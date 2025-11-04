@@ -1,0 +1,727 @@
+<!DOCTYPE html>
+<html lang="en" class="h-full">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Legal - Uniconnect</title>
+    <meta name="description" content="Review Uniconnect's legal policies including Privacy Policy, Terms of Service, Cookie Policy, and GDPR compliance information.">
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css" rel="stylesheet">
+    
+    <!-- Firebase SDK -->
+    <script src="https://www.gstatic.com/firebasejs/9.22.0/firebase-app-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/9.22.0/firebase-analytics-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/9.22.0/firebase-firestore-compat.js"></script>
+    
+    <style>
+        .glass-effect {
+            background: rgba(255, 255, 255, 0.1);
+            backdrop-filter: blur(20px);
+            border: 1px solid rgba(255, 255, 255, 0.2);
+        }
+        .cyber-gradient {
+            background: linear-gradient(135deg, #3B82F6 0%, #8B5CF6 100%);
+        }
+        .quantum-glow {
+            box-shadow: 0 0 30px rgba(59, 130, 246, 0.4);
+        }
+        .neon-text {
+            text-shadow: 0 0 10px rgba(59, 130, 246, 0.7),
+                         0 0 20px rgba(59, 130, 246, 0.5),
+                         0 0 30px rgba(59, 130, 246, 0.3);
+        }
+        .tab-content {
+            display: none;
+        }
+        .tab-content.active {
+            display: block;
+            animation: fadeIn 0.5s ease-in;
+        }
+        @keyframes fadeIn {
+            from { opacity: 0; transform: translateY(20px); }
+            to { opacity: 1; transform: translateY(0); }
+        }
+        .nav-tab {
+            transition: all 0.3s ease;
+        }
+        .nav-tab.active {
+            background: rgba(59, 130, 246, 0.2);
+            border-color: #3B82F6;
+        }
+        .legal-content {
+            max-height: 60vh;
+            overflow-y: auto;
+        }
+        .legal-content::-webkit-scrollbar {
+            width: 6px;
+        }
+        .legal-content::-webkit-scrollbar-track {
+            background: rgba(59, 130, 246, 0.1);
+            border-radius: 3px;
+        }
+        .legal-content::-webkit-scrollbar-thumb {
+            background: #3B82F6;
+            border-radius: 3px;
+        }
+        /* Focus styles for accessibility */
+        .nav-tab:focus {
+            outline: 2px solid #3B82F6;
+            outline-offset: 2px;
+        }
+        /* Print styles */
+        @media print {
+            .glass-effect {
+                background: white;
+                backdrop-filter: none;
+                border: 1px solid #ccc;
+            }
+            .cyber-gradient {
+                background: #3B82F6;
+            }
+            .quantum-glow, .neon-text {
+                box-shadow: none;
+                text-shadow: none;
+            }
+            .legal-content {
+                max-height: none;
+                overflow: visible;
+            }
+            nav, footer {
+                display: none;
+            }
+        }
+    </style>
+</head>
+<body class="h-full bg-gradient-to-br from-gray-900 via-blue-900 to-purple-900 text-white">
+    <!-- Navigation -->
+    <nav class="relative z-10 glass-effect border-b border-blue-800/50" aria-label="Main navigation">
+        <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+            <div class="flex justify-between items-center h-16">
+                <div class="flex items-center space-x-3">
+                    <a href="index.html" class="flex items-center space-x-3" aria-label="Uniconnect Home">
+                        <div class="w-10 h-10 cyber-gradient rounded-lg flex items-center justify-center quantum-glow">
+                            <i class="fas fa-id-card-alt text-white" aria-hidden="true"></i>
+                        </div>
+                        <span class="text-xl font-bold text-transparent bg-clip-text bg-gradient-to-r from-blue-400 to-purple-400 neon-text">
+                            Uniconnect ID
+                        </span>
+                    </a>
+                </div>
+                
+                <div class="hidden md:flex items-center space-x-6">
+                    <a href="index.html" class="text-blue-300 hover:text-white transition">Home</a>
+                    <a href="index.html#features" class="text-blue-300 hover:text-white transition">Features</a>
+                    <a href="index.html#security" class="text-blue-300 hover:text-white transition">Security</a>
+                    <a href="platform.html" class="text-blue-300 hover:text-white transition">Platform</a>
+                    <a href="support.html" class="text-blue-300 hover:text-white transition">Support</a>
+                </div>
+
+                <div class="flex items-center space-x-4">
+                    <a href="login.html" class="glass-effect px-6 py-2 rounded-lg border border-blue-700 text-blue-300 hover:text-white hover:border-blue-400 transition">
+                        Sign In
+                    </a>
+                    <a href="register.html" class="cyber-gradient px-6 py-2 rounded-lg text-white hover:scale-105 transition quantum-glow">
+                        Register
+                    </a>
+                </div>
+            </div>
+        </div>
+    </nav>
+
+    <!-- Legal Header -->
+    <header class="relative py-20 px-4 sm:px-6 lg:px-8">
+        <div class="max-w-7xl mx-auto text-center">
+            <h1 class="text-5xl md:text-6xl font-bold mb-6">
+                <span class="text-transparent bg-clip-text bg-gradient-to-r from-blue-400 via-purple-400 to-cyan-400 neon-text">
+                    Legal
+                </span>
+            </h1>
+            <p class="text-xl text-blue-300 mb-8 max-w-3xl mx-auto">
+                Review our legal policies and understand your rights and responsibilities
+            </p>
+        </div>
+    </header>
+
+    <!-- Legal Navigation -->
+    <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 mb-12">
+        <div class="glass-effect rounded-2xl p-2 flex flex-wrap justify-center gap-2" role="tablist" aria-label="Legal document sections">
+            <button class="nav-tab px-6 py-3 rounded-xl border border-transparent text-blue-300 hover:text-white hover:border-blue-400 transition active" 
+                    data-tab="privacy" role="tab" aria-selected="true" aria-controls="privacy">
+                <i class="fas fa-user-shield mr-2" aria-hidden="true"></i>Privacy Policy
+            </button>
+            <button class="nav-tab px-6 py-3 rounded-xl border border-transparent text-blue-300 hover:text-white hover:border-blue-400 transition" 
+                    data-tab="terms" role="tab" aria-selected="false" aria-controls="terms">
+                <i class="fas fa-file-contract mr-2" aria-hidden="true"></i>Terms of Service
+            </button>
+            <button class="nav-tab px-6 py-3 rounded-xl border border-transparent text-blue-300 hover:text-white hover:border-blue-400 transition" 
+                    data-tab="cookies" role="tab" aria-selected="false" aria-controls="cookies">
+                <i class="fas fa-cookie mr-2" aria-hidden="true"></i>Cookie Policy
+            </button>
+            <button class="nav-tab px-6 py-3 rounded-xl border border-transparent text-blue-300 hover:text-white hover:border-blue-400 transition" 
+                    data-tab="gdpr" role="tab" aria-selected="false" aria-controls="gdpr">
+                <i class="fas fa-shield-alt mr-2" aria-hidden="true"></i>GDPR
+            </button>
+        </div>
+    </div>
+
+    <!-- Tab Contents -->
+    <main class="max-w-4xl mx-auto px-4 sm:px-6 lg:px-8 pb-20">
+        <!-- Privacy Policy Tab -->
+        <section id="privacy" class="tab-content active" role="tabpanel" aria-labelledby="privacy-tab">
+            <div class="glass-effect rounded-2xl p-8 border border-blue-700/50">
+                <h2 class="text-3xl font-bold text-cyan-400 mb-6">Privacy Policy</h2>
+                <p class="text-blue-300 mb-4">Last updated: June 15, 2024</p>
+                
+                <div class="legal-content text-blue-300 space-y-6">
+                    <div>
+                        <h3 class="text-xl font-semibold text-purple-400 mb-3">1. Information We Collect</h3>
+                        <p>Uniconnect collects information that identifies, relates to, describes, references, is capable of being associated with, or could reasonably be linked, directly or indirectly, with a particular consumer or device ("personal information"). In particular, we have collected the following categories of personal information from our users within the last twelve (12) months:</p>
+                        <ul class="list-disc list-inside mt-2 space-y-1">
+                            <li><strong>Identifiers:</strong> Real name, alias, postal address, unique personal identifier, online identifier, Internet Protocol address, email address, account name, or other similar identifiers.</li>
+                            <li><strong>Personal information categories:</strong> Name, signature, Social Security number, physical characteristics or description, address, telephone number, passport number, driver's license or state identification card number, insurance policy number, education, employment, employment history, bank account number, credit card number, debit card number, or any other financial information.</li>
+                            <li><strong>Protected classification characteristics:</strong> Age (40 years or older), race, color, ancestry, national origin, citizenship, religion or creed, marital status, medical condition, physical or mental disability, sex (including gender, gender identity, gender expression, pregnancy or childbirth and related medical conditions), sexual orientation, veteran or military status, genetic information (including familial genetic information).</li>
+                            <li><strong>Commercial information:</strong> Records of personal property, products or services purchased, obtained, or considered, or other purchasing or consuming histories or tendencies.</li>
+                            <li><strong>Internet or other similar network activity:</strong> Browsing history, search history, information on a consumer's interaction with a website, application, or advertisement.</li>
+                            <li><strong>Geolocation data:</strong> Physical location or movements.</li>
+                            <li><strong>Professional or employment-related information:</strong> Current or past job history or performance evaluations.</li>
+                        </ul>
+                    </div>
+
+                    <div>
+                        <h3 class="text-xl font-semibold text-blue-400 mb-3">2. How We Use Your Information</h3>
+                        <p>We may use or disclose the personal information we collect for one or more of the following business purposes:</p>
+                        <ul class="list-disc list-inside mt-2 space-y-1">
+                            <li>To fulfill or meet the reason you provided the information.</li>
+                            <li>To provide, support, personalize, and develop our Website, products, and services.</li>
+                            <li>To create, maintain, customize, and secure your account with us.</li>
+                            <li>To process your requests, purchases, transactions, and payments and prevent transactional fraud.</li>
+                            <li>To provide you with support and to respond to your inquiries, including to investigate and address your concerns and monitor and improve our responses.</li>
+                            <li>To personalize your Website experience and to deliver content and product and service offerings relevant to your interests, including targeted offers and ads through our Website, third-party sites, and via email or text message (with your consent, where required by law).</li>
+                            <li>To help maintain the safety, security, and integrity of our Website, products and services, databases and other technology assets, and business.</li>
+                            <li>For testing, research, analysis, and product development, including to develop and improve our Website, products, and services.</li>
+                            <li>To respond to law enforcement requests and as required by applicable law, court order, or governmental regulations.</li>
+                            <li>As described to you when collecting your personal information or as otherwise set forth in applicable laws.</li>
+                        </ul>
+                    </div>
+
+                    <div>
+                        <h3 class="text-xl font-semibold text-cyan-400 mb-3">3. Information Sharing</h3>
+                        <p>Uniconnect may disclose your personal information to a third party for a business purpose. When we disclose personal information for a business purpose, we enter a contract that describes the purpose and requires the recipient to both keep that personal information confidential and not use it for any purpose except performing the contract.</p>
+                        <p>We share your personal information with the following categories of third parties:</p>
+                        <ul class="list-disc list-inside mt-2 space-y-1">
+                            <li>Service providers</li>
+                            <li>Data aggregators</li>
+                            <li>Third parties to whom you or your agents authorize us to disclose your personal information in connection with products or services we provide to you</li>
+                        </ul>
+                    </div>
+
+                    <div>
+                        <h3 class="text-xl font-semibold text-purple-400 mb-3">4. Data Security</h3>
+                        <p>We have implemented measures designed to secure your personal information from accidental loss and from unauthorized access, use, alteration, and disclosure. All information you provide to us is stored on our secure servers behind firewalls. Any payment transactions will be encrypted using SSL technology.</p>
+                        <p>The safety and security of your information also depends on you. Where we have given you (or where you have chosen) a password for access to certain parts of our Website, you are responsible for keeping this password confidential. We ask you not to share your password with anyone.</p>
+                        <p>Unfortunately, the transmission of information via the internet is not completely secure. Although we do our best to protect your personal information, we cannot guarantee the security of your personal information transmitted to our Website. Any transmission of personal information is at your own risk. We are not responsible for circumvention of any privacy settings or security measures contained on the Website.</p>
+                    </div>
+
+                    <div>
+                        <h3 class="text-xl font-semibold text-blue-400 mb-3">5. Your Rights</h3>
+                        <p>Depending on your location, you may have the following rights regarding your personal information:</p>
+                        <ul class="list-disc list-inside mt-2 space-y-1">
+                            <li><strong>The right to know:</strong> You have the right to request that we disclose certain information to you about our collection and use of your personal information over the past 12 months.</li>
+                            <li><strong>The right to delete:</strong> You have the right to request that we delete any of your personal information that we collected from you and retained, subject to certain exceptions.</li>
+                            <li><strong>The right to correct:</strong> You have the right to request that we correct inaccurate personal information that we maintain about you.</li>
+                            <li><strong>The right to opt-out:</strong> You have the right to direct us to not sell or share your personal information at any time (the "right to opt-out").</li>
+                            <li><strong>The right to limit:</strong> You have the right to request that we limit the use of your sensitive personal information.</li>
+                            <li><strong>Non-discrimination:</strong> We will not discriminate against you for exercising any of your rights.</li>
+                        </ul>
+                    </div>
+
+                    <div>
+                        <h3 class="text-xl font-semibold text-cyan-400 mb-3">6. Changes to Our Privacy Policy</h3>
+                        <p>We reserve the right to amend this privacy policy at our discretion and at any time. When we make changes to this privacy policy, we will post the updated notice on the Website and update the notice's effective date. Your continued use of our Website following the posting of changes constitutes your acceptance of such changes.</p>
+                    </div>
+
+                    <div>
+                        <h3 class="text-xl font-semibold text-purple-400 mb-3">7. Contact Information</h3>
+                        <p>If you have any questions or comments about this notice, the ways in which Uniconnect collects and uses your information described here, your choices and rights regarding such use, or wish to exercise your rights under applicable law, please do not hesitate to contact us at:</p>
+                        <p>Email: privacy@uniconnect.com<br>
+                        Phone: 1-800-UNICONNECT<br>
+                        Postal Address: Uniconnect Inc., 123 Digital Lane, Tech Valley, CA 94016</p>
+                    </div>
+                </div>
+            </div>
+        </section>
+
+        <!-- Terms of Service Tab -->
+        <section id="terms" class="tab-content" role="tabpanel" aria-labelledby="terms-tab" hidden>
+            <div class="glass-effect rounded-2xl p-8 border border-blue-700/50">
+                <h2 class="text-3xl font-bold text-purple-400 mb-6">Terms of Service</h2>
+                <p class="text-blue-300 mb-4">Last updated: June 15, 2024</p>
+                
+                <div class="legal-content text-blue-300 space-y-6">
+                    <div>
+                        <h3 class="text-xl font-semibold text-cyan-400 mb-3">1. Agreement to Terms</h3>
+                        <p>These Terms of Service constitute a legally binding agreement made between you, whether personally or on behalf of an entity ("you") and Uniconnect Inc. ("Company," "we," "us," or "our"), concerning your access to and use of the uniconnect.com website as well as any other media form, media channel, mobile website or mobile application related, linked, or otherwise connected thereto (collectively, the "Site").</p>
+                        <p>You agree that by accessing the Site, you have read, understood, and agree to be bound by all of these Terms of Service. If you do not agree with all of these Terms of Service, then you are expressly prohibited from using the Site and you must discontinue use immediately.</p>
+                        <p>Supplemental terms and conditions or documents that may be posted on the Site from time to time are hereby expressly incorporated herein by reference. We reserve the right, in our sole discretion, to make changes or modifications to these Terms of Service at any time and for any reason.</p>
+                    </div>
+
+                    <div>
+                        <h3 class="text-xl font-semibold text-blue-400 mb-3">2. User Accounts</h3>
+                        <p>In order to access certain features of the Site, you may be required to register for an account. When you register for an account, you agree to:</p>
+                        <ul class="list-disc list-inside mt-2 space-y-1">
+                            <li>Provide accurate, current, and complete information during the registration process</li>
+                            <li>Maintain and promptly update your account information to keep it accurate, current, and complete</li>
+                            <li>Maintain the security of your password and accept all risks of unauthorized access to your account and the information you provide to us</li>
+                            <li>Notify us immediately if you discover or otherwise suspect any security breaches related to the Site</li>
+                            <li>Take responsibility for all activities that occur under your account and accept all risks of unauthorized access</li>
+                        </ul>
+                    </div>
+
+                    <div>
+                        <h3 class="text-xl font-semibold text-purple-400 mb-3">3. Acceptable Use</h3>
+                        <p>You may not access or use the Site for any purpose other than that for which we make the Site available. The Site may not be used in connection with any commercial endeavors except those that are specifically endorsed or approved by us.</p>
+                        <p>As a user of the Site, you agree not to:</p>
+                        <ul class="list-disc list-inside mt-2 space-y-1">
+                            <li>Systematically retrieve data or other content from the Site to create or compile, directly or indirectly, a collection, compilation, database, or directory without written permission from us</li>
+                            <li>Trick, defraud, or mislead us and other users, especially in any attempt to learn sensitive account information such as user passwords</li>
+                            <li>Circumvent, disable, or otherwise interfere with security-related features of the Site, including features that prevent or restrict the use or copying of any Content or enforce limitations on the use of the Site and/or the Content contained therein</li>
+                            <li>Disparage, tarnish, or otherwise harm, in our opinion, us and/or the Site</li>
+                            <li>Use any information obtained from the Site in order to harass, abuse, or harm another person</li>
+                            <li>Make improper use of our support services or submit false reports of abuse or misconduct</li>
+                            <li>Use the Site in a manner inconsistent with any applicable laws or regulations</li>
+                            <li>Engage in unauthorized framing of or linking to the Site</li>
+                            <li>Upload or transmit (or attempt to upload or to transmit) viruses, Trojan horses, or other material, including excessive use of capital letters and spamming (continuous posting of repetitive text), that interferes with any party's uninterrupted use and enjoyment of the Site or modifies, impairs, disrupts, alters, or interferes with the use, features, functions, operation, or maintenance of the Site</li>
+                            <li>Engage in any automated use of the system, such as using scripts to send comments or messages, or using any data mining, robots, or similar data gathering and extraction tools</li>
+                            <li>Delete the copyright or other proprietary rights notice from any Content</li>
+                            <li>Attempt to impersonate another user or person or use the username of another user</li>
+                            <li>Upload or transmit (or attempt to upload or to transmit) any material that acts as a passive or active information collection or transmission mechanism, including without limitation, clear graphics interchange formats ("gifs"), 1×1 pixels, web bugs, cookies, or other similar devices (sometimes referred to as "spyware" or "passive collection mechanisms" or "pcms")</li>
+                            <li>Interfere with, disrupt, or create an undue burden on the Site or the networks or services connected to the Site</li>
+                            <li>Harass, annoy, intimidate, or threaten any of our employees or agents engaged in providing any portion of the Site to you</li>
+                            <li>Attempt to bypass any measures of the Site designed to prevent or restrict access to the Site, or any portion of the Site</li>
+                            <li>Copy or adapt the Site's software, including but not limited to Flash, PHP, HTML, JavaScript, or other code</li>
+                            <li>Except as permitted by applicable law, decipher, decompile, disassemble, or reverse engineer any of the software comprising or in any way making up a part of the Site</li>
+                            <li>Except as may be the result of standard search engine or Internet browser usage, use, launch, develop, or distribute any automated system, including without limitation, any spider, robot, cheat utility, scraper, or offline reader that accesses the Site, or using or launching any unauthorized script or other software</li>
+                            <li>Use a buying agent or purchasing agent to make purchases on the Site</li>
+                            <li>Make any unauthorized use of the Site, including collecting usernames and/or email addresses of users by electronic or other means for the purpose of sending unsolicited email, or creating user accounts by automated means or under false pretenses</li>
+                            <li>Use the Site as part of any effort to compete with us or otherwise use the Site and/or the Content for any revenue-generating endeavor or commercial enterprise</li>
+                        </ul>
+                    </div>
+
+                    <div>
+                        <h3 class="text-xl font-semibold text-cyan-400 mb-3">4. Intellectual Property</h3>
+                        <p>Unless otherwise indicated, the Site is our proprietary property and all source code, databases, functionality, software, website designs, audio, video, text, photographs, and graphics on the Site (collectively, the "Content") and the trademarks, service marks, and logos contained therein (the "Marks") are owned or controlled by us or licensed to us, and are protected by copyright and trademark laws and various other intellectual property rights and unfair competition laws of the United States, international copyright laws, and international conventions.</p>
+                        <p>The Content and the Marks are provided on the Site "AS IS" for your information and personal use only. Except as expressly provided in these Terms of Service, no part of the Site and no Content or Marks may be copied, reproduced, aggregated, republished, uploaded, posted, publicly displayed, encoded, translated, transmitted, distributed, sold, licensed, or otherwise exploited for any commercial purpose whatsoever, without our express prior written permission.</p>
+                    </div>
+
+                    <div>
+                        <h3 class="text-xl font-semibold text-blue-400 mb-3">5. Termination</h3>
+                        <p>These Terms of Service shall remain in full force and effect while you use the Site. WITHOUT LIMITING ANY OTHER PROVISION OF THESE TERMS OF SERVICE, WE RESERVE THE RIGHT TO, IN OUR SOLE DISCRETION AND WITHOUT NOTICE OR LIABILITY, DENY ACCESS TO AND USE OF THE SITE (INCLUDING BLOCKING CERTAIN IP ADDRESSES), TO ANY PERSON FOR ANY REASON OR FOR NO REASON, INCLUDING WITHOUT LIMITATION FOR BREACH OF ANY REPRESENTATION, WARRANTY, OR COVENANT CONTAINED IN THESE TERMS OF SERVICE OR OF ANY APPLICABLE LAW OR REGULATION. WE MAY TERMINATE YOUR USE OR PARTICIPATION IN THE SITE OR DELETE YOUR ACCOUNT AND ANY CONTENT OR INFORMATION THAT YOU POSTED AT ANY TIME, WITHOUT WARNING, IN OUR SOLE DISCRETION.</p>
+                    </div>
+
+                    <div>
+                        <h3 class="text-xl font-semibold text-purple-400 mb-3">6. Limitation of Liability</h3>
+                        <p>IN NO EVENT WILL WE OR OUR DIRECTORS, EMPLOYEES, OR AGENTS BE LIABLE TO YOU OR ANY THIRD PARTY FOR ANY DIRECT, INDIRECT, CONSEQUENTIAL, EXEMPLARY, INCIDENTAL, SPECIAL, OR PUNITIVE DAMAGES, INCLUDING LOST PROFIT, LOST REVENUE, LOSS OF DATA, OR OTHER DAMAGES ARISING FROM YOUR USE OF THE SITE, EVEN IF WE HAVE BEEN ADVISED OF THE POSSIBILITY OF SUCH DAMAGES. NOTWITHSTANDING ANYTHING TO THE CONTRARY CONTAINED HEREIN, OUR LIABILITY TO YOU FOR ANY CAUSE WHATSOEVER AND REGARDLESS OF THE FORM OF THE ACTION, WILL AT ALL TIMES BE LIMITED TO THE AMOUNT PAID, IF ANY, BY YOU TO US DURING THE SIX (6) MONTH PERIOD PRIOR TO ANY CAUSE OF ACTION ARISING.</p>
+                    </div>
+
+                    <div>
+                        <h3 class="text-xl font-semibold text-cyan-400 mb-3">7. Governing Law</h3>
+                        <p>These Terms of Service and your use of the Site are governed by and construed in accordance with the laws of the State of California applicable to agreements made and to be entirely performed within the State of California, without regard to its conflict of law principles.</p>
+                    </div>
+
+                    <div>
+                        <h3 class="text-xl font-semibold text-blue-400 mb-3">8. Contact Information</h3>
+                        <p>If you have any questions about these Terms of Service, please contact us at legal@uniconnect.com.</p>
+                    </div>
+                </div>
+            </div>
+        </section>
+
+        <!-- Cookie Policy Tab -->
+        <section id="cookies" class="tab-content" role="tabpanel" aria-labelledby="cookies-tab" hidden>
+            <div class="glass-effect rounded-2xl p-8 border border-blue-700/50">
+                <h2 class="text-3xl font-bold text-blue-400 mb-6">Cookie Policy</h2>
+                <p class="text-blue-300 mb-4">Last updated: June 15, 2024</p>
+                
+                <div class="legal-content text-blue-300 space-y-6">
+                    <div>
+                        <h3 class="text-xl font-semibold text-cyan-400 mb-3">1. What Are Cookies</h3>
+                        <p>Cookies are small text files that are placed on your computer or mobile device when you visit our Site. They are widely used to make websites work more efficiently, as well as to provide information to the owners of the site.</p>
+                        <p>Cookies are typically classified as either "session cookies" which are erased when you close your browser, or "persistent cookies" which remain on your device for a set period of time or until you manually delete them.</p>
+                    </div>
+
+                    <div>
+                        <h3 class="text-xl font-semibold text-purple-400 mb-3">2. Types of Cookies We Use</h3>
+                        <p>We use several types of cookies for different purposes:</p>
+                        <ul class="list-disc list-inside mt-2 space-y-1">
+                            <li><strong>Essential Cookies:</strong> These cookies are necessary for the website to function and cannot be switched off in our systems. They are usually only set in response to actions made by you which amount to a request for services, such as setting your privacy preferences, logging in or filling in forms.</li>
+                            <li><strong>Performance Cookies:</strong> These cookies allow us to count visits and traffic sources so we can measure and improve the performance of our site. They help us to know which pages are the most and least popular and see how visitors move around the site.</li>
+                            <li><strong>Functionality Cookies:</strong> These cookies enable the website to provide enhanced functionality and personalization. They may be set by us or by third party providers whose services we have added to our pages.</li>
+                            <li><strong>Targeting Cookies:</strong> These cookies may be set through our site by our advertising partners. They may be used by those companies to build a profile of your interests and show you relevant advertisements on other sites.</li>
+                        </ul>
+                    </div>
+
+                    <div>
+                        <h3 class="text-xl font-semibold text-blue-400 mb-3">3. How We Use Cookies</h3>
+                        <p>We use cookies for the following purposes:</p>
+                        <ul class="list-disc list-inside mt-2 space-y-1">
+                            <li><strong>Authentication:</strong> To identify you when you visit our website and as you navigate our website</li>
+                            <li><strong>Status:</strong> To help us determine if you are logged into our website</li>
+                            <li><strong>Personalization:</strong> To store information about your preferences and to personalize the website for you</li>
+                            <li><strong>Security:</strong> As an element of the security measures used to protect user accounts, including preventing fraudulent use of login credentials, and to protect our website and services generally</li>
+                            <li><strong>Advertising:</strong> To help us display advertisements that will be relevant to you</li>
+                            <li><strong>Analysis:</strong> To help us analyze the use and performance of our website and services</li>
+                            <li><strong>Cookie Consent:</strong> To store your preferences in relation to the use of cookies more generally</li>
+                        </ul>
+                    </div>
+
+                    <div>
+                        <h3 class="text-xl font-semibold text-cyan-400 mb-3">4. Managing Cookies</h3>
+                        <p>Most browsers allow you to refuse to accept cookies and to delete cookies. The methods for doing so vary from browser to browser, and from version to version. You can however obtain up-to-date information about blocking and deleting cookies via these links:</p>
+                        <ul class="list-disc list-inside mt-2 space-y-1">
+                            <li><a href="https://support.google.com/chrome/answer/95647" class="text-cyan-400 hover:text-cyan-300" target="_blank">Chrome</a></li>
+                            <li><a href="https://support.mozilla.org/en-US/kb/enable-and-disable-cookies-website-preferences" class="text-cyan-400 hover:text-cyan-300" target="_blank">Firefox</a></li>
+                            <li><a href="https://support.microsoft.com/en-gb/help/17442/windows-internet-explorer-delete-manage-cookies" class="text-cyan-400 hover:text-cyan-300" target="_blank">Internet Explorer</a></li>
+                            <li><a href="https://support.apple.com/guide/safari/manage-cookies-and-website-data-sfri11471/mac" class="text-cyan-400 hover:text-cyan-300" target="_blank">Safari</a></li>
+                            <li><a href="https://support.microsoft.com/en-gb/help/4468242/microsoft-edge-browsing-data-and-privacy" class="text-cyan-400 hover:text-cyan-300" target="_blank">Edge</a></li>
+                        </ul>
+                        <p class="mt-4">Please note that blocking cookies may have a negative impact on the functions of many websites, including our Site. Some features of the Site may cease to be available to you.</p>
+                    </div>
+
+                    <div>
+                        <h3 class="text-xl font-semibold text-purple-400 mb-3">5. Third-Party Cookies</h3>
+                        <p>In addition to our own cookies, we may also use various third-party cookies to report usage statistics of the Site, deliver advertisements on and through the Site, and so on. These cookies may be set through our site by our advertising partners.</p>
+                        <p>Third-party vendors, including Google, use cookies to serve ads based on a user's prior visits to our website or other websites. Google's use of advertising cookies enables it and its partners to serve ads to our users based on their visit to our sites and/or other sites on the Internet.</p>
+                    </div>
+
+                    <div>
+                        <h3 class="text-xl font-semibold text-blue-400 mb-3">6. Updates to This Policy</h3>
+                        <p>We may update this Cookie Policy from time to time in order to reflect, for example, changes to the cookies we use or for other operational, legal or regulatory reasons. Please therefore re-visit this Cookie Policy regularly to stay informed about our use of cookies and related technologies.</p>
+                    </div>
+
+                    <div>
+                        <h3 class="text-xl font-semibold text-cyan-400 mb-3">7. Contact Information</h3>
+                        <p>If you have any questions about our use of cookies or other technologies, please email us at privacy@uniconnect.com.</p>
+                    </div>
+                </div>
+            </div>
+        </section>
+
+        <!-- GDPR Tab -->
+        <section id="gdpr" class="tab-content" role="tabpanel" aria-labelledby="gdpr-tab" hidden>
+            <div class="glass-effect rounded-2xl p-8 border border-blue-700/50">
+                <h2 class="text-3xl font-bold text-cyan-400 mb-6">GDPR Compliance</h2>
+                <p class="text-blue-300 mb-4">Last updated: June 15, 2024</p>
+                
+                <div class="legal-content text-blue-300 space-y-6">
+                    <div>
+                        <h3 class="text-xl font-semibold text-purple-400 mb-3">1. Our Commitment</h3>
+                        <p>Uniconnect is fully committed to complying with the General Data Protection Regulation (GDPR) (Regulation (EU) 2016/679). We recognize the importance of the data protection regulations and have implemented comprehensive measures to ensure we meet the requirements of GDPR.</p>
+                        <p>Our commitment to GDPR compliance reflects our dedication to protecting the privacy and security of our users' personal data, regardless of where they are located.</p>
+                    </div>
+
+                    <div>
+                        <h3 class="text-xl font-semibold text-blue-400 mb-3">2. Data Protection Principles</h3>
+                        <p>We adhere to the core principles of GDPR in processing personal data:</p>
+                        <ul class="list-disc list-inside mt-2 space-y-1">
+                            <li><strong>Lawfulness, fairness and transparency:</strong> We process personal data lawfully, fairly and in a transparent manner.</li>
+                            <li><strong>Purpose limitation:</strong> We collect personal data for specified, explicit and legitimate purposes and do not process it in a manner that is incompatible with those purposes.</li>
+                            <li><strong>Data minimization:</strong> We ensure that personal data is adequate, relevant and limited to what is necessary in relation to the purposes for which it is processed.</li>
+                            <li><strong>Accuracy:</strong> We take every reasonable step to ensure that personal data is accurate and, where necessary, kept up to date.</li>
+                            <li><strong>Storage limitation:</strong> We keep personal data in a form which permits identification of data subjects for no longer than is necessary for the purposes for which the personal data is processed.</li>
+                            <li><strong>Integrity and confidentiality:</strong> We process personal data in a manner that ensures appropriate security, including protection against unauthorized or unlawful processing and against accidental loss, destruction or damage, using appropriate technical or organizational measures.</li>
+                            <li><strong>Accountability:</strong> We are responsible for, and able to demonstrate compliance with, the above principles.</li>
+                        </ul>
+                    </div>
+
+                    <div>
+                        <h3 class="text-xl font-semibold text-cyan-400 mb-3">3. Lawful Basis for Processing</h3>
+                        <p>We process personal data on the following lawful bases:</p>
+                        <ul class="list-disc list-inside mt-2 space-y-1">
+                            <li><strong>Consent:</strong> The individual has given clear consent for us to process their personal data for a specific purpose.</li>
+                            <li><strong>Contract:</strong> The processing is necessary for a contract we have with the individual, or because they have asked us to take specific steps before entering into a contract.</li>
+                            <li><strong>Legal obligation:</strong> The processing is necessary for us to comply with the law (not including contractual obligations).</li>
+                            <li><strong>Legitimate interests:</strong> The processing is necessary for our legitimate interests or the legitimate interests of a third party, unless there is a good reason to protect the individual's personal data which overrides those legitimate interests.</li>
+                        </ul>
+                    </div>
+
+                    <div>
+                        <h3 class="text-xl font-semibold text-purple-400 mb-3">4. Data Subject Rights</h3>
+                        <p>Under GDPR, individuals have the following rights regarding their personal data:</p>
+                        <ul class="list-disc list-inside mt-2 space-y-1">
+                            <li><strong>The right to be informed:</strong> Individuals have the right to be informed about the collection and use of their personal data.</li>
+                            <li><strong>The right of access:</strong> Individuals have the right to access their personal data and supplementary information.</li>
+                            <li><strong>The right to rectification:</strong> Individuals have the right to have inaccurate personal data rectified, or completed if it is incomplete.</li>
+                            <li><strong>The right to erasure:</strong> Individuals have the right to have personal data erased, also known as the 'right to be forgotten'.</li>
+                            <li><strong>The right to restrict processing:</strong> Individuals have the right to request the restriction or suppression of their personal data.</li>
+                            <li><strong>The right to data portability:</strong> Individuals have the right to obtain and reuse their personal data for their own purposes across different services.</li>
+                            <li><strong>The right to object:</strong> Individuals have the right to object to the processing of their personal data in certain circumstances.</li>
+                            <li><strong>Rights in relation to automated decision making and profiling:</strong> Individuals have the right not to be subject to a decision based solely on automated processing, including profiling, which produces legal effects concerning them or similarly significantly affects them.</li>
+                        </ul>
+                    </div>
+
+                    <div>
+                        <h3 class="text-xl font-semibold text-blue-400 mb-3">5. Data Transfers</h3>
+                        <p>Uniconnect may transfer personal data to countries outside the European Economic Area (EEA). When we do, we ensure appropriate safeguards are in place to protect your personal data, such as:</p>
+                        <ul class="list-disc list-inside mt-2 space-y-1">
+                            <li>Transferring to countries that have been deemed to provide an adequate level of protection for personal data by the European Commission</li>
+                            <li>Using specific contracts approved by the European Commission which give personal data the same protection it has in Europe</li>
+                            <li>Where we use providers based in the US, we may transfer data to them if they are part of the Privacy Shield which requires them to provide similar protection to personal data shared between Europe and the US</li>
+                        </ul>
+                    </div>
+
+                    <div>
+                        <h3 class="text-xl font-semibold text-cyan-400 mb-3">6. Data Protection Officer</h3>
+                        <p>We have appointed a Data Protection Officer (DPO) who is responsible for overseeing questions in relation to this GDPR compliance statement. If you have any questions about this statement or our data protection practices, please contact our DPO:</p>
+                        <p>Email: dpo@uniconnect.com<br>
+                        Phone: +1-800-UNICONNECT (Option 2)<br>
+                        Postal Address: Data Protection Officer, Uniconnect Inc., 123 Digital Lane, Tech Valley, CA 94016</p>
+                    </div>
+
+                    <div>
+                        <h3 class="text-xl font-semibold text-purple-400 mb-3">7. Data Breach Procedures</h3>
+                        <p>We have put in place procedures to deal with any suspected personal data breach and will notify you and any applicable regulator of a breach where we are legally required to do so. In the event of a data breach, we will:</p>
+                        <ul class="list-disc list-inside mt-2 space-y-1">
+                            <li>Contain the breach and assess the potential adverse consequences for individuals</li>
+                            <li>Evaluate the risks associated with the breach</li>
+                            <li>Notify the appropriate supervisory authority without undue delay and, where feasible, not later than 72 hours after having become aware of it</li>
+                            <li>Communicate the breach to the affected individuals when it is likely to result in a high risk to their rights and freedoms</li>
+                            <li>Document all data breaches, regardless of whether notification was required</li>
+                        </ul>
+                    </div>
+
+                    <div>
+                        <h3 class="text-xl font-semibold text-blue-400 mb-3">8. Updates to Our GDPR Compliance</h3>
+                        <p>We keep our GDPR compliance measures under regular review and will place any updates on this webpage. This GDPR compliance statement was last updated on June 15, 2024.</p>
+                    </div>
+                </div>
+            </div>
+        </section>
+    </main>
+
+    <!-- Footer -->
+    <footer class="glass-effect border-t border-blue-800/50 py-12">
+        <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+            <div class="grid grid-cols-1 md:grid-cols-4 gap-8">
+                <div class="col-span-1">
+                    <div class="flex items-center space-x-3 mb-4">
+                        <div class="w-10 h-10 cyber-gradient rounded-lg flex items-center justify-center">
+                            <i class="fas fa-id-card-alt text-white" aria-hidden="true"></i>
+                        </div>
+                        <span class="text-xl font-bold text-transparent bg-clip-text bg-gradient-to-r from-blue-400 to-purple-400">
+                            Uniconnect ID
+                        </span>
+                    </div>
+                    <p class="text-blue-300 text-sm">
+                        Your universal identity for the digital world. Secure, private, and always under your control.
+                    </p>
+                </div>
+                
+                <div>
+                    <h3 class="text-white font-semibold mb-4">Product</h3>
+                    <ul class="space-y-2">
+                        <li><a href="index.html#features" class="text-blue-300 hover:text-white transition text-sm">Features</a></li>
+                        <li><a href="index.html#security" class="text-blue-300 hover:text-white transition text-sm">Security</a></li>
+                        <li><a href="platform.html" class="text-blue-300 hover:text-white transition text-sm">Platform</a></li>
+                        <li><a href="pricing.html" class="text-blue-300 hover:text-white transition text-sm">Pricing</a></li>
+                    </ul>
+                </div>
+                
+                <div>
+                    <h3 class="text-white font-semibold mb-4">Company</h3>
+                    <ul class="space-y-2">
+                        <li><a href="about.html" class="text-blue-300 hover:text-white transition text-sm">About</a></li>
+                        <li><a href="careers.html" class="text-blue-300 hover:text-white transition text-sm">Careers</a></li>
+                        <li><a href="contact.html" class="text-blue-300 hover:text-white transition text-sm">Contact</a></li>
+                        <li><a href="legal.html" class="text-blue-300 hover:text-white transition text-sm">Legal</a></li>
+                    </ul>
+                </div>
+                
+                <div>
+                    <h3 class="text-white font-semibold mb-4">Connect</h3>
+                    <div class="flex space-x-4">
+                        <a href="#" class="text-blue-300 hover:text-white transition" aria-label="Twitter">
+                            <i class="fab fa-twitter" aria-hidden="true"></i>
+                        </a>
+                        <a href="#" class="text-blue-300 hover:text-white transition" aria-label="LinkedIn">
+                            <i class="fab fa-linkedin" aria-hidden="true"></i>
+                        </a>
+                        <a href="#" class="text-blue-300 hover:text-white transition" aria-label="GitHub">
+                            <i class="fab fa-github" aria-hidden="true"></i>
+                        </a>
+                        <a href="#" class="text-blue-300 hover:text-white transition" aria-label="Discord">
+                            <i class="fab fa-discord" aria-hidden="true"></i>
+                        </a>
+                    </div>
+                </div>
+            </div>
+            
+            <div class="border-t border-blue-800/50 mt-8 pt-8 flex flex-col md:flex-row justify-between items-center">
+                <p class="text-blue-300 text-sm mb-4 md:mb-0">
+                    © 2024 Uniconnect Inc. All rights reserved.
+                </p>
+                <div class="flex space-x-6">
+                    <a href="privacy.html" class="text-blue-300 hover:text-white transition text-sm">Privacy</a>
+                    <a href="terms.html" class="text-blue-300 hover:text-white transition text-sm">Terms</a>
+                    <a href="cookies.html" class="text-blue-300 hover:text-white transition text-sm">Cookies</a>
+                </div>
+            </div>
+        </div>
+    </footer>
+
+    <script>
+        // Firebase configuration
+        const firebaseConfig = {
+            apiKey: "AIzaSyDHHyGgsSV18BcXrGgzi4C8frzDAE1C1zo",
+            authDomain: "uniconnect-ee95c.firebaseapp.com",
+            projectId: "uniconnect-ee95c",
+            storageBucket: "uniconnect-ee95c.firebasestorage.app",
+            messagingSenderId: "1003264444309",
+            appId: "1:1003264444309:web:9f0307516e44d21e97d89c"
+        };
+
+        // Initialize Firebase
+        let analytics;
+        let db;
+        
+        try {
+            firebase.initializeApp(firebaseConfig);
+            analytics = firebase.analytics();
+            db = firebase.firestore();
+            
+            console.log("✅ Firebase initialized successfully");
+            console.log("📊 Analytics ready");
+            console.log("🗄️ Firestore ready");
+            
+            // Log page view to analytics
+            analytics.logEvent('page_view', {
+                page_title: 'Legal Page',
+                page_location: window.location.href
+            });
+            
+            console.log("📈 Page view logged to Firebase Analytics");
+            
+        } catch (error) {
+            console.error("❌ Firebase initialization error:", error);
+        }
+
+        // Tab functionality
+        document.addEventListener('DOMContentLoaded', function() {
+            const tabs = document.querySelectorAll('.nav-tab');
+            const tabContents = document.querySelectorAll('.tab-content');
+            
+            // Track tab views in Firebase
+            function trackTabView(tabName) {
+                if (analytics) {
+                    analytics.logEvent('legal_tab_view', {
+                        tab_name: tabName,
+                        timestamp: new Date().toISOString()
+                    });
+                    console.log(`📊 Tab view tracked: ${tabName}`);
+                }
+                
+                // Also log to console for debugging
+                console.log(`🔍 User viewed: ${tabName}`);
+            }
+            
+            tabs.forEach(tab => {
+                tab.addEventListener('click', function() {
+                    const target = this.getAttribute('data-tab');
+                    
+                    // Update active tab
+                    tabs.forEach(t => {
+                        t.classList.remove('active');
+                        t.setAttribute('aria-selected', 'false');
+                    });
+                    this.classList.add('active');
+                    this.setAttribute('aria-selected', 'true');
+                    
+                    // Show active content
+                    tabContents.forEach(content => {
+                        content.classList.remove('active');
+                        content.setAttribute('hidden', 'true');
+                    });
+                    
+                    const activeContent = document.getElementById(target);
+                    activeContent.classList.add('active');
+                    activeContent.removeAttribute('hidden');
+                    
+                    // Track the tab view
+                    trackTabView(target);
+                });
+            });
+            
+            // Track initial tab view
+            const initialTab = document.querySelector('.nav-tab.active').getAttribute('data-tab');
+            trackTabView(initialTab);
+            
+            // Keyboard navigation for tabs
+            document.addEventListener('keydown', function(e) {
+                if (e.key === 'ArrowLeft' || e.key === 'ArrowRight') {
+                    const currentTab = document.querySelector('.nav-tab.active');
+                    const tabsArray = Array.from(tabs);
+                    const currentIndex = tabsArray.indexOf(currentTab);
+                    
+                    let nextIndex;
+                    if (e.key === 'ArrowLeft') {
+                        nextIndex = currentIndex > 0 ? currentIndex - 1 : tabsArray.length - 1;
+                    } else {
+                        nextIndex = currentIndex < tabsArray.length - 1 ? currentIndex + 1 : 0;
+                    }
+                    
+                    tabsArray[nextIndex].click();
+                    tabsArray[nextIndex].focus();
+                }
+            });
+
+            // Track scroll depth
+            let scrollDepthTracked = false;
+            window.addEventListener('scroll', function() {
+                const scrollPosition = window.scrollY;
+                const pageHeight = document.documentElement.scrollHeight - window.innerHeight;
+                const scrollPercentage = Math.round((scrollPosition / pageHeight) * 100);
+                
+                if (scrollPercentage > 50 && !scrollDepthTracked) {
+                    if (analytics) {
+                        analytics.logEvent('scroll_depth', {
+                            depth: '50%',
+                            page: 'legal'
+                        });
+                        console.log("📊 Scroll depth tracked: 50%");
+                    }
+                    scrollDepthTracked = true;
+                }
+            });
+
+            // Track time on page
+            let startTime = new Date();
+            window.addEventListener('beforeunload', function() {
+                const endTime = new Date();
+                const timeSpent = Math.round((endTime - startTime) / 1000); // in seconds
+                
+                if (analytics) {
+                    analytics.logEvent('time_on_page', {
+                        duration_seconds: timeSpent,
+                        page: 'legal'
+                    });
+                    console.log(`📊 Time on page tracked: ${timeSpent} seconds`);
+                }
+            });
+
+            // Track external link clicks
+            document.querySelectorAll('a[href^="http"]').forEach(link => {
+                link.addEventListener('click', function(e) {
+                    if (analytics) {
+                        analytics.logEvent('external_link_click', {
+                            link_url: this.href,
+                            link_text: this.textContent
+                        });
+                        console.log(`🔗 External link click tracked: ${this.href}`);
+                    }
+                });
+            });
+
+            console.log("🚀 Legal page tracking initialized successfully");
+        });
+    </script>
+</body>
+</html>

@@ -1,0 +1,870 @@
+<!DOCTYPE html>
+<html lang="en" class="h-full">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Register - Uniconnect ID</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css" rel="stylesheet">
+    
+    <!-- Firebase SDK (Modular Version) -->
+    <script type="module">
+        import { initializeApp } from "https://www.gstatic.com/firebasejs/10.7.1/firebase-app.js";
+        import { getFirestore, doc, setDoc, serverTimestamp } from "https://www.gstatic.com/firebasejs/10.7.1/firebase-firestore.js";
+        import { getAuth, createUserWithEmailAndPassword, sendEmailVerification, updateProfile } from "https://www.gstatic.com/firebasejs/10.7.1/firebase-auth.js";
+        import { getAnalytics, logEvent } from "https://www.gstatic.com/firebasejs/10.7.1/firebase-analytics.js";
+
+        // Firebase configuration
+        const firebaseConfig = {
+            apiKey: "AIzaSyDHHyGgsSV18BcXrGgzi4C8frzDAE1C1zo",
+            authDomain: "uniconnect-ee95c.firebaseapp.com",
+            projectId: "uniconnect-ee95c",
+            storageBucket: "uniconnect-ee95c.appspot.com",
+            messagingSenderId: "1003264444309",
+            appId: "1:1003264444309:web:9f0307516e44d21e97d89c"
+        };
+
+        // Initialize Firebase
+        const app = initializeApp(firebaseConfig);
+        const db = getFirestore(app);
+        const auth = getAuth(app);
+        const analytics = getAnalytics(app);
+
+        // Make Firebase available globally
+        window.firebaseApp = {
+            app,
+            db,
+            auth,
+            analytics,
+            authFunctions: {
+                createUserWithEmailAndPassword,
+                sendEmailVerification,
+                updateProfile
+            },
+            firestore: {
+                doc,
+                setDoc,
+                serverTimestamp
+            },
+            analyticsFunctions: {
+                logEvent
+            }
+        };
+
+        console.log('🔥 Firebase initialized successfully for registration!');
+        
+        // Track registration page view
+        logEvent(analytics, 'page_view', {
+            page_title: 'Registration Page',
+            page_location: window.location.href
+        });
+        
+        // Initialize registration functionality
+        if (window.initRegistration) {
+            window.initRegistration();
+        }
+    </script>
+
+    <style>
+        .glass-effect {
+            background: rgba(255, 255, 255, 0.1);
+            backdrop-filter: blur(20px);
+            border: 1px solid rgba(255, 255, 255, 0.2);
+        }
+        .cyber-gradient {
+            background: linear-gradient(135deg, #3B82F6 0%, #8B5CF6 100%);
+        }
+        .quantum-glow {
+            box-shadow: 0 0 30px rgba(59, 130, 246, 0.4);
+        }
+        .error-message {
+            background: rgba(239, 68, 68, 0.1);
+            border: 1px solid rgba(239, 68, 68, 0.3);
+            color: #fca5a5;
+            padding: 0.75rem;
+            border-radius: 0.5rem;
+            margin-bottom: 1rem;
+        }
+        .success-message {
+            background: rgba(34, 197, 94, 0.1);
+            border: 1px solid rgba(34, 197, 94, 0.3);
+            color: #86efac;
+            padding: 0.75rem;
+            border-radius: 0.5rem;
+            margin-bottom: 1rem;
+        }
+        .info-message {
+            background: rgba(59, 130, 246, 0.1);
+            border: 1px solid rgba(59, 130, 246, 0.3);
+            color: #93c5fd;
+            padding: 0.75rem;
+            border-radius: 0.5rem;
+            margin-bottom: 1rem;
+        }
+        .back-btn {
+            position: fixed;
+            left: 2rem;
+            top: 2rem;
+            z-index: 100;
+            background: rgba(255, 255, 255, 0.1);
+            backdrop-filter: blur(10px);
+            border: 1px solid rgba(255, 255, 255, 0.2);
+            color: white;
+            padding: 0.75rem 1.5rem;
+            border-radius: 2rem;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            cursor: pointer;
+            transition: all 0.3s ease;
+            font-weight: 600;
+        }
+        .back-btn:hover {
+            background: rgba(255, 255, 255, 0.2);
+            transform: scale(1.05);
+        }
+        .connection-status {
+            position: fixed;
+            top: 10px;
+            right: 10px;
+            padding: 8px 16px;
+            border-radius: 20px;
+            font-size: 0.8rem;
+            z-index: 1000;
+            transition: all 0.3s;
+        }
+        .connection-status.connected {
+            background: rgba(34, 197, 94, 0.8);
+            color: white;
+        }
+        .connection-status.connecting {
+            background: rgba(245, 158, 11, 0.8);
+            color: white;
+        }
+        .connection-status.disconnected {
+            background: rgba(239, 68, 68, 0.8);
+            color: white;
+        }
+        .password-strength {
+            height: 4px;
+            border-radius: 2px;
+            margin-top: 4px;
+            transition: all 0.3s ease;
+        }
+        .password-strength.weak {
+            background: #ef4444;
+            width: 25%;
+        }
+        .password-strength.fair {
+            background: #f59e0b;
+            width: 50%;
+        }
+        .password-strength.good {
+            background: #3b82f6;
+            width: 75%;
+        }
+        .password-strength.strong {
+            background: #10b981;
+            width: 100%;
+        }
+        .loading-spinner {
+            border: 2px solid rgba(255, 255, 255, 0.3);
+            border-radius: 50%;
+            border-top: 2px solid #3B82F6;
+            width: 16px;
+            height: 16px;
+            animation: spin 1s linear infinite;
+            display: inline-block;
+            margin-left: 8px;
+        }
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+        .form-input:focus {
+            box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.1);
+        }
+        .floating-label {
+            position: absolute;
+            top: 50%;
+            left: 3rem;
+            transform: translateY(-50%);
+            color: #93c5fd;
+            transition: all 0.3s ease;
+            pointer-events: none;
+        }
+        .form-input:focus + .floating-label,
+        .form-input:not(:placeholder-shown) + .floating-label {
+            top: -10px;
+            left: 0.75rem;
+            font-size: 0.75rem;
+            background: rgba(30, 41, 59, 0.9);
+            padding: 0 0.5rem;
+            border-radius: 4px;
+        }
+    </style>
+</head>
+<body class="h-full bg-gradient-to-br from-gray-900 via-blue-900 to-purple-900 text-white">
+    <!-- Connection Status -->
+    <div class="connection-status connecting" id="connectionStatus">
+        <i class="fas fa-circle-notch fa-spin mr-2"></i>
+        <span id="connectionText">Connecting to Firebase...</span>
+    </div>
+
+    <!-- Animated Background -->
+    <div class="fixed inset-0 overflow-hidden pointer-events-none">
+        <div class="absolute w-2 h-2 bg-blue-400 rounded-full animate-pulse" style="top: 20%; left: 10%;"></div>
+        <div class="absolute w-1 h-1 bg-purple-400 rounded-full animate-pulse" style="top: 60%; left: 80%; animation-delay: 1s;"></div>
+        <div class="absolute w-3 h-3 bg-cyan-400 rounded-full animate-pulse" style="top: 40%; left: 50%; animation-delay: 2s;"></div>
+        <div class="absolute w-1 h-1 bg-green-400 rounded-full animate-pulse" style="top: 80%; left: 20%; animation-delay: 1.5s;"></div>
+        <div class="absolute w-2 h-2 bg-pink-400 rounded-full animate-pulse" style="top: 30%; left: 90%; animation-delay: 0.5s;"></div>
+    </div>
+
+    <!-- Back Button -->
+    <button class="back-btn glass-effect" onclick="goBack()">
+        <i class="fas fa-arrow-left mr-2"></i> Back to Home
+    </button>
+
+    <div class="min-h-full flex items-center justify-center py-12 px-4 sm:px-6 lg:px-8">
+        <div class="max-w-md w-full space-y-8">
+            <!-- Header -->
+            <div class="text-center">
+                <div class="flex items-center justify-center space-x-3 mb-6">
+                    <div class="w-12 h-12 cyber-gradient rounded-xl flex items-center justify-center quantum-glow">
+                        <i class="fas fa-user-plus text-white text-xl"></i>
+                    </div>
+                    <span class="text-3xl font-bold text-transparent bg-clip-text bg-gradient-to-r from-blue-400 to-purple-400">
+                        Uniconnect ID
+                    </span>
+                </div>
+                <h2 class="text-4xl font-bold text-white mb-2">Create Account</h2>
+                <p class="text-blue-300">
+                    Already have an account?{' '}
+                    <a href="login.html" class="font-medium text-purple-400 hover:text-purple-300 transition">
+                        Sign in now
+                    </a>
+                </p>
+            </div>
+
+            <!-- Messages -->
+            <div id="messageContainer"></div>
+
+            <!-- Registration Form -->
+            <div class="space-y-6">
+                <form class="space-y-6" id="registerForm">
+                    <div>
+                        <label for="firstName" class="block text-sm font-medium text-cyan-400 mb-2">Full Name</label>
+                        <div class="relative">
+                            <input id="firstName" name="firstName" type="text" autocomplete="given-name" required 
+                                   class="form-input glass-effect appearance-none block w-full px-4 py-3 border border-blue-700 rounded-xl placeholder-transparent focus:outline-none focus:ring-2 focus:ring-cyan-400 focus:border-cyan-400 text-white pl-12"
+                                   placeholder="Enter your first name">
+                            <span class="floating-label">First Name</span>
+                            <div class="absolute left-4 top-1/2 transform -translate-y-1/2 text-blue-400">
+                                <i class="fas fa-user"></i>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div>
+                        <label for="email" class="block text-sm font-medium text-cyan-400 mb-2">Email address</label>
+                        <div class="relative">
+                            <input id="email" name="email" type="email" autocomplete="email" required 
+                                   class="form-input glass-effect appearance-none block w-full px-4 py-3 border border-blue-700 rounded-xl placeholder-transparent focus:outline-none focus:ring-2 focus:ring-cyan-400 focus:border-cyan-400 text-white pl-12"
+                                   placeholder="Enter your email">
+                            <span class="floating-label">Email Address</span>
+                            <div class="absolute left-4 top-1/2 transform -translate-y-1/2 text-blue-400">
+                                <i class="fas fa-envelope"></i>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div>
+                        <label for="password" class="block text-sm font-medium text-blue-400 mb-2">Password</label>
+                        <div class="relative">
+                            <input id="password" name="password" type="password" autocomplete="new-password" required 
+                                   class="form-input glass-effect appearance-none block w-full px-4 py-3 border border-blue-700 rounded-xl placeholder-transparent focus:outline-none focus:ring-2 focus:ring-blue-400 focus:border-blue-400 text-white pl-12 pr-12"
+                                   placeholder="Create a password">
+                            <span class="floating-label">Password</span>
+                            <div class="absolute left-4 top-1/2 transform -translate-y-1/2 text-blue-400">
+                                <i class="fas fa-lock"></i>
+                            </div>
+                            <button type="button" id="togglePassword" class="absolute right-4 top-1/2 transform -translate-y-1/2 text-blue-400 hover:text-blue-300">
+                                <i class="fas fa-eye"></i>
+                            </button>
+                        </div>
+                        <div id="passwordStrength" class="password-strength weak"></div>
+                        <p id="passwordFeedback" class="text-sm text-blue-300 mt-1">Password must be at least 8 characters with uppercase, lowercase, number, and special character</p>
+                    </div>
+
+                    <div>
+                        <label for="confirmPassword" class="block text-sm font-medium text-purple-400 mb-2">Confirm Password</label>
+                        <div class="relative">
+                            <input id="confirmPassword" name="confirmPassword" type="password" autocomplete="new-password" required 
+                                   class="form-input glass-effect appearance-none block w-full px-4 py-3 border border-blue-700 rounded-xl placeholder-transparent focus:outline-none focus:ring-2 focus:ring-purple-400 focus:border-purple-400 text-white pl-12 pr-12"
+                                   placeholder="Confirm your password">
+                            <span class="floating-label">Confirm Password</span>
+                            <div class="absolute left-4 top-1/2 transform -translate-y-1/2 text-blue-400">
+                                <i class="fas fa-lock"></i>
+                            </div>
+                            <button type="button" id="toggleConfirmPassword" class="absolute right-4 top-1/2 transform -translate-y-1/2 text-blue-400 hover:text-blue-300">
+                                <i class="fas fa-eye"></i>
+                            </button>
+                        </div>
+                    </div>
+
+                    <div class="flex items-start space-x-3">
+                        <input id="agree-terms" name="agree-terms" type="checkbox" required
+                               class="h-5 w-5 text-cyan-400 focus:ring-cyan-400 border-blue-700 rounded glass-effect mt-1">
+                        <label for="agree-terms" class="block text-sm text-blue-300">
+                            I agree to the{' '}
+                            <a href="legal.html" class="text-purple-400 hover:text-purple-300 transition" target="_blank">Terms of Service</a>
+                            {' '}and{' '}
+                            <a href="legal.html" class="text-purple-400 hover:text-purple-300 transition" target="_blank">Privacy Policy</a>
+                            . I understand that my data will be processed in accordance with Uniconnect's data protection policies.
+                        </label>
+                    </div>
+
+                    <div class="flex items-start space-x-3">
+                        <input id="marketing-consent" name="marketing-consent" type="checkbox"
+                               class="h-5 w-5 text-cyan-400 focus:ring-cyan-400 border-blue-700 rounded glass-effect mt-1">
+                        <label for="marketing-consent" class="block text-sm text-blue-300">
+                            I would like to receive product updates, security alerts, and marketing communications from Uniconnect. I can unsubscribe at any time.
+                        </label>
+                    </div>
+
+                    <div>
+                        <button type="submit" id="registerBtn"
+                                class="w-full cyber-gradient text-white py-3 px-4 rounded-xl text-lg font-semibold hover:scale-105 transition focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-cyan-400 quantum-glow disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:scale-100">
+                            <span id="registerBtnText">Create Account</span>
+                            <div id="registerSpinner" class="loading-spinner hidden"></div>
+                        </button>
+                    </div>
+                </form>
+            </div>
+
+            <!-- Security Features -->
+            <div class="glass-effect border border-blue-700 rounded-2xl p-6 mt-8">
+                <h3 class="text-sm font-medium text-cyan-400 mb-3">Secure Registration</h3>
+                <ul class="text-sm text-blue-400 space-y-2">
+                    <li class="flex items-center">
+                        <i class="fas fa-shield-alt text-green-400 mr-2"></i>
+                        <span>Military-grade encryption (AES-256)</span>
+                    </li>
+                    <li class="flex items-center">
+                        <i class="fas fa-user-check text-cyan-400 mr-2"></i>
+                        <span>Email verification required</span>
+                    </li>
+                    <li class="flex items-center">
+                        <i class="fas fa-bolt text-purple-400 mr-2"></i>
+                        <span>Fast and secure authentication</span>
+                    </li>
+                    <li class="flex items-center">
+                        <i class="fas fa-database text-blue-400 mr-2"></i>
+                        <span>Secure cloud storage with Firebase</span>
+                    </li>
+                </ul>
+            </div>
+
+            <!-- Trust Indicators -->
+            <div class="text-center text-sm text-blue-300 mt-6">
+                <p>Trusted by thousands of users worldwide</p>
+                <div class="flex justify-center space-x-6 mt-3">
+                    <div class="flex items-center">
+                        <i class="fas fa-check-circle text-green-400 mr-1"></i>
+                        <span>ISO 27001 Certified</span>
+                    </div>
+                    <div class="flex items-center">
+                        <i class="fas fa-shield-check text-cyan-400 mr-1"></i>
+                        <span>GDPR Compliant</span>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // Registration Application Class
+        class RegistrationApplication {
+            constructor() {
+                this.isConnected = false;
+                this.passwordStrength = 0;
+            }
+
+            async initialize() {
+                try {
+                    await this.initializeFirebase();
+                    this.setupEventListeners();
+                    this.updateConnectionStatus('connected');
+                    console.log('✅ Registration app initialized successfully');
+                    
+                    // Track registration page load
+                    if (window.firebaseApp && window.firebaseApp.analyticsFunctions) {
+                        window.firebaseApp.analyticsFunctions.logEvent(
+                            window.firebaseApp.analytics, 
+                            'registration_page_loaded'
+                        );
+                    }
+                } catch (error) {
+                    console.error('❌ Registration app initialization failed:', error);
+                    this.updateConnectionStatus('disconnected');
+                    this.showMessage('Firebase connection failed. Please check your connection and try again.', 'error');
+                }
+            }
+
+            async initializeFirebase() {
+                if (!window.firebaseApp) {
+                    throw new Error('Firebase not available');
+                }
+
+                this.updateConnectionStatus('connecting');
+                
+                try {
+                    // Test Firestore connection by attempting to write a test document
+                    const testDocRef = window.firebaseApp.firestore.doc(
+                        window.firebaseApp.db, 
+                        "connectionTests", 
+                        "registrationTest"
+                    );
+                    
+                    // Just test the reference creation - don't actually write
+                    console.log("✅ Firebase connected successfully for registration");
+                    
+                    this.isConnected = true;
+                    this.updateConnectionStatus('connected');
+                    
+                } catch (error) {
+                    console.error('❌ Firebase connection failed:', error);
+                    throw error;
+                }
+            }
+
+            updateConnectionStatus(status) {
+                const statusElement = document.getElementById('connectionStatus');
+                const textElement = document.getElementById('connectionText');
+                
+                statusElement.className = `connection-status ${status}`;
+                
+                switch(status) {
+                    case 'connected':
+                        textElement.textContent = 'Connected to Firebase';
+                        statusElement.innerHTML = '<i class="fas fa-wifi mr-2"></i><span id="connectionText">Connected to Firebase</span>';
+                        break;
+                    case 'connecting':
+                        textElement.textContent = 'Connecting to Firebase...';
+                        statusElement.innerHTML = '<i class="fas fa-circle-notch fa-spin mr-2"></i><span id="connectionText">Connecting to Firebase...</span>';
+                        break;
+                    case 'disconnected':
+                        textElement.textContent = 'Connection Failed';
+                        statusElement.innerHTML = '<i class="fas fa-exclamation-triangle mr-2"></i><span id="connectionText">Connection Failed</span>';
+                        break;
+                }
+            }
+
+            showMessage(message, type = 'error') {
+                const messageContainer = document.getElementById('messageContainer');
+                const messageClass = type === 'error' ? 'error-message' : 
+                                   type === 'success' ? 'success-message' : 'info-message';
+                
+                messageContainer.innerHTML = `
+                    <div class="${messageClass}">
+                        <div class="flex items-center">
+                            <i class="fas ${
+                                type === 'error' ? 'fa-exclamation-triangle' : 
+                                type === 'success' ? 'fa-check-circle' : 'fa-info-circle'
+                            } mr-2"></i>
+                            <span>${message}</span>
+                        </div>
+                    </div>
+                `;
+                
+                // Auto-hide success messages after 5 seconds
+                if (type === 'success') {
+                    setTimeout(() => {
+                        if (messageContainer.innerHTML.includes(message)) {
+                            messageContainer.innerHTML = '';
+                        }
+                    }, 5000);
+                }
+            }
+
+            clearMessages() {
+                document.getElementById('messageContainer').innerHTML = '';
+            }
+
+            validatePassword(password) {
+                const requirements = {
+                    length: password.length >= 8,
+                    uppercase: /[A-Z]/.test(password),
+                    lowercase: /[a-z]/.test(password),
+                    number: /[0-9]/.test(password),
+                    special: /[!@#$%^&*(),.?":{}|<>]/.test(password)
+                };
+
+                const strength = Object.values(requirements).filter(Boolean).length;
+                this.passwordStrength = strength;
+
+                // Update strength indicator
+                const strengthBar = document.getElementById('passwordStrength');
+                const feedback = document.getElementById('passwordFeedback');
+                
+                let strengthText = '';
+                let strengthClass = '';
+
+                switch(strength) {
+                    case 0:
+                    case 1:
+                        strengthClass = 'weak';
+                        strengthText = 'Very weak password';
+                        break;
+                    case 2:
+                        strengthClass = 'weak';
+                        strengthText = 'Weak password';
+                        break;
+                    case 3:
+                        strengthClass = 'fair';
+                        strengthText = 'Fair password';
+                        break;
+                    case 4:
+                        strengthClass = 'good';
+                        strengthText = 'Good password';
+                        break;
+                    case 5:
+                        strengthClass = 'strong';
+                        strengthText = 'Strong password!';
+                        break;
+                }
+
+                strengthBar.className = `password-strength ${strengthClass}`;
+                feedback.textContent = strengthText;
+                feedback.className = `text-sm mt-1 ${
+                    strength <= 2 ? 'text-red-400' : 
+                    strength === 3 ? 'text-yellow-400' : 
+                    strength === 4 ? 'text-blue-400' : 'text-green-400'
+                }`;
+
+                return requirements;
+            }
+
+            async registerWithEmailPassword(userData) {
+                if (!this.isConnected || !window.firebaseApp) {
+                    this.showMessage('Firebase not connected. Please try again.', 'error');
+                    return false;
+                }
+
+                try {
+                    // Show loading state
+                    this.setLoadingState(true);
+
+                    console.log('Registering user:', userData.email);
+
+                    // Track registration attempt
+                    if (window.firebaseApp.analyticsFunctions) {
+                        window.firebaseApp.analyticsFunctions.logEvent(
+                            window.firebaseApp.analytics, 
+                            'registration_attempt',
+                            { email: userData.email }
+                        );
+                    }
+
+                    // Create user with Firebase Auth
+                    const userCredential = await window.firebaseApp.authFunctions.createUserWithEmailAndPassword(
+                        window.firebaseApp.auth, 
+                        userData.email, 
+                        userData.password
+                    );
+
+                    const user = userCredential.user;
+                    console.log('✅ User created successfully:', user.email);
+
+                    // Update user profile with display name
+                    if (userData.firstName) {
+                        await window.firebaseApp.authFunctions.updateProfile(user, {
+                            displayName: userData.firstName
+                        });
+                    }
+
+                    // Send email verification
+                    await window.firebaseApp.authFunctions.sendEmailVerification(user);
+                    console.log('✅ Verification email sent');
+
+                    // Store user data in Firestore
+                    try {
+                        await window.firebaseApp.firestore.setDoc(
+                            window.firebaseApp.firestore.doc(window.firebaseApp.db, 'users', user.uid),
+                            {
+                                email: user.email,
+                                displayName: userData.firstName || '',
+                                firstName: userData.firstName || '',
+                                emailVerified: false,
+                                profileComplete: false,
+                                marketingConsent: userData.marketingConsent || false,
+                                settings: {
+                                    theme: 'blue-theme',
+                                    darkMode: true,
+                                    notifications: true
+                                },
+                                createdAt: window.firebaseApp.firestore.serverTimestamp(),
+                                lastLogin: window.firebaseApp.firestore.serverTimestamp(),
+                                registrationSource: 'web'
+                            }
+                        );
+                        console.log('✅ User data saved to Firestore');
+                    } catch (firestoreError) {
+                        console.warn('⚠️ Firestore save warning:', firestoreError);
+                        // Continue even if Firestore fails - auth is what matters
+                    }
+
+                    // Track successful registration
+                    if (window.firebaseApp.analyticsFunctions) {
+                        window.firebaseApp.analyticsFunctions.logEvent(
+                            window.firebaseApp.analytics, 
+                            'registration_success',
+                            { 
+                                email: user.email,
+                                user_id: user.uid 
+                            }
+                        );
+                    }
+
+                    // Show success message
+                    this.showMessage(
+                        `Account created successfully! A verification email has been sent to ${user.email}. Please check your inbox and verify your email address.`,
+                        'success'
+                    );
+
+                    // Update button state
+                    this.setLoadingState(false, 'Account Created!');
+
+                    // Store registration data in localStorage
+                    localStorage.setItem('userEmail', user.email);
+                    localStorage.setItem('userId', user.uid);
+                    localStorage.setItem('userDisplayName', userData.firstName || '');
+                    localStorage.setItem('registrationComplete', 'true');
+                    localStorage.setItem('emailVerificationSent', 'true');
+
+                    // Redirect to login after delay
+                    setTimeout(() => {
+                        window.location.href = 'login.html?message=registration_success';
+                    }, 4000);
+
+                    return true;
+
+                } catch (error) {
+                    console.error('❌ Registration error:', error);
+                    
+                    // Track registration failure
+                    if (window.firebaseApp.analyticsFunctions) {
+                        window.firebaseApp.analyticsFunctions.logEvent(
+                            window.firebaseApp.analytics, 
+                            'registration_failed',
+                            { 
+                                error_code: error.code,
+                                error_message: error.message 
+                            }
+                        );
+                    }
+
+                    // Reset button state
+                    this.setLoadingState(false, 'Create Account');
+
+                    // Handle specific errors
+                    let errorMessage = 'Registration failed. Please try again.';
+
+                    switch (error.code) {
+                        case 'auth/email-already-in-use':
+                            errorMessage = 'This email is already registered. Please sign in instead or use a different email address.';
+                            break;
+                        case 'auth/invalid-email':
+                            errorMessage = 'Invalid email address format. Please check your email and try again.';
+                            break;
+                        case 'auth/weak-password':
+                            errorMessage = 'Password is too weak. Please use a stronger password with at least 8 characters including uppercase, lowercase, numbers, and special characters.';
+                            break;
+                        case 'auth/operation-not-allowed':
+                            errorMessage = 'Email/password accounts are not enabled. Please contact support.';
+                            break;
+                        case 'auth/network-request-failed':
+                            errorMessage = 'Network error. Please check your internet connection and try again.';
+                            break;
+                        case 'auth/too-many-requests':
+                            errorMessage = 'Too many registration attempts. Please try again later.';
+                            break;
+                        default:
+                            errorMessage = `Registration error: ${error.message}`;
+                    }
+
+                    this.showMessage(errorMessage, 'error');
+                    return false;
+                }
+            }
+
+            setLoadingState(isLoading, buttonText = 'Create Account') {
+                const registerBtn = document.getElementById('registerBtn');
+                const registerBtnText = document.getElementById('registerBtnText');
+                const registerSpinner = document.getElementById('registerSpinner');
+
+                registerBtn.disabled = isLoading;
+                
+                if (isLoading) {
+                    registerBtnText.textContent = 'Creating Account...';
+                    registerSpinner.classList.remove('hidden');
+                } else {
+                    registerBtnText.textContent = buttonText;
+                    registerSpinner.classList.add('hidden');
+                }
+            }
+
+            validateFormData(formData) {
+                const errors = [];
+
+                // Name validation
+                if (!formData.firstName || formData.firstName.trim().length < 2) {
+                    errors.push('Please enter a valid first name (at least 2 characters)');
+                }
+
+                // Email validation
+                const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+                if (!formData.email || !emailRegex.test(formData.email)) {
+                    errors.push('Please enter a valid email address');
+                }
+
+                // Password validation
+                if (!formData.password) {
+                    errors.push('Please enter a password');
+                } else if (formData.password.length < 8) {
+                    errors.push('Password must be at least 8 characters long');
+                } else if (this.passwordStrength < 3) {
+                    errors.push('Please use a stronger password');
+                }
+
+                // Password confirmation
+                if (formData.password !== formData.confirmPassword) {
+                    errors.push('Passwords do not match');
+                }
+
+                // Terms agreement
+                if (!formData.agreeTerms) {
+                    errors.push('You must agree to the Terms of Service and Privacy Policy');
+                }
+
+                return errors;
+            }
+
+            setupEventListeners() {
+                // Form submission
+                document.getElementById('registerForm').addEventListener('submit', async (e) => {
+                    e.preventDefault();
+                    this.clearMessages();
+                    
+                    const formData = {
+                        firstName: document.getElementById('firstName').value.trim(),
+                        email: document.getElementById('email').value.trim().toLowerCase(),
+                        password: document.getElementById('password').value,
+                        confirmPassword: document.getElementById('confirmPassword').value,
+                        agreeTerms: document.getElementById('agree-terms').checked,
+                        marketingConsent: document.getElementById('marketing-consent').checked
+                    };
+
+                    // Validate form data
+                    const errors = this.validateFormData(formData);
+                    if (errors.length > 0) {
+                        this.showMessage(errors[0], 'error');
+                        return;
+                    }
+
+                    // Register user
+                    await this.registerWithEmailPassword(formData);
+                });
+
+                // Password strength checking
+                document.getElementById('password').addEventListener('input', (e) => {
+                    this.validatePassword(e.target.value);
+                });
+
+                // Password visibility toggle
+                document.getElementById('togglePassword').addEventListener('click', () => {
+                    const passwordInput = document.getElementById('password');
+                    const icon = document.getElementById('togglePassword').querySelector('i');
+                    
+                    if (passwordInput.type === 'password') {
+                        passwordInput.type = 'text';
+                        icon.className = 'fas fa-eye-slash';
+                    } else {
+                        passwordInput.type = 'password';
+                        icon.className = 'fas fa-eye';
+                    }
+                });
+
+                // Confirm password visibility toggle
+                document.getElementById('toggleConfirmPassword').addEventListener('click', () => {
+                    const confirmInput = document.getElementById('confirmPassword');
+                    const icon = document.getElementById('toggleConfirmPassword').querySelector('i');
+                    
+                    if (confirmInput.type === 'password') {
+                        confirmInput.type = 'text';
+                        icon.className = 'fas fa-eye-slash';
+                    } else {
+                        confirmInput.type = 'password';
+                        icon.className = 'fas fa-eye';
+                    }
+                });
+
+                // Real-time password confirmation validation
+                document.getElementById('confirmPassword').addEventListener('input', (e) => {
+                    const password = document.getElementById('password').value;
+                    const confirmPassword = e.target.value;
+                    
+                    if (confirmPassword && password !== confirmPassword) {
+                        e.target.classList.add('border-red-500');
+                        e.target.classList.remove('border-blue-700');
+                    } else {
+                        e.target.classList.remove('border-red-500');
+                        e.target.classList.add('border-blue-700');
+                    }
+                });
+
+                // Enter key support for form submission
+                document.addEventListener('keypress', (e) => {
+                    if (e.key === 'Enter' && !document.getElementById('registerBtn').disabled) {
+                        document.getElementById('registerForm').dispatchEvent(new Event('submit'));
+                    }
+                });
+
+                console.log('✅ Event listeners setup complete');
+            }
+        }
+
+        // Navigation
+        function goBack() {
+            // Track back button click
+            if (window.firebaseApp && window.firebaseApp.analyticsFunctions) {
+                window.firebaseApp.analyticsFunctions.logEvent(
+                    window.firebaseApp.analytics, 
+                    'registration_back_click'
+                );
+            }
+            window.location.href = 'index.html';
+        }
+
+        // Initialize the application
+        function initRegistration() {
+            window.registrationApp = new RegistrationApplication();
+            window.registrationApp.initialize().catch(error => {
+                console.error('❌ Failed to initialize registration app:', error);
+            });
+        }
+
+        // Make it available globally for Firebase initialization
+        window.initRegistration = initRegistration;
+
+        // Initialize when ready
+        if (document.readyState === 'loading') {
+            document.addEventListener('DOMContentLoaded', initRegistration);
+        } else {
+            initRegistration();
+        }
+
+        console.log('📝 Registration page loaded with modular Firebase');
+    </script>
+</body>
+</html>

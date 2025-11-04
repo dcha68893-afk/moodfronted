@@ -1,0 +1,60 @@
+{
+  "projects": {
+    "default": "uniconnect-ee95c",
+    "development": "uniconnect-ee95c-dev",
+    "staging": "uniconnect-ee95c-staging",
+    "production": "uniconnect-ee95c"
+  },
+  "targets": {
+    "uniconnect-ee95c": {
+      "hosting": {
+        "chat-app": [
+          "uniconnect-ee95c"
+        ]
+      }
+    },
+    "uniconnect-ee95c-dev": {
+      "hosting": {
+        "chat-app-dev": [
+          "uniconnect-ee95c-dev"
+        ]
+      }
+    },
+    "uniconnect-ee95c-staging": {
+      "hosting": {
+        "chat-app-staging": [
+          "uniconnect-ee95c-staging"
+        ]
+      }
+    }
+  },
+  "deploy": {
+    "development": {
+      "project": "uniconnect-ee95c-dev",
+      "public": "./dist",
+      "ignore": [
+        "firebase.json",
+        "**/.*",
+        "**/node_modules/**"
+      ]
+    },
+    "staging": {
+      "project": "uniconnect-ee95c-staging",
+      "public": "./dist",
+      "ignore": [
+        "firebase.json",
+        "**/.*",
+        "**/node_modules/**"
+      ]
+    },
+    "production": {
+      "project": "uniconnect-ee95c",
+      "public": "./dist",
+      "ignore": [
+        "firebase.json",
+        "**/.*",
+        "**/node_modules/**"
+      ]
+    }
+  }
+}

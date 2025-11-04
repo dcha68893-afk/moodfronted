@@ -1,0 +1,1079 @@
+<!DOCTYPE html>
+<html lang="en" class="h-full">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Settings - Uniconnect</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css" rel="stylesheet">
+    
+    <!-- Firebase SDK -->
+    <script src="https://www.gstatic.com/firebasejs/9.22.0/firebase-app-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/9.22.0/firebase-auth-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/9.22.0/firebase-firestore-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/9.22.0/firebase-storage-compat.js"></script>
+    
+    <style>
+        .glass-effect {
+            background: rgba(255, 255, 255, 0.1);
+            backdrop-filter: blur(20px);
+            border: 1px solid rgba(255, 255, 255, 0.2);
+        }
+        .primary-gradient {
+            background: linear-gradient(135deg, #3B82F6 0%, #8B5CF6 100%);
+        }
+        .settings-card {
+            background: rgba(30, 30, 60, 0.7);
+            backdrop-filter: blur(20px);
+            border: 1px solid rgba(59, 130, 246, 0.3);
+            border-radius: 16px;
+            transition: all 0.3s ease;
+        }
+        .settings-card:hover {
+            border-color: rgba(59, 130, 246, 0.6);
+            transform: translateY(-5px);
+            box-shadow: 0 10px 30px rgba(0, 0, 0, 0.3);
+        }
+        .toggle-switch {
+            position: relative;
+            display: inline-block;
+            width: 60px;
+            height: 30px;
+        }
+        .toggle-switch input {
+            opacity: 0;
+            width: 0;
+            height: 0;
+        }
+        .toggle-slider {
+            position: absolute;
+            cursor: pointer;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            background-color: #4B5563;
+            transition: .4s;
+            border-radius: 34px;
+        }
+        .toggle-slider:before {
+            position: absolute;
+            content: "";
+            height: 22px;
+            width: 22px;
+            left: 4px;
+            bottom: 4px;
+            background-color: white;
+            transition: .4s;
+            border-radius: 50%;
+        }
+        input:checked + .toggle-slider {
+            background-color: #3B82F6;
+        }
+        input:checked + .toggle-slider:before {
+            transform: translateX(30px);
+        }
+        .connection-status {
+            position: fixed;
+            top: 10px;
+            right: 10px;
+            padding: 8px 16px;
+            border-radius: 20px;
+            font-size: 0.8rem;
+            z-index: 1000;
+            transition: all 0.3s;
+        }
+        .connection-status.connected {
+            background: rgba(34, 197, 94, 0.8);
+            color: white;
+        }
+        .connection-status.connecting {
+            background: rgba(245, 158, 11, 0.8);
+            color: white;
+        }
+        .connection-status.disconnected {
+            background: rgba(239, 68, 68, 0.8);
+            color: white;
+        }
+        .theme-option {
+            width: 60px;
+            height: 60px;
+            border-radius: 12px;
+            cursor: pointer;
+            border: 3px solid transparent;
+            transition: all 0.3s;
+        }
+        .theme-option:hover {
+            transform: scale(1.05);
+        }
+        .theme-option.active {
+            border-color: white;
+            box-shadow: 0 0 15px rgba(255, 255, 255, 0.5);
+        }
+        .theme-blue {
+            background: linear-gradient(135deg, #1e3a8a 0%, #3b82f6 100%);
+        }
+        .theme-purple {
+            background: linear-gradient(135deg, #7e22ce 0%, #a855f7 100%);
+        }
+        .theme-green {
+            background: linear-gradient(135deg, #059669 0%, #10b981 100%);
+        }
+        .theme-dark {
+            background: linear-gradient(135deg, #0f172a 0%, #334155 100%);
+        }
+        .theme-cyber {
+            background: linear-gradient(135deg, #1e3a8a 0%, #7e22ce 100%);
+        }
+        .theme-red {
+            background: linear-gradient(135deg, #dc2626 0%, #ef4444 100%);
+        }
+        .notification-item {
+            padding: 15px;
+            border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+            transition: all 0.3s;
+        }
+        .notification-item:hover {
+            background: rgba(59, 130, 246, 0.1);
+        }
+        .notification-item:last-child {
+            border-bottom: none;
+        }
+        .loading-spinner {
+            border: 3px solid rgba(255, 255, 255, 0.3);
+            border-radius: 50%;
+            border-top: 3px solid #3B82F6;
+            width: 20px;
+            height: 20px;
+            animation: spin 1s linear infinite;
+        }
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+    </style>
+</head>
+<body class="h-full bg-gradient-to-br from-gray-900 via-blue-900 to-gray-900 text-white">
+    <!-- Connection Status -->
+    <div class="connection-status connecting" id="connectionStatus">
+        <i class="fas fa-circle-notch fa-spin mr-2"></i>
+        <span id="connectionText">Connecting to Firebase...</span>
+    </div>
+
+    <!-- Navigation -->
+    <div class="w-full glass-effect border-b border-blue-800 p-4">
+        <div class="max-w-6xl mx-auto flex items-center justify-between">
+            <a href="home.html" class="flex items-center space-x-3">
+                <div class="w-10 h-10 primary-gradient rounded-2xl flex items-center justify-center">
+                    <i class="fas fa-id-card-alt text-white"></i>
+                </div>
+                <span class="text-xl font-black text-transparent bg-clip-text bg-gradient-to-r from-cyan-400 to-purple-400">
+                    Uniconnect
+                </span>
+            </a>
+            <div class="flex items-center space-x-4">
+                <a href="home.html" class="text-blue-300 hover:text-white transition">Home</a>
+                <a href="chat.html" class="text-blue-300 hover:text-white transition">Chat</a>
+                <a href="profile.html" class="text-blue-300 hover:text-white transition">Profile</a>
+                <a href="settings.html" class="text-white font-semibold">Settings</a>
+            </div>
+        </div>
+    </div>
+
+    <!-- Main Content -->
+    <div class="max-w-6xl mx-auto p-6">
+        <div class="mb-8">
+            <h1 class="text-3xl font-bold mb-2">Settings</h1>
+            <p class="text-blue-300">Manage your Uniconnect preferences and account settings</p>
+        </div>
+
+        <div class="grid grid-cols-1 lg:grid-cols-3 gap-6">
+            <!-- Left Column - Account & Profile -->
+            <div class="lg:col-span-2 space-y-6">
+                <!-- Account Settings -->
+                <div class="settings-card p-6">
+                    <h2 class="text-xl font-bold mb-4 text-blue-300">Account Settings</h2>
+                    
+                    <div class="space-y-4">
+                        <div class="flex items-center justify-between">
+                            <div>
+                                <h3 class="font-semibold">Display Name</h3>
+                                <p class="text-sm text-blue-300">Change how your name appears</p>
+                            </div>
+                            <div class="flex items-center space-x-3">
+                                <span id="displayName" class="flex items-center">
+                                    <div class="loading-spinner mr-2"></div>
+                                    Loading...
+                                </span>
+                                <button id="editNameBtn" class="text-blue-400 hover:text-blue-300 transition">
+                                    <i class="fas fa-edit"></i>
+                                </button>
+                            </div>
+                        </div>
+                        
+                        <div class="flex items-center justify-between">
+                            <div>
+                                <h3 class="font-semibold">Email Address</h3>
+                                <p class="text-sm text-blue-300">Your account email</p>
+                            </div>
+                            <span id="userEmail" class="text-blue-300 flex items-center">
+                                <div class="loading-spinner mr-2"></div>
+                                Loading...
+                            </span>
+                        </div>
+                        
+                        <div class="flex items-center justify-between">
+                            <div>
+                                <h3 class="font-semibold">Account Created</h3>
+                                <p class="text-sm text-blue-300">When you joined Uniconnect</p>
+                            </div>
+                            <span id="accountCreated" class="text-blue-300 flex items-center">
+                                <div class="loading-spinner mr-2"></div>
+                                Loading...
+                            </span>
+                        </div>
+
+                        <div class="flex items-center justify-between">
+                            <div>
+                                <h3 class="font-semibold">User ID</h3>
+                                <p class="text-sm text-blue-300">Your unique identifier</p>
+                            </div>
+                            <span id="userId" class="text-blue-300 text-sm flex items-center">
+                                <div class="loading-spinner mr-2"></div>
+                                Loading...
+                            </span>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Privacy Settings -->
+                <div class="settings-card p-6">
+                    <h2 class="text-xl font-bold mb-4 text-blue-300">Privacy Settings</h2>
+                    
+                    <div class="space-y-6">
+                        <div class="flex items-center justify-between">
+                            <div>
+                                <h3 class="font-semibold">Profile Visibility</h3>
+                                <p class="text-sm text-blue-300">Control who can see your profile</p>
+                            </div>
+                            <select id="profileVisibility" class="bg-gray-800 border border-blue-700 rounded-lg p-2 text-white">
+                                <option value="public">Public</option>
+                                <option value="friends">Friends Only</option>
+                                <option value="private">Private</option>
+                            </select>
+                        </div>
+                        
+                        <div class="flex items-center justify-between">
+                            <div>
+                                <h3 class="font-semibold">Online Status</h3>
+                                <p class="text-sm text-blue-300">Show when you're online</p>
+                            </div>
+                            <label class="toggle-switch">
+                                <input type="checkbox" id="onlineStatusToggle">
+                                <span class="toggle-slider"></span>
+                            </label>
+                        </div>
+                        
+                        <div class="flex items-center justify-between">
+                            <div>
+                                <h3 class="font-semibold">Read Receipts</h3>
+                                <p class="text-sm text-blue-300">Let others see when you've read their messages</p>
+                            </div>
+                            <label class="toggle-switch">
+                                <input type="checkbox" id="readReceiptsToggle">
+                                <span class="toggle-slider"></span>
+                            </label>
+                        </div>
+
+                        <div class="flex items-center justify-between">
+                            <div>
+                                <h3 class="font-semibold">Activity Status</h3>
+                                <p class="text-sm text-blue-300">Show when you're active on the platform</p>
+                            </div>
+                            <label class="toggle-switch">
+                                <input type="checkbox" id="activityStatusToggle">
+                                <span class="toggle-slider"></span>
+                            </label>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Notification Settings -->
+                <div class="settings-card p-6">
+                    <h2 class="text-xl font-bold mb-4 text-blue-300">Notification Settings</h2>
+                    
+                    <div class="space-y-4">
+                        <div class="flex items-center justify-between">
+                            <div>
+                                <h3 class="font-semibold">Push Notifications</h3>
+                                <p class="text-sm text-blue-300">Receive notifications in your browser</p>
+                            </div>
+                            <label class="toggle-switch">
+                                <input type="checkbox" id="pushNotificationsToggle">
+                                <span class="toggle-slider"></span>
+                            </label>
+                        </div>
+                        
+                        <div class="flex items-center justify-between">
+                            <div>
+                                <h3 class="font-semibold">Email Notifications</h3>
+                                <p class="text-sm text-blue-300">Receive notifications via email</p>
+                            </div>
+                            <label class="toggle-switch">
+                                <input type="checkbox" id="emailNotificationsToggle">
+                                <span class="toggle-slider"></span>
+                            </label>
+                        </div>
+                        
+                        <div class="flex items-center justify-between">
+                            <div>
+                                <h3 class="font-semibold">Message Notifications</h3>
+                                <p class="text-sm text-blue-300">Get notified about new messages</p>
+                            </div>
+                            <label class="toggle-switch">
+                                <input type="checkbox" id="messageNotificationsToggle">
+                                <span class="toggle-slider"></span>
+                            </label>
+                        </div>
+
+                        <div class="flex items-center justify-between">
+                            <div>
+                                <h3 class="font-semibold">Friend Request Notifications</h3>
+                                <p class="text-sm text-blue-300">Get notified about friend requests</p>
+                            </div>
+                            <label class="toggle-switch">
+                                <input type="checkbox" id="friendRequestNotificationsToggle">
+                                <span class="toggle-slider"></span>
+                            </label>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Right Column - Appearance & Actions -->
+            <div class="space-y-6">
+                <!-- Theme Settings -->
+                <div class="settings-card p-6">
+                    <h2 class="text-xl font-bold mb-4 text-blue-300">Appearance</h2>
+                    
+                    <div class="mb-4">
+                        <h3 class="font-semibold mb-3">Theme</h3>
+                        <div class="grid grid-cols-3 gap-3">
+                            <div class="theme-option theme-blue active" data-theme="blue-theme"></div>
+                            <div class="theme-option theme-purple" data-theme="purple-theme"></div>
+                            <div class="theme-option theme-green" data-theme="green-theme"></div>
+                            <div class="theme-option theme-dark" data-theme="dark-theme"></div>
+                            <div class="theme-option theme-cyber" data-theme="cyber-theme"></div>
+                            <div class="theme-option theme-red" data-theme="red-theme"></div>
+                        </div>
+                    </div>
+                    
+                    <div class="flex items-center justify-between mt-4">
+                        <div>
+                            <h3 class="font-semibold">Dark Mode</h3>
+                            <p class="text-sm text-blue-300">Use dark theme</p>
+                        </div>
+                        <label class="toggle-switch">
+                            <input type="checkbox" id="darkModeToggle">
+                            <span class="toggle-slider"></span>
+                        </label>
+                    </div>
+                </div>
+
+                <!-- Data Management -->
+                <div class="settings-card p-6">
+                    <h2 class="text-xl font-bold mb-4 text-blue-300">Data Management</h2>
+                    
+                    <div class="space-y-3">
+                        <button id="exportDataBtn" class="w-full text-left p-3 glass-effect rounded-lg hover:bg-blue-900/30 transition flex items-center justify-between">
+                            <span>Export My Data</span>
+                            <i class="fas fa-download text-blue-400"></i>
+                        </button>
+                        
+                        <button id="clearCacheBtn" class="w-full text-left p-3 glass-effect rounded-lg hover:bg-blue-900/30 transition flex items-center justify-between">
+                            <span>Clear Cache</span>
+                            <i class="fas fa-broom text-blue-400"></i>
+                        </button>
+                        
+                        <button id="deleteAccountBtn" class="w-full text-left p-3 glass-effect rounded-lg hover:bg-red-900/30 transition flex items-center justify-between text-red-400">
+                            <span>Delete Account</span>
+                            <i class="fas fa-trash"></i>
+                        </button>
+                    </div>
+                </div>
+
+                <!-- App Information -->
+                <div class="settings-card p-6">
+                    <h2 class="text-xl font-bold mb-4 text-blue-300">About Uniconnect</h2>
+                    
+                    <div class="space-y-3 text-sm">
+                        <div class="flex justify-between">
+                            <span class="text-blue-300">Version</span>
+                            <span>2.1.0</span>
+                        </div>
+                        <div class="flex justify-between">
+                            <span class="text-blue-300">Build Date</span>
+                            <span>Nov 2023</span>
+                        </div>
+                        <div class="flex justify-between">
+                            <span class="text-blue-300">Firebase Status</span>
+                            <span id="firebaseStatus" class="text-yellow-400">Connecting...</span>
+                        </div>
+                        <div class="flex justify-between">
+                            <span class="text-blue-300">Database</span>
+                            <span id="databaseStatus" class="text-yellow-400">Loading...</span>
+                        </div>
+                    </div>
+                    
+                    <div class="mt-4 pt-4 border-t border-blue-800">
+                        <button id="logoutBtn" class="w-full p-3 primary-gradient rounded-lg font-semibold hover:opacity-90 transition">
+                            Sign Out
+                        </button>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Edit Name Modal -->
+    <div id="editNameModal" class="fixed inset-0 bg-black/70 flex items-center justify-center z-50 hidden">
+        <div class="settings-card p-6 w-full max-w-md">
+            <div class="flex justify-between items-center mb-4">
+                <h2 class="text-xl font-bold text-blue-300">Edit Display Name</h2>
+                <button id="closeEditNameModal" class="text-blue-400 hover:text-blue-300">
+                    <i class="fas fa-times"></i>
+                </button>
+            </div>
+            
+            <div class="mb-4">
+                <label class="block text-sm font-medium mb-2">New Display Name</label>
+                <input type="text" id="newDisplayName" class="w-full p-3 glass-effect border border-blue-700 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-400 focus:border-transparent" placeholder="Enter your display name">
+                <p class="text-xs text-blue-300 mt-1">This name will be visible to other users</p>
+            </div>
+            
+            <div class="flex justify-end space-x-3">
+                <button id="cancelEditName" class="px-4 py-2 glass-effect rounded-lg hover:bg-blue-900/30 transition">Cancel</button>
+                <button id="saveDisplayName" class="px-4 py-2 primary-gradient rounded-lg font-semibold hover:opacity-90 transition">Save Changes</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Delete Account Confirmation Modal -->
+    <div id="deleteAccountModal" class="fixed inset-0 bg-black/70 flex items-center justify-center z-50 hidden">
+        <div class="settings-card p-6 w-full max-w-md">
+            <div class="flex justify-between items-center mb-4">
+                <h2 class="text-xl font-bold text-red-400">Delete Account</h2>
+                <button id="closeDeleteModal" class="text-blue-400 hover:text-blue-300">
+                    <i class="fas fa-times"></i>
+                </button>
+            </div>
+            
+            <div class="mb-4">
+                <p class="text-red-300 mb-3">This action cannot be undone. All your data will be permanently deleted.</p>
+                <p class="text-sm text-blue-300 mb-3">To confirm, please type your password:</p>
+                <input type="password" id="confirmPassword" class="w-full p-3 glass-effect border border-red-700 rounded-lg focus:outline-none focus:ring-2 focus:ring-red-400 focus:border-transparent" placeholder="Enter your password">
+            </div>
+            
+            <div class="flex justify-end space-x-3">
+                <button id="cancelDelete" class="px-4 py-2 glass-effect rounded-lg hover:bg-blue-900/30 transition">Cancel</button>
+                <button id="confirmDelete" class="px-4 py-2 bg-red-600 rounded-lg font-semibold hover:bg-red-700 transition text-white">Delete Account</button>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // Firebase configuration
+        const firebaseConfig = {
+            apiKey: "AIzaSyDHHyGgsSV18BcXrGgzi4C8frzDAE1C1zo",
+            authDomain: "uniconnect-ee95c.firebaseapp.com",
+            projectId: "uniconnect-ee95c",
+            storageBucket: "uniconnect-ee95c.firebasestorage.app",
+            messagingSenderId: "1003264444309",
+            appId: "1:1003264444309:web:9f0307516e44d21e97d89c"
+        };
+
+        // Initialize Firebase
+        if (!firebase.apps.length) {
+            firebase.initializeApp(firebaseConfig);
+        }
+
+        const auth = firebase.auth();
+        const db = firebase.firestore();
+
+        // Settings Application
+        class SettingsApplication {
+            constructor() {
+                this.currentUser = null;
+                this.userSettings = {};
+                this.isConnected = false;
+                this.userData = {};
+            }
+
+            async initialize() {
+                try {
+                    console.log("🚀 Initializing Settings Application...");
+                    await this.initializeFirebase();
+                    this.setupEventListeners();
+                    await this.loadUserSettings();
+                    this.showNotification("Settings loaded successfully!", "success");
+                } catch (error) {
+                    console.error('❌ Initialization failed:', error);
+                    this.updateConnectionStatus('disconnected');
+                    this.showNotification("Failed to load settings. Please refresh the page.", "error");
+                }
+            }
+
+            async initializeFirebase() {
+                this.updateConnectionStatus('connecting');
+                
+                return new Promise((resolve, reject) => {
+                    const unsubscribe = auth.onAuthStateChanged(async (user) => {
+                        if (user) {
+                            this.currentUser = user;
+                            console.log("✅ User authenticated:", user.uid);
+                            
+                            try {
+                                // Load user data
+                                await this.loadUserData();
+                                this.updateConnectionStatus('connected');
+                                resolve();
+                            } catch (error) {
+                                console.error("❌ Error loading user data:", error);
+                                reject(error);
+                            }
+                        } else {
+                            console.log("❌ User not authenticated, redirecting to login...");
+                            // Redirect to login if not authenticated
+                            window.location.href = 'index.html';
+                            reject(new Error('User not authenticated'));
+                        }
+                    }, (error) => {
+                        console.error("❌ Auth state change error:", error);
+                        reject(error);
+                    });
+                });
+            }
+
+            async loadUserData() {
+                try {
+                    console.log("📥 Loading user data from Firestore...");
+                    const userDoc = await db.collection('users').doc(this.currentUser.uid).get();
+                    
+                    if (userDoc.exists) {
+                        this.userData = userDoc.data();
+                        console.log("✅ User data loaded:", this.userData);
+                        
+                        // Update UI with user data
+                        this.updateUserInterface();
+                        
+                        // Load settings
+                        if (this.userData.settings) {
+                            this.userSettings = this.userData.settings;
+                            this.applySettingsToUI();
+                        } else {
+                            // Initialize default settings
+                            await this.initializeDefaultSettings();
+                        }
+                    } else {
+                        // Create user document if it doesn't exist
+                        console.log("📝 Creating new user document...");
+                        await this.createUserDocument();
+                    }
+                } catch (error) {
+                    console.error('❌ Error loading user data:', error);
+                    throw error;
+                }
+            }
+
+            updateUserInterface() {
+                // Update display name
+                const displayName = 
+                    this.userData.profile?.displayName || 
+                    this.userData.profile?.firstName || 
+                    'User_' + this.currentUser.uid.slice(-6);
+                document.getElementById('displayName').textContent = displayName;
+                
+                // Update email
+                document.getElementById('userEmail').textContent = this.currentUser.email || 'Not provided';
+                
+                // Update account creation date
+                const createdAt = this.userData.createdAt ? 
+                    new Date(this.userData.createdAt.toDate()).toLocaleDateString() : 
+                    new Date().toLocaleDateString();
+                document.getElementById('accountCreated').textContent = createdAt;
+                
+                // Update user ID
+                document.getElementById('userId').textContent = this.currentUser.uid.slice(0, 8) + '...';
+            }
+
+            async createUserDocument() {
+                try {
+                    const defaultSettings = {
+                        theme: 'blue-theme',
+                        darkMode: true,
+                        profileVisibility: 'public',
+                        onlineStatus: true,
+                        readReceipts: true,
+                        activityStatus: true,
+                        pushNotifications: true,
+                        emailNotifications: false,
+                        messageNotifications: true,
+                        friendRequestNotifications: true
+                    };
+
+                    await db.collection('users').doc(this.currentUser.uid).set({
+                        profile: {
+                            displayName: 'User_' + this.currentUser.uid.slice(-6),
+                            email: this.currentUser.email,
+                            createdAt: new Date()
+                        },
+                        settings: defaultSettings,
+                        createdAt: new Date(),
+                        lastLogin: new Date()
+                    });
+                    
+                    console.log("✅ User document created successfully");
+                    
+                    // Reload user data
+                    await this.loadUserData();
+                } catch (error) {
+                    console.error('❌ Error creating user document:', error);
+                    throw error;
+                }
+            }
+
+            async initializeDefaultSettings() {
+                const defaultSettings = {
+                    theme: 'blue-theme',
+                    darkMode: true,
+                    profileVisibility: 'public',
+                    onlineStatus: true,
+                    readReceipts: true,
+                    activityStatus: true,
+                    pushNotifications: true,
+                    emailNotifications: false,
+                    messageNotifications: true,
+                    friendRequestNotifications: true
+                };
+
+                this.userSettings = defaultSettings;
+                await this.saveAllSettings();
+                this.applySettingsToUI();
+            }
+
+            applySettingsToUI() {
+                console.log("🎨 Applying settings to UI:", this.userSettings);
+                
+                // Apply theme
+                if (this.userSettings.theme) {
+                    this.applyTheme(this.userSettings.theme);
+                }
+                
+                // Apply toggle states
+                const toggleMappings = {
+                    'darkModeToggle': 'darkMode',
+                    'onlineStatusToggle': 'onlineStatus',
+                    'readReceiptsToggle': 'readReceipts',
+                    'activityStatusToggle': 'activityStatus',
+                    'pushNotificationsToggle': 'pushNotifications',
+                    'emailNotificationsToggle': 'emailNotifications',
+                    'messageNotificationsToggle': 'messageNotifications',
+                    'friendRequestNotificationsToggle': 'friendRequestNotifications'
+                };
+
+                Object.entries(toggleMappings).forEach(([elementId, settingKey]) => {
+                    const element = document.getElementById(elementId);
+                    if (element && this.userSettings[settingKey] !== undefined) {
+                        element.checked = this.userSettings[settingKey];
+                    }
+                });
+                
+                // Apply select values
+                if (this.userSettings.profileVisibility) {
+                    document.getElementById('profileVisibility').value = this.userSettings.profileVisibility;
+                }
+            }
+
+            applyTheme(theme) {
+                // Remove all theme classes
+                document.body.classList.remove('blue-theme', 'purple-theme', 'green-theme', 'dark-theme', 'cyber-theme', 'red-theme');
+                
+                // Add selected theme
+                document.body.classList.add(theme);
+                
+                // Update active theme indicator
+                document.querySelectorAll('.theme-option').forEach(option => {
+                    option.classList.remove('active');
+                    if (option.getAttribute('data-theme') === theme) {
+                        option.classList.add('active');
+                    }
+                });
+            }
+
+            async saveSetting(key, value) {
+                if (!this.currentUser) {
+                    console.error("❌ Cannot save setting: No user authenticated");
+                    return;
+                }
+                
+                try {
+                    console.log(`💾 Saving setting: ${key} = ${value}`);
+                    
+                    // Update local settings
+                    this.userSettings[key] = value;
+                    
+                    // Save to Firebase
+                    await db.collection('users').doc(this.currentUser.uid).set({
+                        settings: this.userSettings
+                    }, { merge: true });
+                    
+                    console.log(`✅ Setting saved: ${key} = ${value}`);
+                    
+                    // Also save to localStorage as backup
+                    localStorage.setItem('uniconnectSettings', JSON.stringify(this.userSettings));
+                } catch (error) {
+                    console.error('❌ Error saving setting:', error);
+                    this.showNotification('Failed to save setting. Please try again.', 'error');
+                }
+            }
+
+            async saveAllSettings() {
+                if (!this.currentUser) return;
+                
+                try {
+                    await db.collection('users').doc(this.currentUser.uid).set({
+                        settings: this.userSettings
+                    }, { merge: true });
+                    
+                    console.log("✅ All settings saved to Firebase");
+                } catch (error) {
+                    console.error('❌ Error saving all settings:', error);
+                }
+            }
+
+            async updateDisplayName(newName) {
+                if (!this.currentUser || !newName.trim()) {
+                    this.showNotification('Please enter a valid display name', 'error');
+                    return;
+                }
+                
+                try {
+                    console.log(`🔄 Updating display name to: ${newName.trim()}`);
+                    
+                    await db.collection('users').doc(this.currentUser.uid).set({
+                        profile: {
+                            displayName: newName.trim(),
+                            updatedAt: new Date()
+                        }
+                    }, { merge: true });
+                    
+                    // Update local data and UI
+                    this.userData.profile = this.userData.profile || {};
+                    this.userData.profile.displayName = newName.trim();
+                    this.updateUserInterface();
+                    
+                    this.showNotification('Display name updated successfully!', 'success');
+                    
+                    // Close modal
+                    document.getElementById('editNameModal').classList.add('hidden');
+                } catch (error) {
+                    console.error('❌ Error updating display name:', error);
+                    this.showNotification('Failed to update display name. Please try again.', 'error');
+                }
+            }
+
+            async exportUserData() {
+                if (!this.currentUser) return;
+                
+                try {
+                    console.log("📤 Exporting user data...");
+                    this.showNotification("Preparing your data export...", "info");
+                    
+                    // Get all user data
+                    const userDoc = await db.collection('users').doc(this.currentUser.uid).get();
+                    const userData = userDoc.exists ? userDoc.data() : {};
+                    
+                    // Create downloadable file
+                    const dataStr = JSON.stringify(userData, null, 2);
+                    const dataBlob = new Blob([dataStr], { type: 'application/json' });
+                    const url = URL.createObjectURL(dataBlob);
+                    
+                    const link = document.createElement('a');
+                    link.href = url;
+                    link.download = `uniconnect-data-${this.currentUser.uid}-${new Date().toISOString().split('T')[0]}.json`;
+                    document.body.appendChild(link);
+                    link.click();
+                    document.body.removeChild(link);
+                    URL.revokeObjectURL(url);
+                    
+                    this.showNotification('Data exported successfully!', 'success');
+                } catch (error) {
+                    console.error('❌ Error exporting data:', error);
+                    this.showNotification('Failed to export data. Please try again.', 'error');
+                }
+            }
+
+            async deleteUserAccount(password) {
+                if (!this.currentUser || !password) return;
+                
+                try {
+                    console.log("🗑️ Deleting user account...");
+                    this.showNotification("Deleting your account...", "info");
+                    
+                    // Re-authenticate user
+                    const credential = firebase.auth.EmailAuthProvider.credential(
+                        this.currentUser.email, 
+                        password
+                    );
+                    
+                    await this.currentUser.reauthenticateWithCredential(credential);
+                    
+                    // Delete user data from Firestore
+                    await db.collection('users').doc(this.currentUser.uid).delete();
+                    
+                    // Delete user from Firebase Auth
+                    await this.currentUser.delete();
+                    
+                    this.showNotification('Account deleted successfully. Redirecting...', 'success');
+                    
+                    // Redirect to home page after delay
+                    setTimeout(() => {
+                        window.location.href = 'index.html';
+                    }, 2000);
+                    
+                } catch (error) {
+                    console.error('❌ Error deleting account:', error);
+                    
+                    if (error.code === 'auth/wrong-password') {
+                        this.showNotification('Incorrect password. Please try again.', 'error');
+                    } else {
+                        this.showNotification('Failed to delete account. Please try again.', 'error');
+                    }
+                }
+            }
+
+            setupEventListeners() {
+                console.log("🔧 Setting up event listeners...");
+                
+                // Theme selection
+                document.querySelectorAll('.theme-option').forEach(option => {
+                    option.addEventListener('click', () => {
+                        const theme = option.getAttribute('data-theme');
+                        this.applyTheme(theme);
+                        this.saveSetting('theme', theme);
+                    });
+                });
+                
+                // Toggle switches
+                const toggleMappings = {
+                    'darkModeToggle': 'darkMode',
+                    'onlineStatusToggle': 'onlineStatus',
+                    'readReceiptsToggle': 'readReceipts',
+                    'activityStatusToggle': 'activityStatus',
+                    'pushNotificationsToggle': 'pushNotifications',
+                    'emailNotificationsToggle': 'emailNotifications',
+                    'messageNotificationsToggle': 'messageNotifications',
+                    'friendRequestNotificationsToggle': 'friendRequestNotifications'
+                };
+
+                Object.entries(toggleMappings).forEach(([elementId, settingKey]) => {
+                    const element = document.getElementById(elementId);
+                    if (element) {
+                        element.addEventListener('change', (e) => {
+                            this.saveSetting(settingKey, e.target.checked);
+                        });
+                    }
+                });
+                
+                // Profile visibility
+                document.getElementById('profileVisibility').addEventListener('change', (e) => {
+                    this.saveSetting('profileVisibility', e.target.value);
+                });
+                
+                // Edit name functionality
+                document.getElementById('editNameBtn').addEventListener('click', () => {
+                    document.getElementById('editNameModal').classList.remove('hidden');
+                    document.getElementById('newDisplayName').value = document.getElementById('displayName').textContent;
+                    document.getElementById('newDisplayName').focus();
+                });
+                
+                document.getElementById('closeEditNameModal').addEventListener('click', () => {
+                    document.getElementById('editNameModal').classList.add('hidden');
+                });
+                
+                document.getElementById('cancelEditName').addEventListener('click', () => {
+                    document.getElementById('editNameModal').classList.add('hidden');
+                });
+                
+                document.getElementById('saveDisplayName').addEventListener('click', () => {
+                    const newName = document.getElementById('newDisplayName').value;
+                    this.updateDisplayName(newName);
+                });
+                
+                // Data management
+                document.getElementById('exportDataBtn').addEventListener('click', () => {
+                    this.exportUserData();
+                });
+                
+                document.getElementById('clearCacheBtn').addEventListener('click', () => {
+                    localStorage.clear();
+                    sessionStorage.clear();
+                    this.showNotification('Cache cleared successfully!', 'success');
+                });
+                
+                document.getElementById('deleteAccountBtn').addEventListener('click', () => {
+                    document.getElementById('deleteAccountModal').classList.remove('hidden');
+                    document.getElementById('confirmPassword').value = '';
+                    document.getElementById('confirmPassword').focus();
+                });
+                
+                // Delete account modal
+                document.getElementById('closeDeleteModal').addEventListener('click', () => {
+                    document.getElementById('deleteAccountModal').classList.add('hidden');
+                });
+                
+                document.getElementById('cancelDelete').addEventListener('click', () => {
+                    document.getElementById('deleteAccountModal').classList.add('hidden');
+                });
+                
+                document.getElementById('confirmDelete').addEventListener('click', () => {
+                    const password = document.getElementById('confirmPassword').value;
+                    if (!password) {
+                        this.showNotification('Please enter your password', 'error');
+                        return;
+                    }
+                    this.deleteUserAccount(password);
+                });
+                
+                // Logout
+                document.getElementById('logoutBtn').addEventListener('click', () => {
+                    auth.signOut().then(() => {
+                        console.log("👋 User signed out");
+                        window.location.href = 'index.html';
+                    }).catch(error => {
+                        console.error('❌ Error signing out:', error);
+                        this.showNotification('Error signing out. Please try again.', 'error');
+                    });
+                });
+
+                // Enter key support for modals
+                document.getElementById('newDisplayName').addEventListener('keypress', (e) => {
+                    if (e.key === 'Enter') {
+                        document.getElementById('saveDisplayName').click();
+                    }
+                });
+
+                document.getElementById('confirmPassword').addEventListener('keypress', (e) => {
+                    if (e.key === 'Enter') {
+                        document.getElementById('confirmDelete').click();
+                    }
+                });
+
+                console.log("✅ Event listeners setup complete");
+            }
+
+            updateConnectionStatus(status) {
+                const statusElement = document.getElementById('connectionStatus');
+                const firebaseStatus = document.getElementById('firebaseStatus');
+                const databaseStatus = document.getElementById('databaseStatus');
+                
+                statusElement.className = `connection-status ${status}`;
+                
+                switch(status) {
+                    case 'connected':
+                        statusElement.innerHTML = '<i class="fas fa-wifi mr-2"></i><span id="connectionText">Connected to Firebase</span>';
+                        if (firebaseStatus) {
+                            firebaseStatus.textContent = 'Connected';
+                            firebaseStatus.className = 'text-green-400';
+                        }
+                        if (databaseStatus) {
+                            databaseStatus.textContent = 'Online';
+                            databaseStatus.className = 'text-green-400';
+                        }
+                        break;
+                    case 'connecting':
+                        statusElement.innerHTML = '<i class="fas fa-circle-notch fa-spin mr-2"></i><span id="connectionText">Connecting to Firebase...</span>';
+                        if (firebaseStatus) {
+                            firebaseStatus.textContent = 'Connecting';
+                            firebaseStatus.className = 'text-yellow-400';
+                        }
+                        if (databaseStatus) {
+                            databaseStatus.textContent = 'Loading...';
+                            databaseStatus.className = 'text-yellow-400';
+                        }
+                        break;
+                    case 'disconnected':
+                        statusElement.innerHTML = '<i class="fas fa-exclamation-triangle mr-2"></i><span id="connectionText">Disconnected from Firebase</span>';
+                        if (firebaseStatus) {
+                            firebaseStatus.textContent = 'Disconnected';
+                            firebaseStatus.className = 'text-red-400';
+                        }
+                        if (databaseStatus) {
+                            databaseStatus.textContent = 'Offline';
+                            databaseStatus.className = 'text-red-400';
+                        }
+                        break;
+                }
+            }
+
+            showNotification(message, type = 'success') {
+                // Create notification element
+                const notification = document.createElement('div');
+                notification.className = `fixed top-4 left-1/2 transform -translate-x-1/2 p-4 rounded-2xl glass-effect border ${
+                    type === 'success' ? 'border-green-500 text-green-400' : 
+                    type === 'error' ? 'border-red-500 text-red-400' : 
+                    'border-blue-500 text-blue-400'
+                } z-50 max-w-sm transition-all duration-300 opacity-0 transform -translate-y-2`;
+                notification.innerHTML = `
+                    <div class="flex items-center space-x-3">
+                        <i class="fas ${
+                            type === 'success' ? 'fa-check-circle' : 
+                            type === 'error' ? 'fa-exclamation-circle' : 
+                            'fa-info-circle'
+                        }"></i>
+                        <p class="text-sm">${message}</p>
+                    </div>
+                `;
+                
+                // Add to page
+                document.body.appendChild(notification);
+                
+                // Animate in
+                setTimeout(() => {
+                    notification.classList.remove('opacity-0', '-translate-y-2');
+                    notification.classList.add('opacity-100', 'translate-y-0');
+                }, 10);
+                
+                // Remove after 3 seconds
+                setTimeout(() => {
+                    notification.classList.remove('opacity-100', 'translate-y-0');
+                    notification.classList.add('opacity-0', '-translate-y-2');
+                    setTimeout(() => {
+                        if (notification.parentNode) {
+                            notification.parentNode.removeChild(notification);
+                        }
+                    }, 300);
+                }, 3000);
+            }
+
+            async loadUserSettings() {
+                // Load settings from localStorage as fallback
+                const savedSettings = localStorage.getItem('uniconnectSettings');
+                if (savedSettings) {
+                    this.userSettings = { ...this.userSettings, ...JSON.parse(savedSettings) };
+                    this.applySettingsToUI();
+                }
+            }
+        }
+
+        // Initialize the application
+        document.addEventListener('DOMContentLoaded', function() {
+            console.log("🚀 DOM loaded, initializing Settings Application...");
+            window.settingsApp = new SettingsApplication();
+            window.settingsApp.initialize().catch(error => {
+                console.error("❌ Failed to initialize application:", error);
+            });
+        });
+    </script>
+</body>
+</html>

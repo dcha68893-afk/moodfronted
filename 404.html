@@ -1,0 +1,118 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Page Not Found - UniConnect</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link rel="icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><text y=%22.9em%22 font-size=%2290%22>🎓</text></svg>">
+    <style>
+        @keyframes float {
+            0%, 100% { transform: translateY(0px); }
+            50% { transform: translateY(-10px); }
+        }
+        .floating { animation: float 3s ease-in-out infinite; }
+    </style>
+</head>
+<body class="bg-gradient-to-br from-indigo-50 to-purple-100 min-h-screen flex items-center justify-center px-4">
+    <div class="max-w-lg w-full text-center">
+        <!-- Animated 404 with UniConnect Theme -->
+        <div class="mb-8">
+            <div class="floating text-9xl font-bold text-gray-300 mb-4">
+                404
+            </div>
+            <div class="w-24 h-2 bg-gradient-to-r from-indigo-500 to-purple-600 rounded-full mx-auto mb-6"></div>
+        </div>
+
+        <!-- Message -->
+        <div class="mb-8">
+            <h1 class="text-3xl font-bold text-gray-800 mb-4">Class Dismissed Early!</h1>
+            <p class="text-lg text-gray-600 mb-2">
+                This page seems to have skipped class today.
+            </p>
+            <p class="text-gray-500">
+                Don't worry, even the best students get lost on campus sometimes.
+            </p>
+        </div>
+
+        <!-- UniConnect Branding -->
+        <div class="mb-8 p-4 bg-white rounded-lg shadow-sm border border-gray-200">
+            <div class="flex items-center justify-center space-x-2 text-indigo-600">
+                <span class="text-2xl">🎓</span>
+                <span class="text-xl font-bold">UniConnect</span>
+            </div>
+            <p class="text-sm text-gray-500 mt-2">University Connection Platform</p>
+        </div>
+
+        <!-- Action Buttons -->
+        <div class="space-y-4 sm:space-y-0 sm:space-x-4 sm:flex sm:justify-center">
+            <a href="/" 
+               class="inline-flex items-center px-6 py-3 border border-transparent text-base font-medium rounded-lg text-white bg-indigo-600 hover:bg-indigo-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500 transition-all duration-200 transform hover:scale-105 shadow-lg">
+                <svg class="w-5 h-5 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 12l2-2m0 0l7-7 7 7M5 10v10a1 1 0 001 1h3m10-11l2 2m-2-2v10a1 1 0 01-1 1h-3m-6 0a1 1 0 001-1v-4a1 1 0 011-1h2a1 1 0 011 1v4a1 1 0 001 1m-6 0h6"></path>
+                </svg>
+                Back to Campus
+            </a>
+            
+            <button onclick="history.back()" 
+                    class="inline-flex items-center px-6 py-3 border border-gray-300 text-base font-medium rounded-lg text-gray-700 bg-white hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500 transition-all duration-200">
+                <svg class="w-5 h-5 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 19l-7-7m0 0l7-7m-7 7h18"></path>
+                </svg>
+                Previous Lecture
+            </button>
+        </div>
+
+        <!-- Quick Links -->
+        <div class="mt-8 grid grid-cols-2 gap-4 text-sm">
+            <a href="/marketplace.html" class="text-indigo-600 hover:text-indigo-500 font-medium">
+                📚 Marketplace
+            </a>
+            <a href="/chat.html" class="text-indigo-600 hover:text-indigo-500 font-medium">
+                💬 Campus Chat
+            </a>
+            <a href="/games.html" class="text-indigo-600 hover:text-indigo-500 font-medium">
+                🎮 University Games
+            </a>
+            <a href="/profile.html" class="text-indigo-600 hover:text-indigo-500 font-medium">
+                👤 My Profile
+            </a>
+        </div>
+
+        <!-- Additional Help -->
+        <div class="mt-8 pt-6 border-t border-gray-200">
+            <p class="text-sm text-gray-500">
+                Lost on campus? <a href="mailto:support@uniconnect.com" class="text-indigo-600 hover:text-indigo-500 font-medium">Contact student support</a>
+            </p>
+        </div>
+
+        <!-- Fun Element -->
+        <div class="mt-8">
+            <div class="inline-block animate-bounce">
+                <span class="text-2xl">📚</span>
+            </div>
+        </div>
+
+        <!-- Project Info -->
+        <div class="mt-6 text-xs text-gray-400">
+            <p>UniConnect Project: uniconnect-ee95c</p>
+        </div>
+    </div>
+
+    <script>
+        console.log('UniConnect 404 - Page not found:', window.location.href);
+        console.log('Project: uniconnect-ee95c');
+        
+        // Add some interactive elements
+        document.addEventListener('DOMContentLoaded', function() {
+            const floatingElement = document.querySelector('.floating');
+            floatingElement.addEventListener('click', function() {
+                this.style.animationDuration = '1s';
+                setTimeout(() => {
+                    this.style.animationDuration = '3s';
+                }, 1000);
+            });
+        });
+    </script>
+</body>
+</html>

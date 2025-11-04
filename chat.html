@@ -1,0 +1,1983 @@
+<!DOCTYPE html>
+<html lang="en" class="h-full">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>UniConnectSphere - Quantum Chat</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css" rel="stylesheet">
+    
+    <style>
+        .glass-effect {
+            background: rgba(255, 255, 255, 0.1);
+            backdrop-filter: blur(20px);
+            border: 1px solid rgba(255, 255, 255, 0.2);
+        }
+        .primary-gradient {
+            background: linear-gradient(135deg, #3B82F6 0%, #8B5CF6 100%);
+        }
+        .message-sent {
+            background: linear-gradient(135deg, #3B82F6 0%, #8B5CF6 100%);
+            color: white;
+            margin-left: auto;
+            border-radius: 20px 20px 5px 20px;
+        }
+        .message-received {
+            background: rgba(255, 255, 255, 0.1);
+            color: white;
+            border-radius: 20px 20px 20px 5px;
+            backdrop-filter: blur(10px);
+        }
+
+        /* Emotion Reactive UI */
+        .emotion-joy { background: linear-gradient(135deg, #1a2a6c 0%, #b21f1f 0%, #fdbb2d 100%) !important; }
+        .emotion-love { background: linear-gradient(135deg, #834d9b 0%, #d04ed6 100%) !important; }
+        .emotion-calm { background: linear-gradient(135deg, #2193b0 0%, #6dd5ed 100%) !important; }
+        .emotion-excited { background: linear-gradient(135deg, #f46b45 0%, #eea849 100%) !important; }
+        .emotion-sad { background: linear-gradient(135deg, #3a7bd5 0%, #3a6073 100%) !important; }
+        .emotion-angry { background: linear-gradient(135deg, #c31432 0%, #240b36 100%) !important; }
+        .emotion-default { background: linear-gradient(135deg, #667eea 0%, #764ba2 100%) !important; }
+
+        .emotion-border-joy { border-color: #FFD93D !important; }
+        .emotion-border-love { border-color: #FF6B9D !important; }
+        .emotion-border-calm { border-color: #6BC5D2 !important; }
+        .emotion-border-excited { border-color: #FF9A3D !important; }
+        .emotion-border-sad { border-color: #7B8FD0 !important; }
+        .emotion-border-angry { border-color: #FF6B6B !important; }
+
+        /* Gamification Elements */
+        .streak-fire {
+            animation: firePulse 2s infinite;
+        }
+        @keyframes firePulse {
+            0%, 100% { transform: scale(1); }
+            50% { transform: scale(1.1); }
+        }
+        .unicoin-glow {
+            animation: coinSpin 3s linear infinite;
+        }
+        @keyframes coinSpin {
+            0% { transform: rotateY(0deg); }
+            100% { transform: rotateY(360deg); }
+        }
+        .level-up-flash {
+            animation: levelUp 0.5s ease-out;
+        }
+        @keyframes levelUp {
+            0% { transform: scale(1); opacity: 1; }
+            50% { transform: scale(1.2); opacity: 0.8; }
+            100% { transform: scale(1); opacity: 1; }
+        }
+
+        /* Collab Room Styles */
+        .collab-room {
+            background: rgba(59, 130, 246, 0.1);
+            border: 2px dashed #3B82F6;
+            border-radius: 15px;
+            padding: 20px;
+            margin: 10px 0;
+        }
+        .collab-tool {
+            background: rgba(255, 255, 255, 0.1);
+            border-radius: 10px;
+            padding: 10px;
+            margin: 5px;
+            cursor: pointer;
+            transition: all 0.3s;
+        }
+        .collab-tool:hover {
+            background: rgba(59, 130, 246, 0.3);
+            transform: scale(1.05);
+        }
+
+        /* Time Capsule Styles */
+        .time-capsule {
+            background: linear-gradient(135deg, #8B5CF6 0%, #3B82F6 100%);
+            border-radius: 15px;
+            padding: 15px;
+            margin: 10px 0;
+            position: relative;
+            overflow: hidden;
+        }
+        .time-capsule::before {
+            content: '';
+            position: absolute;
+            top: -50%;
+            left: -50%;
+            width: 200%;
+            height: 200%;
+            background: conic-gradient(transparent, rgba(255,255,255,0.3), transparent);
+            animation: rotate 4s linear infinite;
+        }
+        @keyframes rotate {
+            100% { transform: rotate(360deg); }
+        }
+
+        /* Compatibility DNA Styles */
+        .dna-helix {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            height: 60px;
+            position: relative;
+        }
+        .dna-node {
+            width: 8px;
+            height: 8px;
+            background: #3B82F6;
+            border-radius: 50%;
+            margin: 0 2px;
+            animation: dnaFloat 2s ease-in-out infinite;
+        }
+        @keyframes dnaFloat {
+            0%, 100% { transform: translateY(0px); }
+            50% { transform: translateY(-10px); }
+        }
+
+        /* Enhanced existing styles */
+        .connection-status {
+            position: fixed;
+            top: 10px;
+            right: 10px;
+            padding: 8px 16px;
+            border-radius: 20px;
+            font-size: 0.8rem;
+            z-index: 1000;
+            transition: all 0.3s ease-in-out;
+        }
+        .connection-status.connected {
+            background: rgba(34, 197, 94, 0.8);
+            color: white;
+        }
+        .connection-status.connecting {
+            background: rgba(245, 158, 11, 0.8);
+            color: white;
+        }
+        .connection-status.disconnected {
+            background: rgba(239, 68, 68, 0.8);
+            color: white;
+        }
+
+        .modal {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: rgba(0, 0, 0, 0.8);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            z-index: 1000;
+        }
+        .modal-container {
+            background: rgba(30, 30, 60, 0.95);
+            backdrop-filter: blur(20px);
+            border-radius: 20px;
+            padding: 25px;
+            width: 90%;
+            max-width: 500px;
+            box-shadow: 0 20px 60px rgba(0, 0, 0, 0.5);
+        }
+
+        .dropdown-menu {
+            position: absolute;
+            top: 60px;
+            right: 20px;
+            background: rgba(30, 30, 60, 0.95);
+            backdrop-filter: blur(20px);
+            border: 1px solid rgba(59, 130, 246, 0.3);
+            border-radius: 10px;
+            padding: 10px;
+            min-width: 200px;
+            box-shadow: 0 10px 30px rgba(0, 0, 0, 0.5);
+            z-index: 1000;
+        }
+        .dropdown-item {
+            padding: 12px 15px;
+            border-radius: 8px;
+            cursor: pointer;
+            transition: all 0.3s;
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+        .dropdown-item:hover {
+            background: rgba(59, 130, 246, 0.2);
+        }
+
+        .notification {
+            position: fixed;
+            top: 20px;
+            right: 20px;
+            background: rgba(34, 197, 94, 0.9);
+            color: white;
+            padding: 12px 20px;
+            border-radius: 10px;
+            z-index: 1001;
+            animation: slideIn 0.3s ease-out;
+        }
+        @keyframes slideIn {
+            from { transform: translateX(100%); }
+            to { transform: translateX(0); }
+        }
+
+        .emoji-picker {
+            position: absolute;
+            bottom: 70px;
+            right: 10px;
+            background: rgba(30, 30, 60, 0.95);
+            backdrop-filter: blur(20px);
+            border: 1px solid rgba(59, 130, 246, 0.3);
+            border-radius: 10px;
+            padding: 15px;
+            width: 300px;
+            max-height: 200px;
+            overflow-y: auto;
+            z-index: 1000;
+        }
+        .emoji-grid {
+            display: grid;
+            grid-template-columns: repeat(8, 1fr);
+            gap: 5px;
+        }
+        .emoji {
+            padding: 5px;
+            border-radius: 5px;
+            cursor: pointer;
+            text-align: center;
+            transition: all 0.2s;
+        }
+        .emoji:hover {
+            background: rgba(59, 130, 246, 0.3);
+            transform: scale(1.1);
+        }
+    </style>
+</head>
+<body class="h-full bg-gradient-to-br from-gray-900 via-blue-900 to-gray-900 text-white emotion-default" id="emotionBody">
+    <!-- Gamification Header -->
+    <div class="glass-effect border-b border-blue-800 p-3">
+        <div class="flex items-center justify-between max-w-6xl mx-auto">
+            <div class="flex items-center space-x-4">
+                <div class="flex items-center space-x-2">
+                    <div class="streak-fire text-yellow-400">
+                        <i class="fas fa-fire"></i>
+                    </div>
+                    <span class="text-sm font-bold" id="streakCount">0</span>
+                    <span class="text-xs text-blue-300">day streak</span>
+                </div>
+                <div class="flex items-center space-x-2">
+                    <div class="unicoin-glow text-yellow-300">
+                        <i class="fas fa-coins"></i>
+                    </div>
+                    <span class="text-sm font-bold" id="unicoinsCount">0</span>
+                    <span class="text-xs text-blue-300">UniCoins</span>
+                </div>
+                <div class="level-badge bg-blue-600 px-3 py-1 rounded-full text-xs">
+                    Level <span id="userLevel">1</span>
+                </div>
+            </div>
+            
+            <div class="flex items-center space-x-3">
+                <button id="viewLeaderboard" class="text-blue-300 hover:text-blue-200 text-sm">
+                    <i class="fas fa-trophy"></i> Leaderboard
+                </button>
+                <button id="viewChallenges" class="text-blue-300 hover:text-blue-200 text-sm">
+                    <i class="fas fa-flag"></i> Challenges
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <div class="connection-status connecting" id="connectionStatus">
+        <i class="fas fa-circle-notch fa-spin mr-2"></i>
+        <span>Connecting to Firebase...</span>
+    </div>
+
+    <div class="flex h-full" style="height: calc(100vh - 80px);">
+        <!-- Enhanced Sidebar -->
+        <div class="w-80 bg-gray-900 border-r border-blue-800">
+            <div class="p-4 border-b border-blue-800">
+                <div class="flex items-center justify-between mb-4">
+                    <h2 class="text-xl font-bold text-blue-300">Quantum Chats</h2>
+                    <div class="flex space-x-2">
+                        <button class="text-blue-400 hover:text-blue-300" id="addFriendBtn" title="Add Friend">
+                            <i class="fas fa-user-plus"></i>
+                        </button>
+                        <button class="text-blue-400 hover:text-blue-300" id="createGroupBtn" title="Create Group">
+                            <i class="fas fa-users"></i>
+                        </button>
+                        <button class="text-blue-400 hover:text-blue-300" id="createCollabRoomBtn" title="Collab Room">
+                            <i class="fas fa-palette"></i>
+                        </button>
+                    </div>
+                </div>
+                
+                <!-- Quick Actions -->
+                <div class="grid grid-cols-2 gap-2 mb-4">
+                    <button class="p-2 glass-effect rounded-lg text-xs hover:bg-blue-800/50 transition" id="timeCapsuleBtn">
+                        <i class="fas fa-clock"></i> Time Capsule
+                    </button>
+                    <button class="p-2 glass-effect rounded-lg text-xs hover:bg-blue-800/50 transition" id="nearbyPulseBtn">
+                        <i class="fas fa-satellite"></i> Nearby Pulse
+                    </button>
+                </div>
+                
+                <div class="relative mb-4">
+                    <input type="text" placeholder="Search chats..." 
+                           class="w-full p-2 pl-10 bg-gray-800 border border-blue-700 rounded-lg text-white placeholder-blue-400 focus:outline-none focus:ring-2 focus:ring-blue-400"
+                           id="chatSearch">
+                    <i class="fas fa-search absolute left-3 top-3 text-blue-400"></i>
+                </div>
+                
+                <!-- User Profile with Compatibility -->
+                <div class="p-3 mb-4 glass-effect rounded-lg">
+                    <p class="text-sm font-semibold" id="currentUserName">Loading...</p>
+                    <div class="flex items-center justify-between mt-2">
+                        <div class="text-xs text-blue-300">
+                            <div class="dna-helix">
+                                <div class="dna-node" style="animation-delay: 0s"></div>
+                                <div class="dna-node" style="animation-delay: 0.1s"></div>
+                                <div class="dna-node" style="animation-delay: 0.2s"></div>
+                                <div class="dna-node" style="animation-delay: 0.3s"></div>
+                                <div class="dna-node" style="animation-delay: 0.4s"></div>
+                            </div>
+                            <span id="compatibilityScore">AI Ready</span>
+                        </div>
+                        <div class="text-xs bg-green-500 px-2 py-1 rounded-full" id="userStatus">Online</div>
+                    </div>
+                </div>
+
+                <!-- Active Challenges -->
+                <div class="mb-4">
+                    <h3 class="text-sm font-semibold text-blue-300 mb-2">Today's Challenges</h3>
+                    <div id="activeChallenges" class="space-y-2">
+                        <!-- Challenges will be loaded here -->
+                    </div>
+                </div>
+                
+                <div class="space-y-2" id="chatList">
+                    <p class="text-center text-blue-400">Loading quantum chats...</p>
+                </div>
+            </div>
+        </div>
+
+        <!-- Main Chat Area -->
+        <div class="flex-1 flex flex-col">
+            <!-- Enhanced Chat Header -->
+            <div class="glass-effect border-b border-blue-800 px-6 py-4" id="chatHeader">
+                <div class="flex items-center space-x-4">
+                    <div class="w-12 h-12 bg-gradient-to-r from-blue-500 to-purple-500 rounded-2xl flex items-center justify-center">
+                        <i class="fas fa-user text-white" id="chatIcon"></i>
+                    </div>
+                    <div class="flex-1">
+                        <h2 class="font-semibold text-lg" id="chatUserName">Select a chat</h2>
+                        <div class="flex items-center space-x-2">
+                            <p class="text-sm text-green-400 flex items-center space-x-1">
+                                <span class="w-2 h-2 bg-green-500 rounded-full animate-pulse"></span>
+                                <span id="onlineUsers">Choose a conversation</span>
+                            </p>
+                            <div id="chatCompatibility" class="hidden">
+                                <span class="text-xs bg-purple-600 px-2 py-1 rounded-full">DNA: 85%</span>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="flex items-center space-x-4 text-blue-400 relative">
+                        <button class="w-10 h-10 hover:bg-blue-800/50 rounded-full flex items-center justify-center hover:text-blue-400 transition" id="videoCallBtn">
+                            <i class="fas fa-video"></i>
+                        </button>
+                        <button class="w-10 h-10 hover:bg-blue-800/50 rounded-full flex items-center justify-center hover:text-blue-400 transition" id="voiceMessageBtn">
+                            <i class="fas fa-microphone"></i>
+                        </button>
+                        <button class="w-10 h-10 hover:bg-blue-800/50 rounded-full flex items-center justify-center hover:text-blue-400 transition" id="fileShareBtn">
+                            <i class="fas fa-paperclip"></i>
+                        </button>
+                        <button class="w-10 h-10 hover:bg-blue-800/50 rounded-full flex items-center justify-center hover:text-blue-400 transition" id="collabRoomBtn">
+                            <i class="fas fa-palette"></i>
+                        </button>
+                        <div class="relative">
+                            <button class="w-10 h-10 hover:bg-blue-800/50 rounded-full flex items-center justify-center hover:text-blue-400 transition" id="menuButton">
+                                <i class="fas fa-ellipsis-h"></i>
+                            </button>
+                            <div class="dropdown-menu hidden" id="featuresDropdown">
+                                <div class="dropdown-item" id="searchMenuItem">
+                                    <i class="fas fa-search text-blue-400"></i>
+                                    <span>Search Messages</span>
+                                </div>
+                                <div class="dropdown-item" id="emotionAnalysisBtn">
+                                    <i class="fas fa-brain text-green-400"></i>
+                                    <span>Emotion Analysis</span>
+                                </div>
+                                <div class="dropdown-item" id="dnaTestBtn">
+                                    <i class="fas fa-dna text-purple-400"></i>
+                                    <span>Friendship DNA</span>
+                                </div>
+                                <div class="dropdown-item" id="timeCapsuleMenuBtn">
+                                    <i class="fas fa-clock text-yellow-400"></i>
+                                    <span>Time Capsule</span>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Messages Container with Emotion Reactions -->
+            <div class="flex-1 overflow-y-auto p-6 space-y-4 bg-gradient-to-b from-blue-900/20 to-gray-900/50" id="messagesContainer">
+                <div class="text-center mb-8" id="initialMessageState">
+                    <div class="inline-flex items-center space-x-3 px-4 py-2 glass-effect rounded-full">
+                        <i class="fas fa-brain text-blue-400"></i>
+                        <span class="text-sm text-blue-300">Select a chat to start messaging</span>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Enhanced Message Input with Emotion Detection -->
+            <div class="glass-effect border-t border-blue-800 p-6 relative" id="messageInputArea">
+                <div class="emoji-picker hidden" id="emojiPicker">
+                    <div class="emoji-grid">
+                        <div class="emoji">😀</div><div class="emoji">😃</div><div class="emoji">😄</div><div class="emoji">😁</div>
+                        <div class="emoji">😆</div><div class="emoji">😅</div><div class="emoji">😂</div><div class="emoji">🤣</div>
+                        <div class="emoji">😊</div><div class="emoji">😇</div><div class="emoji">🙂</div><div class="emoji">🙃</div>
+                        <div class="emoji">😉</div><div class="emoji">😌</div><div class="emoji">😍</div><div class="emoji">🥰</div>
+                        <div class="emoji">❤️</div><div class="emoji">💕</div><div class="emoji">💖</div><div class="emoji">💗</div>
+                    </div>
+                </div>
+
+                <!-- Emotion Indicator -->
+                <div class="flex items-center space-x-2 mb-3" id="emotionIndicator">
+                    <span class="text-xs text-blue-300">Current mood:</span>
+                    <div class="flex space-x-1" id="currentEmotion">
+                        <div class="w-3 h-3 bg-blue-400 rounded-full animate-pulse" title="Neutral"></div>
+                    </div>
+                </div>
+
+                <div class="flex items-center space-x-4">
+                    <div class="flex-1 relative">
+                        <input type="text" placeholder="Type your message..." 
+                               class="w-full pl-4 pr-12 py-3 glass-effect border border-blue-700 rounded-2xl focus:outline-none focus:ring-2 focus:ring-blue-400 focus:border-transparent placeholder-blue-400 text-white"
+                               id="messageInput">
+                        <div class="absolute right-3 top-1/2 transform -translate-y-1/2 flex space-x-2">
+                            <button class="text-blue-400 hover:text-blue-300 transition relative" id="emojiButton">
+                                <i class="fas fa-smile"></i>
+                            </button>
+                            <button class="text-blue-400 hover:text-blue-300 transition" id="whisperButton" title="Whisper (self-destructing)">
+                                <i class="fas fa-user-secret"></i>
+                            </button>
+                        </div>
+                    </div>
+                    <button class="w-12 h-12 primary-gradient rounded-full flex items-center justify-center hover:scale-110 transition transform duration-200" id="sendButton">
+                        <i class="fas fa-paper-plane text-white"></i>
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- New Modals for Enhanced Features -->
+    
+    <!-- Emotion Analysis Modal -->
+    <div class="modal hidden" id="emotionAnalysisModal">
+        <div class="modal-container">
+            <div class="flex justify-between items-center mb-6">
+                <h2 class="text-xl font-bold text-blue-300">Emotion Analysis</h2>
+                <button class="text-blue-400 hover:text-blue-300" id="closeEmotionModal">
+                    <i class="fas fa-times text-xl"></i>
+                </button>
+            </div>
+            <div id="emotionAnalysisResults">
+                <div class="text-center py-8">
+                    <i class="fas fa-brain text-4xl text-blue-400 mb-4"></i>
+                    <p class="text-blue-300">Analyzing conversation emotions...</p>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Friendship DNA Test Modal -->
+    <div class="modal hidden" id="dnaTestModal">
+        <div class="modal-container">
+            <div class="flex justify-between items-center mb-6">
+                <h2 class="text-xl font-bold text-blue-300">Friendship DNA Test</h2>
+                <button class="text-blue-400 hover:text-blue-300" id="closeDnaModal">
+                    <i class="fas fa-times text-xl"></i>
+                </button>
+            </div>
+            <div id="dnaTestResults">
+                <div class="text-center py-8">
+                    <div class="dna-helix mb-4">
+                        <div class="dna-node" style="animation-delay: 0s"></div>
+                        <div class="dna-node" style="animation-delay: 0.1s"></div>
+                        <div class="dna-node" style="animation-delay: 0.2s"></div>
+                        <div class="dna-node" style="animation-delay: 0.3s"></div>
+                        <div class="dna-node" style="animation-delay: 0.4s"></div>
+                    </div>
+                    <p class="text-blue-300">Analyzing your connection...</p>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Time Capsule Modal -->
+    <div class="modal hidden" id="timeCapsuleModal">
+        <div class="modal-container">
+            <div class="flex justify-between items-center mb-6">
+                <h2 class="text-xl font-bold text-blue-300">Time Capsule</h2>
+                <button class="text-blue-400 hover:text-blue-300" id="closeTimeCapsuleModal">
+                    <i class="fas fa-times text-xl"></i>
+                </button>
+            </div>
+            <div class="space-y-4">
+                <textarea placeholder="Write a message for the future..." 
+                          class="w-full p-3 glass-effect border border-blue-700 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-400 placeholder-blue-400 text-white h-32"
+                          id="capsuleMessage"></textarea>
+                <div class="grid grid-cols-2 gap-4">
+                    <div>
+                        <label class="text-sm text-blue-300 mb-2 block">Open Date</label>
+                        <input type="date" id="capsuleDate" class="w-full p-2 bg-gray-800 border border-blue-700 rounded-lg text-white">
+                    </div>
+                    <div>
+                        <label class="text-sm text-blue-300 mb-2 block">Open Time</label>
+                        <input type="time" id="capsuleTime" class="w-full p-2 bg-gray-800 border border-blue-700 rounded-lg text-white">
+                    </div>
+                </div>
+                <button class="w-full bg-blue-600 text-white py-3 rounded-xl font-semibold hover:bg-blue-700 transition" id="createCapsuleBtn">
+                    <i class="fas fa-clock mr-2"></i>Create Time Capsule
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Collab Room Modal -->
+    <div class="modal hidden" id="collabRoomModal">
+        <div class="modal-container" style="max-width: 800px;">
+            <div class="flex justify-between items-center mb-6">
+                <h2 class="text-xl font-bold text-blue-300">Collaboration Room</h2>
+                <button class="text-blue-400 hover:text-blue-300" id="closeCollabModal">
+                    <i class="fas fa-times text-xl"></i>
+                </button>
+            </div>
+            <div class="collab-room">
+                <div class="grid grid-cols-3 gap-4 mb-4">
+                    <div class="collab-tool text-center">
+                        <i class="fas fa-paint-brush text-2xl mb-2"></i>
+                        <p class="text-sm">Whiteboard</p>
+                    </div>
+                    <div class="collab-tool text-center">
+                        <i class="fas fa-music text-2xl mb-2"></i>
+                        <p class="text-sm">Music Sync</p>
+                    </div>
+                    <div class="collab-tool text-center">
+                        <i class="fas fa-code text-2xl mb-2"></i>
+                        <p class="text-sm">Code Editor</p>
+                    </div>
+                </div>
+                <div class="bg-gray-800 rounded-lg p-4 h-64 flex items-center justify-center">
+                    <p class="text-blue-300">Collaboration space - Real-time co-creation tools</p>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Nearby Pulse Modal -->
+    <div class="modal hidden" id="nearbyPulseModal">
+        <div class="modal-container">
+            <div class="flex justify-between items-center mb-6">
+                <h2 class="text-xl font-bold text-blue-300">Nearby Pulse</h2>
+                <button class="text-blue-400 hover:text-blue-300" id="closePulseModal">
+                    <i class="fas fa-times text-xl"></i>
+                </button>
+            </div>
+            <div id="nearbyPulseContent">
+                <div class="text-center py-8">
+                    <i class="fas fa-satellite text-4xl text-blue-400 mb-4"></i>
+                    <p class="text-blue-300">Scanning for nearby activity...</p>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Challenges Modal -->
+    <div class="modal hidden" id="challengesModal">
+        <div class="modal-container">
+            <div class="flex justify-between items-center mb-6">
+                <h2 class="text-xl font-bold text-blue-300">Connect Challenges</h2>
+                <button class="text-blue-400 hover:text-blue-300" id="closeChallengesModal">
+                    <i class="fas fa-times text-xl"></i>
+                </button>
+            </div>
+            <div id="challengesList" class="space-y-3">
+                <!-- Challenges will be loaded here -->
+            </div>
+        </div>
+    </div>
+
+    <!-- Add Friend Modal -->
+    <div class="modal hidden" id="addFriendModal">
+        <div class="modal-container">
+            <div class="flex justify-between items-center mb-6">
+                <h2 class="text-xl font-bold text-blue-300">Start New Chat</h2>
+                <button class="text-blue-400 hover:text-blue-300" id="closeAddFriendModal">
+                    <i class="fas fa-times text-xl"></i>
+                </button>
+            </div>
+            
+            <div class="space-y-4">
+                <input type="text" placeholder="Enter user name to search" 
+                       class="w-full p-3 glass-effect border border-blue-700 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-400 placeholder-blue-400 text-white"
+                       id="friendSearchInput">
+                <div id="friendSearchResults" class="max-h-60 overflow-y-auto space-y-2">
+                    <p class="text-center text-blue-300 py-4">Search by user name</p>
+                </div>
+                <button class="w-full bg-blue-600 text-white py-3 rounded-xl font-semibold hover:bg-blue-700 transition" id="searchFriendBtn">
+                    Search Users
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Create Group Modal -->
+    <div class="modal hidden" id="createGroupModal">
+        <div class="modal-container">
+            <div class="flex justify-between items-center mb-6">
+                <h2 class="text-xl font-bold text-blue-300">Create Group</h2>
+                <button class="text-blue-400 hover:text-blue-300" id="closeCreateGroupModal">
+                    <i class="fas fa-times text-xl"></i>
+                </button>
+            </div>
+            
+            <div class="space-y-4">
+                <input type="text" placeholder="Group name" 
+                       class="w-full p-3 glass-effect border border-blue-700 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-400 placeholder-blue-400 text-white"
+                       id="groupNameInput">
+                <textarea placeholder="Group description (optional)" 
+                          class="w-full p-3 glass-effect border border-blue-700 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-400 placeholder-blue-400 text-white h-24"
+                          id="groupDescription"></textarea>
+                <button class="w-full bg-blue-600 text-white py-3 rounded-xl font-semibold hover:bg-blue-700 transition" id="createGroupBtnConfirm">
+                    Create Group
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Firebase SDK -->
+    <script type="module">
+        console.log('🚀 Starting Firebase initialization...');
+        
+        import { initializeApp } from "https://www.gstatic.com/firebasejs/10.7.1/firebase-app.js";
+        import { getFirestore, collection, addDoc, onSnapshot, query, orderBy, serverTimestamp, getDocs, doc, setDoc, where, updateDoc, getDoc, deleteDoc } from "https://www.gstatic.com/firebasejs/10.7.1/firebase-firestore.js";
+        import { getAuth, signInAnonymously, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/10.7.1/firebase-auth.js";
+        import { getStorage, ref, uploadBytes, getDownloadURL } from "https://www.gstatic.com/firebasejs/10.7.1/firebase-storage.js";
+
+        const firebaseConfig = {
+            apiKey: "AIzaSyDHHyGgsSV18BcXrGgzi4C8frzDAE1C1zo",
+            authDomain: "uniconnect-ee95c.firebaseapp.com",
+            projectId: "uniconnect-ee95c",
+            storageBucket: "uniconnect-ee95c.firebasestorage.app",
+            messagingSenderId: "1003264444309",
+            appId: "1:1003264444309:web:9f0307516e44d21e97d89c"
+        };
+
+        try {
+            console.log('🔥 Initializing Firebase app...');
+            const app = initializeApp(firebaseConfig);
+            const db = getFirestore(app);
+            const auth = getAuth(app);
+            const storage = getStorage(app);
+
+            console.log('✅ Firebase initialized successfully!');
+            
+            window.firebaseApp = {
+                app,
+                db,
+                auth,
+                storage,
+                firestore: {
+                    collection, addDoc, onSnapshot, query, orderBy, serverTimestamp, 
+                    getDocs, doc, setDoc, where, updateDoc, getDoc, deleteDoc
+                },
+                authFunctions: { signInAnonymously, onAuthStateChanged },
+                storageFunctions: { ref, uploadBytes, getDownloadURL }
+            };
+
+            // Update connection status
+            document.getElementById('connectionStatus').className = 'connection-status connected';
+            document.getElementById('connectionStatus').innerHTML = '<i class="fas fa-check-circle mr-2"></i><span>Connected to Firebase</span>';
+
+            // Initialize chat application
+            if (window.chatApp) {
+                window.chatApp.initializeApp();
+            }
+
+        } catch (error) {
+            console.error('❌ Firebase initialization failed:', error);
+            document.getElementById('connectionStatus').className = 'connection-status disconnected';
+            document.getElementById('connectionStatus').innerHTML = '<i class="fas fa-exclamation-triangle mr-2"></i><span>Firebase Error</span>';
+        }
+    </script>
+
+    <script>
+        // Enhanced Utility Functions
+        function generateRandomName() {
+            const adjectives = ["Quantum", "Neural", "Digital", "Cyber", "Smart", "AI", "Virtual", "Meta"];
+            const nouns = ["Explorer", "Pioneer", "Voyager", "Navigator", "Connector", "Creator", "Innovator"];
+            const adj = adjectives[Math.floor(Math.random() * adjectives.length)];
+            const noun = nouns[Math.floor(Math.random() * nouns.length)];
+            const number = Math.floor(Math.random() * 999) + 1;
+            return `${adj}${noun}${number}`;
+        }
+
+        // Emotion Detection AI
+        class EmotionAI {
+            constructor() {
+                this.emotionKeywords = {
+                    joy: ['happy', 'excited', 'amazing', 'wonderful', 'great', 'love', 'awesome', 'fantastic', 'yay', '😊', '😄', '😂', '🥰'],
+                    love: ['love', 'heart', 'adore', 'cherish', 'romantic', 'beautiful', 'special', '❤️', '💕', '😍'],
+                    calm: ['peaceful', 'calm', 'relaxed', 'serene', 'quiet', 'chill', 'cool', '😌', '🌊', '☁️'],
+                    excited: ['wow', 'omg', 'incredible', 'unbelievable', 'amazing', 'thrilled', '🔥', '⚡', '🎉'],
+                    sad: ['sad', 'upset', 'unhappy', 'disappointed', 'sorry', '😢', '😔', '💔'],
+                    angry: ['angry', 'mad', 'frustrated', 'annoyed', 'hate', '😠', '👿', '💢']
+                };
+            }
+
+            analyzeText(text) {
+                const words = text.toLowerCase().split(' ');
+                let emotionScores = {
+                    joy: 0, love: 0, calm: 0, excited: 0, sad: 0, angry: 0
+                };
+
+                words.forEach(word => {
+                    for (const [emotion, keywords] of Object.entries(this.emotionKeywords)) {
+                        if (keywords.includes(word)) {
+                            emotionScores[emotion]++;
+                        }
+                    }
+                });
+
+                // Add emoji detection
+                const emojis = text.match(/[\u{1F600}-\u{1F64F}]|[\u{1F300}-\u{1F5FF}]|[\u{1F680}-\u{1F6FF}]|[\u{1F1E0}-\u{1F1FF}]/gu) || [];
+                emojis.forEach(emoji => {
+                    for (const [emotion, keywords] of Object.entries(this.emotionKeywords)) {
+                        if (keywords.includes(emoji)) {
+                            emotionScores[emotion] += 2; // Emojis carry more weight
+                        }
+                    }
+                });
+
+                return this.getDominantEmotion(emotionScores);
+            }
+
+            getDominantEmotion(scores) {
+                let maxScore = 0;
+                let dominantEmotion = 'default';
+
+                for (const [emotion, score] of Object.entries(scores)) {
+                    if (score > maxScore) {
+                        maxScore = score;
+                        dominantEmotion = emotion;
+                    }
+                }
+
+                return maxScore > 0 ? dominantEmotion : 'default';
+            }
+        }
+
+        // Gamification System
+        class GamificationSystem {
+            constructor(userId) {
+                this.userId = userId;
+                this.streak = 0;
+                this.unicoins = 0;
+                this.level = 1;
+                this.xp = 0;
+            }
+
+            async loadUserProgress() {
+                try {
+                    const { doc, getDoc } = window.firebaseApp.firestore;
+                    const progressRef = doc(window.firebaseApp.db, 'userProgress', this.userId);
+                    const progressSnap = await getDoc(progressRef);
+
+                    if (progressSnap.exists()) {
+                        const data = progressSnap.data();
+                        this.streak = data.streak || 0;
+                        this.unicoins = data.unicoins || 0;
+                        this.level = data.level || 1;
+                        this.xp = data.xp || 0;
+                        this.lastActive = data.lastActive?.toDate();
+                    }
+                    this.updateUI();
+                } catch (error) {
+                    console.error('Error loading user progress:', error);
+                }
+            }
+
+            async updateStreak() {
+                const today = new Date().toDateString();
+                const lastActive = this.lastActive ? this.lastActive.toDateString() : null;
+
+                if (lastActive !== today) {
+                    const yesterday = new Date();
+                    yesterday.setDate(yesterday.getDate() - 1);
+                    
+                    if (lastActive === yesterday.toDateString()) {
+                        this.streak++;
+                    } else {
+                        this.streak = 1;
+                    }
+
+                    await this.saveProgress();
+                    this.awardDailyBonus();
+                }
+            }
+
+            awardDailyBonus() {
+                const bonus = 10 + (this.streak * 5); // Base 10 + 5 per streak day
+                this.addUnicoins(bonus);
+                this.addXP(5);
+                
+                window.chatApp.showNotification(`Daily bonus! +${bonus} UniCoins 🔥 ${this.streak} day streak`, 'success');
+            }
+
+            addUnicoins(amount) {
+                this.unicoins += amount;
+                this.updateUI();
+                this.checkLevelUp();
+            }
+
+            addXP(amount) {
+                this.xp += amount;
+                const xpForNextLevel = this.level * 100;
+                
+                if (this.xp >= xpForNextLevel) {
+                    this.levelUp();
+                }
+                this.updateUI();
+            }
+
+            levelUp() {
+                this.level++;
+                this.xp = 0;
+                const levelBonus = this.level * 50;
+                this.addUnicoins(levelBonus);
+                
+                // Show level up animation
+                document.getElementById('userLevel').classList.add('level-up-flash');
+                setTimeout(() => {
+                    document.getElementById('userLevel').classList.remove('level-up-flash');
+                }, 500);
+                
+                window.chatApp.showNotification(`🎉 Level Up! You reached level ${this.level} (+${levelBonus} UniCoins)`, 'success');
+            }
+
+            checkLevelUp() {
+                const xpForNextLevel = this.level * 100;
+                if (this.xp >= xpForNextLevel) {
+                    this.levelUp();
+                }
+            }
+
+            async saveProgress() {
+                try {
+                    const { doc, setDoc } = window.firebaseApp.firestore;
+                    const progressRef = doc(window.firebaseApp.db, 'userProgress', this.userId);
+                    
+                    await setDoc(progressRef, {
+                        streak: this.streak,
+                        unicoins: this.unicoins,
+                        level: this.level,
+                        xp: this.xp,
+                        lastActive: window.firebaseApp.firestore.serverTimestamp()
+                    });
+                } catch (error) {
+                    console.error('Error saving progress:', error);
+                }
+            }
+
+            updateUI() {
+                document.getElementById('streakCount').textContent = this.streak;
+                document.getElementById('unicoinsCount').textContent = this.unicoins;
+                document.getElementById('userLevel').textContent = this.level;
+            }
+        }
+
+        // Enhanced Chat Application
+        class ChatApplication {
+            constructor() {
+                this.currentUser = null;
+                this.currentChat = null;
+                this.unsubscribeChatList = null;
+                this.unsubscribeMessages = null;
+                this.emotionAI = new EmotionAI();
+                this.gamification = null;
+                this.currentEmotion = 'default';
+                this.whisperMode = false;
+                this.allUsers = new Map();
+                this.chats = [];
+                
+                this.setupEventListeners();
+                
+                if (window.firebaseApp) {
+                    this.initializeApp();
+                }
+            }
+
+            initializeApp() {
+                console.log('🚀 Starting enhanced chat application...');
+                
+                if (!window.firebaseApp) {
+                    console.error('❌ Firebase not initialized');
+                    return;
+                }
+
+                const { onAuthStateChanged, signInAnonymously } = window.firebaseApp.authFunctions;
+                const auth = window.firebaseApp.auth;
+                
+                onAuthStateChanged(auth, async (user) => {
+                    if (user) {
+                        console.log('✅ User authenticated:', user.uid);
+                        this.currentUser = user;
+                        await this.ensureUserAccount(user.uid);
+                        this.gamification = new GamificationSystem(user.uid);
+                        await this.gamification.loadUserProgress();
+                        await this.gamification.updateStreak();
+                        this.toggleUI(true);
+                        this.listenToChats();
+                        this.loadDailyChallenges();
+                    } else {
+                        try {
+                            console.log('👤 Starting anonymous authentication...');
+                            const anonUser = await signInAnonymously(auth);
+                            this.currentUser = anonUser.user;
+                            await this.ensureUserAccount(this.currentUser.uid);
+                            this.gamification = new GamificationSystem(this.currentUser.uid);
+                            await this.gamification.loadUserProgress();
+                            await this.gamification.updateStreak();
+                            this.toggleUI(true);
+                            this.listenToChats();
+                            this.loadDailyChallenges();
+                        } catch (error) {
+                            console.error("❌ Authentication Error:", error);
+                            this.showNotification("Authentication failed", 'error');
+                        }
+                    }
+                });
+            }
+
+            async ensureUserAccount(uid) {
+                const { doc, getDoc, setDoc } = window.firebaseApp.firestore;
+                const db = window.firebaseApp.db;
+                const userRef = doc(db, 'users', uid);
+
+                try {
+                    const docSnap = await getDoc(userRef);
+                    if (!docSnap.exists()) {
+                        const newName = generateRandomName();
+                        await setDoc(userRef, {
+                            name: newName,
+                            uid: uid,
+                            status: 'online',
+                            createdAt: window.firebaseApp.firestore.serverTimestamp(),
+                            isAnonymous: true,
+                        });
+                        this.currentUser.name = newName;
+                        this.showNotification(`Welcome, ${newName}!`, 'success');
+                    } else {
+                        const userData = docSnap.data();
+                        this.currentUser.name = userData.name;
+                        this.allUsers.set(uid, userData);
+                    }
+                    document.getElementById('currentUserName').textContent = this.currentUser.name;
+
+                } catch (error) {
+                    console.error("❌ Error ensuring user account:", error);
+                }
+            }
+
+            // Enhanced emotion detection
+            analyzeMessageEmotion(message) {
+                const emotion = this.emotionAI.analyzeText(message);
+                this.applyEmotionTheme(emotion);
+                return emotion;
+            }
+
+            applyEmotionTheme(emotion) {
+                if (emotion === this.currentEmotion) return;
+                
+                this.currentEmotion = emotion;
+                const body = document.getElementById('emotionBody');
+                const messageArea = document.getElementById('messageInputArea');
+                
+                // Remove previous emotion classes
+                body.className = body.className.replace(/emotion-\w+/g, '');
+                messageArea.className = messageArea.className.replace(/emotion-border-\w+/g, '');
+                
+                // Add new emotion classes
+                body.classList.add(`emotion-${emotion}`);
+                messageArea.classList.add(`emotion-border-${emotion}`);
+                
+                // Update emotion indicator
+                this.updateEmotionIndicator(emotion);
+            }
+
+            updateEmotionIndicator(emotion) {
+                const indicator = document.getElementById('currentEmotion');
+                const colors = {
+                    joy: 'bg-yellow-400',
+                    love: 'bg-pink-400',
+                    calm: 'bg-blue-400',
+                    excited: 'bg-orange-400',
+                    sad: 'bg-gray-400',
+                    angry: 'bg-red-400',
+                    default: 'bg-blue-400'
+                };
+                
+                indicator.innerHTML = `
+                    <div class="w-3 h-3 ${colors[emotion]} rounded-full animate-pulse" title="${emotion.charAt(0).toUpperCase() + emotion.slice(1)}"></div>
+                `;
+            }
+
+            // Enhanced message sending with emotion detection
+            async sendMessage() {
+                const input = document.getElementById('messageInput');
+                const text = input.value.trim();
+                
+                if (!text || !this.currentChat || !this.currentUser) return;
+
+                // Analyze emotion
+                const emotion = this.analyzeMessageEmotion(text);
+                
+                const { collection, addDoc, serverTimestamp, updateDoc, doc } = window.firebaseApp.firestore;
+                const db = window.firebaseApp.db;
+                const chatId = this.currentChat.id;
+
+                try {
+                    const messageData = {
+                        senderId: this.currentUser.uid,
+                        senderName: this.currentUser.name,
+                        type: this.whisperMode ? 'whisper' : 'text',
+                        content: text,
+                        emotion: emotion,
+                        timestamp: serverTimestamp(),
+                        expiresAt: this.whisperMode ? 
+                            new Date(Date.now() + 24 * 60 * 60 * 1000) : null // 24 hours for whispers
+                    };
+
+                    await addDoc(collection(db, 'chats', chatId, 'messages'), messageData);
+
+                    await updateDoc(doc(db, 'chats', chatId), {
+                        lastMessageText: this.whisperMode ? '🔒 Whisper message' : text,
+                        lastMessageTimestamp: serverTimestamp(),
+                    });
+
+                    // Award points for messaging
+                    if (this.gamification) {
+                        this.gamification.addUnicoins(2);
+                        this.gamification.addXP(1);
+                    }
+
+                    input.value = '';
+                    this.whisperMode = false;
+                    this.updateWhisperButton();
+
+                } catch (error) {
+                    console.error("❌ Error sending message:", error);
+                    this.showNotification("Failed to send message", 'error');
+                }
+            }
+
+            // Enhanced message display with emotions
+            addMessageToUI(message) {
+                const container = document.getElementById('messagesContainer');
+                const messageEl = document.createElement('div');
+                
+                const isOwnMessage = message.senderId === this.currentUser.uid;
+                messageEl.className = `flex ${isOwnMessage ? 'justify-end' : 'justify-start'} mb-4`;
+                
+                const date = message.timestamp ? message.timestamp.toDate() : new Date();
+                const time = date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+
+                // Add emotion indicator
+                const emotionIcon = message.emotion ? this.getEmotionIcon(message.emotion) : '';
+                const isWhisper = message.type === 'whisper';
+
+                messageEl.innerHTML = `
+                    <div class="max-w-xs lg:max-w-md ${isOwnMessage ? 'message-sent' : 'message-received'} px-4 py-3 rounded-2xl relative ${isWhisper ? 'border-2 border-yellow-400' : ''}">
+                        ${isWhisper ? '<div class="absolute -top-2 -right-2 text-yellow-400"><i class="fas fa-user-secret"></i></div>' : ''}
+                        ${!isOwnMessage ? `<p class="text-xs font-bold mb-1">${message.senderName}</p>` : ''}
+                        <p class="text-sm">${message.content}</p>
+                        <div class="flex items-center justify-between mt-2">
+                            <span class="text-xs opacity-70">${time}</span>
+                            <div class="flex items-center space-x-1">
+                                ${emotionIcon}
+                                ${isOwnMessage ? '<i class="fas fa-check text-blue-300 ml-2"></i>' : ''}
+                            </div>
+                        </div>
+                    </div>
+                `;
+                
+                container.appendChild(messageEl);
+                container.scrollTop = container.scrollHeight;
+            }
+
+            getEmotionIcon(emotion) {
+                const icons = {
+                    joy: '😊',
+                    love: '❤️',
+                    calm: '😌',
+                    excited: '🎉',
+                    sad: '😢',
+                    angry: '😠'
+                };
+                return `<span class="text-xs">${icons[emotion] || ''}</span>`;
+            }
+
+            // Friendship DNA Test
+            async runFriendshipDNATest(targetUserId) {
+                if (!this.currentChat) return;
+
+                try {
+                    const { collection, getDocs, query, where, orderBy } = window.firebaseApp.firestore;
+                    const db = window.firebaseApp.db;
+                    const chatId = this.currentChat.id;
+
+                    // Get chat history
+                    const messagesQuery = query(
+                        collection(db, 'chats', chatId, 'messages'),
+                        orderBy('timestamp', 'asc')
+                    );
+                    const snapshot = await getDocs(messagesQuery);
+                    
+                    const messages = snapshot.docs.map(doc => doc.data());
+                    const userMessages = messages.filter(msg => msg.senderId === this.currentUser.uid);
+                    const targetMessages = messages.filter(msg => msg.senderId === targetUserId);
+
+                    // Simple compatibility algorithm
+                    const compatibilityFactors = {
+                        messageFrequency: Math.min(userMessages.length, targetMessages.length) / Math.max(userMessages.length, targetMessages.length, 1),
+                        responseTime: this.calculateAverageResponseTime(messages),
+                        emotionMatch: this.calculateEmotionCompatibility(messages),
+                        interactionPattern: this.analyzeInteractionPattern(messages)
+                    };
+
+                    const totalScore = Object.values(compatibilityFactors).reduce((sum, score) => sum + score, 0) / Object.keys(compatibilityFactors).length;
+                    const compatibilityPercentage = Math.round(totalScore * 100);
+
+                    this.displayDNAResults(compatibilityPercentage, compatibilityFactors);
+
+                } catch (error) {
+                    console.error('Error running DNA test:', error);
+                }
+            }
+
+            calculateAverageResponseTime(messages) {
+                // Simplified response time calculation
+                return 0.7 + (Math.random() * 0.3); // 70-100% score
+            }
+
+            calculateEmotionCompatibility(messages) {
+                const emotions = messages.map(msg => msg.emotion).filter(Boolean);
+                if (emotions.length < 2) return 0.5;
+
+                const uniqueEmotions = new Set(emotions);
+                return Math.min(uniqueEmotions.size / 5, 1); // More emotion diversity = better
+            }
+
+            analyzeInteractionPattern(messages) {
+                // Simple pattern analysis
+                return 0.6 + (Math.random() * 0.4); // 60-100% score
+            }
+
+            displayDNAResults(percentage, factors) {
+                const resultsHTML = `
+                    <div class="text-center">
+                        <div class="dna-helix mb-4">
+                            ${Array.from({length: 10}, (_, i) => 
+                                `<div class="dna-node" style="animation-delay: ${i * 0.1}s"></div>`
+                            ).join('')}
+                        </div>
+                        <h3 class="text-2xl font-bold text-green-400 mb-2">${percentage}% Match</h3>
+                        <p class="text-blue-300 mb-4">Your friendship DNA is strong!</p>
+                        
+                        <div class="grid grid-cols-2 gap-4 text-left">
+                            <div class="bg-gray-800 p-3 rounded-lg">
+                                <p class="text-sm text-blue-300">Communication</p>
+                                <p class="text-lg font-bold text-green-400">${Math.round(factors.messageFrequency * 100)}%</p>
+                            </div>
+                            <div class="bg-gray-800 p-3 rounded-lg">
+                                <p class="text-sm text-blue-300">Emotional Sync</p>
+                                <p class="text-lg font-bold text-green-400">${Math.round(factors.emotionMatch * 100)}%</p>
+                            </div>
+                        </div>
+                        
+                        <button class="mt-4 bg-blue-600 text-white px-6 py-2 rounded-lg hover:bg-blue-700 transition" onclick="chatApp.shareDNAResults()">
+                            <i class="fas fa-share mr-2"></i>Share Results
+                        </button>
+                    </div>
+                `;
+                
+                document.getElementById('dnaTestResults').innerHTML = resultsHTML;
+            }
+
+            shareDNAResults() {
+                this.showNotification('Friendship DNA results shared!', 'success');
+                // In a real app, this would share to social media
+            }
+
+            // Time Capsule Feature
+            async createTimeCapsule() {
+                const message = document.getElementById('capsuleMessage').value.trim();
+                const date = document.getElementById('capsuleDate').value;
+                const time = document.getElementById('capsuleTime').value;
+
+                if (!message || !date || !time) {
+                    this.showNotification('Please fill all fields', 'error');
+                    return;
+                }
+
+                const openDateTime = new Date(`${date}T${time}`);
+                if (openDateTime <= new Date()) {
+                    this.showNotification('Please select a future date and time', 'error');
+                    return;
+                }
+
+                try {
+                    const { collection, addDoc } = window.firebaseApp.firestore;
+                    const db = window.firebaseApp.db;
+
+                    await addDoc(collection(db, 'timeCapsules'), {
+                        userId: this.currentUser.uid,
+                        message: message,
+                        openAt: openDateTime,
+                        createdAt: window.firebaseApp.firestore.serverTimestamp(),
+                        status: 'scheduled'
+                    });
+
+                    this.showNotification('Time capsule created! It will open on ' + openDateTime.toLocaleString(), 'success');
+                    this.hideTimeCapsuleModal();
+
+                    // Award points for creating time capsule
+                    if (this.gamification) {
+                        this.gamification.addUnicoins(25);
+                        this.gamification.addXP(10);
+                    }
+
+                } catch (error) {
+                    console.error('Error creating time capsule:', error);
+                    this.showNotification('Failed to create time capsule', 'error');
+                }
+            }
+
+            // Daily Challenges System
+            async loadDailyChallenges() {
+                const challenges = [
+                    {
+                        id: 1,
+                        title: "Send 5 Messages",
+                        description: "Stay connected with your friends",
+                        target: 5,
+                        current: 0,
+                        reward: 15,
+                        type: "messages"
+                    },
+                    {
+                        id: 2,
+                        title: "Start 2 New Conversations",
+                        description: "Expand your network",
+                        target: 2,
+                        current: 0,
+                        reward: 20,
+                        type: "new_chats"
+                    },
+                    {
+                        id: 3,
+                        title: "Use 3 Different Emotions",
+                        description: "Express yourself fully",
+                        target: 3,
+                        current: 0,
+                        reward: 25,
+                        type: "emotions"
+                    }
+                ];
+
+                this.displayChallenges(challenges);
+            }
+
+            displayChallenges(challenges) {
+                const container = document.getElementById('activeChallenges');
+                const modalContainer = document.getElementById('challengesList');
+                
+                const challengeHTML = challenges.map(challenge => `
+                    <div class="glass-effect rounded-lg p-3">
+                        <div class="flex justify-between items-center mb-2">
+                            <h4 class="font-semibold text-sm">${challenge.title}</h4>
+                            <span class="text-xs bg-blue-600 px-2 py-1 rounded-full">+${challenge.reward} 🪙</span>
+                        </div>
+                        <p class="text-xs text-blue-300 mb-2">${challenge.description}</p>
+                        <div class="w-full bg-gray-700 rounded-full h-2">
+                            <div class="bg-green-500 h-2 rounded-full" style="width: ${(challenge.current / challenge.target) * 100}%"></div>
+                        </div>
+                        <p class="text-xs text-right mt-1">${challenge.current}/${challenge.target}</p>
+                    </div>
+                `).join('');
+
+                container.innerHTML = challengeHTML;
+                modalContainer.innerHTML = challengeHTML;
+            }
+
+            // Whisper Messages (Self-destructing)
+            toggleWhisperMode() {
+                this.whisperMode = !this.whisperMode;
+                this.updateWhisperButton();
+                
+                const message = this.whisperMode ? 
+                    "Whisper mode activated - messages will disappear after 24 hours 🔒" :
+                    "Whisper mode deactivated";
+                
+                this.showNotification(message, 'info');
+            }
+
+            updateWhisperButton() {
+                const button = document.getElementById('whisperButton');
+                if (this.whisperMode) {
+                    button.classList.add('text-yellow-400');
+                    button.classList.remove('text-blue-400');
+                } else {
+                    button.classList.remove('text-yellow-400');
+                    button.classList.add('text-blue-400');
+                }
+            }
+
+            // Chat Management Methods
+            async getUserData(uid) {
+                if (this.allUsers.has(uid)) {
+                    return this.allUsers.get(uid);
+                }
+
+                const { doc, getDoc } = window.firebaseApp.firestore;
+                const db = window.firebaseApp.db;
+
+                try {
+                    const userRef = doc(db, 'users', uid);
+                    const docSnap = await getDoc(userRef);
+                    if (docSnap.exists()) {
+                        const userData = docSnap.data();
+                        this.allUsers.set(uid, userData);
+                        return userData;
+                    }
+                } catch (error) {
+                    console.error("❌ Error fetching user data:", error);
+                }
+                return { name: 'Unknown User' };
+            }
+
+            async getChatDisplayName(chat) {
+                if (chat.type === 'group') {
+                    return chat.name || 'Group Chat';
+                }
+                
+                const otherUserId = chat.members.find(memberId => memberId !== this.currentUser.uid);
+                if (otherUserId) {
+                    const userData = await this.getUserData(otherUserId);
+                    return userData.name || 'Unknown User';
+                }
+                return 'Self Chat';
+            }
+
+            listenToChats() {
+                if (this.unsubscribeChatList) this.unsubscribeChatList();
+                
+                const { collection, query, where, onSnapshot, orderBy } = window.firebaseApp.firestore;
+                const db = window.firebaseApp.db;
+                
+                const q = query(
+                    collection(db, 'chats'), 
+                    where('members', 'array-contains', this.currentUser.uid), 
+                    orderBy('lastMessageTimestamp', 'desc')
+                );
+
+                this.unsubscribeChatList = onSnapshot(q, async (snapshot) => {
+                    const chats = [];
+                    const chatPromises = [];
+                    
+                    snapshot.forEach(doc => {
+                        const chatData = doc.data();
+                        const chatPromise = this.getChatDisplayName({
+                            ...chatData,
+                            id: doc.id
+                        }).then(displayName => {
+                            chats.push({
+                                id: doc.id,
+                                ...chatData,
+                                name: displayName,
+                                type: chatData.type,
+                                lastMessage: chatData.lastMessageText || 'Start a conversation',
+                                status: 'online',
+                                unread: 0
+                            });
+                        });
+                        chatPromises.push(chatPromise);
+                    });
+
+                    await Promise.all(chatPromises);
+                    this.chats = chats;
+                    this.renderChatList();
+                }, (error) => {
+                    console.error("❌ Error listening to chats:", error);
+                });
+            }
+
+            renderChatList() {
+                const chatList = document.getElementById('chatList');
+                chatList.innerHTML = '';
+                
+                if (!this.chats || this.chats.length === 0) {
+                    chatList.innerHTML = '<p class="text-center text-blue-400 py-4">No chats yet. Search for a user to start one!</p>';
+                    return;
+                }
+
+                this.chats.forEach(chat => {
+                    const chatElement = document.createElement('div');
+                    chatElement.className = 'p-3 border-b border-blue-800 cursor-pointer hover:bg-blue-800/20 transition';
+                    if (this.currentChat && this.currentChat.id === chat.id) {
+                         chatElement.classList.add('bg-blue-800/50');
+                    }
+
+                    const isGroup = chat.type === 'group';
+                    const icon = isGroup ? 'fa-users' : 'fa-user';
+                    const statusText = isGroup ? 'Group Chat' : 'Online';
+
+                    chatElement.innerHTML = `
+                        <div class="flex items-center space-x-3">
+                            <div class="relative">
+                                <div class="w-10 h-10 ${isGroup ? 'bg-blue-500' : 'bg-purple-500'} rounded-full flex items-center justify-center">
+                                    <i class="fas ${icon} text-white"></i>
+                                </div>
+                            </div>
+                            <div class="flex-1 overflow-hidden">
+                                <div class="flex justify-between items-center">
+                                    <h3 class="font-semibold text-white truncate">${chat.name}</h3>
+                                    ${chat.unread > 0 ? `
+                                        <span class="bg-red-500 text-white text-xs rounded-full px-2 py-1 flex-shrink-0">${chat.unread}</span>
+                                    ` : ''}
+                                </div>
+                                <p class="text-sm text-blue-300 truncate">${chat.lastMessage}</p>
+                                <p class="text-xs text-green-400">${statusText}</p>
+                            </div>
+                        </div>
+                    `;
+                    
+                    chatElement.addEventListener('click', () => this.selectChat(chat));
+                    chatList.appendChild(chatElement);
+                });
+            }
+
+            selectChat(chat) {
+                if (this.currentChat && this.currentChat.id === chat.id) return;
+                
+                this.currentChat = chat;
+                
+                document.getElementById('chatUserName').textContent = chat.name;
+                document.getElementById('onlineUsers').textContent = chat.type === 'group' ? 'Group Chat' : 'Online';
+                document.getElementById('chatIcon').className = chat.type === 'group' ? 'fas fa-users text-white' : 'fas fa-user text-white';
+                
+                const messagesContainer = document.getElementById('messagesContainer');
+                messagesContainer.innerHTML = '<p class="text-center text-blue-300 py-8">Loading messages...</p>';
+                document.getElementById('initialMessageState').classList.add('hidden');
+                
+                document.getElementById('messageInput').disabled = false;
+                document.getElementById('sendButton').disabled = false;
+                document.getElementById('emojiButton').disabled = false;
+                document.getElementById('videoCallBtn').disabled = false;
+                document.getElementById('voiceMessageBtn').disabled = false;
+                document.getElementById('fileShareBtn').disabled = false;
+                document.getElementById('menuButton').disabled = false;
+
+                this.renderChatList();
+                this.listenToMessages(chat.id);
+            }
+
+            listenToMessages(chatId) {
+                if (this.unsubscribeMessages) this.unsubscribeMessages();
+                
+                const { collection, query, orderBy, onSnapshot, limit } = window.firebaseApp.firestore;
+                const db = window.firebaseApp.db;
+                
+                const q = query(collection(db, 'chats', chatId, 'messages'), orderBy('timestamp', 'asc'), limit(100));
+
+                this.unsubscribeMessages = onSnapshot(q, (snapshot) => {
+                    const messagesContainer = document.getElementById('messagesContainer');
+                    const messages = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+                    
+                    messagesContainer.innerHTML = '';
+                    messages.forEach(msg => this.addMessageToUI(msg));
+                    
+                    messagesContainer.scrollTop = messagesContainer.scrollHeight;
+                }, (error) => {
+                    console.error("❌ Error listening to messages:", error);
+                });
+            }
+
+            // Enhanced UI methods
+            toggleUI(enabled) {
+                const elementsToToggle = [
+                    'messageInput', 'sendButton', 'emojiButton', 'whisperButton',
+                    'videoCallBtn', 'voiceMessageBtn', 'fileShareBtn', 'menuButton',
+                    'addFriendBtn', 'createGroupBtn', 'createCollabRoomBtn', 'collabRoomBtn'
+                ];
+                elementsToToggle.forEach(id => {
+                    const el = document.getElementById(id);
+                    if (el) el.disabled = !enabled;
+                });
+            }
+
+            // Modal management methods
+            showEmotionAnalysis() {
+                if (!this.currentChat) {
+                    this.showNotification("Please select a chat first", 'warning');
+                    return;
+                }
+                document.getElementById('emotionAnalysisModal').classList.remove('hidden');
+                this.analyzeChatEmotions();
+            }
+
+            hideEmotionAnalysis() {
+                document.getElementById('emotionAnalysisModal').classList.add('hidden');
+            }
+
+            showDNATest() {
+                if (!this.currentChat) {
+                    this.showNotification("Please select a chat first", 'warning');
+                    return;
+                }
+                document.getElementById('dnaTestModal').classList.remove('hidden');
+                const targetUserId = this.currentChat.members.find(id => id !== this.currentUser.uid);
+                if (targetUserId) {
+                    this.runFriendshipDNATest(targetUserId);
+                }
+            }
+
+            hideDNATest() {
+                document.getElementById('dnaTestModal').classList.add('hidden');
+            }
+
+            showTimeCapsule() {
+                document.getElementById('timeCapsuleModal').classList.remove('hidden');
+            }
+
+            hideTimeCapsuleModal() {
+                document.getElementById('timeCapsuleModal').classList.add('hidden');
+            }
+
+            showCollabRoom() {
+                if (!this.currentChat) {
+                    this.showNotification("Please select a chat first", 'warning');
+                    return;
+                }
+                document.getElementById('collabRoomModal').classList.remove('hidden');
+            }
+
+            hideCollabRoom() {
+                document.getElementById('collabRoomModal').classList.add('hidden');
+            }
+
+            showNearbyPulse() {
+                document.getElementById('nearbyPulseModal').classList.remove('hidden');
+                this.loadNearbyPulse();
+            }
+
+            hideNearbyPulse() {
+                document.getElementById('nearbyPulseModal').classList.add('hidden');
+            }
+
+            showChallenges() {
+                document.getElementById('challengesModal').classList.remove('hidden');
+            }
+
+            hideChallenges() {
+                document.getElementById('challengesModal').classList.add('hidden');
+            }
+
+            // Nearby Pulse Implementation
+            async loadNearbyPulse() {
+                // Simulate nearby activity
+                const nearbyContent = `
+                    <div class="space-y-4">
+                        <div class="glass-effect rounded-lg p-4">
+                            <div class="flex items-center space-x-3 mb-2">
+                                <div class="w-10 h-10 bg-green-500 rounded-full flex items-center justify-center">
+                                    <i class="fas fa-user text-white"></i>
+                                </div>
+                                <div>
+                                    <h4 class="font-semibold">TechMeetup NYC</h4>
+                                    <p class="text-xs text-blue-300">0.5km away • 15 people active</p>
+                                </div>
+                            </div>
+                            <p class="text-sm">Discussing AI and quantum computing trends</p>
+                            <button class="w-full mt-2 bg-blue-600 text-white py-2 rounded-lg text-sm hover:bg-blue-700 transition">
+                                Join Conversation
+                            </button>
+                        </div>
+                        
+                        <div class="glass-effect rounded-lg p-4">
+                            <div class="flex items-center space-x-3 mb-2">
+                                <div class="w-10 h-10 bg-purple-500 rounded-full flex items-center justify-center">
+                                    <i class="fas fa-music text-white"></i>
+                                </div>
+                                <div>
+                                    <h4 class="font-semibold">Music Lovers</h4>
+                                    <p class="text-xs text-blue-300">1.2km away • 8 people active</p>
+                                </div>
+                            </div>
+                            <p class="text-sm">Sharing favorite tracks and playlists</p>
+                            <button class="w-full mt-2 bg-purple-600 text-white py-2 rounded-lg text-sm hover:bg-purple-700 transition">
+                                Join Listening Party
+                            </button>
+                        </div>
+                    </div>
+                `;
+                
+                document.getElementById('nearbyPulseContent').innerHTML = nearbyContent;
+            }
+
+            // Emotion analysis for entire chat
+            async analyzeChatEmotions() {
+                if (!this.currentChat) return;
+
+                try {
+                    const { collection, getDocs, query, orderBy } = window.firebaseApp.firestore;
+                    const db = window.firebaseApp.db;
+                    const chatId = this.currentChat.id;
+
+                    const messagesQuery = query(
+                        collection(db, 'chats', chatId, 'messages'),
+                        orderBy('timestamp', 'asc')
+                    );
+                    const snapshot = await getDocs(messagesQuery);
+                    
+                    const messages = snapshot.docs.map(doc => doc.data());
+                    const emotions = messages.map(msg => msg.emotion).filter(Boolean);
+                    
+                    const emotionCount = emotions.reduce((acc, emotion) => {
+                        acc[emotion] = (acc[emotion] || 0) + 1;
+                        return acc;
+                    }, {});
+
+                    this.displayEmotionAnalysis(emotionCount, messages.length);
+
+                } catch (error) {
+                    console.error('Error analyzing emotions:', error);
+                }
+            }
+
+            displayEmotionAnalysis(emotionCount, totalMessages) {
+                const emotions = ['joy', 'love', 'calm', 'excited', 'sad', 'angry'];
+                const emotionLabels = {
+                    joy: 'Joyful 😊',
+                    love: 'Loving ❤️',
+                    calm: 'Calm 😌',
+                    excited: 'Excited 🎉',
+                    sad: 'Sad 😢',
+                    angry: 'Angry 😠'
+                };
+
+                let analysisHTML = `
+                    <div class="text-center mb-6">
+                        <h3 class="text-lg font-semibold text-green-400">Chat Emotion Analysis</h3>
+                        <p class="text-blue-300">Based on ${totalMessages} messages</p>
+                    </div>
+                    <div class="space-y-3">
+                `;
+
+                emotions.forEach(emotion => {
+                    const count = emotionCount[emotion] || 0;
+                    const percentage = totalMessages > 0 ? (count / totalMessages) * 100 : 0;
+                    
+                    analysisHTML += `
+                        <div class="flex items-center justify-between">
+                            <span class="text-sm">${emotionLabels[emotion]}</span>
+                            <div class="flex items-center space-x-2">
+                                <div class="w-24 bg-gray-700 rounded-full h-3">
+                                    <div class="h-3 rounded-full" style="background: var(--emotion-color); width: ${percentage}%"></div>
+                                </div>
+                                <span class="text-xs w-8">${Math.round(percentage)}%</span>
+                            </div>
+                        </div>
+                    `;
+                });
+
+                analysisHTML += `</div>`;
+                document.getElementById('emotionAnalysisResults').innerHTML = analysisHTML;
+            }
+
+            // Add Friend and Group Creation
+            async searchFriends() {
+                const queryText = document.getElementById('friendSearchInput').value.trim();
+                const resultsContainer = document.getElementById('friendSearchResults');
+                resultsContainer.innerHTML = '<p class="text-center text-blue-300 py-4">Searching...</p>';
+                
+                if (!queryText) {
+                    resultsContainer.innerHTML = '<p class="text-center text-blue-300 py-4">Enter user name to search.</p>';
+                    return;
+                }
+
+                const { collection, getDocs, query, where, limit } = window.firebaseApp.firestore;
+                const db = window.firebaseApp.db;
+
+                try {
+                    const usersRef = collection(db, 'users');
+                    const q = query(usersRef, where('name', '>=', queryText), where('name', '<=', queryText + '\uf8ff'), limit(10));
+                    const qSnapshot = await getDocs(q);
+                    
+                    const users = qSnapshot.docs
+                        .map(doc => ({ uid: doc.id, ...doc.data() }))
+                        .filter(user => user.uid !== this.currentUser.uid);
+
+                    if (users.length === 0) {
+                        resultsContainer.innerHTML = '<p class="text-center text-blue-300 py-4">No users found.</p>';
+                        return;
+                    }
+
+                    resultsContainer.innerHTML = users.map(user => `
+                        <div class="p-3 bg-gray-800 rounded-lg">
+                            <div class="flex justify-between items-center">
+                                <div>
+                                    <p class="font-semibold">${user.name}</p>
+                                    <p class="text-sm text-blue-300">Status: ${user.status || 'online'}</p>
+                                </div>
+                                <button class="bg-blue-600 text-white px-4 py-2 rounded-lg hover:bg-blue-700 transition start-chat-btn" data-uid="${user.uid}" data-name="${user.name}">
+                                    Start Chat
+                                </button>
+                            </div>
+                        </div>
+                    `).join('');
+
+                    document.querySelectorAll('.start-chat-btn').forEach(btn => {
+                        btn.addEventListener('click', (e) => {
+                            const targetUid = e.target.dataset.uid;
+                            const targetName = e.target.dataset.name;
+                            this.startOneToOneChat(targetUid, targetName);
+                        });
+                    });
+
+                } catch (error) {
+                    console.error("Error searching users:", error);
+                    this.showNotification("Error searching for users", 'error');
+                }
+            }
+
+            async startOneToOneChat(targetUid, targetName) {
+                const members = [this.currentUser.uid, targetUid].sort();
+                const chatId = members.join('_');
+                const { doc, setDoc, getDoc } = window.firebaseApp.firestore;
+                const db = window.firebaseApp.db;
+
+                try {
+                    const chatRef = doc(db, 'chats', chatId);
+                    const chatSnap = await getDoc(chatRef);
+
+                    if (!chatSnap.exists()) {
+                        await setDoc(chatRef, {
+                            members: members,
+                            type: 'one-to-one',
+                            createdAt: window.firebaseApp.firestore.serverTimestamp(),
+                            lastMessageTimestamp: window.firebaseApp.firestore.serverTimestamp(),
+                            lastMessageText: 'Chat started',
+                            userNames: {
+                                [this.currentUser.uid]: this.currentUser.name,
+                                [targetUid]: targetName
+                            }
+                        });
+                        this.showNotification(`New chat with ${targetName} started!`, 'success');
+                    } else {
+                        this.showNotification(`Chat with ${targetName} already exists.`, 'info');
+                    }
+
+                    this.hideAddFriendModal();
+                    const chatToSelect = { 
+                        id: chatId, 
+                        members, 
+                        type: 'one-to-one', 
+                        name: targetName 
+                    };
+                    this.selectChat(chatToSelect);
+
+                } catch (error) {
+                    console.error("Error starting chat:", error);
+                    this.showNotification("Failed to start chat", 'error');
+                }
+            }
+
+            async createGroup() {
+                const groupName = document.getElementById('groupNameInput').value.trim();
+                const description = document.getElementById('groupDescription').value.trim();
+                
+                if (!groupName) {
+                    this.showNotification("Please enter a group name", 'warning');
+                    return;
+                }
+
+                const { collection, addDoc, serverTimestamp } = window.firebaseApp.firestore;
+                const db = window.firebaseApp.db;
+
+                try {
+                    const docRef = await addDoc(collection(db, 'chats'), {
+                        name: groupName,
+                        description: description,
+                        type: 'group',
+                        members: [this.currentUser.uid],
+                        admin: [this.currentUser.uid],
+                        createdAt: serverTimestamp(),
+                        lastMessageText: 'Group created.',
+                        lastMessageTimestamp: serverTimestamp(),
+                    });
+
+                    this.hideCreateGroupModal();
+                    this.showNotification(`Group "${groupName}" created successfully!`, 'success');
+                    
+                    const newChat = {
+                        id: docRef.id,
+                        name: groupName,
+                        type: 'group',
+                        members: [this.currentUser.uid]
+                    };
+                    this.selectChat(newChat);
+
+                } catch (error) {
+                    console.error("Error creating group:", error);
+                    this.showNotification("Failed to create group", 'error');
+                }
+            }
+
+            // Modal show/hide methods
+            showAddFriendModal() {
+                document.getElementById('addFriendModal').classList.remove('hidden');
+            }
+
+            hideAddFriendModal() {
+                document.getElementById('addFriendModal').classList.add('hidden');
+            }
+
+            showCreateGroupModal() {
+                document.getElementById('createGroupModal').classList.remove('hidden');
+            }
+
+            hideCreateGroupModal() {
+                document.getElementById('createGroupModal').classList.add('hidden');
+            }
+
+            // Enhanced setupEventListeners with new features
+            setupEventListeners() {
+                // Message sending
+                document.getElementById('sendButton').addEventListener('click', () => this.sendMessage());
+                document.getElementById('messageInput').addEventListener('keypress', (e) => {
+                    if (e.key === 'Enter') this.sendMessage();
+                });
+
+                // New feature event listeners
+                document.getElementById('whisperButton').addEventListener('click', () => this.toggleWhisperMode());
+                document.getElementById('emotionAnalysisBtn').addEventListener('click', () => this.showEmotionAnalysis());
+                document.getElementById('dnaTestBtn').addEventListener('click', () => this.showDNATest());
+                document.getElementById('timeCapsuleMenuBtn').addEventListener('click', () => this.showTimeCapsule());
+                document.getElementById('timeCapsuleBtn').addEventListener('click', () => this.showTimeCapsule());
+                document.getElementById('createCapsuleBtn').addEventListener('click', () => this.createTimeCapsule());
+                document.getElementById('collabRoomBtn').addEventListener('click', () => this.showCollabRoom());
+                document.getElementById('createCollabRoomBtn').addEventListener('click', () => this.showCollabRoom());
+                document.getElementById('nearbyPulseBtn').addEventListener('click', () => this.showNearbyPulse());
+                document.getElementById('viewChallenges').addEventListener('click', () => this.showChallenges());
+
+                // Modal close buttons
+                document.getElementById('closeEmotionModal').addEventListener('click', () => this.hideEmotionAnalysis());
+                document.getElementById('closeDnaModal').addEventListener('click', () => this.hideDNATest());
+                document.getElementById('closeTimeCapsuleModal').addEventListener('click', () => this.hideTimeCapsuleModal());
+                document.getElementById('closeCollabModal').addEventListener('click', () => this.hideCollabRoom());
+                document.getElementById('closePulseModal').addEventListener('click', () => this.hideNearbyPulse());
+                document.getElementById('closeChallengesModal').addEventListener('click', () => this.hideChallenges());
+
+                // Friend and group management
+                document.getElementById('addFriendBtn').addEventListener('click', () => this.showAddFriendModal());
+                document.getElementById('searchFriendBtn').addEventListener('click', () => this.searchFriends());
+                document.getElementById('closeAddFriendModal').addEventListener('click', () => this.hideAddFriendModal());
+                document.getElementById('createGroupBtn').addEventListener('click', () => this.showCreateGroupModal());
+                document.getElementById('createGroupBtnConfirm').addEventListener('click', () => this.createGroup());
+                document.getElementById('closeCreateGroupModal').addEventListener('click', () => this.hideCreateGroupModal());
+
+                // Dropdown menu
+                const menuButton = document.getElementById('menuButton');
+                const dropdown = document.getElementById('featuresDropdown');
+                menuButton.addEventListener('click', (e) => {
+                    e.stopPropagation();
+                    dropdown.classList.toggle('hidden');
+                });
+                document.addEventListener('click', () => dropdown.classList.add('hidden'));
+
+                // Emoji picker
+                this.setupEmojiPicker();
+
+                console.log("All event listeners set up successfully!");
+            }
+
+            setupEmojiPicker() {
+                const emojiButton = document.getElementById('emojiButton');
+                const emojiPicker = document.getElementById('emojiPicker');
+                const messageInput = document.getElementById('messageInput');
+
+                emojiButton.addEventListener('click', (e) => {
+                    e.stopPropagation();
+                    emojiPicker.classList.toggle('hidden');
+                });
+
+                document.addEventListener('click', (e) => {
+                    if (!emojiPicker.contains(e.target) && e.target !== emojiButton) {
+                        emojiPicker.classList.add('hidden');
+                    }
+                });
+
+                emojiPicker.addEventListener('click', (e) => {
+                    if (e.target.classList.contains('emoji')) {
+                        messageInput.value += e.target.textContent;
+                        messageInput.focus();
+                    }
+                });
+            }
+
+            showNotification(message, type = 'success') {
+                const notification = document.createElement('div');
+                let bgColor = 'rgba(34, 197, 94, 0.9)';
+                let icon = 'fa-info-circle';
+
+                if (type === 'error') {
+                    bgColor = 'rgba(239, 68, 68, 0.9)';
+                    icon = 'fa-exclamation-circle';
+                } else if (type === 'warning') {
+                    bgColor = 'rgba(245, 158, 11, 0.9)';
+                    icon = 'fa-exclamation-triangle';
+                } else if (type === 'info') {
+                    bgColor = 'rgba(59, 130, 246, 0.9)';
+                    icon = 'fa-info-circle';
+                }
+
+                notification.className = 'notification';
+                notification.style.background = bgColor;
+                notification.innerHTML = `
+                    <div class="flex items-center space-x-2">
+                        <i class="fas ${icon}"></i>
+                        <span>${message}</span>
+                    </div>
+                `;
+                
+                document.body.appendChild(notification);
+                
+                setTimeout(() => {
+                    notification.remove();
+                }, 4000);
+            }
+        }
+
+        // Initialize the enhanced application
+        document.addEventListener('DOMContentLoaded', () => {
+            window.chatApp = new ChatApplication();
+        });
+    </script>
+</body>
+</html>

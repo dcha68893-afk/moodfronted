@@ -1,0 +1,1465 @@
+<!DOCTYPE html>
+<html lang="en" class="h-full">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Premium Games Hub - ConnectSphere</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css" rel="stylesheet">
+    
+    <!-- Firebase SDK -->
+    <script src="https://www.gstatic.com/firebasejs/9.22.1/firebase-app-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/9.22.1/firebase-firestore-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/9.22.1/firebase-auth-compat.js"></script>
+    
+    <style>
+        .glass-card {
+            background: rgba(255, 255, 255, 0.1);
+            backdrop-filter: blur(20px);
+            border: 1px solid rgba(255, 255, 255, 0.2);
+        }
+        .primary-gradient {
+            background: linear-gradient(135deg, #3b82f6 0%, #1d4ed8 100%);
+        }
+        .premium-gradient {
+            background: linear-gradient(135deg, #f59e0b 0%, #d97706 100%);
+        }
+        .game-gradient-1 { background: linear-gradient(135deg, #8b5cf6, #a855f7); }
+        .game-gradient-2 { background: linear-gradient(135deg, #ec4899, #db2777); }
+        .game-gradient-3 { background: linear-gradient(135deg, #10b981, #059669); }
+        .game-gradient-4 { background: linear-gradient(135deg, #06b6d4, #0891b2); }
+        .game-gradient-5 { background: linear-gradient(135deg, #f97316, #ea580c); }
+        
+        .card-glow {
+            box-shadow: 0 0 30px rgba(59, 130, 246, 0.4);
+        }
+        
+        /* Game-specific styles */
+        .game-card {
+            transition: all 0.3s ease;
+            cursor: pointer;
+        }
+        .game-card:hover {
+            transform: translateY(-5px);
+            box-shadow: 0 10px 25px rgba(0, 0, 0, 0.3);
+        }
+        
+        /* Chess Board */
+        .chess-board {
+            display: grid;
+            grid-template-columns: repeat(8, 1fr);
+            grid-template-rows: repeat(8, 1fr);
+            width: 400px;
+            height: 400px;
+            border: 2px solid #374151;
+        }
+        .chess-square {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 30px;
+            cursor: pointer;
+            transition: all 0.2s ease;
+        }
+        .chess-square.white {
+            background: #f0d9b5;
+        }
+        .chess-square.black {
+            background: #b58863;
+        }
+        .chess-square.selected {
+            background: #bbcb2b;
+        }
+        .chess-square.valid-move {
+            background: #86efac;
+        }
+        
+        /* Word Puzzle */
+        .word-puzzle-grid {
+            display: grid;
+            grid-template-columns: repeat(5, 1fr);
+            gap: 5px;
+            margin-bottom: 20px;
+        }
+        .word-cell {
+            width: 50px;
+            height: 50px;
+            border: 2px solid #374151;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 24px;
+            font-weight: bold;
+            text-transform: uppercase;
+        }
+        .word-cell.filled {
+            background: #4b5563;
+        }
+        .word-cell.correct {
+            background: #10b981;
+            border-color: #059669;
+        }
+        .word-cell.partial {
+            background: #f59e0b;
+            border-color: #d97706;
+        }
+        .word-cell.incorrect {
+            background: #6b7280;
+            border-color: #4b5563;
+        }
+        
+        /* Memory Game */
+        .memory-card {
+            width: 80px;
+            height: 80px;
+            background: linear-gradient(135deg, #667eea, #764ba2);
+            border-radius: 8px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 24px;
+            cursor: pointer;
+            transition: transform 0.3s ease;
+            transform-style: preserve-3d;
+        }
+        .memory-card.flipped {
+            transform: rotateY(180deg);
+            background: linear-gradient(135deg, #4fd1c7, #38b2ac);
+        }
+        .memory-card.matched {
+            background: linear-gradient(135deg, #10b981, #059669);
+            cursor: default;
+        }
+        
+        /* Quiz Game */
+        .quiz-option {
+            background: #374151;
+            padding: 12px 16px;
+            border-radius: 8px;
+            cursor: pointer;
+            transition: all 0.3s ease;
+        }
+        .quiz-option:hover {
+            background: #4b5563;
+        }
+        .quiz-option.correct {
+            background: #10b981;
+        }
+        .quiz-option.incorrect {
+            background: #ef4444;
+        }
+        
+        /* Premium Badge */
+        .premium-badge {
+            background: linear-gradient(135deg, #f59e0b, #d97706);
+            animation: pulse 2s infinite;
+        }
+        @keyframes pulse {
+            0%, 100% { opacity: 1; }
+            50% { opacity: 0.7; }
+        }
+        
+        /* Loading states */
+        .loading-spinner {
+            display: inline-block;
+            width: 20px;
+            height: 20px;
+            border: 3px solid rgba(255,255,255,.3);
+            border-radius: 50%;
+            border-top-color: #fff;
+            animation: spin 1s ease-in-out infinite;
+        }
+        @keyframes spin {
+            to { transform: rotate(360deg); }
+        }
+        
+        /* Toast notifications */
+        .toast {
+            position: fixed;
+            top: 20px;
+            right: 20px;
+            padding: 12px 20px;
+            border-radius: 8px;
+            color: white;
+            z-index: 10000;
+            transform: translateX(400px);
+            transition: transform 0.3s ease;
+        }
+        .toast.show {
+            transform: translateX(0);
+        }
+        .toast.success {
+            background: #10b981;
+        }
+        .toast.error {
+            background: #ef4444;
+        }
+        .toast.info {
+            background: #3b82f6;
+        }
+
+        /* Debug panel */
+        .debug-panel {
+            position: fixed;
+            bottom: 10px;
+            left: 10px;
+            background: rgba(0, 0, 0, 0.8);
+            color: white;
+            padding: 10px;
+            border-radius: 5px;
+            font-family: monospace;
+            font-size: 12px;
+            z-index: 1000;
+        }
+
+        /* Keyboard for word puzzle */
+        .keyboard {
+            display: grid;
+            grid-template-columns: repeat(10, 1fr);
+            gap: 5px;
+            margin-top: 20px;
+        }
+        .key {
+            padding: 10px;
+            background: #4b5563;
+            border: none;
+            border-radius: 4px;
+            color: white;
+            font-weight: bold;
+            cursor: pointer;
+            transition: all 0.2s ease;
+        }
+        .key:hover {
+            background: #6b7280;
+        }
+        .key:active {
+            transform: scale(0.95);
+        }
+        .key.used {
+            background: #6b7280;
+        }
+        .key.correct {
+            background: #10b981;
+        }
+        .key.partial {
+            background: #f59e0b;
+        }
+    </style>
+</head>
+<body class="h-full bg-gradient-to-br from-slate-900 via-purple-900 to-slate-900 text-white">
+    <!-- Debug Panel -->
+    <div class="debug-panel" id="debugPanel">
+        <div>Firebase: <span id="firebaseStatus">Checking...</span></div>
+        <div>User: <span id="userStatus">Unknown</span></div>
+        <div>Coins: <span id="coinsStatus">0</span></div>
+    </div>
+
+    <!-- Toast Notifications -->
+    <div id="toastContainer"></div>
+
+    <div class="min-h-screen">
+        <!-- Header -->
+        <div class="glass-card border-b border-slate-700">
+            <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+                <div class="flex justify-between items-center py-4">
+                    <div class="flex items-center space-x-3">
+                        <div class="w-10 h-10 primary-gradient rounded-2xl flex items-center justify-center">
+                            <i class="fas fa-gamepad text-white"></i>
+                        </div>
+                        <div>
+                            <h1 class="text-2xl font-black text-transparent bg-clip-text bg-gradient-to-r from-blue-400 to-cyan-400">
+                                Premium Game Center
+                            </h1>
+                            <p class="text-slate-400 text-sm">Play premium games and earn rewards</p>
+                        </div>
+                    </div>
+                    <div class="flex items-center space-x-4">
+                        <div class="text-right">
+                            <div class="font-semibold text-white" id="userCoins">0 coins</div>
+                            <div class="text-slate-400 text-sm" id="userLevel">Level 1</div>
+                        </div>
+                        <div class="w-10 h-10 bg-gradient-to-r from-purple-500 to-pink-500 rounded-full flex items-center justify-center">
+                            <i class="fas fa-user text-white"></i>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
+            <!-- Premium Subscription Banner -->
+            <div class="premium-gradient rounded-2xl p-6 mb-8 text-center">
+                <div class="flex items-center justify-center mb-4">
+                    <i class="fas fa-crown text-white text-2xl mr-3"></i>
+                    <h2 class="text-2xl font-black text-white">Premium Games Access</h2>
+                </div>
+                <p class="text-white mb-4">Unlock all premium games and exclusive features</p>
+                <button class="px-6 py-3 glass-card text-white rounded-xl font-semibold hover:scale-105 transition" onclick="showPremiumModal()">
+                    <i class="fas fa-gem mr-2"></i> Upgrade to Premium - $9.99/month
+                </button>
+            </div>
+
+            <!-- Featured Games -->
+            <div class="mb-8">
+                <div class="flex items-center justify-between mb-6">
+                    <h2 class="text-3xl font-black text-transparent bg-clip-text bg-gradient-to-r from-purple-400 to-pink-400">
+                        Featured Games
+                    </h2>
+                </div>
+
+                <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6" id="featuredGames">
+                    <!-- Game cards will be loaded here -->
+                </div>
+            </div>
+
+            <!-- Premium Games Section -->
+            <div class="mb-8">
+                <div class="flex items-center justify-between mb-6">
+                    <h2 class="text-3xl font-black text-transparent bg-clip-text bg-gradient-to-r from-yellow-400 to-orange-400">
+                        <i class="fas fa-crown mr-2"></i>Premium Games
+                    </h2>
+                </div>
+
+                <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6" id="premiumGames">
+                    <!-- Premium game cards will be loaded here -->
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Game Modals -->
+    
+    <!-- Chess Game Modal -->
+    <div id="chessGameModal" class="fixed inset-0 bg-black/80 flex items-center justify-center p-4 z-50 hidden">
+        <div class="glass-card rounded-2xl p-6 max-w-2xl w-full fade-in">
+            <div class="flex justify-between items-center mb-6">
+                <h3 class="text-2xl font-black text-white">Quantum Chess</h3>
+                <div class="flex items-center space-x-4">
+                    <span class="text-green-400 font-bold" id="chessStatus">White's Turn</span>
+                    <button class="text-slate-400 hover:text-white" onclick="closeGameModal('chessGameModal')">
+                        <i class="fas fa-times"></i>
+                    </button>
+                </div>
+            </div>
+            
+            <div class="flex justify-center mb-6">
+                <div class="chess-board" id="chessBoard">
+                    <!-- Chess board will be generated here -->
+                </div>
+            </div>
+            
+            <div class="flex space-x-3">
+                <button class="flex-1 px-4 py-2 glass-card border border-slate-700 rounded-xl text-slate-400 hover:border-blue-400 hover:text-blue-400 transition" onclick="closeGameModal('chessGameModal')">
+                    Exit Game
+                </button>
+                <button class="flex-1 px-4 py-2 primary-gradient text-white rounded-xl font-semibold hover:scale-105 transition" onclick="restartChessGame()">
+                    New Game
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Word Puzzle Modal -->
+    <div id="wordPuzzleModal" class="fixed inset-0 bg-black/80 flex items-center justify-center p-4 z-50 hidden">
+        <div class="glass-card rounded-2xl p-6 max-w-2xl w-full fade-in">
+            <div class="flex justify-between items-center mb-6">
+                <h3 class="text-2xl font-black text-white">Word Master</h3>
+                <div class="flex items-center space-x-4">
+                    <span class="text-green-400 font-bold" id="wordPuzzleStatus">Guess the 5-letter word!</span>
+                    <button class="text-slate-400 hover:text-white" onclick="closeGameModal('wordPuzzleModal')">
+                        <i class="fas fa-times"></i>
+                    </button>
+                </div>
+            </div>
+            
+            <div class="mb-6 text-center">
+                <div id="wordPuzzleGrid" class="word-puzzle-grid">
+                    <!-- Word puzzle grid will be generated here -->
+                </div>
+                <div class="keyboard" id="wordKeyboard">
+                    <!-- Keyboard will be generated here -->
+                </div>
+            </div>
+            
+            <div class="flex space-x-3">
+                <button class="flex-1 px-4 py-2 glass-card border border-slate-700 rounded-xl text-slate-400 hover:border-blue-400 hover:text-blue-400 transition" onclick="closeGameModal('wordPuzzleModal')">
+                    Exit Game
+                </button>
+                <button class="flex-1 px-4 py-2 primary-gradient text-white rounded-xl font-semibold hover:scale-105 transition" onclick="restartWordPuzzle()">
+                    New Puzzle
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Memory Game Modal -->
+    <div id="memoryGameModal" class="fixed inset-0 bg-black/80 flex items-center justify-center p-4 z-50 hidden">
+        <div class="glass-card rounded-2xl p-6 max-w-2xl w-full fade-in">
+            <div class="flex justify-between items-center mb-6">
+                <h3 class="text-2xl font-black text-white">Memory Matrix</h3>
+                <div class="flex items-center space-x-4">
+                    <span class="text-green-400 font-bold" id="memoryMoves">Moves: 0</span>
+                    <button class="text-slate-400 hover:text-white" onclick="closeGameModal('memoryGameModal')">
+                        <i class="fas fa-times"></i>
+                    </button>
+                </div>
+            </div>
+            
+            <div class="mb-4 text-center" id="memoryGameGrid">
+                <!-- Memory cards will be generated here -->
+            </div>
+            
+            <div class="flex space-x-3">
+                <button class="flex-1 px-4 py-2 glass-card border border-slate-700 rounded-xl text-slate-400 hover:border-blue-400 hover:text-blue-400 transition" onclick="closeGameModal('memoryGameModal')">
+                    Exit Game
+                </button>
+                <button class="flex-1 px-4 py-2 primary-gradient text-white rounded-xl font-semibold hover:scale-105 transition" onclick="restartMemoryGame()">
+                    Restart
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Quiz Game Modal -->
+    <div id="quizGameModal" class="fixed inset-0 bg-black/80 flex items-center justify-center p-4 z-50 hidden">
+        <div class="glass-card rounded-2xl p-6 max-w-2xl w-full fade-in">
+            <div class="flex justify-between items-center mb-6">
+                <h3 class="text-2xl font-black text-white">Cyber Quiz</h3>
+                <div class="flex items-center space-x-4">
+                    <span class="text-green-400 font-bold" id="quizScore">Score: 0/0</span>
+                    <button class="text-slate-400 hover:text-white" onclick="closeGameModal('quizGameModal')">
+                        <i class="fas fa-times"></i>
+                    </button>
+                </div>
+            </div>
+            
+            <div class="mb-6" id="quizGameContent">
+                <!-- Quiz content will be loaded here -->
+            </div>
+            
+            <div class="flex space-x-3">
+                <button class="flex-1 px-4 py-2 glass-card border border-slate-700 rounded-xl text-slate-400 hover:border-blue-400 hover:text-blue-400 transition" onclick="closeGameModal('quizGameModal')">
+                    Exit Game
+                </button>
+                <button class="flex-1 px-4 py-2 primary-gradient text-white rounded-xl font-semibold hover:scale-105 transition" id="nextQuizQuestion" onclick="loadNextQuizQuestion()">
+                    Next Question
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Premium Subscription Modal -->
+    <div id="premiumModal" class="fixed inset-0 bg-black/80 flex items-center justify-center p-4 z-50 hidden">
+        <div class="glass-card rounded-2xl p-6 max-w-md w-full fade-in">
+            <div class="text-center mb-6">
+                <div class="w-16 h-16 premium-gradient rounded-full flex items-center justify-center mx-auto mb-4">
+                    <i class="fas fa-crown text-white text-2xl"></i>
+                </div>
+                <h3 class="text-2xl font-black text-white mb-2">Upgrade to Premium</h3>
+                <p class="text-slate-400">Unlock all premium games and features</p>
+            </div>
+            
+            <div class="space-y-4 mb-6">
+                <div class="flex items-center p-3 glass-card rounded-xl">
+                    <i class="fas fa-check text-green-400 mr-3"></i>
+                    <span class="text-white">Access to all premium games</span>
+                </div>
+                <div class="flex items-center p-3 glass-card rounded-xl">
+                    <i class="fas fa-check text-green-400 mr-3"></i>
+                    <span class="text-white">Double coin rewards</span>
+                </div>
+                <div class="flex items-center p-3 glass-card rounded-xl">
+                    <i class="fas fa-check text-green-400 mr-3"></i>
+                    <span class="text-white">Exclusive game content</span>
+                </div>
+                <div class="flex items-center p-3 glass-card rounded-xl">
+                    <i class="fas fa-check text-green-400 mr-3"></i>
+                    <span class="text-white">No ads</span>
+                </div>
+            </div>
+            
+            <div class="text-center mb-6">
+                <div class="text-3xl font-black text-yellow-400">$9.99<span class="text-slate-400 text-lg">/month</span></div>
+                <p class="text-slate-400 text-sm">Cancel anytime</p>
+            </div>
+            
+            <div class="flex space-x-3">
+                <button class="flex-1 px-4 py-2 glass-card border border-slate-700 rounded-xl text-slate-400 hover:border-blue-400 hover:text-blue-400 transition" onclick="closePremiumModal()">
+                    Maybe Later
+                </button>
+                <button class="flex-1 px-4 py-2 premium-gradient text-white rounded-xl font-semibold hover:scale-105 transition" onclick="subscribeToPremium()">
+                    Subscribe Now
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // Firebase configuration
+        const firebaseConfig = {
+            apiKey: "AIzaSyDHHyGgsSV18BcXrGgzi4C8frzDAE1C1zo",
+            authDomain: "uniconnect-ee95c.firebaseapp.com",
+            projectId: "uniconnect-ee95c",
+            storageBucket: "uniconnect-ee95c.appspot.com",
+            messagingSenderId: "1003264444309",
+            appId: "1:1003264444309:web:9f0307516e44d21e97d89c"
+        };
+
+        // Firebase services
+        let auth;
+        let db;
+
+        // Initialize Firebase with error handling
+        function initializeFirebase() {
+            try {
+                console.log("🔄 Initializing Firebase...");
+                
+                // Check if Firebase is available
+                if (typeof firebase === 'undefined') {
+                    throw new Error('Firebase SDK not loaded');
+                }
+
+                // Initialize Firebase
+                firebase.initializeApp(firebaseConfig);
+                
+                // Get Firebase services
+                auth = firebase.auth();
+                db = firebase.firestore();
+                
+                console.log("✅ Firebase initialized successfully!");
+                console.log("🔑 Auth service:", auth ? "Available" : "Not available");
+                console.log("🗄️ Firestore service:", db ? "Available" : "Not available");
+                
+                // Update debug panel
+                document.getElementById('firebaseStatus').textContent = 'Connected ✅';
+                document.getElementById('firebaseStatus').style.color = '#10b981';
+                
+                showToast('Firebase connected successfully!', 'success');
+                
+                return true;
+            } catch (error) {
+                console.error("❌ Firebase initialization failed:", error);
+                document.getElementById('firebaseStatus').textContent = 'Failed ❌';
+                document.getElementById('firebaseStatus').style.color = '#ef4444';
+                showToast('Firebase connection failed: ' + error.message, 'error');
+                return false;
+            }
+        }
+
+        // Games data
+        const freeGames = [
+            {
+                id: "memory",
+                name: "Memory Matrix",
+                description: "Test your memory with cyber cards",
+                category: "puzzle",
+                players: "1",
+                coins: 80,
+                gradient: "game-gradient-1",
+                icon: "fa-brain",
+                featured: true,
+                premium: false
+            },
+            {
+                id: "quiz",
+                name: "Cyber Quiz",
+                description: "Test your knowledge of cyber world",
+                category: "trivia",
+                players: "1",
+                coins: 120,
+                gradient: "game-gradient-2",
+                icon: "fa-question-circle",
+                featured: true,
+                premium: false
+            }
+        ];
+
+        const premiumGames = [
+            {
+                id: "chess",
+                name: "Quantum Chess",
+                description: "Strategic chess with quantum twists",
+                category: "strategy",
+                players: "2",
+                coins: 200,
+                gradient: "game-gradient-3",
+                icon: "fa-chess",
+                featured: true,
+                premium: true
+            },
+            {
+                id: "wordpuzzle",
+                name: "Word Master",
+                description: "Guess the word in limited attempts",
+                category: "puzzle",
+                players: "1",
+                coins: 150,
+                gradient: "game-gradient-4",
+                icon: "fa-font",
+                featured: true,
+                premium: true
+            },
+            {
+                id: "sudoku",
+                name: "Number Matrix",
+                description: "Classic number puzzle game",
+                category: "puzzle",
+                players: "1",
+                coins: 180,
+                gradient: "game-gradient-5",
+                icon: "fa-th-large",
+                featured: false,
+                premium: true
+            }
+        ];
+
+        // Game state variables
+        let currentUser = null;
+        let userData = {
+            coins: 0,
+            level: 1,
+            gamesPlayed: 0,
+            displayName: "Guest",
+            isPremium: false
+        };
+
+        // Chess Game Variables
+        let chessGame = {
+            board: [],
+            currentPlayer: 'white',
+            selectedPiece: null,
+            validMoves: []
+        };
+
+        // Word Puzzle Variables
+        let wordPuzzle = {
+            targetWord: '',
+            currentGuess: '',
+            guesses: [],
+            maxGuesses: 6,
+            gameOver: false
+        };
+
+        // Memory Game Variables
+        let memoryGame = {
+            cards: [],
+            flippedCards: [],
+            matchedPairs: 0,
+            moves: 0,
+            totalPairs: 8
+        };
+
+        // Quiz Game Variables
+        let quizGame = {
+            questions: [],
+            currentQuestion: 0,
+            score: 0,
+            totalQuestions: 5
+        };
+
+        // Word list for word puzzle
+        const wordList = [
+            'APPLE', 'BRAIN', 'CHESS', 'DREAM', 'EARTH', 'FLAME', 'GRAPE', 'HOUSE',
+            'IMAGE', 'JOKER', 'KNIFE', 'LIGHT', 'MAGIC', 'NIGHT', 'OCEAN', 'PIANO',
+            'QUEEN', 'RIVER', 'STONE', 'TIGER', 'UNITY', 'VOICE', 'WATER', 'YOUTH',
+            'ZEBRA', 'ALPHA', 'BETA', 'GAMMA', 'DELTA', 'OMEGA'
+        ];
+
+        // Initialize the application
+        document.addEventListener('DOMContentLoaded', function() {
+            console.log("🚀 Starting application initialization...");
+            initializeApp();
+        });
+
+        async function initializeApp() {
+            // Initialize Firebase first
+            const firebaseInitialized = initializeFirebase();
+            
+            if (!firebaseInitialized) {
+                // If Firebase fails, load games with demo data
+                console.log("⚠️ Using demo mode (Firebase not available)");
+                loadGames();
+                updateUI();
+                return;
+            }
+
+            // Set up auth state listener
+            auth.onAuthStateChanged(async (user) => {
+                console.log("🔐 Auth state changed:", user ? `User: ${user.email}` : "No user");
+                currentUser = user;
+                
+                if (user) {
+                    document.getElementById('userStatus').textContent = user.email;
+                    document.getElementById('userStatus').style.color = '#10b981';
+                    await loadUserData(user.uid);
+                } else {
+                    document.getElementById('userStatus').textContent = 'Not signed in';
+                    document.getElementById('userStatus').style.color = '#ef4444';
+                    // Use demo data for guests
+                    userData = { coins: 1000, level: 1, gamesPlayed: 0, displayName: "Guest", isPremium: false };
+                    updateUI();
+                }
+                
+                loadGames();
+            });
+        }
+
+        async function loadUserData(userId) {
+            try {
+                console.log("📥 Loading user data for:", userId);
+                const userDoc = await db.collection('users').doc(userId).get();
+                
+                if (userDoc.exists) {
+                    const data = userDoc.data();
+                    userData = {
+                        coins: data.coins || 0,
+                        level: data.level || 1,
+                        gamesPlayed: data.gamesPlayed || 0,
+                        displayName: data.displayName || "Player",
+                        isPremium: data.isPremium || false
+                    };
+                    console.log("✅ User data loaded:", userData);
+                } else {
+                    // Create new user document
+                    console.log("👤 Creating new user document...");
+                    userData = {
+                        coins: 100,
+                        level: 1,
+                        gamesPlayed: 0,
+                        displayName: "New Player",
+                        isPremium: false,
+                        createdAt: firebase.firestore.FieldValue.serverTimestamp()
+                    };
+                    await db.collection('users').doc(userId).set(userData);
+                    console.log("✅ New user document created");
+                }
+                
+                updateUI();
+            } catch (error) {
+                console.error("❌ Error loading user data:", error);
+                // Fallback to demo data
+                userData = { coins: 500, level: 1, gamesPlayed: 0, displayName: "Guest", isPremium: false };
+                updateUI();
+            }
+        }
+
+        function updateUI() {
+            document.getElementById('userCoins').textContent = `${userData.coins.toLocaleString()} coins`;
+            document.getElementById('userLevel').textContent = `Level ${userData.level}`;
+            document.getElementById('coinsStatus').textContent = userData.coins;
+        }
+
+        function loadGames() {
+            loadFreeGames();
+            loadPremiumGames();
+        }
+
+        function loadFreeGames() {
+            const featuredGamesContainer = document.getElementById('featuredGames');
+            
+            featuredGamesContainer.innerHTML = freeGames.map(game => `
+                <div class="game-card glass-card rounded-2xl border border-slate-700 overflow-hidden" onclick="startGame('${game.id}')">
+                    <div class="h-32 ${game.gradient} flex items-center justify-center">
+                        <i class="fas ${game.icon} text-white text-4xl"></i>
+                    </div>
+                    <div class="p-6">
+                        <div class="flex justify-between items-start mb-3">
+                            <h3 class="text-xl font-black text-white">${game.name}</h3>
+                            <span class="px-2 py-1 bg-slate-700 text-slate-300 text-xs rounded-full">
+                                ${game.players} player
+                            </span>
+                        </div>
+                        <p class="text-slate-400 text-sm mb-4">${game.description}</p>
+                        <div class="flex justify-between items-center">
+                            <span class="text-yellow-400 font-bold">${game.coins} coins</span>
+                            <button class="px-4 py-2 primary-gradient text-white rounded-xl font-semibold hover:scale-105 transition">
+                                Play Free
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            `).join('');
+        }
+
+        function loadPremiumGames() {
+            const premiumGamesContainer = document.getElementById('premiumGames');
+            
+            premiumGamesContainer.innerHTML = premiumGames.map(game => `
+                <div class="game-card glass-card rounded-2xl border border-slate-700 overflow-hidden relative" onclick="startGame('${game.id}')">
+                    <div class="absolute top-3 right-3 premium-badge text-xs text-black font-bold px-2 py-1 rounded-full">
+                        <i class="fas fa-crown mr-1"></i> PREMIUM
+                    </div>
+                    <div class="h-32 ${game.gradient} flex items-center justify-center opacity-70">
+                        <i class="fas ${game.icon} text-white text-4xl"></i>
+                    </div>
+                    <div class="p-6">
+                        <div class="flex justify-between items-start mb-3">
+                            <h3 class="text-xl font-black text-white">${game.name}</h3>
+                            <span class="px-2 py-1 bg-slate-700 text-slate-300 text-xs rounded-full">
+                                ${game.players} player
+                            </span>
+                        </div>
+                        <p class="text-slate-400 text-sm mb-4">${game.description}</p>
+                        <div class="flex justify-between items-center">
+                            <span class="text-yellow-400 font-bold">${game.coins} coins</span>
+                            <button class="px-4 py-2 premium-gradient text-white rounded-xl font-semibold hover:scale-105 transition">
+                                Play Now
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            `).join('');
+        }
+
+        function startGame(gameId) {
+            console.log("🎮 Starting game:", gameId);
+            
+            // Check if premium game and user doesn't have premium
+            const game = [...freeGames, ...premiumGames].find(g => g.id === gameId);
+            if (game.premium && !userData.isPremium) {
+                showToast('This is a premium game. Upgrade to play!', 'info');
+                showPremiumModal();
+                return;
+            }
+            
+            if (!currentUser && !game.premium) {
+                showToast('Sign in to save your progress and earn coins!', 'info');
+            }
+            
+            switch(gameId) {
+                case 'chess':
+                    startChessGame();
+                    break;
+                case 'wordpuzzle':
+                    startWordPuzzle();
+                    break;
+                case 'memory':
+                    startMemoryGame();
+                    break;
+                case 'quiz':
+                    startQuizGame();
+                    break;
+                default:
+                    showToast('Game coming soon!', 'info');
+            }
+        }
+
+        // ==================== CHESS GAME ====================
+        function startChessGame() {
+            openGameModal('chessGameModal');
+            initializeChessBoard();
+            renderChessBoard();
+            
+            console.log("♟️ Chess game started");
+        }
+
+        function initializeChessBoard() {
+            // Initialize empty board
+            chessGame.board = Array(8).fill().map(() => Array(8).fill(null));
+            
+            // Set up pawns
+            for (let i = 0; i < 8; i++) {
+                chessGame.board[1][i] = { type: 'pawn', color: 'black' };
+                chessGame.board[6][i] = { type: 'pawn', color: 'white' };
+            }
+            
+            // Set up other pieces
+            const backRow = ['rook', 'knight', 'bishop', 'queen', 'king', 'bishop', 'knight', 'rook'];
+            for (let i = 0; i < 8; i++) {
+                chessGame.board[0][i] = { type: backRow[i], color: 'black' };
+                chessGame.board[7][i] = { type: backRow[i], color: 'white' };
+            }
+            
+            chessGame.currentPlayer = 'white';
+            chessGame.selectedPiece = null;
+            chessGame.validMoves = [];
+            
+            updateChessStatus();
+        }
+
+        function renderChessBoard() {
+            const board = document.getElementById('chessBoard');
+            board.innerHTML = '';
+            
+            for (let row = 0; row < 8; row++) {
+                for (let col = 0; col < 8; col++) {
+                    const square = document.createElement('div');
+                    const isWhite = (row + col) % 2 === 0;
+                    square.className = `chess-square ${isWhite ? 'white' : 'black'}`;
+                    
+                    const piece = chessGame.board[row][col];
+                    if (piece) {
+                        square.innerHTML = getChessSymbol(piece);
+                        square.style.cursor = 'pointer';
+                    }
+                    
+                    // Check if this square is a valid move
+                    if (chessGame.validMoves.some(move => move.row === row && move.col === col)) {
+                        square.classList.add('valid-move');
+                    }
+                    
+                    // Check if this square is selected
+                    if (chessGame.selectedPiece && chessGame.selectedPiece.row === row && chessGame.selectedPiece.col === col) {
+                        square.classList.add('selected');
+                    }
+                    
+                    square.onclick = () => handleChessClick(row, col);
+                    board.appendChild(square);
+                }
+            }
+        }
+
+        function getChessSymbol(piece) {
+            const symbols = {
+                'king': { white: '♔', black: '♚' },
+                'queen': { white: '♕', black: '♛' },
+                'rook': { white: '♖', black: '♜' },
+                'bishop': { white: '♗', black: '♝' },
+                'knight': { white: '♘', black: '♞' },
+                'pawn': { white: '♙', black: '♟' }
+            };
+            return symbols[piece.type][piece.color];
+        }
+
+        function handleChessClick(row, col) {
+            const piece = chessGame.board[row][col];
+            
+            // If a piece is already selected
+            if (chessGame.selectedPiece) {
+                const selectedRow = chessGame.selectedPiece.row;
+                const selectedCol = chessGame.selectedPiece.col;
+                
+                // Check if clicking on a valid move
+                const isValidMove = chessGame.validMoves.some(move => move.row === row && move.col === col);
+                
+                if (isValidMove) {
+                    // Move the piece
+                    chessGame.board[row][col] = chessGame.board[selectedRow][selectedCol];
+                    chessGame.board[selectedRow][selectedCol] = null;
+                    
+                    // Switch player
+                    chessGame.currentPlayer = chessGame.currentPlayer === 'white' ? 'black' : 'white';
+                    updateChessStatus();
+                }
+                
+                // Reset selection
+                chessGame.selectedPiece = null;
+                chessGame.validMoves = [];
+                renderChessBoard();
+                return;
+            }
+            
+            // If clicking on a piece of current player's color
+            if (piece && piece.color === chessGame.currentPlayer) {
+                chessGame.selectedPiece = { row, col };
+                chessGame.validMoves = calculateValidMoves(row, col, piece);
+                renderChessBoard();
+            }
+        }
+
+        function calculateValidMoves(row, col, piece) {
+            // Simplified move calculation - in a real game, this would be more complex
+            const moves = [];
+            
+            if (piece.type === 'pawn') {
+                const direction = piece.color === 'white' ? -1 : 1;
+                // Forward move
+                if (row + direction >= 0 && row + direction < 8 && !chessGame.board[row + direction][col]) {
+                    moves.push({ row: row + direction, col });
+                }
+                // Capture moves
+                if (col > 0 && chessGame.board[row + direction][col - 1] && chessGame.board[row + direction][col - 1].color !== piece.color) {
+                    moves.push({ row: row + direction, col: col - 1 });
+                }
+                if (col < 7 && chessGame.board[row + direction][col + 1] && chessGame.board[row + direction][col + 1].color !== piece.color) {
+                    moves.push({ row: row + direction, col: col + 1 });
+                }
+            }
+            
+            return moves;
+        }
+
+        function updateChessStatus() {
+            document.getElementById('chessStatus').textContent = `${chessGame.currentPlayer.charAt(0).toUpperCase() + chessGame.currentPlayer.slice(1)}'s Turn`;
+        }
+
+        function restartChessGame() {
+            initializeChessBoard();
+            renderChessBoard();
+        }
+
+        // ==================== WORD PUZZLE GAME ====================
+        function startWordPuzzle() {
+            openGameModal('wordPuzzleModal');
+            initializeWordPuzzle();
+            renderWordPuzzle();
+            
+            console.log("🔤 Word puzzle game started");
+        }
+
+        function initializeWordPuzzle() {
+            // Select a random word
+            wordPuzzle.targetWord = wordList[Math.floor(Math.random() * wordList.length)];
+            wordPuzzle.currentGuess = '';
+            wordPuzzle.guesses = [];
+            wordPuzzle.gameOver = false;
+            
+            updateWordPuzzleStatus();
+        }
+
+        function renderWordPuzzle() {
+            const grid = document.getElementById('wordPuzzleGrid');
+            const keyboard = document.getElementById('wordKeyboard');
+            
+            // Clear previous content
+            grid.innerHTML = '';
+            keyboard.innerHTML = '';
+            
+            // Create grid
+            for (let i = 0; i < wordPuzzle.maxGuesses; i++) {
+                for (let j = 0; j < 5; j++) {
+                    const cell = document.createElement('div');
+                    cell.className = 'word-cell';
+                    
+                    if (wordPuzzle.guesses[i] && wordPuzzle.guesses[i][j]) {
+                        cell.textContent = wordPuzzle.guesses[i][j];
+                        cell.classList.add('filled');
+                        
+                        // Color coding
+                        if (wordPuzzle.guesses[i][j] === wordPuzzle.targetWord[j]) {
+                            cell.classList.add('correct');
+                        } else if (wordPuzzle.targetWord.includes(wordPuzzle.guesses[i][j])) {
+                            cell.classList.add('partial');
+                        } else {
+                            cell.classList.add('incorrect');
+                        }
+                    }
+                    
+                    grid.appendChild(cell);
+                }
+            }
+            
+            // Create keyboard
+            const keyboardLayout = 'QWERTYUIOPASDFGHJKLZXCVBNM';
+            for (let char of keyboardLayout) {
+                const key = document.createElement('button');
+                key.className = 'key';
+                key.textContent = char;
+                key.onclick = () => handleKeyPress(char);
+                keyboard.appendChild(key);
+            }
+            
+            // Add Enter and Backspace
+            const enterKey = document.createElement('button');
+            enterKey.className = 'key';
+            enterKey.textContent = 'ENTER';
+            enterKey.onclick = submitGuess;
+            keyboard.appendChild(enterKey);
+            
+            const backspaceKey = document.createElement('button');
+            backspaceKey.className = 'key';
+            backspaceKey.innerHTML = '<i class="fas fa-backspace"></i>';
+            backspaceKey.onclick = handleBackspace;
+            keyboard.appendChild(backspaceKey);
+        }
+
+        function handleKeyPress(char) {
+            if (wordPuzzle.gameOver) return;
+            
+            if (wordPuzzle.currentGuess.length < 5) {
+                wordPuzzle.currentGuess += char;
+                renderWordPuzzle();
+            }
+        }
+
+        function handleBackspace() {
+            if (wordPuzzle.gameOver) return;
+            
+            if (wordPuzzle.currentGuess.length > 0) {
+                wordPuzzle.currentGuess = wordPuzzle.currentGuess.slice(0, -1);
+                renderWordPuzzle();
+            }
+        }
+
+        function submitGuess() {
+            if (wordPuzzle.gameOver || wordPuzzle.currentGuess.length !== 5) return;
+            
+            wordPuzzle.guesses.push(wordPuzzle.currentGuess);
+            
+            // Check if won
+            if (wordPuzzle.currentGuess === wordPuzzle.targetWord) {
+                wordPuzzle.gameOver = true;
+                showToast('Congratulations! You guessed the word!', 'success');
+                awardCoins(150);
+            } else if (wordPuzzle.guesses.length >= wordPuzzle.maxGuesses) {
+                wordPuzzle.gameOver = true;
+                showToast(`Game Over! The word was: ${wordPuzzle.targetWord}`, 'info');
+            }
+            
+            wordPuzzle.currentGuess = '';
+            renderWordPuzzle();
+            updateWordPuzzleStatus();
+        }
+
+        function updateWordPuzzleStatus() {
+            if (wordPuzzle.gameOver) {
+                if (wordPuzzle.guesses[wordPuzzle.guesses.length - 1] === wordPuzzle.targetWord) {
+                    document.getElementById('wordPuzzleStatus').textContent = 'You won! 🎉';
+                } else {
+                    document.getElementById('wordPuzzleStatus').textContent = `The word was: ${wordPuzzle.targetWord}`;
+                }
+            } else {
+                document.getElementById('wordPuzzleStatus').textContent = `Guess ${wordPuzzle.guesses.length + 1}/${wordPuzzle.maxGuesses}`;
+            }
+        }
+
+        function restartWordPuzzle() {
+            initializeWordPuzzle();
+            renderWordPuzzle();
+        }
+
+        // ==================== MEMORY GAME ====================
+        function startMemoryGame() {
+            openGameModal('memoryGameModal');
+            resetMemoryGame();
+            generateMemoryCards();
+            renderMemoryCards();
+            
+            console.log("🧠 Memory game started");
+        }
+
+        function resetMemoryGame() {
+            memoryGame.cards = [];
+            memoryGame.flippedCards = [];
+            memoryGame.matchedPairs = 0;
+            memoryGame.moves = 0;
+            updateMemoryMoves();
+        }
+
+        function generateMemoryCards() {
+            const symbols = ['🚀', '🌟', '🔮', '💎', '🎯', '🎨', '🎭', '🎪'];
+            let cards = [];
+            
+            // Create pairs of cards
+            symbols.forEach(symbol => {
+                cards.push({ symbol, matched: false });
+                cards.push({ symbol, matched: false });
+            });
+            
+            // Shuffle cards
+            memoryGame.cards = cards.sort(() => Math.random() - 0.5);
+        }
+
+        function renderMemoryCards() {
+            const grid = document.getElementById('memoryGameGrid');
+            grid.innerHTML = '';
+            grid.className = 'grid grid-cols-4 gap-2 max-w-md mx-auto';
+            
+            memoryGame.cards.forEach((card, index) => {
+                const cardElement = document.createElement('div');
+                cardElement.className = `memory-card ${card.matched ? 'matched' : ''}`;
+                cardElement.innerHTML = card.matched || memoryGame.flippedCards.includes(index) ? 
+                    card.symbol : '<i class="fas fa-question text-white"></i>';
+                cardElement.onclick = () => flipMemoryCard(index);
+                grid.appendChild(cardElement);
+            });
+        }
+
+        function flipMemoryCard(index) {
+            if (memoryGame.flippedCards.length >= 2 || 
+                memoryGame.flippedCards.includes(index) || 
+                memoryGame.cards[index].matched) {
+                return;
+            }
+            
+            memoryGame.flippedCards.push(index);
+            memoryGame.moves++;
+            updateMemoryMoves();
+            
+            renderMemoryCards();
+            
+            if (memoryGame.flippedCards.length === 2) {
+                checkMemoryMatch();
+            }
+        }
+
+        function checkMemoryMatch() {
+            const [index1, index2] = memoryGame.flippedCards;
+            const card1 = memoryGame.cards[index1];
+            const card2 = memoryGame.cards[index2];
+            
+            if (card1.symbol === card2.symbol) {
+                card1.matched = true;
+                card2.matched = true;
+                memoryGame.matchedPairs++;
+                memoryGame.flippedCards = [];
+                
+                if (memoryGame.matchedPairs === memoryGame.totalPairs) {
+                    setTimeout(() => {
+                        showToast(`Congratulations! You won in ${memoryGame.moves} moves!`, 'success');
+                        awardCoins(80);
+                    }, 500);
+                }
+            } else {
+                setTimeout(() => {
+                    memoryGame.flippedCards = [];
+                    renderMemoryCards();
+                }, 1000);
+            }
+        }
+
+        function updateMemoryMoves() {
+            document.getElementById('memoryMoves').textContent = `Moves: ${memoryGame.moves}`;
+        }
+
+        function restartMemoryGame() {
+            resetMemoryGame();
+            generateMemoryCards();
+            renderMemoryCards();
+        }
+
+        // ==================== QUIZ GAME ====================
+        function startQuizGame() {
+            openGameModal('quizGameModal');
+            resetQuizGame();
+            loadQuizQuestions();
+            
+            console.log("❓ Quiz game started");
+        }
+
+        function resetQuizGame() {
+            quizGame.currentQuestion = 0;
+            quizGame.score = 0;
+            updateQuizScore();
+        }
+
+        function loadQuizQuestions() {
+            // Sample quiz questions
+            quizGame.questions = [
+                {
+                    question: "What does CPU stand for?",
+                    options: [
+                        "Central Processing Unit",
+                        "Computer Personal Unit", 
+                        "Central Process Unit",
+                        "Computer Processing Unit"
+                    ],
+                    correct: 0
+                },
+                {
+                    question: "Which programming language is known for web development?",
+                    options: [
+                        "Python",
+                        "JavaScript",
+                        "C++",
+                        "Java"
+                    ],
+                    correct: 1
+                },
+                {
+                    question: "What is the capital of Kenya?",
+                    options: [
+                        "Mombasa",
+                        "Nairobi", 
+                        "Kisumu",
+                        "Nakuru"
+                    ],
+                    correct: 1
+                },
+                {
+                    question: "Which company developed React?",
+                    options: [
+                        "Google",
+                        "Facebook",
+                        "Microsoft", 
+                        "Apple"
+                    ],
+                    correct: 1
+                },
+                {
+                    question: "What does HTML stand for?",
+                    options: [
+                        "Hyper Text Markup Language",
+                        "High Tech Modern Language",
+                        "Hyper Transfer Markup Language",
+                        "Home Tool Markup Language"
+                    ],
+                    correct: 0
+                }
+            ];
+            
+            loadNextQuizQuestion();
+        }
+
+        function loadNextQuizQuestion() {
+            if (quizGame.currentQuestion >= quizGame.questions.length) {
+                showQuizResults();
+                return;
+            }
+            
+            const question = quizGame.questions[quizGame.currentQuestion];
+            const content = document.getElementById('quizGameContent');
+            
+            content.innerHTML = `
+                <div class="glass-card rounded-xl p-6 mb-4">
+                    <h4 class="text-xl font-semibold text-white mb-4">${question.question}</h4>
+                    <div class="space-y-3" id="quizOptions">
+                        ${question.options.map((option, index) => `
+                            <div class="quiz-option" onclick="selectQuizAnswer(${index})">
+                                ${option}
+                            </div>
+                        `).join('')}
+                    </div>
+                </div>
+            `;
+            
+            document.getElementById('nextQuizQuestion').style.display = 'none';
+        }
+
+        function selectQuizAnswer(selectedIndex) {
+            const question = quizGame.questions[quizGame.currentQuestion];
+            const options = document.querySelectorAll('.quiz-option');
+            
+            options.forEach((option, index) => {
+                if (index === question.correct) {
+                    option.classList.add('correct');
+                } else if (index === selectedIndex && index !== question.correct) {
+                    option.classList.add('incorrect');
+                }
+                option.style.pointerEvents = 'none';
+            });
+            
+            if (selectedIndex === question.correct) {
+                quizGame.score++;
+                updateQuizScore();
+            }
+            
+            document.getElementById('nextQuizQuestion').style.display = 'block';
+            quizGame.currentQuestion++;
+        }
+
+        function updateQuizScore() {
+            document.getElementById('quizScore').textContent = `Score: ${quizGame.score}/${quizGame.currentQuestion}`;
+        }
+
+        function showQuizResults() {
+            const content = document.getElementById('quizGameContent');
+            content.innerHTML = `
+                <div class="glass-card rounded-xl p-6 text-center">
+                    <h4 class="text-2xl font-black text-white mb-4">Quiz Complete!</h4>
+                    <div class="text-4xl font-black text-green-400 mb-4">${quizGame.score}/${quizGame.questions.length}</div>
+                    <p class="text-slate-400 mb-4">You scored ${Math.round((quizGame.score / quizGame.questions.length) * 100)}%</p>
+                    ${quizGame.score === quizGame.questions.length ? 
+                        '<p class="text-yellow-400 font-semibold">Perfect score! Amazing job! 🎉</p>' :
+                        quizGame.score >= quizGame.questions.length * 0.7 ?
+                        '<p class="text-green-400 font-semibold">Great job! Well done! 👍</p>' :
+                        '<p class="text-blue-400 font-semibold">Good effort! Keep practicing! 💪</p>'
+                    }
+                </div>
+            `;
+            
+            document.getElementById('nextQuizQuestion').style.display = 'none';
+            awardCoins(quizGame.score * 20);
+        }
+
+        // ==================== PREMIUM FEATURES ====================
+        function showPremiumModal() {
+            document.getElementById('premiumModal').classList.remove('hidden');
+        }
+
+        function closePremiumModal() {
+            document.getElementById('premiumModal').classList.add('hidden');
+        }
+
+        async function subscribeToPremium() {
+            if (!currentUser) {
+                showToast('Please sign in to subscribe to premium', 'info');
+                return;
+            }
+
+            try {
+                // In a real app, this would integrate with a payment processor
+                await db.collection('users').doc(currentUser.uid).update({
+                    isPremium: true,
+                    premiumSince: firebase.firestore.FieldValue.serverTimestamp()
+                });
+                
+                userData.isPremium = true;
+                showToast('Welcome to Premium! All games are now unlocked!', 'success');
+                closePremiumModal();
+                
+                // Reload games to show premium games as unlocked
+                loadGames();
+            } catch (error) {
+                console.error("❌ Error subscribing to premium:", error);
+                showToast('Error processing subscription', 'error');
+            }
+        }
+
+        // ==================== COMMON GAME FUNCTIONS ====================
+        function openGameModal(modalId) {
+            document.getElementById(modalId).classList.remove('hidden');
+        }
+
+        function closeGameModal(modalId) {
+            document.getElementById(modalId).classList.add('hidden');
+        }
+
+        async function awardCoins(amount) {
+            if (!currentUser) {
+                showToast(`You earned ${amount} coins! Sign in to save your progress.`, 'info');
+                return;
+            }
+
+            try {
+                // Double coins for premium users
+                const finalAmount = userData.isPremium ? amount * 2 : amount;
+                const newCoins = userData.coins + finalAmount;
+                
+                // Update Firebase
+                await db.collection('users').doc(currentUser.uid).update({
+                    coins: newCoins,
+                    lastGamePlayed: firebase.firestore.FieldValue.serverTimestamp(),
+                    gamesPlayed: firebase.firestore.FieldValue.increment(1)
+                });
+                
+                // Update local state
+                userData.coins = newCoins;
+                userData.gamesPlayed += 1;
+                
+                updateUI();
+                showToast(`+${finalAmount} coins awarded! ${userData.isPremium ? '(Premium bonus!)' : ''}`, 'success');
+                
+                console.log("💰 Coins awarded:", finalAmount, "New total:", newCoins);
+            } catch (error) {
+                console.error("❌ Error awarding coins:", error);
+                showToast('Error saving coins to database', 'error');
+            }
+        }
+
+        function showToast(message, type = 'info') {
+            const toast = document.createElement('div');
+            toast.className = `toast ${type}`;
+            toast.innerHTML = `
+                <div class="flex items-center">
+                    <i class="fas fa-${type === 'success' ? 'check-circle' : type === 'error' ? 'exclamation-circle' : 'info-circle'} mr-2"></i>
+                    ${message}
+                </div>
+            `;
+            
+            document.getElementById('toastContainer').appendChild(toast);
+            
+            setTimeout(() => {
+                toast.classList.add('show');
+            }, 100);
+            
+            setTimeout(() => {
+                toast.classList.remove('show');
+                setTimeout(() => {
+                    toast.remove();
+                }, 300);
+            }, 3000);
+        }
+    </script>
+</body>
+</html>

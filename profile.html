@@ -1,0 +1,1894 @@
+<!DOCTYPE html>
+<html lang="en" class="h-full">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Profile - ConnectSphere</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css" rel="stylesheet">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/cropperjs/1.5.13/cropper.min.css">
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/cropperjs/1.5.13/cropper.min.js"></script>
+    
+    <style>
+        .glass-effect {
+            background: rgba(255, 255, 255, 0.1);
+            backdrop-filter: blur(20px);
+            border: 1px solid rgba(255, 255, 255, 0.2);
+        }
+        .primary-gradient {
+            background: linear-gradient(135deg, #3B82F6 0%, #8B5CF6 100%);
+        }
+        
+        /* Connection Status */
+        .connection-status {
+            position: fixed;
+            top: 10px;
+            right: 10px;
+            padding: 8px 16px;
+            border-radius: 20px;
+            font-size: 0.8rem;
+            z-index: 1000;
+            transition: all 0.3s ease-in-out;
+            display: flex;
+            align-items: center;
+            box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
+        }
+        .connection-status.connected {
+            background: rgba(34, 197, 94, 0.9);
+            color: white;
+            border: 1px solid rgba(34, 197, 94, 0.6);
+        }
+        .connection-status.connecting {
+            background: rgba(245, 158, 11, 0.9);
+            color: white;
+            border: 1px solid rgba(245, 158, 11, 0.6);
+        }
+        .connection-status.disconnected {
+            background: rgba(239, 68, 68, 0.9);
+            color: white;
+            border: 1px solid rgba(239, 68, 68, 0.6);
+        }
+        .connection-status.hidden {
+            opacity: 0;
+            transform: translateY(-20px);
+            pointer-events: none;
+        }
+        
+        .notification-badge {
+            position: absolute;
+            top: -5px;
+            right: -5px;
+            background: #ef4444;
+            color: white;
+            border-radius: 50%;
+            width: 20px;
+            height: 20px;
+            font-size: 12px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+        
+        /* Modal Styles */
+        .modal {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: rgba(0, 0, 0, 0.7);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            z-index: 1000;
+        }
+        .modal-container {
+            background: rgba(30, 30, 60, 0.95);
+            backdrop-filter: blur(20px);
+            border-radius: 20px;
+            padding: 25px;
+            width: 90%;
+            max-width: 500px;
+            box-shadow: 0 20px 60px rgba(0, 0, 0, 0.5);
+        }
+
+        /* Profile specific styles */
+        .profile-cover {
+            height: 250px;
+            background: linear-gradient(135deg, #3B82F6 0%, #8B5CF6 100%);
+            position: relative;
+            border-radius: 15px 15px 0 0;
+        }
+        .profile-avatar {
+            width: 120px;
+            height: 120px;
+            border-radius: 50%;
+            border: 4px solid rgba(255, 255, 255, 0.2);
+            position: absolute;
+            bottom: -60px;
+            left: 40px;
+            background: linear-gradient(135deg, #3B82F6 0%, #8B5CF6 100%);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            color: white;
+            font-size: 40px;
+            background-size: cover;
+            background-position: center;
+        }
+        .profile-info {
+            padding: 80px 30px 30px;
+        }
+        .profile-stats {
+            display: flex;
+            justify-content: space-around;
+            margin: 20px 0;
+            text-align: center;
+        }
+        .stat-item {
+            padding: 10px;
+            cursor: pointer;
+        }
+        .stat-value {
+            font-size: 24px;
+            font-weight: bold;
+            color: #3B82F6;
+        }
+        .stat-label {
+            font-size: 14px;
+            color: #93C5FD;
+        }
+        .profile-tabs {
+            display: flex;
+            border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+            margin-bottom: 20px;
+            overflow-x: auto;
+        }
+        .profile-tab {
+            padding: 15px 20px;
+            cursor: pointer;
+            border-bottom: 2px solid transparent;
+            transition: all 0.3s;
+            white-space: nowrap;
+            position: relative;
+        }
+        .profile-tab.active {
+            border-bottom: 2px solid #3B82F6;
+            color: #3B82F6;
+        }
+        .tab-content {
+            display: none;
+        }
+        .tab-content.active {
+            display: block;
+        }
+        
+        /* Edit buttons */
+        .edit-cover-btn {
+            position: absolute;
+            top: 20px;
+            right: 20px;
+            background: rgba(0, 0, 0, 0.5);
+            color: white;
+            border: none;
+            border-radius: 20px;
+            padding: 8px 15px;
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            gap: 5px;
+        }
+        .edit-avatar-btn {
+            position: absolute;
+            bottom: 10px;
+            right: 10px;
+            background: rgba(0, 0, 0, 0.5);
+            color: white;
+            border: none;
+            border-radius: 50%;
+            width: 30px;
+            height: 30px;
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+        
+        /* File input */
+        .file-input {
+            display: none;
+        }
+
+        /* Loading spinner */
+        .loading-spinner {
+            display: none;
+            position: fixed;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            z-index: 1000;
+        }
+
+        /* Toast Styles */
+        .toast {
+            position: fixed;
+            top: 20px;
+            right: 20px;
+            z-index: 1000;
+            max-width: 400px;
+        }
+
+        /* New enhanced styles */
+        .cropper-modal {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: rgba(0, 0, 0, 0.8);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            z-index: 2000;
+        }
+        .cropper-container {
+            background: rgba(30, 30, 60, 0.95);
+            border-radius: 20px;
+            padding: 20px;
+            max-width: 90%;
+            max-height: 90%;
+        }
+        .cropper-preview {
+            width: 100%;
+            max-height: 400px;
+            margin-bottom: 20px;
+        }
+        .cropper-controls {
+            display: flex;
+            gap: 10px;
+            justify-content: center;
+        }
+        .post-card {
+            transition: all 0.3s ease;
+            border: 1px solid rgba(59, 130, 246, 0.3);
+        }
+        .post-card:hover {
+            transform: translateY(-2px);
+            border-color: rgba(59, 130, 246, 0.6);
+            box-shadow: 0 10px 25px rgba(0, 0, 0, 0.3);
+        }
+        .user-card {
+            transition: all 0.3s ease;
+            border: 1px solid rgba(59, 130, 246, 0.2);
+        }
+        .user-card:hover {
+            transform: translateY(-2px);
+            border-color: rgba(59, 130, 246, 0.4);
+        }
+        
+        .connection-status-indicator {
+            width: 8px;
+            height: 8px;
+            border-radius: 50%;
+            display: inline-block;
+            margin-right: 6px;
+        }
+        .status-online { background-color: #10B981; }
+        .status-away { background-color: #F59E0B; }
+        .status-offline { background-color: #6B7280; }
+        .status-busy { background-color: #EF4444; }
+
+        /* New styles for enhanced profile features */
+        .mood-status {
+            display: inline-flex;
+            align-items: center;
+            padding: 4px 12px;
+            border-radius: 20px;
+            font-size: 0.8rem;
+            font-weight: 500;
+            margin-left: 10px;
+        }
+        .mood-happy { background: rgba(34, 197, 94, 0.2); color: #10B981; }
+        .mood-calm { background: rgba(59, 130, 246, 0.2); color: #3B82F6; }
+        .mood-excited { background: rgba(168, 85, 247, 0.2); color: #A855F7; }
+        .mood-focused { background: rgba(245, 158, 11, 0.2); color: #F59E0B; }
+        .mood-tired { background: rgba(107, 114, 128, 0.2); color: #9CA3AF; }
+        
+        .bio-text {
+            line-height: 1.6;
+        }
+        .bio-hashtag {
+            color: #60A5FA;
+            font-weight: 500;
+        }
+        .bio-link {
+            color: #93C5FD;
+            text-decoration: underline;
+        }
+        
+        .badge {
+            display: inline-flex;
+            align-items: center;
+            padding: 6px 12px;
+            border-radius: 20px;
+            font-size: 0.8rem;
+            font-weight: 500;
+            margin: 0 5px 5px 0;
+        }
+        .badge-gold { background: linear-gradient(135deg, #FCD34D, #F59E0B); color: #7C2D12; }
+        .badge-silver { background: linear-gradient(135deg, #E5E7EB, #9CA3AF); color: #374151; }
+        .badge-bronze { background: linear-gradient(135deg, #FCD34D, #B45309); color: #7C2D12; }
+        .badge-blue { background: linear-gradient(135deg, #93C5FD, #3B82F6); color: white; }
+        .badge-purple { background: linear-gradient(135deg, #C4B5FD, #8B5CF6); color: white; }
+        
+        .dna-score {
+            width: 80px;
+            height: 80px;
+            border-radius: 50%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-weight: bold;
+            font-size: 1.2rem;
+            margin: 0 auto;
+            position: relative;
+        }
+        .dna-score::after {
+            content: '';
+            position: absolute;
+            width: 90px;
+            height: 90px;
+            border-radius: 50%;
+            border: 2px solid;
+            opacity: 0.3;
+        }
+        .dna-high { background: rgba(34, 197, 94, 0.2); color: #10B981; }
+        .dna-high::after { border-color: #10B981; }
+        .dna-medium { background: rgba(245, 158, 11, 0.2); color: #F59E0B; }
+        .dna-medium::after { border-color: #F59E0B; }
+        .dna-low { background: rgba(239, 68, 68, 0.2); color: #EF4444; }
+        .dna-low::after { border-color: #EF4444; }
+        
+        .sentiment-pulse {
+            animation: pulse 2s infinite;
+        }
+        @keyframes pulse {
+            0% { box-shadow: 0 0 0 0 rgba(59, 130, 246, 0.7); }
+            70% { box-shadow: 0 0 0 10px rgba(59, 130, 246, 0); }
+            100% { box-shadow: 0 0 0 0 rgba(59, 130, 246, 0); }
+        }
+        
+        /* Social Media Icons */
+        .social-media-icons {
+            display: flex;
+            gap: 10px;
+            margin-top: 15px;
+        }
+        .social-icon {
+            width: 40px;
+            height: 40px;
+            border-radius: 50%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            color: white;
+            font-size: 18px;
+            transition: all 0.3s ease;
+            cursor: pointer;
+        }
+        .social-icon:hover {
+            transform: translateY(-3px);
+            box-shadow: 0 5px 15px rgba(0, 0, 0, 0.3);
+        }
+        .social-twitter { background: #1DA1F2; }
+        .social-instagram { background: linear-gradient(45deg, #405DE6, #5851DB, #833AB4, #C13584, #E1306C, #FD1D1D); }
+        .social-facebook { background: #1877F2; }
+        .social-linkedin { background: #0A66C2; }
+        .social-youtube { background: #FF0000; }
+        .social-github { background: #333; }
+        .social-tiktok { background: #000000; }
+        .social-discord { background: #5865F2; }
+        .social-reddit { background: #FF4500; }
+        .social-snapchat { background: #FFFC00; color: #000; }
+        .social-whatsapp { background: #25D366; }
+        .social-telegram { background: #0088CC; }
+        .social-pinterest { background: #E60023; }
+        .social-spotify { background: #1DB954; }
+        
+        /* Social Media Modal */
+        .social-modal {
+            max-width: 600px;
+        }
+        .social-platform-option {
+            display: flex;
+            align-items: center;
+            padding: 15px;
+            border-radius: 10px;
+            margin-bottom: 10px;
+            cursor: pointer;
+            transition: all 0.3s;
+            border: 1px solid rgba(255, 255, 255, 0.1);
+        }
+        .social-platform-option:hover {
+            background: rgba(255, 255, 255, 0.1);
+            transform: translateY(-2px);
+        }
+        .social-platform-icon {
+            width: 40px;
+            height: 40px;
+            border-radius: 50%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            margin-right: 15px;
+            font-size: 18px;
+            color: white;
+        }
+        .social-platform-info {
+            flex: 1;
+        }
+        .social-platform-name {
+            font-weight: bold;
+            margin-bottom: 5px;
+        }
+        .social-platform-url {
+            font-size: 0.9rem;
+            color: #93C5FD;
+        }
+        
+        /* Friend System Styles */
+        .friend-request-item {
+            display: flex;
+            align-items: center;
+            padding: 15px;
+            border-radius: 10px;
+            margin-bottom: 10px;
+            border: 1px solid rgba(255, 255, 255, 0.1);
+            transition: all 0.3s;
+        }
+        .friend-request-item:hover {
+            background: rgba(255, 255, 255, 0.05);
+        }
+        .friend-request-avatar {
+            width: 50px;
+            height: 50px;
+            border-radius: 50%;
+            background: linear-gradient(135deg, #3B82F6 0%, #8B5CF6 100%);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            color: white;
+            font-size: 20px;
+            margin-right: 15px;
+        }
+        .friend-request-info {
+            flex: 1;
+        }
+        .friend-request-name {
+            font-weight: bold;
+            margin-bottom: 5px;
+        }
+        .friend-request-mutual {
+            font-size: 0.8rem;
+            color: #93C5FD;
+        }
+        .friend-request-actions {
+            display: flex;
+            gap: 10px;
+        }
+        .friend-action-btn {
+            padding: 8px 15px;
+            border-radius: 20px;
+            font-size: 0.8rem;
+            font-weight: 500;
+            cursor: pointer;
+            transition: all 0.3s;
+        }
+        .friend-action-accept {
+            background: rgba(34, 197, 94, 0.2);
+            color: #10B981;
+            border: 1px solid rgba(34, 197, 94, 0.3);
+        }
+        .friend-action-accept:hover {
+            background: rgba(34, 197, 94, 0.3);
+        }
+        .friend-action-decline {
+            background: rgba(239, 68, 68, 0.2);
+            color: #EF4444;
+            border: 1px solid rgba(239, 68, 68, 0.3);
+        }
+        .friend-action-decline:hover {
+            background: rgba(239, 68, 68, 0.3);
+        }
+        .friend-action-cancel {
+            background: rgba(107, 114, 128, 0.2);
+            color: #9CA3AF;
+            border: 1px solid rgba(107, 114, 128, 0.3);
+        }
+        .friend-action-cancel:hover {
+            background: rgba(107, 114, 128, 0.3);
+        }
+        
+        .friend-suggestion-item {
+            display: flex;
+            align-items: center;
+            padding: 15px;
+            border-radius: 10px;
+            margin-bottom: 10px;
+            border: 1px solid rgba(255, 255, 255, 0.1);
+            transition: all 0.3s;
+        }
+        .friend-suggestion-item:hover {
+            background: rgba(255, 255, 255, 0.05);
+        }
+        .friend-suggestion-avatar {
+            width: 50px;
+            height: 50px;
+            border-radius: 50%;
+            background: linear-gradient(135deg, #3B82F6 0%, #8B5CF6 100%);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            color: white;
+            font-size: 20px;
+            margin-right: 15px;
+        }
+        .friend-suggestion-info {
+            flex: 1;
+        }
+        .friend-suggestion-name {
+            font-weight: bold;
+            margin-bottom: 5px;
+        }
+        .friend-suggestion-mutual {
+            font-size: 0.8rem;
+            color: #93C5FD;
+        }
+        .friend-suggestion-actions {
+            display: flex;
+            gap: 10px;
+        }
+        
+        .friend-item {
+            display: flex;
+            align-items: center;
+            padding: 15px;
+            border-radius: 10px;
+            margin-bottom: 10px;
+            border: 1px solid rgba(255, 255, 255, 0.1);
+            transition: all 0.3s;
+        }
+        .friend-item:hover {
+            background: rgba(255, 255, 255, 0.05);
+        }
+        .friend-avatar {
+            width: 50px;
+            height: 50px;
+            border-radius: 50%;
+            background: linear-gradient(135deg, #3B82F6 0%, #8B5CF6 100%);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            color: white;
+            font-size: 20px;
+            margin-right: 15px;
+        }
+        .friend-info {
+            flex: 1;
+        }
+        .friend-name {
+            font-weight: bold;
+            margin-bottom: 5px;
+        }
+        .friend-status {
+            display: flex;
+            align-items: center;
+            font-size: 0.8rem;
+            color: #93C5FD;
+        }
+        .friend-actions {
+            display: flex;
+            gap: 10px;
+        }
+        
+        .add-friend-method {
+            display: flex;
+            align-items: center;
+            padding: 15px;
+            border-radius: 10px;
+            margin-bottom: 10px;
+            border: 1px solid rgba(255, 255, 255, 0.1);
+            cursor: pointer;
+            transition: all 0.3s;
+        }
+        .add-friend-method:hover {
+            background: rgba(255, 255, 255, 0.05);
+        }
+        .add-friend-icon {
+            width: 40px;
+            height: 40px;
+            border-radius: 50%;
+            background: rgba(59, 130, 246, 0.2);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            color: #3B82F6;
+            font-size: 18px;
+            margin-right: 15px;
+        }
+        .add-friend-info {
+            flex: 1;
+        }
+        .add-friend-title {
+            font-weight: bold;
+            margin-bottom: 5px;
+        }
+        .add-friend-description {
+            font-size: 0.8rem;
+            color: #93C5FD;
+        }
+    </style>
+</head>
+<body class="h-full bg-gradient-to-br from-gray-900 via-blue-900 to-gray-900 text-white">
+    <!-- Connection Status -->
+    <div class="connection-status connecting" id="connectionStatus">
+        <i class="fas fa-circle-notch fa-spin mr-2"></i>
+        <span id="connectionText">Connecting...</span>
+    </div>
+
+    <!-- Loading Spinner -->
+    <div class="loading-spinner" id="loadingSpinner">
+        <div class="glass-effect rounded-2xl p-6 border border-blue-700">
+            <div class="flex items-center space-x-3">
+                <i class="fas fa-circle-notch fa-spin text-blue-400 text-xl"></i>
+                <span class="text-blue-300">Loading...</span>
+            </div>
+        </div>
+    </div>
+
+    <!-- Image Cropper Modal -->
+    <div class="cropper-modal hidden" id="cropperModal">
+        <div class="cropper-container">
+            <h3 class="text-xl font-bold text-blue-300 mb-4 text-center" id="cropperTitle">Crop Image</h3>
+            <img id="cropperImage" class="cropper-preview">
+            <div class="cropper-controls">
+                <button id="cancelCrop" class="px-4 py-2 glass-effect text-blue-400 rounded-xl hover:bg-blue-800/30 transition">
+                    Cancel
+                </button>
+                <button id="applyCrop" class="px-4 py-2 primary-gradient text-white rounded-xl hover:scale-105 transition">
+                    Apply Crop
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Social Media Modal -->
+    <div class="modal hidden" id="socialMediaModal">
+        <div class="modal-container social-modal">
+            <h3 class="text-xl font-bold text-blue-300 mb-4">Manage Social Media Links</h3>
+            
+            <div class="space-y-3 mb-6" id="socialMediaList">
+                <!-- Social media links will be populated here -->
+            </div>
+            
+            <div class="flex justify-between items-center mb-4">
+                <h4 class="text-lg font-bold text-blue-300">Add New Platform</h4>
+                <button id="addSocialMedia" class="px-4 py-2 primary-gradient text-white rounded-xl hover:scale-105 transition">
+                    <i class="fas fa-plus mr-2"></i>Add Platform
+                </button>
+            </div>
+            
+            <div class="space-y-3" id="availablePlatforms">
+                <!-- Available platforms will be populated here -->
+            </div>
+            
+            <div class="flex justify-end space-x-3 pt-4">
+                <button id="closeSocialModal" class="px-4 py-2 glass-effect text-blue-400 rounded-xl hover:bg-blue-800/30 transition">
+                    Close
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Add Friend Modal -->
+    <div class="modal hidden" id="addFriendModal">
+        <div class="modal-container">
+            <h3 class="text-xl font-bold text-blue-300 mb-4">Add Friend</h3>
+            
+            <div class="space-y-4 mb-6">
+                <div class="add-friend-method" id="searchByUsername">
+                    <div class="add-friend-icon">
+                        <i class="fas fa-user"></i>
+                    </div>
+                    <div class="add-friend-info">
+                        <div class="add-friend-title">Search by Username</div>
+                        <div class="add-friend-description">Find users by their ConnectSphere username</div>
+                    </div>
+                    <i class="fas fa-chevron-right text-blue-400"></i>
+                </div>
+                
+                <div class="add-friend-method" id="searchByEmail">
+                    <div class="add-friend-icon">
+                        <i class="fas fa-envelope"></i>
+                    </div>
+                    <div class="add-friend-info">
+                        <div class="add-friend-title">Search by Email</div>
+                        <div class="add-friend-description">Find users by their email address</div>
+                    </div>
+                    <i class="fas fa-chevron-right text-blue-400"></i>
+                </div>
+                
+                <div class="add-friend-method" id="searchByPhone">
+                    <div class="add-friend-icon">
+                        <i class="fas fa-phone"></i>
+                    </div>
+                    <div class="add-friend-info">
+                        <div class="add-friend-title">Search by Phone Number</div>
+                        <div class="add-friend-description">Find users by their phone number</div>
+                    </div>
+                    <i class="fas fa-chevron-right text-blue-400"></i>
+                </div>
+                
+                <div class="add-friend-method" id="importFromSocial">
+                    <div class="add-friend-icon">
+                        <i class="fas fa-share-alt"></i>
+                    </div>
+                    <div class="add-friend-info">
+                        <div class="add-friend-title">Import from Social Media</div>
+                        <div class="add-friend-description">Find friends from your social media accounts</div>
+                    </div>
+                    <i class="fas fa-chevron-right text-blue-400"></i>
+                </div>
+            </div>
+            
+            <div class="flex justify-end space-x-3 pt-4">
+                <button id="closeAddFriendModal" class="px-4 py-2 glass-effect text-blue-400 rounded-xl hover:bg-blue-800/30 transition">
+                    Close
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Search User Modal -->
+    <div class="modal hidden" id="searchUserModal">
+        <div class="modal-container">
+            <h3 class="text-xl font-bold text-blue-300 mb-4" id="searchUserTitle">Search Users</h3>
+            
+            <div class="mb-4">
+                <input type="text" id="userSearchInput" class="w-full glass-effect border border-blue-700 rounded-xl px-4 py-3 text-white" placeholder="Enter username, email, or phone number">
+            </div>
+            
+            <div class="space-y-3 mb-4 max-h-60 overflow-y-auto" id="searchResults">
+                <!-- Search results will appear here -->
+            </div>
+            
+            <div class="flex justify-end space-x-3 pt-4">
+                <button id="closeSearchModal" class="px-4 py-2 glass-effect text-blue-400 rounded-xl hover:bg-blue-800/30 transition">
+                    Cancel
+                </button>
+                <button id="searchUsers" class="px-4 py-2 primary-gradient text-white rounded-xl hover:scale-105 transition">
+                    Search
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Toast Container -->
+    <div class="toast" id="toastContainer"></div>
+
+    <!-- Profile Layout -->
+    <div class="flex h-full" id="profileLayout">
+        <!-- Navigation Sidebar -->
+        <div class="w-20 lg:w-64 glass-effect border-r border-blue-800 flex flex-col">
+            <div class="p-4">
+                <a href="integration.html" class="flex items-center space-x-3">
+                    <div class="w-10 h-10 primary-gradient rounded-2xl flex items-center justify-center">
+                        <i class="fas fa-brain text-white"></i>
+                    </div>
+                    <span class="hidden lg:block text-xl font-black text-transparent bg-clip-text bg-gradient-to-r from-cyan-400 to-purple-400">
+                        ConnectSphere
+                    </span>
+                </a>
+            </div>
+
+            <nav class="flex-1 px-2 lg:px-4 space-y-2">
+                <a href="home.html" class="flex items-center space-x-3 p-3 rounded-xl text-blue-300 hover:bg-blue-900/30 hover:text-cyan-400 transition">
+                    <i class="fas fa-home w-6"></i>
+                    <span class="hidden lg:block">Neural Feed</span>
+                </a>
+                <a href="chat.html" class="flex items-center space-x-3 p-3 rounded-xl text-blue-300 hover:bg-blue-900/30 hover:text-cyan-400 transition">
+                    <i class="fas fa-comment-dots w-6"></i>
+                    <span class="hidden lg:block">Quantum Chat</span>
+                </a>
+                <a href="notifications.html" class="flex items-center space-x-3 p-3 rounded-xl text-blue-300 hover:bg-blue-900/30 hover:text-cyan-400 transition">
+                    <i class="fas fa-bell w-6"></i>
+                    <span class="hidden lg:block">Neural Alerts</span>
+                </a>
+                <a href="profile.html" class="flex items-center space-x-3 p-3 rounded-xl bg-blue-900/30 text-cyan-400 border border-cyan-500/50">
+                    <i class="fas fa-user-astronaut w-6"></i>
+                    <span class="hidden lg:block">Neural Profile</span>
+                </a>
+            </nav>
+        </div>
+
+        <!-- Main Profile Area -->
+        <div class="flex-1 flex flex-col overflow-y-auto">
+            <!-- Profile Header -->
+            <div class="glass-effect border-b border-blue-800 px-6 py-4">
+                <div class="flex items-center justify-between">
+                    <h1 class="text-2xl font-bold text-blue-300">Profile</h1>
+                    <div class="flex items-center space-x-4">
+                        <!-- Notifications Bell -->
+                        <div class="relative">
+                            <button id="notificationsBell" class="px-4 py-2 glass-effect text-blue-400 rounded-2xl hover:bg-blue-800/30 border border-blue-700 transition relative">
+                                <i class="fas fa-bell mr-2"></i>
+                                Notifications
+                            </button>
+                            <div id="notificationCount" class="notification-badge hidden">0</div>
+                        </div>
+                        
+                        <a href="settings.html" class="px-4 py-2 glass-effect text-blue-400 rounded-2xl hover:bg-blue-800/30 border border-blue-700 transition">
+                            <i class="fas fa-cog mr-2"></i>
+                            Settings
+                        </a>
+                        <a href="chat.html" class="px-4 py-2 glass-effect text-blue-400 rounded-2xl hover:bg-blue-800/30 border border-blue-700 transition">
+                            <i class="fas fa-comments mr-2"></i>
+                            Chat
+                        </a>
+                        <button id="logoutBtn" class="px-4 py-2 primary-gradient text-white rounded-2xl hover:scale-105 font-medium transition">
+                            <i class="fas fa-sign-out-alt mr-2"></i>
+                            Logout
+                        </button>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Profile Content -->
+            <div class="flex-1 overflow-y-auto p-6">
+                <!-- Profile Card -->
+                <div class="glass-effect rounded-2xl border border-blue-700 overflow-hidden mb-6">
+                    <!-- Profile Cover -->
+                    <div class="profile-cover" id="profileCover">
+                        <button class="edit-cover-btn" id="editCoverBtn">
+                            <i class="fas fa-camera"></i>
+                            Edit Cover
+                        </button>
+                        <input type="file" id="coverInput" class="file-input" accept="image/*">
+                    </div>
+                    
+                    <!-- Profile Avatar -->
+                    <div class="profile-avatar" id="profileAvatar">
+                        <i class="fas fa-user" id="avatarIcon"></i>
+                        <button class="edit-avatar-btn" id="editAvatarBtn">
+                            <i class="fas fa-camera"></i>
+                        </button>
+                        <input type="file" id="avatarInput" class="file-input" accept="image/*">
+                    </div>
+                    
+                    <!-- Profile Info -->
+                    <div class="profile-info">
+                        <div class="flex justify-between items-start">
+                            <div>
+                                <div class="flex items-center">
+                                    <h1 class="text-3xl font-bold text-white mb-2" id="profileName">Alex Johnson</h1>
+                                    <div class="mood-status mood-happy sentiment-pulse" id="moodStatus">
+                                        <i class="fas fa-smile mr-1"></i> Happy
+                                    </div>
+                                </div>
+                                <p class="text-blue-300 text-lg" id="profileUsername">@alexj</p>
+                                <div class="bio-text text-gray-300 mt-3" id="profileBio">
+                                    Digital creator & tech enthusiast 🚀 | Building the future one line of code at a time 💻 | #AI #WebDev #Innovation
+                                </div>
+                                
+                                <!-- Social Media Icons -->
+                                <div class="social-media-icons" id="socialMediaIcons">
+                                    <a href="https://twitter.com/alexj" target="_blank" class="social-icon social-twitter">
+                                        <i class="fab fa-twitter"></i>
+                                    </a>
+                                    <a href="https://instagram.com/alexj" target="_blank" class="social-icon social-instagram">
+                                        <i class="fab fa-instagram"></i>
+                                    </a>
+                                    <a href="https://github.com/alexj" target="_blank" class="social-icon social-github">
+                                        <i class="fab fa-github"></i>
+                                    </a>
+                                    <a href="https://linkedin.com/in/alexj" target="_blank" class="social-icon social-linkedin">
+                                        <i class="fab fa-linkedin-in"></i>
+                                    </a>
+                                </div>
+                                
+                                <div class="flex items-center mt-2 text-sm text-blue-300">
+                                    <i class="fas fa-calendar-alt mr-2"></i>
+                                    <span id="memberSince">Member since: January 2023</span>
+                                </div>
+                            </div>
+                            <div class="flex space-x-3">
+                                <button id="editProfileBtn" class="px-4 py-2 primary-gradient text-white rounded-2xl hover:scale-105 font-medium transition">
+                                    <i class="fas fa-edit mr-2"></i>
+                                    Edit Profile
+                                </button>
+                                <button id="manageSocialMediaBtn" class="px-4 py-2 glass-effect text-blue-400 rounded-2xl hover:bg-blue-800/30 border border-blue-700 transition">
+                                    <i class="fas fa-share-alt mr-2"></i>
+                                    Social Links
+                                </button>
+                            </div>
+                        </div>
+                        
+                        <!-- Action Buttons -->
+                        <div class="flex flex-wrap gap-3 mt-4">
+                            <button class="px-4 py-2 glass-effect text-blue-400 rounded-2xl hover:bg-blue-800/30 border border-blue-700 transition">
+                                <i class="fas fa-comment mr-2"></i> Message
+                            </button>
+                            <button id="addFriendBtn" class="px-4 py-2 glass-effect text-green-400 rounded-2xl hover:bg-green-800/30 border border-green-700 transition">
+                                <i class="fas fa-user-plus mr-2"></i> Add Friend
+                            </button>
+                            <button class="px-4 py-2 glass-effect text-purple-400 rounded-2xl hover:bg-purple-800/30 border border-purple-700 transition">
+                                <i class="fas fa-share mr-2"></i> Share Profile
+                            </button>
+                            <button class="px-4 py-2 glass-effect text-yellow-400 rounded-2xl hover:bg-yellow-800/30 border border-yellow-700 transition">
+                                <i class="fas fa-star mr-2"></i> Rate User
+                            </button>
+                        </div>
+                    </div>
+                    
+                    <!-- Profile Stats -->
+                    <div class="profile-stats">
+                        <div class="stat-item" data-tab="posts">
+                            <div class="stat-value" id="postsCount">24</div>
+                            <div class="stat-label">Posts</div>
+                        </div>
+                        <div class="stat-item" data-tab="friends">
+                            <div class="stat-value" id="friendsCount">87</div>
+                            <div class="stat-label">Friends</div>
+                        </div>
+                        <div class="stat-item" data-tab="followers">
+                            <div class="stat-value" id="followersCount">1.2K</div>
+                            <div class="stat-label">Followers</div>
+                        </div>
+                        <div class="stat-item" data-tab="following">
+                            <div class="stat-value" id="followingCount">356</div>
+                            <div class="stat-label">Following</div>
+                        </div>
+                        <div class="stat-item" data-tab="likes">
+                            <div class="stat-value" id="likesCount">2.4K</div>
+                            <div class="stat-label">Likes</div>
+                        </div>
+                    </div>
+                </div>
+                
+                <!-- Profile Tabs -->
+                <div class="glass-effect rounded-2xl border border-blue-700 overflow-hidden">
+                    <div class="profile-tabs">
+                        <div class="profile-tab active" data-tab="posts">
+                            <i class="fas fa-newspaper mr-2"></i> Posts
+                        </div>
+                        <div class="profile-tab" data-tab="friends">
+                            <i class="fas fa-users mr-2"></i> Friends
+                        </div>
+                        <div class="profile-tab" data-tab="photos">
+                            <i class="fas fa-images mr-2"></i> Photos
+                        </div>
+                        <div class="profile-tab" data-tab="badges">
+                            <i class="fas fa-award mr-2"></i> Badges
+                        </div>
+                        <div class="profile-tab" data-tab="activity">
+                            <i class="fas fa-chart-line mr-2"></i> Activity
+                        </div>
+                    </div>
+                    
+                    <!-- Tab Content -->
+                    <div class="p-6">
+                        <!-- Posts Tab -->
+                        <div class="tab-content active" id="postsTab">
+                            <div class="grid grid-cols-1 md:grid-cols-2 gap-6" id="postsGrid">
+                                <!-- Posts will be loaded here -->
+                                <div class="post-card glass-effect rounded-2xl p-6">
+                                    <div class="flex items-center mb-4">
+                                        <div class="w-10 h-10 primary-gradient rounded-full flex items-center justify-center mr-3">
+                                            <i class="fas fa-user text-white"></i>
+                                        </div>
+                                        <div>
+                                            <h4 class="font-bold text-white">Alex Johnson</h4>
+                                            <p class="text-sm text-blue-300">2 hours ago</p>
+                                        </div>
+                                    </div>
+                                    <p class="text-gray-300 mb-4">Just launched my new AI project! It's been an incredible journey building this from scratch. The future of technology is so exciting! 🚀 #AI #Innovation #Tech</p>
+                                    <div class="flex justify-between text-blue-300">
+                                        <button class="flex items-center space-x-1 hover:text-cyan-400 transition">
+                                            <i class="far fa-heart"></i>
+                                            <span>42</span>
+                                        </button>
+                                        <button class="flex items-center space-x-1 hover:text-cyan-400 transition">
+                                            <i class="far fa-comment"></i>
+                                            <span>8</span>
+                                        </button>
+                                        <button class="flex items-center space-x-1 hover:text-cyan-400 transition">
+                                            <i class="far fa-share-square"></i>
+                                            <span>Share</span>
+                                        </button>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                        
+                        <!-- Friends Tab -->
+                        <div class="tab-content" id="friendsTab">
+                            <div class="mb-6">
+                                <h3 class="text-xl font-bold text-blue-300 mb-4">Friend Requests</h3>
+                                <div class="space-y-3" id="friendRequests">
+                                    <!-- Friend requests will appear here -->
+                                    <div class="friend-request-item">
+                                        <div class="friend-request-avatar">
+                                            <i class="fas fa-user"></i>
+                                        </div>
+                                        <div class="friend-request-info">
+                                            <div class="friend-request-name">Sarah Miller</div>
+                                            <div class="friend-request-mutual">5 mutual friends</div>
+                                        </div>
+                                        <div class="friend-request-actions">
+                                            <button class="friend-action-btn friend-action-accept">
+                                                <i class="fas fa-check mr-1"></i> Accept
+                                            </button>
+                                            <button class="friend-action-btn friend-action-decline">
+                                                <i class="fas fa-times mr-1"></i> Decline
+                                            </button>
+                                        </div>
+                                    </div>
+                                    
+                                    <div class="friend-request-item">
+                                        <div class="friend-request-avatar">
+                                            <i class="fas fa-user"></i>
+                                        </div>
+                                        <div class="friend-request-info">
+                                            <div class="friend-request-name">Michael Chen</div>
+                                            <div class="friend-request-mutual">12 mutual friends</div>
+                                        </div>
+                                        <div class="friend-request-actions">
+                                            <button class="friend-action-btn friend-action-accept">
+                                                <i class="fas fa-check mr-1"></i> Accept
+                                            </button>
+                                            <button class="friend-action-btn friend-action-decline">
+                                                <i class="fas fa-times mr-1"></i> Decline
+                                            </button>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                            
+                            <div class="mb-6">
+                                <h3 class="text-xl font-bold text-blue-300 mb-4">Sent Requests</h3>
+                                <div class="space-y-3" id="sentRequests">
+                                    <!-- Sent requests will appear here -->
+                                    <div class="friend-request-item">
+                                        <div class="friend-request-avatar">
+                                            <i class="fas fa-user"></i>
+                                        </div>
+                                        <div class="friend-request-info">
+                                            <div class="friend-request-name">Jessica Wong</div>
+                                            <div class="friend-request-mutual">Pending</div>
+                                        </div>
+                                        <div class="friend-request-actions">
+                                            <button class="friend-action-btn friend-action-cancel">
+                                                <i class="fas fa-times mr-1"></i> Cancel
+                                            </button>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                            
+                            <div class="mb-6">
+                                <h3 class="text-xl font-bold text-blue-300 mb-4">People You May Know</h3>
+                                <div class="space-y-3" id="friendSuggestions">
+                                    <!-- Friend suggestions will appear here -->
+                                    <div class="friend-suggestion-item">
+                                        <div class="friend-suggestion-avatar">
+                                            <i class="fas fa-user"></i>
+                                        </div>
+                                        <div class="friend-suggestion-info">
+                                            <div class="friend-suggestion-name">David Kim</div>
+                                            <div class="friend-suggestion-mutual">8 mutual friends</div>
+                                        </div>
+                                        <div class="friend-suggestion-actions">
+                                            <button class="friend-action-btn friend-action-accept">
+                                                <i class="fas fa-user-plus mr-1"></i> Add
+                                            </button>
+                                        </div>
+                                    </div>
+                                    
+                                    <div class="friend-suggestion-item">
+                                        <div class="friend-suggestion-avatar">
+                                            <i class="fas fa-user"></i>
+                                        </div>
+                                        <div class="friend-suggestion-info">
+                                            <div class="friend-suggestion-name">Emma Wilson</div>
+                                            <div class="friend-suggestion-mutual">3 mutual friends</div>
+                                        </div>
+                                        <div class="friend-suggestion-actions">
+                                            <button class="friend-action-btn friend-action-accept">
+                                                <i class="fas fa-user-plus mr-1"></i> Add
+                                            </button>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                            
+                            <div>
+                                <h3 class="text-xl font-bold text-blue-300 mb-4">Your Friends</h3>
+                                <div class="grid grid-cols-1 md:grid-cols-2 gap-4" id="friendsList">
+                                    <!-- Friends list will appear here -->
+                                    <div class="friend-item">
+                                        <div class="friend-avatar">
+                                            <i class="fas fa-user"></i>
+                                        </div>
+                                        <div class="friend-info">
+                                            <div class="friend-name">John Smith</div>
+                                            <div class="friend-status">
+                                                <span class="connection-status-indicator status-online"></span>
+                                                <span>Online</span>
+                                            </div>
+                                        </div>
+                                        <div class="friend-actions">
+                                            <button class="px-3 py-1 glass-effect text-blue-400 rounded-lg hover:bg-blue-800/30 transition">
+                                                <i class="fas fa-comment"></i>
+                                            </button>
+                                        </div>
+                                    </div>
+                                    
+                                    <div class="friend-item">
+                                        <div class="friend-avatar">
+                                            <i class="fas fa-user"></i>
+                                        </div>
+                                        <div class="friend-info">
+                                            <div class="friend-name">Lisa Brown</div>
+                                            <div class="friend-status">
+                                                <span class="connection-status-indicator status-away"></span>
+                                                <span>Away</span>
+                                            </div>
+                                        </div>
+                                        <div class="friend-actions">
+                                            <button class="px-3 py-1 glass-effect text-blue-400 rounded-lg hover:bg-blue-800/30 transition">
+                                                <i class="fas fa-comment"></i>
+                                            </button>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                        
+                        <!-- Photos Tab -->
+                        <div class="tab-content" id="photosTab">
+                            <div class="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4" id="photosGrid">
+                                <!-- Photos will be loaded here -->
+                                <div class="aspect-square glass-effect rounded-xl flex items-center justify-center">
+                                    <i class="fas fa-image text-3xl text-blue-400"></i>
+                                </div>
+                                <div class="aspect-square glass-effect rounded-xl flex items-center justify-center">
+                                    <i class="fas fa-image text-3xl text-blue-400"></i>
+                                </div>
+                                <div class="aspect-square glass-effect rounded-xl flex items-center justify-center">
+                                    <i class="fas fa-image text-3xl text-blue-400"></i>
+                                </div>
+                                <div class="aspect-square glass-effect rounded-xl flex items-center justify-center">
+                                    <i class="fas fa-image text-3xl text-blue-400"></i>
+                                </div>
+                            </div>
+                        </div>
+                        
+                        <!-- Badges Tab -->
+                        <div class="tab-content" id="badgesTab">
+                            <div class="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4" id="badgesGrid">
+                                <!-- Badges will be loaded here -->
+                                <div class="glass-effect rounded-xl p-4 flex items-center space-x-4">
+                                    <div class="badge badge-gold">
+                                        <i class="fas fa-medal mr-1"></i> First Post
+                                    </div>
+                                    <div>
+                                        <p class="font-medium">First Post</p>
+                                        <p class="text-sm text-blue-300">Created your first post</p>
+                                    </div>
+                                </div>
+                                <div class="glass-effect rounded-xl p-4 flex items-center space-x-4">
+                                    <div class="badge badge-silver">
+                                        <i class="fas fa-users mr-1"></i> Social Butterfly
+                                    </div>
+                                    <div>
+                                        <p class="font-medium">Social Butterfly</p>
+                                        <p class="text-sm text-blue-300">Connected with 10 friends</p>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                        
+                        <!-- Activity Tab -->
+                        <div class="tab-content" id="activityTab">
+                            <div id="activityTimeline">
+                                <!-- Activity will be loaded here -->
+                                <div class="text-center py-10">
+                                    <i class="fas fa-chart-line text-4xl text-blue-400 mb-4"></i>
+                                    <p class="text-blue-300">No activity yet</p>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // Initialize when DOM is loaded
+        document.addEventListener('DOMContentLoaded', function() {
+            initProfile();
+        });
+
+        // Initialize Profile Functionality
+        function initProfile() {
+            console.log('🚀 Initializing profile functionality...');
+            
+            // Set up connection status
+            setupConnectionStatus();
+            
+            // Set up event listeners
+            setupEventListeners();
+            
+            // Set up tab switching
+            setupTabSwitching();
+            
+            // Set up image upload
+            setupImageUpload();
+            
+            // Set up social media
+            setupSocialMedia();
+            
+            // Set up friend system
+            setupFriendSystem();
+            
+            // Set up logout functionality
+            setupLogout();
+        }
+
+        // Set up connection status
+        function setupConnectionStatus() {
+            const connectionStatus = document.getElementById('connectionStatus');
+            const connectionText = document.getElementById('connectionText');
+            
+            // Simulate connection process
+            setTimeout(() => {
+                connectionStatus.classList.remove('connecting');
+                connectionStatus.classList.add('connected');
+                connectionText.innerHTML = '<i class="fas fa-wifi mr-2"></i> Connected';
+                
+                // Hide after 3 seconds
+                setTimeout(() => {
+                    connectionStatus.classList.add('hidden');
+                }, 3000);
+            }, 2000);
+        }
+
+        // Set up event listeners
+        function setupEventListeners() {
+            // Tab switching
+            document.querySelectorAll('.profile-tab').forEach(tab => {
+                tab.addEventListener('click', () => {
+                    const tabName = tab.getAttribute('data-tab');
+                    switchTab(tabName);
+                });
+            });
+            
+            // Stat items (also switch tabs)
+            document.querySelectorAll('.stat-item').forEach(stat => {
+                stat.addEventListener('click', () => {
+                    const tabName = stat.getAttribute('data-tab');
+                    switchTab(tabName);
+                });
+            });
+            
+            // Edit profile button
+            document.getElementById('editProfileBtn').addEventListener('click', () => {
+                showToast('Edit profile feature coming soon!', 'info');
+            });
+            
+            // Manage social media button
+            document.getElementById('manageSocialMediaBtn').addEventListener('click', () => {
+                document.getElementById('socialMediaModal').classList.remove('hidden');
+            });
+            
+            // Close social media modal
+            document.getElementById('closeSocialModal').addEventListener('click', () => {
+                document.getElementById('socialMediaModal').classList.add('hidden');
+            });
+            
+            // Add social media button
+            document.getElementById('addSocialMedia').addEventListener('click', addNewSocialMediaPlatform);
+            
+            // Add friend button
+            document.getElementById('addFriendBtn').addEventListener('click', () => {
+                document.getElementById('addFriendModal').classList.remove('hidden');
+            });
+            
+            // Close add friend modal
+            document.getElementById('closeAddFriendModal').addEventListener('click', () => {
+                document.getElementById('addFriendModal').classList.add('hidden');
+            });
+            
+            // Close search modal
+            document.getElementById('closeSearchModal').addEventListener('click', () => {
+                document.getElementById('searchUserModal').classList.add('hidden');
+            });
+            
+            // Search users button
+            document.getElementById('searchUsers').addEventListener('click', searchUsers);
+            
+            // Add friend methods
+            document.getElementById('searchByUsername').addEventListener('click', () => {
+                document.getElementById('addFriendModal').classList.add('hidden');
+                showSearchModal('Search by Username', 'Enter username');
+            });
+            
+            document.getElementById('searchByEmail').addEventListener('click', () => {
+                document.getElementById('addFriendModal').classList.add('hidden');
+                showSearchModal('Search by Email', 'Enter email address');
+            });
+            
+            document.getElementById('searchByPhone').addEventListener('click', () => {
+                document.getElementById('addFriendModal').classList.add('hidden');
+                showSearchModal('Search by Phone', 'Enter phone number');
+            });
+            
+            document.getElementById('importFromSocial').addEventListener('click', () => {
+                document.getElementById('addFriendModal').classList.add('hidden');
+                importFromSocialMedia();
+            });
+            
+            // Friend request actions
+            setupFriendRequestActions();
+        }
+
+        // Set up tab switching
+        function setupTabSwitching() {
+            // Default to posts tab
+            switchTab('posts');
+        }
+
+        // Switch to a specific tab
+        function switchTab(tabName) {
+            // Update active tab
+            document.querySelectorAll('.profile-tab').forEach(tab => {
+                tab.classList.remove('active');
+                if (tab.getAttribute('data-tab') === tabName) {
+                    tab.classList.add('active');
+                }
+            });
+            
+            // Show active tab content
+            document.querySelectorAll('.tab-content').forEach(content => {
+                content.classList.remove('active');
+                if (content.id === `${tabName}Tab`) {
+                    content.classList.add('active');
+                }
+            });
+        }
+
+        // Set up image upload
+        function setupImageUpload() {
+            // Cover image upload
+            document.getElementById('editCoverBtn').addEventListener('click', () => {
+                document.getElementById('coverInput').click();
+            });
+            
+            document.getElementById('coverInput').addEventListener('change', function(e) {
+                if (this.files && this.files[0]) {
+                    const reader = new FileReader();
+                    reader.onload = function(e) {
+                        // Show cropper modal for cover
+                        showCropperModal(e.target.result, 'cover');
+                    };
+                    reader.readAsDataURL(this.files[0]);
+                }
+            });
+            
+            // Avatar image upload
+            document.getElementById('editAvatarBtn').addEventListener('click', () => {
+                document.getElementById('avatarInput').click();
+            });
+            
+            document.getElementById('avatarInput').addEventListener('change', function(e) {
+                if (this.files && this.files[0]) {
+                    const reader = new FileReader();
+                    reader.onload = function(e) {
+                        // Show cropper modal for avatar (circular crop)
+                        showCropperModal(e.target.result, 'avatar');
+                    };
+                    reader.readAsDataURL(this.files[0]);
+                }
+            });
+            
+            // Cropper controls
+            document.getElementById('cancelCrop').addEventListener('click', () => {
+                document.getElementById('cropperModal').classList.add('hidden');
+                if (window.cropper) {
+                    window.cropper.destroy();
+                }
+            });
+            
+            document.getElementById('applyCrop').addEventListener('click', applyCrop);
+        }
+
+        // Show cropper modal
+        function showCropperModal(imageSrc, type) {
+            document.getElementById('cropperModal').classList.remove('hidden');
+            document.getElementById('cropperTitle').textContent = `Crop ${type === 'cover' ? 'Cover Image' : 'Profile Picture'}`;
+            
+            const image = document.getElementById('cropperImage');
+            image.src = imageSrc;
+            
+            // Initialize cropper
+            if (window.cropper) {
+                window.cropper.destroy();
+            }
+            
+            window.cropper = new Cropper(image, {
+                aspectRatio: type === 'cover' ? 16/9 : 1,
+                viewMode: 1,
+                autoCropArea: 0.8,
+                responsive: true,
+                restore: false,
+                guides: true,
+                center: true,
+                highlight: false,
+                cropBoxMovable: true,
+                cropBoxResizable: true,
+                toggleDragModeOnDblclick: false,
+            });
+            
+            window.currentCropType = type;
+        }
+
+        // Apply crop and update image
+        function applyCrop() {
+            if (window.cropper) {
+                const canvas = window.cropper.getCroppedCanvas();
+                const croppedImage = canvas.toDataURL('image/jpeg');
+                
+                if (window.currentCropType === 'cover') {
+                    // Update cover image
+                    document.getElementById('profileCover').style.backgroundImage = `url(${croppedImage})`;
+                    document.getElementById('profileCover').style.backgroundSize = 'cover';
+                    document.getElementById('profileCover').style.backgroundPosition = 'center';
+                } else {
+                    // Update avatar
+                    document.getElementById('profileAvatar').style.backgroundImage = `url(${croppedImage})`;
+                    document.getElementById('avatarIcon').style.display = 'none';
+                }
+                
+                // Close modal and destroy cropper
+                document.getElementById('cropperModal').classList.add('hidden');
+                window.cropper.destroy();
+                
+                // Show success message
+                showToast('Image updated successfully!', 'success');
+            }
+        }
+
+        // Set up social media
+        function setupSocialMedia() {
+            // Define social media platforms
+            const socialPlatforms = [
+                { name: 'Twitter', icon: 'fab fa-twitter', color: 'social-twitter', url: 'https://twitter.com/' },
+                { name: 'Instagram', icon: 'fab fa-instagram', color: 'social-instagram', url: 'https://instagram.com/' },
+                { name: 'Facebook', icon: 'fab fa-facebook-f', color: 'social-facebook', url: 'https://facebook.com/' },
+                { name: 'LinkedIn', icon: 'fab fa-linkedin-in', color: 'social-linkedin', url: 'https://linkedin.com/in/' },
+                { name: 'YouTube', icon: 'fab fa-youtube', color: 'social-youtube', url: 'https://youtube.com/c/' },
+                { name: 'GitHub', icon: 'fab fa-github', color: 'social-github', url: 'https://github.com/' },
+                { name: 'TikTok', icon: 'fab fa-tiktok', color: 'social-tiktok', url: 'https://tiktok.com/@' },
+                { name: 'Discord', icon: 'fab fa-discord', color: 'social-discord', url: 'https://discord.gg/' },
+                { name: 'Reddit', icon: 'fab fa-reddit-alien', color: 'social-reddit', url: 'https://reddit.com/user/' },
+                { name: 'Snapchat', icon: 'fab fa-snapchat-ghost', color: 'social-snapchat', url: 'https://snapchat.com/add/' },
+                { name: 'WhatsApp', icon: 'fab fa-whatsapp', color: 'social-whatsapp', url: 'https://wa.me/' },
+                { name: 'Telegram', icon: 'fab fa-telegram-plane', color: 'social-telegram', url: 'https://t.me/' },
+                { name: 'Pinterest', icon: 'fab fa-pinterest-p', color: 'social-pinterest', url: 'https://pinterest.com/' },
+                { name: 'Spotify', icon: 'fab fa-spotify', color: 'social-spotify', url: 'https://open.spotify.com/user/' }
+            ];
+            
+            // Populate available platforms
+            const availablePlatforms = document.getElementById('availablePlatforms');
+            if (availablePlatforms) {
+                availablePlatforms.innerHTML = '';
+                socialPlatforms.forEach(platform => {
+                    const platformElement = document.createElement('div');
+                    platformElement.className = 'social-platform-option';
+                    platformElement.setAttribute('data-platform', platform.name);
+                    platformElement.innerHTML = `
+                        <div class="social-platform-icon ${platform.color}">
+                            <i class="${platform.icon}"></i>
+                        </div>
+                        <div class="social-platform-info">
+                            <div class="social-platform-name">${platform.name}</div>
+                            <div class="social-platform-url">${platform.url}</div>
+                        </div>
+                        <button class="px-3 py-1 glass-effect text-blue-400 rounded-lg hover:bg-blue-800/30 transition add-platform-btn" data-platform="${platform.name}">
+                            <i class="fas fa-plus mr-1"></i> Add
+                        </button>
+                    `;
+                    availablePlatforms.appendChild(platformElement);
+                });
+                
+                // Add event listeners to add buttons
+                const addButtons = availablePlatforms.querySelectorAll('.add-platform-btn');
+                addButtons.forEach(button => {
+                    button.addEventListener('click', function(e) {
+                        e.stopPropagation();
+                        const platformName = this.getAttribute('data-platform');
+                        addSocialMediaPlatform(platformName);
+                    });
+                });
+            }
+        }
+
+        // Add new social media platform
+        function addNewSocialMediaPlatform() {
+            // For demo purposes, we'll add Twitter
+            const platformName = prompt('Enter platform name (e.g., Twitter, Instagram):');
+            if (!platformName) return;
+            
+            const url = prompt(`Enter your ${platformName} URL:`);
+            if (!url) return;
+            
+            // In a real app, this would save to a database
+            showToast(`${platformName} link added!`, 'success');
+            
+            // Add to social media icons
+            const socialMediaIcons = document.getElementById('socialMediaIcons');
+            const iconMap = {
+                'Twitter': { icon: 'fab fa-twitter', color: 'social-twitter' },
+                'Instagram': { icon: 'fab fa-instagram', color: 'social-instagram' },
+                'Facebook': { icon: 'fab fa-facebook-f', color: 'social-facebook' },
+                'LinkedIn': { icon: 'fab fa-linkedin-in', color: 'social-linkedin' },
+                'YouTube': { icon: 'fab fa-youtube', color: 'social-youtube' },
+                'GitHub': { icon: 'fab fa-github', color: 'social-github' },
+                'TikTok': { icon: 'fab fa-tiktok', color: 'social-tiktok' },
+                'Discord': { icon: 'fab fa-discord', color: 'social-discord' },
+                'Reddit': { icon: 'fab fa-reddit-alien', color: 'social-reddit' },
+                'Snapchat': { icon: 'fab fa-snapchat-ghost', color: 'social-snapchat' },
+                'WhatsApp': { icon: 'fab fa-whatsapp', color: 'social-whatsapp' },
+                'Telegram': { icon: 'fab fa-telegram-plane', color: 'social-telegram' },
+                'Pinterest': { icon: 'fab fa-pinterest-p', color: 'social-pinterest' },
+                'Spotify': { icon: 'fab fa-spotify', color: 'social-spotify' }
+            };
+            
+            const platformInfo = iconMap[platformName] || { icon: 'fas fa-share-alt', color: 'social-twitter' };
+            
+            const iconElement = document.createElement('a');
+            iconElement.href = url;
+            iconElement.target = '_blank';
+            iconElement.rel = 'noopener noreferrer';
+            iconElement.className = `social-icon ${platformInfo.color}`;
+            iconElement.title = platformName;
+            iconElement.innerHTML = `<i class="${platformInfo.icon}"></i>`;
+            
+            socialMediaIcons.appendChild(iconElement);
+        }
+
+        // Add social media platform
+        function addSocialMediaPlatform(platformName) {
+            const url = prompt(`Enter your ${platformName} URL:`);
+            if (!url) return;
+            
+            // In a real app, this would save to a database
+            showToast(`${platformName} link added!`, 'success');
+            
+            // Add to social media icons
+            const socialMediaIcons = document.getElementById('socialMediaIcons');
+            const iconMap = {
+                'Twitter': { icon: 'fab fa-twitter', color: 'social-twitter' },
+                'Instagram': { icon: 'fab fa-instagram', color: 'social-instagram' },
+                'Facebook': { icon: 'fab fa-facebook-f', color: 'social-facebook' },
+                'LinkedIn': { icon: 'fab fa-linkedin-in', color: 'social-linkedin' },
+                'YouTube': { icon: 'fab fa-youtube', color: 'social-youtube' },
+                'GitHub': { icon: 'fab fa-github', color: 'social-github' },
+                'TikTok': { icon: 'fab fa-tiktok', color: 'social-tiktok' },
+                'Discord': { icon: 'fab fa-discord', color: 'social-discord' },
+                'Reddit': { icon: 'fab fa-reddit-alien', color: 'social-reddit' },
+                'Snapchat': { icon: 'fab fa-snapchat-ghost', color: 'social-snapchat' },
+                'WhatsApp': { icon: 'fab fa-whatsapp', color: 'social-whatsapp' },
+                'Telegram': { icon: 'fab fa-telegram-plane', color: 'social-telegram' },
+                'Pinterest': { icon: 'fab fa-pinterest-p', color: 'social-pinterest' },
+                'Spotify': { icon: 'fab fa-spotify', color: 'social-spotify' }
+            };
+            
+            const platformInfo = iconMap[platformName] || { icon: 'fas fa-share-alt', color: 'social-twitter' };
+            
+            const iconElement = document.createElement('a');
+            iconElement.href = url;
+            iconElement.target = '_blank';
+            iconElement.rel = 'noopener noreferrer';
+            iconElement.className = `social-icon ${platformInfo.color}`;
+            iconElement.title = platformName;
+            iconElement.innerHTML = `<i class="${platformInfo.icon}"></i>`;
+            
+            socialMediaIcons.appendChild(iconElement);
+        }
+
+        // Set up friend system
+        function setupFriendSystem() {
+            // This would typically load friend data from a database
+            // For demo purposes, we'll use sample data
+        }
+
+        // Set up friend request actions
+        function setupFriendRequestActions() {
+            // Accept friend request
+            document.querySelectorAll('.friend-action-accept').forEach(button => {
+                button.addEventListener('click', function(e) {
+                    e.stopPropagation();
+                    const requestItem = this.closest('.friend-request-item');
+                    const userName = requestItem.querySelector('.friend-request-name').textContent;
+                    
+                    // Remove from requests and add to friends
+                    requestItem.remove();
+                    
+                    // Add to friends list
+                    const friendsList = document.getElementById('friendsList');
+                    const friendItem = document.createElement('div');
+                    friendItem.className = 'friend-item';
+                    friendItem.innerHTML = `
+                        <div class="friend-avatar">
+                            <i class="fas fa-user"></i>
+                        </div>
+                        <div class="friend-info">
+                            <div class="friend-name">${userName}</div>
+                            <div class="friend-status">
+                                <span class="connection-status-indicator status-online"></span>
+                                <span>Online</span>
+                            </div>
+                        </div>
+                        <div class="friend-actions">
+                            <button class="px-3 py-1 glass-effect text-blue-400 rounded-lg hover:bg-blue-800/30 transition">
+                                <i class="fas fa-comment"></i>
+                            </button>
+                        </div>
+                    `;
+                    friendsList.appendChild(friendItem);
+                    
+                    showToast(`You are now friends with ${userName}!`, 'success');
+                    
+                    // Update friend count
+                    const friendsCount = document.getElementById('friendsCount');
+                    friendsCount.textContent = parseInt(friendsCount.textContent) + 1;
+                });
+            });
+            
+            // Decline friend request
+            document.querySelectorAll('.friend-action-decline').forEach(button => {
+                button.addEventListener('click', function(e) {
+                    e.stopPropagation();
+                    const requestItem = this.closest('.friend-request-item');
+                    const userName = requestItem.querySelector('.friend-request-name').textContent;
+                    
+                    requestItem.remove();
+                    showToast(`Friend request from ${userName} declined`, 'info');
+                });
+            });
+            
+            // Cancel sent request
+            document.querySelectorAll('.friend-action-cancel').forEach(button => {
+                button.addEventListener('click', function(e) {
+                    e.stopPropagation();
+                    const requestItem = this.closest('.friend-request-item');
+                    const userName = requestItem.querySelector('.friend-request-name').textContent;
+                    
+                    requestItem.remove();
+                    showToast(`Friend request to ${userName} cancelled`, 'info');
+                });
+            });
+            
+            // Add friend from suggestions
+            document.querySelectorAll('.friend-suggestion-item .friend-action-accept').forEach(button => {
+                button.addEventListener('click', function(e) {
+                    e.stopPropagation();
+                    const suggestionItem = this.closest('.friend-suggestion-item');
+                    const userName = suggestionItem.querySelector('.friend-suggestion-name').textContent;
+                    
+                    // Remove from suggestions and add to sent requests
+                    suggestionItem.remove();
+                    
+                    // Add to sent requests
+                    const sentRequests = document.getElementById('sentRequests');
+                    const requestItem = document.createElement('div');
+                    requestItem.className = 'friend-request-item';
+                    requestItem.innerHTML = `
+                        <div class="friend-request-avatar">
+                            <i class="fas fa-user"></i>
+                        </div>
+                        <div class="friend-request-info">
+                            <div class="friend-request-name">${userName}</div>
+                            <div class="friend-request-mutual">Pending</div>
+                        </div>
+                        <div class="friend-request-actions">
+                            <button class="friend-action-btn friend-action-cancel">
+                                <i class="fas fa-times mr-1"></i> Cancel
+                            </button>
+                        </div>
+                    `;
+                    sentRequests.appendChild(requestItem);
+                    
+                    // Set up cancel action for the new request
+                    requestItem.querySelector('.friend-action-cancel').addEventListener('click', function(e) {
+                        e.stopPropagation();
+                        requestItem.remove();
+                        showToast(`Friend request to ${userName} cancelled`, 'info');
+                    });
+                    
+                    showToast(`Friend request sent to ${userName}!`, 'success');
+                });
+            });
+        }
+
+        // Show search modal
+        function showSearchModal(title, placeholder) {
+            document.getElementById('searchUserModal').classList.remove('hidden');
+            document.getElementById('searchUserTitle').textContent = title;
+            document.getElementById('userSearchInput').placeholder = placeholder;
+            
+            // Clear previous results
+            document.getElementById('searchResults').innerHTML = '';
+        }
+
+        // Search users
+        function searchUsers() {
+            const searchInput = document.getElementById('userSearchInput');
+            const query = searchInput.value.trim();
+            
+            if (!query) {
+                showToast('Please enter a search term', 'error');
+                return;
+            }
+            
+            // Show loading
+            const searchResults = document.getElementById('searchResults');
+            searchResults.innerHTML = `
+                <div class="text-center py-4">
+                    <i class="fas fa-circle-notch fa-spin text-blue-400 text-xl mr-3"></i>
+                    <span class="text-blue-300">Searching...</span>
+                </div>
+            `;
+            
+            // Simulate API call
+            setTimeout(() => {
+                // Sample search results
+                const results = [
+                    { name: 'Sarah Miller', username: 'sarahm', mutualFriends: 5 },
+                    { name: 'Michael Chen', username: 'michaelc', mutualFriends: 12 },
+                    { name: 'Jessica Wong', username: 'jessicaw', mutualFriends: 8 }
+                ];
+                
+                searchResults.innerHTML = '';
+                
+                if (results.length === 0) {
+                    searchResults.innerHTML = `
+                        <div class="text-center py-4 text-blue-300">
+                            <i class="fas fa-search text-xl mb-2"></i>
+                            <p>No users found</p>
+                        </div>
+                    `;
+                    return;
+                }
+                
+                results.forEach(user => {
+                    const userElement = document.createElement('div');
+                    userElement.className = 'friend-suggestion-item';
+                    userElement.innerHTML = `
+                        <div class="friend-suggestion-avatar">
+                            <i class="fas fa-user"></i>
+                        </div>
+                        <div class="friend-suggestion-info">
+                            <div class="friend-suggestion-name">${user.name}</div>
+                            <div class="friend-suggestion-mutual">${user.mutualFriends} mutual friends</div>
+                        </div>
+                        <div class="friend-suggestion-actions">
+                            <button class="friend-action-btn friend-action-accept">
+                                <i class="fas fa-user-plus mr-1"></i> Add
+                            </button>
+                        </div>
+                    `;
+                    searchResults.appendChild(userElement);
+                    
+                    // Set up add friend action
+                    userElement.querySelector('.friend-action-accept').addEventListener('click', function(e) {
+                        e.stopPropagation();
+                        userElement.remove();
+                        
+                        // Add to sent requests
+                        const sentRequests = document.getElementById('sentRequests');
+                        const requestItem = document.createElement('div');
+                        requestItem.className = 'friend-request-item';
+                        requestItem.innerHTML = `
+                            <div class="friend-request-avatar">
+                                <i class="fas fa-user"></i>
+                            </div>
+                            <div class="friend-request-info">
+                                <div class="friend-request-name">${user.name}</div>
+                                <div class="friend-request-mutual">Pending</div>
+                            </div>
+                            <div class="friend-request-actions">
+                                <button class="friend-action-btn friend-action-cancel">
+                                    <i class="fas fa-times mr-1"></i> Cancel
+                                </button>
+                            </div>
+                        `;
+                        sentRequests.appendChild(requestItem);
+                        
+                        // Set up cancel action for the new request
+                        requestItem.querySelector('.friend-action-cancel').addEventListener('click', function(e) {
+                            e.stopPropagation();
+                            requestItem.remove();
+                            showToast(`Friend request to ${user.name} cancelled`, 'info');
+                        });
+                        
+                        showToast(`Friend request sent to ${user.name}!`, 'success');
+                        
+                        // Close modal after sending request
+                        document.getElementById('searchUserModal').classList.add('hidden');
+                    });
+                });
+            }, 1500);
+        }
+
+        // Import from social media
+        function importFromSocialMedia() {
+            showToast('Social media import feature coming soon!', 'info');
+        }
+
+        // Set up logout functionality
+        function setupLogout() {
+            document.getElementById('logoutBtn').addEventListener('click', () => {
+                if (confirm('Are you sure you want to log out?')) {
+                    // Show loading
+                    document.getElementById('loadingSpinner').style.display = 'block';
+                    
+                    // Simulate logout process
+                    setTimeout(() => {
+                        // Redirect to login page
+                        window.location.href = 'index.html';
+                    }, 1000);
+                }
+            });
+        }
+
+        // Show toast message
+        function showToast(message, type = 'info') {
+            // Create toast element
+            const toast = document.createElement('div');
+            toast.className = `glass-effect rounded-xl p-4 mb-3 border ${
+                type === 'success' ? 'border-green-700 text-green-400' : 
+                type === 'error' ? 'border-red-700 text-red-400' : 
+                'border-blue-700 text-blue-400'
+            }`;
+            toast.innerHTML = `
+                <div class="flex items-center">
+                    <i class="fas fa-${type === 'success' ? 'check-circle' : type === 'error' ? 'exclamation-circle' : 'info-circle'} mr-3"></i>
+                    <span>${message}</span>
+                </div>
+            `;
+            
+            // Add to toast container
+            let toastContainer = document.getElementById('toastContainer');
+            if (!toastContainer) {
+                toastContainer = document.createElement('div');
+                toastContainer.id = 'toastContainer';
+                toastContainer.className = 'toast';
+                document.body.appendChild(toastContainer);
+            }
+            
+            toastContainer.appendChild(toast);
+            
+            // Remove after 3 seconds
+            setTimeout(() => {
+                toast.remove();
+                if (toastContainer.children.length === 0) {
+                    toastContainer.remove();
+                }
+            }, 3000);
+        }
+    </script>
+</body>
+</html>

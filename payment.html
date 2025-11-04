@@ -1,0 +1,1269 @@
+<!DOCTYPE html>
+<html lang="en" class="h-full">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Payments - ConnectSphere</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css" rel="stylesheet">
+    
+    <!-- Firebase SDK -->
+    <script src="https://www.gstatic.com/firebasejs/9.22.1/firebase-app-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/9.22.1/firebase-firestore-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/9.22.1/firebase-auth-compat.js"></script>
+    
+    <style>
+        .glass-card {
+            background: rgba(255, 255, 255, 0.1);
+            backdrop-filter: blur(20px);
+            border: 1px solid rgba(255, 255, 255, 0.2);
+        }
+        .primary-gradient {
+            background: linear-gradient(135deg, #3b82f6 0%, #1d4ed8 100%);
+        }
+        .security-gradient {
+            background: linear-gradient(135deg, #10b981 0%, #059669 100%);
+        }
+        .rewards-gradient {
+            background: linear-gradient(135deg, #f59e0b 0%, #d97706 100%);
+        }
+        .crypto-gradient {
+            background: linear-gradient(135deg, #8b5cf6 0%, #7c3aed 100%);
+        }
+        
+        .card-glow {
+            box-shadow: 0 0 30px rgba(59, 130, 246, 0.4);
+        }
+        .pulse-effect {
+            animation: pulseEffect 2s infinite;
+        }
+        @keyframes pulseEffect {
+            0%, 100% { opacity: 1; }
+            50% { opacity: 0.7; }
+        }
+        
+        /* Payment-specific styles */
+        .payment-method {
+            transition: all 0.3s ease;
+            cursor: pointer;
+        }
+        .payment-method:hover {
+            transform: translateY(-5px);
+            box-shadow: 0 10px 25px rgba(0, 0, 0, 0.3);
+        }
+        .payment-method.selected {
+            border-color: #3b82f6;
+            background: rgba(59, 130, 246, 0.1);
+            box-shadow: 0 0 20px rgba(59, 130, 246, 0.5);
+        }
+        
+        /* Security badges */
+        .security-badge {
+            display: inline-flex;
+            align-items: center;
+            padding: 0.25rem 0.75rem;
+            border-radius: 9999px;
+            font-size: 0.75rem;
+            font-weight: 600;
+            background: rgba(16, 185, 129, 0.2);
+            color: #10b981;
+            border: 1px solid rgba(16, 185, 129, 0.5);
+        }
+        
+        /* Progress indicators */
+        .progress-step {
+            width: 40px;
+            height: 40px;
+            border-radius: 50%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-weight: 600;
+            background: rgba(255, 255, 255, 0.1);
+            border: 2px solid rgba(255, 255, 255, 0.2);
+        }
+        .progress-step.active {
+            background: linear-gradient(135deg, #3b82f6, #1d4ed8);
+            border-color: #3b82f6;
+            color: white;
+        }
+        .progress-step.completed {
+            background: linear-gradient(135deg, #10b981, #059669);
+            border-color: #10b981;
+            color: white;
+        }
+        
+        /* Transaction history */
+        .transaction-item {
+            transition: all 0.3s ease;
+        }
+        .transaction-item:hover {
+            background: rgba(255, 255, 255, 0.05);
+            transform: translateX(5px);
+        }
+        
+        /* Fraud detection alerts */
+        .fraud-alert {
+            background: linear-gradient(135deg, rgba(239, 68, 68, 0.2), rgba(220, 38, 38, 0.2));
+            border: 1px solid rgba(239, 68, 68, 0.5);
+            animation: pulseEffect 1.5s infinite;
+        }
+        
+        /* Gamification elements */
+        .reward-spin {
+            animation: spin 3s ease-in-out;
+        }
+        @keyframes spin {
+            from { transform: rotate(0deg); }
+            to { transform: rotate(360deg); }
+        }
+        
+        .cashback-badge {
+            background: linear-gradient(135deg, #f59e0b, #d97706);
+            animation: bounce 2s infinite;
+        }
+        @keyframes bounce {
+            0%, 100% { transform: translateY(0); }
+            50% { transform: translateY(-5px); }
+        }
+        
+        /* Form styles */
+        .form-group {
+            margin-bottom: 1.5rem;
+        }
+        .form-label {
+            display: block;
+            margin-bottom: 0.5rem;
+            font-weight: 600;
+            color: #cbd5e1;
+        }
+        .form-input {
+            width: 100%;
+            padding: 0.75rem 1rem;
+            background: rgba(255, 255, 255, 0.1);
+            border: 1px solid #475569;
+            border-radius: 0.75rem;
+            color: white;
+            font-size: 1rem;
+        }
+        .form-input:focus {
+            outline: none;
+            border-color: #3b82f6;
+            box-shadow: 0 0 0 2px rgba(59, 130, 246, 0.2);
+        }
+        
+        /* Loading states */
+        .loading-spinner {
+            display: inline-block;
+            width: 20px;
+            height: 20px;
+            border: 3px solid rgba(255,255,255,.3);
+            border-radius: 50%;
+            border-top-color: #fff;
+            animation: spin 1s ease-in-out infinite;
+        }
+        
+        /* Toast notifications */
+        .toast {
+            position: fixed;
+            top: 20px;
+            right: 20px;
+            padding: 12px 20px;
+            border-radius: 8px;
+            color: white;
+            z-index: 10000;
+            transform: translateX(400px);
+            transition: transform 0.3s ease;
+        }
+        .toast.show {
+            transform: translateX(0);
+        }
+        .toast.success {
+            background: #10b981;
+        }
+        .toast.error {
+            background: #ef4444;
+        }
+        .toast.info {
+            background: #3b82f6;
+        }
+        
+        /* M-Pesa specific styles */
+        .mpesa-green {
+            background: linear-gradient(135deg, #00B300 0%, #006400 100%);
+        }
+        .mpesa-card {
+            border: 1px solid rgba(0, 179, 0, 0.5);
+            background: rgba(0, 179, 0, 0.1);
+        }
+        
+        /* Connection status */
+        .connection-status {
+            position: fixed;
+            bottom: 20px;
+            right: 20px;
+            padding: 8px 16px;
+            border-radius: 20px;
+            font-size: 12px;
+            font-weight: 600;
+            z-index: 1000;
+            display: flex;
+            align-items: center;
+            gap: 6px;
+        }
+        .connection-status.connected {
+            background: rgba(16, 185, 129, 0.2);
+            color: #10b981;
+            border: 1px solid rgba(16, 185, 129, 0.5);
+        }
+        .connection-status.connecting {
+            background: rgba(245, 158, 11, 0.2);
+            color: #f59e0b;
+            border: 1px solid rgba(245, 158, 11, 0.5);
+        }
+        .connection-status.error {
+            background: rgba(239, 68, 68, 0.2);
+            color: #ef4444;
+            border: 1px solid rgba(239, 68, 68, 0.5);
+        }
+        
+        /* Modal animations */
+        .fade-in {
+            animation: fadeIn 0.3s ease-in-out;
+        }
+        @keyframes fadeIn {
+            from { opacity: 0; transform: scale(0.9); }
+            to { opacity: 1; transform: scale(1); }
+        }
+        
+        /* Reward wheel animation */
+        .spin-wheel {
+            animation: spinWheel 3s cubic-bezier(0.2, 0.8, 0.3, 1);
+        }
+        @keyframes spinWheel {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(1080deg); }
+        }
+    </style>
+</head>
+<body class="h-full bg-gradient-to-br from-slate-900 via-blue-900 to-slate-900 text-white">
+    <!-- Connection Status Indicator -->
+    <div id="connectionStatus" class="connection-status connecting">
+        <i class="fas fa-sync fa-spin"></i>
+        <span>Connecting to Firebase...</span>
+    </div>
+
+    <!-- Toast Notifications -->
+    <div id="toastContainer"></div>
+
+    <div class="min-h-screen">
+        <!-- Header -->
+        <div class="glass-card border-b border-slate-700">
+            <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+                <div class="flex justify-between items-center py-4">
+                    <div class="flex items-center space-x-3">
+                        <div class="w-10 h-10 primary-gradient rounded-2xl flex items-center justify-center">
+                            <i class="fas fa-wallet text-white"></i>
+                        </div>
+                        <div>
+                            <h1 class="text-2xl font-black text-transparent bg-clip-text bg-gradient-to-r from-blue-400 to-cyan-400">
+                                ConnectPay
+                            </h1>
+                            <p class="text-slate-400 text-sm">Secure, fast, and social payments</p>
+                        </div>
+                    </div>
+                    <div class="flex items-center space-x-4">
+                        <div class="text-right">
+                            <div class="font-semibold text-white" id="userBalance">KSh 12,450.00</div>
+                            <div class="text-slate-400 text-sm">Available Balance</div>
+                        </div>
+                        <div class="w-10 h-10 bg-gradient-to-r from-green-500 to-emerald-500 rounded-full flex items-center justify-center">
+                            <i class="fas fa-shield-alt text-white"></i>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
+            <!-- Quick Actions -->
+            <div class="grid grid-cols-2 md:grid-cols-4 gap-4 mb-8">
+                <button class="glass-card rounded-2xl border border-slate-700 p-4 text-center hover:border-blue-400 transition" onclick="openSendMoneyModal()">
+                    <div class="w-12 h-12 primary-gradient rounded-full flex items-center justify-center mx-auto mb-2">
+                        <i class="fas fa-paper-plane text-white"></i>
+                    </div>
+                    <span class="font-semibold text-white">Send Money</span>
+                </button>
+                
+                <button class="glass-card rounded-2xl border border-slate-700 p-4 text-center hover:border-green-400 transition" onclick="openRequestMoneyModal()">
+                    <div class="w-12 h-12 security-gradient rounded-full flex items-center justify-center mx-auto mb-2">
+                        <i class="fas fa-hand-holding-usd text-white"></i>
+                    </div>
+                    <span class="font-semibold text-white">Request Money</span>
+                </button>
+                
+                <button class="glass-card rounded-2xl border border-slate-700 p-4 text-center hover:border-yellow-400 transition" onclick="openMarketplaceModal()">
+                    <div class="w-12 h-12 rewards-gradient rounded-full flex items-center justify-center mx-auto mb-2">
+                        <i class="fas fa-shopping-cart text-white"></i>
+                    </div>
+                    <span class="font-semibold text-white">Marketplace</span>
+                </button>
+                
+                <button class="glass-card rounded-2xl border border-slate-700 p-4 text-center hover:border-purple-400 transition" onclick="openCryptoModal()">
+                    <div class="w-12 h-12 crypto-gradient rounded-full flex items-center justify-center mx-auto mb-2">
+                        <i class="fas fa-coins text-white"></i>
+                    </div>
+                    <span class="font-semibold text-white">Crypto</span>
+                </button>
+            </div>
+
+            <!-- Payment Overview -->
+            <div class="grid grid-cols-1 lg:grid-cols-3 gap-6 mb-8">
+                <!-- Balance Card -->
+                <div class="glass-card rounded-2xl border border-slate-700 p-6">
+                    <h3 class="text-xl font-black text-white mb-4">Account Balance</h3>
+                    <div class="text-3xl font-black text-green-400 mb-2" id="balanceAmount">KSh 12,450.00</div>
+                    <p class="text-slate-400 text-sm mb-4">Available for transactions</p>
+                    <div class="flex space-x-3">
+                        <button class="flex-1 px-4 py-2 primary-gradient text-white rounded-xl font-semibold hover:scale-105 transition" onclick="openAddMoneyModal()">
+                            Add Money
+                        </button>
+                        <button class="flex-1 px-4 py-2 glass-card border border-slate-700 rounded-xl text-slate-400 hover:text-white transition" onclick="openWithdrawModal()">
+                            Withdraw
+                        </button>
+                    </div>
+                </div>
+
+                <!-- Security Status -->
+                <div class="glass-card rounded-2xl border border-slate-700 p-6">
+                    <h3 class="text-xl font-black text-white mb-4">Security Status</h3>
+                    <div class="space-y-3 mb-4">
+                        <div class="flex justify-between items-center">
+                            <span class="text-slate-400">AI Fraud Detection</span>
+                            <span class="security-badge" id="fraudDetectionStatus">
+                                <i class="fas fa-shield-alt mr-1"></i> Active
+                            </span>
+                        </div>
+                        <div class="flex justify-between items-center">
+                            <span class="text-slate-400">Biometric Auth</span>
+                            <span class="security-badge" id="biometricStatus">
+                                <i class="fas fa-fingerprint mr-1"></i> Enabled
+                            </span>
+                        </div>
+                        <div class="flex justify-between items-center">
+                            <span class="text-slate-400">2FA</span>
+                            <span class="security-badge" id="twoFAStatus">
+                                <i class="fas fa-mobile-alt mr-1"></i> Enabled
+                            </span>
+                        </div>
+                    </div>
+                    <button class="w-full px-4 py-2 security-gradient text-white rounded-xl font-semibold hover:scale-105 transition" onclick="openSecuritySettings()">
+                        <i class="fas fa-cog mr-2"></i> Security Settings
+                    </button>
+                </div>
+
+                <!-- Rewards & Cashback -->
+                <div class="glass-card rounded-2xl border border-slate-700 p-6">
+                    <h3 class="text-xl font-black text-white mb-4">Rewards</h3>
+                    <div class="flex items-center justify-between mb-4">
+                        <div>
+                            <div class="text-2xl font-black text-yellow-400" id="cashbackAmount">KSh 245</div>
+                            <div class="text-slate-400 text-sm">Cashback Earned</div>
+                        </div>
+                        <div class="cashback-badge w-12 h-12 rounded-full flex items-center justify-center">
+                            <i class="fas fa-gift text-white"></i>
+                        </div>
+                    </div>
+                    <div class="space-y-2 mb-4">
+                        <div class="flex justify-between text-sm">
+                            <span class="text-slate-400">Daily Spin Available</span>
+                            <span class="text-green-400 font-semibold cursor-pointer" onclick="openRewardsSpinModal()">Spin Now</span>
+                        </div>
+                        <div class="flex justify-between text-sm">
+                            <span class="text-slate-400">Streak Bonus</span>
+                            <span class="text-yellow-400 font-semibold" id="streakCount">Day 5</span>
+                        </div>
+                    </div>
+                    <button class="w-full px-4 py-2 rewards-gradient text-white rounded-xl font-semibold hover:scale-105 transition" onclick="claimRewards()">
+                        <i class="fas fa-trophy mr-2"></i> Claim Rewards
+                    </button>
+                </div>
+            </div>
+
+            <!-- Payment Methods -->
+            <div class="mb-8">
+                <h2 class="text-3xl font-black text-transparent bg-clip-text bg-gradient-to-r from-blue-400 to-cyan-400 mb-6">
+                    Payment Methods
+                </h2>
+
+                <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4 mb-6" id="paymentMethods">
+                    <div class="payment-method glass-card rounded-2xl border border-slate-700 p-4 text-center" data-method="mpesa">
+                        <div class="w-16 h-16 mpesa-green rounded-full flex items-center justify-center mx-auto mb-3">
+                            <i class="fas fa-mobile-alt text-white text-2xl"></i>
+                        </div>
+                        <h3 class="font-semibold text-white">M-Pesa</h3>
+                        <p class="text-slate-400 text-sm">Mobile Money</p>
+                    </div>
+
+                    <div class="payment-method glass-card rounded-2xl border border-slate-700 p-4 text-center" data-method="card">
+                        <div class="w-16 h-16 primary-gradient rounded-full flex items-center justify-center mx-auto mb-3">
+                            <i class="fas fa-credit-card text-white text-2xl"></i>
+                        </div>
+                        <h3 class="font-semibold text-white">Card</h3>
+                        <p class="text-slate-400 text-sm">Visa • MasterCard</p>
+                    </div>
+
+                    <div class="payment-method glass-card rounded-2xl border border-slate-700 p-4 text-center" data-method="bank">
+                        <div class="w-16 h-16 security-gradient rounded-full flex items-center justify-center mx-auto mb-3">
+                            <i class="fas fa-university text-white text-2xl"></i>
+                        </div>
+                        <h3 class="font-semibold text-white">Bank Transfer</h3>
+                        <p class="text-slate-400 text-sm">Direct Transfer</p>
+                    </div>
+
+                    <div class="payment-method glass-card rounded-2xl border border-slate-700 p-4 text-center" data-method="crypto">
+                        <div class="w-16 h-16 crypto-gradient rounded-full flex items-center justify-center mx-auto mb-3">
+                            <i class="fas fa-coins text-white text-2xl"></i>
+                        </div>
+                        <h3 class="font-semibold text-white">Crypto</h3>
+                        <p class="text-slate-400 text-sm">Bitcoin • Ethereum</p>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Recent Transactions -->
+            <div class="mb-8">
+                <div class="flex items-center justify-between mb-6">
+                    <h2 class="text-3xl font-black text-transparent bg-clip-text bg-gradient-to-r from-purple-400 to-pink-400">
+                        Recent Transactions
+                    </h2>
+                    <button class="text-purple-400 hover:text-pink-300 font-semibold transition" onclick="viewAllTransactions()">
+                        View All
+                    </button>
+                </div>
+
+                <div class="glass-card rounded-2xl border border-slate-700 p-6">
+                    <div class="space-y-4" id="transactionsList">
+                        <!-- Transactions will be loaded here -->
+                    </div>
+                </div>
+            </div>
+
+            <!-- AI Fraud Detection -->
+            <div class="glass-card rounded-2xl border border-slate-700 p-6 mb-8">
+                <div class="flex items-center justify-between mb-4">
+                    <h3 class="text-2xl font-black text-white">AI Fraud Detection</h3>
+                    <span class="security-badge pulse-effect">
+                        <i class="fas fa-shield-alt mr-1"></i> Real-time Protection
+                    </span>
+                </div>
+                <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
+                    <div class="text-center">
+                        <div class="text-3xl font-black text-green-400">99.7%</div>
+                        <div class="text-slate-400">Detection Accuracy</div>
+                    </div>
+                    <div class="text-center">
+                        <div class="text-3xl font-black text-blue-400">0.2s</div>
+                        <div class="text-slate-400">Response Time</div>
+                    </div>
+                    <div class="text-center">
+                        <div class="text-3xl font-black text-purple-400">24/7</div>
+                        <div class="text-slate-400">Active Monitoring</div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Social Payment Features -->
+            <div class="mb-8">
+                <h2 class="text-3xl font-black text-transparent bg-clip-text bg-gradient-to-r from-green-400 to-cyan-400 mb-6">
+                    Social Payments
+                </h2>
+
+                <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+                    <div class="glass-card rounded-2xl border border-slate-700 p-6 text-center">
+                        <div class="w-16 h-16 primary-gradient rounded-full flex items-center justify-center mx-auto mb-4">
+                            <i class="fas fa-users text-white text-2xl"></i>
+                        </div>
+                        <h3 class="text-lg font-semibold text-white mb-2">Group Payments</h3>
+                        <p class="text-slate-400 text-sm mb-4">Split bills and collect money from groups</p>
+                        <button class="w-full px-4 py-2 primary-gradient text-white rounded-xl font-semibold hover:scale-105 transition" onclick="createGroup()">
+                            Create Group
+                        </button>
+                    </div>
+
+                    <div class="glass-card rounded-2xl border border-slate-700 p-6 text-center">
+                        <div class="w-16 h-16 rewards-gradient rounded-full flex items-center justify-center mx-auto mb-4">
+                            <i class="fas fa-gift text-white text-2xl"></i>
+                        </div>
+                        <h3 class="text-lg font-semibold text-white mb-2">Social Gifting</h3>
+                        <p class="text-slate-400 text-sm mb-4">Send gifts with personalized messages</p>
+                        <button class="w-full px-4 py-2 rewards-gradient text-white rounded-xl font-semibold hover:scale-105 transition" onclick="sendGift()">
+                            Send Gift
+                        </button>
+                    </div>
+
+                    <div class="glass-card rounded-2xl border border-slate-700 p-6 text-center">
+                        <div class="w-16 h-16 security-gradient rounded-full flex items-center justify-center mx-auto mb-4">
+                            <i class="fas fa-bullseye text-white text-2xl"></i>
+                        </div>
+                        <h3 class="text-lg font-semibold text-white mb-2">Shared Goals</h3>
+                        <p class="text-slate-400 text-sm mb-4">Save together for common objectives</p>
+                        <button class="w-full px-4 py-2 security-gradient text-white rounded-xl font-semibold hover:scale-105 transition" onclick="startGoal()">
+                            Start Goal
+                        </button>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Payment Modals -->
+    
+    <!-- Send Money Modal -->
+    <div id="sendMoneyModal" class="fixed inset-0 bg-black/80 flex items-center justify-center p-4 z-50 hidden">
+        <div class="glass-card rounded-2xl p-6 max-w-md w-full fade-in">
+            <div class="flex justify-between items-center mb-6">
+                <h3 class="text-2xl font-black text-white">Send Money</h3>
+                <button class="text-slate-400 hover:text-white" onclick="closeModal('sendMoneyModal')">
+                    <i class="fas fa-times"></i>
+                </button>
+            </div>
+            
+            <div class="mb-6">
+                <div class="flex justify-between mb-4">
+                    <div class="progress-step completed">1</div>
+                    <div class="flex-1 h-1 bg-slate-700 mx-2 mt-4"></div>
+                    <div class="progress-step active">2</div>
+                    <div class="flex-1 h-1 bg-slate-700 mx-2 mt-4"></div>
+                    <div class="progress-step">3</div>
+                </div>
+                
+                <div class="form-group">
+                    <label class="form-label">Recipient</label>
+                    <input type="text" class="form-input" id="recipientInput" placeholder="Search friends or enter phone number">
+                </div>
+                
+                <div class="form-group">
+                    <label class="form-label">Amount</label>
+                    <input type="number" class="form-input" id="sendAmountInput" placeholder="KSh 0.00">
+                </div>
+                
+                <div class="form-group">
+                    <label class="form-label">Message (Optional)</label>
+                    <input type="text" class="form-input" id="sendMessageInput" placeholder="Add a note">
+                </div>
+                
+                <div class="fraud-alert rounded-xl p-4 mb-4 hidden" id="fraudAlert">
+                    <div class="flex items-center">
+                        <i class="fas fa-exclamation-triangle text-red-400 mr-2"></i>
+                        <span class="text-red-400 font-semibold">Suspicious Activity Detected</span>
+                    </div>
+                    <p class="text-slate-400 text-sm mt-1">This transaction matches known fraud patterns</p>
+                </div>
+            </div>
+            
+            <div class="flex space-x-3">
+                <button class="flex-1 px-4 py-2 glass-card border border-slate-700 rounded-xl text-slate-400 hover:border-blue-400 hover:text-blue-400 transition" onclick="closeModal('sendMoneyModal')">
+                    Cancel
+                </button>
+                <button class="flex-1 px-4 py-2 primary-gradient text-white rounded-xl font-semibold hover:scale-105 transition" onclick="processPayment()">
+                    Send Money
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Request Money Modal -->
+    <div id="requestMoneyModal" class="fixed inset-0 bg-black/80 flex items-center justify-center p-4 z-50 hidden">
+        <div class="glass-card rounded-2xl p-6 max-w-md w-full fade-in">
+            <div class="flex justify-between items-center mb-6">
+                <h3 class="text-2xl font-black text-white">Request Money</h3>
+                <button class="text-slate-400 hover:text-white" onclick="closeModal('requestMoneyModal')">
+                    <i class="fas fa-times"></i>
+                </button>
+            </div>
+            
+            <div class="mb-6">
+                <div class="form-group">
+                    <label class="form-label">From</label>
+                    <input type="text" class="form-input" id="requestFromInput" placeholder="Select friends or groups">
+                </div>
+                
+                <div class="form-group">
+                    <label class="form-label">Amount</label>
+                    <input type="number" class="form-input" id="requestAmountInput" placeholder="KSh 0.00">
+                </div>
+                
+                <div class="form-group">
+                    <label class="form-label">Reason</label>
+                    <input type="text" class="form-input" id="requestReasonInput" placeholder="Dinner, rent, etc.">
+                </div>
+                
+                <div class="form-group">
+                    <label class="form-label">Split Equally</label>
+                    <div class="flex items-center">
+                        <input type="checkbox" class="mr-2" id="splitEqually">
+                        <label for="splitEqually" class="text-slate-400">Divide amount between selected people</label>
+                    </div>
+                </div>
+            </div>
+            
+            <div class="flex space-x-3">
+                <button class="flex-1 px-4 py-2 glass-card border border-slate-700 rounded-xl text-slate-400 hover:border-green-400 hover:text-green-400 transition" onclick="closeModal('requestMoneyModal')">
+                    Cancel
+                </button>
+                <button class="flex-1 px-4 py-2 security-gradient text-white rounded-xl font-semibold hover:scale-105 transition" onclick="sendRequest()">
+                    Send Request
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Add Money Modal -->
+    <div id="addMoneyModal" class="fixed inset-0 bg-black/80 flex items-center justify-center p-4 z-50 hidden">
+        <div class="glass-card rounded-2xl p-6 max-w-md w-full fade-in">
+            <div class="flex justify-between items-center mb-6">
+                <h3 class="text-2xl font-black text-white">Add Money</h3>
+                <button class="text-slate-400 hover:text-white" onclick="closeModal('addMoneyModal')">
+                    <i class="fas fa-times"></i>
+                </button>
+            </div>
+            
+            <div class="mb-6">
+                <div class="form-group">
+                    <label class="form-label">Amount</label>
+                    <input type="number" class="form-input" id="addAmountInput" placeholder="KSh 0.00">
+                </div>
+                
+                <div class="form-group">
+                    <label class="form-label">Payment Method</label>
+                    <div class="grid grid-cols-2 gap-3">
+                        <div class="payment-option glass-card rounded-xl p-3 text-center cursor-pointer border border-slate-700 hover:border-blue-400" onclick="selectPaymentOption(this, 'mpesa')">
+                            <i class="fas fa-mobile-alt text-green-400 mb-1"></i>
+                            <div class="text-sm">M-Pesa</div>
+                        </div>
+                        <div class="payment-option glass-card rounded-xl p-3 text-center cursor-pointer border border-slate-700 hover:border-blue-400" onclick="selectPaymentOption(this, 'card')">
+                            <i class="fas fa-credit-card text-blue-400 mb-1"></i>
+                            <div class="text-sm">Card</div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+            
+            <div class="flex space-x-3">
+                <button class="flex-1 px-4 py-2 glass-card border border-slate-700 rounded-xl text-slate-400 hover:border-blue-400 hover:text-blue-400 transition" onclick="closeModal('addMoneyModal')">
+                    Cancel
+                </button>
+                <button class="flex-1 px-4 py-2 primary-gradient text-white rounded-xl font-semibold hover:scale-105 transition" onclick="addMoney()">
+                    Add Money
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Security Settings Modal -->
+    <div id="securitySettingsModal" class="fixed inset-0 bg-black/80 flex items-center justify-center p-4 z-50 hidden">
+        <div class="glass-card rounded-2xl p-6 max-w-md w-full fade-in">
+            <div class="flex justify-between items-center mb-6">
+                <h3 class="text-2xl font-black text-white">Security Settings</h3>
+                <button class="text-slate-400 hover:text-white" onclick="closeModal('securitySettingsModal')">
+                    <i class="fas fa-times"></i>
+                </button>
+            </div>
+            
+            <div class="mb-6 space-y-4">
+                <div class="flex justify-between items-center">
+                    <div>
+                        <div class="font-semibold text-white">AI Fraud Detection</div>
+                        <div class="text-slate-400 text-sm">Real-time transaction monitoring</div>
+                    </div>
+                    <label class="relative inline-flex items-center cursor-pointer">
+                        <input type="checkbox" class="sr-only peer" id="fraudToggle" checked>
+                        <div class="w-11 h-6 bg-slate-700 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-green-500"></div>
+                    </label>
+                </div>
+                
+                <div class="flex justify-between items-center">
+                    <div>
+                        <div class="font-semibold text-white">Biometric Authentication</div>
+                        <div class="text-slate-400 text-sm">Use fingerprint or face ID</div>
+                    </div>
+                    <label class="relative inline-flex items-center cursor-pointer">
+                        <input type="checkbox" class="sr-only peer" id="biometricToggle" checked>
+                        <div class="w-11 h-6 bg-slate-700 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-green-500"></div>
+                    </label>
+                </div>
+                
+                <div class="flex justify-between items-center">
+                    <div>
+                        <div class="font-semibold text-white">Two-Factor Authentication</div>
+                        <div class="text-slate-400 text-sm">Extra security for your account</div>
+                    </div>
+                    <label class="relative inline-flex items-center cursor-pointer">
+                        <input type="checkbox" class="sr-only peer" id="twoFAToggle" checked>
+                        <div class="w-11 h-6 bg-slate-700 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-green-500"></div>
+                    </label>
+                </div>
+            </div>
+            
+            <button class="w-full px-4 py-2 security-gradient text-white rounded-xl font-semibold hover:scale-105 transition" onclick="saveSecuritySettings()">
+                Save Settings
+            </button>
+        </div>
+    </div>
+
+    <!-- Daily Rewards Spin Modal -->
+    <div id="rewardsSpinModal" class="fixed inset-0 bg-black/80 flex items-center justify-center p-4 z-50 hidden">
+        <div class="glass-card rounded-2xl p-6 max-w-md w-full fade-in text-center">
+            <div class="flex justify-between items-center mb-6">
+                <h3 class="text-2xl font-black text-white">Daily Rewards</h3>
+                <button class="text-slate-400 hover:text-white" onclick="closeModal('rewardsSpinModal')">
+                    <i class="fas fa-times"></i>
+                </button>
+            </div>
+            
+            <div class="mb-6">
+                <div class="w-48 h-48 mx-auto relative" id="rewardWheel">
+                    <div class="absolute inset-0 rounded-full border-4 border-yellow-400"></div>
+                    <div class="absolute inset-8 rounded-full bg-yellow-400/20 flex items-center justify-center">
+                        <span class="text-4xl">🎁</span>
+                    </div>
+                    <div class="absolute top-0 left-1/2 transform -translate-x-1/2 -translate-y-1/2 text-4xl" id="wheelPointer">
+                        🎯
+                    </div>
+                </div>
+                
+                <p class="text-slate-400 mt-4">Spin to win daily cashback and rewards!</p>
+            </div>
+            
+            <button class="w-full px-4 py-2 rewards-gradient text-white rounded-xl font-semibold hover:scale-105 transition" onclick="spinRewardsWheel()" id="spinButton">
+                <i class="fas fa-sync mr-2"></i> Spin Now
+            </button>
+        </div>
+    </div>
+
+    <script>
+        // Firebase configuration
+        const firebaseConfig = {
+            apiKey: "AIzaSyC4mOkOjf4w33XvJ2QdQqS2q8X8w8X8w8X",
+            authDomain: "connectsphere-payments.firebaseapp.com",
+            projectId: "connectsphere-payments",
+            storageBucket: "connectsphere-payments.appspot.com",
+            messagingSenderId: "123456789012",
+            appId: "1:123456789012:web:8a8b8c8d8e8f9a0b1c2d3e"
+        };
+
+        // Initialize Firebase
+        console.log('🔄 Initializing Firebase...');
+        firebase.initializeApp(firebaseConfig);
+        const db = firebase.firestore();
+        const auth = firebase.auth();
+
+        // State
+        let selectedPaymentMethod = null;
+        let selectedPaymentOption = null;
+        let userBalance = 12450.00;
+        let cashbackBalance = 245;
+        let streakCount = 5;
+        let transactions = [
+            { type: 'sent', amount: 2499, description: 'Marketplace Purchase', date: 'Today • 14:30' },
+            { type: 'received', amount: 5000, description: 'Money Received', date: 'Yesterday • 09:15', from: 'John Doe' },
+            { type: 'received', amount: 125, description: 'Cashback Reward', date: '2 days ago • 16:45', note: 'Marketplace purchase' }
+        ];
+
+        // Initialize
+        document.addEventListener('DOMContentLoaded', function() {
+            setupEventListeners();
+            updateUI();
+            initializeFirebase();
+            loadTransactions();
+        });
+
+        function initializeFirebase() {
+            console.log('🔄 Testing Firebase connection...');
+            
+            // Test Firestore connection
+            db.collection('test').limit(1).get()
+                .then(() => {
+                    console.log('✅ Firebase Firestore connected successfully!');
+                    updateConnectionStatus('connected', 'Firebase Connected');
+                    showToast('Firebase connected successfully!', 'success');
+                })
+                .catch((error) => {
+                    console.error('❌ Firebase Firestore connection failed:', error);
+                    updateConnectionStatus('error', 'Connection Failed');
+                    showToast('Firebase connection failed. Using offline mode.', 'error');
+                });
+
+            // Auth state listener
+            auth.onAuthStateChanged((user) => {
+                if (user) {
+                    console.log('✅ User authenticated:', user.email);
+                } else {
+                    console.log('🔐 No user signed in (this is normal for now)');
+                    // You can implement anonymous auth here if needed
+                }
+            });
+        }
+
+        function setupEventListeners() {
+            // Payment method selection
+            document.querySelectorAll('.payment-method').forEach(method => {
+                method.addEventListener('click', function() {
+                    document.querySelectorAll('.payment-method').forEach(m => {
+                        m.classList.remove('selected');
+                    });
+                    this.classList.add('selected');
+                    selectedPaymentMethod = this.getAttribute('data-method');
+                    console.log(`✅ Selected payment method: ${selectedPaymentMethod}`);
+                    showToast(`${selectedPaymentMethod.toUpperCase()} selected as payment method`, 'info');
+                });
+            });
+
+            // Fraud detection simulation
+            const amountInput = document.querySelector('#sendAmountInput');
+            if (amountInput) {
+                amountInput.addEventListener('input', function() {
+                    const amount = parseFloat(this.value);
+                    const fraudAlert = document.getElementById('fraudAlert');
+                    
+                    if (amount > 50000) {
+                        fraudAlert.classList.remove('hidden');
+                        console.warn('🚨 Fraud alert triggered for amount:', amount);
+                    } else {
+                        fraudAlert.classList.add('hidden');
+                    }
+                });
+            }
+        }
+
+        function updateUI() {
+            document.getElementById('userBalance').textContent = `KSh ${userBalance.toLocaleString()}`;
+            document.getElementById('balanceAmount').textContent = `KSh ${userBalance.toLocaleString()}`;
+            document.getElementById('cashbackAmount').textContent = `KSh ${cashbackBalance}`;
+            document.getElementById('streakCount').textContent = `Day ${streakCount}`;
+        }
+
+        function loadTransactions() {
+            const transactionsList = document.getElementById('transactionsList');
+            transactionsList.innerHTML = '';
+            
+            transactions.forEach(transaction => {
+                const transactionClass = transaction.type === 'sent' ? 'text-red-400' : 'text-green-400';
+                const sign = transaction.type === 'sent' ? '-' : '+';
+                const icon = transaction.type === 'sent' ? 'fa-paper-plane' : 'fa-hand-holding-usd';
+                const gradient = transaction.type === 'sent' ? 'primary-gradient' : 'security-gradient';
+                
+                const transactionHTML = `
+                    <div class="transaction-item flex items-center justify-between p-4 bg-slate-800/50 rounded-xl">
+                        <div class="flex items-center">
+                            <div class="w-12 h-12 ${gradient} rounded-full flex items-center justify-center mr-4">
+                                <i class="fas ${icon} text-white"></i>
+                            </div>
+                            <div>
+                                <div class="font-semibold text-white">${transaction.description}</div>
+                                <div class="text-slate-400 text-sm">${transaction.date}</div>
+                            </div>
+                        </div>
+                        <div class="text-right">
+                            <div class="${transactionClass} font-bold">${sign} KSh ${transaction.amount.toLocaleString()}</div>
+                            <div class="text-slate-400 text-sm">${transaction.from || transaction.note || 'Completed'}</div>
+                        </div>
+                    </div>
+                `;
+                
+                transactionsList.innerHTML += transactionHTML;
+            });
+        }
+
+        // Modal Functions
+        function openSendMoneyModal() {
+            console.log('📤 Opening send money modal');
+            openModal('sendMoneyModal');
+        }
+
+        function openRequestMoneyModal() {
+            console.log('📥 Opening request money modal');
+            openModal('requestMoneyModal');
+        }
+
+        function openAddMoneyModal() {
+            console.log('💰 Opening add money modal');
+            openModal('addMoneyModal');
+        }
+
+        function openSecuritySettings() {
+            console.log('🔒 Opening security settings');
+            openModal('securitySettingsModal');
+        }
+
+        function openRewardsSpinModal() {
+            console.log('🎡 Opening rewards spin modal');
+            openModal('rewardsSpinModal');
+        }
+
+        function openMarketplaceModal() {
+            console.log('🛒 Redirecting to marketplace');
+            showToast('Redirecting to marketplace...', 'info');
+            // In a real app, this would redirect to the marketplace page
+            setTimeout(() => {
+                showToast('Marketplace feature coming soon!', 'info');
+            }, 1000);
+        }
+
+        function openCryptoModal() {
+            console.log('₿ Opening crypto features');
+            showToast('Crypto features coming soon!', 'info');
+        }
+
+        function openWithdrawModal() {
+            console.log('💸 Opening withdraw modal');
+            showToast('Withdrawal feature coming soon!', 'info');
+        }
+
+        // Social Payment Functions
+        function createGroup() {
+            console.log('👥 Creating group payment');
+            showToast('Group payment feature coming soon!', 'info');
+        }
+
+        function sendGift() {
+            console.log('🎁 Sending gift');
+            showToast('Social gifting feature coming soon!', 'info');
+        }
+
+        function startGoal() {
+            console.log('🎯 Starting shared goal');
+            showToast('Shared goals feature coming soon!', 'info');
+        }
+
+        function viewAllTransactions() {
+            console.log('📊 Viewing all transactions');
+            showToast('Loading all transactions...', 'info');
+        }
+
+        // Payment Processing Functions
+        function processPayment() {
+            const amountInput = document.getElementById('sendAmountInput');
+            const recipientInput = document.getElementById('recipientInput');
+            const amount = parseFloat(amountInput.value);
+            const recipient = recipientInput.value;
+            
+            if (!amount || amount <= 0) {
+                showToast('Please enter a valid amount', 'error');
+                return;
+            }
+
+            if (!recipient) {
+                showToast('Please enter a recipient', 'error');
+                return;
+            }
+
+            if (amount > userBalance) {
+                showToast('Insufficient balance', 'error');
+                return;
+            }
+
+            if (!selectedPaymentMethod) {
+                showToast('Please select a payment method', 'error');
+                return;
+            }
+
+            const processBtn = document.querySelector('#sendMoneyModal button:last-child');
+            processBtn.innerHTML = '<span class="loading-spinner"></span> Processing...';
+            processBtn.disabled = true;
+
+            console.log(`💸 Processing payment of KSh ${amount} to ${recipient} via ${selectedPaymentMethod}`);
+
+            // Simulate payment processing
+            setTimeout(() => {
+                userBalance -= amount;
+                updateUI();
+                
+                // Add transaction to history
+                transactions.unshift({
+                    type: 'sent',
+                    amount: amount,
+                    description: `Payment to ${recipient}`,
+                    date: 'Just now'
+                });
+                loadTransactions();
+                
+                showToast(`Payment of KSh ${amount.toLocaleString()} sent successfully to ${recipient}!`, 'success');
+                closeModal('sendMoneyModal');
+                processBtn.innerHTML = 'Send Money';
+                processBtn.disabled = false;
+                
+                // Reset form
+                amountInput.value = '';
+                recipientInput.value = '';
+                
+                // Log to Firebase if connected
+                logTransactionToFirebase('sent', amount, `Payment to ${recipient}`);
+            }, 2000);
+        }
+
+        function sendRequest() {
+            const amountInput = document.getElementById('requestAmountInput');
+            const fromInput = document.getElementById('requestFromInput');
+            const reasonInput = document.getElementById('requestReasonInput');
+            const amount = parseFloat(amountInput.value);
+            const from = fromInput.value;
+            const reason = reasonInput.value;
+            
+            if (!amount || amount <= 0) {
+                showToast('Please enter a valid amount', 'error');
+                return;
+            }
+
+            if (!from) {
+                showToast('Please enter who to request from', 'error');
+                return;
+            }
+
+            const processBtn = document.querySelector('#requestMoneyModal button:last-child');
+            processBtn.innerHTML = '<span class="loading-spinner"></span> Sending...';
+            processBtn.disabled = true;
+
+            console.log(`📥 Sending money request of KSh ${amount} to ${from} for ${reason}`);
+
+            // Simulate request sending
+            setTimeout(() => {
+                showToast(`Money request of KSh ${amount.toLocaleString()} sent to ${from}!`, 'success');
+                closeModal('requestMoneyModal');
+                processBtn.innerHTML = 'Send Request';
+                processBtn.disabled = false;
+                
+                // Reset form
+                amountInput.value = '';
+                fromInput.value = '';
+                reasonInput.value = '';
+            }, 2000);
+        }
+
+        function selectPaymentOption(element, method) {
+            document.querySelectorAll('.payment-option').forEach(opt => {
+                opt.classList.remove('border-blue-400', 'bg-blue-500/20');
+            });
+            element.classList.add('border-blue-400', 'bg-blue-500/20');
+            selectedPaymentOption = method;
+            console.log(`✅ Selected payment option: ${method}`);
+        }
+
+        function addMoney() {
+            const amountInput = document.getElementById('addAmountInput');
+            const amount = parseFloat(amountInput.value);
+            
+            if (!amount || amount <= 0) {
+                showToast('Please enter a valid amount', 'error');
+                return;
+            }
+
+            if (!selectedPaymentOption) {
+                showToast('Please select a payment method', 'error');
+                return;
+            }
+
+            const processBtn = document.querySelector('#addMoneyModal button:last-child');
+            processBtn.innerHTML = '<span class="loading-spinner"></span> Processing...';
+            processBtn.disabled = true;
+
+            console.log(`💰 Adding KSh ${amount} via ${selectedPaymentOption}`);
+
+            // Simulate adding money
+            setTimeout(() => {
+                userBalance += amount;
+                updateUI();
+                
+                // Add transaction to history
+                transactions.unshift({
+                    type: 'received',
+                    amount: amount,
+                    description: `Added via ${selectedPaymentOption.toUpperCase()}`,
+                    date: 'Just now'
+                });
+                loadTransactions();
+                
+                showToast(`Successfully added KSh ${amount.toLocaleString()} to your account!`, 'success');
+                closeModal('addMoneyModal');
+                processBtn.innerHTML = 'Add Money';
+                processBtn.disabled = false;
+                
+                // Reset form
+                amountInput.value = '';
+                document.querySelectorAll('.payment-option').forEach(opt => {
+                    opt.classList.remove('border-blue-400', 'bg-blue-500/20');
+                });
+                selectedPaymentOption = null;
+            }, 2000);
+        }
+
+        function saveSecuritySettings() {
+            const fraudToggle = document.getElementById('fraudToggle').checked;
+            const biometricToggle = document.getElementById('biometricToggle').checked;
+            const twoFAToggle = document.getElementById('twoFAToggle').checked;
+
+            // Update security status badges
+            document.getElementById('fraudDetectionStatus').innerHTML = 
+                `<i class="fas fa-shield-alt mr-1"></i> ${fraudToggle ? 'Active' : 'Inactive'}`;
+            document.getElementById('biometricStatus').innerHTML = 
+                `<i class="fas fa-fingerprint mr-1"></i> ${biometricToggle ? 'Enabled' : 'Disabled'}`;
+            document.getElementById('twoFAStatus').innerHTML = 
+                `<i class="fas fa-mobile-alt mr-1"></i> ${twoFAToggle ? 'Enabled' : 'Disabled'}`;
+
+            console.log('🔒 Security settings saved:', { fraudToggle, biometricToggle, twoFAToggle });
+            showToast('Security settings updated successfully!', 'success');
+            closeModal('securitySettingsModal');
+        }
+
+        function claimRewards() {
+            if (cashbackBalance <= 0) {
+                showToast('No cashback available to claim', 'info');
+                return;
+            }
+
+            console.log(`🎁 Claiming KSh ${cashbackBalance} cashback`);
+
+            // Simulate claiming rewards
+            userBalance += cashbackBalance;
+            
+            // Add transaction to history
+            transactions.unshift({
+                type: 'received',
+                amount: cashbackBalance,
+                description: 'Cashback Claimed',
+                date: 'Just now'
+            });
+            
+            showToast(`Successfully claimed KSh ${cashbackBalance} cashback!`, 'success');
+            
+            // Reset cashback
+            cashbackBalance = 0;
+            updateUI();
+            loadTransactions();
+        }
+
+        function spinRewardsWheel() {
+            const spinBtn = document.getElementById('spinButton');
+            const wheel = document.getElementById('rewardWheel');
+            const pointer = document.getElementById('wheelPointer');
+            
+            spinBtn.innerHTML = '<span class="loading-spinner"></span> Spinning...';
+            spinBtn.disabled = true;
+
+            console.log('🎡 Spinning rewards wheel...');
+
+            // Add spin animation
+            wheel.classList.add('spin-wheel');
+            pointer.classList.add('reward-spin');
+
+            // Simulate spin
+            setTimeout(() => {
+                const rewards = [50, 100, 25, 75, 150, 200];
+                const reward = rewards[Math.floor(Math.random() * rewards.length)];
+                
+                // Add reward to cashback
+                cashbackBalance += reward;
+                streakCount++;
+                
+                updateUI();
+                
+                showToast(`Congratulations! You won KSh ${reward} cashback!`, 'success');
+                
+                // Reset button
+                spinBtn.innerHTML = '<i class="fas fa-sync mr-2"></i> Spin Again';
+                spinBtn.disabled = false;
+                
+                // Remove animations
+                wheel.classList.remove('spin-wheel');
+                pointer.classList.remove('reward-spin');
+                
+                // Add transaction to history
+                transactions.unshift({
+                    type: 'received',
+                    amount: reward,
+                    description: 'Reward Spin',
+                    date: 'Just now'
+                });
+                loadTransactions();
+                
+                // Log to Firebase if connected
+                logTransactionToFirebase('received', reward, 'Reward Spin');
+            }, 3000);
+        }
+
+        function logTransactionToFirebase(type, amount, description) {
+            // Only log if Firebase is properly initialized
+            if (db) {
+                const transactionData = {
+                    type: type,
+                    amount: amount,
+                    description: description,
+                    timestamp: firebase.firestore.FieldValue.serverTimestamp(),
+                    userId: auth.currentUser ? auth.currentUser.uid : 'anonymous'
+                };
+
+                db.collection('transactions').add(transactionData)
+                    .then((docRef) => {
+                        console.log('✅ Transaction logged to Firebase with ID:', docRef.id);
+                    })
+                    .catch((error) => {
+                        console.error('❌ Error logging transaction to Firebase:', error);
+                    });
+            }
+        }
+
+        function updateConnectionStatus(status, message) {
+            const statusElement = document.getElementById('connectionStatus');
+            statusElement.className = `connection-status ${status}`;
+            
+            const icon = status === 'connected' ? 'fa-check-circle' : 
+                        status === 'connecting' ? 'fa-sync fa-spin' : 'fa-exclamation-triangle';
+            
+            statusElement.innerHTML = `
+                <i class="fas ${icon}"></i>
+                <span>${message}</span>
+            `;
+        }
+
+        function openModal(modalId) {
+            document.getElementById(modalId).classList.remove('hidden');
+        }
+
+        function closeModal(modalId) {
+            document.getElementById(modalId).classList.add('hidden');
+        }
+
+        function showToast(message, type = 'info') {
+            const toast = document.createElement('div');
+            toast.className = `toast ${type}`;
+            toast.innerHTML = `
+                <div class="flex items-center">
+                    <i class="fas fa-${type === 'success' ? 'check-circle' : type === 'error' ? 'exclamation-circle' : 'info-circle'} mr-2"></i>
+                    ${message}
+                </div>
+            `;
+            
+            document.getElementById('toastContainer').appendChild(toast);
+            
+            setTimeout(() => {
+                toast.classList.add('show');
+            }, 100);
+            
+            setTimeout(() => {
+                toast.classList.remove('show');
+                setTimeout(() => {
+                    toast.remove();
+                }, 300);
+            }, 3000);
+        }
+
+        // Close modals when clicking outside
+        document.addEventListener('click', function(event) {
+            if (event.target.classList.contains('fixed')) {
+                event.target.classList.add('hidden');
+            }
+        });
+    </script>
+</body>
+</html>

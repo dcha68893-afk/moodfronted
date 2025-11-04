@@ -1,0 +1,1723 @@
+<!DOCTYPE html>
+<html lang="en" class="h-full">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Marketplace - ConnectSphere</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css" rel="stylesheet">
+    
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap');
+        
+        * {
+            font-family: 'Inter', sans-serif;
+        }
+        
+        body {
+            background: linear-gradient(135deg, #0f172a 0%, #1e1b4b 100%);
+            min-height: 100vh;
+        }
+        
+        .glass-card {
+            background: rgba(255, 255, 255, 0.07);
+            backdrop-filter: blur(20px);
+            border: 1px solid rgba(255, 255, 255, 0.12);
+            box-shadow: 0 8px 32px rgba(0, 0, 0, 0.2);
+        }
+        
+        .glass-card-hover {
+            transition: all 0.3s ease;
+        }
+        
+        .glass-card-hover:hover {
+            background: rgba(255, 255, 255, 0.1);
+            border: 1px solid rgba(255, 255, 255, 0.2);
+            transform: translateY(-5px);
+            box-shadow: 0 12px 40px rgba(0, 0, 0, 0.3);
+        }
+        
+        .primary-gradient {
+            background: linear-gradient(135deg, #3b82f6 0%, #1d4ed8 100%);
+        }
+        
+        .modal {
+            display: none;
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: rgba(0, 0, 0, 0.8);
+            backdrop-filter: blur(10px);
+            z-index: 1000;
+            align-items: center;
+            justify-content: center;
+            padding: 1rem;
+            overflow-y: auto;
+        }
+        
+        .modal.active {
+            display: flex;
+        }
+        
+        .scroll-btn {
+            position: fixed;
+            right: 2rem;
+            z-index: 100;
+            background: rgba(255, 255, 255, 0.1);
+            backdrop-filter: blur(10px);
+            border: 1px solid rgba(255, 255, 255, 0.2);
+            color: white;
+            width: 50px;
+            height: 50px;
+            border-radius: 50%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            cursor: pointer;
+            transition: all 0.3s ease;
+        }
+        
+        .scroll-btn:hover {
+            background: rgba(255, 255, 255, 0.2);
+            transform: scale(1.1);
+        }
+        
+        .scroll-to-top { bottom: 2rem; }
+        .scroll-to-bottom { bottom: 5.5rem; }
+        
+        .back-btn {
+            position: fixed;
+            left: 2rem;
+            top: 2rem;
+            z-index: 100;
+            background: rgba(255, 255, 255, 0.1);
+            backdrop-filter: blur(10px);
+            border: 1px solid rgba(255, 255, 255, 0.2);
+            color: white;
+            padding: 0.75rem 1.5rem;
+            border-radius: 2rem;
+            cursor: pointer;
+            transition: all 0.3s ease;
+        }
+        
+        .back-btn:hover {
+            background: rgba(255, 255, 255, 0.2);
+            transform: scale(1.05);
+        }
+        
+        .form-input, .form-textarea, .form-select {
+            width: 100%;
+            padding: 0.75rem 1rem;
+            background: rgba(255, 255, 255, 0.08);
+            border: 1px solid #475569;
+            border-radius: 0.75rem;
+            color: white;
+            font-size: 1rem;
+        }
+        
+        .form-input:focus, .form-textarea:focus, .form-select:focus {
+            outline: none;
+            border-color: #3b82f6;
+            box-shadow: 0 0 0 2px rgba(59, 130, 246, 0.2);
+        }
+        
+        .toast {
+            position: fixed;
+            top: 20px;
+            right: 20px;
+            padding: 12px 20px;
+            border-radius: 10px;
+            color: white;
+            z-index: 10000;
+            transform: translateX(400px);
+            transition: transform 0.3s ease;
+            min-width: 200px;
+        }
+        
+        .toast.show { transform: translateX(0); }
+        .toast.success { background: rgba(16, 185, 129, 0.9); }
+        .toast.error { background: rgba(239, 68, 68, 0.9); }
+        .toast.info { background: rgba(59, 130, 246, 0.9); }
+        
+        .product-card {
+            transition: all 0.3s ease;
+            cursor: pointer;
+        }
+        
+        .product-card:hover {
+            transform: translateY(-8px);
+            box-shadow: 0 15px 30px rgba(0, 0, 0, 0.4);
+        }
+        
+        .btn-primary {
+            background: linear-gradient(135deg, #3b82f6, #1d4ed8);
+            color: white;
+            border: none;
+            border-radius: 12px;
+            padding: 12px 24px;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.3s ease;
+        }
+        
+        .btn-primary:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 6px 20px rgba(59, 130, 246, 0.4);
+        }
+        
+        .btn-secondary {
+            background: rgba(255, 255, 255, 0.1);
+            color: white;
+            border: 1px solid rgba(255, 255, 255, 0.2);
+            border-radius: 12px;
+            padding: 12px 24px;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.3s ease;
+        }
+        
+        .btn-secondary:hover {
+            background: rgba(255, 255, 255, 0.2);
+        }
+        
+        .social-action-btn {
+            width: 36px;
+            height: 36px;
+            border-radius: 50%;
+            background: rgba(0, 0, 0, 0.7);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            color: white;
+            border: none;
+            cursor: pointer;
+            transition: all 0.3s ease;
+        }
+        
+        .social-action-btn:hover {
+            transform: scale(1.1);
+        }
+        
+        .social-action-btn.active {
+            background: #ef4444;
+        }
+        
+        .ai-assistant {
+            position: fixed;
+            bottom: 24px;
+            right: 24px;
+            width: 60px;
+            height: 60px;
+            border-radius: 50%;
+            background: linear-gradient(135deg, #3b82f6, #1d4ed8);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            color: white;
+            cursor: pointer;
+            box-shadow: 0 4px 20px rgba(59, 130, 246, 0.4);
+            z-index: 90;
+            transition: all 0.3s ease;
+            animation: pulse 2s infinite;
+        }
+        
+        @keyframes pulse {
+            0%, 100% { box-shadow: 0 4px 20px rgba(59, 130, 246, 0.4); }
+            50% { box-shadow: 0 4px 30px rgba(59, 130, 246, 0.6); }
+        }
+        
+        .ai-assistant:hover {
+            transform: scale(1.1);
+        }
+        
+        .ai-chat-window {
+            position: fixed;
+            bottom: 100px;
+            right: 24px;
+            width: 350px;
+            height: 500px;
+            background: rgba(30, 41, 59, 0.95);
+            border-radius: 20px;
+            box-shadow: 0 10px 30px rgba(0, 0, 0, 0.5);
+            z-index: 95;
+            display: none;
+            flex-direction: column;
+            border: 1px solid rgba(255, 255, 255, 0.1);
+            overflow: hidden;
+        }
+        
+        .ai-chat-window.active {
+            display: flex;
+            animation: slideIn 0.3s ease;
+        }
+        
+        @keyframes slideIn {
+            from { transform: translateY(20px); opacity: 0; }
+            to { transform: translateY(0); opacity: 1; }
+        }
+        
+        .ai-chat-messages {
+            flex: 1;
+            padding: 20px;
+            overflow-y: auto;
+        }
+        
+        .message {
+            margin-bottom: 12px;
+            padding: 10px 14px;
+            border-radius: 18px;
+            max-width: 80%;
+            font-size: 0.875rem;
+            animation: messageSlide 0.3s ease;
+        }
+        
+        @keyframes messageSlide {
+            from { transform: translateY(10px); opacity: 0; }
+            to { transform: translateY(0); opacity: 1; }
+        }
+        
+        .message.user {
+            background: #3b82f6;
+            color: white;
+            margin-left: auto;
+        }
+        
+        .message.ai {
+            background: rgba(255, 255, 255, 0.1);
+            color: #cbd5e1;
+        }
+        
+        .gradient-text {
+            background: linear-gradient(135deg, #3b82f6, #8b5cf6, #ec4899);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+        }
+        
+        .filter-chip {
+            background: rgba(255, 255, 255, 0.1);
+            border-radius: 16px;
+            padding: 6px 12px;
+            font-size: 0.875rem;
+            cursor: pointer;
+            transition: all 0.3s ease;
+        }
+        
+        .filter-chip.active {
+            background: #3b82f6;
+            color: white;
+        }
+        
+        .filter-chip:hover {
+            background: rgba(255, 255, 255, 0.2);
+        }
+        
+        /* Price Comparison */
+        .price-compare {
+            background: rgba(16, 185, 129, 0.1);
+            border: 1px solid rgba(16, 185, 129, 0.3);
+            border-radius: 12px;
+            padding: 12px;
+            margin-top: 10px;
+        }
+        
+        /* Auction Badge */
+        .auction-badge {
+            background: linear-gradient(135deg, #f59e0b, #d97706);
+            color: white;
+            padding: 4px 8px;
+            border-radius: 8px;
+            font-size: 0.75rem;
+            font-weight: bold;
+            animation: pulse 2s infinite;
+        }
+        
+        /* Wishlist */
+        .wishlist-counter {
+            position: absolute;
+            top: -5px;
+            right: -5px;
+            background: #ef4444;
+            color: white;
+            border-radius: 50%;
+            width: 20px;
+            height: 20px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 0.75rem;
+            font-weight: bold;
+        }
+        
+        /* 3D Product View */
+        .product-3d-view {
+            position: relative;
+            transform-style: preserve-3d;
+            transition: transform 0.5s;
+        }
+        
+        .product-3d-view:hover {
+            transform: rotateY(10deg);
+        }
+        
+        /* AR Badge */
+        .ar-badge {
+            background: linear-gradient(135deg, #06b6d4, #0891b2);
+            color: white;
+            padding: 4px 8px;
+            border-radius: 8px;
+            font-size: 0.75rem;
+            display: inline-flex;
+            align-items: center;
+            gap: 4px;
+        }
+        
+        /* Voice Search Animation */
+        .voice-active {
+            animation: voicePulse 1s infinite;
+        }
+        
+        @keyframes voicePulse {
+            0%, 100% { transform: scale(1); }
+            50% { transform: scale(1.2); }
+        }
+        
+        /* Trending Badge */
+        .trending-badge {
+            background: linear-gradient(135deg, #ec4899, #db2777);
+            color: white;
+            padding: 4px 8px;
+            border-radius: 8px;
+            font-size: 0.75rem;
+            animation: pulse 2s infinite;
+        }
+        
+        /* Deal Timer */
+        .deal-timer {
+            background: rgba(239, 68, 68, 0.2);
+            border: 1px solid #ef4444;
+            border-radius: 8px;
+            padding: 8px;
+            text-align: center;
+            color: #fca5a5;
+        }
+        
+        /* Video Preview */
+        .video-preview {
+            position: relative;
+            overflow: hidden;
+            border-radius: 12px;
+        }
+        
+        .video-preview::before {
+            content: '\f04b';
+            font-family: 'Font Awesome 6 Free';
+            font-weight: 900;
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            font-size: 3rem;
+            color: white;
+            opacity: 0.8;
+            z-index: 1;
+        }
+        
+        /* Loyalty Points */
+        .loyalty-badge {
+            background: linear-gradient(135deg, #fbbf24, #f59e0b);
+            color: white;
+            padding: 4px 12px;
+            border-radius: 20px;
+            font-size: 0.75rem;
+            font-weight: bold;
+            display: inline-flex;
+            align-items: center;
+            gap: 4px;
+        }
+        
+        /* Live Indicator */
+        .live-pulse {
+            width: 8px;
+            height: 8px;
+            background: #ef4444;
+            border-radius: 50%;
+            animation: livePulse 1.5s infinite;
+        }
+        
+        @keyframes livePulse {
+            0% { box-shadow: 0 0 0 0 rgba(239, 68, 68, 0.7); }
+            70% { box-shadow: 0 0 0 10px rgba(239, 68, 68, 0); }
+            100% { box-shadow: 0 0 0 0 rgba(239, 68, 68, 0); }
+        }
+    </style>
+</head>
+<body class="h-full">
+    <!-- Toast Container -->
+    <div id="toastContainer"></div>
+
+    <!-- AI Assistant -->
+    <div class="ai-assistant" id="aiAssistant">
+        <i class="fas fa-robot text-xl"></i>
+    </div>
+    
+    <div class="ai-chat-window" id="aiChatWindow">
+        <div class="p-5 bg-blue-900/30 border-b border-white/10">
+            <div class="flex justify-between items-center">
+                <div>
+                    <h3 class="font-bold text-blue-300 flex items-center">
+                        <i class="fas fa-robot mr-2"></i> AI Shopping Assistant
+                    </h3>
+                    <p class="text-gray-400 text-sm">Powered by AI • 24/7 Available</p>
+                </div>
+                <button onclick="toggleAiChat()" class="text-gray-400 hover:text-white">
+                    <i class="fas fa-times"></i>
+                </button>
+            </div>
+        </div>
+        <div class="ai-chat-messages" id="aiChatMessages">
+            <div class="message ai">
+                👋 Hi! I'm your AI shopping assistant. I can help you:
+                <ul class="mt-2 text-xs space-y-1">
+                    <li>• Find products by description</li>
+                    <li>• Compare prices</li>
+                    <li>• Get recommendations</li>
+                    <li>• Check deals & discounts</li>
+                </ul>
+            </div>
+        </div>
+        <div class="p-5 border-t border-white/10">
+            <div class="flex gap-2">
+                <button id="voiceSearchBtn" class="px-3 py-2 btn-secondary">
+                    <i class="fas fa-microphone"></i>
+                </button>
+                <input type="text" id="aiChatInput" class="flex-1 form-input" placeholder="Ask me anything...">
+                <button id="sendAiMessage" class="px-4 btn-primary">
+                    <i class="fas fa-paper-plane"></i>
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Navigation Buttons -->
+    <button class="back-btn" onclick="goBack()">
+        <i class="fas fa-arrow-left mr-2"></i> Back
+    </button>
+    <button class="scroll-btn scroll-to-top" onclick="scrollToTop()">
+        <i class="fas fa-arrow-up"></i>
+    </button>
+    <button class="scroll-btn scroll-to-bottom" onclick="scrollToBottom()">
+        <i class="fas fa-arrow-down"></i>
+    </button>
+
+    <div class="flex h-full">
+        <!-- Sidebar -->
+        <div class="w-20 lg:w-64 glass-card border-r border-gray-700 flex flex-col">
+            <div class="p-6">
+                <div class="flex items-center space-x-3 cursor-pointer">
+                    <div class="w-12 h-12 primary-gradient rounded-2xl flex items-center justify-center">
+                        <i class="fas fa-globe-americas text-white text-xl"></i>
+                    </div>
+                    <span class="hidden lg:block text-xl font-black gradient-text">
+                        ConnectSphere
+                    </span>
+                </div>
+            </div>
+
+            <nav class="flex-1 px-3 lg:px-6 space-y-2 py-4">
+                <a href="#" class="flex items-center space-x-3 p-3 rounded-xl text-gray-300 hover:bg-gray-700 hover:text-blue-300 transition">
+                    <i class="fas fa-home w-6"></i>
+                    <span class="hidden lg:block">Home</span>
+                </a>
+                <a href="#" class="flex items-center space-x-3 p-3 rounded-xl bg-blue-900/30 text-blue-300 border border-blue-500/50">
+                    <i class="fas fa-store w-6"></i>
+                    <span class="hidden lg:block">Marketplace</span>
+                </a>
+                <a href="#" onclick="openWishlist()" class="flex items-center space-x-3 p-3 rounded-xl text-gray-300 hover:bg-gray-700 hover:text-blue-300 transition relative">
+                    <i class="fas fa-heart w-6"></i>
+                    <span class="hidden lg:block">Wishlist</span>
+                    <span class="wishlist-counter" id="wishlistCounter">0</span>
+                </a>
+                <a href="#" onclick="openAuctions()" class="flex items-center space-x-3 p-3 rounded-xl text-gray-300 hover:bg-gray-700 hover:text-blue-300 transition">
+                    <i class="fas fa-gavel w-6"></i>
+                    <span class="hidden lg:block">Auctions</span>
+                </a>
+                <a href="#" onclick="openDeals()" class="flex items-center space-x-3 p-3 rounded-xl text-gray-300 hover:bg-gray-700 hover:text-blue-300 transition">
+                    <i class="fas fa-fire w-6"></i>
+                    <span class="hidden lg:block">Hot Deals</span>
+                </a>
+            </nav>
+            
+            <div class="p-6 border-t border-gray-700">
+                <div class="flex items-center space-x-3">
+                    <div class="w-12 h-12 bg-gradient-to-r from-pink-500 to-purple-500 rounded-full flex items-center justify-center">
+                        <i class="fas fa-user text-white"></i>
+                    </div>
+                    <div class="hidden lg:block">
+                        <div class="font-semibold text-blue-300" id="userName">Guest User</div>
+                        <div class="loyalty-badge text-xs">
+                            <i class="fas fa-star"></i>
+                            <span id="loyaltyPoints">0</span> Points
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Main Content -->
+        <div class="flex-1 flex flex-col overflow-hidden">
+            <!-- Header -->
+            <header class="glass-card border-b border-gray-700 px-8 py-6">
+                <div class="flex items-center justify-between">
+                    <div>
+                        <h1 class="text-3xl font-black gradient-text">Smart Marketplace</h1>
+                        <p class="text-gray-400 mt-1 flex items-center gap-2">
+                            <span class="live-pulse"></span>
+                            <span id="onlineUsers">1,234</span> users shopping now
+                        </p>
+                    </div>
+                    <div class="flex gap-3">
+                        <button id="listProductBtn" class="btn-primary">
+                            <i class="fas fa-plus mr-2"></i>
+                            List Product
+                        </button>
+                        <button id="priceCompareBtn" class="btn-secondary">
+                            <i class="fas fa-balance-scale mr-2"></i>
+                            Compare
+                        </button>
+                        <button id="ar3DBtn" class="btn-secondary">
+                            <i class="fas fa-cube mr-2"></i>
+                            AR View
+                        </button>
+                    </div>
+                </div>
+            </header>
+
+            <!-- Marketplace Content -->
+            <main class="flex-1 overflow-y-auto">
+                <div class="max-w-7xl mx-auto p-8">
+                    <!-- Hot Deals Banner -->
+                    <div class="glass-card rounded-2xl border border-red-500/30 p-6 mb-8 bg-gradient-to-r from-red-900/20 to-orange-900/20">
+                        <div class="flex items-center justify-between">
+                            <div class="flex items-center gap-4">
+                                <div class="text-4xl">🔥</div>
+                                <div>
+                                    <h3 class="text-xl font-bold text-white">Flash Sale - 50% OFF</h3>
+                                    <p class="text-gray-400">Limited time offers on selected items</p>
+                                </div>
+                            </div>
+                            <div class="deal-timer">
+                                <div class="text-xs mb-1">Ends in</div>
+                                <div class="text-xl font-bold" id="dealTimer">02:45:30</div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Search -->
+                    <div class="glass-card rounded-2xl border border-gray-700 p-6 mb-8">
+                        <div class="flex flex-col lg:flex-row gap-4">
+                            <div class="flex-1 relative">
+                                <i class="fas fa-search absolute left-3 top-1/2 transform -translate-y-1/2 text-blue-400"></i>
+                                <input type="text" id="searchInput" placeholder="Search products or ask AI..." 
+                                       class="w-full pl-10 pr-12 py-3 form-input">
+                                <button id="voiceSearchMainBtn" class="absolute right-3 top-1/2 transform -translate-y-1/2 text-blue-400 hover:text-blue-300">
+                                    <i class="fas fa-microphone text-xl"></i>
+                                </button>
+                            </div>
+                            <select id="categoryFilter" class="form-select">
+                                <option value="all">All Categories</option>
+                                <option value="Electronics">Electronics</option>
+                                <option value="Fashion">Fashion</option>
+                                <option value="Home">Home & Garden</option>
+                                <option value="Sports">Sports</option>
+                                <option value="Books">Books</option>
+                            </select>
+                            <select id="locationFilter" class="form-select">
+                                <option value="all">All Locations</option>
+                                <option value="Nairobi">Nairobi</option>
+                                <option value="Mombasa">Mombasa</option>
+                                <option value="Kisumu">Kisumu</option>
+                            </select>
+                        </div>
+                        
+                        <div class="flex flex-wrap gap-2 mt-4" id="filterChips">
+                            <div class="filter-chip active" data-filter="all">All</div>
+                            <div class="filter-chip" data-filter="verified">✓ Verified</div>
+                            <div class="filter-chip" data-filter="shipping">🚚 Free Shipping</div>
+                            <div class="filter-chip" data-filter="discount">🏷️ Discounts</div>
+                            <div class="filter-chip" data-filter="trending">🔥 Trending</div>
+                            <div class="filter-chip" data-filter="auction">⚡ Auctions</div>
+                            <div class="filter-chip" data-filter="ar">🥽 AR View</div>
+                        </div>
+                    </div>
+
+                    <!-- Products Grid -->
+                    <div class="mb-8">
+                        <div class="flex items-center justify-between mb-6">
+                            <h2 class="text-2xl font-black gradient-text">Featured Products</h2>
+                            <div class="flex gap-3">
+                                <button id="sortByBtn" class="btn-secondary">
+                                    <i class="fas fa-sort mr-2"></i>
+                                    Sort By
+                                </button>
+                                <button id="viewToggle" class="btn-secondary">
+                                    <i class="fas fa-th mr-2"></i>
+                                    View
+                                </button>
+                            </div>
+                        </div>
+                        
+                        <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6" id="productsContainer">
+                            <!-- Products loaded here -->
+                        </div>
+                    </div>
+                </div>
+            </main>
+        </div>
+    </div>
+
+    <!-- Modals -->
+    <div class="modal" id="listProductModal">
+        <div class="glass-card rounded-3xl p-8 max-w-2xl w-full max-h-[90vh] overflow-y-auto">
+            <div class="flex justify-between items-center mb-6">
+                <h2 class="text-2xl font-black gradient-text">List a Product</h2>
+                <button onclick="closeModal('listProductModal')" class="text-gray-400 hover:text-white">
+                    <i class="fas fa-times text-2xl"></i>
+                </button>
+            </div>
+            
+            <form id="listProductForm" class="space-y-4">
+                <div>
+                    <label class="block text-gray-300 mb-2 font-semibold">Product Name</label>
+                    <input type="text" id="productName" class="form-input" placeholder="Enter product name" required>
+                </div>
+                
+                <div class="grid grid-cols-2 gap-4">
+                    <div>
+                        <label class="block text-gray-300 mb-2 font-semibold">Price (KSh)</label>
+                        <input type="number" id="productPrice" class="form-input" placeholder="Enter price" required>
+                    </div>
+                    <div>
+                        <label class="block text-gray-300 mb-2 font-semibold">Condition</label>
+                        <select id="productCondition" class="form-select" required>
+                            <option value="New">New</option>
+                            <option value="Like New">Like New</option>
+                            <option value="Used">Used</option>
+                        </select>
+                    </div>
+                </div>
+                
+                <div>
+                    <label class="block text-gray-300 mb-2 font-semibold">Category</label>
+                    <select id="productCategory" class="form-select" required>
+                        <option value="">Select category</option>
+                        <option value="Electronics">Electronics</option>
+                        <option value="Fashion">Fashion</option>
+                        <option value="Home">Home & Garden</option>
+                        <option value="Sports">Sports</option>
+                        <option value="Books">Books</option>
+                    </select>
+                </div>
+                
+                <div>
+                    <label class="block text-gray-300 mb-2 font-semibold">Description</label>
+                    <textarea id="productDescription" class="form-input" rows="4" placeholder="Describe your product" required></textarea>
+                </div>
+                
+                <div>
+                    <label class="block text-gray-300 mb-2 font-semibold">Location</label>
+                    <input type="text" id="productLocation" class="form-input" placeholder="Enter location" required>
+                </div>
+                
+                <div class="flex items-center gap-4">
+                    <label class="flex items-center gap-2 text-gray-300 cursor-pointer">
+                        <input type="checkbox" id="freeShipping" class="w-4 h-4">
+                        <span>Free Shipping</span>
+                    </label>
+                    <label class="flex items-center gap-2 text-gray-300 cursor-pointer">
+                        <input type="checkbox" id="hasAR" class="w-4 h-4">
+                        <span>AR View Available</span>
+                    </label>
+                </div>
+                
+                <button type="submit" class="w-full btn-primary py-3">
+                    <i class="fas fa-plus mr-2"></i>
+                    List Product
+                </button>
+            </form>
+        </div>
+    </div>
+
+    <!-- Price Compare Modal -->
+    <div class="modal" id="priceCompareModal">
+        <div class="glass-card rounded-3xl p-8 max-w-4xl w-full max-h-[90vh] overflow-y-auto">
+            <div class="flex justify-between items-center mb-6">
+                <h2 class="text-2xl font-black gradient-text">Price Comparison</h2>
+                <button onclick="closeModal('priceCompareModal')" class="text-gray-400 hover:text-white">
+                    <i class="fas fa-times text-2xl"></i>
+                </button>
+            </div>
+            <div id="priceCompareContent"></div>
+        </div>
+    </div>
+
+    <!-- Wishlist Modal -->
+    <div class="modal" id="wishlistModal">
+        <div class="glass-card rounded-3xl p-8 max-w-4xl w-full max-h-[90vh] overflow-y-auto">
+            <div class="flex justify-between items-center mb-6">
+                <h2 class="text-2xl font-black gradient-text">My Wishlist</h2>
+                <button onclick="closeModal('wishlistModal')" class="text-gray-400 hover:text-white">
+                    <i class="fas fa-times text-2xl"></i>
+                </button>
+            </div>
+            <div id="wishlistContent" class="grid grid-cols-1 md:grid-cols-2 gap-4"></div>
+        </div>
+    </div>
+
+    <!-- Product Detail Modal -->
+    <div class="modal" id="productDetailModal">
+        <div class="glass-card rounded-3xl p-8 max-w-5xl w-full max-h-[90vh] overflow-y-auto">
+            <div class="flex justify-between items-center mb-6">
+                <h2 class="text-2xl font-black gradient-text" id="productDetailTitle"></h2>
+                <button onclick="closeModal('productDetailModal')" class="text-gray-400 hover:text-white">
+                    <i class="fas fa-times text-2xl"></i>
+                </button>
+            </div>
+            <div id="productDetailContent"></div>
+        </div>
+    </div>
+
+    <script>
+        // Initialize app without Firebase - Pure JavaScript implementation
+        let currentUser = { name: 'Guest User', points: 150 };
+        let allProducts = [];
+        let filteredProducts = [];
+        let wishlist = [];
+        let cart = [];
+        let activeFilters = { category: 'all', location: 'all', chips: 'all' };
+        let isVoiceActive = false;
+
+        // Initialize
+        document.addEventListener('DOMContentLoaded', function() {
+            console.log('🚀 Marketplace initialized');
+            setupEventListeners();
+            loadProducts();
+            updateUI();
+            startDealTimer();
+            simulateOnlineUsers();
+        });
+
+        // Event Listeners
+        function setupEventListeners() {
+            // Modals
+            document.getElementById('listProductBtn').addEventListener('click', () => openModal('listProductModal'));
+            document.getElementById('priceCompareBtn').addEventListener('click', openPriceCompare);
+            document.getElementById('ar3DBtn').addEventListener('click', showARFeature);
+            
+            // Forms
+            document.getElementById('listProductForm').addEventListener('submit', handleProductSubmit);
+            
+            // Search & Filters
+            document.getElementById('searchInput').addEventListener('input', handleSearch);
+            document.getElementById('categoryFilter').addEventListener('change', handleCategoryFilter);
+            document.getElementById('locationFilter').addEventListener('change', handleLocationFilter);
+            document.getElementById('sortByBtn').addEventListener('click', handleSort);
+            document.getElementById('viewToggle').addEventListener('click', toggleView);
+            
+            // Filter Chips
+            document.querySelectorAll('.filter-chip').forEach(chip => {
+                chip.addEventListener('click', handleChipFilter);
+            });
+            
+            // AI Assistant
+            document.getElementById('aiAssistant').addEventListener('click', toggleAiChat);
+            document.getElementById('sendAiMessage').addEventListener('click', sendAiMessage);
+            document.getElementById('aiChatInput').addEventListener('keypress', (e) => {
+                if (e.key === 'Enter') sendAiMessage();
+            });
+            
+            // Voice Search
+            document.getElementById('voiceSearchBtn').addEventListener('click', startVoiceSearch);
+            document.getElementById('voiceSearchMainBtn').addEventListener('click', startVoiceSearch);
+            
+            // Close modals on outside click
+            window.addEventListener('click', (e) => {
+                if (e.target.classList.contains('modal')) {
+                    e.target.classList.remove('active');
+                }
+            });
+        }
+
+        // Load Products with Enhanced Features
+        function loadProducts() {
+            allProducts = [
+                {
+                    id: 1,
+                    name: "Wireless Bluetooth Earbuds Pro",
+                    price: 4500,
+                    originalPrice: 6000,
+                    category: "Electronics",
+                    location: "Nairobi",
+                    image: "https://images.unsplash.com/photo-1590658268037-6bf12165a8df?w=400",
+                    seller: "TechHub Kenya",
+                    rating: 4.8,
+                    reviews: 124,
+                    verified: true,
+                    freeShipping: true,
+                    discount: 25,
+                    trending: true,
+                    hasAR: true,
+                    hasVideo: true,
+                    auction: false,
+                    description: "Premium wireless earbuds with noise cancellation",
+                    stock: 15
+                },
+                {
+                    id: 2,
+                    name: "Smart Watch Series 5 - AUCTION",
+                    price: 12500,
+                    currentBid: 10000,
+                    category: "Electronics",
+                    location: "Mombasa",
+                    image: "https://images.unsplash.com/photo-1523275335684-37898b6baf30?w=400",
+                    seller: "GadgetZone",
+                    rating: 4.5,
+                    reviews: 89,
+                    verified: true,
+                    freeShipping: false,
+                    discount: 0,
+                    trending: false,
+                    hasAR: true,
+                    hasVideo: false,
+                    auction: true,
+                    auctionEnds: new Date(Date.now() + 24 * 60 * 60 * 1000),
+                    description: "Latest smartwatch with health tracking",
+                    stock: 5
+                },
+                {
+                    id: 3,
+                    name: "Designer Leather Handbag",
+                    price: 8500,
+                    originalPrice: 12000,
+                    category: "Fashion",
+                    location: "Nairobi",
+                    image: "https://images.unsplash.com/photo-1584917865442-de89df76afd3?w=400",
+                    seller: "Fashion Store KE",
+                    rating: 4.9,
+                    reviews: 67,
+                    verified: true,
+                    freeShipping: true,
+                    discount: 29,
+                    trending: true,
+                    hasAR: true,
+                    hasVideo: true,
+                    auction: false,
+                    description: "Premium leather handbag, perfect for any occasion",
+                    stock: 8
+                },
+                {
+                    id: 4,
+                    name: "Ergonomic Laptop Stand",
+                    price: 2500,
+                    category: "Electronics",
+                    location: "Kisumu",
+                    image: "https://images.unsplash.com/photo-1527864550417-7fd91fc51a46?w=400",
+                    seller: "Office Plus",
+                    rating: 4.6,
+                    reviews: 45,
+                    verified: false,
+                    freeShipping: true,
+                    discount: 10,
+                    trending: false,
+                    hasAR: false,
+                    hasVideo: false,
+                    auction: false,
+                    description: "Adjustable laptop stand for better posture",
+                    stock: 20
+                },
+                {
+                    id: 5,
+                    name: "Gaming Mechanical Keyboard RGB",
+                    price: 7800,
+                    originalPrice: 9500,
+                    category: "Electronics",
+                    location: "Nairobi",
+                    image: "https://images.unsplash.com/photo-1587829741301-dc798b83add3?w=400",
+                    seller: "GamersHub KE",
+                    rating: 4.7,
+                    reviews: 156,
+                    verified: true,
+                    freeShipping: true,
+                    discount: 18,
+                    trending: true,
+                    hasAR: false,
+                    hasVideo: true,
+                    auction: false,
+                    description: "RGB mechanical keyboard with blue switches",
+                    stock: 12
+                },
+                {
+                    id: 6,
+                    name: "Yoga Mat Premium - Flash Sale",
+                    price: 1200,
+                    originalPrice: 2400,
+                    category: "Sports",
+                    location: "Mombasa",
+                    image: "https://images.unsplash.com/photo-1601925260368-ae2f83cf8b7f?w=400",
+                    seller: "FitLife Kenya",
+                    rating: 4.4,
+                    reviews: 89,
+                    verified: true,
+                    freeShipping: true,
+                    discount: 50,
+                    trending: true,
+                    hasAR: false,
+                    hasVideo: false,
+                    auction: false,
+                    description: "Non-slip yoga mat, eco-friendly material",
+                    stock: 30
+                }
+            ];
+            
+            filteredProducts = [...allProducts];
+            displayProducts();
+        }
+
+        // Display Products with Enhanced UI
+        function displayProducts() {
+            const container = document.getElementById('productsContainer');
+            container.innerHTML = '';
+            
+            if (filteredProducts.length === 0) {
+                container.innerHTML = `
+                    <div class="col-span-full text-center py-20">
+                        <i class="fas fa-search text-6xl text-gray-600 mb-4"></i>
+                        <p class="text-gray-400 text-xl">No products found</p>
+                        <button onclick="resetFilters()" class="btn-primary mt-4">Reset Filters</button>
+                    </div>
+                `;
+                return;
+            }
+            
+            filteredProducts.forEach(product => {
+                const card = document.createElement('div');
+                card.className = 'product-card glass-card rounded-2xl border border-gray-700 overflow-hidden';
+                card.onclick = () => showProductDetail(product.id);
+                
+                const badges = [];
+                if (product.discount > 0) badges.push(`<div class="absolute top-3 left-3 px-2 py-1 bg-gradient-to-r from-pink-500 to-red-500 text-white text-xs font-bold rounded-lg">${product.discount}% OFF</div>`);
+                if (product.trending) badges.push(`<div class="absolute top-3 right-3 trending-badge">🔥 TRENDING</div>`);
+                if (product.auction) badges.push(`<div class="absolute top-12 left-3 auction-badge">⚡ AUCTION</div>`);
+                if (product.hasAR) badges.push(`<div class="absolute bottom-3 left-3 ar-badge"><i class="fas fa-cube mr-1"></i>AR View</div>`);
+                
+                card.innerHTML = `
+                    <div class="relative product-3d-view">
+                        <img src="${product.image}" alt="${product.name}" class="w-full h-48 object-cover">
+                        ${badges.join('')}
+                        ${product.hasVideo ? '<div class="video-preview absolute inset-0"></div>' : ''}
+                        <div class="absolute top-3 right-3 flex flex-col gap-2">
+                            <button class="social-action-btn ${wishlist.includes(product.id) ? 'active' : ''}" onclick="event.stopPropagation(); toggleWishlist(${product.id})">
+                                <i class="fas fa-heart"></i>
+                            </button>
+                            <button class="social-action-btn" onclick="event.stopPropagation(); shareProduct(${product.id})">
+                                <i class="fas fa-share"></i>
+                            </button>
+                        </div>
+                    </div>
+                    
+                    <div class="p-4">
+                        <div class="flex justify-between items-start mb-2">
+                            <h3 class="font-bold text-white flex-1 text-sm">${product.name}</h3>
+                        </div>
+                        
+                        <div class="flex items-center gap-2 mb-2">
+                            ${product.auction ? `
+                                <div>
+                                    <span class="text-xs text-gray-400">Current Bid</span>
+                                    <div class="text-blue-400 font-bold">KSh ${product.currentBid.toLocaleString()}</div>
+                                </div>
+                            ` : `
+                                <div>
+                                    <span class="text-blue-400 font-bold text-lg">KSh ${product.price.toLocaleString()}</span>
+                                    ${product.originalPrice ? `<span class="text-gray-500 text-sm line-through ml-2">KSh ${product.originalPrice.toLocaleString()}</span>` : ''}
+                                </div>
+                            `}
+                        </div>
+                        
+                        <div class="flex items-center text-xs text-gray-400 mb-3">
+                            <i class="fas fa-map-marker-alt mr-1"></i>
+                            <span>${product.location}</span>
+                            <i class="fas fa-star text-yellow-400 ml-2 mr-1"></i>
+                            <span>${product.rating}</span>
+                            <span class="mx-1">•</span>
+                            <span>${product.reviews}</span>
+                        </div>
+                        
+                        <div class="flex flex-wrap gap-1 mb-3">
+                            ${product.verified ? '<span class="text-xs px-2 py-1 bg-green-500/20 text-green-400 rounded">✓ Verified</span>' : ''}
+                            ${product.freeShipping ? '<span class="text-xs px-2 py-1 bg-blue-500/20 text-blue-400 rounded">🚚 Free Shipping</span>' : ''}
+                            ${product.stock < 10 ? `<span class="text-xs px-2 py-1 bg-red-500/20 text-red-400 rounded">⚠️ Only ${product.stock} left</span>` : ''}
+                        </div>
+                        
+                        <div class="text-xs text-gray-400 mb-3">${product.seller}</div>
+                        
+                        <div class="flex gap-2">
+                            <button onclick="event.stopPropagation(); addToCart(${product.id})" class="flex-1 px-3 py-2 glass-card border border-gray-700 rounded-xl hover:bg-gray-700 transition text-sm">
+                                <i class="fas fa-shopping-cart mr-1"></i> Add
+                            </button>
+                            <button onclick="event.stopPropagation(); ${product.auction ? `placeBid(${product.id})` : `buyNow(${product.id})`}" class="flex-1 px-3 py-2 btn-primary text-sm">
+                                ${product.auction ? '⚡ Bid Now' : '💳 Buy'}
+                            </button>
+                        </div>
+                    </div>
+                `;
+                
+                container.appendChild(card);
+            });
+        }
+
+        // Product Detail View
+        function showProductDetail(productId) {
+            const product = allProducts.find(p => p.id === productId);
+            if (!product) return;
+            
+            document.getElementById('productDetailTitle').textContent = product.name;
+            document.getElementById('productDetailContent').innerHTML = `
+                <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
+                    <div>
+                        <img src="${product.image}" alt="${product.name}" class="w-full rounded-2xl mb-4">
+                        ${product.hasAR ? `
+                            <button onclick="showARView(${productId})" class="w-full btn-secondary mb-2">
+                                <i class="fas fa-cube mr-2"></i>
+                                View in AR
+                            </button>
+                        ` : ''}
+                        ${product.hasVideo ? `
+                            <button onclick="playVideo(${productId})" class="w-full btn-secondary">
+                                <i class="fas fa-play mr-2"></i>
+                                Watch Product Video
+                            </button>
+                        ` : ''}
+                    </div>
+                    <div>
+                        <div class="mb-4">
+                            ${product.auction ? `
+                                <div class="text-3xl font-bold text-blue-400 mb-2">Current Bid: KSh ${product.currentBid.toLocaleString()}</div>
+                                <div class="text-gray-400">Auction ends in 23h 45m</div>
+                            ` : `
+                                <div class="text-3xl font-bold text-blue-400 mb-2">KSh ${product.price.toLocaleString()}</div>
+                                ${product.originalPrice ? `<div class="text-gray-500 line-through">KSh ${product.originalPrice.toLocaleString()}</div>` : ''}
+                            `}
+                        </div>
+                        
+                        <div class="glass-card p-4 rounded-xl mb-4">
+                            <div class="flex items-center justify-between mb-2">
+                                <span class="text-gray-400">Rating</span>
+                                <div class="flex items-center">
+                                    <i class="fas fa-star text-yellow-400 mr-1"></i>
+                                    <span class="font-bold">${product.rating}</span>
+                                    <span class="text-gray-400 ml-2">(${product.reviews} reviews)</span>
+                                </div>
+                            </div>
+                            <div class="flex items-center justify-between mb-2">
+                                <span class="text-gray-400">Seller</span>
+                                <span class="font-semibold">${product.seller} ${product.verified ? '✓' : ''}</span>
+                            </div>
+                            <div class="flex items-center justify-between mb-2">
+                                <span class="text-gray-400">Location</span>
+                                <span class="font-semibold">${product.location}</span>
+                            </div>
+                            <div class="flex items-center justify-between">
+                                <span class="text-gray-400">Stock</span>
+                                <span class="font-semibold ${product.stock < 10 ? 'text-red-400' : 'text-green-400'}">${product.stock} available</span>
+                            </div>
+                        </div>
+                        
+                        <div class="mb-4">
+                            <h4 class="font-bold mb-2">Description</h4>
+                            <p class="text-gray-400">${product.description}</p>
+                        </div>
+                        
+                        ${product.freeShipping ? `
+                            <div class="glass-card p-3 rounded-xl mb-4 bg-blue-500/10">
+                                <i class="fas fa-shipping-fast text-blue-400 mr-2"></i>
+                                <span class="text-blue-400 font-semibold">Free Shipping Available</span>
+                            </div>
+                        ` : ''}
+                        
+                        <div class="price-compare mb-4">
+                            <div class="flex items-center justify-between">
+                                <span class="text-green-400">💰 Best Price Alert</span>
+                                <span class="text-sm text-gray-400">${product.discount}% below market average</span>
+                            </div>
+                        </div>
+                        
+                        <div class="flex gap-3">
+                            <button onclick="addToCart(${product.id}); closeModal('productDetailModal')" class="flex-1 btn-secondary py-3">
+                                <i class="fas fa-shopping-cart mr-2"></i>
+                                Add to Cart
+                            </button>
+                            <button onclick="${product.auction ? `placeBid(${product.id})` : `buyNow(${product.id})`}" class="flex-1 btn-primary py-3">
+                                ${product.auction ? '⚡ Place Bid' : '💳 Buy Now'}
+                            </button>
+                        </div>
+                        
+                        <button onclick="toggleWishlist(${product.id})" class="w-full btn-secondary py-3 mt-3">
+                            <i class="fas fa-heart mr-2 ${wishlist.includes(product.id) ? 'text-red-400' : ''}"></i>
+                            ${wishlist.includes(product.id) ? 'Remove from' : 'Add to'} Wishlist
+                        </button>
+                    </div>
+                </div>
+            `;
+            
+            openModal('productDetailModal');
+        }
+
+        // Wishlist Functions
+        function toggleWishlist(productId) {
+            const index = wishlist.indexOf(productId);
+            if (index > -1) {
+                wishlist.splice(index, 1);
+                showToast('Removed from wishlist', 'info');
+            } else {
+                wishlist.push(productId);
+                showToast('Added to wishlist!', 'success');
+                currentUser.points += 5;
+            }
+            updateWishlistCounter();
+            updateUI();
+            displayProducts();
+        }
+
+        function updateWishlistCounter() {
+            document.getElementById('wishlistCounter').textContent = wishlist.length;
+        }
+
+        function openWishlist() {
+            const wishlistProducts = allProducts.filter(p => wishlist.includes(p.id));
+            const content = document.getElementById('wishlistContent');
+            
+            if (wishlistProducts.length === 0) {
+                content.innerHTML = `
+                    <div class="col-span-full text-center py-10">
+                        <i class="fas fa-heart text-6xl text-gray-600 mb-4"></i>
+                        <p class="text-gray-400">Your wishlist is empty</p>
+                    </div>
+                `;
+            } else {
+                content.innerHTML = wishlistProducts.map(product => `
+                    <div class="glass-card p-4 rounded-xl">
+                        <img src="${product.image}" class="w-full h-32 object-cover rounded-lg mb-3">
+                        <h4 class="font-bold mb-2">${product.name}</h4>
+                        <div class="text-blue-400 font-bold mb-3">KSh ${product.price.toLocaleString()}</div>
+                        <div class="flex gap-2">
+                            <button onclick="buyNow(${product.id}); closeModal('wishlistModal')" class="flex-1 btn-primary text-sm py-2">
+                                Buy Now
+                            </button>
+                            <button onclick="toggleWishlist(${product.id}); openWishlist()" class="px-3 py-2 btn-secondary text-sm">
+                                <i class="fas fa-times"></i>
+                            </button>
+                        </div>
+                    </div>
+                `).join('');
+            }
+            
+            openModal('wishlistModal');
+        }
+
+        // Cart Functions
+        function addToCart(productId) {
+            const product = allProducts.find(p => p.id === productId);
+            cart.push(product);
+            showToast(`${product.name} added to cart!`, 'success');
+            currentUser.points += 10;
+            updateUI();
+        }
+
+        function buyNow(productId) {
+            const product = allProducts.find(p => p.id === productId);
+            showToast(`Processing purchase for ${product.name}...`, 'info');
+            setTimeout(() => {
+                showToast('🎉 Purchase successful! Redirecting to checkout...', 'success');
+                currentUser.points += 50;
+                updateUI();
+            }, 2000);
+        }
+
+        // Auction Functions
+        function placeBid(productId) {
+            const product = allProducts.find(p => p.id === productId);
+            const bidAmount = prompt(`Current bid: KSh ${product.currentBid.toLocaleString()}\n\nEnter your bid amount:`);
+            
+            if (bidAmount && !isNaN(bidAmount) && parseInt(bidAmount) > product.currentBid) {
+                product.currentBid = parseInt(bidAmount);
+                showToast('🎯 Bid placed successfully!', 'success');
+                currentUser.points += 20;
+                displayProducts();
+                updateUI();
+            } else if (bidAmount) {
+                showToast('Bid must be higher than current bid', 'error');
+            }
+        }
+
+        function openAuctions() {
+            activeFilters.chips = 'auction';
+            document.querySelectorAll('.filter-chip').forEach(chip => chip.classList.remove('active'));
+            document.querySelector('[data-filter="auction"]').classList.add('active');
+            applyFilters();
+            showToast('Showing auction items', 'info');
+        }
+
+        function openDeals() {
+            activeFilters.chips = 'discount';
+            document.querySelectorAll('.filter-chip').forEach(chip => chip.classList.remove('active'));
+            document.querySelector('[data-filter="discount"]').classList.add('active');
+            applyFilters();
+            showToast('Showing hot deals', 'info');
+        }
+
+        // Price Comparison
+        function openPriceCompare() {
+            document.getElementById('priceCompareContent').innerHTML = `
+                <div class="space-y-4">
+                    <p class="text-gray-400 mb-4">Compare prices across different sellers and platforms</p>
+                    ${allProducts.slice(0, 3).map(product => `
+                        <div class="glass-card p-4 rounded-xl">
+                            <div class="flex items-center gap-4">
+                                <img src="${product.image}" class="w-20 h-20 object-cover rounded-lg">
+                                <div class="flex-1">
+                                    <h4 class="font-bold mb-1">${product.name}</h4>
+                                    <div class="text-blue-400 font-bold">KSh ${product.price.toLocaleString()}</div>
+                                    ${product.originalPrice ? `
+                                        <div class="text-green-400 text-sm">
+                                            💰 Save KSh ${(product.originalPrice - product.price).toLocaleString()} (${product.discount}% off)
+                                        </div>
+                                    ` : ''}
+                                </div>
+                                <button onclick="buyNow(${product.id}); closeModal('priceCompareModal')" class="btn-primary">
+                                    Buy Now
+                                </button>
+                            </div>
+                        </div>
+                    `).join('')}
+                </div>
+            `;
+            openModal('priceCompareModal');
+        }
+
+        // AR Feature
+        function showARFeature() {
+            showToast('🥽 AR View feature coming soon! Try products with AR badge', 'info');
+        }
+
+        function showARView(productId) {
+            const product = allProducts.find(p => p.id === productId);
+            showToast(`🥽 Loading AR view for ${product.name}...`, 'info');
+            setTimeout(() => {
+                showToast('AR view is a demo feature. Full 3D view coming soon!', 'info');
+            }, 2000);
+        }
+
+        function playVideo(productId) {
+            const product = allProducts.find(p => p.id === productId);
+            showToast(`📹 Playing product video for ${product.name}...`, 'info');
+        }
+
+        // Form Handler
+        function handleProductSubmit(e) {
+            e.preventDefault();
+            
+            const newProduct = {
+                id: allProducts.length + 1,
+                name: document.getElementById('productName').value,
+                price: parseFloat(document.getElementById('productPrice').value),
+                category: document.getElementById('productCategory').value,
+                description: document.getElementById('productDescription').value,
+                location: document.getElementById('productLocation').value,
+                seller: currentUser.name,
+                image: "https://images.unsplash.com/photo-1505740420928-5e560c06d30e?w=400",
+                rating: 0,
+                reviews: 0,
+                verified: false,
+                freeShipping: document.getElementById('freeShipping').checked,
+                hasAR: document.getElementById('hasAR').checked,
+                discount: 0,
+                trending: false,
+                auction: false,
+                stock: 10
+            };
+
+            allProducts.unshift(newProduct);
+            filteredProducts = [...allProducts];
+            displayProducts();
+            
+            showToast('✅ Product listed successfully!', 'success');
+            currentUser.points += 25;
+            updateUI();
+            
+            closeModal('listProductModal');
+            document.getElementById('listProductForm').reset();
+        }
+
+        // Search & Filters
+        function handleSearch(e) {
+            const query = e.target.value.toLowerCase();
+            filteredProducts = allProducts.filter(product => 
+                product.name.toLowerCase().includes(query) ||
+                product.category.toLowerCase().includes(query) ||
+                product.seller.toLowerCase().includes(query) ||
+                product.description.toLowerCase().includes(query)
+            );
+            applyFilters();
+        }
+
+        function handleCategoryFilter(e) {
+            activeFilters.category = e.target.value;
+            applyFilters();
+        }
+
+        function handleLocationFilter(e) {
+            activeFilters.location = e.target.value;
+            applyFilters();
+        }
+
+        function handleChipFilter(e) {
+            document.querySelectorAll('.filter-chip').forEach(chip => {
+                chip.classList.remove('active');
+            });
+            e.target.classList.add('active');
+            
+            activeFilters.chips = e.target.dataset.filter;
+            applyFilters();
+        }
+
+        function applyFilters() {
+            filteredProducts = allProducts.filter(product => {
+                const categoryMatch = activeFilters.category === 'all' || product.category === activeFilters.category;
+                const locationMatch = activeFilters.location === 'all' || product.location === activeFilters.location;
+                
+                let chipMatch = true;
+                if (activeFilters.chips === 'verified') chipMatch = product.verified;
+                if (activeFilters.chips === 'shipping') chipMatch = product.freeShipping;
+                if (activeFilters.chips === 'discount') chipMatch = product.discount > 0;
+                if (activeFilters.chips === 'trending') chipMatch = product.trending;
+                if (activeFilters.chips === 'auction') chipMatch = product.auction;
+                if (activeFilters.chips === 'ar') chipMatch = product.hasAR;
+                
+                return categoryMatch && locationMatch && chipMatch;
+            });
+            
+            displayProducts();
+        }
+
+        function resetFilters() {
+            activeFilters = { category: 'all', location: 'all', chips: 'all' };
+            document.getElementById('categoryFilter').value = 'all';
+            document.getElementById('locationFilter').value = 'all';
+            document.getElementById('searchInput').value = '';
+            document.querySelectorAll('.filter-chip').forEach(chip => chip.classList.remove('active'));
+            document.querySelector('[data-filter="all"]').classList.add('active');
+            filteredProducts = [...allProducts];
+            displayProducts();
+            showToast('Filters reset', 'info');
+        }
+
+        function handleSort() {
+            const options = [
+                { name: 'Price: Low to High', value: 'price-asc' },
+                { name: 'Price: High to Low', value: 'price-desc' },
+                { name: 'Rating: High to Low', value: 'rating' },
+                { name: 'Newest First', value: 'newest' },
+                { name: 'Most Popular', value: 'popular' }
+            ];
+            
+            const sortMenu = options.map((opt, i) => `${i + 1}. ${opt.name}`).join('\n');
+            const choice = prompt(`Sort by:\n\n${sortMenu}\n\nEnter 1-5:`);
+            
+            if (choice >= 1 && choice <= 5) {
+                const sortType = options[choice - 1].value;
+                
+                switch(sortType) {
+                    case 'price-asc':
+                        filteredProducts.sort((a, b) => a.price - b.price);
+                        showToast('Sorted by price: Low to High', 'info');
+                        break;
+                    case 'price-desc':
+                        filteredProducts.sort((a, b) => b.price - a.price);
+                        showToast('Sorted by price: High to Low', 'info');
+                        break;
+                    case 'rating':
+                        filteredProducts.sort((a, b) => b.rating - a.rating);
+                        showToast('Sorted by rating', 'info');
+                        break;
+                    case 'newest':
+                        filteredProducts.sort((a, b) => b.id - a.id);
+                        showToast('Showing newest first', 'info');
+                        break;
+                    case 'popular':
+                        filteredProducts.sort((a, b) => b.reviews - a.reviews);
+                        showToast('Showing most popular', 'info');
+                        break;
+                }
+                
+                displayProducts();
+            }
+        }
+
+        function toggleView() {
+            const container = document.getElementById('productsContainer');
+            if (container.classList.contains('grid-cols-1')) {
+                container.classList.remove('grid-cols-1', 'md:grid-cols-2', 'lg:grid-cols-3', 'xl:grid-cols-4');
+                container.classList.add('grid-cols-1', 'md:grid-cols-1', 'lg:grid-cols-2');
+                showToast('List view', 'info');
+            } else {
+                container.classList.remove('grid-cols-1', 'md:grid-cols-1', 'lg:grid-cols-2');
+                container.classList.add('grid-cols-1', 'md:grid-cols-2', 'lg:grid-cols-3', 'xl:grid-cols-4');
+                showToast('Grid view', 'info');
+            }
+        }
+
+        // Share Product
+        function shareProduct(productId) {
+            const product = allProducts.find(p => p.id === productId);
+            if (navigator.share) {
+                navigator.share({
+                    title: product.name,
+                    text: `Check out ${product.name} for KSh ${product.price.toLocaleString()}`,
+                    url: window.location.href
+                }).then(() => {
+                    showToast('Shared successfully!', 'success');
+                    currentUser.points += 5;
+                    updateUI();
+                }).catch(() => {});
+            } else {
+                navigator.clipboard.writeText(window.location.href);
+                showToast('Link copied to clipboard!', 'success');
+                currentUser.points += 5;
+                updateUI();
+            }
+        }
+
+        // AI Chat Functions
+        function toggleAiChat() {
+            const chatWindow = document.getElementById('aiChatWindow');
+            chatWindow.classList.toggle('active');
+        }
+
+        function sendAiMessage() {
+            const input = document.getElementById('aiChatInput');
+            const message = input.value.trim();
+            
+            if (!message) return;
+            
+            addChatMessage(message, 'user');
+            input.value = '';
+            
+            setTimeout(() => {
+                const responses = [
+                    `I found ${filteredProducts.length} products matching your criteria. The most popular is "${filteredProducts[0].name}" priced at KSh ${filteredProducts[0].price.toLocaleString()}`,
+                    `Based on your search, I recommend checking out our Electronics category. We have ${allProducts.filter(p => p.category === 'Electronics').length} items available.`,
+                    `Great choice! The "${allProducts[0].name}" has a ${allProducts[0].rating}⭐ rating with ${allProducts[0].discount}% discount. Would you like to see similar products?`,
+                    `💡 Pro tip: Products with AR View let you see them in your space before buying. We have ${allProducts.filter(p => p.hasAR).length} AR-enabled products!`,
+                    `🔥 Hot deal alert! The "${allProducts.find(p => p.discount > 20)?.name}" is ${allProducts.find(p => p.discount > 20)?.discount}% off. Limited stock available!`,
+                    `Looking for verified sellers? We have ${allProducts.filter(p => p.verified).length} products from verified sellers with free shipping.`,
+                    `Check out our auction section! You can win products at great prices. Current auctions: ${allProducts.filter(p => p.auction).length}`,
+                    `Your loyalty points: ${currentUser.points}. Keep shopping to earn more rewards! 🎁`
+                ];
+                const response = responses[Math.floor(Math.random() * responses.length)];
+                addChatMessage(response, 'ai');
+            }, 1000);
+        }
+
+        function addChatMessage(text, sender) {
+            const messagesContainer = document.getElementById('aiChatMessages');
+            const messageDiv = document.createElement('div');
+            messageDiv.className = `message ${sender}`;
+            messageDiv.textContent = text;
+            messagesContainer.appendChild(messageDiv);
+            messagesContainer.scrollTop = messagesContainer.scrollHeight;
+        }
+
+        // Voice Search
+        function startVoiceSearch() {
+            if (!('webkitSpeechRecognition' in window)) {
+                showToast('Voice search not supported in this browser', 'error');
+                return;
+            }
+            
+            const recognition = new webkitSpeechRecognition();
+            recognition.continuous = false;
+            recognition.interimResults = false;
+            
+            const voiceBtn = document.getElementById('voiceSearchMainBtn');
+            voiceBtn.classList.add('voice-active');
+            isVoiceActive = true;
+            
+            recognition.onresult = function(event) {
+                const transcript = event.results[0][0].transcript;
+                document.getElementById('searchInput').value = transcript;
+                handleSearch({ target: { value: transcript } });
+                showToast(`Searching for: ${transcript}`, 'info');
+            };
+            
+            recognition.onerror = function(event) {
+                showToast('Voice search error. Please try again.', 'error');
+            };
+            
+            recognition.onend = function() {
+                voiceBtn.classList.remove('voice-active');
+                isVoiceActive = false;
+            };
+            
+            recognition.start();
+            showToast('🎤 Listening...', 'info');
+        }
+
+        // Deal Timer
+        function startDealTimer() {
+            setInterval(() => {
+                const timer = document.getElementById('dealTimer');
+                const now = new Date();
+                const endTime = new Date(now);
+                endTime.setHours(23, 59, 59);
+                
+                const diff = endTime - now;
+                const hours = Math.floor(diff / (1000 * 60 * 60));
+                const minutes = Math.floor((diff % (1000 * 60 * 60)) / (1000 * 60));
+                const seconds = Math.floor((diff % (1000 * 60)) / 1000);
+                
+                timer.textContent = `${hours.toString().padStart(2, '0')}:${minutes.toString().padStart(2, '0')}:${seconds.toString().padStart(2, '0')}`;
+            }, 1000);
+        }
+
+        // Simulate Online Users
+        function simulateOnlineUsers() {
+            setInterval(() => {
+                const users = 1200 + Math.floor(Math.random() * 100);
+                document.getElementById('onlineUsers').textContent = users.toLocaleString();
+            }, 5000);
+        }
+
+        // Update UI
+        function updateUI() {
+            document.getElementById('userName').textContent = currentUser.name;
+            document.getElementById('loyaltyPoints').textContent = currentUser.points;
+            updateWishlistCounter();
+        }
+
+        // Modal Functions
+        function openModal(modalId) {
+            document.getElementById(modalId).classList.add('active');
+        }
+
+        function closeModal(modalId) {
+            document.getElementById(modalId).classList.remove('active');
+        }
+
+        // Toast Notifications
+        function showToast(message, type = 'info') {
+            const toast = document.createElement('div');
+            toast.className = `toast ${type}`;
+            toast.innerHTML = `
+                <div class="flex items-center gap-2">
+                    ${type === 'success' ? '<i class="fas fa-check-circle"></i>' : ''}
+                    ${type === 'error' ? '<i class="fas fa-exclamation-circle"></i>' : ''}
+                    ${type === 'info' ? '<i class="fas fa-info-circle"></i>' : ''}
+                    <span>${message}</span>
+                </div>
+            `;
+            
+            document.getElementById('toastContainer').appendChild(toast);
+            
+            setTimeout(() => toast.classList.add('show'), 100);
+            
+            setTimeout(() => {
+                toast.classList.remove('show');
+                setTimeout(() => toast.remove(), 300);
+            }, 3000);
+        }
+
+        // Navigation Functions
+        function scrollToTop() {
+            window.scrollTo({ top: 0, behavior: 'smooth' });
+        }
+
+        function scrollToBottom() {
+            window.scrollTo({ top: document.body.scrollHeight, behavior: 'smooth' });
+        }
+
+        function goBack() {
+            window.history.back();
+        }
+
+        // Auto-save to localStorage
+        setInterval(() => {
+            localStorage.setItem('marketplace_wishlist', JSON.stringify(wishlist));
+            localStorage.setItem('marketplace_cart', JSON.stringify(cart));
+            localStorage.setItem('marketplace_user', JSON.stringify(currentUser));
+        }, 5000);
+
+        // Load from localStorage on startup
+        function loadFromStorage() {
+            const savedWishlist = localStorage.getItem('marketplace_wishlist');
+            const savedCart = localStorage.getItem('marketplace_cart');
+            const savedUser = localStorage.getItem('marketplace_user');
+            
+            if (savedWishlist) wishlist = JSON.parse(savedWishlist);
+            if (savedCart) cart = JSON.parse(savedCart);
+            if (savedUser) currentUser = JSON.parse(savedUser);
+        }
+
+        // Initialize storage
+        loadFromStorage();
+
+        // Keyboard shortcuts
+        document.addEventListener('keydown', function(e) {
+            // Ctrl/Cmd + K = Focus search
+            if ((e.ctrlKey || e.metaKey) && e.key === 'k') {
+                e.preventDefault();
+                document.getElementById('searchInput').focus();
+            }
+            
+            // Escape = Close modals
+            if (e.key === 'Escape') {
+                document.querySelectorAll('.modal.active').forEach(modal => {
+                    modal.classList.remove('active');
+                });
+                const chatWindow = document.getElementById('aiChatWindow');
+                if (chatWindow.classList.contains('active')) {
+                    chatWindow.classList.remove('active');
+                }
+            }
+            
+            // Ctrl/Cmd + L = List product
+            if ((e.ctrlKey || e.metaKey) && e.key === 'l') {
+                e.preventDefault();
+                openModal('listProductModal');
+            }
+        });
+
+        // Show welcome message
+        setTimeout(() => {
+            showToast('🎉 Welcome to Smart Marketplace! Earn points with every action.', 'success');
+        }, 1000);
+
+        console.log('✅ All features loaded successfully!');
+        console.log('🎯 Marketplace ready with:', {
+            products: allProducts.length,
+            features: [
+                '✓ AI Shopping Assistant',
+                '✓ Voice Search',
+                '✓ AR Product View',
+                '✓ Live Auctions',
+                '✓ Price Comparison',
+                '✓ Wishlist',
+                '✓ Loyalty Points',
+                '✓ Hot Deals Timer',
+                '✓ Real-time Updates'
+            ]
+        });
+    </script>
+</body>
+</html>
