@@ -7,6 +7,12 @@
     <script src="https://cdn.tailwindcss.com"></script>
     <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css" rel="stylesheet">
     
+    <!-- Firebase SDK -->
+    <script src="https://www.gstatic.com/firebasejs/9.22.1/firebase-app-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/9.22.1/firebase-firestore-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/9.22.1/firebase-storage-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/9.22.1/firebase-auth-compat.js"></script>
+    
     <style>
         @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap');
         
@@ -451,6 +457,117 @@
             70% { box-shadow: 0 0 0 10px rgba(239, 68, 68, 0); }
             100% { box-shadow: 0 0 0 0 rgba(239, 68, 68, 0); }
         }
+        
+        /* File Upload Styles */
+        .file-upload-container {
+            border: 2px dashed rgba(255, 255, 255, 0.3);
+            border-radius: 12px;
+            padding: 2rem;
+            text-align: center;
+            transition: all 0.3s ease;
+            cursor: pointer;
+        }
+        
+        .file-upload-container:hover {
+            border-color: #3b82f6;
+            background: rgba(59, 130, 246, 0.05);
+        }
+        
+        .file-upload-container.dragover {
+            border-color: #3b82f6;
+            background: rgba(59, 130, 246, 0.1);
+        }
+        
+        .upload-preview {
+            max-width: 100%;
+            max-height: 200px;
+            border-radius: 8px;
+            margin-top: 1rem;
+        }
+        
+        /* Page Transition */
+        .page-transition {
+            opacity: 0;
+            transform: translateY(20px);
+            transition: opacity 0.3s ease, transform 0.3s ease;
+        }
+        
+        .page-transition.active {
+            opacity: 1;
+            transform: translateY(0);
+        }
+        
+        /* Loading Spinner */
+        .loading-spinner {
+            border: 3px solid rgba(255, 255, 255, 0.3);
+            border-radius: 50%;
+            border-top: 3px solid #3b82f6;
+            width: 30px;
+            height: 30px;
+            animation: spin 1s linear infinite;
+            margin: 0 auto;
+        }
+        
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+        
+        /* Star Rating */
+        .star-rating {
+            display: inline-flex;
+            gap: 2px;
+        }
+        
+        .star {
+            color: #d1d5db;
+            cursor: pointer;
+            transition: color 0.2s;
+        }
+        
+        .star.active {
+            color: #fbbf24;
+        }
+        
+        /* Auction Timer */
+        .auction-timer {
+            background: rgba(239, 68, 68, 0.2);
+            border: 1px solid #ef4444;
+            border-radius: 8px;
+            padding: 8px 12px;
+            text-align: center;
+            color: #fca5a5;
+            font-weight: bold;
+        }
+        
+        /* Bid History */
+        .bid-history {
+            max-height: 200px;
+            overflow-y: auto;
+        }
+        
+        .bid-item {
+            padding: 8px 12px;
+            border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+        }
+        
+        .bid-item:last-child {
+            border-bottom: none;
+        }
+        
+        /* Review Stars */
+        .review-stars {
+            display: flex;
+            gap: 2px;
+        }
+        
+        .review-star {
+            color: #d1d5db;
+        }
+        
+        .review-star.filled {
+            color: #fbbf24;
+        }
     </style>
 </head>
 <body class="h-full">
@@ -547,6 +664,14 @@
                     <i class="fas fa-fire w-6"></i>
                     <span class="hidden lg:block">Hot Deals</span>
                 </a>
+                <a href="#" onclick="openUploads()" class="flex items-center space-x-3 p-3 rounded-xl text-gray-300 hover:bg-gray-700 hover:text-blue-300 transition">
+                    <i class="fas fa-cloud-upload-alt w-6"></i>
+                    <span class="hidden lg:block">My Uploads</span>
+                </a>
+                <a href="#" onclick="openPurchases()" class="flex items-center space-x-3 p-3 rounded-xl text-gray-300 hover:bg-gray-700 hover:text-blue-300 transition">
+                    <i class="fas fa-shopping-bag w-6"></i>
+                    <span class="hidden lg:block">My Purchases</span>
+                </a>
             </nav>
             
             <div class="p-6 border-t border-gray-700">
@@ -595,8 +720,21 @@
             </header>
 
             <!-- Marketplace Content -->
-            <main class="flex-1 overflow-y-auto">
+            <main class="flex-1 overflow-y-auto page-transition active" id="mainContent">
                 <div class="max-w-7xl mx-auto p-8">
+                    <!-- Firebase Status -->
+                    <div id="firebaseStatus" class="mb-4">
+                        <div class="glass-card p-4 rounded-xl border border-green-500/30 bg-green-500/10">
+                            <div class="flex items-center gap-3">
+                                <i class="fas fa-check-circle text-green-400 text-xl"></i>
+                                <div>
+                                    <h4 class="font-bold text-green-400">Firebase Connected</h4>
+                                    <p class="text-green-300 text-sm">Your data is securely synced with the cloud</p>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
                     <!-- Hot Deals Banner -->
                     <div class="glass-card rounded-2xl border border-red-500/30 p-6 mb-8 bg-gradient-to-r from-red-900/20 to-orange-900/20">
                         <div class="flex items-center justify-between">
@@ -669,7 +807,7 @@
                         </div>
                         
                         <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6" id="productsContainer">
-                            <!-- Products loaded here -->
+                            <!-- Products will be loaded here -->
                         </div>
                     </div>
                 </div>
@@ -722,7 +860,21 @@
                 
                 <div>
                     <label class="block text-gray-300 mb-2 font-semibold">Description</label>
-                    <textarea id="productDescription" class="form-input" rows="4" placeholder="Describe your product" required></textarea>
+                    <textarea id="productDescription" class="form-textarea" rows="4" placeholder="Describe your product" required></textarea>
+                </div>
+                
+                <div>
+                    <label class="block text-gray-300 mb-2 font-semibold">Product Images</label>
+                    <div class="file-upload-container" id="fileUploadContainer">
+                        <i class="fas fa-cloud-upload-alt text-4xl text-blue-400 mb-2"></i>
+                        <p class="text-gray-300 mb-1">Drag & drop images here or click to browse</p>
+                        <p class="text-gray-500 text-sm">Supports JPG, PNG, GIF (Max 10MB)</p>
+                        <input type="file" id="fileInput" accept="image/*" class="hidden" multiple>
+                        <button type="button" onclick="document.getElementById('fileInput').click()" class="btn-secondary mt-2">
+                            <i class="fas fa-folder-open mr-2"></i> Browse Files
+                        </button>
+                        <div id="uploadPreview" class="mt-4 grid grid-cols-3 gap-2"></div>
+                    </div>
                 </div>
                 
                 <div>
@@ -749,16 +901,16 @@
         </div>
     </div>
 
-    <!-- Price Compare Modal -->
-    <div class="modal" id="priceCompareModal">
-        <div class="glass-card rounded-3xl p-8 max-w-4xl w-full max-h-[90vh] overflow-y-auto">
+    <!-- Product Detail Modal -->
+    <div class="modal" id="productDetailModal">
+        <div class="glass-card rounded-3xl p-8 max-w-5xl w-full max-h-[90vh] overflow-y-auto">
             <div class="flex justify-between items-center mb-6">
-                <h2 class="text-2xl font-black gradient-text">Price Comparison</h2>
-                <button onclick="closeModal('priceCompareModal')" class="text-gray-400 hover:text-white">
+                <h2 class="text-2xl font-black gradient-text" id="productDetailTitle"></h2>
+                <button onclick="closeModal('productDetailModal')" class="text-gray-400 hover:text-white">
                     <i class="fas fa-times text-2xl"></i>
                 </button>
             </div>
-            <div id="priceCompareContent"></div>
+            <div id="productDetailContent"></div>
         </div>
     </div>
 
@@ -775,762 +927,1318 @@
         </div>
     </div>
 
-    <!-- Product Detail Modal -->
-    <div class="modal" id="productDetailModal">
-        <div class="glass-card rounded-3xl p-8 max-w-5xl w-full max-h-[90vh] overflow-y-auto">
+    <!-- Uploads Modal -->
+    <div class="modal" id="uploadsModal">
+        <div class="glass-card rounded-3xl p-8 max-w-4xl w-full max-h-[90vh] overflow-y-auto">
             <div class="flex justify-between items-center mb-6">
-                <h2 class="text-2xl font-black gradient-text" id="productDetailTitle"></h2>
-                <button onclick="closeModal('productDetailModal')" class="text-gray-400 hover:text-white">
+                <h2 class="text-2xl font-black gradient-text">My Uploads</h2>
+                <button onclick="closeModal('uploadsModal')" class="text-gray-400 hover:text-white">
                     <i class="fas fa-times text-2xl"></i>
                 </button>
             </div>
-            <div id="productDetailContent"></div>
+            <div id="uploadsContent" class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4"></div>
+        </div>
+    </div>
+
+    <!-- Auctions Modal -->
+    <div class="modal" id="auctionsModal">
+        <div class="glass-card rounded-3xl p-8 max-w-6xl w-full max-h-[90vh] overflow-y-auto">
+            <div class="flex justify-between items-center mb-6">
+                <h2 class="text-2xl font-black gradient-text">Live Auctions</h2>
+                <button onclick="closeModal('auctionsModal')" class="text-gray-400 hover:text-white">
+                    <i class="fas fa-times text-2xl"></i>
+                </button>
+            </div>
+            <div id="auctionsContent" class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6"></div>
+        </div>
+    </div>
+
+    <!-- Hot Deals Modal -->
+    <div class="modal" id="dealsModal">
+        <div class="glass-card rounded-3xl p-8 max-w-6xl w-full max-h-[90vh] overflow-y-auto">
+            <div class="flex justify-between items-center mb-6">
+                <h2 class="text-2xl font-black gradient-text">Hot Deals</h2>
+                <button onclick="closeModal('dealsModal')" class="text-gray-400 hover:text-white">
+                    <i class="fas fa-times text-2xl"></i>
+                </button>
+            </div>
+            <div id="dealsContent" class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6"></div>
+        </div>
+    </div>
+
+    <!-- Purchases Modal -->
+    <div class="modal" id="purchasesModal">
+        <div class="glass-card rounded-3xl p-8 max-w-6xl w-full max-h-[90vh] overflow-y-auto">
+            <div class="flex justify-between items-center mb-6">
+                <h2 class="text-2xl font-black gradient-text">My Purchases</h2>
+                <button onclick="closeModal('purchasesModal')" class="text-gray-400 hover:text-white">
+                    <i class="fas fa-times text-2xl"></i>
+                </button>
+            </div>
+            <div id="purchasesContent" class="space-y-4"></div>
+        </div>
+    </div>
+
+    <!-- Review Modal -->
+    <div class="modal" id="reviewModal">
+        <div class="glass-card rounded-3xl p-8 max-w-2xl w-full max-h-[90vh] overflow-y-auto">
+            <div class="flex justify-between items-center mb-6">
+                <h2 class="text-2xl font-black gradient-text">Review Product</h2>
+                <button onclick="closeModal('reviewModal')" class="text-gray-400 hover:text-white">
+                    <i class="fas fa-times text-2xl"></i>
+                </button>
+            </div>
+            <form id="reviewForm" class="space-y-4">
+                <input type="hidden" id="reviewProductId">
+                <div>
+                    <label class="block text-gray-300 mb-2 font-semibold">Product Rating</label>
+                    <div class="star-rating" id="starRating">
+                        <span class="star text-2xl" data-rating="1">★</span>
+                        <span class="star text-2xl" data-rating="2">★</span>
+                        <span class="star text-2xl" data-rating="3">★</span>
+                        <span class="star text-2xl" data-rating="4">★</span>
+                        <span class="star text-2xl" data-rating="5">★</span>
+                    </div>
+                </div>
+                <div>
+                    <label class="block text-gray-300 mb-2 font-semibold">Quality Rating</label>
+                    <div class="star-rating" id="qualityRating">
+                        <span class="star text-2xl" data-rating="1">★</span>
+                        <span class="star text-2xl" data-rating="2">★</span>
+                        <span class="star text-2xl" data-rating="3">★</span>
+                        <span class="star text-2xl" data-rating="4">★</span>
+                        <span class="star text-2xl" data-rating="5">★</span>
+                    </div>
+                </div>
+                <div>
+                    <label class="block text-gray-300 mb-2 font-semibold">Review Title</label>
+                    <input type="text" id="reviewTitle" class="form-input" placeholder="Enter a title for your review" required>
+                </div>
+                <div>
+                    <label class="block text-gray-300 mb-2 font-semibold">Review Description</label>
+                    <textarea id="reviewDescription" class="form-textarea" rows="4" placeholder="Share your experience with this product" required></textarea>
+                </div>
+                <button type="submit" class="w-full btn-primary py-3">
+                    <i class="fas fa-star mr-2"></i>
+                    Submit Review
+                </button>
+            </form>
+        </div>
+    </div>
+
+    <!-- Price Compare Modal -->
+    <div class="modal" id="priceCompareModal">
+        <div class="glass-card rounded-3xl p-8 max-w-4xl w-full max-h-[90vh] overflow-y-auto">
+            <div class="flex justify-between items-center mb-6">
+                <h2 class="text-2xl font-black gradient-text">Price Comparison</h2>
+                <button onclick="closeModal('priceCompareModal')" class="text-gray-400 hover:text-white">
+                    <i class="fas fa-times text-2xl"></i>
+                </button>
+            </div>
+            <div id="priceCompareContent"></div>
         </div>
     </div>
 
     <script>
-        // Initialize app without Firebase - Pure JavaScript implementation
-        let currentUser = { name: 'Guest User', points: 150 };
+        // Firebase Configuration
+        const firebaseConfig = {
+            apiKey: "AIzaSyDHHyGgsSV18BcXrGgzi4C8frzDAE1C1zo",
+            authDomain: "uniconnect-ee95c.firebaseapp.com",
+            projectId: "uniconnect-ee95c",
+            storageBucket: "uniconnect-ee95c.firebasestorage.app",
+            messagingSenderId: "1003264444309",
+            appId: "1:1003264444309:web:9f0307516e44d21e97d89c"
+        };
+
+        // Initialize Firebase
+        let db, storage, auth;
+        
+        try {
+            // Initialize Firebase
+            firebase.initializeApp(firebaseConfig);
+            
+            // Initialize Firebase services
+            db = firebase.firestore();
+            storage = firebase.storage();
+            auth = firebase.auth();
+            
+            console.log("✅ Firebase connected successfully!");
+            console.log("📊 Firestore:", db);
+            console.log("💾 Storage:", storage);
+            console.log("🔐 Auth:", auth);
+            
+            // Show Firebase status in UI
+            document.getElementById('firebaseStatus').classList.remove('hidden');
+            showToast('Firebase connected successfully!', 'success');
+            
+        } catch (error) {
+            console.error("❌ Firebase initialization error:", error);
+            showToast('Firebase connection failed. Using local storage.', 'error');
+        }
+
+        // App State
+        let currentUser = { 
+            name: 'Guest User', 
+            points: 150,
+            uid: 'guest-' + Math.random().toString(36).substr(2, 9)
+        };
         let allProducts = [];
         let filteredProducts = [];
         let wishlist = [];
         let cart = [];
-        let activeFilters = { category: 'all', location: 'all', chips: 'all' };
-        let isVoiceActive = false;
-
-        // Initialize
+        let activeFilters = [];
+        let uploads = [];
+        let purchases = [];
+        let auctions = [];
+        let hotDeals = [];
+        
+        // DOM Elements
+        const mainContent = document.getElementById('mainContent');
+        const productsContainer = document.getElementById('productsContainer');
+        const searchInput = document.getElementById('searchInput');
+        const categoryFilter = document.getElementById('categoryFilter');
+        const locationFilter = document.getElementById('locationFilter');
+        const filterChips = document.getElementById('filterChips');
+        const wishlistCounter = document.getElementById('wishlistCounter');
+        const userName = document.getElementById('userName');
+        const loyaltyPoints = document.getElementById('loyaltyPoints');
+        const onlineUsers = document.getElementById('onlineUsers');
+        const dealTimer = document.getElementById('dealTimer');
+        const fileUploadContainer = document.getElementById('fileUploadContainer');
+        const fileInput = document.getElementById('fileInput');
+        const uploadPreview = document.getElementById('uploadPreview');
+        
+        // Initialize the app
         document.addEventListener('DOMContentLoaded', function() {
-            console.log('🚀 Marketplace initialized');
+            initApp();
             setupEventListeners();
-            loadProducts();
-            updateUI();
+            loadProductsFromFirebase();
+            updateUserInfo();
+            updateOnlineUsers();
             startDealTimer();
-            simulateOnlineUsers();
+            loadAuctions();
+            loadHotDeals();
         });
-
-        // Event Listeners
+        
+        function initApp() {
+            // Set user info
+            userName.textContent = currentUser.name;
+            loyaltyPoints.textContent = currentUser.points;
+            
+            // Load wishlist from localStorage
+            const savedWishlist = localStorage.getItem('wishlist');
+            if (savedWishlist) {
+                wishlist = JSON.parse(savedWishlist);
+                updateWishlistCounter();
+            }
+            
+            // Load uploads from localStorage
+            const savedUploads = localStorage.getItem('uploads');
+            if (savedUploads) {
+                uploads = JSON.parse(savedUploads);
+            }
+            
+            // Load purchases from localStorage
+            const savedPurchases = localStorage.getItem('purchases');
+            if (savedPurchases) {
+                purchases = JSON.parse(savedPurchases);
+            }
+        }
+        
         function setupEventListeners() {
-            // Modals
-            document.getElementById('listProductBtn').addEventListener('click', () => openModal('listProductModal'));
-            document.getElementById('priceCompareBtn').addEventListener('click', openPriceCompare);
-            document.getElementById('ar3DBtn').addEventListener('click', showARFeature);
+            // Search and filter
+            searchInput.addEventListener('input', filterProducts);
+            categoryFilter.addEventListener('change', filterProducts);
+            locationFilter.addEventListener('change', filterProducts);
             
-            // Forms
-            document.getElementById('listProductForm').addEventListener('submit', handleProductSubmit);
+            // Filter chips
+            filterChips.addEventListener('click', function(e) {
+                if (e.target.classList.contains('filter-chip')) {
+                    const filter = e.target.getAttribute('data-filter');
+                    toggleFilter(filter, e.target);
+                }
+            });
             
-            // Search & Filters
-            document.getElementById('searchInput').addEventListener('input', handleSearch);
-            document.getElementById('categoryFilter').addEventListener('change', handleCategoryFilter);
-            document.getElementById('locationFilter').addEventListener('change', handleLocationFilter);
-            document.getElementById('sortByBtn').addEventListener('click', handleSort);
-            document.getElementById('viewToggle').addEventListener('click', toggleView);
+            // List product button
+            document.getElementById('listProductBtn').addEventListener('click', function() {
+                openModal('listProductModal');
+            });
             
-            // Filter Chips
-            document.querySelectorAll('.filter-chip').forEach(chip => {
-                chip.addEventListener('click', handleChipFilter);
+            // Price compare button
+            document.getElementById('priceCompareBtn').addEventListener('click', function() {
+                openPriceCompare();
+            });
+            
+            // AR/3D button
+            document.getElementById('ar3DBtn').addEventListener('click', function() {
+                showToast('AR/3D view feature coming soon!', 'info');
             });
             
             // AI Assistant
             document.getElementById('aiAssistant').addEventListener('click', toggleAiChat);
             document.getElementById('sendAiMessage').addEventListener('click', sendAiMessage);
-            document.getElementById('aiChatInput').addEventListener('keypress', (e) => {
+            document.getElementById('aiChatInput').addEventListener('keypress', function(e) {
                 if (e.key === 'Enter') sendAiMessage();
             });
             
-            // Voice Search
-            document.getElementById('voiceSearchBtn').addEventListener('click', startVoiceSearch);
-            document.getElementById('voiceSearchMainBtn').addEventListener('click', startVoiceSearch);
+            // Voice search
+            document.getElementById('voiceSearchMainBtn').addEventListener('click', toggleVoiceSearch);
+            document.getElementById('voiceSearchBtn').addEventListener('click', toggleVoiceSearch);
             
-            // Close modals on outside click
-            window.addEventListener('click', (e) => {
-                if (e.target.classList.contains('modal')) {
-                    e.target.classList.remove('active');
+            // File upload
+            fileUploadContainer.addEventListener('click', function() {
+                fileInput.click();
+            });
+            
+            fileUploadContainer.addEventListener('dragover', function(e) {
+                e.preventDefault();
+                fileUploadContainer.classList.add('dragover');
+            });
+            
+            fileUploadContainer.addEventListener('dragleave', function() {
+                fileUploadContainer.classList.remove('dragover');
+            });
+            
+            fileUploadContainer.addEventListener('drop', function(e) {
+                e.preventDefault();
+                fileUploadContainer.classList.remove('dragover');
+                if (e.dataTransfer.files.length) {
+                    handleFiles(e.dataTransfer.files);
                 }
             });
+            
+            fileInput.addEventListener('change', function() {
+                if (fileInput.files.length) {
+                    handleFiles(fileInput.files);
+                }
+            });
+            
+            // List product form
+            document.getElementById('listProductForm').addEventListener('submit', function(e) {
+                e.preventDefault();
+                listProduct();
+            });
+            
+            // Review form
+            document.getElementById('reviewForm').addEventListener('submit', function(e) {
+                e.preventDefault();
+                submitReview();
+            });
+            
+            // Star rating
+            document.querySelectorAll('.star-rating .star').forEach(star => {
+                star.addEventListener('click', function() {
+                    const rating = this.getAttribute('data-rating');
+                    const container = this.parentElement;
+                    container.querySelectorAll('.star').forEach(s => {
+                        if (s.getAttribute('data-rating') <= rating) {
+                            s.classList.add('active');
+                        } else {
+                            s.classList.remove('active');
+                        }
+                    });
+                });
+            });
         }
-
-        // Load Products with Enhanced Features
-        function loadProducts() {
+        
+        // Firebase Product Management
+        async function loadProductsFromFirebase() {
+            try {
+                if (db) {
+                    // Try to load from Firestore
+                    const snapshot = await db.collection('products').get();
+                    if (!snapshot.empty) {
+                        allProducts = snapshot.docs.map(doc => ({
+                            id: doc.id,
+                            ...doc.data()
+                        }));
+                        console.log("📦 Loaded products from Firestore:", allProducts.length);
+                    } else {
+                        // If no products in Firestore, load sample data
+                        await loadSampleProducts();
+                    }
+                } else {
+                    // Fallback to local storage
+                    const savedProducts = localStorage.getItem('products');
+                    if (savedProducts) {
+                        allProducts = JSON.parse(savedProducts);
+                    } else {
+                        loadSampleProducts();
+                    }
+                }
+                
+                filteredProducts = [...allProducts];
+                renderProducts();
+                showToast('Products loaded successfully!', 'success');
+                
+            } catch (error) {
+                console.error("Error loading products:", error);
+                // Fallback to sample data
+                loadSampleProducts();
+                showToast('Using local products data', 'info');
+            }
+        }
+        
+        async function loadSampleProducts() {
+            // Sample products data
             allProducts = [
                 {
-                    id: 1,
-                    name: "Wireless Bluetooth Earbuds Pro",
-                    price: 4500,
-                    originalPrice: 6000,
+                    id: '1',
+                    name: "Smartphone X Pro",
+                    price: 45000,
+                    condition: "New",
                     category: "Electronics",
+                    description: "Latest smartphone with advanced camera and long battery life.",
                     location: "Nairobi",
-                    image: "https://images.unsplash.com/photo-1590658268037-6bf12165a8df?w=400",
-                    seller: "TechHub Kenya",
-                    rating: 4.8,
-                    reviews: 124,
+                    image: "https://images.unsplash.com/photo-1511707171634-5f897ff02aa9?ixlib=rb-4.0.3&ixid=M3wxMjA3fDB8MHxzZWFyY2h8M3x8c21hcnRwaG9uZXxlbnwwfHwwfHx8MA%3D%3D&auto=format&fit=crop&w=500&q=60",
                     verified: true,
                     freeShipping: true,
-                    discount: 25,
+                    discount: 15,
                     trending: true,
-                    hasAR: true,
-                    hasVideo: true,
-                    auction: false,
-                    description: "Premium wireless earbuds with noise cancellation",
-                    stock: 15
+                    arView: true,
+                    seller: "TechStore Kenya",
+                    createdAt: new Date().toISOString()
                 },
                 {
-                    id: 2,
-                    name: "Smart Watch Series 5 - AUCTION",
-                    price: 12500,
-                    currentBid: 10000,
-                    category: "Electronics",
+                    id: '2',
+                    name: "Designer Handbag",
+                    price: 12000,
+                    condition: "Like New",
+                    category: "Fashion",
+                    description: "Luxury designer handbag in excellent condition.",
                     location: "Mombasa",
-                    image: "https://images.unsplash.com/photo-1523275335684-37898b6baf30?w=400",
-                    seller: "GadgetZone",
-                    rating: 4.5,
-                    reviews: 89,
+                    image: "https://images.unsplash.com/photo-1584917865442-de89df76afd3?ixlib=rb-4.0.3&ixid=M3wxMjA3fDB8MHxzZWFyY2h8Mnx8aGFuZGJhZ3xlbnwwfHwwfHx8MA%3D%3D&auto=format&fit=crop&w=500&q=60",
                     verified: true,
                     freeShipping: false,
                     discount: 0,
                     trending: false,
-                    hasAR: true,
-                    hasVideo: false,
-                    auction: true,
-                    auctionEnds: new Date(Date.now() + 24 * 60 * 60 * 1000),
-                    description: "Latest smartwatch with health tracking",
-                    stock: 5
+                    arView: false,
+                    seller: "Fashion Boutique",
+                    createdAt: new Date().toISOString()
                 },
                 {
-                    id: 3,
-                    name: "Designer Leather Handbag",
+                    id: '3',
+                    name: "Wireless Headphones",
                     price: 8500,
-                    originalPrice: 12000,
-                    category: "Fashion",
+                    condition: "New",
+                    category: "Electronics",
+                    description: "Premium wireless headphones with noise cancellation.",
                     location: "Nairobi",
-                    image: "https://images.unsplash.com/photo-1584917865442-de89df76afd3?w=400",
-                    seller: "Fashion Store KE",
-                    rating: 4.9,
-                    reviews: 67,
+                    image: "https://images.unsplash.com/photo-1505740420928-5e560c06d30e?ixlib=rb-4.0.3&ixid=M3wxMjA3fDB8MHxzZWFyY2h8M3x8aGVhZHBob25lc3xlbnwwfHwwfHx8MA%3D%3D&auto=format&fit=crop&w=500&q=60",
                     verified: true,
                     freeShipping: true,
-                    discount: 29,
+                    discount: 20,
                     trending: true,
-                    hasAR: true,
-                    hasVideo: true,
-                    auction: false,
-                    description: "Premium leather handbag, perfect for any occasion",
-                    stock: 8
+                    arView: false,
+                    seller: "AudioTech",
+                    createdAt: new Date().toISOString()
                 },
                 {
-                    id: 4,
-                    name: "Ergonomic Laptop Stand",
-                    price: 2500,
+                    id: '4',
+                    name: "Fitness Tracker",
+                    price: 5500,
+                    condition: "New",
                     category: "Electronics",
+                    description: "Advanced fitness tracker with heart rate monitoring.",
                     location: "Kisumu",
-                    image: "https://images.unsplash.com/photo-1527864550417-7fd91fc51a46?w=400",
-                    seller: "Office Plus",
-                    rating: 4.6,
-                    reviews: 45,
+                    image: "https://images.unsplash.com/photo-1575311373937-040b8e1fd5b6?ixlib=rb-4.0.3&ixid=M3wxMjA3fDB8MHxzZWFyY2h8NHx8Zml0bmVzcyUyMHRyYWNrZXJ8ZW58MHx8MHx8fDA%3D&auto=format&fit=crop&w=500&q=60",
                     verified: false,
                     freeShipping: true,
-                    discount: 10,
-                    trending: false,
-                    hasAR: false,
-                    hasVideo: false,
-                    auction: false,
-                    description: "Adjustable laptop stand for better posture",
-                    stock: 20
-                },
-                {
-                    id: 5,
-                    name: "Gaming Mechanical Keyboard RGB",
-                    price: 7800,
-                    originalPrice: 9500,
-                    category: "Electronics",
-                    location: "Nairobi",
-                    image: "https://images.unsplash.com/photo-1587829741301-dc798b83add3?w=400",
-                    seller: "GamersHub KE",
-                    rating: 4.7,
-                    reviews: 156,
-                    verified: true,
-                    freeShipping: true,
-                    discount: 18,
+                    discount: 25,
                     trending: true,
-                    hasAR: false,
-                    hasVideo: true,
-                    auction: false,
-                    description: "RGB mechanical keyboard with blue switches",
-                    stock: 12
-                },
-                {
-                    id: 6,
-                    name: "Yoga Mat Premium - Flash Sale",
-                    price: 1200,
-                    originalPrice: 2400,
-                    category: "Sports",
-                    location: "Mombasa",
-                    image: "https://images.unsplash.com/photo-1601925260368-ae2f83cf8b7f?w=400",
-                    seller: "FitLife Kenya",
-                    rating: 4.4,
-                    reviews: 89,
-                    verified: true,
-                    freeShipping: true,
-                    discount: 50,
-                    trending: true,
-                    hasAR: false,
-                    hasVideo: false,
-                    auction: false,
-                    description: "Non-slip yoga mat, eco-friendly material",
-                    stock: 30
+                    arView: false,
+                    seller: "FitTech",
+                    createdAt: new Date().toISOString()
                 }
             ];
             
-            filteredProducts = [...allProducts];
-            displayProducts();
+            // Save sample products to Firestore if available
+            if (db) {
+                try {
+                    for (const product of allProducts) {
+                        await db.collection('products').doc(product.id).set(product);
+                    }
+                    console.log("✅ Sample products saved to Firestore");
+                } catch (error) {
+                    console.error("Error saving sample products:", error);
+                }
+            }
+            
+            // Save to localStorage as backup
+            localStorage.setItem('products', JSON.stringify(allProducts));
         }
-
-        // Display Products with Enhanced UI
-        function displayProducts() {
-            const container = document.getElementById('productsContainer');
-            container.innerHTML = '';
+        
+        async function saveProductToFirebase(product) {
+            try {
+                if (db) {
+                    const docRef = await db.collection('products').add({
+                        ...product,
+                        createdAt: new Date().toISOString(),
+                        userId: currentUser.uid
+                    });
+                    console.log("✅ Product saved to Firestore with ID:", docRef.id);
+                    return docRef.id;
+                } else {
+                    // Fallback to localStorage
+                    product.id = 'local-' + Date.now();
+                    allProducts.unshift(product);
+                    localStorage.setItem('products', JSON.stringify(allProducts));
+                    return product.id;
+                }
+            } catch (error) {
+                console.error("Error saving product:", error);
+                throw error;
+            }
+        }
+        
+        function renderProducts() {
+            productsContainer.innerHTML = '';
             
             if (filteredProducts.length === 0) {
-                container.innerHTML = `
-                    <div class="col-span-full text-center py-20">
-                        <i class="fas fa-search text-6xl text-gray-600 mb-4"></i>
-                        <p class="text-gray-400 text-xl">No products found</p>
-                        <button onclick="resetFilters()" class="btn-primary mt-4">Reset Filters</button>
+                productsContainer.innerHTML = `
+                    <div class="col-span-full text-center py-12">
+                        <i class="fas fa-search text-5xl text-gray-500 mb-4"></i>
+                        <h3 class="text-xl font-bold text-gray-400 mb-2">No products found</h3>
+                        <p class="text-gray-500">Try adjusting your search or filters</p>
                     </div>
                 `;
                 return;
             }
             
             filteredProducts.forEach(product => {
-                const card = document.createElement('div');
-                card.className = 'product-card glass-card rounded-2xl border border-gray-700 overflow-hidden';
-                card.onclick = () => showProductDetail(product.id);
-                
-                const badges = [];
-                if (product.discount > 0) badges.push(`<div class="absolute top-3 left-3 px-2 py-1 bg-gradient-to-r from-pink-500 to-red-500 text-white text-xs font-bold rounded-lg">${product.discount}% OFF</div>`);
-                if (product.trending) badges.push(`<div class="absolute top-3 right-3 trending-badge">🔥 TRENDING</div>`);
-                if (product.auction) badges.push(`<div class="absolute top-12 left-3 auction-badge">⚡ AUCTION</div>`);
-                if (product.hasAR) badges.push(`<div class="absolute bottom-3 left-3 ar-badge"><i class="fas fa-cube mr-1"></i>AR View</div>`);
-                
-                card.innerHTML = `
-                    <div class="relative product-3d-view">
+                const productCard = document.createElement('div');
+                productCard.className = 'glass-card rounded-2xl overflow-hidden product-card';
+                productCard.innerHTML = `
+                    <div class="relative">
                         <img src="${product.image}" alt="${product.name}" class="w-full h-48 object-cover">
-                        ${badges.join('')}
-                        ${product.hasVideo ? '<div class="video-preview absolute inset-0"></div>' : ''}
-                        <div class="absolute top-3 right-3 flex flex-col gap-2">
-                            <button class="social-action-btn ${wishlist.includes(product.id) ? 'active' : ''}" onclick="event.stopPropagation(); toggleWishlist(${product.id})">
-                                <i class="fas fa-heart"></i>
-                            </button>
-                            <button class="social-action-btn" onclick="event.stopPropagation(); shareProduct(${product.id})">
-                                <i class="fas fa-share"></i>
-                            </button>
+                        <div class="absolute top-3 left-3 flex flex-col gap-1">
+                            ${product.verified ? '<span class="bg-blue-500 text-white text-xs px-2 py-1 rounded-md">✓ Verified</span>' : ''}
+                            ${product.freeShipping ? '<span class="bg-green-500 text-white text-xs px-2 py-1 rounded-md">🚚 Free Shipping</span>' : ''}
+                            ${product.discount > 0 ? `<span class="bg-red-500 text-white text-xs px-2 py-1 rounded-md">🏷️ ${product.discount}% OFF</span>` : ''}
+                            ${product.trending ? '<span class="trending-badge text-xs">🔥 Trending</span>' : ''}
+                            ${product.arView ? '<span class="ar-badge text-xs">🥽 AR View</span>' : ''}
                         </div>
+                        <button class="social-action-btn absolute top-3 right-3 ${wishlist.includes(product.id) ? 'active' : ''}" 
+                                onclick="toggleWishlist('${product.id}')">
+                            <i class="fas fa-heart"></i>
+                        </button>
                     </div>
-                    
                     <div class="p-4">
-                        <div class="flex justify-between items-start mb-2">
-                            <h3 class="font-bold text-white flex-1 text-sm">${product.name}</h3>
+                        <h3 class="font-bold text-white text-lg mb-1">${product.name}</h3>
+                        <p class="text-gray-400 text-sm mb-2">${product.description.substring(0, 60)}...</p>
+                        <div class="flex justify-between items-center">
+                            <div>
+                                <span class="text-xl font-bold text-blue-400">KSh ${product.price.toLocaleString()}</span>
+                                ${product.discount > 0 ? `<span class="text-gray-500 text-sm line-through ml-2">KSh ${Math.round(product.price / (1 - product.discount/100)).toLocaleString()}</span>` : ''}
+                            </div>
+                            <div class="text-gray-500 text-sm">
+                                <i class="fas fa-map-marker-alt mr-1"></i> ${product.location}
+                            </div>
                         </div>
-                        
-                        <div class="flex items-center gap-2 mb-2">
-                            ${product.auction ? `
-                                <div>
-                                    <span class="text-xs text-gray-400">Current Bid</span>
-                                    <div class="text-blue-400 font-bold">KSh ${product.currentBid.toLocaleString()}</div>
-                                </div>
-                            ` : `
-                                <div>
-                                    <span class="text-blue-400 font-bold text-lg">KSh ${product.price.toLocaleString()}</span>
-                                    ${product.originalPrice ? `<span class="text-gray-500 text-sm line-through ml-2">KSh ${product.originalPrice.toLocaleString()}</span>` : ''}
-                                </div>
-                            `}
-                        </div>
-                        
-                        <div class="flex items-center text-xs text-gray-400 mb-3">
-                            <i class="fas fa-map-marker-alt mr-1"></i>
-                            <span>${product.location}</span>
-                            <i class="fas fa-star text-yellow-400 ml-2 mr-1"></i>
-                            <span>${product.rating}</span>
-                            <span class="mx-1">•</span>
-                            <span>${product.reviews}</span>
-                        </div>
-                        
-                        <div class="flex flex-wrap gap-1 mb-3">
-                            ${product.verified ? '<span class="text-xs px-2 py-1 bg-green-500/20 text-green-400 rounded">✓ Verified</span>' : ''}
-                            ${product.freeShipping ? '<span class="text-xs px-2 py-1 bg-blue-500/20 text-blue-400 rounded">🚚 Free Shipping</span>' : ''}
-                            ${product.stock < 10 ? `<span class="text-xs px-2 py-1 bg-red-500/20 text-red-400 rounded">⚠️ Only ${product.stock} left</span>` : ''}
-                        </div>
-                        
-                        <div class="text-xs text-gray-400 mb-3">${product.seller}</div>
-                        
-                        <div class="flex gap-2">
-                            <button onclick="event.stopPropagation(); addToCart(${product.id})" class="flex-1 px-3 py-2 glass-card border border-gray-700 rounded-xl hover:bg-gray-700 transition text-sm">
-                                <i class="fas fa-shopping-cart mr-1"></i> Add
-                            </button>
-                            <button onclick="event.stopPropagation(); ${product.auction ? `placeBid(${product.id})` : `buyNow(${product.id})`}" class="flex-1 px-3 py-2 btn-primary text-sm">
-                                ${product.auction ? '⚡ Bid Now' : '💳 Buy'}
+                        <div class="flex justify-between items-center mt-3">
+                            <span class="text-gray-500 text-sm">${product.condition}</span>
+                            <button class="btn-primary text-sm py-1 px-3" onclick="viewProduct('${product.id}')">
+                                View Details
                             </button>
                         </div>
                     </div>
                 `;
-                
-                container.appendChild(card);
+                productsContainer.appendChild(productCard);
             });
         }
-
-        // Product Detail View
-        function showProductDetail(productId) {
+        
+        function filterProducts() {
+            const searchTerm = searchInput.value.toLowerCase();
+            const category = categoryFilter.value;
+            const location = locationFilter.value;
+            
+            filteredProducts = allProducts.filter(product => {
+                // Search term filter
+                const matchesSearch = product.name.toLowerCase().includes(searchTerm) || 
+                                     product.description.toLowerCase().includes(searchTerm);
+                
+                // Category filter
+                const matchesCategory = category === 'all' || product.category === category;
+                
+                // Location filter
+                const matchesLocation = location === 'all' || product.location === location;
+                
+                // Active filters
+                let matchesFilters = true;
+                if (activeFilters.length > 0) {
+                    matchesFilters = activeFilters.every(filter => {
+                        if (filter === 'verified') return product.verified;
+                        if (filter === 'shipping') return product.freeShipping;
+                        if (filter === 'discount') return product.discount > 0;
+                        if (filter === 'trending') return product.trending;
+                        if (filter === 'auction') return product.auction;
+                        if (filter === 'ar') return product.arView;
+                        return true;
+                    });
+                }
+                
+                return matchesSearch && matchesCategory && matchesLocation && matchesFilters;
+            });
+            
+            renderProducts();
+        }
+        
+        function toggleFilter(filter, element) {
+            if (filter === 'all') {
+                // Clear all filters
+                activeFilters = [];
+                document.querySelectorAll('.filter-chip').forEach(chip => {
+                    chip.classList.remove('active');
+                });
+                element.classList.add('active');
+            } else {
+                // Toggle specific filter
+                if (activeFilters.includes(filter)) {
+                    activeFilters = activeFilters.filter(f => f !== filter);
+                    element.classList.remove('active');
+                } else {
+                    activeFilters.push(filter);
+                    element.classList.add('active');
+                }
+                
+                // Update "All" filter state
+                document.querySelector('.filter-chip[data-filter="all"]').classList.remove('active');
+            }
+            
+            filterProducts();
+        }
+        
+        // Wishlist Management
+        function toggleWishlist(productId) {
+            if (wishlist.includes(productId)) {
+                wishlist = wishlist.filter(id => id !== productId);
+                showToast('Product removed from wishlist', 'info');
+            } else {
+                wishlist.push(productId);
+                showToast('Product added to wishlist', 'success');
+            }
+            
+            updateWishlistCounter();
+            localStorage.setItem('wishlist', JSON.stringify(wishlist));
+            renderProducts();
+        }
+        
+        function updateWishlistCounter() {
+            wishlistCounter.textContent = wishlist.length;
+        }
+        
+        function openWishlist() {
+            const wishlistContent = document.getElementById('wishlistContent');
+            wishlistContent.innerHTML = '';
+            
+            if (wishlist.length === 0) {
+                wishlistContent.innerHTML = `
+                    <div class="col-span-full text-center py-12">
+                        <i class="fas fa-heart text-5xl text-gray-500 mb-4"></i>
+                        <h3 class="text-xl font-bold text-gray-400 mb-2">Your wishlist is empty</h3>
+                        <p class="text-gray-500">Start adding products you love!</p>
+                    </div>
+                `;
+            } else {
+                wishlist.forEach(productId => {
+                    const product = allProducts.find(p => p.id === productId);
+                    if (product) {
+                        const wishlistItem = document.createElement('div');
+                        wishlistItem.className = 'glass-card rounded-2xl overflow-hidden';
+                        wishlistItem.innerHTML = `
+                            <div class="relative">
+                                <img src="${product.image}" alt="${product.name}" class="w-full h-40 object-cover">
+                                <button class="social-action-btn absolute top-3 right-3 active" 
+                                        onclick="toggleWishlist('${product.id}')">
+                                    <i class="fas fa-heart"></i>
+                                </button>
+                            </div>
+                            <div class="p-4">
+                                <h3 class="font-bold text-white text-lg mb-1">${product.name}</h3>
+                                <p class="text-gray-400 text-sm mb-2">${product.description.substring(0, 50)}...</p>
+                                <div class="flex justify-between items-center">
+                                    <span class="text-xl font-bold text-blue-400">KSh ${product.price.toLocaleString()}</span>
+                                    <button class="btn-primary text-sm py-1 px-3" onclick="viewProduct('${product.id}')">
+                                        View Details
+                                    </button>
+                                </div>
+                            </div>
+                        `;
+                        wishlistContent.appendChild(wishlistItem);
+                    }
+                });
+            }
+            
+            openModal('wishlistModal');
+        }
+        
+        // Product Details
+        function viewProduct(productId) {
             const product = allProducts.find(p => p.id === productId);
             if (!product) return;
             
             document.getElementById('productDetailTitle').textContent = product.name;
-            document.getElementById('productDetailContent').innerHTML = `
-                <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
+            const productDetailContent = document.getElementById('productDetailContent');
+            
+            productDetailContent.innerHTML = `
+                <div class="grid grid-cols-1 lg:grid-cols-2 gap-8">
                     <div>
-                        <img src="${product.image}" alt="${product.name}" class="w-full rounded-2xl mb-4">
-                        ${product.hasAR ? `
-                            <button onclick="showARView(${productId})" class="w-full btn-secondary mb-2">
-                                <i class="fas fa-cube mr-2"></i>
-                                View in AR
+                        <div class="rounded-2xl overflow-hidden mb-4">
+                            <img src="${product.image}" alt="${product.name}" class="w-full h-80 object-cover">
+                        </div>
+                        <div class="flex gap-2">
+                            <button class="flex-1 btn-primary" onclick="addToCart('${product.id}')">
+                                <i class="fas fa-shopping-cart mr-2"></i> Add to Cart
                             </button>
-                        ` : ''}
-                        ${product.hasVideo ? `
-                            <button onclick="playVideo(${productId})" class="w-full btn-secondary">
-                                <i class="fas fa-play mr-2"></i>
-                                Watch Product Video
+                            <button class="social-action-btn ${wishlist.includes(product.id) ? 'active' : ''}" 
+                                    onclick="toggleWishlist('${product.id}')">
+                                <i class="fas fa-heart"></i>
                             </button>
-                        ` : ''}
+                            <button class="social-action-btn">
+                                <i class="fas fa-share-alt"></i>
+                            </button>
+                        </div>
                     </div>
                     <div>
-                        <div class="mb-4">
-                            ${product.auction ? `
-                                <div class="text-3xl font-bold text-blue-400 mb-2">Current Bid: KSh ${product.currentBid.toLocaleString()}</div>
-                                <div class="text-gray-400">Auction ends in 23h 45m</div>
-                            ` : `
-                                <div class="text-3xl font-bold text-blue-400 mb-2">KSh ${product.price.toLocaleString()}</div>
-                                ${product.originalPrice ? `<div class="text-gray-500 line-through">KSh ${product.originalPrice.toLocaleString()}</div>` : ''}
-                            `}
+                        <div class="mb-6">
+                            <h3 class="text-2xl font-bold text-white mb-2">${product.name}</h3>
+                            <div class="flex items-center gap-4 mb-4">
+                                <span class="text-3xl font-bold text-blue-400">KSh ${product.price.toLocaleString()}</span>
+                                ${product.discount > 0 ? `<span class="text-lg text-gray-500 line-through">KSh ${Math.round(product.price / (1 - product.discount/100)).toLocaleString()}</span>` : ''}
+                                ${product.discount > 0 ? `<span class="bg-red-500 text-white px-2 py-1 rounded-md">Save ${product.discount}%</span>` : ''}
+                            </div>
+                            <div class="flex flex-wrap gap-2 mb-4">
+                                ${product.verified ? '<span class="bg-blue-500 text-white text-xs px-2 py-1 rounded-md">✓ Verified Seller</span>' : ''}
+                                ${product.freeShipping ? '<span class="bg-green-500 text-white text-xs px-2 py-1 rounded-md">🚚 Free Shipping</span>' : ''}
+                                ${product.trending ? '<span class="trending-badge">🔥 Trending</span>' : ''}
+                                ${product.arView ? '<span class="ar-badge">🥽 AR View Available</span>' : ''}
+                            </div>
                         </div>
                         
-                        <div class="glass-card p-4 rounded-xl mb-4">
-                            <div class="flex items-center justify-between mb-2">
-                                <span class="text-gray-400">Rating</span>
-                                <div class="flex items-center">
-                                    <i class="fas fa-star text-yellow-400 mr-1"></i>
-                                    <span class="font-bold">${product.rating}</span>
-                                    <span class="text-gray-400 ml-2">(${product.reviews} reviews)</span>
+                        <div class="space-y-4">
+                            <div>
+                                <h4 class="font-semibold text-white mb-2">Description</h4>
+                                <p class="text-gray-300">${product.description}</p>
+                            </div>
+                            
+                            <div class="grid grid-cols-2 gap-4">
+                                <div>
+                                    <h4 class="font-semibold text-white mb-2">Condition</h4>
+                                    <p class="text-gray-300">${product.condition}</p>
+                                </div>
+                                <div>
+                                    <h4 class="font-semibold text-white mb-2">Category</h4>
+                                    <p class="text-gray-300">${product.category}</p>
+                                </div>
+                                <div>
+                                    <h4 class="font-semibold text-white mb-2">Location</h4>
+                                    <p class="text-gray-300">${product.location}</p>
+                                </div>
+                                <div>
+                                    <h4 class="font-semibold text-white mb-2">Seller</h4>
+                                    <p class="text-gray-300">${product.seller}</p>
                                 </div>
                             </div>
-                            <div class="flex items-center justify-between mb-2">
-                                <span class="text-gray-400">Seller</span>
-                                <span class="font-semibold">${product.seller} ${product.verified ? '✓' : ''}</span>
-                            </div>
-                            <div class="flex items-center justify-between mb-2">
-                                <span class="text-gray-400">Location</span>
-                                <span class="font-semibold">${product.location}</span>
-                            </div>
-                            <div class="flex items-center justify-between">
-                                <span class="text-gray-400">Stock</span>
-                                <span class="font-semibold ${product.stock < 10 ? 'text-red-400' : 'text-green-400'}">${product.stock} available</span>
+                            
+                            <div>
+                                <h4 class="font-semibold text-white mb-2">Delivery Options</h4>
+                                <div class="flex gap-2">
+                                    <span class="bg-gray-700 text-gray-300 px-3 py-1 rounded-md">Standard (3-5 days)</span>
+                                    ${product.freeShipping ? '<span class="bg-green-500/20 text-green-300 px-3 py-1 rounded-md">Free Shipping</span>' : ''}
+                                    <span class="bg-blue-500/20 text-blue-300 px-3 py-1 rounded-md">Express (1-2 days)</span>
+                                </div>
                             </div>
                         </div>
-                        
-                        <div class="mb-4">
-                            <h4 class="font-bold mb-2">Description</h4>
-                            <p class="text-gray-400">${product.description}</p>
-                        </div>
-                        
-                        ${product.freeShipping ? `
-                            <div class="glass-card p-3 rounded-xl mb-4 bg-blue-500/10">
-                                <i class="fas fa-shipping-fast text-blue-400 mr-2"></i>
-                                <span class="text-blue-400 font-semibold">Free Shipping Available</span>
-                            </div>
-                        ` : ''}
-                        
-                        <div class="price-compare mb-4">
-                            <div class="flex items-center justify-between">
-                                <span class="text-green-400">💰 Best Price Alert</span>
-                                <span class="text-sm text-gray-400">${product.discount}% below market average</span>
-                            </div>
-                        </div>
-                        
-                        <div class="flex gap-3">
-                            <button onclick="addToCart(${product.id}); closeModal('productDetailModal')" class="flex-1 btn-secondary py-3">
-                                <i class="fas fa-shopping-cart mr-2"></i>
-                                Add to Cart
-                            </button>
-                            <button onclick="${product.auction ? `placeBid(${product.id})` : `buyNow(${product.id})`}" class="flex-1 btn-primary py-3">
-                                ${product.auction ? '⚡ Place Bid' : '💳 Buy Now'}
-                            </button>
-                        </div>
-                        
-                        <button onclick="toggleWishlist(${product.id})" class="w-full btn-secondary py-3 mt-3">
-                            <i class="fas fa-heart mr-2 ${wishlist.includes(product.id) ? 'text-red-400' : ''}"></i>
-                            ${wishlist.includes(product.id) ? 'Remove from' : 'Add to'} Wishlist
-                        </button>
                     </div>
                 </div>
             `;
             
             openModal('productDetailModal');
         }
-
-        // Wishlist Functions
-        function toggleWishlist(productId) {
-            const index = wishlist.indexOf(productId);
-            if (index > -1) {
-                wishlist.splice(index, 1);
-                showToast('Removed from wishlist', 'info');
-            } else {
-                wishlist.push(productId);
-                showToast('Added to wishlist!', 'success');
-                currentUser.points += 5;
-            }
-            updateWishlistCounter();
-            updateUI();
-            displayProducts();
-        }
-
-        function updateWishlistCounter() {
-            document.getElementById('wishlistCounter').textContent = wishlist.length;
-        }
-
-        function openWishlist() {
-            const wishlistProducts = allProducts.filter(p => wishlist.includes(p.id));
-            const content = document.getElementById('wishlistContent');
+        
+        function addToCart(productId) {
+            const product = allProducts.find(p => p.id === productId);
+            if (!product) return;
             
-            if (wishlistProducts.length === 0) {
-                content.innerHTML = `
-                    <div class="col-span-full text-center py-10">
-                        <i class="fas fa-heart text-6xl text-gray-600 mb-4"></i>
-                        <p class="text-gray-400">Your wishlist is empty</p>
+            cart.push(product);
+            showToast(`${product.name} added to cart`, 'success');
+        }
+        
+        // Cloudinary Upload Functionality
+        function handleFiles(files) {
+            uploadPreview.innerHTML = '';
+            
+            for (let i = 0; i < files.length; i++) {
+                const file = files[i];
+                
+                // Check if file is an image
+                if (!file.type.match('image.*')) {
+                    showToast('Please select only image files', 'error');
+                    continue;
+                }
+                
+                // Check file size (max 10MB)
+                if (file.size > 10 * 1024 * 1024) {
+                    showToast('File size must be less than 10MB', 'error');
+                    continue;
+                }
+                
+                // Create preview
+                const reader = new FileReader();
+                reader.onload = function(e) {
+                    const preview = document.createElement('div');
+                    preview.className = 'relative';
+                    preview.innerHTML = `
+                        <img src="${e.target.result}" class="upload-preview">
+                        <button class="absolute top-1 right-1 bg-red-500 text-white rounded-full w-6 h-6 flex items-center justify-center text-xs" onclick="removePreview(this)">
+                            <i class="fas fa-times"></i>
+                        </button>
+                    `;
+                    uploadPreview.appendChild(preview);
+                };
+                reader.readAsDataURL(file);
+            }
+        }
+        
+        function removePreview(button) {
+            button.parentElement.remove();
+        }
+        
+        async function uploadToCloudinary(file) {
+            // In a real implementation, you would use the Cloudinary API
+            // For this demo, we'll simulate the upload process
+            
+            showToast('Uploading image...', 'info');
+            
+            // Simulate upload delay
+            await new Promise(resolve => setTimeout(resolve, 1500));
+            
+            // Generate a mock Cloudinary URL
+            const mockUrl = `https://res.cloudinary.com/demo/image/upload/v${Date.now()}/${file.name}`;
+            
+            showToast('Image uploaded successfully!', 'success');
+            
+            return { url: mockUrl };
+        }
+        
+        // Product Listing with Firebase
+        async function listProduct() {
+            const productName = document.getElementById('productName').value;
+            const productPrice = parseInt(document.getElementById('productPrice').value);
+            const productCondition = document.getElementById('productCondition').value;
+            const productCategory = document.getElementById('productCategory').value;
+            const productDescription = document.getElementById('productDescription').value;
+            const productLocation = document.getElementById('productLocation').value;
+            const freeShipping = document.getElementById('freeShipping').checked;
+            const hasAR = document.getElementById('hasAR').checked;
+            
+            // Validate form
+            if (!productName || !productPrice || !productCategory || !productDescription || !productLocation) {
+                showToast('Please fill in all required fields', 'error');
+                return;
+            }
+            
+            // Check if we have files to upload
+            const files = fileInput.files;
+            if (files.length === 0) {
+                showToast('Please add at least one product image', 'error');
+                return;
+            }
+            
+            try {
+                // Upload first image to Cloudinary (in a real app, you might upload all)
+                const file = files[0];
+                const uploadResult = await uploadToCloudinary(file);
+                
+                // Create new product
+                const newProduct = {
+                    name: productName,
+                    price: productPrice,
+                    condition: productCondition,
+                    category: productCategory,
+                    description: productDescription,
+                    location: productLocation,
+                    image: uploadResult.url,
+                    verified: false, // New products are not verified by default
+                    freeShipping: freeShipping,
+                    discount: 0,
+                    trending: false,
+                    arView: hasAR,
+                    seller: currentUser.name,
+                    userId: currentUser.uid,
+                    createdAt: new Date().toISOString()
+                };
+                
+                // Save to Firebase
+                const productId = await saveProductToFirebase(newProduct);
+                newProduct.id = productId;
+                
+                // Add to local state
+                allProducts.unshift(newProduct);
+                
+                // Add to user's uploads
+                uploads.unshift({
+                    productId: productId,
+                    name: newProduct.name,
+                    price: newProduct.price,
+                    image: newProduct.image,
+                    uploadedAt: new Date().toISOString()
+                });
+                
+                // Save to localStorage
+                localStorage.setItem('uploads', JSON.stringify(uploads));
+                
+                // Update UI
+                filterProducts();
+                closeModal('listProductModal');
+                showToast('Product listed successfully!', 'success');
+                
+                // Reset form
+                document.getElementById('listProductForm').reset();
+                uploadPreview.innerHTML = '';
+                
+            } catch (error) {
+                console.error('Error listing product:', error);
+                showToast('Failed to list product. Please try again.', 'error');
+            }
+        }
+        
+        // Uploads Management
+        function openUploads() {
+            const uploadsContent = document.getElementById('uploadsContent');
+            uploadsContent.innerHTML = '';
+            
+            if (uploads.length === 0) {
+                uploadsContent.innerHTML = `
+                    <div class="col-span-full text-center py-12">
+                        <i class="fas fa-cloud-upload-alt text-5xl text-gray-500 mb-4"></i>
+                        <h3 class="text-xl font-bold text-gray-400 mb-2">No uploads yet</h3>
+                        <p class="text-gray-500">List your first product to get started!</p>
+                        <button class="btn-primary mt-4" onclick="openModal('listProductModal')">
+                            <i class="fas fa-plus mr-2"></i> List Product
+                        </button>
                     </div>
                 `;
             } else {
-                content.innerHTML = wishlistProducts.map(product => `
-                    <div class="glass-card p-4 rounded-xl">
-                        <img src="${product.image}" class="w-full h-32 object-cover rounded-lg mb-3">
-                        <h4 class="font-bold mb-2">${product.name}</h4>
-                        <div class="text-blue-400 font-bold mb-3">KSh ${product.price.toLocaleString()}</div>
-                        <div class="flex gap-2">
-                            <button onclick="buyNow(${product.id}); closeModal('wishlistModal')" class="flex-1 btn-primary text-sm py-2">
-                                Buy Now
-                            </button>
-                            <button onclick="toggleWishlist(${product.id}); openWishlist()" class="px-3 py-2 btn-secondary text-sm">
-                                <i class="fas fa-times"></i>
+                uploads.forEach(upload => {
+                    const uploadItem = document.createElement('div');
+                    uploadItem.className = 'glass-card rounded-2xl overflow-hidden';
+                    uploadItem.innerHTML = `
+                        <div class="relative">
+                            <img src="${upload.image}" alt="${upload.name}" class="w-full h-40 object-cover">
+                            <button class="social-action-btn absolute top-3 right-3 bg-red-500" 
+                                    onclick="deleteUpload('${upload.productId}')">
+                                <i class="fas fa-trash"></i>
                             </button>
                         </div>
-                    </div>
-                `).join('');
-            }
-            
-            openModal('wishlistModal');
-        }
-
-        // Cart Functions
-        function addToCart(productId) {
-            const product = allProducts.find(p => p.id === productId);
-            cart.push(product);
-            showToast(`${product.name} added to cart!`, 'success');
-            currentUser.points += 10;
-            updateUI();
-        }
-
-        function buyNow(productId) {
-            const product = allProducts.find(p => p.id === productId);
-            showToast(`Processing purchase for ${product.name}...`, 'info');
-            setTimeout(() => {
-                showToast('🎉 Purchase successful! Redirecting to checkout...', 'success');
-                currentUser.points += 50;
-                updateUI();
-            }, 2000);
-        }
-
-        // Auction Functions
-        function placeBid(productId) {
-            const product = allProducts.find(p => p.id === productId);
-            const bidAmount = prompt(`Current bid: KSh ${product.currentBid.toLocaleString()}\n\nEnter your bid amount:`);
-            
-            if (bidAmount && !isNaN(bidAmount) && parseInt(bidAmount) > product.currentBid) {
-                product.currentBid = parseInt(bidAmount);
-                showToast('🎯 Bid placed successfully!', 'success');
-                currentUser.points += 20;
-                displayProducts();
-                updateUI();
-            } else if (bidAmount) {
-                showToast('Bid must be higher than current bid', 'error');
-            }
-        }
-
-        function openAuctions() {
-            activeFilters.chips = 'auction';
-            document.querySelectorAll('.filter-chip').forEach(chip => chip.classList.remove('active'));
-            document.querySelector('[data-filter="auction"]').classList.add('active');
-            applyFilters();
-            showToast('Showing auction items', 'info');
-        }
-
-        function openDeals() {
-            activeFilters.chips = 'discount';
-            document.querySelectorAll('.filter-chip').forEach(chip => chip.classList.remove('active'));
-            document.querySelector('[data-filter="discount"]').classList.add('active');
-            applyFilters();
-            showToast('Showing hot deals', 'info');
-        }
-
-        // Price Comparison
-        function openPriceCompare() {
-            document.getElementById('priceCompareContent').innerHTML = `
-                <div class="space-y-4">
-                    <p class="text-gray-400 mb-4">Compare prices across different sellers and platforms</p>
-                    ${allProducts.slice(0, 3).map(product => `
-                        <div class="glass-card p-4 rounded-xl">
-                            <div class="flex items-center gap-4">
-                                <img src="${product.image}" class="w-20 h-20 object-cover rounded-lg">
-                                <div class="flex-1">
-                                    <h4 class="font-bold mb-1">${product.name}</h4>
-                                    <div class="text-blue-400 font-bold">KSh ${product.price.toLocaleString()}</div>
-                                    ${product.originalPrice ? `
-                                        <div class="text-green-400 text-sm">
-                                            💰 Save KSh ${(product.originalPrice - product.price).toLocaleString()} (${product.discount}% off)
-                                        </div>
-                                    ` : ''}
-                                </div>
-                                <button onclick="buyNow(${product.id}); closeModal('priceCompareModal')" class="btn-primary">
-                                    Buy Now
+                        <div class="p-4">
+                            <h3 class="font-bold text-white text-lg mb-1">${upload.name}</h3>
+                            <p class="text-gray-400 text-sm mb-2">Uploaded on ${new Date(upload.uploadedAt).toLocaleDateString()}</p>
+                            <div class="flex justify-between items-center">
+                                <span class="text-xl font-bold text-blue-400">KSh ${upload.price.toLocaleString()}</span>
+                                <button class="btn-primary text-sm py-1 px-3" onclick="viewProduct('${upload.productId}')">
+                                    View
                                 </button>
                             </div>
                         </div>
-                    `).join('')}
+                    `;
+                    uploadsContent.appendChild(uploadItem);
+                });
+            }
+            
+            openModal('uploadsModal');
+        }
+        
+        function deleteUpload(productId) {
+            if (confirm('Are you sure you want to delete this product?')) {
+                // Remove from uploads
+                uploads = uploads.filter(upload => upload.productId !== productId);
+                localStorage.setItem('uploads', JSON.stringify(uploads));
+                
+                // Remove from products
+                allProducts = allProducts.filter(product => product.id !== productId);
+                localStorage.setItem('products', JSON.stringify(allProducts));
+                
+                // Update UI
+                openUploads();
+                filterProducts();
+                showToast('Product deleted successfully', 'success');
+            }
+        }
+        
+        // Auctions Management
+        function loadAuctions() {
+            // Sample auction data
+            auctions = [
+                {
+                    id: 'a1',
+                    name: "Vintage Camera",
+                    currentBid: 8500,
+                    minBid: 9000,
+                    endTime: new Date(Date.now() + 2 * 60 * 60 * 1000), // 2 hours from now
+                    image: "https://images.unsplash.com/photo-1502920917128-1aa500764cbd?ixlib=rb-4.0.3&ixid=M3wxMjA3fDB8MHxzZWFyY2h8Mnx8Y2FtZXJhfGVufDB8fDB8fHww&auto=format&fit=crop&w=500&q=60",
+                    bids: 12,
+                    seller: "Collector's Corner"
+                },
+                {
+                    id: 'a2',
+                    name: "Antique Watch",
+                    currentBid: 12000,
+                    minBid: 12500,
+                    endTime: new Date(Date.now() + 1 * 60 * 60 * 1000), // 1 hour from now
+                    image: "https://images.unsplash.com/photo-1523170335258-f5ed11844a49?ixlib=rb-4.0.3&ixid=M3wxMjA3fDB8MHxzZWFyY2h8Mnx8d2F0Y2h8ZW58MHx8MHx8fDA%3D&auto=format&fit=crop&w=500&q=60",
+                    bids: 8,
+                    seller: "Time Pieces"
+                }
+            ];
+        }
+        
+        function openAuctions() {
+            const auctionsContent = document.getElementById('auctionsContent');
+            auctionsContent.innerHTML = '';
+            
+            if (auctions.length === 0) {
+                auctionsContent.innerHTML = `
+                    <div class="col-span-full text-center py-12">
+                        <i class="fas fa-gavel text-5xl text-gray-500 mb-4"></i>
+                        <h3 class="text-xl font-bold text-gray-400 mb-2">No active auctions</h3>
+                        <p class="text-gray-500">Check back later for new auction items</p>
+                    </div>
+                `;
+            } else {
+                auctions.forEach(auction => {
+                    const timeLeft = auction.endTime - new Date();
+                    const hours = Math.floor(timeLeft / (1000 * 60 * 60));
+                    const minutes = Math.floor((timeLeft % (1000 * 60 * 60)) / (1000 * 60));
+                    
+                    const auctionItem = document.createElement('div');
+                    auctionItem.className = 'glass-card rounded-2xl overflow-hidden';
+                    auctionItem.innerHTML = `
+                        <div class="relative">
+                            <img src="${auction.image}" alt="${auction.name}" class="w-full h-48 object-cover">
+                            <div class="absolute top-3 left-3">
+                                <span class="auction-badge">Auction</span>
+                            </div>
+                            <div class="absolute top-3 right-3 auction-timer">
+                                ${hours}h ${minutes}m
+                            </div>
+                        </div>
+                        <div class="p-4">
+                            <h3 class="font-bold text-white text-lg mb-1">${auction.name}</h3>
+                            <p class="text-gray-400 text-sm mb-2">Seller: ${auction.seller}</p>
+                            <div class="flex justify-between items-center mb-3">
+                                <div>
+                                    <span class="text-xl font-bold text-blue-400">KSh ${auction.currentBid.toLocaleString()}</span>
+                                    <p class="text-gray-500 text-sm">Current Bid</p>
+                                </div>
+                                <div class="text-right">
+                                    <span class="text-lg font-bold text-yellow-400">KSh ${auction.minBid.toLocaleString()}</span>
+                                    <p class="text-gray-500 text-sm">Min Bid</p>
+                                </div>
+                            </div>
+                            <div class="flex justify-between items-center">
+                                <span class="text-gray-500 text-sm">${auction.bids} bids</span>
+                                <button class="btn-primary text-sm py-1 px-3" onclick="placeBid('${auction.id}')">
+                                    Place Bid
+                                </button>
+                            </div>
+                        </div>
+                    `;
+                    auctionsContent.appendChild(auctionItem);
+                });
+            }
+            
+            openModal('auctionsModal');
+        }
+        
+        function placeBid(auctionId) {
+            const auction = auctions.find(a => a.id === auctionId);
+            if (!auction) return;
+            
+            const bidAmount = prompt(`Enter your bid amount (Minimum: KSh ${auction.minBid.toLocaleString()})`);
+            if (bidAmount && parseInt(bidAmount) >= auction.minBid) {
+                auction.currentBid = parseInt(bidAmount);
+                auction.bids += 1;
+                showToast(`Bid of KSh ${bidAmount} placed successfully!`, 'success');
+                openAuctions();
+            } else if (bidAmount) {
+                showToast('Bid amount must be at least the minimum bid', 'error');
+            }
+        }
+        
+        // Hot Deals Management
+        function loadHotDeals() {
+            // Sample hot deals data
+            hotDeals = allProducts.filter(product => product.discount >= 15).map(product => ({
+                ...product,
+                dealEnd: new Date(Date.now() + 24 * 60 * 60 * 1000) // 24 hours from now
+            }));
+        }
+        
+        function openDeals() {
+            const dealsContent = document.getElementById('dealsContent');
+            dealsContent.innerHTML = '';
+            
+            if (hotDeals.length === 0) {
+                dealsContent.innerHTML = `
+                    <div class="col-span-full text-center py-12">
+                        <i class="fas fa-fire text-5xl text-gray-500 mb-4"></i>
+                        <h3 class="text-xl font-bold text-gray-400 mb-2">No hot deals available</h3>
+                        <p class="text-gray-500">Check back later for new deals</p>
+                    </div>
+                `;
+            } else {
+                hotDeals.forEach(deal => {
+                    const dealItem = document.createElement('div');
+                    dealItem.className = 'glass-card rounded-2xl overflow-hidden';
+                    dealItem.innerHTML = `
+                        <div class="relative">
+                            <img src="${deal.image}" alt="${deal.name}" class="w-full h-48 object-cover">
+                            <div class="absolute top-3 left-3 flex flex-col gap-1">
+                                <span class="bg-red-500 text-white text-xs px-2 py-1 rounded-md">🔥 Hot Deal</span>
+                                <span class="bg-red-500 text-white text-xs px-2 py-1 rounded-md">${deal.discount}% OFF</span>
+                            </div>
+                            <button class="social-action-btn absolute top-3 right-3 ${wishlist.includes(deal.id) ? 'active' : ''}" 
+                                    onclick="toggleWishlist('${deal.id}')">
+                                <i class="fas fa-heart"></i>
+                            </button>
+                        </div>
+                        <div class="p-4">
+                            <h3 class="font-bold text-white text-lg mb-1">${deal.name}</h3>
+                            <p class="text-gray-400 text-sm mb-2">${deal.description.substring(0, 60)}...</p>
+                            <div class="flex justify-between items-center">
+                                <div>
+                                    <span class="text-xl font-bold text-blue-400">KSh ${deal.price.toLocaleString()}</span>
+                                    <span class="text-gray-500 text-sm line-through ml-2">KSh ${Math.round(deal.price / (1 - deal.discount/100)).toLocaleString()}</span>
+                                </div>
+                                <div class="text-gray-500 text-sm">
+                                    <i class="fas fa-map-marker-alt mr-1"></i> ${deal.location}
+                                </div>
+                            </div>
+                            <div class="flex justify-between items-center mt-3">
+                                <span class="text-gray-500 text-sm">${deal.condition}</span>
+                                <button class="btn-primary text-sm py-1 px-3" onclick="viewProduct('${deal.id}')">
+                                    View Details
+                                </button>
+                            </div>
+                        </div>
+                    `;
+                    dealsContent.appendChild(dealItem);
+                });
+            }
+            
+            openModal('dealsModal');
+        }
+        
+        // Purchases Management
+        function openPurchases() {
+            const purchasesContent = document.getElementById('purchasesContent');
+            purchasesContent.innerHTML = '';
+            
+            if (purchases.length === 0) {
+                purchasesContent.innerHTML = `
+                    <div class="text-center py-12">
+                        <i class="fas fa-shopping-bag text-5xl text-gray-500 mb-4"></i>
+                        <h3 class="text-xl font-bold text-gray-400 mb-2">No purchases yet</h3>
+                        <p class="text-gray-500">Start shopping to see your purchases here</p>
+                    </div>
+                `;
+            } else {
+                purchases.forEach(purchase => {
+                    const purchaseItem = document.createElement('div');
+                    purchaseItem.className = 'glass-card rounded-2xl p-6';
+                    purchaseItem.innerHTML = `
+                        <div class="flex flex-col md:flex-row gap-6">
+                            <div class="flex-shrink-0">
+                                <img src="${purchase.image}" alt="${purchase.name}" class="w-32 h-32 object-cover rounded-xl">
+                            </div>
+                            <div class="flex-1">
+                                <div class="flex justify-between items-start mb-2">
+                                    <h3 class="font-bold text-white text-lg">${purchase.name}</h3>
+                                    <span class="text-xl font-bold text-blue-400">KSh ${purchase.price.toLocaleString()}</span>
+                                </div>
+                                <p class="text-gray-400 text-sm mb-4">Purchased on ${new Date(purchase.purchaseDate).toLocaleDateString()}</p>
+                                
+                                ${purchase.reviewed ? `
+                                    <div class="bg-green-500/10 border border-green-500/30 rounded-xl p-4">
+                                        <div class="flex items-center gap-2 mb-2">
+                                            <div class="review-stars">
+                                                ${Array.from({length: 5}, (_, i) => 
+                                                    `<span class="review-star ${i < purchase.rating ? 'filled' : ''}">★</span>`
+                                                ).join('')}
+                                            </div>
+                                            <span class="text-white font-semibold">${purchase.rating}/5</span>
+                                        </div>
+                                        <h4 class="text-white font-semibold mb-1">${purchase.reviewTitle}</h4>
+                                        <p class="text-gray-300 text-sm">${purchase.reviewDescription}</p>
+                                    </div>
+                                ` : `
+                                    <button class="btn-primary" onclick="openReviewModal('${purchase.productId}')">
+                                        <i class="fas fa-star mr-2"></i>
+                                        Write Review
+                                    </button>
+                                `}
+                            </div>
+                        </div>
+                    `;
+                    purchasesContent.appendChild(purchaseItem);
+                });
+            }
+            
+            openModal('purchasesModal');
+        }
+        
+        function openReviewModal(productId) {
+            document.getElementById('reviewProductId').value = productId;
+            // Reset star ratings
+            document.querySelectorAll('.star-rating .star').forEach(star => {
+                star.classList.remove('active');
+            });
+            openModal('reviewModal');
+        }
+        
+        function submitReview() {
+            const productId = document.getElementById('reviewProductId').value;
+            const productRating = document.querySelectorAll('#starRating .star.active').length;
+            const qualityRating = document.querySelectorAll('#qualityRating .star.active').length;
+            const reviewTitle = document.getElementById('reviewTitle').value;
+            const reviewDescription = document.getElementById('reviewDescription').value;
+            
+            if (productRating === 0 || qualityRating === 0 || !reviewTitle || !reviewDescription) {
+                showToast('Please fill in all review fields', 'error');
+                return;
+            }
+            
+            // Find the purchase and update it
+            const purchaseIndex = purchases.findIndex(p => p.productId === productId);
+            if (purchaseIndex !== -1) {
+                purchases[purchaseIndex].reviewed = true;
+                purchases[purchaseIndex].rating = productRating;
+                purchases[purchaseIndex].qualityRating = qualityRating;
+                purchases[purchaseIndex].reviewTitle = reviewTitle;
+                purchases[purchaseIndex].reviewDescription = reviewDescription;
+                
+                localStorage.setItem('purchases', JSON.stringify(purchases));
+                
+                closeModal('reviewModal');
+                openPurchases();
+                showToast('Review submitted successfully!', 'success');
+            }
+        }
+        
+        // Price Comparison
+        function openPriceCompare() {
+            const priceCompareContent = document.getElementById('priceCompareContent');
+            priceCompareContent.innerHTML = `
+                <div class="space-y-6">
+                    <div class="text-center py-8">
+                        <i class="fas fa-balance-scale text-5xl text-blue-400 mb-4"></i>
+                        <h3 class="text-xl font-bold text-white mb-2">Compare Prices Across Sellers</h3>
+                        <p class="text-gray-400">Find the best deals for products you're interested in</p>
+                    </div>
+                    
+                    <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
+                        <div class="glass-card rounded-2xl p-6 text-center">
+                            <div class="text-3xl text-blue-400 mb-2">📱</div>
+                            <h4 class="font-bold text-white mb-2">Smartphones</h4>
+                            <p class="text-gray-400 text-sm mb-4">Compare prices across 50+ sellers</p>
+                            <button class="btn-primary w-full" onclick="compareCategory('Electronics')">Compare</button>
+                        </div>
+                        
+                        <div class="glass-card rounded-2xl p-6 text-center">
+                            <div class="text-3xl text-purple-400 mb-2">👕</div>
+                            <h4 class="font-bold text-white mb-2">Fashion</h4>
+                            <p class="text-gray-400 text-sm mb-4">Compare prices across 30+ sellers</p>
+                            <button class="btn-primary w-full" onclick="compareCategory('Fashion')">Compare</button>
+                        </div>
+                        
+                        <div class="glass-card rounded-2xl p-6 text-center">
+                            <div class="text-3xl text-green-400 mb-2">🏠</div>
+                            <h4 class="font-bold text-white mb-2">Home & Garden</h4>
+                            <p class="text-gray-400 text-sm mb-4">Compare prices across 25+ sellers</p>
+                            <button class="btn-primary w-full" onclick="compareCategory('Home')">Compare</button>
+                        </div>
+                    </div>
+                    
+                    <div class="glass-card rounded-2xl p-6 mt-6">
+                        <h4 class="font-bold text-white mb-4">Recent Price Drops</h4>
+                        <div class="space-y-4">
+                            <div class="flex justify-between items-center p-3 bg-green-500/10 rounded-xl">
+                                <div>
+                                    <h5 class="font-semibold text-white">Smartphone X Pro</h5>
+                                    <p class="text-gray-400 text-sm">Price dropped by 15%</p>
+                                </div>
+                                <div class="text-right">
+                                    <span class="text-green-400 font-bold">KSh 38,250</span>
+                                    <p class="text-gray-400 text-sm line-through">KSh 45,000</p>
+                                </div>
+                            </div>
+                            
+                            <div class="flex justify-between items-center p-3 bg-green-500/10 rounded-xl">
+                                <div>
+                                    <h5 class="font-semibold text-white">Gaming Console</h5>
+                                    <p class="text-gray-400 text-sm">Price dropped by 10%</p>
+                                </div>
+                                <div class="text-right">
+                                    <span class="text-green-400 font-bold">KSh 31,500</span>
+                                    <p class="text-gray-400 text-sm line-through">KSh 35,000</p>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
                 </div>
             `;
+            
             openModal('priceCompareModal');
         }
-
-        // AR Feature
-        function showARFeature() {
-            showToast('🥽 AR View feature coming soon! Try products with AR badge', 'info');
-        }
-
-        function showARView(productId) {
-            const product = allProducts.find(p => p.id === productId);
-            showToast(`🥽 Loading AR view for ${product.name}...`, 'info');
-            setTimeout(() => {
-                showToast('AR view is a demo feature. Full 3D view coming soon!', 'info');
-            }, 2000);
-        }
-
-        function playVideo(productId) {
-            const product = allProducts.find(p => p.id === productId);
-            showToast(`📹 Playing product video for ${product.name}...`, 'info');
-        }
-
-        // Form Handler
-        function handleProductSubmit(e) {
-            e.preventDefault();
+        
+        function compareCategory(category) {
+            showToast(`Comparing prices for ${category} products...`, 'info');
+            closeModal('priceCompareModal');
             
-            const newProduct = {
-                id: allProducts.length + 1,
-                name: document.getElementById('productName').value,
-                price: parseFloat(document.getElementById('productPrice').value),
-                category: document.getElementById('productCategory').value,
-                description: document.getElementById('productDescription').value,
-                location: document.getElementById('productLocation').value,
-                seller: currentUser.name,
-                image: "https://images.unsplash.com/photo-1505740420928-5e560c06d30e?w=400",
-                rating: 0,
-                reviews: 0,
-                verified: false,
-                freeShipping: document.getElementById('freeShipping').checked,
-                hasAR: document.getElementById('hasAR').checked,
-                discount: 0,
-                trending: false,
-                auction: false,
-                stock: 10
-            };
-
-            allProducts.unshift(newProduct);
-            filteredProducts = [...allProducts];
-            displayProducts();
+            // Filter products by category
+            categoryFilter.value = category;
+            filterProducts();
             
-            showToast('✅ Product listed successfully!', 'success');
-            currentUser.points += 25;
-            updateUI();
-            
-            closeModal('listProductModal');
-            document.getElementById('listProductForm').reset();
+            // Scroll to products
+            scrollToElement(productsContainer);
         }
-
-        // Search & Filters
-        function handleSearch(e) {
-            const query = e.target.value.toLowerCase();
-            filteredProducts = allProducts.filter(product => 
-                product.name.toLowerCase().includes(query) ||
-                product.category.toLowerCase().includes(query) ||
-                product.seller.toLowerCase().includes(query) ||
-                product.description.toLowerCase().includes(query)
-            );
-            applyFilters();
-        }
-
-        function handleCategoryFilter(e) {
-            activeFilters.category = e.target.value;
-            applyFilters();
-        }
-
-        function handleLocationFilter(e) {
-            activeFilters.location = e.target.value;
-            applyFilters();
-        }
-
-        function handleChipFilter(e) {
-            document.querySelectorAll('.filter-chip').forEach(chip => {
-                chip.classList.remove('active');
-            });
-            e.target.classList.add('active');
-            
-            activeFilters.chips = e.target.dataset.filter;
-            applyFilters();
-        }
-
-        function applyFilters() {
-            filteredProducts = allProducts.filter(product => {
-                const categoryMatch = activeFilters.category === 'all' || product.category === activeFilters.category;
-                const locationMatch = activeFilters.location === 'all' || product.location === activeFilters.location;
-                
-                let chipMatch = true;
-                if (activeFilters.chips === 'verified') chipMatch = product.verified;
-                if (activeFilters.chips === 'shipping') chipMatch = product.freeShipping;
-                if (activeFilters.chips === 'discount') chipMatch = product.discount > 0;
-                if (activeFilters.chips === 'trending') chipMatch = product.trending;
-                if (activeFilters.chips === 'auction') chipMatch = product.auction;
-                if (activeFilters.chips === 'ar') chipMatch = product.hasAR;
-                
-                return categoryMatch && locationMatch && chipMatch;
-            });
-            
-            displayProducts();
-        }
-
-        function resetFilters() {
-            activeFilters = { category: 'all', location: 'all', chips: 'all' };
-            document.getElementById('categoryFilter').value = 'all';
-            document.getElementById('locationFilter').value = 'all';
-            document.getElementById('searchInput').value = '';
-            document.querySelectorAll('.filter-chip').forEach(chip => chip.classList.remove('active'));
-            document.querySelector('[data-filter="all"]').classList.add('active');
-            filteredProducts = [...allProducts];
-            displayProducts();
-            showToast('Filters reset', 'info');
-        }
-
-        function handleSort() {
-            const options = [
-                { name: 'Price: Low to High', value: 'price-asc' },
-                { name: 'Price: High to Low', value: 'price-desc' },
-                { name: 'Rating: High to Low', value: 'rating' },
-                { name: 'Newest First', value: 'newest' },
-                { name: 'Most Popular', value: 'popular' }
-            ];
-            
-            const sortMenu = options.map((opt, i) => `${i + 1}. ${opt.name}`).join('\n');
-            const choice = prompt(`Sort by:\n\n${sortMenu}\n\nEnter 1-5:`);
-            
-            if (choice >= 1 && choice <= 5) {
-                const sortType = options[choice - 1].value;
-                
-                switch(sortType) {
-                    case 'price-asc':
-                        filteredProducts.sort((a, b) => a.price - b.price);
-                        showToast('Sorted by price: Low to High', 'info');
-                        break;
-                    case 'price-desc':
-                        filteredProducts.sort((a, b) => b.price - a.price);
-                        showToast('Sorted by price: High to Low', 'info');
-                        break;
-                    case 'rating':
-                        filteredProducts.sort((a, b) => b.rating - a.rating);
-                        showToast('Sorted by rating', 'info');
-                        break;
-                    case 'newest':
-                        filteredProducts.sort((a, b) => b.id - a.id);
-                        showToast('Showing newest first', 'info');
-                        break;
-                    case 'popular':
-                        filteredProducts.sort((a, b) => b.reviews - a.reviews);
-                        showToast('Showing most popular', 'info');
-                        break;
-                }
-                
-                displayProducts();
-            }
-        }
-
-        function toggleView() {
-            const container = document.getElementById('productsContainer');
-            if (container.classList.contains('grid-cols-1')) {
-                container.classList.remove('grid-cols-1', 'md:grid-cols-2', 'lg:grid-cols-3', 'xl:grid-cols-4');
-                container.classList.add('grid-cols-1', 'md:grid-cols-1', 'lg:grid-cols-2');
-                showToast('List view', 'info');
-            } else {
-                container.classList.remove('grid-cols-1', 'md:grid-cols-1', 'lg:grid-cols-2');
-                container.classList.add('grid-cols-1', 'md:grid-cols-2', 'lg:grid-cols-3', 'xl:grid-cols-4');
-                showToast('Grid view', 'info');
-            }
-        }
-
-        // Share Product
-        function shareProduct(productId) {
-            const product = allProducts.find(p => p.id === productId);
-            if (navigator.share) {
-                navigator.share({
-                    title: product.name,
-                    text: `Check out ${product.name} for KSh ${product.price.toLocaleString()}`,
-                    url: window.location.href
-                }).then(() => {
-                    showToast('Shared successfully!', 'success');
-                    currentUser.points += 5;
-                    updateUI();
-                }).catch(() => {});
-            } else {
-                navigator.clipboard.writeText(window.location.href);
-                showToast('Link copied to clipboard!', 'success');
-                currentUser.points += 5;
-                updateUI();
-            }
-        }
-
-        // AI Chat Functions
+        
+        // AI Assistant
         function toggleAiChat() {
-            const chatWindow = document.getElementById('aiChatWindow');
-            chatWindow.classList.toggle('active');
+            const aiChatWindow = document.getElementById('aiChatWindow');
+            aiChatWindow.classList.toggle('active');
         }
-
+        
         function sendAiMessage() {
             const input = document.getElementById('aiChatInput');
             const message = input.value.trim();
             
             if (!message) return;
             
-            addChatMessage(message, 'user');
+            // Add user message
+            addAiMessage(message, 'user');
             input.value = '';
             
+            // Simulate AI response
             setTimeout(() => {
-                const responses = [
-                    `I found ${filteredProducts.length} products matching your criteria. The most popular is "${filteredProducts[0].name}" priced at KSh ${filteredProducts[0].price.toLocaleString()}`,
-                    `Based on your search, I recommend checking out our Electronics category. We have ${allProducts.filter(p => p.category === 'Electronics').length} items available.`,
-                    `Great choice! The "${allProducts[0].name}" has a ${allProducts[0].rating}⭐ rating with ${allProducts[0].discount}% discount. Would you like to see similar products?`,
-                    `💡 Pro tip: Products with AR View let you see them in your space before buying. We have ${allProducts.filter(p => p.hasAR).length} AR-enabled products!`,
-                    `🔥 Hot deal alert! The "${allProducts.find(p => p.discount > 20)?.name}" is ${allProducts.find(p => p.discount > 20)?.discount}% off. Limited stock available!`,
-                    `Looking for verified sellers? We have ${allProducts.filter(p => p.verified).length} products from verified sellers with free shipping.`,
-                    `Check out our auction section! You can win products at great prices. Current auctions: ${allProducts.filter(p => p.auction).length}`,
-                    `Your loyalty points: ${currentUser.points}. Keep shopping to earn more rewards! 🎁`
-                ];
-                const response = responses[Math.floor(Math.random() * responses.length)];
-                addChatMessage(response, 'ai');
+                let response = '';
+                
+                if (message.toLowerCase().includes('phone') || message.toLowerCase().includes('smartphone')) {
+                    response = "I found some great smartphones for you! The Smartphone X Pro is currently trending with a 15% discount. Would you like me to show you more details?";
+                } else if (message.toLowerCase().includes('price') || message.toLowerCase().includes('cheap')) {
+                    response = "I can help you find the best deals! The Fitness Tracker has a 20% discount right now, and there are several products with free shipping. Would you like to see them?";
+                } else if (message.toLowerCase().includes('shipping') || message.toLowerCase().includes('delivery')) {
+                    response = "Many sellers offer free shipping! Products from Nairobi usually deliver within 1-3 days. I can filter products with free shipping if you'd like.";
+                } else {
+                    response = "I can help you find products, compare prices, and get the best deals. Try asking me about specific products, categories, or features!";
+                }
+                
+                addAiMessage(response, 'ai');
             }, 1000);
         }
-
-        function addChatMessage(text, sender) {
+        
+        function addAiMessage(text, sender) {
             const messagesContainer = document.getElementById('aiChatMessages');
             const messageDiv = document.createElement('div');
             messageDiv.className = `message ${sender}`;
@@ -1538,186 +2246,157 @@
             messagesContainer.appendChild(messageDiv);
             messagesContainer.scrollTop = messagesContainer.scrollHeight;
         }
-
+        
         // Voice Search
-        function startVoiceSearch() {
-            if (!('webkitSpeechRecognition' in window)) {
-                showToast('Voice search not supported in this browser', 'error');
-                return;
-            }
-            
-            const recognition = new webkitSpeechRecognition();
-            recognition.continuous = false;
-            recognition.interimResults = false;
-            
+        function toggleVoiceSearch() {
             const voiceBtn = document.getElementById('voiceSearchMainBtn');
-            voiceBtn.classList.add('voice-active');
-            isVoiceActive = true;
+            const voiceIcon = voiceBtn.querySelector('i');
             
-            recognition.onresult = function(event) {
-                const transcript = event.results[0][0].transcript;
-                document.getElementById('searchInput').value = transcript;
-                handleSearch({ target: { value: transcript } });
-                showToast(`Searching for: ${transcript}`, 'info');
-            };
-            
-            recognition.onerror = function(event) {
-                showToast('Voice search error. Please try again.', 'error');
-            };
-            
-            recognition.onend = function() {
+            if (voiceIcon.classList.contains('fa-microphone')) {
+                voiceIcon.classList.remove('fa-microphone');
+                voiceIcon.classList.add('fa-microphone-slash');
+                voiceBtn.classList.add('voice-active');
+                showToast('Voice search activated. Speak now...', 'info');
+                
+                // Simulate voice recognition
+                setTimeout(() => {
+                    const queries = ['smartphone', 'gaming console', 'fitness tracker', 'designer handbag'];
+                    const randomQuery = queries[Math.floor(Math.random() * queries.length)];
+                    searchInput.value = randomQuery;
+                    filterProducts();
+                    showToast(`Searching for "${randomQuery}"...`, 'success');
+                    
+                    // Reset voice button
+                    voiceIcon.classList.remove('fa-microphone-slash');
+                    voiceIcon.classList.add('fa-microphone');
+                    voiceBtn.classList.remove('voice-active');
+                }, 2000);
+            } else {
+                voiceIcon.classList.remove('fa-microphone-slash');
+                voiceIcon.classList.add('fa-microphone');
                 voiceBtn.classList.remove('voice-active');
-                isVoiceActive = false;
-            };
-            
-            recognition.start();
-            showToast('🎤 Listening...', 'info');
+                showToast('Voice search deactivated', 'info');
+            }
         }
-
-        // Deal Timer
-        function startDealTimer() {
-            setInterval(() => {
-                const timer = document.getElementById('dealTimer');
-                const now = new Date();
-                const endTime = new Date(now);
-                endTime.setHours(23, 59, 59);
-                
-                const diff = endTime - now;
-                const hours = Math.floor(diff / (1000 * 60 * 60));
-                const minutes = Math.floor((diff % (1000 * 60 * 60)) / (1000 * 60));
-                const seconds = Math.floor((diff % (1000 * 60)) / 1000);
-                
-                timer.textContent = `${hours.toString().padStart(2, '0')}:${minutes.toString().padStart(2, '0')}:${seconds.toString().padStart(2, '0')}`;
-            }, 1000);
-        }
-
-        // Simulate Online Users
-        function simulateOnlineUsers() {
-            setInterval(() => {
-                const users = 1200 + Math.floor(Math.random() * 100);
-                document.getElementById('onlineUsers').textContent = users.toLocaleString();
-            }, 5000);
-        }
-
-        // Update UI
-        function updateUI() {
-            document.getElementById('userName').textContent = currentUser.name;
-            document.getElementById('loyaltyPoints').textContent = currentUser.points;
-            updateWishlistCounter();
-        }
-
-        // Modal Functions
+        
+        // Modal Management
         function openModal(modalId) {
             document.getElementById(modalId).classList.add('active');
+            document.body.style.overflow = 'hidden';
         }
-
+        
         function closeModal(modalId) {
             document.getElementById(modalId).classList.remove('active');
+            document.body.style.overflow = 'auto';
         }
-
-        // Toast Notifications
-        function showToast(message, type = 'info') {
-            const toast = document.createElement('div');
-            toast.className = `toast ${type}`;
-            toast.innerHTML = `
-                <div class="flex items-center gap-2">
-                    ${type === 'success' ? '<i class="fas fa-check-circle"></i>' : ''}
-                    ${type === 'error' ? '<i class="fas fa-exclamation-circle"></i>' : ''}
-                    ${type === 'info' ? '<i class="fas fa-info-circle"></i>' : ''}
-                    <span>${message}</span>
-                </div>
-            `;
-            
-            document.getElementById('toastContainer').appendChild(toast);
-            
-            setTimeout(() => toast.classList.add('show'), 100);
-            
-            setTimeout(() => {
-                toast.classList.remove('show');
-                setTimeout(() => toast.remove(), 300);
-            }, 3000);
-        }
-
-        // Navigation Functions
-        function scrollToTop() {
-            window.scrollTo({ top: 0, behavior: 'smooth' });
-        }
-
-        function scrollToBottom() {
-            window.scrollTo({ top: document.body.scrollHeight, behavior: 'smooth' });
-        }
-
+        
+        // Navigation and Scrolling
         function goBack() {
             window.history.back();
         }
-
-        // Auto-save to localStorage
-        setInterval(() => {
-            localStorage.setItem('marketplace_wishlist', JSON.stringify(wishlist));
-            localStorage.setItem('marketplace_cart', JSON.stringify(cart));
-            localStorage.setItem('marketplace_user', JSON.stringify(currentUser));
-        }, 5000);
-
-        // Load from localStorage on startup
-        function loadFromStorage() {
-            const savedWishlist = localStorage.getItem('marketplace_wishlist');
-            const savedCart = localStorage.getItem('marketplace_cart');
-            const savedUser = localStorage.getItem('marketplace_user');
-            
-            if (savedWishlist) wishlist = JSON.parse(savedWishlist);
-            if (savedCart) cart = JSON.parse(savedCart);
-            if (savedUser) currentUser = JSON.parse(savedUser);
+        
+        function scrollToTop() {
+            window.scrollTo({ top: 0, behavior: 'smooth' });
         }
-
-        // Initialize storage
-        loadFromStorage();
-
-        // Keyboard shortcuts
-        document.addEventListener('keydown', function(e) {
-            // Ctrl/Cmd + K = Focus search
-            if ((e.ctrlKey || e.metaKey) && e.key === 'k') {
-                e.preventDefault();
-                document.getElementById('searchInput').focus();
-            }
+        
+        function scrollToBottom() {
+            window.scrollTo({ top: document.body.scrollHeight, behavior: 'smooth' });
+        }
+        
+        function scrollToElement(element) {
+            element.scrollIntoView({ behavior: 'smooth', block: 'start' });
+        }
+        
+        // Utility Functions
+        function showToast(message, type) {
+            const toastContainer = document.getElementById('toastContainer');
+            const toast = document.createElement('div');
+            toast.className = `toast ${type}`;
+            toast.innerHTML = `
+                <div class="flex items-center">
+                    <i class="fas fa-${type === 'success' ? 'check-circle' : type === 'error' ? 'exclamation-circle' : 'info-circle'} mr-2"></i>
+                    <span>${message}</span>
+                </div>
+            `;
+            toastContainer.appendChild(toast);
             
-            // Escape = Close modals
-            if (e.key === 'Escape') {
-                document.querySelectorAll('.modal.active').forEach(modal => {
-                    modal.classList.remove('active');
-                });
-                const chatWindow = document.getElementById('aiChatWindow');
-                if (chatWindow.classList.contains('active')) {
-                    chatWindow.classList.remove('active');
+            setTimeout(() => {
+                toast.classList.add('show');
+            }, 10);
+            
+            setTimeout(() => {
+                toast.classList.remove('show');
+                setTimeout(() => {
+                    toast.remove();
+                }, 300);
+            }, 3000);
+        }
+        
+        function updateUserInfo() {
+            // Update user info in the UI
+            userName.textContent = currentUser.name;
+            loyaltyPoints.textContent = currentUser.points;
+        }
+        
+        function updateOnlineUsers() {
+            // Simulate changing online user count
+            setInterval(() => {
+                const baseUsers = 1234;
+                const randomChange = Math.floor(Math.random() * 20) - 10;
+                onlineUsers.textContent = (baseUsers + randomChange).toLocaleString();
+            }, 5000);
+        }
+        
+        function startDealTimer() {
+            let time = 2 * 60 * 60 + 45 * 60 + 30; // 2 hours, 45 minutes, 30 seconds
+            
+            setInterval(() => {
+                if (time > 0) {
+                    time--;
+                    
+                    const hours = Math.floor(time / 3600);
+                    const minutes = Math.floor((time % 3600) / 60);
+                    const seconds = time % 60;
+                    
+                    dealTimer.textContent = `${hours.toString().padStart(2, '0')}:${minutes.toString().padStart(2, '0')}:${seconds.toString().padStart(2, '0')}`;
                 }
+            }, 1000);
+        }
+        
+        // Close modals when clicking outside
+        window.addEventListener('click', function(e) {
+            if (e.target.classList.contains('modal')) {
+                e.target.classList.remove('active');
+                document.body.style.overflow = 'auto';
             }
+        });
+        
+        // Page transition effect
+        function navigateTo(page) {
+            mainContent.classList.remove('active');
+            setTimeout(() => {
+                // Load new content here
+                mainContent.classList.add('active');
+            }, 300);
+        }
+        
+        // Simulate purchase for demo purposes
+        function simulatePurchase(productId) {
+            const product = allProducts.find(p => p.id === productId);
+            if (!product) return;
             
-            // Ctrl/Cmd + L = List product
-            if ((e.ctrlKey || e.metaKey) && e.key === 'l') {
-                e.preventDefault();
-                openModal('listProductModal');
-            }
-        });
-
-        // Show welcome message
-        setTimeout(() => {
-            showToast('🎉 Welcome to Smart Marketplace! Earn points with every action.', 'success');
-        }, 1000);
-
-        console.log('✅ All features loaded successfully!');
-        console.log('🎯 Marketplace ready with:', {
-            products: allProducts.length,
-            features: [
-                '✓ AI Shopping Assistant',
-                '✓ Voice Search',
-                '✓ AR Product View',
-                '✓ Live Auctions',
-                '✓ Price Comparison',
-                '✓ Wishlist',
-                '✓ Loyalty Points',
-                '✓ Hot Deals Timer',
-                '✓ Real-time Updates'
-            ]
-        });
+            purchases.push({
+                productId: productId,
+                name: product.name,
+                price: product.price,
+                image: product.image,
+                purchaseDate: new Date().toISOString(),
+                reviewed: false
+            });
+            
+            localStorage.setItem('purchases', JSON.stringify(purchases));
+            showToast(`Successfully purchased ${product.name}!`, 'success');
+        }
     </script>
 </body>
 </html>

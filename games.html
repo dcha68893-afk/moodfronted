@@ -244,6 +244,35 @@
         .key.partial {
             background: #f59e0b;
         }
+
+        /* Level progression */
+        .level-badge {
+            background: linear-gradient(135deg, #8b5cf6, #a855f7);
+            animation: glow 2s infinite;
+        }
+        @keyframes glow {
+            0%, 100% { box-shadow: 0 0 5px #8b5cf6; }
+            50% { box-shadow: 0 0 20px #8b5cf6; }
+        }
+
+        /* Payment methods */
+        .payment-method {
+            border: 2px solid transparent;
+            transition: all 0.3s ease;
+        }
+        .payment-method.selected {
+            border-color: #3b82f6;
+            background: rgba(59, 130, 246, 0.1);
+        }
+
+        /* Fade in animation */
+        .fade-in {
+            animation: fadeIn 0.3s ease-in;
+        }
+        @keyframes fadeIn {
+            from { opacity: 0; transform: scale(0.9); }
+            to { opacity: 1; transform: scale(1); }
+        }
     </style>
 </head>
 <body class="h-full bg-gradient-to-br from-slate-900 via-purple-900 to-slate-900 text-white">
@@ -252,6 +281,7 @@
         <div>Firebase: <span id="firebaseStatus">Checking...</span></div>
         <div>User: <span id="userStatus">Unknown</span></div>
         <div>Coins: <span id="coinsStatus">0</span></div>
+        <div>Level: <span id="levelStatus">1</span></div>
     </div>
 
     <!-- Toast Notifications -->
@@ -270,7 +300,7 @@
                             <h1 class="text-2xl font-black text-transparent bg-clip-text bg-gradient-to-r from-blue-400 to-cyan-400">
                                 Premium Game Center
                             </h1>
-                            <p class="text-slate-400 text-sm">Play premium games and earn rewards</p>
+                            <p class="text-slate-400 text-sm">Unlimited levels & premium rewards</p>
                         </div>
                     </div>
                     <div class="flex items-center space-x-4">
@@ -287,6 +317,26 @@
         </div>
 
         <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
+            <!-- Level Progression Banner -->
+            <div class="glass-card rounded-2xl p-6 mb-8 border border-purple-500/30">
+                <div class="flex items-center justify-between">
+                    <div>
+                        <h2 class="text-2xl font-black text-white mb-2">Unlimited Gaming Experience</h2>
+                        <p class="text-slate-400">Play thousands of levels across all games. Progress never resets!</p>
+                    </div>
+                    <div class="level-badge px-4 py-2 rounded-full text-white font-bold">
+                        Level <span id="currentLevelDisplay">1</span>
+                    </div>
+                </div>
+                <div class="mt-4 bg-slate-700 rounded-full h-3">
+                    <div id="levelProgress" class="bg-gradient-to-r from-purple-500 to-pink-500 h-3 rounded-full transition-all duration-500" style="width: 0%"></div>
+                </div>
+                <div class="flex justify-between text-sm text-slate-400 mt-2">
+                    <span>Level <span id="currentLevel">1</span></span>
+                    <span>Next: <span id="nextLevel">2</span></span>
+                </div>
+            </div>
+
             <!-- Premium Subscription Banner -->
             <div class="premium-gradient rounded-2xl p-6 mb-8 text-center">
                 <div class="flex items-center justify-center mb-4">
@@ -295,7 +345,7 @@
                 </div>
                 <p class="text-white mb-4">Unlock all premium games and exclusive features</p>
                 <button class="px-6 py-3 glass-card text-white rounded-xl font-semibold hover:scale-105 transition" onclick="showPremiumModal()">
-                    <i class="fas fa-gem mr-2"></i> Upgrade to Premium - $9.99/month
+                    <i class="fas fa-gem mr-2"></i> Upgrade to Premium
                 </button>
             </div>
 
@@ -333,7 +383,10 @@
     <div id="chessGameModal" class="fixed inset-0 bg-black/80 flex items-center justify-center p-4 z-50 hidden">
         <div class="glass-card rounded-2xl p-6 max-w-2xl w-full fade-in">
             <div class="flex justify-between items-center mb-6">
-                <h3 class="text-2xl font-black text-white">Quantum Chess</h3>
+                <div>
+                    <h3 class="text-2xl font-black text-white">Quantum Chess</h3>
+                    <p class="text-slate-400">Level <span id="chessLevel">1</span> - Unlimited progression</p>
+                </div>
                 <div class="flex items-center space-x-4">
                     <span class="text-green-400 font-bold" id="chessStatus">White's Turn</span>
                     <button class="text-slate-400 hover:text-white" onclick="closeGameModal('chessGameModal')">
@@ -352,8 +405,8 @@
                 <button class="flex-1 px-4 py-2 glass-card border border-slate-700 rounded-xl text-slate-400 hover:border-blue-400 hover:text-blue-400 transition" onclick="closeGameModal('chessGameModal')">
                     Exit Game
                 </button>
-                <button class="flex-1 px-4 py-2 primary-gradient text-white rounded-xl font-semibold hover:scale-105 transition" onclick="restartChessGame()">
-                    New Game
+                <button class="flex-1 px-4 py-2 primary-gradient text-white rounded-xl font-semibold hover:scale-105 transition" onclick="nextChessLevel()">
+                    Next Level
                 </button>
             </div>
         </div>
@@ -363,7 +416,10 @@
     <div id="wordPuzzleModal" class="fixed inset-0 bg-black/80 flex items-center justify-center p-4 z-50 hidden">
         <div class="glass-card rounded-2xl p-6 max-w-2xl w-full fade-in">
             <div class="flex justify-between items-center mb-6">
-                <h3 class="text-2xl font-black text-white">Word Master</h3>
+                <div>
+                    <h3 class="text-2xl font-black text-white">Word Master</h3>
+                    <p class="text-slate-400">Level <span id="wordPuzzleLevel">1</span> - Unlimited words</p>
+                </div>
                 <div class="flex items-center space-x-4">
                     <span class="text-green-400 font-bold" id="wordPuzzleStatus">Guess the 5-letter word!</span>
                     <button class="text-slate-400 hover:text-white" onclick="closeGameModal('wordPuzzleModal')">
@@ -385,8 +441,8 @@
                 <button class="flex-1 px-4 py-2 glass-card border border-slate-700 rounded-xl text-slate-400 hover:border-blue-400 hover:text-blue-400 transition" onclick="closeGameModal('wordPuzzleModal')">
                     Exit Game
                 </button>
-                <button class="flex-1 px-4 py-2 primary-gradient text-white rounded-xl font-semibold hover:scale-105 transition" onclick="restartWordPuzzle()">
-                    New Puzzle
+                <button class="flex-1 px-4 py-2 primary-gradient text-white rounded-xl font-semibold hover:scale-105 transition" onclick="nextWordPuzzleLevel()">
+                    Next Word
                 </button>
             </div>
         </div>
@@ -396,7 +452,10 @@
     <div id="memoryGameModal" class="fixed inset-0 bg-black/80 flex items-center justify-center p-4 z-50 hidden">
         <div class="glass-card rounded-2xl p-6 max-w-2xl w-full fade-in">
             <div class="flex justify-between items-center mb-6">
-                <h3 class="text-2xl font-black text-white">Memory Matrix</h3>
+                <div>
+                    <h3 class="text-2xl font-black text-white">Memory Matrix</h3>
+                    <p class="text-slate-400">Level <span id="memoryLevel">1</span> - Increasing difficulty</p>
+                </div>
                 <div class="flex items-center space-x-4">
                     <span class="text-green-400 font-bold" id="memoryMoves">Moves: 0</span>
                     <button class="text-slate-400 hover:text-white" onclick="closeGameModal('memoryGameModal')">
@@ -413,8 +472,8 @@
                 <button class="flex-1 px-4 py-2 glass-card border border-slate-700 rounded-xl text-slate-400 hover:border-blue-400 hover:text-blue-400 transition" onclick="closeGameModal('memoryGameModal')">
                     Exit Game
                 </button>
-                <button class="flex-1 px-4 py-2 primary-gradient text-white rounded-xl font-semibold hover:scale-105 transition" onclick="restartMemoryGame()">
-                    Restart
+                <button class="flex-1 px-4 py-2 primary-gradient text-white rounded-xl font-semibold hover:scale-105 transition" onclick="nextMemoryLevel()">
+                    Next Level
                 </button>
             </div>
         </div>
@@ -424,7 +483,10 @@
     <div id="quizGameModal" class="fixed inset-0 bg-black/80 flex items-center justify-center p-4 z-50 hidden">
         <div class="glass-card rounded-2xl p-6 max-w-2xl w-full fade-in">
             <div class="flex justify-between items-center mb-6">
-                <h3 class="text-2xl font-black text-white">Cyber Quiz</h3>
+                <div>
+                    <h3 class="text-2xl font-black text-white" id="quizGameTitle">Knowledge Challenge</h3>
+                    <p class="text-slate-400">Level <span id="quizLevel">1</span> - Choose your category</p>
+                </div>
                 <div class="flex items-center space-x-4">
                     <span class="text-green-400 font-bold" id="quizScore">Score: 0/0</span>
                     <button class="text-slate-400 hover:text-white" onclick="closeGameModal('quizGameModal')">
@@ -448,49 +510,131 @@
         </div>
     </div>
 
+    <!-- Quiz Category Selection Modal -->
+    <div id="quizCategoryModal" class="fixed inset-0 bg-black/80 flex items-center justify-center p-4 z-50 hidden">
+        <div class="glass-card rounded-2xl p-6 max-w-md w-full fade-in">
+            <div class="text-center mb-6">
+                <div class="w-16 h-16 primary-gradient rounded-full flex items-center justify-center mx-auto mb-4">
+                    <i class="fas fa-brain text-white text-2xl"></i>
+                </div>
+                <h3 class="text-2xl font-black text-white mb-2">Choose Quiz Category</h3>
+                <p class="text-slate-400">Select your preferred topic</p>
+            </div>
+            
+            <div class="space-y-3 mb-6" id="quizCategories">
+                <!-- Categories will be loaded here -->
+            </div>
+            
+            <div class="flex space-x-3">
+                <button class="flex-1 px-4 py-2 glass-card border border-slate-700 rounded-xl text-slate-400 hover:border-blue-400 hover:text-blue-400 transition" onclick="closeGameModal('quizCategoryModal')">
+                    Cancel
+                </button>
+                <button class="flex-1 px-4 py-2 primary-gradient text-white rounded-xl font-semibold hover:scale-105 transition" onclick="startSelectedQuiz()">
+                    Start Quiz
+                </button>
+            </div>
+        </div>
+    </div>
+
     <!-- Premium Subscription Modal -->
     <div id="premiumModal" class="fixed inset-0 bg-black/80 flex items-center justify-center p-4 z-50 hidden">
-        <div class="glass-card rounded-2xl p-6 max-w-md w-full fade-in">
+        <div class="glass-card rounded-2xl p-6 max-w-2xl w-full fade-in">
             <div class="text-center mb-6">
                 <div class="w-16 h-16 premium-gradient rounded-full flex items-center justify-center mx-auto mb-4">
                     <i class="fas fa-crown text-white text-2xl"></i>
                 </div>
                 <h3 class="text-2xl font-black text-white mb-2">Upgrade to Premium</h3>
-                <p class="text-slate-400">Unlock all premium games and features</p>
+                <p class="text-slate-400">Choose your preferred payment method</p>
             </div>
             
-            <div class="space-y-4 mb-6">
-                <div class="flex items-center p-3 glass-card rounded-xl">
-                    <i class="fas fa-check text-green-400 mr-3"></i>
-                    <span class="text-white">Access to all premium games</span>
+            <div class="grid grid-cols-1 md:grid-cols-2 gap-6 mb-6">
+                <!-- Coins Payment -->
+                <div class="payment-method glass-card p-6 rounded-xl cursor-pointer" onclick="selectPaymentMethod('coins')">
+                    <div class="flex items-center mb-4">
+                        <i class="fas fa-coins text-yellow-400 text-2xl mr-3"></i>
+                        <h4 class="text-lg font-bold text-white">Pay with Coins</h4>
+                    </div>
+                    <p class="text-slate-400 text-sm mb-4">Use your earned coins to unlock premium</p>
+                    <div class="text-center">
+                        <div class="text-2xl font-black text-yellow-400">5,000</div>
+                        <div class="text-slate-400 text-sm">coins</div>
+                    </div>
+                    <div class="text-xs text-slate-500 mt-2">Your coins: <span id="userCoinBalance">0</span></div>
                 </div>
-                <div class="flex items-center p-3 glass-card rounded-xl">
-                    <i class="fas fa-check text-green-400 mr-3"></i>
-                    <span class="text-white">Double coin rewards</span>
+
+                <!-- M-Pesa Payment -->
+                <div class="payment-method glass-card p-6 rounded-xl cursor-pointer" onclick="selectPaymentMethod('mpesa')">
+                    <div class="flex items-center mb-4">
+                        <i class="fas fa-mobile-alt text-green-400 text-2xl mr-3"></i>
+                        <h4 class="text-lg font-bold text-white">M-Pesa</h4>
+                    </div>
+                    <p class="text-slate-400 text-sm mb-4">Instant activation via M-Pesa</p>
+                    <div class="text-center">
+                        <div class="text-2xl font-black text-green-400">KSh 99</div>
+                        <div class="text-slate-400 text-sm">per month</div>
+                    </div>
+                    <div class="text-xs text-slate-500 mt-2">+254 XXX XXX XXX</div>
                 </div>
-                <div class="flex items-center p-3 glass-card rounded-xl">
-                    <i class="fas fa-check text-green-400 mr-3"></i>
-                    <span class="text-white">Exclusive game content</span>
+
+                <!-- Bank Transfer -->
+                <div class="payment-method glass-card p-6 rounded-xl cursor-pointer" onclick="selectPaymentMethod('bank')">
+                    <div class="flex items-center mb-4">
+                        <i class="fas fa-university text-blue-400 text-2xl mr-3"></i>
+                        <h4 class="text-lg font-bold text-white">Bank Transfer</h4>
+                    </div>
+                    <p class="text-slate-400 text-sm mb-4">Direct bank transfer option</p>
+                    <div class="text-center">
+                        <div class="text-2xl font-black text-blue-400">KSh 99</div>
+                        <div class="text-slate-400 text-sm">per month</div>
+                    </div>
+                    <div class="text-xs text-slate-500 mt-2">Account: 1234567890</div>
                 </div>
-                <div class="flex items-center p-3 glass-card rounded-xl">
-                    <i class="fas fa-check text-green-400 mr-3"></i>
-                    <span class="text-white">No ads</span>
+
+                <!-- Credit Card -->
+                <div class="payment-method glass-card p-6 rounded-xl cursor-pointer" onclick="selectPaymentMethod('card')">
+                    <div class="flex items-center mb-4">
+                        <i class="fas fa-credit-card text-purple-400 text-2xl mr-3"></i>
+                        <h4 class="text-lg font-bold text-white">Credit Card</h4>
+                    </div>
+                    <p class="text-slate-400 text-sm mb-4">Secure card payment</p>
+                    <div class="text-center">
+                        <div class="text-2xl font-black text-purple-400">$0.99</div>
+                        <div class="text-slate-400 text-sm">per month</div>
+                    </div>
+                    <div class="text-xs text-slate-500 mt-2">Visa, MasterCard, Amex</div>
                 </div>
             </div>
-            
+
             <div class="text-center mb-6">
-                <div class="text-3xl font-black text-yellow-400">$9.99<span class="text-slate-400 text-lg">/month</span></div>
-                <p class="text-slate-400 text-sm">Cancel anytime</p>
+                <div class="text-sm text-slate-400">
+                    <i class="fas fa-shield-check text-green-400 mr-1"></i>
+                    All payments are secure and encrypted
+                </div>
             </div>
             
             <div class="flex space-x-3">
                 <button class="flex-1 px-4 py-2 glass-card border border-slate-700 rounded-xl text-slate-400 hover:border-blue-400 hover:text-blue-400 transition" onclick="closePremiumModal()">
                     Maybe Later
                 </button>
-                <button class="flex-1 px-4 py-2 premium-gradient text-white rounded-xl font-semibold hover:scale-105 transition" onclick="subscribeToPremium()">
+                <button class="flex-1 px-4 py-2 premium-gradient text-white rounded-xl font-semibold hover:scale-105 transition" id="subscribeButton" onclick="processPremiumPayment()">
                     Subscribe Now
                 </button>
             </div>
+        </div>
+    </div>
+
+    <!-- Payment Processing Modal -->
+    <div id="paymentModal" class="fixed inset-0 bg-black/80 flex items-center justify-center p-4 z-50 hidden">
+        <div class="glass-card rounded-2xl p-6 max-w-md w-full fade-in text-center">
+            <div class="w-16 h-16 primary-gradient rounded-full flex items-center justify-center mx-auto mb-4">
+                <i class="fas fa-spinner fa-spin text-white text-2xl" id="paymentIcon"></i>
+            </div>
+            <h3 class="text-2xl font-black text-white mb-2" id="paymentTitle">Processing Payment</h3>
+            <p class="text-slate-400 mb-6" id="paymentMessage">Please wait while we process your payment...</p>
+            <div class="loading-spinner mx-auto mb-4"></div>
+            <button class="w-full px-4 py-2 glass-card border border-slate-700 rounded-xl text-slate-400 hover:border-blue-400 hover:text-blue-400 transition hidden" id="paymentCloseButton" onclick="closePaymentModal()">
+                Close
+            </button>
         </div>
     </div>
 
@@ -551,26 +695,28 @@
             {
                 id: "memory",
                 name: "Memory Matrix",
-                description: "Test your memory with cyber cards",
+                description: "Test your memory with unlimited levels",
                 category: "puzzle",
                 players: "1",
                 coins: 80,
                 gradient: "game-gradient-1",
                 icon: "fa-brain",
                 featured: true,
-                premium: false
+                premium: false,
+                unlimitedLevels: true
             },
             {
                 id: "quiz",
-                name: "Cyber Quiz",
-                description: "Test your knowledge of cyber world",
+                name: "Knowledge Challenge",
+                description: "Test your knowledge across multiple categories",
                 category: "trivia",
                 players: "1",
                 coins: 120,
                 gradient: "game-gradient-2",
-                icon: "fa-question-circle",
+                icon: "fa-brain",
                 featured: true,
-                premium: false
+                premium: false,
+                unlimitedLevels: true
             }
         ];
 
@@ -578,38 +724,167 @@
             {
                 id: "chess",
                 name: "Quantum Chess",
-                description: "Strategic chess with quantum twists",
+                description: "Strategic chess with unlimited progression",
                 category: "strategy",
                 players: "2",
                 coins: 200,
                 gradient: "game-gradient-3",
                 icon: "fa-chess",
                 featured: true,
-                premium: true
+                premium: true,
+                unlimitedLevels: true
             },
             {
                 id: "wordpuzzle",
                 name: "Word Master",
-                description: "Guess the word in limited attempts",
+                description: "Unlimited word puzzles with increasing difficulty",
                 category: "puzzle",
                 players: "1",
                 coins: 150,
                 gradient: "game-gradient-4",
                 icon: "fa-font",
                 featured: true,
-                premium: true
+                premium: true,
+                unlimitedLevels: true
             },
             {
                 id: "sudoku",
                 name: "Number Matrix",
-                description: "Classic number puzzle game",
+                description: "Thousands of Sudoku puzzles",
                 category: "puzzle",
                 players: "1",
                 coins: 180,
                 gradient: "game-gradient-5",
                 icon: "fa-th-large",
                 featured: false,
-                premium: true
+                premium: true,
+                unlimitedLevels: true
+            }
+        ];
+
+        // Quiz Categories
+        const quizCategories = [
+            {
+                id: "technology",
+                name: "Technology & Programming",
+                icon: "fa-laptop-code",
+                color: "text-blue-400",
+                questions: [
+                    {
+                        question: "What does API stand for?",
+                        options: [
+                            "Application Programming Interface",
+                            "Advanced Programming Interface", 
+                            "Application Process Integration",
+                            "Automated Programming Interface"
+                        ],
+                        correct: 0
+                    },
+                    {
+                        question: "Which language is used for web styling?",
+                        options: [
+                            "JavaScript",
+                            "Python",
+                            "CSS",
+                            "HTML"
+                        ],
+                        correct: 2
+                    },
+                    {
+                        question: "What does HTML stand for?",
+                        options: [
+                            "Hyper Text Markup Language",
+                            "High Tech Modern Language",
+                            "Hyper Transfer Markup Language",
+                            "Home Tool Markup Language"
+                        ],
+                        correct: 0
+                    }
+                ]
+            },
+            {
+                id: "science",
+                name: "Science & Nature",
+                icon: "fa-flask",
+                color: "text-green-400",
+                questions: [
+                    {
+                        question: "What is the chemical symbol for gold?",
+                        options: [
+                            "Go",
+                            "Gd", 
+                            "Au",
+                            "Ag"
+                        ],
+                        correct: 2
+                    },
+                    {
+                        question: "How many bones are in the human body?",
+                        options: [
+                            "196",
+                            "206",
+                            "216", 
+                            "226"
+                        ],
+                        correct: 1
+                    }
+                ]
+            },
+            {
+                id: "history",
+                name: "History & Geography",
+                icon: "fa-landmark",
+                color: "text-yellow-400",
+                questions: [
+                    {
+                        question: "Which year did World War II end?",
+                        options: [
+                            "1944",
+                            "1945", 
+                            "1946",
+                            "1947"
+                        ],
+                        correct: 1
+                    },
+                    {
+                        question: "What is the capital of Australia?",
+                        options: [
+                            "Sydney",
+                            "Melbourne",
+                            "Canberra", 
+                            "Perth"
+                        ],
+                        correct: 2
+                    }
+                ]
+            },
+            {
+                id: "entertainment",
+                name: "Entertainment & Movies",
+                icon: "fa-film",
+                color: "text-purple-400",
+                questions: [
+                    {
+                        question: "Who directed the movie 'Inception'?",
+                        options: [
+                            "Steven Spielberg",
+                            "Christopher Nolan", 
+                            "James Cameron",
+                            "Quentin Tarantino"
+                        ],
+                        correct: 1
+                    },
+                    {
+                        question: "Which actor played Iron Man in the MCU?",
+                        options: [
+                            "Chris Evans",
+                            "Robert Downey Jr.", 
+                            "Chris Hemsworth",
+                            "Mark Ruffalo"
+                        ],
+                        correct: 1
+                    }
+                ]
             }
         ];
 
@@ -620,15 +895,25 @@
             level: 1,
             gamesPlayed: 0,
             displayName: "Guest",
-            isPremium: false
+            isPremium: false,
+            gameProgress: {
+                chess: { level: 1, xp: 0 },
+                wordpuzzle: { level: 1, xp: 0 },
+                memory: { level: 1, xp: 0 },
+                quiz: { level: 1, xp: 0 }
+            }
         };
+
+        // Payment state
+        let selectedPaymentMethod = null;
 
         // Chess Game Variables
         let chessGame = {
             board: [],
             currentPlayer: 'white',
             selectedPiece: null,
-            validMoves: []
+            validMoves: [],
+            currentLevel: 1
         };
 
         // Word Puzzle Variables
@@ -637,7 +922,16 @@
             currentGuess: '',
             guesses: [],
             maxGuesses: 6,
-            gameOver: false
+            gameOver: false,
+            currentLevel: 1,
+            wordList: [
+                'APPLE', 'BRAIN', 'CHESS', 'DREAM', 'EARTH', 'FLAME', 'GRAPE', 'HOUSE',
+                'IMAGE', 'JOKER', 'KNIFE', 'LIGHT', 'MAGIC', 'NIGHT', 'OCEAN', 'PIANO',
+                'QUEEN', 'RIVER', 'STONE', 'TIGER', 'UNITY', 'VOICE', 'WATER', 'YOUTH',
+                'ZEBRA', 'ALPHA', 'BETA', 'GAMMA', 'DELTA', 'OMEGA', 'CRYPT', 'QUANT',
+                'ZEPHYR', 'JUMBO', 'VORTEX', 'PYTHON', 'JAVASCRIPT', 'REACT', 'NODEJS',
+                'MONGODB', 'EXPRESS', 'TYPESCRIPT', 'GRAPHQL', 'DOCKER', 'KUBERNETES'
+            ]
         };
 
         // Memory Game Variables
@@ -646,7 +940,8 @@
             flippedCards: [],
             matchedPairs: 0,
             moves: 0,
-            totalPairs: 8
+            totalPairs: 8,
+            currentLevel: 1
         };
 
         // Quiz Game Variables
@@ -654,16 +949,16 @@
             questions: [],
             currentQuestion: 0,
             score: 0,
-            totalQuestions: 5
+            totalQuestions: 5,
+            currentLevel: 1,
+            selectedCategory: null
         };
 
-        // Word list for word puzzle
-        const wordList = [
-            'APPLE', 'BRAIN', 'CHESS', 'DREAM', 'EARTH', 'FLAME', 'GRAPE', 'HOUSE',
-            'IMAGE', 'JOKER', 'KNIFE', 'LIGHT', 'MAGIC', 'NIGHT', 'OCEAN', 'PIANO',
-            'QUEEN', 'RIVER', 'STONE', 'TIGER', 'UNITY', 'VOICE', 'WATER', 'YOUTH',
-            'ZEBRA', 'ALPHA', 'BETA', 'GAMMA', 'DELTA', 'OMEGA'
-        ];
+        // Level progression system
+        const LEVEL_XP_REQUIREMENTS = {
+            1: 100, 2: 250, 3: 500, 4: 1000, 5: 2000,
+            6: 4000, 7: 8000, 8: 16000, 9: 32000, 10: 64000
+        };
 
         // Initialize the application
         document.addEventListener('DOMContentLoaded', function() {
@@ -696,7 +991,19 @@
                     document.getElementById('userStatus').textContent = 'Not signed in';
                     document.getElementById('userStatus').style.color = '#ef4444';
                     // Use demo data for guests
-                    userData = { coins: 1000, level: 1, gamesPlayed: 0, displayName: "Guest", isPremium: false };
+                    userData = { 
+                        coins: 1000, 
+                        level: 1, 
+                        gamesPlayed: 0, 
+                        displayName: "Guest", 
+                        isPremium: false,
+                        gameProgress: {
+                            chess: { level: 1, xp: 0 },
+                            wordpuzzle: { level: 1, xp: 0 },
+                            memory: { level: 1, xp: 0 },
+                            quiz: { level: 1, xp: 0 }
+                        }
+                    };
                     updateUI();
                 }
                 
@@ -716,7 +1023,13 @@
                         level: data.level || 1,
                         gamesPlayed: data.gamesPlayed || 0,
                         displayName: data.displayName || "Player",
-                        isPremium: data.isPremium || false
+                        isPremium: data.isPremium || false,
+                        gameProgress: data.gameProgress || {
+                            chess: { level: 1, xp: 0 },
+                            wordpuzzle: { level: 1, xp: 0 },
+                            memory: { level: 1, xp: 0 },
+                            quiz: { level: 1, xp: 0 }
+                        }
                     };
                     console.log("✅ User data loaded:", userData);
                 } else {
@@ -728,6 +1041,12 @@
                         gamesPlayed: 0,
                         displayName: "New Player",
                         isPremium: false,
+                        gameProgress: {
+                            chess: { level: 1, xp: 0 },
+                            wordpuzzle: { level: 1, xp: 0 },
+                            memory: { level: 1, xp: 0 },
+                            quiz: { level: 1, xp: 0 }
+                        },
                         createdAt: firebase.firestore.FieldValue.serverTimestamp()
                     };
                     await db.collection('users').doc(userId).set(userData);
@@ -738,7 +1057,19 @@
             } catch (error) {
                 console.error("❌ Error loading user data:", error);
                 // Fallback to demo data
-                userData = { coins: 500, level: 1, gamesPlayed: 0, displayName: "Guest", isPremium: false };
+                userData = { 
+                    coins: 500, 
+                    level: 1, 
+                    gamesPlayed: 0, 
+                    displayName: "Guest", 
+                    isPremium: false,
+                    gameProgress: {
+                        chess: { level: 1, xp: 0 },
+                        wordpuzzle: { level: 1, xp: 0 },
+                        memory: { level: 1, xp: 0 },
+                        quiz: { level: 1, xp: 0 }
+                    }
+                };
                 updateUI();
             }
         }
@@ -747,6 +1078,20 @@
             document.getElementById('userCoins').textContent = `${userData.coins.toLocaleString()} coins`;
             document.getElementById('userLevel').textContent = `Level ${userData.level}`;
             document.getElementById('coinsStatus').textContent = userData.coins;
+            document.getElementById('levelStatus').textContent = userData.level;
+            document.getElementById('currentLevelDisplay').textContent = userData.level;
+            document.getElementById('currentLevel').textContent = userData.level;
+            document.getElementById('nextLevel').textContent = userData.level + 1;
+            document.getElementById('userCoinBalance').textContent = userData.coins.toLocaleString();
+            
+            // Update level progress
+            const currentLevel = userData.level;
+            const currentXP = userData.gameProgress ? Object.values(userData.gameProgress).reduce((total, game) => total + game.xp, 0) : 0;
+            const xpForCurrentLevel = LEVEL_XP_REQUIREMENTS[currentLevel] || 100;
+            const xpForNextLevel = LEVEL_XP_REQUIREMENTS[currentLevel + 1] || xpForCurrentLevel * 2;
+            const progress = ((currentXP - xpForCurrentLevel) / (xpForNextLevel - xpForCurrentLevel)) * 100;
+            
+            document.getElementById('levelProgress').style.width = `${Math.max(0, Math.min(100, progress))}%`;
         }
 
         function loadGames() {
@@ -789,7 +1134,7 @@
                     <div class="absolute top-3 right-3 premium-badge text-xs text-black font-bold px-2 py-1 rounded-full">
                         <i class="fas fa-crown mr-1"></i> PREMIUM
                     </div>
-                    <div class="h-32 ${game.gradient} flex items-center justify-center opacity-70">
+                    <div class="h-32 ${game.gradient} flex items-center justify-center ${userData.isPremium ? '' : 'opacity-70'}">
                         <i class="fas ${game.icon} text-white text-4xl"></i>
                     </div>
                     <div class="p-6">
@@ -802,8 +1147,8 @@
                         <p class="text-slate-400 text-sm mb-4">${game.description}</p>
                         <div class="flex justify-between items-center">
                             <span class="text-yellow-400 font-bold">${game.coins} coins</span>
-                            <button class="px-4 py-2 premium-gradient text-white rounded-xl font-semibold hover:scale-105 transition">
-                                Play Now
+                            <button class="px-4 py-2 ${userData.isPremium ? 'primary-gradient' : 'premium-gradient'} text-white rounded-xl font-semibold hover:scale-105 transition">
+                                ${userData.isPremium ? 'Play Now' : 'Unlock'}
                             </button>
                         </div>
                     </div>
@@ -826,31 +1171,75 @@
                 showToast('Sign in to save your progress and earn coins!', 'info');
             }
             
+            // Load current level for the game
+            const currentLevel = userData.gameProgress[gameId]?.level || 1;
+            
             switch(gameId) {
                 case 'chess':
+                    chessGame.currentLevel = currentLevel;
                     startChessGame();
                     break;
                 case 'wordpuzzle':
+                    wordPuzzle.currentLevel = currentLevel;
                     startWordPuzzle();
                     break;
                 case 'memory':
+                    memoryGame.currentLevel = currentLevel;
                     startMemoryGame();
                     break;
                 case 'quiz':
-                    startQuizGame();
+                    quizGame.currentLevel = currentLevel;
+                    showQuizCategorySelection();
                     break;
                 default:
                     showToast('Game coming soon!', 'info');
             }
         }
 
+        // ==================== QUIZ CATEGORY SELECTION ====================
+        function showQuizCategorySelection() {
+            const categoriesContainer = document.getElementById('quizCategories');
+            categoriesContainer.innerHTML = quizCategories.map(category => `
+                <div class="quiz-option flex items-center p-4" onclick="selectQuizCategory('${category.id}')">
+                    <i class="fas ${category.icon} ${category.color} text-xl mr-3"></i>
+                    <span class="text-white font-medium">${category.name}</span>
+                </div>
+            `).join('');
+            
+            openGameModal('quizCategoryModal');
+        }
+
+        function selectQuizCategory(categoryId) {
+            quizGame.selectedCategory = categoryId;
+            const category = quizCategories.find(c => c.id === categoryId);
+            
+            // Remove previous selections
+            document.querySelectorAll('.quiz-option').forEach(opt => {
+                opt.classList.remove('correct');
+            });
+            
+            // Highlight selected category
+            event.currentTarget.classList.add('correct');
+        }
+
+        function startSelectedQuiz() {
+            if (!quizGame.selectedCategory) {
+                showToast('Please select a quiz category', 'error');
+                return;
+            }
+            
+            closeGameModal('quizCategoryModal');
+            startQuizGame();
+        }
+
         // ==================== CHESS GAME ====================
         function startChessGame() {
             openGameModal('chessGameModal');
+            document.getElementById('chessLevel').textContent = chessGame.currentLevel;
             initializeChessBoard();
             renderChessBoard();
             
-            console.log("♟️ Chess game started");
+            console.log("♟️ Chess game started - Level:", chessGame.currentLevel);
         }
 
         function initializeChessBoard() {
@@ -983,23 +1372,35 @@
             document.getElementById('chessStatus').textContent = `${chessGame.currentPlayer.charAt(0).toUpperCase() + chessGame.currentPlayer.slice(1)}'s Turn`;
         }
 
-        function restartChessGame() {
+        function nextChessLevel() {
+            chessGame.currentLevel++;
+            document.getElementById('chessLevel').textContent = chessGame.currentLevel;
             initializeChessBoard();
             renderChessBoard();
+            showToast(`Advanced to Chess Level ${chessGame.currentLevel}!`, 'success');
         }
 
         // ==================== WORD PUZZLE GAME ====================
         function startWordPuzzle() {
             openGameModal('wordPuzzleModal');
+            document.getElementById('wordPuzzleLevel').textContent = wordPuzzle.currentLevel;
+            
+            // Increase difficulty with level
+            wordPuzzle.maxGuesses = Math.max(4, 7 - Math.floor(wordPuzzle.currentLevel / 10));
+            
             initializeWordPuzzle();
             renderWordPuzzle();
             
-            console.log("🔤 Word puzzle game started");
+            console.log("🔤 Word puzzle game started - Level:", wordPuzzle.currentLevel);
         }
 
         function initializeWordPuzzle() {
-            // Select a random word
-            wordPuzzle.targetWord = wordList[Math.floor(Math.random() * wordList.length)];
+            // Select a random word based on level (more complex words for higher levels)
+            const startIndex = Math.min(wordPuzzle.currentLevel - 1, wordPuzzle.wordList.length - 1);
+            const endIndex = Math.min(startIndex + 20, wordPuzzle.wordList.length);
+            const levelWords = wordPuzzle.wordList.slice(startIndex, endIndex);
+            
+            wordPuzzle.targetWord = levelWords[Math.floor(Math.random() * levelWords.length)];
             wordPuzzle.currentGuess = '';
             wordPuzzle.guesses = [];
             wordPuzzle.gameOver = false;
@@ -1090,7 +1491,7 @@
             if (wordPuzzle.currentGuess === wordPuzzle.targetWord) {
                 wordPuzzle.gameOver = true;
                 showToast('Congratulations! You guessed the word!', 'success');
-                awardCoins(150);
+                handleWordPuzzleCompletion(true);
             } else if (wordPuzzle.guesses.length >= wordPuzzle.maxGuesses) {
                 wordPuzzle.gameOver = true;
                 showToast(`Game Over! The word was: ${wordPuzzle.targetWord}`, 'info');
@@ -1113,19 +1514,27 @@
             }
         }
 
-        function restartWordPuzzle() {
+        function nextWordPuzzleLevel() {
+            wordPuzzle.currentLevel++;
+            document.getElementById('wordPuzzleLevel').textContent = wordPuzzle.currentLevel;
             initializeWordPuzzle();
             renderWordPuzzle();
+            showToast(`Advanced to Word Puzzle Level ${wordPuzzle.currentLevel}!`, 'success');
         }
 
         // ==================== MEMORY GAME ====================
         function startMemoryGame() {
             openGameModal('memoryGameModal');
+            document.getElementById('memoryLevel').textContent = memoryGame.currentLevel;
+            
+            // Increase difficulty with level
+            memoryGame.totalPairs = Math.min(16, 8 + Math.floor(memoryGame.currentLevel / 3));
+            
             resetMemoryGame();
             generateMemoryCards();
             renderMemoryCards();
             
-            console.log("🧠 Memory game started");
+            console.log("🧠 Memory game started - Level:", memoryGame.currentLevel);
         }
 
         function resetMemoryGame() {
@@ -1137,11 +1546,12 @@
         }
 
         function generateMemoryCards() {
-            const symbols = ['🚀', '🌟', '🔮', '💎', '🎯', '🎨', '🎭', '🎪'];
+            const symbols = ['🚀', '🌟', '🔮', '💎', '🎯', '🎨', '🎭', '🎪', '⚡', '🔥', '🌈', '⭐', '🎵', '🎮', '🏆', '🎲'];
             let cards = [];
             
             // Create pairs of cards
-            symbols.forEach(symbol => {
+            const levelSymbols = symbols.slice(0, memoryGame.totalPairs);
+            levelSymbols.forEach(symbol => {
                 cards.push({ symbol, matched: false });
                 cards.push({ symbol, matched: false });
             });
@@ -1153,7 +1563,8 @@
         function renderMemoryCards() {
             const grid = document.getElementById('memoryGameGrid');
             grid.innerHTML = '';
-            grid.className = 'grid grid-cols-4 gap-2 max-w-md mx-auto';
+            const columns = Math.min(6, Math.ceil(Math.sqrt(memoryGame.totalPairs * 2)));
+            grid.className = `grid grid-cols-${columns} gap-2 max-w-md mx-auto`;
             
             memoryGame.cards.forEach((card, index) => {
                 const cardElement = document.createElement('div');
@@ -1197,7 +1608,7 @@
                 if (memoryGame.matchedPairs === memoryGame.totalPairs) {
                     setTimeout(() => {
                         showToast(`Congratulations! You won in ${memoryGame.moves} moves!`, 'success');
-                        awardCoins(80);
+                        handleMemoryGameCompletion();
                     }, 500);
                 }
             } else {
@@ -1212,19 +1623,28 @@
             document.getElementById('memoryMoves').textContent = `Moves: ${memoryGame.moves}`;
         }
 
-        function restartMemoryGame() {
-            resetMemoryGame();
-            generateMemoryCards();
-            renderMemoryCards();
+        function nextMemoryLevel() {
+            memoryGame.currentLevel++;
+            document.getElementById('memoryLevel').textContent = memoryGame.currentLevel;
+            startMemoryGame();
+            showToast(`Advanced to Memory Level ${memoryGame.currentLevel}!`, 'success');
         }
 
         // ==================== QUIZ GAME ====================
         function startQuizGame() {
             openGameModal('quizGameModal');
+            document.getElementById('quizLevel').textContent = quizGame.currentLevel;
+            
+            // Set category title
+            const category = quizCategories.find(c => c.id === quizGame.selectedCategory);
+            if (category) {
+                document.getElementById('quizGameTitle').textContent = category.name;
+            }
+            
             resetQuizGame();
             loadQuizQuestions();
             
-            console.log("❓ Quiz game started");
+            console.log("❓ Quiz game started - Level:", quizGame.currentLevel, "Category:", quizGame.selectedCategory);
         }
 
         function resetQuizGame() {
@@ -1234,59 +1654,16 @@
         }
 
         function loadQuizQuestions() {
-            // Sample quiz questions
-            quizGame.questions = [
-                {
-                    question: "What does CPU stand for?",
-                    options: [
-                        "Central Processing Unit",
-                        "Computer Personal Unit", 
-                        "Central Process Unit",
-                        "Computer Processing Unit"
-                    ],
-                    correct: 0
-                },
-                {
-                    question: "Which programming language is known for web development?",
-                    options: [
-                        "Python",
-                        "JavaScript",
-                        "C++",
-                        "Java"
-                    ],
-                    correct: 1
-                },
-                {
-                    question: "What is the capital of Kenya?",
-                    options: [
-                        "Mombasa",
-                        "Nairobi", 
-                        "Kisumu",
-                        "Nakuru"
-                    ],
-                    correct: 1
-                },
-                {
-                    question: "Which company developed React?",
-                    options: [
-                        "Google",
-                        "Facebook",
-                        "Microsoft", 
-                        "Apple"
-                    ],
-                    correct: 1
-                },
-                {
-                    question: "What does HTML stand for?",
-                    options: [
-                        "Hyper Text Markup Language",
-                        "High Tech Modern Language",
-                        "Hyper Transfer Markup Language",
-                        "Home Tool Markup Language"
-                    ],
-                    correct: 0
-                }
-            ];
+            const category = quizCategories.find(c => c.id === quizGame.selectedCategory);
+            if (!category) return;
+
+            // For higher levels, mix questions from multiple categories
+            if (quizGame.currentLevel > 5) {
+                const allQuestions = quizCategories.flatMap(cat => cat.questions);
+                quizGame.questions = allQuestions.sort(() => 0.5 - Math.random()).slice(0, quizGame.totalQuestions);
+            } else {
+                quizGame.questions = category.questions.slice(0, quizGame.totalQuestions);
+            }
             
             loadNextQuizQuestion();
         }
@@ -1359,41 +1736,180 @@
             `;
             
             document.getElementById('nextQuizQuestion').style.display = 'none';
-            awardCoins(quizGame.score * 20);
+            handleQuizCompletion();
         }
 
-        // ==================== PREMIUM FEATURES ====================
-        function showPremiumModal() {
-            document.getElementById('premiumModal').classList.remove('hidden');
+        // ==================== PAYMENT SYSTEM ====================
+        function selectPaymentMethod(method) {
+            selectedPaymentMethod = method;
+            
+            // Remove previous selections
+            document.querySelectorAll('.payment-method').forEach(method => {
+                method.classList.remove('selected');
+            });
+            
+            // Highlight selected method
+            event.currentTarget.classList.add('selected');
+            
+            // Update subscribe button text
+            const button = document.getElementById('subscribeButton');
+            if (method === 'coins') {
+                button.innerHTML = '<i class="fas fa-coins mr-2"></i>Pay with Coins (5,000)';
+            } else {
+                button.innerHTML = '<i class="fas fa-lock mr-2"></i>Subscribe Now';
+            }
         }
 
-        function closePremiumModal() {
-            document.getElementById('premiumModal').classList.add('hidden');
-        }
-
-        async function subscribeToPremium() {
-            if (!currentUser) {
-                showToast('Please sign in to subscribe to premium', 'info');
+        async function processPremiumPayment() {
+            if (!selectedPaymentMethod) {
+                showToast('Please select a payment method', 'error');
                 return;
             }
 
+            if (!currentUser) {
+                showToast('Please sign in to purchase premium', 'error');
+                return;
+            }
+
+            showPaymentModal('Processing your payment...', 'Please wait...');
+
             try {
-                // In a real app, this would integrate with a payment processor
-                await db.collection('users').doc(currentUser.uid).update({
-                    isPremium: true,
-                    premiumSince: firebase.firestore.FieldValue.serverTimestamp()
-                });
-                
-                userData.isPremium = true;
-                showToast('Welcome to Premium! All games are now unlocked!', 'success');
-                closePremiumModal();
-                
+                if (selectedPaymentMethod === 'coins') {
+                    // Check if user has enough coins
+                    if (userData.coins < 5000) {
+                        showPaymentResult('error', 'Insufficient Coins', 'You need 5,000 coins to unlock premium. Keep playing to earn more!');
+                        return;
+                    }
+
+                    // Deduct coins and activate premium
+                    await db.collection('users').doc(currentUser.uid).update({
+                        coins: firebase.firestore.FieldValue.increment(-5000),
+                        isPremium: true,
+                        premiumSince: firebase.firestore.FieldValue.serverTimestamp(),
+                        premiumMethod: 'coins'
+                    });
+
+                    userData.coins -= 5000;
+                    userData.isPremium = true;
+                    showPaymentResult('success', 'Premium Unlocked!', 'You have successfully unlocked premium using coins!');
+                    
+                } else {
+                    // Simulate payment processing for real money methods
+                    setTimeout(async () => {
+                        await db.collection('users').doc(currentUser.uid).update({
+                            isPremium: true,
+                            premiumSince: firebase.firestore.FieldValue.serverTimestamp(),
+                            premiumMethod: selectedPaymentMethod
+                        });
+
+                        userData.isPremium = true;
+                        showPaymentResult('success', 'Payment Successful!', 'Welcome to ConnectSphere Premium!');
+                    }, 3000);
+                }
+
                 // Reload games to show premium games as unlocked
                 loadGames();
+                updateUI();
+
             } catch (error) {
-                console.error("❌ Error subscribing to premium:", error);
-                showToast('Error processing subscription', 'error');
+                console.error("❌ Payment processing error:", error);
+                showPaymentResult('error', 'Payment Failed', 'There was an error processing your payment. Please try again.');
             }
+        }
+
+        function showPaymentModal(title, message) {
+            document.getElementById('paymentTitle').textContent = title;
+            document.getElementById('paymentMessage').textContent = message;
+            document.getElementById('paymentIcon').className = 'fas fa-spinner fa-spin text-white text-2xl';
+            document.getElementById('paymentCloseButton').classList.add('hidden');
+            openGameModal('paymentModal');
+        }
+
+        function showPaymentResult(type, title, message) {
+            const icon = type === 'success' ? 'fa-check-circle' : 'fa-exclamation-circle';
+            const color = type === 'success' ? 'text-green-400' : 'text-red-400';
+            
+            document.getElementById('paymentTitle').textContent = title;
+            document.getElementById('paymentMessage').textContent = message;
+            document.getElementById('paymentIcon').className = `fas ${icon} ${color} text-2xl`;
+            document.getElementById('paymentCloseButton').classList.remove('hidden');
+        }
+
+        function closePaymentModal() {
+            closeGameModal('paymentModal');
+            closePremiumModal();
+        }
+
+        // ==================== LEVEL PROGRESSION SYSTEM ====================
+        async function awardXP(gameId, xpAmount) {
+            if (!currentUser) return;
+
+            try {
+                const currentXP = userData.gameProgress[gameId]?.xp || 0;
+                const newXP = currentXP + xpAmount;
+                const currentLevel = userData.gameProgress[gameId]?.level || 1;
+                
+                // Calculate new level based on XP
+                let newLevel = currentLevel;
+                let xpForNextLevel = LEVEL_XP_REQUIREMENTS[newLevel] || 100;
+                
+                while (newXP >= xpForNextLevel) {
+                    newLevel++;
+                    xpForNextLevel = LEVEL_XP_REQUIREMENTS[newLevel] || xpForNextLevel * 2;
+                }
+
+                // Update user progress
+                await db.collection('users').doc(currentUser.uid).update({
+                    [`gameProgress.${gameId}.xp`]: newXP,
+                    [`gameProgress.${gameId}.level`]: newLevel
+                });
+
+                userData.gameProgress[gameId] = { xp: newXP, level: newLevel };
+                
+                // Check for level up
+                if (newLevel > currentLevel) {
+                    showToast(`🎉 Level Up! ${gameId} is now level ${newLevel}`, 'success');
+                }
+
+                updateUI();
+                
+            } catch (error) {
+                console.error("❌ Error awarding XP:", error);
+            }
+        }
+
+        // ==================== GAME COMPLETION HANDLERS ====================
+        async function handleWordPuzzleCompletion(success) {
+            if (success) {
+                const performance = 1 - (wordPuzzle.guesses.length / wordPuzzle.maxGuesses);
+                await completeGame('wordpuzzle', performance);
+                awardCoins(150);
+            }
+        }
+
+        async function handleMemoryGameCompletion() {
+            const performance = 1 - (memoryGame.moves / (memoryGame.totalPairs * 3));
+            await completeGame('memory', performance);
+            awardCoins(80);
+        }
+
+        async function handleQuizCompletion() {
+            const performance = quizGame.score / quizGame.totalQuestions;
+            await completeGame('quiz', performance);
+            awardCoins(quizGame.score * 20);
+        }
+
+        async function completeGame(gameId, performanceMultiplier = 1) {
+            const baseXP = 50;
+            const levelBonus = (userData.gameProgress[gameId]?.level || 1) * 10;
+            const xpEarned = Math.floor((baseXP + levelBonus) * performanceMultiplier);
+            
+            await awardXP(gameId, xpEarned);
+            
+            // Level up the game for next play
+            userData.gameProgress[gameId].level++;
+            
+            showToast(`+${xpEarned} XP earned! Next level unlocked.`, 'success');
         }
 
         // ==================== COMMON GAME FUNCTIONS ====================
@@ -1403,6 +1919,20 @@
 
         function closeGameModal(modalId) {
             document.getElementById(modalId).classList.add('hidden');
+        }
+
+        function showPremiumModal() {
+            document.getElementById('premiumModal').classList.remove('hidden');
+        }
+
+        function closePremiumModal() {
+            document.getElementById('premiumModal').classList.add('hidden');
+            selectedPaymentMethod = null;
+            
+            // Reset payment method selections
+            document.querySelectorAll('.payment-method').forEach(method => {
+                method.classList.remove('selected');
+            });
         }
 
         async function awardCoins(amount) {

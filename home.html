@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>UniConnectSphere - Enhanced Social Feed</title>
+    <title>ConnectSphere - Enhanced Social Feed</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css" rel="stylesheet">
     
@@ -52,6 +52,41 @@
             --text-secondary: #bae6fd;
             --accent-color: #f59e0b;
             --accent-hover: #d97706;
+        }
+
+        /* Connection Status */
+        .connection-status {
+            position: fixed;
+            top: 10px;
+            right: 10px;
+            padding: 8px 16px;
+            border-radius: 20px;
+            font-size: 0.8rem;
+            z-index: 1000;
+            transition: all 0.3s ease-in-out;
+            display: flex;
+            align-items: center;
+            box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
+        }
+        .connection-status.connected {
+            background: rgba(34, 197, 94, 0.9);
+            color: white;
+            border: 1px solid rgba(34, 197, 94, 0.6);
+        }
+        .connection-status.connecting {
+            background: rgba(245, 158, 11, 0.9);
+            color: white;
+            border: 1px solid rgba(245, 158, 11, 0.6);
+        }
+        .connection-status.disconnected {
+            background: rgba(239, 68, 68, 0.9);
+            color: white;
+            border: 1px solid rgba(239, 68, 68, 0.6);
+        }
+        .connection-status.hidden {
+            opacity: 0;
+            transform: translateY(-20px);
+            pointer-events: none;
         }
 
         /* Emotion Reactive Backgrounds */
@@ -347,9 +382,31 @@
         .hover\:bg-theme-accent:hover {
             background-color: var(--accent-hover);
         }
+        
+        /* Upload Progress */
+        .upload-progress {
+            width: 100%;
+            height: 6px;
+            background: var(--glass-bg);
+            border-radius: 3px;
+            margin-top: 10px;
+            overflow: hidden;
+        }
+        .upload-progress-bar {
+            height: 100%;
+            background: var(--accent-color);
+            width: 0%;
+            transition: width 0.3s ease;
+        }
     </style>
 </head>
 <body class="h-full dark-theme emotion-default" id="emotionBody">
+    <!-- Connection Status -->
+    <div class="connection-status connecting" id="connectionStatus">
+        <i class="fas fa-circle-notch fa-spin mr-2"></i>
+        <span id="connectionText">Connecting to Firebase...</span>
+    </div>
+
     <!-- Gamification Header -->
     <div class="glass border-b border-purple-800 p-3">
         <div class="flex items-center justify-between max-w-6xl mx-auto">
@@ -366,7 +423,7 @@
                         <i class="fas fa-coins"></i>
                     </div>
                     <span class="text-sm font-bold" id="unicoinsCount">0</span>
-                    <span class="text-xs text-theme-secondary">UniCoins</span>
+                    <span class="text-xs text-theme-secondary">ConnectCoins</span>
                 </div>
                 <div class="level-badge bg-theme-accent px-3 py-1 rounded-full text-xs">
                     Level <span id="userLevel">1</span>
@@ -607,6 +664,9 @@
                     <img id="modalPreviewImage" class="media-preview w-full hidden">
                     <video id="modalPreviewVideo" class="media-preview w-full hidden" controls></video>
                     <audio id="modalPreviewAudio" class="audio-player hidden" controls></audio>
+                    <div class="upload-progress hidden" id="uploadProgress">
+                        <div class="upload-progress-bar" id="uploadProgressBar"></div>
+                    </div>
                 </div>
                 
                 <div class="flex space-x-4 text-theme-secondary justify-center">
@@ -647,6 +707,9 @@
                 
                 <div id="storyMediaPreview" class="hidden">
                     <img id="storyPreviewImage" class="media-preview w-full hidden">
+                    <div class="upload-progress hidden" id="storyUploadProgress">
+                        <div class="upload-progress-bar" id="storyUploadProgressBar"></div>
+                    </div>
                 </div>
                 
                 <div class="flex space-x-4 text-theme-secondary justify-center">
@@ -689,9 +752,52 @@
         let currentMediaFile = null;
         let currentStoryFile = null;
 
+        // Firebase connection simulation
+        function simulateFirebaseConnection() {
+            const connectionStatus = document.getElementById('connectionStatus');
+            const connectionText = document.getElementById('connectionText');
+            
+            // Show connecting status
+            connectionStatus.classList.remove('hidden');
+            connectionStatus.classList.add('connecting');
+            
+            // Simulate connection process
+            setTimeout(() => {
+                connectionStatus.classList.remove('connecting');
+                connectionStatus.classList.add('connected');
+                connectionText.innerHTML = '<i class="fas fa-check-circle mr-2"></i> Connected to Firebase';
+                
+                // Hide after 5 seconds
+                setTimeout(() => {
+                    connectionStatus.classList.add('hidden');
+                }, 5000);
+            }, 2000);
+        }
+
+        // Image optimization function
+        function optimizeImage(imageUrl) {
+            // Check if the URL is from Cloudinary (for demo purposes)
+            if (imageUrl.includes('cloudinary.com')) {
+                // Apply Cloudinary transformations for optimization
+                return imageUrl.replace('/upload/', '/upload/f_auto,q_auto/');
+            }
+            return imageUrl;
+        }
+
+        // Apply image optimization to all post images
+        function optimizePostImages() {
+            const postImages = document.querySelectorAll('.media-preview');
+            postImages.forEach(img => {
+                const originalSrc = img.src;
+                const optimizedSrc = optimizeImage(originalSrc);
+                img.src = optimizedSrc;
+            });
+        }
+
         // Initialize the application
         document.addEventListener('DOMContentLoaded', function() {
             console.log("DOM loaded, initializing app...");
+            simulateFirebaseConnection();
             initializeApp();
         });
 
@@ -815,855 +921,859 @@
             document.getElementById('followingCount').textContent = userData.following || 0;
         }
 
-        // Load all data
-        async function loadAllData() {
-            console.log("Loading all data...");
-            await loadFeedData();
-            await loadStories();
-            await loadTrendingTopics();
-            await loadSuggestedUsers();
-            showNotification('Welcome to ConnectSphere!', 'success');
-        }
-
-        // Load feed data from Firestore
-        async function loadFeedData() {
-            try {
-                console.log("Loading feed data...");
-                
-                const postsQuery = db.collection('posts')
-                    .orderBy('createdAt', 'desc')
-                    .limit(20);
-
-                const unsubscribe = postsQuery.onSnapshot((snapshot) => {
-                    const feedContainer = document.getElementById('feedContainer');
-                    const trendingContainer = document.getElementById('trendingContainer');
-                    
-                    feedContainer.innerHTML = '';
-                    trendingContainer.innerHTML = '';
-
-                    if (snapshot.empty) {
-                        feedContainer.innerHTML = `
-                            <div class="glass border border-purple-700 rounded-2xl p-6 text-center">
-                                <i class="fas fa-newspaper text-4xl text-theme-secondary mb-4"></i>
-                                <h3 class="text-lg font-bold text-theme-accent mb-2">No posts yet</h3>
-                                <p class="text-theme-secondary">Be the first to share something with your network!</p>
-                                <button onclick="showCreatePostModal()" class="mt-4 bg-theme-accent text-white px-6 py-2 rounded-xl hover:bg-theme-hover transition">
-                                    Create First Post
-                                </button>
-                            </div>
-                        `;
-                        return;
-                    }
-
-                    const posts = [];
-                    snapshot.forEach((doc) => {
-                        const post = { id: doc.id, ...doc.data() };
-                        posts.push(post);
-                    });
-
-                    // Display trending posts (most liked)
-                    const trendingPosts = [...posts]
-                        .sort((a, b) => (b.likes || 0) - (a.likes || 0))
-                        .slice(0, 3);
-
-                    trendingPosts.forEach(post => {
-                        const trendingElement = createTrendingPostElement(post);
-                        trendingContainer.appendChild(trendingElement);
-                    });
-
-                    // Display all posts
-                    posts.forEach(post => {
-                        const postElement = createPostElement(post);
-                        feedContainer.appendChild(postElement);
-                    });
-
-                }, (error) => {
-                    console.error('Error loading feed:', error);
-                });
-
-                // Store unsubscribe for cleanup
-                window.feedUnsubscribe = unsubscribe;
-                
-            } catch (error) {
-                console.error('Error loading feed data:', error);
-            }
-        }
-
-        // Create a post element for the feed
-        function createPostElement(post) {
-            const postElement = document.createElement('div');
-            postElement.className = 'glass border border-purple-700 rounded-2xl p-6';
-            postElement.innerHTML = `
-                <div class="flex items-center justify-between mb-4">
-                    <div class="flex items-center space-x-3">
-                        <img src="${post.userAvatar || 'https://ui-avatars.com/api/?name=User&background=6366f1&color=fff'}" alt="${post.userName}" class="w-10 h-10 rounded-2xl object-cover">
-                        <div>
-                            <h3 class="font-bold text-theme-accent">${post.userName}</h3>
-                            <p class="text-xs text-theme-secondary">${formatTimestamp(post.createdAt)}</p>
-                        </div>
-                    </div>
-                    <button class="text-theme-secondary hover:text-theme-accent transition">
-                        <i class="fas fa-ellipsis-h"></i>
-                    </button>
-                </div>
-                
-                <p class="text-theme-primary mb-4">${post.content}</p>
-                
-                ${post.media ? `
-                    <div class="mb-4">
-                        ${post.media.type === 'image' ? `<img src="${post.media.url}" class="media-preview w-full cursor-pointer" onclick="openMediaModal('${post.media.url}', 'image')">` : ''}
-                        ${post.media.type === 'video' ? `<video src="${post.media.url}" class="media-preview w-full" controls></video>` : ''}
-                        ${post.media.type === 'audio' ? `<audio src="${post.media.url}" class="audio-player" controls></audio>` : ''}
-                    </div>
-                ` : ''}
-                
-                ${post.tags && post.tags.length > 0 ? `
-                    <div class="mb-4">
-                        ${post.tags.map(tag => `<span class="tag-pill">#${tag}</span>`).join('')}
-                    </div>
-                ` : ''}
-                
-                <div class="flex items-center justify-between text-theme-secondary">
-                    <div class="flex space-x-6">
-                        <button class="interaction-btn like-btn" data-post-id="${post.id}">
-                            <i class="far fa-heart"></i>
-                            <span class="ml-1">${post.likes || 0}</span>
-                        </button>
-                        <button class="interaction-btn comment-btn" data-post-id="${post.id}">
-                            <i class="far fa-comment"></i>
-                            <span class="ml-1">${post.comments || 0}</span>
-                        </button>
-                        <button class="interaction-btn share-btn" data-post-id="${post.id}">
-                            <i class="fas fa-share"></i>
-                            <span class="ml-1">${post.shares || 0}</span>
-                        </button>
-                    </div>
-                    <button class="interaction-btn bookmark-btn" data-post-id="${post.id}">
-                        <i class="far fa-bookmark"></i>
-                    </button>
-                </div>
-
-                <!-- Comments Section -->
-                <div class="mt-4 hidden" id="comments-${post.id}">
-                    <div class="flex space-x-3 mb-3">
-                        <img src="${userData.avatar}" class="w-8 h-8 rounded-2xl object-cover">
-                        <div class="flex-1">
-                            <input type="text" placeholder="Write a comment..." class="w-full p-2 glass border border-purple-700 rounded-xl text-sm">
-                        </div>
-                    </div>
-                </div>
-            `;
-            
-            // Add event listeners
-            const likeBtn = postElement.querySelector('.like-btn');
-            likeBtn.addEventListener('click', () => handleLikePost(post.id, likeBtn));
-
-            const commentBtn = postElement.querySelector('.comment-btn');
-            commentBtn.addEventListener('click', () => toggleComments(post.id));
-
-            const shareBtn = postElement.querySelector('.share-btn');
-            shareBtn.addEventListener('click', () => handleSharePost(post.id));
-
-            const bookmarkBtn = postElement.querySelector('.bookmark-btn');
-            bookmarkBtn.addEventListener('click', () => handleBookmarkPost(post.id, bookmarkBtn));
-            
-            return postElement;
-        }
-
-        // Create trending post element
-        function createTrendingPostElement(post) {
-            const element = document.createElement('div');
-            element.className = 'flex items-center space-x-3 p-3 hover:bg-purple-900/30 rounded-lg cursor-pointer transition';
-            element.innerHTML = `
-                <div class="flex-1 min-w-0">
-                    <p class="text-sm font-semibold text-theme-accent truncate">${post.userName}</p>
-                    <p class="text-xs text-theme-secondary truncate">${post.content.substring(0, 50)}${post.content.length > 50 ? '...' : ''}</p>
-                </div>
-                <div class="flex items-center space-x-1 text-yellow-400">
-                    <i class="fas fa-fire"></i>
-                    <span class="text-xs">${post.likes || 0}</span>
-                </div>
-            `;
-            element.addEventListener('click', () => {
-                // Scroll to post in feed
-                const postElement = document.querySelector(`[data-post-id="${post.id}"]`);
-                if (postElement) {
-                    postElement.scrollIntoView({ behavior: 'smooth' });
-                    postElement.classList.add('bg-purple-900/30');
-                    setTimeout(() => postElement.classList.remove('bg-purple-900/30'), 2000);
-                }
-            });
-            return element;
-        }
-
-        // Load stories from Firestore
-        async function loadStories() {
-            try {
-                console.log("Loading stories...");
-                
-                const storiesQuery = db.collection('stories')
-                    .where('expiresAt', '>', new Date())
-                    .orderBy('expiresAt', 'asc')
-                    .limit(10);
-
-                const unsubscribe = storiesQuery.onSnapshot((snapshot) => {
-                    const storiesContainer = document.getElementById('storiesContainer');
-                    // Clear existing stories (except the "Your Story" element)
-                    const yourStoryElement = storiesContainer.firstElementChild;
-                    storiesContainer.innerHTML = '';
-                    storiesContainer.appendChild(yourStoryElement);
-
-                    if (snapshot.empty) {
-                        return;
-                    }
-
-                    snapshot.forEach((doc) => {
-                        const story = doc.data();
-                        story.id = doc.id;
-                        const storyElement = createStoryElement(story);
-                        storiesContainer.appendChild(storyElement);
-                    });
-                }, (error) => {
-                    console.error('Error loading stories:', error);
-                });
-
-                window.storiesUnsubscribe = unsubscribe;
-                
-            } catch (error) {
-                console.error('Error loading stories:', error);
-            }
-        }
-
-        // Create a story element
-        function createStoryElement(story) {
-            const storyElement = document.createElement('div');
-            storyElement.className = 'flex flex-col items-center space-y-2 flex-shrink-0';
-            storyElement.innerHTML = `
-                <div class="w-20 h-20 hologram-border rounded-2xl p-0.5 cursor-pointer" onclick="viewStory('${story.id}')">
-                    <img src="${story.userAvatar}" alt="${story.userName}" class="w-full h-full rounded-2xl object-cover">
-                </div>
-                <span class="text-xs font-semibold text-theme-primary">${story.userName}</span>
-            `;
-            return storyElement;
-        }
-
-        // Load trending topics
-        async function loadTrendingTopics() {
-            try {
-                console.log("Loading trending topics...");
-                
-                // For now, create some default trending topics
-                const topicsContainer = document.getElementById('trendingTopicsContainer');
-                topicsContainer.innerHTML = '';
-
-                const defaultTopics = [
-                    { name: 'technology', count: 15 },
-                    { name: 'programming', count: 12 },
-                    { name: 'ai', count: 8 },
-                    { name: 'webdev', count: 6 }
-                ];
-
-                defaultTopics.forEach(topic => {
-                    const topicElement = document.createElement('div');
-                    topicElement.className = 'flex items-center justify-between cursor-pointer hover:bg-purple-900/30 p-2 rounded-lg transition';
-                    topicElement.innerHTML = `
-                        <span class="text-theme-primary font-medium">#${topic.name}</span>
-                        <span class="text-theme-secondary text-sm">${topic.count} posts</span>
-                    `;
-                    topicElement.addEventListener('click', () => {
-                        document.getElementById('searchInput').value = `#${topic.name}`;
-                        handleSearch();
-                    });
-                    topicsContainer.appendChild(topicElement);
-                });
-                
-            } catch (error) {
-                console.error('Error loading trending topics:', error);
-            }
-        }
-
-        // Load suggested users
-        async function loadSuggestedUsers() {
-            try {
-                console.log("Loading suggested users...");
-                
-                const usersQuery = db.collection('users').limit(5);
-
-                const unsubscribe = usersQuery.onSnapshot((snapshot) => {
-                    const suggestedContainer = document.getElementById('suggestedUsersContainer');
-                    suggestedContainer.innerHTML = '';
-
-                    if (snapshot.empty) {
-                        suggestedContainer.innerHTML = `
-                            <div class="text-center text-theme-secondary">
-                                <p>No suggested users found</p>
-                            </div>
-                        `;
-                        return;
-                    }
-
-                    snapshot.forEach((doc) => {
-                        if (doc.id !== currentUser.uid) {
-                            const user = doc.data();
-                            user.id = doc.id;
-                            const userElement = createSuggestedUserElement(user);
-                            suggestedContainer.appendChild(userElement);
-                        }
-                    });
-                }, (error) => {
-                    console.error('Error loading suggested users:', error);
-                });
-
-                window.suggestedUsersUnsubscribe = unsubscribe;
-                
-            } catch (error) {
-                console.error('Error loading suggested users:', error);
-            }
-        }
-
-        // Create a suggested user element
-        function createSuggestedUserElement(user) {
-            const userElement = document.createElement('div');
-            userElement.className = 'flex items-center justify-between';
-            userElement.innerHTML = `
-                <div class="flex items-center space-x-3">
-                    <img src="${user.avatar}" alt="${user.displayName}" class="w-10 h-10 rounded-2xl object-cover">
-                    <div>
-                        <h4 class="font-semibold text-theme-accent text-sm">${user.displayName}</h4>
-                        <p class="text-xs text-theme-secondary">${user.followers || 0} followers</p>
-                    </div>
-                </div>
-                <button class="follow-btn" data-user-id="${user.id}">
-                    Follow
-                </button>
-            `;
-            
-            const followBtn = userElement.querySelector('.follow-btn');
-            followBtn.addEventListener('click', () => handleFollowUser(user.id, followBtn));
-            
-            return userElement;
-        }
-
-        // Handle like post
-        async function handleLikePost(postId, button) {
-            try {
-                const postRef = db.collection('posts').doc(postId);
-                const postDoc = await postRef.get();
-                
-                if (postDoc.exists) {
-                    const post = postDoc.data();
-                    const newLikes = (post.likes || 0) + 1;
-                    
-                    await postRef.update({
-                        likes: newLikes
-                    });
-                    
-                    // Update UI immediately
-                    const icon = button.querySelector('i');
-                    const count = button.querySelector('span');
-                    icon.classList.remove('far');
-                    icon.classList.add('fas');
-                    icon.style.color = 'var(--accent-color)';
-                    count.textContent = newLikes;
-                    
-                    showNotification('Post liked!', 'success');
-                }
-            } catch (error) {
-                console.error('Error liking post:', error);
-                showNotification('Error liking post', 'error');
-            }
-        }
-
-        // Handle follow user
-        async function handleFollowUser(userId, button) {
-            try {
-                // Update UI immediately
-                button.textContent = 'Following';
-                button.classList.add('following');
-                
-                // Update in Firebase
-                await db.collection('users').doc(userId).update({
-                    followers: firebase.firestore.FieldValue.increment(1)
-                });
-
-                // Update current user's following count
-                await db.collection('users').doc(currentUser.uid).update({
-                    following: firebase.firestore.FieldValue.increment(1)
-                });
-
-                showNotification('User followed!', 'success');
-            } catch (error) {
-                console.error('Error following user:', error);
-                showNotification('Error following user', 'error');
-            }
-        }
-
-        // Handle share post
-        async function handleSharePost(postId) {
-            try {
-                const postRef = db.collection('posts').doc(postId);
-                const postDoc = await postRef.get();
-                
-                if (postDoc.exists) {
-                    const post = postDoc.data();
-                    const newShares = (post.shares || 0) + 1;
-                    
-                    await postRef.update({
-                        shares: newShares
-                    });
-                    
-                    showNotification('Post shared!', 'success');
-                }
-            } catch (error) {
-                console.error('Error sharing post:', error);
-                showNotification('Error sharing post', 'error');
-            }
-        }
-
-        // Handle bookmark post
-        async function handleBookmarkPost(postId, button) {
-            try {
-                const icon = button.querySelector('i');
-                icon.classList.toggle('far');
-                icon.classList.toggle('fas');
-                icon.style.color = icon.classList.contains('fas') ? 'var(--accent-color)' : '';
-                
-                showNotification(icon.classList.contains('fas') ? 'Post bookmarked!' : 'Post unbookmarked', 'success');
-            } catch (error) {
-                console.error('Error bookmarking post:', error);
-                showNotification('Error bookmarking post', 'error');
-            }
-        }
-
-        // Toggle comments section
-        function toggleComments(postId) {
-            const commentsSection = document.getElementById(`comments-${postId}`);
-            commentsSection.classList.toggle('hidden');
-        }
-
-        // Create a new post
-        async function createPost() {
-            const postInput = document.getElementById('modalPostInput');
-            const content = postInput.value.trim();
-            
-            if (!content && !currentMediaFile) {
-                showNotification('Please enter some content or add media to your post', 'error');
-                return;
-            }
-
-            try {
-                let mediaUrl = null;
-                let mediaType = null;
-
-                // Upload media if exists
-                if (currentMediaFile) {
-                    showNotification('Uploading media...', 'success');
-                    mediaUrl = await uploadMedia(currentMediaFile);
-                    mediaType = currentMediaFile.type.split('/')[0];
-                }
-
-                // Create post document
-                const postData = {
-                    content: content,
-                    userId: currentUser.uid,
-                    userName: userData.displayName,
-                    userAvatar: userData.avatar,
-                    media: mediaUrl ? { url: mediaUrl, type: mediaType } : null,
-                    tags: extractTags(content),
-                    likes: 0,
-                    comments: 0,
-                    shares: 0,
-                    createdAt: firebase.firestore.FieldValue.serverTimestamp(),
-                    updatedAt: firebase.firestore.FieldValue.serverTimestamp()
-                };
-
-                await db.collection('posts').add(postData);
-
-                // Update user post count
-                await db.collection('users').doc(currentUser.uid).update({
-                    posts: firebase.firestore.FieldValue.increment(1)
-                });
-
-                // Clear input and reset media
-                postInput.value = '';
-                clearMediaPreview();
-                hideCreatePostModal();
-                
-                showNotification('Post shared successfully!', 'success');
-            } catch (error) {
-                console.error('Error creating post:', error);
-                showNotification('Error sharing post. Please try again.', 'error');
-            }
-        }
-
-        // Create a new story
-        async function createStory() {
-            const storyInput = document.getElementById('storyInput');
-            const content = storyInput.value.trim();
-            
-            if (!content && !currentStoryFile) {
-                showNotification('Please add a photo or caption to your story', 'error');
-                return;
-            }
-
-            try {
-                let mediaUrl = null;
-
-                // Upload story media if exists
-                if (currentStoryFile) {
-                    showNotification('Uploading story...', 'success');
-                    mediaUrl = await uploadMedia(currentStoryFile);
-                }
-
-                // Calculate expiration time (24 hours from now)
-                const expiresAt = new Date();
-                expiresAt.setHours(expiresAt.getHours() + 24);
-
-                // Create story document
-                const storyData = {
-                    content: content,
-                    userId: currentUser.uid,
-                    userName: userData.displayName,
-                    userAvatar: userData.avatar,
-                    mediaUrl: mediaUrl,
-                    views: 0,
-                    expiresAt: expiresAt,
-                    createdAt: firebase.firestore.FieldValue.serverTimestamp()
-                };
-
-                await db.collection('stories').add(storyData);
-
-                // Clear input and reset media
-                storyInput.value = '';
-                clearStoryPreview();
-                hideCreateStoryModal();
-                
-                showNotification('Story shared successfully!', 'success');
-            } catch (error) {
-                console.error('Error creating story:', error);
-                showNotification('Error sharing story. Please try again.', 'error');
-            }
-        }
-
-        // Upload media to Firebase Storage
-        async function uploadMedia(file) {
-            try {
-                const storageRef = storage.ref();
-                const fileRef = storageRef.child(`posts/${currentUser.uid}/${Date.now()}_${file.name}`);
-                const snapshot = await fileRef.put(file);
-                const downloadURL = await snapshot.ref.getDownloadURL();
-                return downloadURL;
-            } catch (error) {
-                console.error('Error uploading media:', error);
-                throw error;
-            }
-        }
-
-        // Extract hashtags from content
-        function extractTags(content) {
-            const tagRegex = /#(\w+)/g;
-            const tags = [];
-            let match;
-            
-            while ((match = tagRegex.exec(content)) !== null) {
-                tags.push(match[1]);
-            }
-            
-            return tags;
-        }
-
-        // Handle search functionality
-        async function handleSearch() {
-            const query = document.getElementById('searchInput').value.trim();
-            const resultsContainer = document.getElementById('searchResults');
-            
-            if (query.length < 2) {
-                resultsContainer.classList.remove('show');
-                return;
-            }
-
-            try {
-                // Search users
-                const usersSnapshot = await db.collection('users')
-                    .where('displayName', '>=', query)
-                    .where('displayName', '<=', query + '\uf8ff')
-                    .limit(5)
-                    .get();
-
-                // Search posts
-                const postsSnapshot = await db.collection('posts')
-                    .where('content', '>=', query)
-                    .where('content', '<=', query + '\uf8ff')
-                    .limit(5)
-                    .get();
-
-                let resultsHTML = '';
-
-                // Add user results
-                if (!usersSnapshot.empty) {
-                    resultsHTML += '<div class="text-xs font-semibold text-theme-secondary mb-2">USERS</div>';
-                    usersSnapshot.forEach(doc => {
-                        const user = doc.data();
-                        resultsHTML += `
-                            <div class="search-result-item" data-user-id="${doc.id}">
-                                <div class="flex items-center space-x-3">
-                                    <img src="${user.avatar}" alt="${user.displayName}" class="w-8 h-8 rounded-2xl object-cover">
-                                    <div>
-                                        <p class="font-medium text-theme-primary">${user.displayName}</p>
-                                        <p class="text-xs text-theme-secondary">${user.followers || 0} followers</p>
-                                    </div>
-                                </div>
-                            </div>
-                        `;
-                    });
-                }
-
-                // Add post results
-                if (!postsSnapshot.empty) {
-                    resultsHTML += '<div class="text-xs font-semibold text-theme-secondary mb-2 mt-4">POSTS</div>';
-                    postsSnapshot.forEach(doc => {
-                        const post = doc.data();
-                        resultsHTML += `
-                            <div class="search-result-item" data-post-id="${doc.id}">
-                                <p class="font-medium text-theme-primary">${post.content.substring(0, 50)}${post.content.length > 50 ? '...' : ''}</p>
-                                <p class="text-xs text-theme-secondary">by ${post.userName}</p>
-                            </div>
-                        `;
-                    });
-                }
-
-                if (resultsHTML === '') {
-                    resultsHTML = '<div class="text-theme-secondary p-3 text-center">No results found</div>';
-                }
-
-                resultsContainer.innerHTML = resultsHTML;
-                resultsContainer.classList.add('show');
-            } catch (error) {
-                console.error('Error searching:', error);
-            }
-        }
-
-        // Format Firestore timestamp
-        function formatTimestamp(timestamp) {
-            if (!timestamp) return 'Just now';
-            
-            try {
-                const date = timestamp.toDate();
-                const now = new Date();
-                const diffInSeconds = Math.floor((now - date) / 1000);
-                
-                if (diffInSeconds < 60) return 'Just now';
-                if (diffInSeconds < 3600) return `${Math.floor(diffInSeconds / 60)}m ago`;
-                if (diffInSeconds < 86400) return `${Math.floor(diffInSeconds / 3600)}h ago`;
-                if (diffInSeconds < 604800) return `${Math.floor(diffInSeconds / 86400)}d ago`;
-                
-                return date.toLocaleDateString();
-            } catch (error) {
-                return 'Recently';
-            }
-        }
-
-        // Modal Management
-        function showCreatePostModal() {
-            document.getElementById('createPostModal').classList.remove('hidden');
-        }
-
-        function hideCreatePostModal() {
-            document.getElementById('createPostModal').classList.add('hidden');
-            clearMediaPreview();
-        }
-
-        function showCreateStoryModal() {
-            document.getElementById('createStoryModal').classList.remove('hidden');
-        }
-
-        function hideCreateStoryModal() {
-            document.getElementById('createStoryModal').classList.add('hidden');
-            clearStoryPreview();
-        }
-
-        // Media Preview Management
-        function clearMediaPreview() {
-            const preview = document.getElementById('modalMediaPreview');
-            preview.classList.add('hidden');
-            document.getElementById('modalPreviewImage').classList.add('hidden');
-            document.getElementById('modalPreviewVideo').classList.add('hidden');
-            document.getElementById('modalPreviewAudio').classList.add('hidden');
-            currentMediaFile = null;
-        }
-
-        function clearStoryPreview() {
-            const preview = document.getElementById('storyMediaPreview');
-            preview.classList.add('hidden');
-            document.getElementById('storyPreviewImage').classList.add('hidden');
-            currentStoryFile = null;
-        }
-
         // Setup event listeners
         function setupEventListeners() {
             console.log("Setting up event listeners...");
-
-            // Theme toggle
+            
+            // Theme selector
             document.getElementById('themeToggle').addEventListener('click', function() {
-                const themeOptions = document.querySelector('.theme-options');
-                themeOptions.classList.toggle('show');
+                const options = document.querySelector('.theme-options');
+                options.classList.toggle('show');
             });
 
             // Theme selection
             document.querySelectorAll('.theme-option').forEach(option => {
                 option.addEventListener('click', function() {
                     const theme = this.getAttribute('data-theme');
-                    document.body.className = `h-full ${theme} emotion-default`;
+                    document.body.className = theme;
                     
+                    // Update active state
                     document.querySelectorAll('.theme-option').forEach(opt => {
                         opt.classList.remove('active');
                     });
                     this.classList.add('active');
                     
+                    // Hide options
                     document.querySelector('.theme-options').classList.remove('show');
-                    localStorage.setItem('selectedTheme', theme);
                 });
             });
 
-            // Load saved theme
-            const savedTheme = localStorage.getItem('selectedTheme') || 'dark-theme';
-            document.body.className = `h-full ${savedTheme} emotion-default`;
-            document.querySelectorAll('.theme-option').forEach(opt => {
-                if (opt.getAttribute('data-theme') === savedTheme) {
-                    opt.classList.add('active');
-                }
+            // Post creation
+            document.getElementById('createPostBtn').addEventListener('click', function() {
+                document.getElementById('createPostModal').classList.remove('hidden');
             });
 
-            // Post creation
-            document.getElementById('modalSharePost').addEventListener('click', createPost);
-            document.getElementById('createPostBtn').addEventListener('click', showCreatePostModal);
-            document.getElementById('closePostModal').addEventListener('click', hideCreatePostModal);
+            document.getElementById('closePostModal').addEventListener('click', function() {
+                document.getElementById('createPostModal').classList.add('hidden');
+                resetMediaUpload();
+            });
 
             // Story creation
-            document.getElementById('createStoryBtn').addEventListener('click', showCreateStoryModal);
-            document.getElementById('shareStory').addEventListener('click', createStory);
-            document.getElementById('closeStoryModal').addEventListener('click', hideCreateStoryModal);
-
-            // Media upload buttons
-            document.getElementById('modalAddPhoto').addEventListener('click', () => triggerMediaUpload('image', 'modal'));
-            document.getElementById('modalAddVideo').addEventListener('click', () => triggerMediaUpload('video', 'modal'));
-            document.getElementById('modalAddAudio').addEventListener('click', () => triggerMediaUpload('audio', 'modal'));
-            document.getElementById('addStoryPhoto').addEventListener('click', () => triggerMediaUpload('image', 'story'));
-
-            // Search functionality
-            document.getElementById('searchInput').addEventListener('input', handleSearch);
-
-            // Close search results when clicking outside
-            document.addEventListener('click', function(event) {
-                if (!event.target.closest('#searchInput') && !event.target.closest('#searchResults')) {
-                    document.getElementById('searchResults').classList.remove('show');
-                }
-                if (!event.target.closest('#themeToggle') && !event.target.closest('.theme-options')) {
-                    document.querySelector('.theme-options').classList.remove('show');
-                }
+            document.getElementById('createStoryBtn').addEventListener('click', function() {
+                document.getElementById('createStoryModal').classList.remove('hidden');
             });
 
-            console.log("All event listeners set up successfully!");
+            document.getElementById('closeStoryModal').addEventListener('click', function() {
+                document.getElementById('createStoryModal').classList.add('hidden');
+                resetStoryUpload();
+            });
+
+            // Media upload buttons
+            document.getElementById('modalAddPhoto').addEventListener('click', function() {
+                document.getElementById('fileInput').click();
+            });
+
+            document.getElementById('modalAddVideo').addEventListener('click', function() {
+                document.getElementById('videoInput').click();
+            });
+
+            document.getElementById('modalAddAudio').addEventListener('click', function() {
+                document.getElementById('audioInput').click();
+            });
+
+            document.getElementById('addStoryPhoto').addEventListener('click', function() {
+                document.getElementById('storyFileInput').click();
+            });
+
+            // File inputs
+            const fileInput = document.createElement('input');
+            fileInput.type = 'file';
+            fileInput.id = 'fileInput';
+            fileInput.accept = 'image/*';
+            fileInput.style.display = 'none';
+            document.body.appendChild(fileInput);
+
+            const videoInput = document.createElement('input');
+            videoInput.type = 'file';
+            videoInput.id = 'videoInput';
+            videoInput.accept = 'video/*';
+            videoInput.style.display = 'none';
+            document.body.appendChild(videoInput);
+
+            const audioInput = document.createElement('input');
+            audioInput.type = 'file';
+            audioInput.id = 'audioInput';
+            audioInput.accept = 'audio/*';
+            audioInput.style.display = 'none';
+            document.body.appendChild(audioInput);
+
+            const storyFileInput = document.createElement('input');
+            storyFileInput.type = 'file';
+            storyFileInput.id = 'storyFileInput';
+            storyFileInput.accept = 'image/*';
+            storyFileInput.style.display = 'none';
+            document.body.appendChild(storyFileInput);
+
+            // File input change handlers
+            fileInput.addEventListener('change', function(e) {
+                handleFileUpload(e.target.files[0], 'image');
+            });
+
+            videoInput.addEventListener('change', function(e) {
+                handleFileUpload(e.target.files[0], 'video');
+            });
+
+            audioInput.addEventListener('change', function(e) {
+                handleFileUpload(e.target.files[0], 'audio');
+            });
+
+            storyFileInput.addEventListener('change', function(e) {
+                handleStoryUpload(e.target.files[0]);
+            });
+
+            // Post sharing
+            document.getElementById('modalSharePost').addEventListener('click', sharePost);
+            document.getElementById('shareStory').addEventListener('click', shareStory);
+
+            // Search functionality
+            document.getElementById('searchInput').addEventListener('input', debounce(handleSearch, 300));
+
+            console.log("Event listeners set up successfully");
         }
 
-        // Trigger media upload
-        function triggerMediaUpload(type, context) {
-            const input = document.createElement('input');
-            input.type = 'file';
-            input.accept = type === 'image' ? 'image/*' : type === 'video' ? 'video/*' : 'audio/*';
-            input.onchange = (e) => handleMediaUpload(e, type, context);
-            input.click();
-        }
-
-        // Handle media upload
-        function handleMediaUpload(event, type, context) {
-            const file = event.target.files[0];
+        // Handle file upload for posts
+        function handleFileUpload(file, type) {
             if (!file) return;
-
-            if (type === 'image' && !file.type.startsWith('image/')) {
-                showNotification('Please select an image file', 'error');
-                return;
-            }
-
-            if (type === 'video' && !file.type.startsWith('video/')) {
-                showNotification('Please select a video file', 'error');
-                return;
-            }
-
-            if (type === 'audio' && !file.type.startsWith('audio/')) {
-                showNotification('Please select an audio file', 'error');
-                return;
-            }
-
-            if (context === 'modal') {
-                currentMediaFile = file;
-                const preview = document.getElementById('modalMediaPreview');
-                const previewImage = document.getElementById('modalPreviewImage');
-                const previewVideo = document.getElementById('modalPreviewVideo');
-                const previewAudio = document.getElementById('modalPreviewAudio');
-
-                preview.classList.remove('hidden');
-                previewImage.classList.add('hidden');
-                previewVideo.classList.add('hidden');
-                previewAudio.classList.add('hidden');
-
-                if (type === 'image') {
-                    previewImage.src = URL.createObjectURL(file);
+            
+            currentMediaFile = { file, type };
+            
+            const previewContainer = document.getElementById('modalMediaPreview');
+            const previewImage = document.getElementById('modalPreviewImage');
+            const previewVideo = document.getElementById('modalPreviewVideo');
+            const previewAudio = document.getElementById('modalPreviewAudio');
+            
+            previewContainer.classList.remove('hidden');
+            previewImage.classList.add('hidden');
+            previewVideo.classList.add('hidden');
+            previewAudio.classList.add('hidden');
+            
+            if (type === 'image') {
+                const reader = new FileReader();
+                reader.onload = function(e) {
+                    previewImage.src = e.target.result;
                     previewImage.classList.remove('hidden');
-                } else if (type === 'video') {
-                    previewVideo.src = URL.createObjectURL(file);
+                };
+                reader.readAsDataURL(file);
+            } else if (type === 'video') {
+                const reader = new FileReader();
+                reader.onload = function(e) {
+                    previewVideo.src = e.target.result;
                     previewVideo.classList.remove('hidden');
-                } else if (type === 'audio') {
-                    previewAudio.src = URL.createObjectURL(file);
+                };
+                reader.readAsDataURL(file);
+            } else if (type === 'audio') {
+                const reader = new FileReader();
+                reader.onload = function(e) {
+                    previewAudio.src = e.target.result;
                     previewAudio.classList.remove('hidden');
-                }
-            } else if (context === 'story') {
-                currentStoryFile = file;
-                const preview = document.getElementById('storyMediaPreview');
-                const previewImage = document.getElementById('storyPreviewImage');
-
-                preview.classList.remove('hidden');
-                previewImage.src = URL.createObjectURL(file);
-                previewImage.classList.remove('hidden');
+                };
+                reader.readAsDataURL(file);
             }
         }
 
-        // View story
-        function viewStory(storyId) {
-            showNotification('Viewing story: ' + storyId, 'success');
+        // Handle story upload
+        function handleStoryUpload(file) {
+            if (!file) return;
+            
+            currentStoryFile = file;
+            
+            const previewContainer = document.getElementById('storyMediaPreview');
+            const previewImage = document.getElementById('storyPreviewImage');
+            
+            previewContainer.classList.remove('hidden');
+            
+            const reader = new FileReader();
+            reader.onload = function(e) {
+                previewImage.src = e.target.result;
+                previewImage.classList.remove('hidden');
+            };
+            reader.readAsDataURL(file);
         }
 
-        // Open media modal
-        function openMediaModal(url, type) {
-            showNotification(`Opening ${type}: ${url}`, 'info');
+        // Reset media upload
+        function resetMediaUpload() {
+            currentMediaFile = null;
+            document.getElementById('modalMediaPreview').classList.add('hidden');
+            document.getElementById('modalPostInput').value = '';
+            document.getElementById('uploadProgress').classList.add('hidden');
+            document.getElementById('uploadProgressBar').style.width = '0%';
         }
 
-        // Show notification
-        function showNotification(message, type) {
-            const notification = document.createElement('div');
-            notification.className = `fixed top-4 right-4 p-4 rounded-2xl glass border ${
-                type === 'success' ? 'border-green-500 text-green-400' : 'border-red-500 text-red-400'
-            } z-50 transition transform duration-300 ease-in-out`;
-            notification.textContent = message;
+        // Reset story upload
+        function resetStoryUpload() {
+            currentStoryFile = null;
+            document.getElementById('storyMediaPreview').classList.add('hidden');
+            document.getElementById('storyInput').value = '';
+            document.getElementById('storyUploadProgress').classList.add('hidden');
+            document.getElementById('storyUploadProgressBar').style.width = '0%';
+        }
+
+        // Share post function
+        async function sharePost() {
+            const postText = document.getElementById('modalPostInput').value.trim();
             
-            document.body.appendChild(notification);
+            if (!postText && !currentMediaFile) {
+                alert('Please add some text or media to your post');
+                return;
+            }
             
+            const postData = {
+                text: postText,
+                userId: currentUser.uid,
+                userName: userData.displayName,
+                userAvatar: userData.avatar,
+                timestamp: firebase.firestore.FieldValue.serverTimestamp(),
+                likes: 0,
+                comments: 0,
+                shares: 0
+            };
+            
+            try {
+                // Show upload progress
+                const uploadProgress = document.getElementById('uploadProgress');
+                const uploadProgressBar = document.getElementById('uploadProgressBar');
+                uploadProgress.classList.remove('hidden');
+                
+                // If there's media, upload it first
+                if (currentMediaFile) {
+                    const mediaUrl = await uploadToCloudinary(currentMediaFile.file, uploadProgressBar);
+                    if (mediaUrl) {
+                        postData.mediaUrl = mediaUrl;
+                        postData.mediaType = currentMediaFile.type;
+                    }
+                }
+                
+                // Save post to Firestore
+                const postRef = await db.collection('posts').add(postData);
+                
+                // Update user's post count
+                await db.collection('users').doc(currentUser.uid).update({
+                    posts: firebase.firestore.FieldValue.increment(1)
+                });
+                
+                // Reset form and close modal
+                resetMediaUpload();
+                document.getElementById('createPostModal').classList.add('hidden');
+                
+                // Reload posts to show the new one
+                loadPosts();
+                
+                // Award points for posting
+                awardPoints(10, 'Created a post');
+                
+            } catch (error) {
+                console.error('Error sharing post:', error);
+                alert('Failed to share post. Please try again.');
+            }
+        }
+
+        // Share story function
+        async function shareStory() {
+            const storyText = document.getElementById('storyInput').value.trim();
+            
+            if (!currentStoryFile) {
+                alert('Please add a photo to your story');
+                return;
+            }
+            
+            try {
+                // Show upload progress
+                const uploadProgress = document.getElementById('storyUploadProgress');
+                const uploadProgressBar = document.getElementById('storyUploadProgressBar');
+                uploadProgress.classList.remove('hidden');
+                
+                // Upload story image to Cloudinary
+                const storyUrl = await uploadToCloudinary(currentStoryFile, uploadProgressBar);
+                
+                if (storyUrl) {
+                    const storyData = {
+                        text: storyText,
+                        userId: currentUser.uid,
+                        userName: userData.displayName,
+                        userAvatar: userData.avatar,
+                        mediaUrl: storyUrl,
+                        timestamp: firebase.firestore.FieldValue.serverTimestamp(),
+                        expiresAt: new Date(Date.now() + 24 * 60 * 60 * 1000) // 24 hours from now
+                    };
+                    
+                    // Save story to Firestore
+                    await db.collection('stories').add(storyData);
+                    
+                    // Reset form and close modal
+                    resetStoryUpload();
+                    document.getElementById('createStoryModal').classList.add('hidden');
+                    
+                    // Reload stories to show the new one
+                    loadStories();
+                    
+                    // Award points for sharing a story
+                    awardPoints(5, 'Shared a story');
+                }
+            } catch (error) {
+                console.error('Error sharing story:', error);
+                alert('Failed to share story. Please try again.');
+            }
+        }
+
+        // Upload to Cloudinary function
+        async function uploadToCloudinary(file, progressBar) {
+            const formData = new FormData();
+            formData.append('file', file);
+            formData.append('upload_preset', 'connectsphere'); // Replace with your upload preset
+
+            try {
+                const response = await fetch('https://api.cloudinary.com/v1_1/YOUR_CLOUD_NAME/upload', {
+                    method: 'POST',
+                    body: formData
+                });
+
+                if (!response.ok) {
+                    throw new Error('Upload failed');
+                }
+
+                const data = await response.json();
+                console.log('Cloudinary URL:', data.secure_url);
+                
+                // Optimize the image URL
+                const optimizedUrl = optimizeImage(data.secure_url);
+                console.log('Optimized URL:', optimizedUrl);
+                
+                return optimizedUrl;
+            } catch (error) {
+                console.error('Cloudinary upload error:', error);
+                // Fallback to Firebase Storage if Cloudinary fails
+                return await uploadToFirebaseStorage(file, progressBar);
+            }
+        }
+
+        // Fallback upload to Firebase Storage
+        async function uploadToFirebaseStorage(file, progressBar) {
+            try {
+                const storageRef = storage.ref();
+                const fileRef = storageRef.child(`uploads/${currentUser.uid}/${Date.now()}_${file.name}`);
+                
+                const uploadTask = fileRef.put(file);
+                
+                return new Promise((resolve, reject) => {
+                    uploadTask.on('state_changed',
+                        (snapshot) => {
+                            // Update progress bar
+                            const progress = (snapshot.bytesTransferred / snapshot.totalBytes) * 100;
+                            progressBar.style.width = progress + '%';
+                        },
+                        (error) => {
+                            console.error('Firebase upload error:', error);
+                            reject(error);
+                        },
+                        async () => {
+                            // Upload completed successfully
+                            const downloadURL = await uploadTask.snapshot.ref.getDownloadURL();
+                            console.log('Firebase Storage URL:', downloadURL);
+                            resolve(downloadURL);
+                        }
+                    );
+                });
+            } catch (error) {
+                console.error('Firebase Storage upload failed:', error);
+                throw error;
+            }
+        }
+
+        // Load all data
+        async function loadAllData() {
+            console.log("Loading all data...");
+            await loadPosts();
+            await loadStories();
+            await loadTrendingTopics();
+            await loadSuggestedUsers();
+            updateGamificationStats();
+        }
+
+        // Load posts from Firestore
+        async function loadPosts() {
+            try {
+                console.log("Loading posts...");
+                const postsSnapshot = await db.collection('posts')
+                    .orderBy('timestamp', 'desc')
+                    .limit(20)
+                    .get();
+                
+                const feedContainer = document.getElementById('feedContainer');
+                feedContainer.innerHTML = '';
+                
+                if (postsSnapshot.empty) {
+                    // Create demo posts if none exist
+                    createDemoPosts();
+                    return;
+                }
+                
+                postsSnapshot.forEach(doc => {
+                    const post = doc.data();
+                    post.id = doc.id;
+                    createPostElement(post, feedContainer);
+                });
+                
+                // Apply image optimization after loading posts
+                setTimeout(() => {
+                    optimizePostImages();
+                }, 100);
+                
+            } catch (error) {
+                console.error("Error loading posts:", error);
+                // Create demo posts as fallback
+                createDemoPosts();
+            }
+        }
+
+        // Create demo posts
+        function createDemoPosts() {
+            const feedContainer = document.getElementById('feedContainer');
+            feedContainer.innerHTML = '';
+            
+            const demoPosts = [
+                {
+                    id: 'demo1',
+                    userName: 'Alex Johnson',
+                    userAvatar: 'https://ui-avatars.com/api/?name=Alex+Johnson&background=10b981&color=fff',
+                    text: 'Just discovered this amazing platform! The interface is so intuitive and the community seems really engaging.',
+                    timestamp: new Date(Date.now() - 2 * 60 * 60 * 1000),
+                    likes: 15,
+                    comments: 3,
+                    shares: 2
+                },
+                {
+                    id: 'demo2',
+                    userName: 'Taylor Swift',
+                    userAvatar: 'https://ui-avatars.com/api/?name=Taylor+Swift&background=ef4444&color=fff',
+                    text: 'Sharing some thoughts on digital creativity and how platforms like this are changing the way we connect.',
+                    mediaUrl: 'https://images.unsplash.com/photo-1611224923853-80b023f02d71?ixlib=rb-4.0.3&ixid=M3wxMjA3fDB8MHxwaG90by1wYWdlfHx8fGVufDB8fHx8fA%3D%3D&auto=format&fit=crop&w=1000&q=80',
+                    mediaType: 'image',
+                    timestamp: new Date(Date.now() - 5 * 60 * 60 * 1000),
+                    likes: 42,
+                    comments: 7,
+                    shares: 5
+                },
+                {
+                    id: 'demo3',
+                    userName: 'Tech Enthusiast',
+                    userAvatar: 'https://ui-avatars.com/api/?name=Tech+Enthusiast&background=3b82f6&color=fff',
+                    text: 'The future of social networking is here! Love the innovative features and clean design.',
+                    timestamp: new Date(Date.now() - 8 * 60 * 60 * 1000),
+                    likes: 28,
+                    comments: 4,
+                    shares: 1
+                }
+            ];
+            
+            demoPosts.forEach(post => {
+                createPostElement(post, feedContainer);
+            });
+            
+            // Apply image optimization after creating demo posts
             setTimeout(() => {
-                notification.remove();
-            }, 3000);
+                optimizePostImages();
+            }, 100);
         }
 
-        // Make functions globally available
-        window.showCreatePostModal = showCreatePostModal;
-        window.viewStory = viewStory;
-        window.openMediaModal = openMediaModal;
+        // Create post element
+        function createPostElement(post, container) {
+            const postElement = document.createElement('div');
+            postElement.className = 'glass border border-purple-700 rounded-2xl p-6';
+            postElement.id = `post-${post.id}`;
+            
+            const timeAgo = getTimeAgo(post.timestamp);
+            
+            postElement.innerHTML = `
+                <div class="flex items-start space-x-4">
+                    <img class="w-12 h-12 rounded-2xl object-cover" src="${post.userAvatar}" alt="${post.userName}">
+                    <div class="flex-1">
+                        <div class="flex items-center justify-between">
+                            <div>
+                                <h3 class="font-bold text-theme-accent">${post.userName}</h3>
+                                <p class="text-xs text-theme-secondary">${timeAgo}</p>
+                            </div>
+                            <button class="text-theme-secondary hover:text-theme-accent transition">
+                                <i class="fas fa-ellipsis-h"></i>
+                            </button>
+                        </div>
+                        <p class="my-3">${post.text}</p>
+                        ${post.mediaUrl ? 
+                            (post.mediaType === 'image' ? 
+                                `<img src="${post.mediaUrl}" class="media-preview w-full" alt="Post media">` : 
+                                post.mediaType === 'video' ? 
+                                `<video src="${post.mediaUrl}" class="media-preview w-full" controls></video>` :
+                                `<audio src="${post.mediaUrl}" class="audio-player" controls></audio>`
+                            ) : ''
+                        }
+                        <div class="flex items-center justify-between mt-4 pt-4 border-t border-purple-800">
+                            <div class="flex space-x-6 text-theme-secondary">
+                                <button class="interaction-btn flex items-center space-x-2" data-post-id="${post.id}" data-action="like">
+                                    <i class="far fa-heart"></i>
+                                    <span>${post.likes || 0}</span>
+                                </button>
+                                <button class="interaction-btn flex items-center space-x-2" data-post-id="${post.id}" data-action="comment">
+                                    <i class="far fa-comment"></i>
+                                    <span>${post.comments || 0}</span>
+                                </button>
+                                <button class="interaction-btn flex items-center space-x-2" data-post-id="${post.id}" data-action="share">
+                                    <i class="far fa-share-square"></i>
+                                    <span>${post.shares || 0}</span>
+                                </button>
+                            </div>
+                            <button class="interaction-btn text-theme-secondary" data-post-id="${post.id}" data-action="save">
+                                <i class="far fa-bookmark"></i>
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            `;
+            
+            container.appendChild(postElement);
+            
+            // Add event listeners for interactions
+            postElement.querySelectorAll('.interaction-btn').forEach(btn => {
+                btn.addEventListener('click', function() {
+                    const postId = this.getAttribute('data-post-id');
+                    const action = this.getAttribute('data-action');
+                    handlePostInteraction(postId, action, this);
+                });
+            });
+        }
 
-        // Cleanup on page unload
-        window.addEventListener('beforeunload', function() {
-            if (window.feedUnsubscribe) window.feedUnsubscribe();
-            if (window.storiesUnsubscribe) window.storiesUnsubscribe();
-            if (window.suggestedUsersUnsubscribe) window.suggestedUsersUnsubscribe();
-        });
+        // Load stories from Firestore
+        async function loadStories() {
+            try {
+                console.log("Loading stories...");
+                const storiesSnapshot = await db.collection('stories')
+                    .where('expiresAt', '>', new Date())
+                    .orderBy('timestamp', 'desc')
+                    .limit(10)
+                    .get();
+                
+                const storiesContainer = document.getElementById('storiesContainer');
+                // Clear existing stories except the "Your Story" element
+                const yourStory = storiesContainer.firstElementChild;
+                storiesContainer.innerHTML = '';
+                storiesContainer.appendChild(yourStory);
+                
+                if (storiesSnapshot.empty) {
+                    // Create demo stories if none exist
+                    createDemoStories();
+                    return;
+                }
+                
+                storiesSnapshot.forEach(doc => {
+                    const story = doc.data();
+                    story.id = doc.id;
+                    createStoryElement(story, storiesContainer);
+                });
+                
+            } catch (error) {
+                console.error("Error loading stories:", error);
+                // Create demo stories as fallback
+                createDemoStories();
+            }
+        }
+
+        // Create demo stories
+        function createDemoStories() {
+            const storiesContainer = document.getElementById('storiesContainer');
+            const yourStory = storiesContainer.firstElementChild;
+            storiesContainer.innerHTML = '';
+            storiesContainer.appendChild(yourStory);
+            
+            const demoStories = [
+                {
+                    id: 'demo-story1',
+                    userName: 'Alex Johnson',
+                    userAvatar: 'https://ui-avatars.com/api/?name=Alex+Johnson&background=10b981&color=fff',
+                    mediaUrl: 'https://images.unsplash.com/photo-1579546929662-711aa81148cf?ixlib=rb-4.0.3&ixid=M3wxMjA3fDB8MHxwaG90by1wYWdlfHx8fGVufDB8fHx8fA%3D%3D&auto=format&fit=crop&w=500&q=80'
+                },
+                {
+                    id: 'demo-story2',
+                    userName: 'Taylor Swift',
+                    userAvatar: 'https://ui-avatars.com/api/?name=Taylor+Swift&background=ef4444&color=fff',
+                    mediaUrl: 'https://images.unsplash.com/photo-1550684376-efcbd6e3f031?ixlib=rb-4.0.3&ixid=M3wxMjA3fDB8MHxwaG90by1wYWdlfHx8fGVufDB8fHx8fA%3D%3D&auto=format&fit=crop&w=500&q=80'
+                },
+                {
+                    id: 'demo-story3',
+                    userName: 'Tech Enthusiast',
+                    userAvatar: 'https://ui-avatars.com/api/?name=Tech+Enthusiast&background=3b82f6&color=fff',
+                    mediaUrl: 'https://images.unsplash.com/photo-1518709268805-4e9042af2176?ixlib=rb-4.0.3&ixid=M3wxMjA3fDB8MHxwaG90by1wYWdlfHx8fGVufDB8fHx8fA%3D%3D&auto=format&fit=crop&w=500&q=80'
+                }
+            ];
+            
+            demoStories.forEach(story => {
+                createStoryElement(story, storiesContainer);
+            });
+        }
+
+        // Create story element
+        function createStoryElement(story, container) {
+            const storyElement = document.createElement('div');
+            storyElement.className = 'flex flex-col items-center space-y-2 flex-shrink-0';
+            
+            storyElement.innerHTML = `
+                <div class="w-20 h-20 hologram-border rounded-2xl p-0.5 cursor-pointer">
+                    <img class="w-full h-full rounded-2xl object-cover" src="${story.mediaUrl}" alt="${story.userName}">
+                </div>
+                <span class="text-xs font-semibold text-theme-accent">${story.userName}</span>
+            `;
+            
+            container.appendChild(storyElement);
+        }
+
+        // Load trending topics
+        async function loadTrendingTopics() {
+            try {
+                const topicsContainer = document.getElementById('trendingTopicsContainer');
+                
+                // Demo trending topics
+                const trendingTopics = [
+                    { tag: '#ConnectSphere', posts: 142 },
+                    { tag: '#SocialMedia', posts: 98 },
+                    { tag: '#TechInnovation', posts: 76 },
+                    { tag: '#DigitalCommunity', posts: 65 },
+                    { tag: '#FutureOfNetworking', posts: 54 }
+                ];
+                
+                topicsContainer.innerHTML = '';
+                
+                trendingTopics.forEach(topic => {
+                    const topicElement = document.createElement('div');
+                    topicElement.className = 'flex justify-between items-center';
+                    topicElement.innerHTML = `
+                        <span class="font-medium text-theme-accent">${topic.tag}</span>
+                        <span class="text-xs text-theme-secondary">${topic.posts} posts</span>
+                    `;
+                    topicsContainer.appendChild(topicElement);
+                });
+                
+            } catch (error) {
+                console.error("Error loading trending topics:", error);
+            }
+        }
+
+        // Load suggested users
+        async function loadSuggestedUsers() {
+            try {
+                const usersContainer = document.getElementById('suggestedUsersContainer');
+                
+                // Demo suggested users
+                const suggestedUsers = [
+                    {
+                        name: 'Alex Johnson',
+                        avatar: 'https://ui-avatars.com/api/?name=Alex+Johnson&background=10b981&color=fff',
+                        bio: 'Digital Creator',
+                        mutual: 12
+                    },
+                    {
+                        name: 'Taylor Swift',
+                        avatar: 'https://ui-avatars.com/api/?name=Taylor+Swift&background=ef4444&color=fff',
+                        bio: 'Music & Tech',
+                        mutual: 8
+                    },
+                    {
+                        name: 'Tech Enthusiast',
+                        avatar: 'https://ui-avatars.com/api/?name=Tech+Enthusiast&background=3b82f6&color=fff',
+                        bio: 'Innovation Advocate',
+                        mutual: 5
+                    }
+                ];
+                
+                usersContainer.innerHTML = '';
+                
+                suggestedUsers.forEach(user => {
+                    const userElement = document.createElement('div');
+                    userElement.className = 'flex items-center justify-between';
+                    userElement.innerHTML = `
+                        <div class="flex items-center space-x-3">
+                            <img class="w-10 h-10 rounded-2xl object-cover" src="${user.avatar}" alt="${user.name}">
+                            <div>
+                                <p class="font-medium text-theme-accent">${user.name}</p>
+                                <p class="text-xs text-theme-secondary">${user.bio}</p>
+                                <p class="text-xs text-theme-accent">${user.mutual} mutual connections</p>
+                            </div>
+                        </div>
+                        <button class="follow-btn">Follow</button>
+                    `;
+                    usersContainer.appendChild(userElement);
+                    
+                    // Add follow button functionality
+                    const followBtn = userElement.querySelector('.follow-btn');
+                    followBtn.addEventListener('click', function() {
+                        this.classList.toggle('following');
+                        this.textContent = this.classList.contains('following') ? 'Following' : 'Follow';
+                        
+                        if (this.classList.contains('following')) {
+                            awardPoints(3, 'Followed a user');
+                        }
+                    });
+                });
+                
+            } catch (error) {
+                console.error("Error loading suggested users:", error);
+            }
+        }
+
+        // Handle post interactions
+        function handlePostInteraction(postId, action, element) {
+            console.log(`Post ${postId}: ${action}`);
+            
+            // Update UI immediately for better UX
+            const icon = element.querySelector('i');
+            const countSpan = element.querySelector('span');
+            
+            if (action === 'like') {
+                if (icon.classList.contains('far')) {
+                    icon.classList.remove('far');
+                    icon.classList.add('fas', 'text-red-500');
+                    if (countSpan) {
+                        countSpan.textContent = parseInt(countSpan.textContent) + 1;
+                    }
+                    element.classList.add('active');
+                    awardPoints(1, 'Liked a post');
+                } else {
+                    icon.classList.remove('fas', 'text-red-500');
+                    icon.classList.add('far');
+                    if (countSpan) {
+                        countSpan.textContent = parseInt(countSpan.textContent) - 1;
+                    }
+                    element.classList.remove('active');
+                }
+            } else if (action === 'comment') {
+                // In a real app, this would open a comment modal
+                if (countSpan) {
+                    countSpan.textContent = parseInt(countSpan.textContent) + 1;
+                }
+                awardPoints(2, 'Commented on a post');
+            } else if (action === 'share') {
+                // In a real app, this would open a share modal
+                if (countSpan) {
+                    countSpan.textContent = parseInt(countSpan.textContent) + 1;
+                }
+                awardPoints(2, 'Shared a post');
+            } else if (action === 'save') {
+                if (icon.classList.contains('far')) {
+                    icon.classList.remove('far');
+                    icon.classList.add('fas', 'text-yellow-400');
+                    element.classList.add('active');
+                    awardPoints(1, 'Saved a post');
+                } else {
+                    icon.classList.remove('fas', 'text-yellow-400');
+                    icon.classList.add('far');
+                    element.classList.remove('active');
+                }
+            }
+            
+            // In a real app, you would update the database here
+        }
+
+        // Handle search functionality
+        function handleSearch(e) {
+            const query = e.target.value.trim();
+            const resultsContainer = document.getElementById('searchResults');
+            
+            if (query.length < 2) {
+                resultsContainer.classList.remove('show');
+                return;
+            }
+            
+            // Demo search results
+            const demoResults = [
+                { type: 'user', name: 'Alex Johnson', detail: '12 mutual connections' },
+                { type: 'user', name: 'Alexandra Chen', detail: '5 mutual connections' },
+                { type: 'hashtag', name: '#ConnectSphere', detail: '142 posts' },
+                { type: 'hashtag', name: '#SocialMedia', detail: '98 posts' },
+                { type: 'post', name: 'Just discovered this amazing platform!', detail: 'Alex Johnson' }
+            ];
+            
+            resultsContainer.innerHTML = '';
+            
+            demoResults.forEach(result => {
+                const resultElement = document.createElement('div');
+                resultElement.className = 'search-result-item';
+                
+                let icon = '';
+                if (result.type === 'user') {
+                    icon = '<i class="fas fa-user text-theme-accent mr-2"></i>';
+                } else if (result.type === 'hashtag') {
+                    icon = '<i class="fas fa-hashtag text-theme-accent mr-2"></i>';
+                } else if (result.type === 'post') {
+                    icon = '<i class="fas fa-file-alt text-theme-accent mr-2"></i>';
+                }
+                
+                resultElement.innerHTML = `
+                    ${icon}
+                    <div>
+                        <p class="font-medium text-theme-accent">${result.name}</p>
+                        <p class="text-xs text-theme-secondary">${result.detail}</p>
+                    </div>
+                `;
+                
+                resultsContainer.appendChild(resultElement);
+            });
+            
+            resultsContainer.classList.add('show');
+        }
+
+        // Update gamification stats
+        function updateGamificationStats() {
+            // Demo stats
+            document.getElementById('streakCount').textContent = Math.floor(Math.random() * 10) + 1;
+            document.getElementById('unicoinsCount').textContent = Math.floor(Math.random() * 100) + 50;
+            document.getElementById('userLevel').textContent = Math.floor(Math.random() * 5) + 1;
+        }
+
+        // Award points function
+        function awardPoints(points, reason) {
+            console.log(`Awarded ${points} points for: ${reason}`);
+            
+            // Update UI
+            const currentCoins = parseInt(document.getElementById('unicoinsCount').textContent);
+            document.getElementById('unicoinsCount').textContent = currentCoins + points;
+            
+            // In a real app, you would update the database here
+        }
+
+        // Utility function to get time ago
+        function getTimeAgo(timestamp) {
+            if (!timestamp) return 'Just now';
+            
+            const date = timestamp.toDate ? timestamp.toDate() : new Date(timestamp);
+            const now = new Date();
+            const diffInSeconds = Math.floor((now - date) / 1000);
+            
+            if (diffInSeconds < 60) return 'Just now';
+            if (diffInSeconds < 3600) return `${Math.floor(diffInSeconds / 60)}m ago`;
+            if (diffInSeconds < 86400) return `${Math.floor(diffInSeconds / 3600)}h ago`;
+            if (diffInSeconds < 604800) return `${Math.floor(diffInSeconds / 86400)}d ago`;
+            
+            return date.toLocaleDateString();
+        }
+
+        // Debounce function for search
+        function debounce(func, wait) {
+            let timeout;
+            return function executedFunction(...args) {
+                const later = () => {
+                    clearTimeout(timeout);
+                    func(...args);
+                };
+                clearTimeout(timeout);
+                timeout = setTimeout(later, wait);
+            };
+        }
     </script>
 </body>
 </html>

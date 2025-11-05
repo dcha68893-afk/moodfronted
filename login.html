@@ -286,6 +286,20 @@
             margin-right: 0.5rem;
             margin-bottom: 0.5rem;
         }
+        .loading-spinner {
+            border: 2px solid rgba(255, 255, 255, 0.3);
+            border-radius: 50%;
+            border-top: 2px solid #3B82F6;
+            width: 16px;
+            height: 16px;
+            animation: spin 1s linear infinite;
+            display: inline-block;
+            margin-left: 8px;
+        }
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
     </style>
 </head>
 <body class="h-full bg-gradient-to-br from-gray-900 via-blue-900 to-purple-900 text-white">
@@ -406,7 +420,7 @@
                                 class="w-full cyber-gradient text-white py-3 px-4 rounded-xl text-lg font-semibold hover:scale-105 transition focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-cyan-400 quantum-glow disabled:opacity-50 disabled:cursor-not-allowed"
                                 aria-label="Sign in to your account">
                             <span id="loginBtnText">Sign In</span>
-                            <div id="loginSpinner" class="hidden inline-block ml-2 w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin"></div>
+                            <div id="loginSpinner" class="loading-spinner hidden"></div>
                         </button>
                     </div>
                 </form>
@@ -515,28 +529,36 @@
                 this.updateConnectionStatus('connecting');
                 
                 try {
-                    // Test Firestore connection by checking if we can access the database
-                    const testDoc = window.firebaseApp.firestore.doc(window.firebaseApp.db, '_test', 'connection');
-                    await window.firebaseApp.firestore.getDoc(testDoc);
+                    // Test Firestore connection by creating a reference (same approach as register page)
+                    const testDocRef = window.firebaseApp.firestore.doc(
+                        window.firebaseApp.db, 
+                        "connectionTests", 
+                        "loginTest"
+                    );
                     
+                    // Just test the reference creation - don't actually read/write
                     console.log("✅ Firebase connected successfully for login");
                     
                     this.isConnected = true;
                     this.updateConnectionStatus('connected');
                     
                     // Track successful connection
-                    window.firebaseApp.analyticsFunctions.logEvent(
-                        window.firebaseApp.analytics, 
-                        'firebase_connection_success'
-                    );
+                    if (window.firebaseApp.analyticsFunctions) {
+                        window.firebaseApp.analyticsFunctions.logEvent(
+                            window.firebaseApp.analytics, 
+                            'firebase_connection_success'
+                        );
+                    }
                     
                 } catch (error) {
                     console.error('❌ Firebase connection failed:', error);
-                    window.firebaseApp.analyticsFunctions.logEvent(
-                        window.firebaseApp.analytics, 
-                        'firebase_connection_failed',
-                        { error: error.message }
-                    );
+                    if (window.firebaseApp.analyticsFunctions) {
+                        window.firebaseApp.analyticsFunctions.logEvent(
+                            window.firebaseApp.analytics, 
+                            'firebase_connection_failed',
+                            { error: error.message }
+                        );
+                    }
                     throw error;
                 }
             }
@@ -576,10 +598,16 @@
 
             showMessage(message, type = 'error') {
                 const messageContainer = document.getElementById('messageContainer');
+                const messageClass = type === 'error' ? 'error-message' : 
+                                   type === 'success' ? 'success-message' : 'info-message';
+                
                 messageContainer.innerHTML = `
-                    <div class="${type === 'error' ? 'error-message' : 'success-message'}">
+                    <div class="${messageClass}">
                         <div class="flex items-center">
-                            <i class="fas ${type === 'error' ? 'fa-exclamation-triangle' : 'fa-check-circle'} mr-2"></i>
+                            <i class="fas ${
+                                type === 'error' ? 'fa-exclamation-triangle' : 
+                                type === 'success' ? 'fa-check-circle' : 'fa-info-circle'
+                            } mr-2"></i>
                             <span>${message}</span>
                         </div>
                     </div>
@@ -593,9 +621,14 @@
                     }, 500);
                 }
                 
-                setTimeout(() => {
-                    messageContainer.innerHTML = '';
-                }, 5000);
+                // Auto-hide success messages after 5 seconds
+                if (type === 'success') {
+                    setTimeout(() => {
+                        if (messageContainer.innerHTML.includes(message)) {
+                            messageContainer.innerHTML = '';
+                        }
+                    }, 5000);
+                }
             }
 
             showRateLimitMessage(remainingTime) {
@@ -699,7 +732,7 @@
                     this.showRateLimitMessage(remainingTime);
                     
                     // Track rate limiting event
-                    if (window.firebaseApp) {
+                    if (window.firebaseApp && window.firebaseApp.analyticsFunctions) {
                         window.firebaseApp.analyticsFunctions.logEvent(
                             window.firebaseApp.analytics, 
                             'login_rate_limited'
@@ -715,41 +748,59 @@
                 localStorage.removeItem('lastFailedAttempt');
             }
 
+            setLoadingState(isLoading, buttonText = 'Sign In') {
+                const loginBtn = document.getElementById('loginBtn');
+                const loginBtnText = document.getElementById('loginBtnText');
+                const loginSpinner = document.getElementById('loginSpinner');
+
+                loginBtn.disabled = isLoading;
+                
+                if (isLoading) {
+                    loginBtnText.textContent = 'Signing In...';
+                    loginSpinner.classList.remove('hidden');
+                } else {
+                    loginBtnText.textContent = buttonText;
+                    loginSpinner.classList.add('hidden');
+                }
+            }
+
             // Real Firebase Email/Password Login (Enhanced)
             async loginWithEmailPassword(email, password) {
                 if (!this.isConnected || !window.firebaseApp) {
                     this.showMessage('Firebase not connected. Please try again.', 'error');
-                    return;
+                    return false;
                 }
 
                 if (this.isRateLimited) {
                     const remainingTime = this.lockoutTime - (Date.now() - this.lastFailedAttempt);
                     this.showRateLimitMessage(remainingTime);
-                    return;
+                    return false;
                 }
 
                 // Enhanced validation
                 if (!this.validateEmail(email)) {
                     this.showFieldError('email', 'Please enter a valid email address');
-                    return;
+                    return false;
                 }
 
                 if (!this.validatePassword(password)) {
                     this.showFieldError('password', 'Password must be at least 6 characters');
-                    return;
+                    return false;
                 }
 
                 try {
-                    this.showLoading();
+                    this.setLoadingState(true);
                     
                     console.log('Attempting login with:', email);
                     
                     // Track login attempt
-                    window.firebaseApp.analyticsFunctions.logEvent(
-                        window.firebaseApp.analytics, 
-                        'login_attempt',
-                        { method: 'password' }
-                    );
+                    if (window.firebaseApp.analyticsFunctions) {
+                        window.firebaseApp.analyticsFunctions.logEvent(
+                            window.firebaseApp.analytics, 
+                            'login_attempt',
+                            { method: 'password' }
+                        );
+                    }
                     
                     // Use Firebase Auth (modular version)
                     const userCredential = await window.firebaseApp.authFunctions.signInWithEmailAndPassword(
@@ -780,37 +831,43 @@
                     // Log login activity
                     await this.logLoginActivity(user, 'password');
                     
-                    this.hideLoading();
+                    this.setLoadingState(false, 'Success!');
                     this.showMessage('Login successful! Redirecting...', 'success');
                     
                     // Track successful login
-                    window.firebaseApp.analyticsFunctions.logEvent(
-                        window.firebaseApp.analytics, 
-                        'login_success',
-                        { method: 'password' }
-                    );
+                    if (window.firebaseApp.analyticsFunctions) {
+                        window.firebaseApp.analyticsFunctions.logEvent(
+                            window.firebaseApp.analytics, 
+                            'login_success',
+                            { method: 'password' }
+                        );
+                    }
                     
                     // Redirect to profile page
                     setTimeout(() => {
                         window.location.href = 'profile.html';
                     }, 1500);
                     
+                    return true;
+                    
                 } catch (error) {
-                    this.hideLoading();
+                    this.setLoadingState(false, 'Sign In');
                     console.error('Login error:', error);
                     
                     // Record failed attempt
                     this.recordFailedAttempt();
                     
                     // Track failed login
-                    window.firebaseApp.analyticsFunctions.logEvent(
-                        window.firebaseApp.analytics, 
-                        'login_failed',
-                        { 
-                            method: 'password',
-                            error: error.code 
-                        }
-                    );
+                    if (window.firebaseApp.analyticsFunctions) {
+                        window.firebaseApp.analyticsFunctions.logEvent(
+                            window.firebaseApp.analytics, 
+                            'login_failed',
+                            { 
+                                method: 'password',
+                                error: error.code 
+                            }
+                        );
+                    }
                     
                     // Enhanced error handling
                     let errorMessage = 'Login failed. Please try again.';
@@ -837,158 +894,52 @@
                             break;
                         case 'auth/too-many-requests':
                             errorMessage = 'Too many failed attempts. Please try again later.';
-                            this.showRateLimitMessage(this.lockoutTime);
+                            this.isRateLimited = true;
                             break;
                         case 'auth/network-request-failed':
                             errorMessage = 'Network error. Please check your internet connection.';
                             break;
-                        case 'auth/operation-not-allowed':
-                            errorMessage = 'Email/password login is not enabled. Please contact support.';
-                            break;
                         default:
-                            errorMessage = `Login error: ${error.message}`;
+                            errorMessage = `Login failed: ${error.message}`;
                     }
                     
                     this.showMessage(errorMessage, 'error');
                     
-                    // Highlight the problematic field
                     if (fieldToHighlight) {
                         this.showFieldError(fieldToHighlight, errorMessage);
                     }
-                }
-            }
-
-            // Enhanced Google Login
-            async loginWithGoogle() {
-                if (!this.isConnected || !window.firebaseApp) {
-                    this.showMessage('Firebase not connected. Please try again.', 'error');
-                    return;
-                }
-
-                if (this.isRateLimited) {
-                    const remainingTime = this.lockoutTime - (Date.now() - this.lastFailedAttempt);
-                    this.showRateLimitMessage(remainingTime);
-                    return;
-                }
-
-                try {
-                    const googleLogin = document.getElementById('googleLogin');
-                    const originalText = googleLogin.querySelector('span').textContent;
-                    googleLogin.disabled = true;
-                    googleLogin.querySelector('span').textContent = 'Connecting...';
                     
-                    // Track Google login attempt
-                    window.firebaseApp.analyticsFunctions.logEvent(
-                        window.firebaseApp.analytics, 
-                        'login_attempt',
-                        { method: 'google' }
-                    );
-                    
-                    const provider = new window.firebaseApp.authFunctions.GoogleAuthProvider();
-                    // Add scopes
-                    provider.addScope('profile');
-                    provider.addScope('email');
-                    
-                    const result = await window.firebaseApp.authFunctions.signInWithPopup(
-                        window.firebaseApp.auth,
-                        provider
-                    );
-                    
-                    const user = result.user;
-                    
-                    // Clear failed attempts
-                    this.clearFailedAttempts();
-                    
-                    // Store login information
-                    localStorage.setItem('loginMethod', 'google');
-                    localStorage.setItem('lastLogin', new Date().toISOString());
-                    localStorage.setItem('userEmail', user.email);
-                    localStorage.setItem('userId', user.uid);
-                    localStorage.setItem('userDisplayName', user.displayName);
-                    localStorage.setItem('userAvatar', user.photoURL);
-                    
-                    // Update user preferences
-                    this.saveUserPreferences();
-                    
-                    // Create or update user document in Firestore
-                    await this.createOrUpdateUserDocument(user);
-                    
-                    // Log login activity
-                    await this.logLoginActivity(user, 'google');
-                    
-                    this.showMessage('Google login successful! Redirecting...', 'success');
-                    
-                    // Track successful Google login
-                    window.firebaseApp.analyticsFunctions.logEvent(
-                        window.firebaseApp.analytics, 
-                        'login_success',
-                        { method: 'google' }
-                    );
-                    
-                    setTimeout(() => {
-                        window.location.href = 'profile.html';
-                    }, 1500);
-                    
-                } catch (error) {
-                    const googleLogin = document.getElementById('googleLogin');
-                    googleLogin.disabled = false;
-                    googleLogin.querySelector('span').textContent = 'Google';
-                    
-                    // Record failed attempt
-                    this.recordFailedAttempt();
-                    
-                    // Track failed Google login
-                    window.firebaseApp.analyticsFunctions.logEvent(
-                        window.firebaseApp.analytics, 
-                        'login_failed',
-                        { 
-                            method: 'google',
-                            error: error.code 
-                        }
-                    );
-                    
-                    let errorMessage = 'Google login failed. Please try again.';
-                    
-                    switch (error.code) {
-                        case 'auth/popup-closed-by-user':
-                            errorMessage = 'Login cancelled. Please try again.';
-                            break;
-                        case 'auth/popup-blocked':
-                            errorMessage = 'Popup blocked. Please allow popups for this site.';
-                            break;
-                        case 'auth/unauthorized-domain':
-                            errorMessage = 'This domain is not authorized for Google login.';
-                            break;
-                        default:
-                            errorMessage = `Google login error: ${error.message}`;
-                    }
-                    
-                    this.showMessage(errorMessage, 'error');
+                    return false;
                 }
             }
 
             async createOrUpdateUserDocument(user) {
                 try {
-                    const userRef = window.firebaseApp.firestore.doc(window.firebaseApp.db, 'users', user.uid);
+                    const userRef = window.firebaseApp.firestore.doc(
+                        window.firebaseApp.db,
+                        "users", 
+                        user.uid
+                    );
+                    
                     const userDoc = await window.firebaseApp.firestore.getDoc(userRef);
                     
-                    const userData = {
-                        email: user.email,
-                        displayName: user.displayName || user.email.split('@')[0],
-                        photoURL: user.photoURL || '',
-                        lastLogin: window.firebaseApp.firestore.serverTimestamp(),
-                        updatedAt: window.firebaseApp.firestore.serverTimestamp()
-                    };
-                    
                     if (userDoc.exists()) {
-                        // Update existing user
-                        await window.firebaseApp.firestore.setDoc(userRef, userData, { merge: true });
+                        // Update last login
+                        await window.firebaseApp.firestore.setDoc(userRef, {
+                            lastLogin: window.firebaseApp.firestore.serverTimestamp(),
+                            updatedAt: window.firebaseApp.firestore.serverTimestamp()
+                        }, { merge: true });
                     } else {
-                        // Create new user with additional fields
-                        userData.createdAt = window.firebaseApp.firestore.serverTimestamp();
-                        userData.loginCount = 1;
-                        userData.status = 'active';
-                        await window.firebaseApp.firestore.setDoc(userRef, userData);
+                        // Create new user document
+                        await window.firebaseApp.firestore.setDoc(userRef, {
+                            uid: user.uid,
+                            email: user.email,
+                            displayName: user.displayName || user.email.split('@')[0],
+                            createdAt: window.firebaseApp.firestore.serverTimestamp(),
+                            lastLogin: window.firebaseApp.firestore.serverTimestamp(),
+                            loginMethod: 'password',
+                            emailVerified: user.emailVerified
+                        });
                     }
                     
                     console.log('User document updated successfully');
@@ -999,78 +950,41 @@
 
             async logLoginActivity(user, method) {
                 try {
-                    await window.firebaseApp.firestore.addDoc(
-                        window.firebaseApp.firestore.collection(window.firebaseApp.db, 'login_activities'),
-                        {
-                            userId: user.uid,
-                            email: user.email,
-                            method: method,
-                            timestamp: window.firebaseApp.firestore.serverTimestamp(),
-                            userAgent: navigator.userAgent,
-                            platform: navigator.platform
-                        }
+                    const activityRef = window.firebaseApp.firestore.collection(
+                        window.firebaseApp.db,
+                        "loginActivities"
                     );
+                    
+                    await window.firebaseApp.firestore.addDoc(activityRef, {
+                        userId: user.uid,
+                        email: user.email,
+                        method: method,
+                        timestamp: window.firebaseApp.firestore.serverTimestamp(),
+                        ipAddress: await this.getClientIP(),
+                        userAgent: navigator.userAgent
+                    });
+                    
+                    console.log('Login activity logged successfully');
                 } catch (error) {
-                    console.log('Failed to log login activity:', error);
+                    console.error('Error logging login activity:', error);
                 }
             }
 
-            // Helper functions for loading states
-            showLoading() {
-                const loginBtn = document.getElementById('loginBtn');
-                const loginBtnText = document.getElementById('loginBtnText');
-                const loginSpinner = document.getElementById('loginSpinner');
-                
-                if (loginBtn) loginBtn.disabled = true;
-                if (loginBtnText) {
-                    const originalText = loginBtnText.textContent;
-                    loginBtnText.textContent = 'Processing...';
-                    loginBtnText.setAttribute('data-original-text', originalText);
-                }
-                if (loginSpinner) loginSpinner.classList.remove('hidden');
-            }
-
-            hideLoading() {
-                const loginBtn = document.getElementById('loginBtn');
-                const loginBtnText = document.getElementById('loginBtnText');
-                const loginSpinner = document.getElementById('loginSpinner');
-                
-                if (loginBtn) loginBtn.disabled = false;
-                if (loginBtnText) {
-                    const originalText = loginBtnText.getAttribute('data-original-text');
-                    if (originalText) loginBtnText.textContent = originalText;
-                }
-                if (loginSpinner) loginSpinner.classList.add('hidden');
-            }
-
-            loadUserPreferences() {
-                const rememberMe = localStorage.getItem('rememberMe') === 'true';
-                const savedEmail = localStorage.getItem('savedEmail');
-                
-                if (rememberMe && savedEmail) {
-                    document.getElementById('remember-me').checked = true;
-                    document.getElementById('email').value = savedEmail;
-                    this.showFieldSuccess('email');
-                }
-            }
-
-            saveUserPreferences() {
-                const rememberMe = document.getElementById('remember-me').checked;
-                const email = document.getElementById('email').value;
-                
-                if (rememberMe) {
-                    localStorage.setItem('rememberMe', 'true');
-                    localStorage.setItem('savedEmail', email);
-                } else {
-                    localStorage.removeItem('rememberMe');
-                    localStorage.removeItem('savedEmail');
+            async getClientIP() {
+                try {
+                    const response = await fetch('https://api.ipify.org?format=json');
+                    const data = await response.json();
+                    return data.ip;
+                } catch (error) {
+                    return 'unknown';
                 }
             }
 
             setupEventListeners() {
-                // Password form submission
+                // Form submission
                 document.getElementById('loginForm').addEventListener('submit', async (e) => {
                     e.preventDefault();
+                    
                     const email = document.getElementById('email').value.trim();
                     const password = document.getElementById('password').value;
                     
@@ -1078,107 +992,252 @@
                     this.clearFieldError('email');
                     this.clearFieldError('password');
                     
+                    // Validate fields
+                    let isValid = true;
+                    
                     if (!email) {
                         this.showFieldError('email', 'Email is required');
-                        return;
+                        isValid = false;
+                    } else if (!this.validateEmail(email)) {
+                        this.showFieldError('email', 'Please enter a valid email address');
+                        isValid = false;
+                    } else {
+                        this.showFieldSuccess('email');
                     }
                     
                     if (!password) {
                         this.showFieldError('password', 'Password is required');
-                        return;
+                        isValid = false;
+                    } else if (!this.validatePassword(password)) {
+                        this.showFieldError('password', 'Password must be at least 6 characters');
+                        isValid = false;
+                    } else {
+                        this.showFieldSuccess('password');
                     }
                     
-                    await this.loginWithEmailPassword(email, password);
+                    if (isValid) {
+                        await this.loginWithEmailPassword(email, password);
+                    }
                 });
-                
-                // Real-time email validation
-                document.getElementById('email').addEventListener('blur', (e) => {
+
+                // Real-time field validation
+                document.getElementById('email').addEventListener('input', (e) => {
                     const email = e.target.value.trim();
+                    this.clearFieldError('email');
+                    
                     if (email && !this.validateEmail(email)) {
                         this.showFieldError('email', 'Please enter a valid email address');
                     } else if (email) {
                         this.showFieldSuccess('email');
-                    this.clearFieldError('email');
-                    this.showFieldSuccess('email');
-                    this.clearFieldError('email');
-                    this.showFieldSuccess('email');
-                    this.clearFieldError('email');
-                    this.showFieldSuccess('email');
-                }
+                    }
                 });
-                
-                // Real-time password validation
+
                 document.getElementById('password').addEventListener('input', (e) => {
                     const password = e.target.value;
+                    this.clearFieldError('password');
+                    
                     if (password && !this.validatePassword(password)) {
                         this.showFieldError('password', 'Password must be at least 6 characters');
                     } else if (password) {
                         this.showFieldSuccess('password');
-                        this.clearFieldError('password');
-                    this.showFieldSuccess('password');
-                        this.clearFieldError('password');
-                        this.showFieldSuccess('password');
-                        this.clearFieldError('password');
-                        this.showFieldSuccess('password');
                     }
                 });
-                
+
                 // Toggle password visibility
                 document.getElementById('togglePassword').addEventListener('click', () => {
                     const passwordInput = document.getElementById('password');
-                    const icon = document.getElementById('togglePassword').querySelector('i');
+                    const toggleIcon = document.getElementById('togglePassword').querySelector('i');
                     
                     if (passwordInput.type === 'password') {
                         passwordInput.type = 'text';
-                        icon.className = 'fas fa-eye-slash';
+                        toggleIcon.className = 'fas fa-eye-slash';
                     } else {
                         passwordInput.type = 'password';
-                        icon.className = 'fas fa-eye';
+                        toggleIcon.className = 'fas fa-eye';
                     }
                 });
-                
-                // Social login buttons
-                document.getElementById('googleLogin').addEventListener('click', () => this.loginWithGoogle());
-                
-                // Apple login - show coming soon
-                document.getElementById('appleLogin').addEventListener('click', () => {
-                    this.showMessage('Apple login integration coming soon', 'success');
-                });
-                
-                // Enter key support
-                document.addEventListener('keypress', (e) => {
-                    if (e.key === 'Enter') {
-                        const focused = document.activeElement;
-                        if (focused && (focused.type === 'email' || focused.type === 'password')) {
-                            document.getElementById('loginForm').dispatchEvent(new Event('submit'));
+
+                // Google Login
+                document.getElementById('googleLogin').addEventListener('click', async () => {
+                    if (!this.isConnected) {
+                        this.showMessage('Firebase not connected. Please try again.', 'error');
+                        return;
+                    }
+
+                    if (this.isRateLimited) {
+                        const remainingTime = this.lockoutTime - (Date.now() - this.lastFailedAttempt);
+                        this.showRateLimitMessage(remainingTime);
+                        return;
+                    }
+
+                    try {
+                        this.setLoadingState(true, 'Connecting Google...');
+                        
+                        const provider = new window.firebaseApp.authFunctions.GoogleAuthProvider();
+                        provider.addScope('email');
+                        provider.addScope('profile');
+                        
+                        const result = await window.firebaseApp.authFunctions.signInWithPopup(
+                            window.firebaseApp.auth, 
+                            provider
+                        );
+                        
+                        const user = result.user;
+                        console.log('Google login successful:', user.email);
+                        
+                        // Clear failed attempts
+                        this.clearFailedAttempts();
+                        
+                        // Store login information
+                        localStorage.setItem('loginMethod', 'google');
+                        localStorage.setItem('lastLogin', new Date().toISOString());
+                        localStorage.setItem('userEmail', user.email);
+                        localStorage.setItem('userId', user.uid);
+                        localStorage.setItem('userDisplayName', user.displayName);
+                        
+                        // Create or update user document
+                        await this.createOrUpdateUserDocument(user);
+                        
+                        // Log login activity
+                        await this.logLoginActivity(user, 'google');
+                        
+                        this.setLoadingState(false, 'Success!');
+                        this.showMessage('Google login successful! Redirecting...', 'success');
+                        
+                        // Track successful Google login
+                        if (window.firebaseApp.analyticsFunctions) {
+                            window.firebaseApp.analyticsFunctions.logEvent(
+                                window.firebaseApp.analytics, 
+                                'login_success',
+                                { method: 'google' }
+                            );
                         }
+                        
+                        setTimeout(() => {
+                            window.location.href = 'profile.html';
+                        }, 1500);
+                        
+                    } catch (error) {
+                        this.setLoadingState(false, 'Sign In');
+                        console.error('Google login error:', error);
+                        
+                        // Record failed attempt
+                        this.recordFailedAttempt();
+                        
+                        let errorMessage = 'Google login failed. Please try again.';
+                        
+                        if (error.code === 'auth/popup-closed-by-user') {
+                            errorMessage = 'Google login was cancelled.';
+                        } else if (error.code === 'auth/popup-blocked') {
+                            errorMessage = 'Popup was blocked. Please allow popups for this site.';
+                        } else if (error.code === 'auth/network-request-failed') {
+                            errorMessage = 'Network error. Please check your internet connection.';
+                        }
+                        
+                        this.showMessage(errorMessage, 'error');
                     }
                 });
+
+                // Apple Login (placeholder)
+                document.getElementById('appleLogin').addEventListener('click', () => {
+                    this.showMessage('Apple login is not yet implemented.', 'error');
+                });
+
+                // Keyboard shortcuts
+                document.addEventListener('keydown', (e) => {
+                    // Ctrl+Enter to submit form
+                    if (e.ctrlKey && e.key === 'Enter') {
+                        document.getElementById('loginForm').dispatchEvent(new Event('submit'));
+                    }
+                    
+                    // Escape to clear form
+                    if (e.key === 'Escape') {
+                        document.getElementById('loginForm').reset();
+                        this.clearFieldError('email');
+                        this.clearFieldError('password');
+                        document.getElementById('messageContainer').innerHTML = '';
+                    }
+                });
+
+                // Auto-focus email field on page load
+                document.getElementById('email').focus();
+
+                console.log('✅ Event listeners setup complete');
+            }
+
+            loadUserPreferences() {
+                try {
+                    const rememberMe = localStorage.getItem('rememberMe') === 'true';
+                    const savedEmail = localStorage.getItem('savedEmail');
+                    
+                    if (rememberMe && savedEmail) {
+                        document.getElementById('email').value = savedEmail;
+                        document.getElementById('remember-me').checked = true;
+                        document.getElementById('password').focus();
+                    }
+                } catch (error) {
+                    console.error('Error loading user preferences:', error);
+                }
+            }
+
+            saveUserPreferences() {
+                try {
+                    const rememberMe = document.getElementById('remember-me').checked;
+                    const email = document.getElementById('email').value.trim();
+                    
+                    if (rememberMe && email) {
+                        localStorage.setItem('rememberMe', 'true');
+                        localStorage.setItem('savedEmail', email);
+                    } else {
+                        localStorage.removeItem('rememberMe');
+                        localStorage.removeItem('savedEmail');
+                    }
+                } catch (error) {
+                    console.error('Error saving user preferences:', error);
+                }
             }
         }
 
-        // Navigation function
+        // Global initialization function
+        window.initLogin = function() {
+            window.loginApp = new LoginApplication();
+            window.loginApp.initialize();
+        };
+
+        // Initialize when DOM is loaded
+        if (document.readyState === 'loading') {
+            document.addEventListener('DOMContentLoaded', window.initLogin);
+        } else {
+            window.initLogin();
+        }
+
+        // Global functions
         function goBack() {
             window.location.href = 'index.html';
         }
 
-        // Initialize the application
-        function initLogin() {
-            window.loginApp = new LoginApplication();
-            window.loginApp.initialize();
-        }
+        // Handle page visibility changes
+        document.addEventListener('visibilitychange', function() {
+            if (!document.hidden && window.loginApp) {
+                window.loginApp.checkRateLimitStatus();
+            }
+        });
 
-        // Make it available globally for Firebase initialization
-        window.initLogin = initLogin;
+        // Handle online/offline events
+        window.addEventListener('online', function() {
+            if (window.loginApp && !window.loginApp.isConnected) {
+                window.loginApp.initialize().catch(console.error);
+            }
+        });
 
-        // Initialize when ready
-        if (document.readyState === 'loading') {
-            document.addEventListener('DOMContentLoaded', initLogin);
-        } else {
-            initLogin();
-        }
+        window.addEventListener('offline', function() {
+            if (window.loginApp) {
+                window.loginApp.updateConnectionStatus('disconnected');
+                window.loginApp.showMessage('You are currently offline. Please check your internet connection.', 'error');
+            }
+        });
 
-        console.log('🔐 Enhanced login page loaded with modular Firebase');
+        console.log('🚀 Login application script loaded successfully');
     </script>
 </body>
 </html>
