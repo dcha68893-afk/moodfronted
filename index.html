@@ -1,594 +1,1705 @@
 <!DOCTYPE html>
 <html lang="en" class="h-full">
 <head>
-  <meta charset="utf-8" />
-  <meta name="viewport" content="width=device-width,initial-scale=1" />
-  <title>ConnectSphere — Global Connection Hub for Everyone</title>
-
-  <!-- Tailwind CDN -->
-  <script src="https://cdn.tailwindcss.com"></script>
-  <!-- Font Awesome for icons -->
-  <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css" rel="stylesheet">
-  <!-- Google Fonts -->
-  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap" rel="stylesheet">
-
-  <!-- PWA Meta Tags -->
-  <link rel="manifest" href="/manifest.json">
-  <meta name="theme-color" content="#7C3AED">
-  <meta name="apple-mobile-web-app-capable" content="yes">
-  <meta name="apple-mobile-web-app-status-bar-style" content="default">
-  <meta name="apple-mobile-web-app-title" content="ConnectSphere">
-
-  <meta name="description" content="Connect with people worldwide. Real-time chat, communities, marketplace, and global collaboration platform for everyone.">
-
-  <style>
-    /* -------------------------
-       Enhanced Visual Theme
-       ------------------------- */
-    :root{
-      --bg-1: #0b1020;
-      --bg-2: #1a1f36;
-      --glass: rgba(255,255,255,0.06);
-      --accent-a: #6EE7B7;
-      --accent-b: #7C3AED;
-      --accent-c: #06B6D4;
-      --accent-d: #F59E0B;
-      --neon: 0 0 20px rgba(124,58,237,0.25), 0 0 40px rgba(6,182,212,0.15);
-      --neon-glow: 0 0 30px rgba(124,58,237,0.4);
-    }
-
-    body {
-      background: linear-gradient(135deg, var(--bg-1) 0%, #1a1030 50%, var(--bg-1) 100%);
-      color: #E2E8F0;
-      font-family: 'Inter', sans-serif;
-      overflow-x: hidden;
-    }
-
-    /* Animated Background Elements */
-    .bg-grid {
-      background-image: 
-        linear-gradient(rgba(124, 58, 237, 0.1) 1px, transparent 1px),
-        linear-gradient(90deg, rgba(124, 58, 237, 0.1) 1px, transparent 1px);
-      background-size: 50px 50px;
-    }
-
-    .floating-element {
-      animation: float 6s ease-in-out infinite;
-    }
-
-    @keyframes float {
-      0%, 100% { transform: translateY(0px) rotate(0deg); }
-      50% { transform: translateY(-20px) rotate(5deg); }
-    }
-
-    @keyframes glow {
-      0%, 100% { box-shadow: var(--neon); }
-      50% { box-shadow: var(--neon-glow); }
-    }
-
-    /* Custom scrollbar */
-    ::-webkit-scrollbar {
-        width: 8px;
-    }
-    ::-webkit-scrollbar-track {
-        background: rgba(255, 255, 255, 0.05);
-    }
-    ::-webkit-scrollbar-thumb {
-        background: linear-gradient(180deg, #7C3AED, #06B6D4);
-        border-radius: 4px;
-    }
-
-    /* Glass Effect */
-    .glass-card {
-      background: var(--glass);
-      backdrop-filter: blur(20px);
-      border: 1px solid rgba(255, 255, 255, 0.1);
-      box-shadow: var(--neon);
-      transition: all 0.3s ease;
-    }
-    .glass-card:hover {
-      border-color: rgba(255, 255, 255, 0.2);
-      transform: translateY(-2px);
-      animation: glow 2s ease-in-out infinite;
-    }
-
-    .neon-button {
-      background: linear-gradient(135deg, rgba(124,58,237,0.3), rgba(6,182,212,0.3));
-      border: 1px solid;
-      border-image: linear-gradient(135deg, #7C3AED, #06B6D4) 1;
-      transition: all 0.3s ease;
-      position: relative;
-      overflow: hidden;
-    }
-    .neon-button::before {
-      content: '';
-      position: absolute;
-      top: 0;
-      left: -100%;
-      width: 100%;
-      height: 100%;
-      background: linear-gradient(90deg, transparent, rgba(255,255,255,0.2), transparent);
-      transition: left 0.5s;
-    }
-    .neon-button:hover::before {
-      left: 100%;
-    }
-    .neon-button:hover {
-      transform: translateY(-2px);
-      box-shadow: 0 10px 25px rgba(124,58,237,0.3);
-    }
-
-    .feature-card {
-      background: linear-gradient(135deg, rgba(124,58,237,0.1), rgba(6,182,212,0.1));
-      border: 1px solid rgba(255,255,255,0.1);
-      transition: all 0.3s ease;
-    }
-    .feature-card:hover {
-      transform: translateY(-5px) scale(1.02);
-      box-shadow: 0 20px 40px rgba(124,58,237,0.2);
-    }
-
-    /* Typing animation */
-    .typing-demo {
-      animation: typing 2s steps(22), blink .5s step-end infinite alternate;
-      white-space: nowrap;
-      overflow: hidden;
-      border-right: 3px solid;
-      border-image: linear-gradient(180deg, #7C3AED, #06B6D4) 1;
-    }
-
-    @keyframes typing {
-      from { width: 0 }
-      to { width: 100% }
-    }
-
-    @keyframes blink {
-      50% { border-color: transparent }
-    }
-
-    /* Image styling */
-    .brand-image {
-      filter: drop-shadow(0 20px 40px rgba(124, 58, 237, 0.3));
-      transition: all 0.5s ease;
-      max-width: 100%;
-      height: auto;
-      border-radius: 20px;
-    }
-    .brand-image:hover {
-      transform: scale(1.05);
-      filter: drop-shadow(0 30px 60px rgba(124, 58, 237, 0.5));
-    }
-
-    /* Fallback image styling */
-    .fallback-image {
-      width: 400px;
-      height: 300px;
-      background: linear-gradient(135deg, #7C3AED, #06B6D4);
-      border-radius: 20px;
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      color: white;
-      font-weight: bold;
-      font-size: 18px;
-      text-align: center;
-      padding: 20px;
-    }
-
-    /* Connection status indicator */
-    .connection-status {
-      position: fixed;
-      top: 10px;
-      right: 10px;
-      background: rgba(0,0,0,0.8);
-      padding: 8px 12px;
-      border-radius: 20px;
-      font-size: 12px;
-      z-index: 1000;
-      border: 1px solid;
-    }
-    .connection-status.connected {
-      border-color: #10B981;
-      color: #10B981;
-    }
-    .connection-status.connecting {
-      border-color: #F59E0B;
-      color: #F59E0B;
-    }
-    .connection-status.error {
-      border-color: #EF4444;
-      color: #EF4444;
-    }
-  </style>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>UniConnect - Connect Globally, Create Together</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css" rel="stylesheet">
+    
+    <style>
+        /* Custom styles for transitions and animations */
+        .section {
+            transition: all 0.5s ease-in-out;
+        }
+        
+        .section-hidden {
+            opacity: 0;
+            transform: translateX(50px);
+            pointer-events: none;
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+        }
+        
+        .section-active {
+            opacity: 1;
+            transform: translateX(0);
+            pointer-events: all;
+            position: relative;
+        }
+        
+        .glass-effect {
+            background: rgba(255, 255, 255, 0.1);
+            backdrop-filter: blur(20px);
+            border: 1px solid rgba(255, 255, 255, 0.2);
+        }
+        
+        .cyber-gradient {
+            background: linear-gradient(135deg, #3B82F6 0%, #8B5CF6 100%);
+        }
+        
+        .quantum-glow {
+            box-shadow: 0 0 30px rgba(59, 130, 246, 0.4);
+        }
+        
+        .neon-text {
+            text-shadow: 0 0 10px rgba(59, 130, 246, 0.7),
+                         0 0 20px rgba(59, 130, 246, 0.5),
+                         0 0 30px rgba(59, 130, 246, 0.3);
+        }
+        
+        .loading-spinner {
+            border: 2px solid rgba(255, 255, 255, 0.3);
+            border-radius: 50%;
+            border-top: 2px solid #3B82F6;
+            width: 16px;
+            height: 16px;
+            animation: spin 1s linear infinite;
+            display: inline-block;
+            margin-left: 8px;
+        }
+        
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+        
+        .shake {
+            animation: shake 0.5s ease-in-out;
+        }
+        
+        @keyframes shake {
+            0%, 100% { transform: translateX(0); }
+            25% { transform: translateX(-5px); }
+            75% { transform: translateX(5px); }
+        }
+        
+        .input-error {
+            border-color: #ef4444 !important;
+            box-shadow: 0 0 0 3px rgba(239, 68, 68, 0.1) !important;
+        }
+        
+        .input-success {
+            border-color: #10b981 !important;
+            box-shadow: 0 0 0 3px rgba(16, 185, 129, 0.1) !important;
+        }
+        
+        .error-message {
+            background: rgba(239, 68, 68, 0.1);
+            border: 1px solid rgba(239, 68, 68, 0.3);
+            color: #fca5a5;
+            padding: 0.75rem;
+            border-radius: 0.5rem;
+            margin-bottom: 1rem;
+        }
+        
+        .success-message {
+            background: rgba(34, 197, 94, 0.1);
+            border: 1px solid rgba(34, 197, 94, 0.3);
+            color: #86efac;
+            padding: 0.75rem;
+            border-radius: 0.5rem;
+            margin-bottom: 1rem;
+        }
+        
+        .security-badge {
+            display: inline-flex;
+            align-items: center;
+            background: rgba(16, 185, 129, 0.1);
+            border: 1px solid rgba(16, 185, 129, 0.3);
+            color: #86efac;
+            padding: 0.25rem 0.5rem;
+            border-radius: 1rem;
+            font-size: 0.75rem;
+            margin-right: 0.5rem;
+            margin-bottom: 0.5rem;
+        }
+        
+        .connection-status {
+            position: fixed;
+            top: 10px;
+            right: 10px;
+            padding: 8px 16px;
+            border-radius: 20px;
+            font-size: 0.8rem;
+            z-index: 1000;
+            transition: all 0.3s;
+        }
+        
+        .connection-status.connected {
+            background: rgba(34, 197, 94, 0.8);
+            color: white;
+        }
+        
+        .connection-status.connecting {
+            background: rgba(245, 158, 11, 0.8);
+            color: white;
+        }
+        
+        .connection-status.disconnected {
+            background: rgba(239, 68, 68, 0.8);
+            color: white;
+        }
+        
+        /* Toast Styles */
+        #toastContainer {
+            position: fixed;
+            top: 1rem;
+            right: 1rem;
+            z-index: 1000;
+        }
+        
+        .toast {
+            opacity: 0;
+            transform: translateX(100%);
+            transition: all 0.3s ease-out;
+            margin-bottom: 0.5rem;
+            padding: 0.75rem 1rem;
+            border-radius: 0.5rem;
+            box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -2px rgba(0, 0, 0, 0.1);
+            color: white;
+            min-width: 250px;
+        }
+        
+        .toast.show {
+            opacity: 1;
+            transform: translateX(0);
+        }
+        
+        .toast.success { background-color: #10B981; }
+        .toast.error { background-color: #EF4444; }
+        .toast.warning { background-color: #F59E0B; }
+        
+        /* Cookie Consent Banner */
+        .cookie-banner {
+            position: fixed;
+            bottom: 0;
+            left: 0;
+            right: 0;
+            background: linear-gradient(135deg, #1e3a8a 0%, #3730a3 100%);
+            color: white;
+            padding: 1.5rem;
+            box-shadow: 0 -4px 20px rgba(0, 0, 0, 0.3);
+            z-index: 10000;
+            transform: translateY(100%);
+            transition: transform 0.5s ease-in-out;
+        }
+        
+        .cookie-banner.show {
+            transform: translateY(0);
+        }
+        
+        /* Attractive Advertisement Styles */
+        .feature-highlight {
+            background: linear-gradient(135deg, rgba(59, 130, 246, 0.1), rgba(139, 92, 246, 0.1));
+            border: 1px solid rgba(59, 130, 246, 0.3);
+            transition: all 0.3s ease;
+        }
+        
+        .feature-highlight:hover {
+            transform: translateY(-5px);
+            box-shadow: 0 20px 40px rgba(59, 130, 246, 0.2);
+        }
+        
+        .pulse-glow {
+            animation: pulse-glow 2s infinite;
+        }
+        
+        @keyframes pulse-glow {
+            0%, 100% { box-shadow: 0 0 20px rgba(59, 130, 246, 0.4); }
+            50% { box-shadow: 0 0 40px rgba(59, 130, 246, 0.8); }
+        }
+        
+        .floating {
+            animation: floating 3s ease-in-out infinite;
+        }
+        
+        @keyframes floating {
+            0%, 100% { transform: translateY(0); }
+            50% { transform: translateY(-10px); }
+        }
+        
+        .gradient-text {
+            background: linear-gradient(135deg, #60a5fa, #a78bfa, #f472b6);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            background-clip: text;
+        }
+        
+        .stats-counter {
+            font-size: 2.5rem;
+            font-weight: bold;
+            background: linear-gradient(135deg, #60a5fa, #a78bfa);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            background-clip: text;
+        }
+        
+        /* Unified Dashboard Layout */
+        .dashboard-container {
+            min-height: 100vh;
+            background: linear-gradient(135deg, #0f172a 0%, #1e1b4b 50%, #0f172a 100%);
+            transition: all 0.5s ease-in-out;
+        }
+        
+        .content-area {
+            transition: all 0.5s ease-in-out;
+        }
+        
+        .form-container {
+            max-width: 400px;
+            margin: 0 auto;
+        }
+        
+        /* Background Patterns */
+        .bg-grid-pattern {
+            background-image: 
+                linear-gradient(rgba(99, 102, 241, 0.1) 1px, transparent 1px),
+                linear-gradient(90deg, rgba(99, 102, 241, 0.1) 1px, transparent 1px);
+            background-size: 50px 50px;
+        }
+        
+        /* Mood Theme Colors */
+        .theme-calm {
+            background: linear-gradient(135deg, #0f172a 0%, #1e3a8a 50%, #0f172a 100%) !important;
+        }
+        
+        .theme-energetic {
+            background: linear-gradient(135deg, #431407 0%, #9a3412 50%, #431407 100%) !important;
+        }
+        
+        .theme-creative {
+            background: linear-gradient(135deg, #1e1b4b 0%, #7e22ce 50%, #1e1b4b 100%) !important;
+        }
+        
+        .theme-chill {
+            background: linear-gradient(135deg, #064e3b 0%, #059669 50%, #064e3b 100%) !important;
+        }
+        
+        .theme-romantic {
+            background: linear-gradient(135deg, #831843 0%, #db2777 50%, #831843 100%) !important;
+        }
+        
+        /* Mood Selector */
+        .mood-selector {
+            position: fixed;
+            top: 10px;
+            left: 10px;
+            z-index: 1000;
+        }
+        
+        .mood-btn {
+            background: rgba(255, 255, 255, 0.1);
+            backdrop-filter: blur(10px);
+            border: 1px solid rgba(255, 255, 255, 0.2);
+            color: white;
+            padding: 8px 12px;
+            border-radius: 20px;
+            cursor: pointer;
+            transition: all 0.3s ease;
+        }
+        
+        .mood-btn:hover {
+            background: rgba(255, 255, 255, 0.2);
+            transform: scale(1.05);
+        }
+        
+        .mood-options {
+            position: absolute;
+            top: 100%;
+            left: 0;
+            background: rgba(0, 0, 0, 0.9);
+            backdrop-filter: blur(20px);
+            border: 1px solid rgba(255, 255, 255, 0.2);
+            border-radius: 10px;
+            padding: 10px;
+            display: none;
+            grid-template-columns: repeat(3, 1fr);
+            gap: 5px;
+            min-width: 150px;
+        }
+        
+        .mood-options.show {
+            display: grid;
+        }
+        
+        .mood-option {
+            width: 40px;
+            height: 40px;
+            border-radius: 50%;
+            border: 2px solid transparent;
+            cursor: pointer;
+            transition: all 0.3s ease;
+        }
+        
+        .mood-option:hover {
+            transform: scale(1.1);
+            border-color: white;
+        }
+        
+        .mood-calm { background: linear-gradient(135deg, #3B82F6, #8B5CF6); }
+        .mood-energetic { background: linear-gradient(135deg, #DC2626, #EA580C); }
+        .mood-creative { background: linear-gradient(135deg, #7C3AED, #DB2777); }
+        .mood-chill { background: linear-gradient(135deg, #059669, #10B981); }
+        .mood-romantic { background: linear-gradient(135deg, #DB2777, #BE185D); }
+        .mood-default { background: linear-gradient(135deg, #6B7280, #4B5563); }
+    </style>
 </head>
-<body class="min-h-full bg-grid">
-  <!-- Connection Status Indicator -->
-  <div id="connectionStatus" class="connection-status connecting">
-    <i class="fas fa-circle-notch fa-spin mr-1"></i> Connecting to Firebase...
-  </div>
-
-  <!-- Animated Background Elements -->
-  <div class="fixed inset-0 overflow-hidden pointer-events-none">
-    <div class="floating-element absolute top-1/4 left-1/4 w-20 h-20 bg-purple-500/10 rounded-full blur-xl"></div>
-    <div class="floating-element absolute top-3/4 right-1/4 w-16 h-16 bg-cyan-500/10 rounded-full blur-xl" style="animation-delay: -2s;"></div>
-    <div class="floating-element absolute top-1/2 left-3/4 w-24 h-24 bg-green-500/10 rounded-full blur-xl" style="animation-delay: -4s;"></div>
-  </div>
-
-  <!-- Main Container -->
-  <div id="app" class="flex flex-col min-h-screen relative z-10">
-
-    <!-- Enhanced Header -->
-    <header class="p-4 glass-card rounded-b-2xl mb-6 sticky top-0 z-50">
-      <div class="max-w-7xl mx-auto flex justify-between items-center">
-        <!-- Logo with enhanced styling -->
-        <div class="flex items-center space-x-3">
-          <div class="w-12 h-12 bg-gradient-to-br from-purple-500 to-cyan-400 rounded-xl flex items-center justify-center shadow-lg">
-            <i class="fas fa-globe text-white text-xl"></i>
-          </div>
-          <div>
-            <h1 class="text-2xl font-black text-transparent bg-clip-text bg-gradient-to-r from-cyan-400 via-purple-500 to-cyan-400 bg-300% animate-gradient">
-              ConnectSphere
-            </h1>
-            <p class="text-xs text-gray-400">Global Connection Hub</p>
-          </div>
+<body class="h-full dashboard-container bg-grid-pattern theme-calm">
+    <!-- Mood Theme Selector -->
+    <div class="mood-selector">
+        <button class="mood-btn flex items-center space-x-2">
+            <i class="fas fa-palette"></i>
+            <span>Mood</span>
+        </button>
+        <div class="mood-options">
+            <div class="mood-option mood-calm" data-theme="calm" title="Calm"></div>
+            <div class="mood-option mood-energetic" data-theme="energetic" title="Energetic"></div>
+            <div class="mood-option mood-creative" data-theme="creative" title="Creative"></div>
+            <div class="mood-option mood-chill" data-theme="chill" title="Chill"></div>
+            <div class="mood-option mood-romantic" data-theme="romantic" title="Romantic"></div>
+            <div class="mood-option mood-default" data-theme="default" title="Default"></div>
         </div>
+    </div>
 
-        <!-- Navigation -->
-        <nav class="flex items-center space-x-4">
-          <!-- Enhanced Auth Buttons -->
-          <div class="flex items-center space-x-3">
-            <a href="login.html" class="neon-button px-4 py-2 rounded-lg font-semibold text-sm">
-              <i class="fas fa-sign-in-alt mr-2"></i>Log In
-            </a>
-            <a href="register.html" class="bg-gradient-to-r from-purple-600 to-cyan-500 px-4 py-2 rounded-lg font-semibold text-white text-sm shadow-lg hover:shadow-xl transition-all duration-300 hover:scale-105">
-              <i class="fas fa-user-plus mr-2"></i>Join Free
-            </a>
-          </div>
-        </nav>
-      </div>
-    </header>
+    <!-- Connection Status -->
+    <div class="connection-status connecting" id="connectionStatus">
+        <i class="fas fa-circle-notch fa-spin mr-2"></i>
+        <span id="connectionText">Connecting to Firebase...</span>
+    </div>
 
-    <!-- Hero Section with Your Image on the RIGHT -->
-    <main class="flex-grow max-w-7xl mx-auto w-full px-4 space-y-8">
-      <!-- Hero Card -->
-      <div class="glass-card p-8 rounded-3xl relative overflow-hidden">
-        <div class="absolute inset-0 bg-gradient-to-br from-purple-500/10 to-cyan-500/10"></div>
-        <div class="relative z-10">
-          <div class="flex flex-col lg:flex-row items-center justify-between gap-8">
-            <!-- Text Content on LEFT -->
-            <div class="flex-1 text-left">
-              <p class="text-sm font-semibold uppercase tracking-widest text-green-300 mb-4">Join 100,000+ People Worldwide</p>
-              <h2 class="text-5xl md:text-6xl font-black text-white mb-6 leading-tight">
-                Connect. Create.
-                <span class="typing-demo text-transparent bg-clip-text bg-gradient-to-r from-cyan-400 to-purple-500">Communicate.</span>
-              </h2>
-              <p class="text-xl text-gray-300 max-w-3xl mb-8 leading-relaxed">
-                The ultimate platform for global connection. Chat in real-time, join communities, share ideas, and build meaningful relationships with people around the world.
-              </p>
-              
-              <!-- Enhanced CTA Buttons -->
-              <div class="flex flex-col sm:flex-row justify-start items-start space-y-4 sm:space-y-0 sm:space-x-6">
-                <a href="register.html" class="bg-gradient-to-r from-purple-600 to-cyan-500 px-8 py-4 rounded-2xl font-bold text-white text-lg shadow-2xl hover:scale-105 transition-transform duration-300 group">
-                  <i class="fas fa-rocket mr-3 group-hover:rotate-12 transition-transform"></i>
-                  Start Connecting - It's Free!
-                </a>
-                <a href="login.html" class="neon-button px-8 py-4 rounded-2xl font-bold text-lg">
-                  <i class="fas fa-play-circle mr-3"></i>
-                  Continue Your Journey
-                </a>
-              </div>
+    <!-- Toast Container -->
+    <div id="toastContainer"></div>
 
-              <!-- Trust Indicators -->
-              <div class="mt-8 flex flex-wrap items-center gap-6 text-sm text-gray-400">
-                <div class="flex items-center space-x-2">
-                  <i class="fas fa-shield-check text-green-400"></i>
-                  <span>Secure & Private</span>
+    <!-- Cookie Consent Banner -->
+    <div id="cookieBanner" class="cookie-banner">
+        <div class="max-w-4xl mx-auto">
+            <div class="flex flex-col md:flex-row items-center justify-between">
+                <div class="flex-1 mb-4 md:mb-0">
+                    <h3 class="text-xl font-bold mb-2">🍪 We Value Your Privacy</h3>
+                    <p class="text-blue-200">
+                        We use cookies to enhance your experience, analyze traffic, and personalize content. 
+                        By continuing to use UniConnect, you agree to our use of cookies and our Privacy Policy.
+                    </p>
                 </div>
-                <div class="flex items-center space-x-2">
-                  <i class="fas fa-bolt text-yellow-400"></i>
-                  <span>Real-time Chat</span>
+                <div class="flex space-x-4">
+                    <button id="cookieReject" class="px-6 py-2 border border-blue-400 text-blue-400 rounded-lg hover:bg-blue-400 hover:text-white transition">
+                        Reject Non-Essential
+                    </button>
+                    <button id="cookieAccept" class="px-6 py-2 bg-blue-500 text-white rounded-lg hover:bg-blue-600 transition pulse-glow">
+                        Accept All
+                    </button>
                 </div>
-                <div class="flex items-center space-x-2">
-                  <i class="fas fa-globe text-cyan-400"></i>
-                  <span>Global Community</span>
-                </div>
-              </div>
             </div>
+        </div>
+    </div>
 
-            <!-- Your Brand Image on RIGHT - Properly Sized -->
-            <div class="flex-1 flex justify-center lg:justify-end">
-              <div class="relative">
-                <!-- Your actual image with proper error handling -->
-                <div class="bg-gradient-to-br from-purple-500/20 to-cyan-500/20 rounded-3xl p-6 border-2 border-purple-500/30">
-                  <img src="./connectsphere-image.png" 
-                       alt="ConnectSphere - Connect. Create. Communicate." 
-                       class="brand-image w-full max-w-[400px] h-auto"
-                       onerror="this.style.display='none'; document.getElementById('fallbackImage').style.display='flex';">
-                  
-                  <!-- Fallback if image fails to load -->
-                  <div id="fallbackImage" class="fallback-image hidden">
-                    <div>
-                      <div class="text-4xl mb-4">🌐</div>
-                      <div>ConnectSphere</div>
-                      <div class="text-sm mt-2">Connect. Create. Communicate.</div>
+    <!-- Animated Background -->
+    <div class="fixed inset-0 overflow-hidden pointer-events-none">
+        <div class="absolute w-2 h-2 bg-blue-400 rounded-full animate-pulse" style="top: 20%; left: 10%;"></div>
+        <div class="absolute w-1 h-1 bg-purple-400 rounded-full animate-pulse" style="top: 60%; left: 80%; animation-delay: 1s;"></div>
+        <div class="absolute w-3 h-3 bg-cyan-400 rounded-full animate-pulse" style="top: 40%; left: 50%; animation-delay: 2s;"></div>
+    </div>
+
+    <!-- Main Dashboard Container -->
+    <div class="min-h-screen flex">
+        <!-- Left Side - Advertisement Section (Always Visible) -->
+        <div class="hidden lg:flex flex-1 p-8 items-center justify-center">
+            <div class="max-w-2xl">
+                <!-- Header -->
+                <div class="text-center mb-8">
+                    <div class="flex items-center justify-center space-x-4 mb-6">
+                        <div class="w-20 h-20 cyber-gradient rounded-2xl flex items-center justify-center quantum-glow floating">
+                            <i class="fas fa-globe-americas text-white text-3xl"></i>
+                        </div>
+                        <div>
+                            <span class="text-5xl font-bold text-transparent bg-clip-text bg-gradient-to-r from-blue-400 to-purple-400 neon-text">
+                                UniConnect
+                            </span>
+                            <p class="text-blue-300 text-lg mt-2">Where the World Connects</p>
+                        </div>
                     </div>
-                  </div>
                 </div>
+
+                <!-- Attractive Advertisement Content -->
+                <div class="space-y-8">
+                    <div class="text-center">
+                        <h2 class="text-4xl font-bold gradient-text mb-4">Join 500,000+ Global Connectors!</h2>
+                        <p class="text-xl text-blue-200 mb-6">The world's most vibrant community is waiting for you</p>
+                    </div>
+
+                    <!-- Live Stats Counter -->
+                    <div class="grid grid-cols-2 gap-6 mb-8">
+                        <div class="text-center">
+                            <div class="stats-counter" id="onlineCount">500K+</div>
+                            <div class="text-blue-300 text-sm">Active Users</div>
+                        </div>
+                        <div class="text-center">
+                            <div class="stats-counter" id="countryCount">190+</div>
+                            <div class="text-blue-300 text-sm">Countries</div>
+                        </div>
+                        <div class="text-center">
+                            <div class="stats-counter" id="languageCount">50+</div>
+                            <div class="text-blue-300 text-sm">Languages</div>
+                        </div>
+                        <div class="text-center">
+                            <div class="stats-counter" id="communityCount">10K+</div>
+                            <div class="text-blue-300 text-sm">Communities</div>
+                        </div>
+                    </div>
+
+                    <!-- Feature Highlights -->
+                    <div class="grid grid-cols-1 gap-4 mb-8">
+                        <div class="feature-highlight rounded-xl p-6 text-center">
+                            <div class="w-16 h-16 bg-gradient-to-br from-green-400 to-blue-500 rounded-full flex items-center justify-center mx-auto mb-4">
+                                <i class="fas fa-comments text-white text-2xl"></i>
+                            </div>
+                            <h3 class="text-lg font-bold text-white mb-2">Real-time Chat</h3>
+                            <p class="text-blue-300 text-sm">Connect instantly with people worldwide in 50+ languages</p>
+                        </div>
+                        
+                        <div class="feature-highlight rounded-xl p-6 text-center">
+                            <div class="w-16 h-16 bg-gradient-to-br from-purple-400 to-pink-500 rounded-full flex items-center justify-center mx-auto mb-4">
+                                <i class="fas fa-users text-white text-2xl"></i>
+                            </div>
+                            <h3 class="text-lg font-bold text-white mb-2">Global Communities</h3>
+                            <p class="text-blue-300 text-sm">Join interest-based groups from tech to travel</p>
+                        </div>
+                    </div>
+
+                    <!-- Success Stories -->
+                    <div class="bg-black/30 rounded-xl p-6 border border-purple-500/30">
+                        <h3 class="text-xl font-bold text-center text-white mb-6">🌟 Success Stories</h3>
+                        <div class="space-y-4">
+                            <div class="flex items-start space-x-3">
+                                <div class="w-12 h-12 bg-gradient-to-br from-blue-500 to-purple-600 rounded-full flex items-center justify-center">
+                                    <span class="text-white font-bold">S</span>
+                                </div>
+                                <div>
+                                    <p class="text-white font-semibold">"Found my business partner in Japan! UniConnect made global networking effortless."</p>
+                                    <p class="text-blue-300 text-sm">- Sarah, Entrepreneur from USA</p>
+                                </div>
+                            </div>
+                            <div class="flex items-start space-x-3">
+                                <div class="w-12 h-12 bg-gradient-to-br from-green-500 to-blue-600 rounded-full flex items-center justify-center">
+                                    <span class="text-white font-bold">A</span>
+                                </div>
+                                <div>
+                                    <p class="text-white font-semibold">"Learned Spanish while making friends from Mexico! Best language exchange platform."</p>
+                                    <p class="text-blue-300 text-sm">- Alex, Student from UK</p>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Right Side - Content Area (Forms & Interactions) -->
+        <div class="flex-1 flex items-center justify-center p-8">
+            <div class="w-full max-w-md">
+                <!-- Mobile Header -->
+                <div class="lg:hidden text-center mb-8">
+                    <div class="flex items-center justify-center space-x-3 mb-6">
+                        <div class="w-16 h-16 cyber-gradient rounded-xl flex items-center justify-center quantum-glow">
+                            <i class="fas fa-globe text-white text-2xl"></i>
+                        </div>
+                        <div>
+                            <span class="text-3xl font-bold text-transparent bg-clip-text bg-gradient-to-r from-blue-400 to-purple-400 neon-text">
+                                UniConnect
+                            </span>
+                            <p class="text-blue-300 text-sm">Where the World Connects</p>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Error/Success Messages -->
+                <div id="messageContainer"></div>
+
+                <!-- Security Status -->
+                <div id="securityStatus" class="glass-effect border border-blue-700 rounded-2xl p-4 mb-6 hidden">
+                    <div class="flex items-center justify-between">
+                        <div class="flex items-center space-x-3">
+                            <i class="fas fa-shield-alt text-green-400"></i>
+                            <span class="text-sm font-medium text-green-400">Secure Connection Established</span>
+                        </div>
+                        <div class="flex space-x-1">
+                            <span class="security-badge">
+                                <i class="fas fa-lock mr-1"></i> HTTPS
+                            </span>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Content Sections -->
+                <div class="content-area">
+                    <!-- Landing Section -->
+                    <div id="landingSection" class="section section-active">
+                        <div class="text-center">
+                            <h2 class="text-3xl font-bold text-white mb-4">Your Global Journey Starts Here</h2>
+                            <p class="text-blue-300 mb-8">
+                                Join millions who have transformed how they connect, learn, and grow with people from every corner of the world.
+                            </p>
+                            
+                            <div class="space-y-4">
+                                <button id="showLoginBtn" class="w-full cyber-gradient text-white py-4 px-6 rounded-xl text-lg font-semibold hover:scale-105 transition focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-cyan-400 quantum-glow pulse-glow">
+                                    <i class="fas fa-sign-in-alt mr-2"></i>Continue Your Journey
+                                </button>
+                                <button id="showRegisterBtn" class="w-full glass-effect text-white py-4 px-6 rounded-xl text-lg font-semibold hover:scale-105 transition focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-cyan-400 border border-blue-700 hover:border-cyan-500">
+                                    <i class="fas fa-user-plus mr-2"></i>Start Free Adventure
+                                </button>
+                            </div>
+                            
+                            <div class="mt-8 flex justify-center space-x-6 text-sm text-blue-300">
+                                <div class="flex items-center">
+                                    <i class="fas fa-bolt text-yellow-400 mr-2"></i>
+                                    <span>Instant Setup</span>
+                                </div>
+                                <div class="flex items-center">
+                                    <i class="fas fa-globe text-green-400 mr-2"></i>
+                                    <span>Global Access</span>
+                                </div>
+                                <div class="flex items-center">
+                                    <i class="fas fa-heart text-pink-400 mr-2"></i>
+                                    <span>Always Free</span>
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- Security Features -->
+                        <div class="glass-effect border border-blue-700 rounded-2xl p-6 mt-8">
+                            <h3 class="text-sm font-medium text-cyan-400 mb-3">Why Choose UniConnect?</h3>
+                            <ul class="text-sm text-blue-400 space-y-2">
+                                <li class="flex items-center">
+                                    <i class="fas fa-check-circle text-green-400 mr-2"></i>
+                                    <span>No hidden fees - completely free forever</span>
+                                </li>
+                                <li class="flex items-center">
+                                    <i class="fas fa-check-circle text-green-400 mr-2"></i>
+                                    <span>Connect with verified users worldwide</span>
+                                </li>
+                                <li class="flex items-center">
+                                    <i class="fas fa-check-circle text-green-400 mr-2"></i>
+                                    <span>Advanced translation for seamless communication</span>
+                                </li>
+                            </ul>
+                        </div>
+                    </div>
+
+                    <!-- Login Section -->
+                    <div id="loginSection" class="section section-hidden">
+                        <div class="text-center mb-6">
+                            <h2 class="text-3xl font-bold text-white mb-2">Welcome Back</h2>
+                            <p class="text-blue-300">
+                                Continue your global journey with UniConnect
+                            </p>
+                        </div>
+
+                        <!-- Password Login Form -->
+                        <div class="space-y-6">
+                            <form class="space-y-6" id="loginForm">
+                                <div>
+                                    <label for="loginEmail" class="block text-sm font-medium text-cyan-400 mb-2">
+                                        Email address
+                                        <span class="text-red-400 ml-1">*</span>
+                                    </label>
+                                    <div class="relative">
+                                        <input id="loginEmail" name="email" type="email" autocomplete="email" required 
+                                               class="glass-effect appearance-none block w-full px-4 py-3 border border-blue-700 rounded-xl placeholder-blue-400 focus:outline-none focus:ring-2 focus:ring-cyan-400 focus:border-cyan-400 text-white pl-12 transition"
+                                               placeholder="Enter your email">
+                                        <div class="absolute left-4 top-1/2 transform -translate-y-1/2 text-blue-400">
+                                            <i class="fas fa-envelope"></i>
+                                        </div>
+                                    </div>
+                                    <div id="loginEmailError" class="text-red-400 text-sm mt-1 hidden"></div>
+                                </div>
+
+                                <div>
+                                    <label for="loginPassword" class="block text-sm font-medium text-blue-400 mb-2">
+                                        Password
+                                        <span class="text-red-400 ml-1">*</span>
+                                    </label>
+                                    <div class="relative">
+                                        <input id="loginPassword" name="password" type="password" autocomplete="current-password" required 
+                                               class="glass-effect appearance-none block w-full px-4 py-3 border border-blue-700 rounded-xl placeholder-blue-400 focus:outline-none focus:ring-2 focus:ring-blue-400 focus:border-blue-400 text-white pl-12 pr-12 transition"
+                                               placeholder="Enter your password">
+                                        <div class="absolute left-4 top-1/2 transform -translate-y-1/2 text-blue-400">
+                                            <i class="fas fa-lock"></i>
+                                        </div>
+                                        <button type="button" id="toggleLoginPassword" class="absolute right-4 top-1/2 transform -translate-y-1/2 text-blue-400 hover:text-cyan-400 transition">
+                                            <i class="fas fa-eye"></i>
+                                        </button>
+                                    </div>
+                                    <div id="loginPasswordError" class="text-red-400 text-sm mt-1 hidden"></div>
+                                </div>
+
+                                <div class="flex items-center justify-between">
+                                    <div class="flex items-center">
+                                        <input id="remember-me" name="remember-me" type="checkbox" 
+                                               class="h-4 w-4 text-cyan-400 focus:ring-cyan-400 border-blue-700 rounded glass-effect">
+                                        <label for="remember-me" class="ml-2 block text-sm text-blue-300">Remember me</label>
+                                    </div>
+                                    <div class="text-sm">
+                                        <button type="button" class="font-medium text-purple-400 hover:text-purple-300 transition">Forgot password?</button>
+                                    </div>
+                                </div>
+
+                                <div>
+                                    <button type="submit" id="loginBtn"
+                                            class="w-full cyber-gradient text-white py-3 px-4 rounded-xl text-lg font-semibold hover:scale-105 transition focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-cyan-400 quantum-glow disabled:opacity-50 disabled:cursor-not-allowed">
+                                        <span id="loginBtnText">Sign In</span>
+                                        <div id="loginSpinner" class="loading-spinner hidden"></div>
+                                    </button>
+                                </div>
+                            </form>
+                        </div>
+
+                        <!-- Switch to Register -->
+                        <div class="mt-6 text-center">
+                            <p class="text-blue-300">
+                                Don't have an account?{' '}
+                                <button id="switchToRegisterFromLogin" class="font-medium text-purple-400 hover:text-purple-300 transition">
+                                    Create one now
+                                </button>
+                            </p>
+                        </div>
+
+                        <!-- Back Button -->
+                        <div class="mt-4 text-center">
+                            <button id="backToLandingFromLogin" class="text-blue-400 hover:text-cyan-400 transition">
+                                <i class="fas fa-arrow-left mr-2"></i> Back to Home
+                            </button>
+                        </div>
+                    </div>
+
+                    <!-- Register Section -->
+                    <div id="registerSection" class="section section-hidden">
+                        <div class="text-center mb-6">
+                            <h2 class="text-3xl font-bold text-white mb-2">Join UniConnect</h2>
+                            <p class="text-blue-300">
+                                Start your global adventure today
+                            </p>
+                        </div>
+
+                        <!-- Registration Form -->
+                        <form id="registration-form" class="space-y-6">
+                            <div>
+                                <label for="displayName" class="block text-sm font-medium text-cyan-400 mb-2">
+                                    Display Name
+                                    <span class="text-red-400 ml-1">*</span>
+                                </label>
+                                <div class="relative">
+                                    <input type="text" id="displayName" name="displayName" required autocomplete="name"
+                                           class="glass-effect appearance-none block w-full px-4 py-3 border border-blue-700 rounded-xl placeholder-blue-400 focus:outline-none focus:ring-2 focus:ring-cyan-400 focus:border-cyan-400 text-white pl-12 transition"
+                                           placeholder="Enter your display name">
+                                    <div class="absolute left-4 top-1/2 transform -translate-y-1/2 text-blue-400">
+                                        <i class="fas fa-user"></i>
+                                    </div>
+                                </div>
+                                <div id="displayNameError" class="text-red-400 text-sm mt-1 hidden"></div>
+                            </div>
+                            
+                            <div>
+                                <label for="registerEmail" class="block text-sm font-medium text-cyan-400 mb-2">
+                                    Email Address
+                                    <span class="text-red-400 ml-1">*</span>
+                                </label>
+                                <div class="relative">
+                                    <input type="email" id="registerEmail" name="email" required autocomplete="email"
+                                           class="glass-effect appearance-none block w-full px-4 py-3 border border-blue-700 rounded-xl placeholder-blue-400 focus:outline-none focus:ring-2 focus:ring-cyan-400 focus:border-cyan-400 text-white pl-12 transition"
+                                           placeholder="Enter your email">
+                                    <div class="absolute left-4 top-1/2 transform -translate-y-1/2 text-blue-400">
+                                        <i class="fas fa-envelope"></i>
+                                    </div>
+                                </div>
+                                <div id="registerEmailError" class="text-red-400 text-sm mt-1 hidden"></div>
+                            </div>
+                            
+                            <div>
+                                <label for="registerPassword" class="block text-sm font-medium text-blue-400 mb-2">
+                                    Password (6+ characters)
+                                    <span class="text-red-400 ml-1">*</span>
+                                </label>
+                                <div class="relative">
+                                    <input type="password" id="registerPassword" name="password" required autocomplete="new-password"
+                                           class="glass-effect appearance-none block w-full px-4 py-3 border border-blue-700 rounded-xl placeholder-blue-400 focus:outline-none focus:ring-2 focus:ring-blue-400 focus:border-blue-400 text-white pl-12 pr-12 transition"
+                                           placeholder="Enter your password">
+                                    <div class="absolute left-4 top-1/2 transform -translate-y-1/2 text-blue-400">
+                                        <i class="fas fa-lock"></i>
+                                    </div>
+                                    <button type="button" id="toggleRegisterPassword" class="absolute right-4 top-1/2 transform -translate-y-1/2 text-blue-400 hover:text-cyan-400 transition">
+                                        <i class="fas fa-eye"></i>
+                                    </button>
+                                </div>
+                                <div id="registerPasswordError" class="text-red-400 text-sm mt-1 hidden"></div>
+                            </div>
+                            
+                            <div>
+                                <label for="confirmPassword" class="block text-sm font-medium text-blue-400 mb-2">
+                                    Confirm Password
+                                    <span class="text-red-400 ml-1">*</span>
+                                </label>
+                                <div class="relative">
+                                    <input type="password" id="confirmPassword" name="confirmPassword" required autocomplete="new-password"
+                                           class="glass-effect appearance-none block w-full px-4 py-3 border border-blue-700 rounded-xl placeholder-blue-400 focus:outline-none focus:ring-2 focus:ring-blue-400 focus:border-blue-400 text-white pl-12 pr-12 transition"
+                                           placeholder="Confirm your password">
+                                    <div class="absolute left-4 top-1/2 transform -translate-y-1/2 text-blue-400">
+                                        <i class="fas fa-lock"></i>
+                                    </div>
+                                    <button type="button" id="toggleConfirmPassword" class="absolute right-4 top-1/2 transform -translate-y-1/2 text-blue-400 hover:text-cyan-400 transition">
+                                        <i class="fas fa-eye"></i>
+                                    </button>
+                                </div>
+                                <div id="confirmPasswordError" class="text-red-400 text-sm mt-1 hidden"></div>
+                            </div>
+
+                            <!-- Terms Agreement -->
+                            <div class="flex items-start space-x-3">
+                                <input type="checkbox" id="termsAgreement" required
+                                       class="h-4 w-4 text-cyan-400 focus:ring-cyan-400 border-blue-700 rounded glass-effect mt-1">
+                                <label for="termsAgreement" class="text-sm text-blue-300">
+                                    I agree to the <a href="#" class="text-purple-400 hover:text-purple-300">Terms of Service</a> and <a href="#" class="text-purple-400 hover:text-purple-300">Privacy Policy</a>
+                                </label>
+                            </div>
+                            <div id="termsError" class="text-red-400 text-sm hidden">Please accept the terms and conditions</div>
+
+                            <button type="submit" id="registerBtn"
+                                    class="w-full cyber-gradient text-white py-3 px-4 rounded-xl text-lg font-semibold hover:scale-105 transition focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-cyan-400 quantum-glow disabled:opacity-50 disabled:cursor-not-allowed">
+                                <span id="registerBtnText">Create Account</span>
+                                <div id="registerSpinner" class="loading-spinner hidden"></div>
+                            </button>
+                        </form>
+
+                        <!-- Switch to Login -->
+                        <div class="mt-6 text-center">
+                            <p class="text-blue-300">
+                                Already have an account?{' '}
+                                <button id="switchToLoginFromRegister" class="font-medium text-purple-400 hover:text-purple-300 transition">
+                                    Sign in here
+                                </button>
+                            </p>
+                        </div>
+
+                        <!-- Back Button -->
+                        <div class="mt-4 text-center">
+                            <button id="backToLandingFromRegister" class="text-blue-400 hover:text-cyan-400 transition">
+                                <i class="fas fa-arrow-left mr-2"></i> Back to Home
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Firebase SDK -->
+    <script type="module">
+        /**
+         * UniConnect - Firebase Authentication Module
+         * Handles user authentication with Firebase
+         */
+
+        // Firebase configuration
+        const firebaseConfig = {
+            apiKey: "AIzaSyDHHyGgsSV18BcXrGgzi4C8frzDAE1C1zo",
+            authDomain: "uniconnect-ee95c.firebaseapp.com",
+            projectId: "uniconnect-ee95c",
+            storageBucket: "uniconnect-ee95c.firebasestorage.app",
+            messagingSenderId: "1003264444309",
+            appId: "1:1003264444309:web:9f0307516e44d21e97d89c"
+        };
+
+        class FirebaseAuthService {
+            constructor() {
+                this.app = null;
+                this.auth = null;
+                this.db = null;
+                this.isInitialized = false;
+                this.init();
+            }
+
+            /**
+             * Initializes Firebase authentication
+             */
+            async init() {
+                try {
+                    // Update connection status
+                    this.updateConnectionStatus('connecting', 'Connecting to Firebase...');
+                    
+                    // Import and initialize Firebase
+                    const { initializeApp } = await import('https://www.gstatic.com/firebasejs/10.7.1/firebase-app.js');
+                    const { getAuth, createUserWithEmailAndPassword, signInWithEmailAndPassword, updateProfile } = await import('https://www.gstatic.com/firebasejs/10.7.1/firebase-auth.js');
+                    const { getFirestore, doc, setDoc, serverTimestamp } = await import('https://www.gstatic.com/firebasejs/10.7.1/firebase-firestore.js');
+
+                    // Initialize Firebase
+                    this.app = initializeApp(firebaseConfig);
+                    this.auth = getAuth(this.app);
+                    this.db = getFirestore(this.app);
+                    
+                    this.isInitialized = true;
+                    this.updateConnectionStatus('connected', 'Connected to Firebase');
+                    
+                    // Show security status
+                    document.getElementById('securityStatus').classList.remove('hidden');
+                    
+                    console.log('✅ Firebase initialized successfully!');
+                    
+                } catch (error) {
+                    console.error('❌ Firebase initialization failed:', error);
+                    this.updateConnectionStatus('disconnected', 'Firebase connection failed');
+                    
+                    // Show error message
+                    if (window.uniConnectApp) {
+                        window.uniConnectApp.showMessage('Firebase connection failed. Please check your connection.', 'error');
+                    }
+                }
+            }
+
+            /**
+             * Registers a new user with email and password
+             */
+            async registerUser(email, password, displayName) {
+                if (!this.isInitialized || !this.auth) {
+                    throw new Error('Firebase not initialized. Please try again.');
+                }
+
+                try {
+                    // Import required functions
+                    const { createUserWithEmailAndPassword, updateProfile } = await import('https://www.gstatic.com/firebasejs/10.7.1/firebase-auth.js');
+                    const { doc, setDoc, serverTimestamp } = await import('https://www.gstatic.com/firebasejs/10.7.1/firebase-firestore.js');
+
+                    // Create user with email and password
+                    const userCredential = await createUserWithEmailAndPassword(this.auth, email, password);
+                    const user = userCredential.user;
+                    
+                    // Update user profile with display name
+                    await updateProfile(user, {
+                        displayName: displayName
+                    });
+                    
+                    // Create user document in Firestore
+                    const userDocRef = doc(this.db, 'users', user.uid);
+                    await setDoc(userDocRef, {
+                        uid: user.uid,
+                        email: user.email,
+                        displayName: displayName,
+                        photoURL: '',
+                        bio: 'New UniConnect member!',
+                        createdAt: serverTimestamp(),
+                        lastLogin: serverTimestamp(),
+                        emailVerified: false
+                    });
+                    
+                    // Store user info in localStorage
+                    localStorage.setItem('uniconnect-user', JSON.stringify({
+                        uid: user.uid,
+                        email: user.email,
+                        displayName: displayName,
+                        isNewUser: true
+                    }));
+                    
+                    console.log('✅ User registered successfully:', user.email);
+                    return userCredential;
+                    
+                } catch (error) {
+                    console.error('❌ Registration failed:', error);
+                    
+                    // Handle specific error cases
+                    let errorMessage = 'Registration failed. Please try again.';
+                    
+                    switch (error.code) {
+                        case 'auth/email-already-in-use':
+                            errorMessage = 'This email is already registered. Please try logging in.';
+                            break;
+                        case 'auth/weak-password':
+                            errorMessage = 'Password is too weak. Please use a stronger password (at least 6 characters).';
+                            break;
+                        case 'auth/invalid-email':
+                            errorMessage = 'Invalid email address. Please check your email.';
+                            break;
+                        case 'auth/operation-not-allowed':
+                            errorMessage = 'Email/password accounts are not enabled. Please contact support.';
+                            break;
+                        case 'auth/network-request-failed':
+                            errorMessage = 'Network error. Please check your internet connection.';
+                            break;
+                        default:
+                            errorMessage = `Registration failed: ${error.message}`;
+                    }
+                    
+                    throw new Error(errorMessage);
+                }
+            }
+
+            /**
+             * Logs in a user with email and password
+             */
+            async loginUser(email, password) {
+                if (!this.isInitialized || !this.auth) {
+                    throw new Error('Firebase not initialized. Please try again.');
+                }
+
+                try {
+                    // Import required function
+                    const { signInWithEmailAndPassword } = await import('https://www.gstatic.com/firebasejs/10.7.1/firebase-auth.js');
+                    const { doc, setDoc, serverTimestamp } = await import('https://www.gstatic.com/firebasejs/10.7.1/firebase-firestore.js');
+
+                    // Sign in user
+                    const userCredential = await signInWithEmailAndPassword(this.auth, email, password);
+                    const user = userCredential.user;
+                    
+                    // Update last login timestamp in Firestore
+                    const userDocRef = doc(this.db, 'users', user.uid);
+                    await setDoc(userDocRef, {
+                        lastLogin: serverTimestamp()
+                    }, { merge: true });
+                    
+                    // Store user info in localStorage
+                    localStorage.setItem('uniconnect-user', JSON.stringify({
+                        uid: user.uid,
+                        email: user.email,
+                        displayName: user.displayName || user.email.split('@')[0],
+                        isNewUser: false
+                    }));
+                    
+                    console.log('✅ User logged in successfully:', user.email);
+                    return userCredential;
+                    
+                } catch (error) {
+                    console.error('❌ Login failed:', error);
+                    
+                    // Handle specific error cases
+                    let errorMessage = 'Login failed. Please try again.';
+                    
+                    switch (error.code) {
+                        case 'auth/user-not-found':
+                            errorMessage = 'No account found with this email. Please register first.';
+                            break;
+                        case 'auth/wrong-password':
+                            errorMessage = 'Incorrect password. Please try again.';
+                            break;
+                        case 'auth/invalid-email':
+                            errorMessage = 'Invalid email address. Please check your email.';
+                            break;
+                        case 'auth/user-disabled':
+                            errorMessage = 'This account has been disabled. Please contact support.';
+                            break;
+                        case 'auth/too-many-requests':
+                            errorMessage = 'Too many failed attempts. Please try again later.';
+                            break;
+                        case 'auth/network-request-failed':
+                            errorMessage = 'Network error. Please check your internet connection.';
+                            break;
+                        default:
+                            errorMessage = `Login failed: ${error.message}`;
+                    }
+                    
+                    throw new Error(errorMessage);
+                }
+            }
+
+            /**
+             * Updates the connection status display
+             */
+            updateConnectionStatus(status, message) {
+                const statusElement = document.getElementById('connectionStatus');
+                const textElement = document.getElementById('connectionText');
                 
-                <!-- Floating decorative elements -->
-                <div class="absolute -top-4 -left-4 w-16 h-16 bg-green-500/20 rounded-2xl flex items-center justify-center floating-element">
-                  <i class="fas fa-comments text-green-400"></i>
-                </div>
-                <div class="absolute -bottom-4 -right-4 w-16 h-16 bg-yellow-500/20 rounded-2xl flex items-center justify-center floating-element" style="animation-delay: -1s;">
-                  <i class="fas fa-users text-yellow-400"></i>
-                </div>
-              </div>
-            </div>
-          </div>
-        </div>
-      </div>
-
-      <!-- Features Grid for Everyone -->
-      <div class="grid grid-cols-1 md:grid-cols-3 gap-6">
-        <!-- Feature 1 -->
-        <div class="feature-card p-6 rounded-2xl text-center group">
-          <div class="w-20 h-20 bg-gradient-to-br from-purple-500 to-pink-500 rounded-2xl flex items-center justify-center mx-auto mb-4 group-hover:scale-110 transition-transform">
-            <i class="fas fa-comments text-white text-3xl"></i>
-          </div>
-          <h3 class="text-xl font-bold text-white mb-3">Global Chat</h3>
-          <p class="text-gray-300">Real-time messaging with people from around the world</p>
-        </div>
-
-        <!-- Feature 2 -->
-        <div class="feature-card p-6 rounded-2xl text-center group">
-          <div class="w-20 h-20 bg-gradient-to-br from-cyan-500 to-blue-500 rounded-2xl flex items-center justify-center mx-auto mb-4 group-hover:scale-110 transition-transform">
-            <i class="fas fa-users text-white text-3xl"></i>
-          </div>
-          <h3 class="text-xl font-bold text-white mb-3">Communities</h3>
-          <p class="text-gray-300">Join or create communities for any interest or topic</p>
-        </div>
-
-        <!-- Feature 3 -->
-        <div class="feature-card p-6 rounded-2xl text-center group">
-          <div class="w-20 h-20 bg-gradient-to-br from-green-500 to-emerald-500 rounded-2xl flex items-center justify-center mx-auto mb-4 group-hover:scale-110 transition-transform">
-            <i class="fas fa-share-alt text-white text-3xl"></i>
-          </div>
-          <h3 class="text-xl font-bold text-white mb-3">Share & Connect</h3>
-          <p class="text-gray-300">Share ideas, resources, and build global networks</p>
-        </div>
-      </div>
-
-      <!-- Live Activity Section -->
-      <div class="glass-card p-6 rounded-2xl">
-        <div class="flex items-center justify-between mb-6">
-          <h3 class="text-2xl font-bold text-white">Live Global Activity</h3>
-          <div class="flex items-center space-x-2 text-green-400">
-            <div class="w-3 h-3 bg-green-400 rounded-full animate-pulse"></div>
-            <span class="text-sm font-semibold" id="liveStatus">Live Now</span>
-          </div>
-        </div>
-
-        <!-- Activity Stats -->
-        <div class="grid grid-cols-2 md:grid-cols-4 gap-4 mb-6">
-          <div class="text-center p-4 bg-white/5 rounded-xl">
-            <div class="text-2xl font-bold text-cyan-400" id="onlineUsers">5,847</div>
-            <div class="text-sm text-gray-400">Online Now</div>
-          </div>
-          <div class="text-center p-4 bg-white/5 rounded-xl">
-            <div class="text-2xl font-bold text-purple-400" id="activeChats">2,234</div>
-            <div class="text-sm text-gray-400">Active Chats</div>
-          </div>
-          <div class="text-center p-4 bg-white/5 rounded-xl">
-            <div class="text-2xl font-bold text-green-400" id="newPosts">1,589</div>
-            <div class="text-sm text-gray-400">New Posts</div>
-          </div>
-          <div class="text-center p-4 bg-white/5 rounded-xl">
-            <div class="text-2xl font-bold text-yellow-400" id="communities">426</div>
-            <div class="text-sm text-gray-400">Communities</div>
-          </div>
-        </div>
-
-        <!-- Preview of Global Feed -->
-        <div class="space-y-4">
-          <div class="flex items-start space-x-3 p-4 bg-white/5 rounded-xl">
-            <div class="w-10 h-10 bg-gradient-to-br from-purple-500 to-cyan-400 rounded-full flex items-center justify-center">
-              <span class="text-white font-bold text-sm">JD</span>
-            </div>
-            <div class="flex-1">
-              <div class="flex items-center space-x-2 mb-1">
-                <span class="font-semibold text-cyan-300">@JohnDoe_Tech</span>
-                <span class="text-xs text-gray-500">New York, USA</span>
-              </div>
-              <p class="text-gray-200">Just joined the Tech Innovators community! Anyone working on AI projects want to connect?</p>
-              <div class="flex items-center space-x-4 mt-2 text-xs text-gray-400">
-                <span><i class="fas fa-heart mr-1"></i> 24</span>
-                <span><i class="fas fa-comment mr-1"></i> 8</span>
-                <span>2 min ago</span>
-              </div>
-            </div>
-          </div>
-
-          <div class="text-center">
-            <a href="register.html" class="neon-button px-6 py-3 rounded-xl font-semibold inline-block">
-              <i class="fas fa-eye mr-2"></i>Join to See Full Activity
-            </a>
-          </div>
-        </div>
-      </div>
-
-      <!-- Final Call-to-Action -->
-      <div class="glass-card p-8 rounded-3xl text-center">
-        <h3 class="text-3xl font-bold text-white mb-4">Ready to Connect Globally?</h3>
-        <p class="text-xl text-gray-300 mb-6">100,000+ people are already connecting worldwide</p>
-        <div class="flex flex-col sm:flex-row justify-center items-center space-y-4 sm:space-y-0 sm:space-x-6">
-          <a href="register.html" class="bg-gradient-to-r from-purple-600 to-cyan-500 px-8 py-4 rounded-2xl font-bold text-white text-lg shadow-2xl hover:scale-105 transition-transform duration-300">
-            <i class="fas fa-user-plus mr-3"></i>
-            Create Free Account
-          </a>
-          <a href="login.html" class="neon-button px-8 py-4 rounded-2xl font-bold text-lg">
-            <i class="fas fa-sign-in-alt mr-3"></i>
-            Sign In to Continue
-          </a>
-        </div>
-      </div>
-    </main>
-
-    <!-- Simplified Footer -->
-    <footer class="p-8 mt-12 text-sm text-gray-400 border-t border-gray-800 bg-black/30">
-      <div class="max-w-7xl mx-auto text-center">
-        <div class="flex items-center justify-center space-x-3 mb-4">
-          <div class="w-10 h-10 bg-gradient-to-br from-purple-500 to-cyan-400 rounded-xl flex items-center justify-center">
-            <i class="fas fa-globe text-white"></i>
-          </div>
-          <h4 class="text-lg font-black text-transparent bg-clip-text bg-gradient-to-r from-cyan-400 to-purple-500">
-            ConnectSphere
-          </h4>
-        </div>
-        <p class="text-gray-500 text-sm mb-4">Connecting people across the globe</p>
-        
-        <div class="flex justify-center space-x-6 mb-6">
-          <a href="login.html" class="text-gray-400 hover:text-cyan-400 transition-colors">Log In</a>
-          <a href="register.html" class="text-gray-400 hover:text-cyan-400 transition-colors">Register</a>
-          <a href="support.html" class="text-gray-400 hover:text-cyan-400 transition-colors">Support</a>
-          <a href="privacy.html" class="text-gray-400 hover:text-cyan-400 transition-colors">Privacy</a>
-        </div>
-        
-        <div class="text-xs text-gray-500 border-t border-gray-700 pt-4">
-          <p>&copy; 2025 ConnectSphere. Connecting people across the globe.</p>
-        </div>
-      </div>
-    </footer>
-  </div>
-
-  <!-- Firebase Connection Script -->
-  <script type="module">
-    // Import Firebase modules
-    import { initializeApp } from "https://www.gstatic.com/firebasejs/10.7.1/firebase-app.js";
-    import { getAuth, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/10.7.1/firebase-auth.js";
-    import { getFirestore } from "https://www.gstatic.com/firebasejs/10.7.1/firebase-firestore.js";
-
-    // Your Firebase Configuration
-    const firebaseConfig = {
-      apiKey: "AIzaSyDHHyGgsSV18BcXrGgzi4C8frzDAE1C1zo",
-      authDomain: "uniconnect-ee95c.firebaseapp.com",
-      projectId: "uniconnect-ee95c",
-      storageBucket: "uniconnect-ee95c.firebasestorage.app",
-      messagingSenderId: "1003264444309",
-      appId: "1:1003264444309:web:9f0307516e44d21e97d89c"
-    };
-
-    // Initialize Firebase with proper error handling
-    try {
-      console.log('🚀 Initializing Firebase connection...');
-      
-      const app = initializeApp(firebaseConfig);
-      const auth = getAuth(app);
-      const db = getFirestore(app);
-
-      // Update connection status
-      const statusElement = document.getElementById('connectionStatus');
-      statusElement.innerHTML = '<i class="fas fa-check-circle mr-1"></i> Firebase Connected!';
-      statusElement.className = 'connection-status connected';
-
-      console.log('✅ Firebase successfully connected!');
-      console.log('📊 Project: uniconnect-ee95c');
-      console.log('🔗 Auth Domain: uniconnect-ee95c.firebaseapp.com');
-      console.log('🆔 Project ID: uniconnect-ee95c');
-
-      // Listen for auth state changes WITHOUT redirecting
-      onAuthStateChanged(auth, (user) => {
-        if (user) {
-          console.log('👤 User is signed in:', user.email || user.uid);
-          // User is signed in - but we DON'T redirect automatically
-          // They can choose to go to dashboard manually if they want
-        } else {
-          console.log('👤 No user signed in - showing landing page');
-          // User is signed out - perfect, show the landing page
+                if (statusElement && textElement) {
+                    statusElement.className = `connection-status ${status}`;
+                    
+                    // Update icon and text based on status
+                    if (status === 'connected') {
+                        statusElement.innerHTML = '<i class="fas fa-check-circle mr-2"></i><span id="connectionText">Connected to Firebase</span>';
+                    } else if (status === 'connecting') {
+                        statusElement.innerHTML = '<i class="fas fa-circle-notch fa-spin mr-2"></i><span id="connectionText">Connecting to Firebase...</span>';
+                    } else {
+                        statusElement.innerHTML = '<i class="fas fa-exclamation-triangle mr-2"></i><span id="connectionText">Connection Failed</span>';
+                    }
+                    
+                    // Update the text element reference
+                    const newTextElement = document.getElementById('connectionText');
+                    if (newTextElement) {
+                        newTextElement.textContent = message;
+                    }
+                }
+            }
         }
-      });
 
-      // Test Firestore connection
-      console.log('📚 Firestore instance created successfully');
+        // Initialize Firebase Auth Service
+        window.firebaseAuth = new FirebaseAuthService();
+    </script>
+    
+    <!-- Application Script -->
+    <script>
+        /**
+         * UniConnect - Main Application Script
+         * Handles section transitions, cookies, mood themes, and UI interactions
+         */
 
-    } catch (error) {
-      console.error('❌ Firebase initialization error:', error);
-      const statusElement = document.getElementById('connectionStatus');
-      statusElement.innerHTML = '<i class="fas fa-exclamation-triangle mr-1"></i> Firebase Error';
-      statusElement.className = 'connection-status error';
-    }
+        class UniConnectApp {
+            constructor() {
+                this.currentSection = 'landing';
+                this.isTransitioning = false;
+                this.cookiesAccepted = false;
+                this.showingCookieBanner = false;
+                this.currentTheme = 'calm';
+                this.init();
+            }
 
-    // Animate stats
-    function animateCounter(element, target) {
-      let current = 0;
-      const increment = target / 100;
-      const timer = setInterval(() => {
-        current += increment;
-        if (current >= target) {
-          element.textContent = target.toLocaleString();
-          clearInterval(timer);
-        } else {
-          element.textContent = Math.floor(current).toLocaleString();
+            init() {
+                // Initialize event listeners
+                this.setupEventListeners();
+                
+                // Load user preferences if any
+                this.loadUserPreferences();
+                
+                // Start animated counters
+                this.startCounterAnimations();
+                
+                // Initialize mood theme
+                this.loadThemePreference();
+                
+                console.log('🚀 UniConnect app initialized');
+            }
+
+            /**
+             * Sets up all event listeners for the application
+             */
+            setupEventListeners() {
+                // Section navigation buttons
+                document.getElementById('showLoginBtn').addEventListener('click', () => this.showSection('login'));
+                document.getElementById('showRegisterBtn').addEventListener('click', () => {
+                    // Show cookie banner only when registering (new users)
+                    this.showCookieBannerForNewUsers();
+                    this.showSection('register');
+                });
+                
+                // Back buttons
+                document.getElementById('backToLandingFromLogin').addEventListener('click', () => this.showSection('landing'));
+                document.getElementById('backToLandingFromRegister').addEventListener('click', () => {
+                    // Hide cookie banner when going back from register
+                    this.hideCookieBanner();
+                    this.showSection('landing');
+                });
+                
+                // Switch between login and register
+                document.getElementById('switchToRegisterFromLogin').addEventListener('click', () => {
+                    this.showCookieBannerForNewUsers();
+                    this.showSection('register');
+                });
+                
+                document.getElementById('switchToLoginFromRegister').addEventListener('click', () => {
+                    this.hideCookieBanner();
+                    this.showSection('login');
+                });
+                
+                // Form submissions
+                document.getElementById('loginForm').addEventListener('submit', (e) => this.handleLogin(e));
+                document.getElementById('registration-form').addEventListener('submit', (e) => this.handleRegistration(e));
+                
+                // Cookie consent
+                document.getElementById('cookieAccept').addEventListener('click', () => this.acceptCookies());
+                document.getElementById('cookieReject').addEventListener('click', () => this.rejectCookies());
+                
+                // Password visibility toggles - FIXED
+                this.setupPasswordToggles();
+                
+                // Mood theme selector
+                this.setupMoodSelector();
+            }
+
+            /**
+             * Sets up password visibility toggle buttons - FIXED VERSION
+             */
+            setupPasswordToggles() {
+                // Login password toggle
+                const toggleLoginBtn = document.getElementById('toggleLoginPassword');
+                if (toggleLoginBtn) {
+                    toggleLoginBtn.addEventListener('click', () => {
+                        this.togglePasswordVisibility('loginPassword', 'toggleLoginPassword');
+                    });
+                }
+                
+                // Register password toggle
+                const toggleRegisterBtn = document.getElementById('toggleRegisterPassword');
+                if (toggleRegisterBtn) {
+                    toggleRegisterBtn.addEventListener('click', () => {
+                        this.togglePasswordVisibility('registerPassword', 'toggleRegisterPassword');
+                    });
+                }
+                
+                // Confirm password toggle
+                const toggleConfirmBtn = document.getElementById('toggleConfirmPassword');
+                if (toggleConfirmBtn) {
+                    toggleConfirmBtn.addEventListener('click', () => {
+                        this.togglePasswordVisibility('confirmPassword', 'toggleConfirmPassword');
+                    });
+                }
+            }
+
+            /**
+             * Toggles password field visibility - FIXED VERSION
+             */
+            togglePasswordVisibility(passwordFieldId, toggleButtonId) {
+                const passwordInput = document.getElementById(passwordFieldId);
+                const toggleButton = document.getElementById(toggleButtonId);
+                
+                if (!passwordInput || !toggleButton) {
+                    console.error('Password field or toggle button not found:', passwordFieldId, toggleButtonId);
+                    return;
+                }
+                
+                const toggleIcon = toggleButton.querySelector('i');
+                
+                if (passwordInput.type === 'password') {
+                    passwordInput.type = 'text';
+                    toggleIcon.className = 'fas fa-eye-slash';
+                } else {
+                    passwordInput.type = 'password';
+                    toggleIcon.className = 'fas fa-eye';
+                }
+            }
+
+            /**
+             * Sets up mood theme selector
+             */
+            setupMoodSelector() {
+                const moodBtn = document.querySelector('.mood-btn');
+                const moodOptions = document.querySelector('.mood-options');
+                const moodOptionsList = document.querySelectorAll('.mood-option');
+
+                // Toggle mood options visibility
+                moodBtn.addEventListener('click', (e) => {
+                    e.stopPropagation();
+                    moodOptions.classList.toggle('show');
+                });
+
+                // Close mood options when clicking outside
+                document.addEventListener('click', () => {
+                    moodOptions.classList.remove('show');
+                });
+
+                // Prevent mood options from closing when clicking inside
+                moodOptions.addEventListener('click', (e) => {
+                    e.stopPropagation();
+                });
+
+                // Handle mood selection
+                moodOptionsList.forEach(option => {
+                    option.addEventListener('click', () => {
+                        const theme = option.getAttribute('data-theme');
+                        this.changeTheme(theme);
+                        moodOptions.classList.remove('show');
+                    });
+                });
+            }
+
+            /**
+             * Changes the theme based on mood selection
+             */
+            changeTheme(theme) {
+                const body = document.body;
+                
+                // Remove all theme classes
+                body.classList.remove('theme-calm', 'theme-energetic', 'theme-creative', 'theme-chill', 'theme-romantic', 'theme-default');
+                
+                // Add new theme class
+                body.classList.add(`theme-${theme}`);
+                
+                // Update current theme
+                this.currentTheme = theme;
+                
+                // Save theme preference
+                localStorage.setItem('uniconnect-theme', theme);
+                
+                // Show theme change message
+                const themeNames = {
+                    'calm': 'Calm Blue',
+                    'energetic': 'Energetic Orange',
+                    'creative': 'Creative Purple',
+                    'chill': 'Chill Green',
+                    'romantic': 'Romantic Pink',
+                    'default': 'Default Dark'
+                };
+                
+                this.showToast(`Theme changed to ${themeNames[theme]}`, 'success');
+                console.log(`🎨 Theme changed to: ${theme}`);
+            }
+
+            /**
+             * Loads theme preference from localStorage
+             */
+            loadThemePreference() {
+                const savedTheme = localStorage.getItem('uniconnect-theme');
+                if (savedTheme) {
+                    this.changeTheme(savedTheme);
+                }
+            }
+
+            /**
+             * Shows cookie banner only for new users (register flow)
+             */
+            showCookieBannerForNewUsers() {
+                const cookieDecision = localStorage.getItem('uniconnect-cookies');
+                if (!cookieDecision && !this.showingCookieBanner) {
+                    this.showingCookieBanner = true;
+                    const banner = document.getElementById('cookieBanner');
+                    setTimeout(() => banner.classList.add('show'), 300);
+                }
+            }
+
+            /**
+             * Handles cookie acceptance
+             */
+            acceptCookies() {
+                localStorage.setItem('uniconnect-cookies', 'accepted');
+                this.cookiesAccepted = true;
+                this.showingCookieBanner = false;
+                this.hideCookieBanner();
+                this.showToast('Cookies accepted. Thank you!', 'success');
+                
+                // Enable analytics and tracking here
+                console.log('🔍 Analytics enabled');
+            }
+
+            /**
+             * Handles cookie rejection
+             */
+            rejectCookies() {
+                localStorage.setItem('uniconnect-cookies', 'rejected');
+                this.cookiesAccepted = false;
+                this.showingCookieBanner = false;
+                this.hideCookieBanner();
+                this.showToast('Non-essential cookies rejected.', 'info');
+                
+                // Disable analytics and tracking here
+                console.log('🔍 Analytics disabled');
+            }
+
+            /**
+             * Hides the cookie banner
+             */
+            hideCookieBanner() {
+                const banner = document.getElementById('cookieBanner');
+                banner.classList.remove('show');
+                this.showingCookieBanner = false;
+            }
+
+            /**
+             * Starts animated counters for statistics
+             */
+            startCounterAnimations() {
+                const counters = [
+                    { id: 'onlineCount', target: 500000, suffix: '+' },
+                    { id: 'countryCount', target: 190, suffix: '+' },
+                    { id: 'languageCount', target: 50, suffix: '+' },
+                    { id: 'communityCount', target: 10000, suffix: '+' }
+                ];
+
+                counters.forEach(counter => {
+                    this.animateCounter(counter.id, counter.target, counter.suffix);
+                });
+            }
+
+            /**
+             * Animates a counter from 0 to target value
+             */
+            animateCounter(elementId, target, suffix = '') {
+                const element = document.getElementById(elementId);
+                if (!element) return;
+
+                let current = 0;
+                const increment = target / 50;
+                const timer = setInterval(() => {
+                    current += increment;
+                    if (current >= target) {
+                        element.textContent = target.toLocaleString() + suffix;
+                        clearInterval(timer);
+                    } else {
+                        element.textContent = Math.floor(current).toLocaleString() + suffix;
+                    }
+                }, 40);
+            }
+
+            /**
+             * Shows the specified section with a smooth transition
+             */
+            showSection(sectionId) {
+                if (this.isTransitioning || this.currentSection === sectionId) return;
+                
+                this.isTransitioning = true;
+                
+                // Get section elements
+                const currentSectionEl = document.getElementById(`${this.currentSection}Section`);
+                const newSectionEl = document.getElementById(`${sectionId}Section`);
+                
+                // Hide current section
+                currentSectionEl.classList.remove('section-active');
+                currentSectionEl.classList.add('section-hidden');
+                
+                // Show new section after a brief delay for smooth transition
+                setTimeout(() => {
+                    newSectionEl.classList.remove('section-hidden');
+                    newSectionEl.classList.add('section-active');
+                    
+                    this.currentSection = sectionId;
+                    this.isTransitioning = false;
+                    
+                    // Focus on first input in form sections
+                    if (sectionId === 'login') {
+                        document.getElementById('loginEmail').focus();
+                    } else if (sectionId === 'register') {
+                        document.getElementById('displayName').focus();
+                    }
+                    
+                    console.log(`🔄 Switched to ${sectionId} section`);
+                }, 300);
+            }
+
+            /**
+             * Handles login form submission
+             */
+            async handleLogin(e) {
+                e.preventDefault();
+                
+                const email = document.getElementById('loginEmail').value.trim();
+                const password = document.getElementById('loginPassword').value;
+                
+                // Clear previous errors
+                this.clearFieldError('loginEmail');
+                this.clearFieldError('loginPassword');
+                
+                // Validate inputs
+                let isValid = true;
+                
+                if (!email) {
+                    this.showFieldError('loginEmail', 'Email is required');
+                    isValid = false;
+                } else if (!this.validateEmail(email)) {
+                    this.showFieldError('loginEmail', 'Please enter a valid email address');
+                    isValid = false;
+                }
+                
+                if (!password) {
+                    this.showFieldError('loginPassword', 'Password is required');
+                    isValid = false;
+                }
+                
+                if (isValid) {
+                    // Set loading state
+                    this.setLoginLoadingState(true);
+                    
+                    try {
+                        // Call Firebase authentication
+                        await window.firebaseAuth.loginUser(email, password);
+                        
+                        // Success - redirect to profile page
+                        this.redirectToProfile();
+                        
+                    } catch (error) {
+                        // Handle authentication error
+                        this.showMessage(error.message, 'error');
+                        this.setLoginLoadingState(false);
+                    }
+                }
+            }
+
+            /**
+             * Handles registration form submission
+             */
+            async handleRegistration(e) {
+                e.preventDefault();
+                
+                const displayName = document.getElementById('displayName').value.trim();
+                const email = document.getElementById('registerEmail').value.trim();
+                const password = document.getElementById('registerPassword').value;
+                const confirmPassword = document.getElementById('confirmPassword').value;
+                const termsAgreed = document.getElementById('termsAgreement').checked;
+                
+                // Clear previous errors
+                this.clearFieldError('displayName');
+                this.clearFieldError('registerEmail');
+                this.clearFieldError('registerPassword');
+                this.clearFieldError('confirmPassword');
+                this.clearFieldError('termsAgreement');
+                
+                // Validate inputs
+                let isValid = true;
+                
+                if (!displayName) {
+                    this.showFieldError('displayName', 'Display name is required');
+                    isValid = false;
+                }
+                
+                if (!email) {
+                    this.showFieldError('registerEmail', 'Email is required');
+                    isValid = false;
+                } else if (!this.validateEmail(email)) {
+                    this.showFieldError('registerEmail', 'Please enter a valid email address');
+                    isValid = false;
+                }
+                
+                if (!password) {
+                    this.showFieldError('registerPassword', 'Password is required');
+                    isValid = false;
+                } else if (password.length < 6) {
+                    this.showFieldError('registerPassword', 'Password must be at least 6 characters');
+                    isValid = false;
+                }
+                
+                if (!confirmPassword) {
+                    this.showFieldError('confirmPassword', 'Please confirm your password');
+                    isValid = false;
+                } else if (password !== confirmPassword) {
+                    this.showFieldError('confirmPassword', 'Passwords do not match');
+                    isValid = false;
+                }
+                
+                if (!termsAgreed) {
+                    document.getElementById('termsError').classList.remove('hidden');
+                    isValid = false;
+                }
+                
+                if (isValid) {
+                    // Set loading state
+                    this.setRegisterLoadingState(true);
+                    
+                    try {
+                        // Call Firebase registration
+                        await window.firebaseAuth.registerUser(email, password, displayName);
+                        
+                        // Success - redirect to profile page
+                        this.redirectToProfile();
+                        
+                    } catch (error) {
+                        // Handle registration error
+                        this.showMessage(error.message, 'error');
+                        this.setRegisterLoadingState(false);
+                    }
+                }
+            }
+
+            /**
+             * Validates email format
+             */
+            validateEmail(email) {
+                const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+                return emailRegex.test(email);
+            }
+
+            /**
+             * Shows an error message for a form field
+             */
+            showFieldError(fieldId, message) {
+                const field = document.getElementById(fieldId);
+                const errorElement = document.getElementById(fieldId + 'Error');
+                
+                if (field && errorElement) {
+                    field.classList.add('input-error');
+                    field.classList.remove('input-success');
+                    errorElement.textContent = message;
+                    errorElement.classList.remove('hidden');
+                }
+            }
+
+            /**
+             * Clears error message for a form field
+             */
+            clearFieldError(fieldId) {
+                const field = document.getElementById(fieldId);
+                const errorElement = document.getElementById(fieldId + 'Error');
+                
+                if (field && errorElement) {
+                    field.classList.remove('input-error');
+                    errorElement.classList.add('hidden');
+                }
+                
+                // Special handling for terms agreement
+                if (fieldId === 'termsAgreement') {
+                    document.getElementById('termsError').classList.add('hidden');
+                }
+            }
+
+            /**
+             * Shows a success message for a form field
+             */
+            showFieldSuccess(fieldId) {
+                const field = document.getElementById(fieldId);
+                if (field) {
+                    field.classList.add('input-success');
+                    field.classList.remove('input-error');
+                }
+            }
+
+            /**
+             * Sets loading state for login form
+             */
+            setLoginLoadingState(isLoading) {
+                const loginBtn = document.getElementById('loginBtn');
+                const loginBtnText = document.getElementById('loginBtnText');
+                const loginSpinner = document.getElementById('loginSpinner');
+
+                if (loginBtn && loginBtnText && loginSpinner) {
+                    loginBtn.disabled = isLoading;
+                    
+                    if (isLoading) {
+                        loginBtnText.textContent = 'Signing In...';
+                        loginSpinner.classList.remove('hidden');
+                    } else {
+                        loginBtnText.textContent = 'Sign In';
+                        loginSpinner.classList.add('hidden');
+                    }
+                }
+            }
+
+            /**
+             * Sets loading state for registration form
+             */
+            setRegisterLoadingState(isLoading) {
+                const registerBtn = document.getElementById('registerBtn');
+                const registerBtnText = document.getElementById('registerBtnText');
+                const registerSpinner = document.getElementById('registerSpinner');
+
+                if (registerBtn && registerBtnText && registerSpinner) {
+                    registerBtn.disabled = isLoading;
+                    
+                    if (isLoading) {
+                        registerBtnText.textContent = 'Creating Account...';
+                        registerSpinner.classList.remove('hidden');
+                    } else {
+                        registerBtnText.textContent = 'Create Account';
+                        registerSpinner.classList.add('hidden');
+                    }
+                }
+            }
+
+            /**
+             * Shows a message toast
+             */
+            showMessage(message, type = 'error') {
+                const messageContainer = document.getElementById('messageContainer');
+                const messageClass = type === 'error' ? 'error-message' : 'success-message';
+                
+                messageContainer.innerHTML = `
+                    <div class="${messageClass}">
+                        <div class="flex items-center">
+                            <i class="fas ${type === 'error' ? 'fa-exclamation-triangle' : 'fa-check-circle'} mr-2"></i>
+                            <span>${message}</span>
+                        </div>
+                    </div>
+                `;
+                
+                if (type === 'error') {
+                    messageContainer.classList.add('shake');
+                    setTimeout(() => messageContainer.classList.remove('shake'), 500);
+                }
+                
+                if (type === 'success') {
+                    setTimeout(() => {
+                        if (messageContainer.innerHTML.includes(message)) {
+                            messageContainer.innerHTML = '';
+                        }
+                    }, 5000);
+                }
+            }
+
+            /**
+             * Shows a toast notification
+             */
+            showToast(message, type = 'info') {
+                const toastContainer = document.getElementById('toastContainer');
+                if (!toastContainer) return;
+
+                const toast = document.createElement('div');
+                toast.className = `toast ${type}`;
+                toast.innerHTML = `
+                    <div class="flex items-center">
+                        <i class="fas fa-${type === 'success' ? 'check-circle' : type === 'error' ? 'exclamation-circle' : type === 'warning' ? 'exclamation-triangle' : 'info-circle'} mr-2"></i>
+                        <span class="font-medium">${message}</span>
+                    </div>
+                `;
+                
+                toastContainer.appendChild(toast);
+                
+                setTimeout(() => {
+                    toast.classList.add('show');
+                }, 100);
+                
+                setTimeout(() => {
+                    toast.classList.remove('show');
+                    setTimeout(() => {
+                        toastContainer.removeChild(toast);
+                    }, 300);
+                }, 3000);
+            }
+
+            /**
+             * Loads user preferences from localStorage
+             */
+            loadUserPreferences() {
+                const savedEmail = localStorage.getItem('uniconnect-email');
+                const rememberMe = localStorage.getItem('uniconnect-remember') === 'true';
+                
+                if (savedEmail && rememberMe) {
+                    document.getElementById('loginEmail').value = savedEmail;
+                    document.getElementById('remember-me').checked = true;
+                }
+            }
+
+            /**
+             * Saves user preferences to localStorage
+             */
+            saveUserPreferences() {
+                const email = document.getElementById('loginEmail').value;
+                const rememberMe = document.getElementById('remember-me').checked;
+                
+                if (rememberMe && email) {
+                    localStorage.setItem('uniconnect-email', email);
+                    localStorage.setItem('uniconnect-remember', 'true');
+                } else {
+                    localStorage.removeItem('uniconnect-email');
+                    localStorage.removeItem('uniconnect-remember');
+                }
+            }
+
+            /**
+             * Redirects to the profile page with a smooth transition
+             */
+            redirectToProfile() {
+                // Save user preferences
+                this.saveUserPreferences();
+                
+                // Show success message
+                this.showMessage('Welcome to UniConnect! Redirecting...', 'success');
+                
+                // Add a brief delay to show the success message
+                setTimeout(() => {
+                    // Apply fade-out transition to the entire page
+                    document.body.style.opacity = '0';
+                    document.body.style.transition = 'opacity 0.5s ease-in-out';
+                    
+                    // Redirect after transition completes
+                    setTimeout(() => {
+                        window.location.href = 'profile.html';
+                    }, 500);
+                }, 1000);
+            }
         }
-      }, 20);
-    }
 
-    // Initialize animated stats
-    document.addEventListener('DOMContentLoaded', () => {
-      // Animate the counters
-      setTimeout(() => {
-        const onlineUsers = document.getElementById('onlineUsers');
-        const activeChats = document.getElementById('activeChats');
-        const newPosts = document.getElementById('newPosts');
-        const communities = document.getElementById('communities');
-        
-        if (onlineUsers) animateCounter(onlineUsers, 5847);
-        if (activeChats) animateCounter(activeChats, 2234);
-        if (newPosts) animateCounter(newPosts, 1589);
-        if (communities) animateCounter(communities, 426);
-      }, 1000);
-
-      // Check if image loaded properly
-      const img = document.querySelector('.brand-image');
-      if (img) {
-        img.addEventListener('load', function() {
-          console.log('🖼️ Image loaded successfully');
+        // Initialize the app when DOM is loaded
+        document.addEventListener('DOMContentLoaded', () => {
+            window.uniConnectApp = new UniConnectApp();
+            
+            // Check Firebase status after a delay
+            setTimeout(() => {
+                if (!window.firebaseAuth || !window.firebaseAuth.isInitialized) {
+                    console.warn('⚠️ Firebase not initialized - using fallback mode');
+                }
+            }, 3000);
         });
-        img.addEventListener('error', function() {
-          console.log('🖼️ Image failed to load, showing fallback');
-          this.style.display = 'none';
-          const fallback = document.getElementById('fallbackImage');
-          if (fallback) fallback.style.display = 'flex';
-        });
-      }
-    });
-
-    // Service Worker Registration for PWA
-    if ('serviceWorker' in navigator) {
-      window.addEventListener('load', () => {
-        navigator.serviceWorker.register('/service-worker.js')
-          .then(registration => {
-            console.log('🔧 Service Worker registered:', registration);
-          })
-          .catch(error => {
-            console.log('🔧 Service Worker registration failed:', error);
-          });
-      });
-    }
-
-    // Add gradient animation
-    const style = document.createElement('style');
-    style.textContent = `
-      @keyframes gradient {
-        0% { background-position: 0% 50%; }
-        50% { background-position: 100% 50%; }
-        100% { background-position: 0% 50%; }
-      }
-      .animate-gradient {
-        animation: gradient 3s ease infinite;
-        background-size: 200% 200%;
-      }
-    `;
-    document.head.appendChild(style);
-  </script>
+    </script>
 </body>
 </html>

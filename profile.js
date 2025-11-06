@@ -1,14 +1,14 @@
 // profile.js - User Profile Management
 console.log('👤 Profile script loaded');
 
-// Firebase configuration
+// Firebase configuration (to be configured before deployment)
 const firebaseConfig = {
-    apiKey: "AIzaSyDHHyGgsSV18BcXrGgzi4C8frzDAE1C1zo",
-    authDomain: "uniconnect-ee95c.firebasestorage.app",
-    projectId: "uniconnect-ee95c",
-    storageBucket: "uniconnect-ee95c.firebasestorage.app",
-    messagingSenderId: "1003264444309",
-    appId: "1:1003264444309:web:9f0307516e44d21e97d89c"
+  apiKey: "AIzaSyDHHyGgsSV18BcXrGgzi4C8frzDAE1C1zo",
+  authDomain: "uniconnect-ee95c.firebaseapp.com",
+  projectId: "uniconnect-ee95c",
+  storageBucket: "uniconnect-ee95c.firebasestorage.app",
+  messagingSenderId: "1003264444309",
+  appId: "1:1003264444309:web:9f0307516e44d21e97d89c"
 };
 
 // Initialize Firebase
@@ -31,14 +31,14 @@ const postCount = document.getElementById('postCount');
 const followerCount = document.getElementById('followerCount');
 const followingCount = document.getElementById('followingCount');
 const streakCount = document.getElementById('streakCount');
-const unicoinsCount = document.getElementById('unicoinsCount');
+const coinsCount = document.getElementById('coinsCount');
 const userLevel = document.getElementById('userLevel');
 const editProfileBtn = document.getElementById('editProfileBtn');
 const logoutBtn = document.getElementById('logoutBtn');
 const userPostsContainer = document.getElementById('userPostsContainer');
 
-// Cloudinary configuration
-const CLOUDINARY_UPLOAD_URL = 'http://localhost:3000/upload';
+// Cloudinary configuration (to be configured before deployment)
+const CLOUDINARY_UPLOAD_URL = '/upload';
 
 // Event Listeners
 document.addEventListener('DOMContentLoaded', function() {
@@ -110,7 +110,7 @@ function updateProfileUI(data) {
     if (followerCount) followerCount.textContent = data.followers || 0;
     if (followingCount) followingCount.textContent = data.following || 0;
     if (streakCount) streakCount.textContent = data.streak || 1;
-    if (unicoinsCount) unicoinsCount.textContent = data.unicoins || 0;
+    if (coinsCount) coinsCount.textContent = data.coins || 0;
     if (userLevel) userLevel.textContent = data.level || 1;
     
     console.log('✅ Profile UI updated with user data');

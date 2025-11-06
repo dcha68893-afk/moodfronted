@@ -13,6 +13,7 @@
     <script src="https://www.gstatic.com/firebasejs/9.22.1/firebase-auth-compat.js"></script>
     
     <style>
+        /* All existing CSS styles remain */
         .glass-card {
             background: rgba(255, 255, 255, 0.1);
             backdrop-filter: blur(20px);
@@ -244,6 +245,71 @@
             0% { transform: rotate(0deg); }
             100% { transform: rotate(1080deg); }
         }
+        
+        /* New styles for enhanced features */
+        .payment-option.selected {
+            border-color: #3b82f6;
+            background: rgba(59, 130, 246, 0.2);
+        }
+        
+        .user-avatar {
+            width: 40px;
+            height: 40px;
+            border-radius: 50%;
+            background: linear-gradient(135deg, #3b82f6, #1d4ed8);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            color: white;
+            font-weight: bold;
+        }
+        
+        .category-tag {
+            display: inline-block;
+            padding: 4px 12px;
+            border-radius: 20px;
+            font-size: 0.75rem;
+            font-weight: 600;
+            margin-right: 8px;
+            margin-bottom: 8px;
+        }
+        
+        .emergency-tag {
+            background: rgba(239, 68, 68, 0.2);
+            color: #ef4444;
+            border: 1px solid rgba(239, 68, 68, 0.5);
+        }
+        
+        .charity-tag {
+            background: rgba(16, 185, 129, 0.2);
+            color: #10b981;
+            border: 1px solid rgba(16, 185, 129, 0.5);
+        }
+        
+        .celebration-tag {
+            background: rgba(245, 158, 11, 0.2);
+            color: #f59e0b;
+            border: 1px solid rgba(245, 158, 11, 0.5);
+        }
+        
+        .scrollable-list {
+            max-height: 300px;
+            overflow-y: auto;
+        }
+        
+        .scrollable-list::-webkit-scrollbar {
+            width: 6px;
+        }
+        
+        .scrollable-list::-webkit-scrollbar-track {
+            background: rgba(255, 255, 255, 0.1);
+            border-radius: 10px;
+        }
+        
+        .scrollable-list::-webkit-scrollbar-thumb {
+            background: rgba(59, 130, 246, 0.5);
+            border-radius: 10px;
+        }
     </style>
 </head>
 <body class="h-full bg-gradient-to-br from-slate-900 via-blue-900 to-slate-900 text-white">
@@ -274,7 +340,7 @@
                     </div>
                     <div class="flex items-center space-x-4">
                         <div class="text-right">
-                            <div class="font-semibold text-white" id="userBalance">KSh 12,450.00</div>
+                            <div class="font-semibold text-white" id="userBalance">Loading...</div>
                             <div class="text-slate-400 text-sm">Available Balance</div>
                         </div>
                         <div class="w-10 h-10 bg-gradient-to-r from-green-500 to-emerald-500 rounded-full flex items-center justify-center">
@@ -322,7 +388,7 @@
                 <!-- Balance Card -->
                 <div class="glass-card rounded-2xl border border-slate-700 p-6">
                     <h3 class="text-xl font-black text-white mb-4">Account Balance</h3>
-                    <div class="text-3xl font-black text-green-400 mb-2" id="balanceAmount">KSh 12,450.00</div>
+                    <div class="text-3xl font-black text-green-400 mb-2" id="balanceAmount">Loading...</div>
                     <p class="text-slate-400 text-sm mb-4">Available for transactions</p>
                     <div class="flex space-x-3">
                         <button class="flex-1 px-4 py-2 primary-gradient text-white rounded-xl font-semibold hover:scale-105 transition" onclick="openAddMoneyModal()">
@@ -341,19 +407,19 @@
                         <div class="flex justify-between items-center">
                             <span class="text-slate-400">AI Fraud Detection</span>
                             <span class="security-badge" id="fraudDetectionStatus">
-                                <i class="fas fa-shield-alt mr-1"></i> Active
+                                <i class="fas fa-shield-alt mr-1"></i> Loading...
                             </span>
                         </div>
                         <div class="flex justify-between items-center">
                             <span class="text-slate-400">Biometric Auth</span>
                             <span class="security-badge" id="biometricStatus">
-                                <i class="fas fa-fingerprint mr-1"></i> Enabled
+                                <i class="fas fa-fingerprint mr-1"></i> Loading...
                             </span>
                         </div>
                         <div class="flex justify-between items-center">
                             <span class="text-slate-400">2FA</span>
                             <span class="security-badge" id="twoFAStatus">
-                                <i class="fas fa-mobile-alt mr-1"></i> Enabled
+                                <i class="fas fa-mobile-alt mr-1"></i> Loading...
                             </span>
                         </div>
                     </div>
@@ -367,7 +433,7 @@
                     <h3 class="text-xl font-black text-white mb-4">Rewards</h3>
                     <div class="flex items-center justify-between mb-4">
                         <div>
-                            <div class="text-2xl font-black text-yellow-400" id="cashbackAmount">KSh 245</div>
+                            <div class="text-2xl font-black text-yellow-400" id="cashbackAmount">Loading...</div>
                             <div class="text-slate-400 text-sm">Cashback Earned</div>
                         </div>
                         <div class="cashback-badge w-12 h-12 rounded-full flex items-center justify-center">
@@ -381,7 +447,7 @@
                         </div>
                         <div class="flex justify-between text-sm">
                             <span class="text-slate-400">Streak Bonus</span>
-                            <span class="text-yellow-400 font-semibold" id="streakCount">Day 5</span>
+                            <span class="text-yellow-400 font-semibold" id="streakCount">Loading...</span>
                         </div>
                     </div>
                     <button class="w-full px-4 py-2 rewards-gradient text-white rounded-xl font-semibold hover:scale-105 transition" onclick="claimRewards()">
@@ -444,7 +510,10 @@
 
                 <div class="glass-card rounded-2xl border border-slate-700 p-6">
                     <div class="space-y-4" id="transactionsList">
-                        <!-- Transactions will be loaded here -->
+                        <div class="text-center py-8 text-slate-400">
+                            <i class="fas fa-sync fa-spin text-2xl mb-2"></i>
+                            <p>Loading transactions...</p>
+                        </div>
                     </div>
                 </div>
             </div>
@@ -486,7 +555,7 @@
                         </div>
                         <h3 class="text-lg font-semibold text-white mb-2">Group Payments</h3>
                         <p class="text-slate-400 text-sm mb-4">Split bills and collect money from groups</p>
-                        <button class="w-full px-4 py-2 primary-gradient text-white rounded-xl font-semibold hover:scale-105 transition" onclick="createGroup()">
+                        <button class="w-full px-4 py-2 primary-gradient text-white rounded-xl font-semibold hover:scale-105 transition" onclick="openGroupPaymentModal()">
                             Create Group
                         </button>
                     </div>
@@ -497,7 +566,7 @@
                         </div>
                         <h3 class="text-lg font-semibold text-white mb-2">Social Gifting</h3>
                         <p class="text-slate-400 text-sm mb-4">Send gifts with personalized messages</p>
-                        <button class="w-full px-4 py-2 rewards-gradient text-white rounded-xl font-semibold hover:scale-105 transition" onclick="sendGift()">
+                        <button class="w-full px-4 py-2 rewards-gradient text-white rounded-xl font-semibold hover:scale-105 transition" onclick="openSocialGiftingModal()">
                             Send Gift
                         </button>
                     </div>
@@ -508,7 +577,7 @@
                         </div>
                         <h3 class="text-lg font-semibold text-white mb-2">Shared Goals</h3>
                         <p class="text-slate-400 text-sm mb-4">Save together for common objectives</p>
-                        <button class="w-full px-4 py-2 security-gradient text-white rounded-xl font-semibold hover:scale-105 transition" onclick="startGoal()">
+                        <button class="w-full px-4 py-2 security-gradient text-white rounded-xl font-semibold hover:scale-105 transition" onclick="openSharedGoalsModal()">
                             Start Goal
                         </button>
                     </div>
@@ -637,14 +706,22 @@
                 
                 <div class="form-group">
                     <label class="form-label">Payment Method</label>
-                    <div class="grid grid-cols-2 gap-3">
-                        <div class="payment-option glass-card rounded-xl p-3 text-center cursor-pointer border border-slate-700 hover:border-blue-400" onclick="selectPaymentOption(this, 'mpesa')">
+                    <div class="grid grid-cols-2 gap-3" id="paymentOptions">
+                        <div class="payment-option glass-card rounded-xl p-3 text-center cursor-pointer border border-slate-700 hover:border-blue-400" data-method="mpesa">
                             <i class="fas fa-mobile-alt text-green-400 mb-1"></i>
                             <div class="text-sm">M-Pesa</div>
                         </div>
-                        <div class="payment-option glass-card rounded-xl p-3 text-center cursor-pointer border border-slate-700 hover:border-blue-400" onclick="selectPaymentOption(this, 'card')">
+                        <div class="payment-option glass-card rounded-xl p-3 text-center cursor-pointer border border-slate-700 hover:border-blue-400" data-method="card">
                             <i class="fas fa-credit-card text-blue-400 mb-1"></i>
                             <div class="text-sm">Card</div>
+                        </div>
+                        <div class="payment-option glass-card rounded-xl p-3 text-center cursor-pointer border border-slate-700 hover:border-blue-400" data-method="bank">
+                            <i class="fas fa-university text-emerald-400 mb-1"></i>
+                            <div class="text-sm">Bank Transfer</div>
+                        </div>
+                        <div class="payment-option glass-card rounded-xl p-3 text-center cursor-pointer border border-slate-700 hover:border-blue-400" data-method="crypto">
+                            <i class="fas fa-coins text-purple-400 mb-1"></i>
+                            <div class="text-sm">Crypto</div>
                         </div>
                     </div>
                 </div>
@@ -697,24 +774,39 @@
                 <div class="flex justify-between items-center">
                     <div>
                         <div class="font-semibold text-white">Two-Factor Authentication</div>
-                        <div class="text-slate-400 text-sm">Extra security for your account</div>
+                        <div class="text-slate-400 text-sm">Extra security for logins</div>
                     </div>
                     <label class="relative inline-flex items-center cursor-pointer">
                         <input type="checkbox" class="sr-only peer" id="twoFAToggle" checked>
                         <div class="w-11 h-6 bg-slate-700 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-green-500"></div>
                     </label>
                 </div>
+                
+                <div class="flex justify-between items-center">
+                    <div>
+                        <div class="font-semibold text-white">Transaction Limits</div>
+                        <div class="text-slate-400 text-sm">Set daily spending limits</div>
+                    </div>
+                    <button class="text-blue-400 hover:text-blue-300" onclick="setTransactionLimits()">
+                        Configure
+                    </button>
+                </div>
             </div>
             
-            <button class="w-full px-4 py-2 security-gradient text-white rounded-xl font-semibold hover:scale-105 transition" onclick="saveSecuritySettings()">
-                Save Settings
-            </button>
+            <div class="flex space-x-3">
+                <button class="flex-1 px-4 py-2 glass-card border border-slate-700 rounded-xl text-slate-400 hover:border-green-400 hover:text-green-400 transition" onclick="closeModal('securitySettingsModal')">
+                    Cancel
+                </button>
+                <button class="flex-1 px-4 py-2 security-gradient text-white rounded-xl font-semibold hover:scale-105 transition" onclick="saveSecuritySettings()">
+                    Save Settings
+                </button>
+            </div>
         </div>
     </div>
 
-    <!-- Daily Rewards Spin Modal -->
+    <!-- Rewards Spin Modal -->
     <div id="rewardsSpinModal" class="fixed inset-0 bg-black/80 flex items-center justify-center p-4 z-50 hidden">
-        <div class="glass-card rounded-2xl p-6 max-w-md w-full fade-in text-center">
+        <div class="glass-card rounded-2xl p-6 max-w-md w-full fade-in">
             <div class="flex justify-between items-center mb-6">
                 <h3 class="text-2xl font-black text-white">Daily Rewards</h3>
                 <button class="text-slate-400 hover:text-white" onclick="closeModal('rewardsSpinModal')">
@@ -722,102 +814,546 @@
                 </button>
             </div>
             
-            <div class="mb-6">
-                <div class="w-48 h-48 mx-auto relative" id="rewardWheel">
-                    <div class="absolute inset-0 rounded-full border-4 border-yellow-400"></div>
-                    <div class="absolute inset-8 rounded-full bg-yellow-400/20 flex items-center justify-center">
-                        <span class="text-4xl">🎁</span>
+            <div class="mb-6 text-center">
+                <div class="relative w-64 h-64 mx-auto mb-4">
+                    <div class="absolute inset-0 rounded-full primary-gradient flex items-center justify-center">
+                        <div class="w-60 h-60 bg-slate-900 rounded-full flex items-center justify-center">
+                            <div class="text-center">
+                                <div class="text-2xl font-black text-white mb-2">Spin to Win!</div>
+                                <div class="text-slate-400 text-sm">Tap the button below</div>
+                            </div>
+                        </div>
                     </div>
-                    <div class="absolute top-0 left-1/2 transform -translate-x-1/2 -translate-y-1/2 text-4xl" id="wheelPointer">
-                        🎯
-                    </div>
+                    <div class="absolute top-0 left-1/2 transform -translate-x-1/2 -translate-y-1 w-4 h-8 bg-yellow-400 rounded-t-lg"></div>
                 </div>
                 
-                <p class="text-slate-400 mt-4">Spin to win daily cashback and rewards!</p>
+                <div class="text-slate-400 text-sm mb-4">
+                    Spin the wheel to win cashback, bonus points, or special rewards!
+                </div>
             </div>
             
-            <button class="w-full px-4 py-2 rewards-gradient text-white rounded-xl font-semibold hover:scale-105 transition" onclick="spinRewardsWheel()" id="spinButton">
-                <i class="fas fa-sync mr-2"></i> Spin Now
-            </button>
+            <div class="flex space-x-3">
+                <button class="flex-1 px-4 py-2 glass-card border border-slate-700 rounded-xl text-slate-400 hover:border-yellow-400 hover:text-yellow-400 transition" onclick="closeModal('rewardsSpinModal')">
+                    Maybe Later
+                </button>
+                <button class="flex-1 px-4 py-2 rewards-gradient text-white rounded-xl font-semibold hover:scale-105 transition" onclick="spinRewardsWheel()">
+                    <i class="fas fa-sync mr-2"></i> Spin Now
+                </button>
+            </div>
         </div>
     </div>
 
+    <!-- Group Payment Modal -->
+    <div id="groupPaymentModal" class="fixed inset-0 bg-black/80 flex items-center justify-center p-4 z-50 hidden">
+        <div class="glass-card rounded-2xl p-6 max-w-md w-full fade-in">
+            <div class="flex justify-between items-center mb-6">
+                <h3 class="text-2xl font-black text-white">Create Group Payment</h3>
+                <button class="text-slate-400 hover:text-white" onclick="closeModal('groupPaymentModal')">
+                    <i class="fas fa-times"></i>
+                </button>
+            </div>
+            
+            <div class="mb-6">
+                <div class="form-group">
+                    <label class="form-label">Group Name</label>
+                    <input type="text" class="form-input" id="groupNameInput" placeholder="Enter group name">
+                </div>
+                
+                <div class="form-group">
+                    <label class="form-label">Total Amount</label>
+                    <input type="number" class="form-input" id="groupAmountInput" placeholder="KSh 0.00">
+                </div>
+                
+                <div class="form-group">
+                    <label class="form-label">Description</label>
+                    <input type="text" class="form-input" id="groupDescriptionInput" placeholder="What's this payment for?">
+                </div>
+                
+                <div class="form-group">
+                    <label class="form-label">Add Members</label>
+                    <div class="flex space-x-2 mb-2">
+                        <input type="text" class="form-input flex-1" id="memberSearchInput" placeholder="Search users">
+                        <button class="px-4 py-2 primary-gradient text-white rounded-xl font-semibold" onclick="addMember()">
+                            Add
+                        </button>
+                    </div>
+                    <div class="scrollable-list border border-slate-700 rounded-xl p-3 max-h-32" id="membersList">
+                        <div class="text-slate-400 text-center py-2">No members added yet</div>
+                    </div>
+                </div>
+                
+                <div class="form-group">
+                    <label class="form-label">Split Options</label>
+                    <div class="flex space-x-3">
+                        <button class="flex-1 px-4 py-2 glass-card border border-slate-700 rounded-xl text-slate-400 hover:border-blue-400 hover:text-blue-400 transition" onclick="setSplitOption('equal')">
+                            Equal Split
+                        </button>
+                        <button class="flex-1 px-4 py-2 glass-card border border-slate-700 rounded-xl text-slate-400 hover:border-blue-400 hover:text-blue-400 transition" onclick="setSplitOption('custom')">
+                            Custom Split
+                        </button>
+                    </div>
+                </div>
+            </div>
+            
+            <div class="flex space-x-3">
+                <button class="flex-1 px-4 py-2 glass-card border border-slate-700 rounded-xl text-slate-400 hover:border-blue-400 hover:text-blue-400 transition" onclick="closeModal('groupPaymentModal')">
+                    Cancel
+                </button>
+                <button class="flex-1 px-4 py-2 primary-gradient text-white rounded-xl font-semibold hover:scale-105 transition" onclick="createGroupPayment()">
+                    Create Group
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Social Gifting Modal -->
+    <div id="socialGiftingModal" class="fixed inset-0 bg-black/80 flex items-center justify-center p-4 z-50 hidden">
+        <div class="glass-card rounded-2xl p-6 max-w-md w-full fade-in">
+            <div class="flex justify-between items-center mb-6">
+                <h3 class="text-2xl font-black text-white">Send a Gift</h3>
+                <button class="text-slate-400 hover:text-white" onclick="closeModal('socialGiftingModal')">
+                    <i class="fas fa-times"></i>
+                </button>
+            </div>
+            
+            <div class="mb-6">
+                <div class="form-group">
+                    <label class="form-label">Recipient</label>
+                    <div class="flex space-x-2">
+                        <select class="form-input flex-1" id="giftRecipientType">
+                            <option value="user">Individual User</option>
+                            <option value="group">Group</option>
+                            <option value="charity">Charity Organization</option>
+                        </select>
+                        <input type="text" class="form-input flex-2" id="giftRecipientInput" placeholder="Search users or groups">
+                    </div>
+                </div>
+                
+                <div class="form-group">
+                    <label class="form-label">Gift Amount</label>
+                    <input type="number" class="form-input" id="giftAmountInput" placeholder="KSh 0.00">
+                </div>
+                
+                <div class="form-group">
+                    <label class="form-label">Gift Category</label>
+                    <div class="flex flex-wrap gap-2">
+                        <span class="category-tag emergency-tag cursor-pointer" onclick="selectGiftCategory('emergency')">Emergency Aid</span>
+                        <span class="category-tag charity-tag cursor-pointer" onclick="selectGiftCategory('charity')">Charity Donation</span>
+                        <span class="category-tag celebration-tag cursor-pointer" onclick="selectGiftCategory('celebration')">Celebration</span>
+                        <span class="category-tag cursor-pointer" style="background: rgba(59, 130, 246, 0.2); color: #3b82f6; border: 1px solid rgba(59, 130, 246, 0.5);" onclick="selectGiftCategory('appreciation')">Appreciation</span>
+                    </div>
+                </div>
+                
+                <div class="form-group">
+                    <label class="form-label">Personal Message</label>
+                    <textarea class="form-input" id="giftMessageInput" placeholder="Add a personal message..." rows="3"></textarea>
+                </div>
+                
+                <div class="form-group">
+                    <label class="form-label">Gift Anonymously</label>
+                    <div class="flex items-center">
+                        <input type="checkbox" class="mr-2" id="anonymousGift">
+                        <label for="anonymousGift" class="text-slate-400">Send gift without revealing your identity</label>
+                    </div>
+                </div>
+            </div>
+            
+            <div class="flex space-x-3">
+                <button class="flex-1 px-4 py-2 glass-card border border-slate-700 rounded-xl text-slate-400 hover:border-yellow-400 hover:text-yellow-400 transition" onclick="closeModal('socialGiftingModal')">
+                    Cancel
+                </button>
+                <button class="flex-1 px-4 py-2 rewards-gradient text-white rounded-xl font-semibold hover:scale-105 transition" onclick="sendGift()">
+                    Send Gift
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Shared Goals Modal -->
+    <div id="sharedGoalsModal" class="fixed inset-0 bg-black/80 flex items-center justify-center p-4 z-50 hidden">
+        <div class="glass-card rounded-2xl p-6 max-w-md w-full fade-in">
+            <div class="flex justify-between items-center mb-6">
+                <h3 class="text-2xl font-black text-white">Create Shared Goal</h3>
+                <button class="text-slate-400 hover:text-white" onclick="closeModal('sharedGoalsModal')">
+                    <i class="fas fa-times"></i>
+                </button>
+            </div>
+            
+            <div class="mb-6">
+                <div class="form-group">
+                    <label class="form-label">Goal Name</label>
+                    <input type="text" class="form-input" id="goalNameInput" placeholder="e.g., Trip to Mombasa">
+                </div>
+                
+                <div class="form-group">
+                    <label class="form-label">Target Amount</label>
+                    <input type="number" class="form-input" id="goalAmountInput" placeholder="KSh 0.00">
+                </div>
+                
+                <div class="form-group">
+                    <label class="form-label">Description</label>
+                    <textarea class="form-input" id="goalDescriptionInput" placeholder="Describe your goal..." rows="2"></textarea>
+                </div>
+                
+                <div class="form-group">
+                    <label class="form-label">Target Date</label>
+                    <input type="date" class="form-input" id="goalDateInput">
+                </div>
+                
+                <div class="form-group">
+                    <label class="form-label">Add Participants</label>
+                    <div class="flex space-x-2 mb-2">
+                        <input type="text" class="form-input flex-1" id="participantSearchInput" placeholder="Search users">
+                        <button class="px-4 py-2 primary-gradient text-white rounded-xl font-semibold" onclick="addParticipant()">
+                            Add
+                        </button>
+                    </div>
+                    <div class="scrollable-list border border-slate-700 rounded-xl p-3 max-h-32" id="participantsList">
+                        <div class="text-slate-400 text-center py-2">No participants added yet</div>
+                    </div>
+                </div>
+                
+                <div class="form-group">
+                    <label class="form-label">Contribution Type</label>
+                    <div class="flex space-x-3">
+                        <button class="flex-1 px-4 py-2 glass-card border border-slate-700 rounded-xl text-slate-400 hover:border-blue-400 hover:text-blue-400 transition" onclick="setContributionType('equal')">
+                            Equal Shares
+                        </button>
+                        <button class="flex-1 px-4 py-2 glass-card border border-slate-700 rounded-xl text-slate-400 hover:border-blue-400 hover:text-blue-400 transition" onclick="setContributionType('custom')">
+                            Custom Amounts
+                        </button>
+                    </div>
+                </div>
+            </div>
+            
+            <div class="flex space-x-3">
+                <button class="flex-1 px-4 py-2 glass-card border border-slate-700 rounded-xl text-slate-400 hover:border-green-400 hover:text-green-400 transition" onclick="closeModal('sharedGoalsModal')">
+                    Cancel
+                </button>
+                <button class="flex-1 px-4 py-2 security-gradient text-white rounded-xl font-semibold hover:scale-105 transition" onclick="createSharedGoal()">
+                    Create Goal
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Firebase Configuration -->
     <script>
-        // Firebase configuration
+        // Firebase configuration for the live project
         const firebaseConfig = {
-            apiKey: "AIzaSyC4mOkOjf4w33XvJ2QdQqS2q8X8w8X8w8X",
-            authDomain: "connectsphere-payments.firebaseapp.com",
-            projectId: "connectsphere-payments",
-            storageBucket: "connectsphere-payments.appspot.com",
-            messagingSenderId: "123456789012",
-            appId: "1:123456789012:web:8a8b8c8d8e8f9a0b1c2d3e"
+            apiKey: "AIzaSyDHHyGgsSV18BcXrGgzi4C8frzDAE1C1zo",
+            authDomain: "uniconnect-ee95c.firebaseapp.com",
+            projectId: "uniconnect-ee95c",
+            storageBucket: "uniconnect-ee95c.firebasestorage.app",
+            messagingSenderId: "1003264444309",
+            appId: "1:1003264444309:web:9f0307516e44d21e97d89c"
         };
 
         // Initialize Firebase
-        console.log('🔄 Initializing Firebase...');
         firebase.initializeApp(firebaseConfig);
-        const db = firebase.firestore();
         const auth = firebase.auth();
+        const db = firebase.firestore();
 
-        // State
+        // Global variables
+        let currentUser = null;
+        let userData = null;
         let selectedPaymentMethod = null;
         let selectedPaymentOption = null;
-        let userBalance = 12450.00;
-        let cashbackBalance = 245;
-        let streakCount = 5;
-        let transactions = [
-            { type: 'sent', amount: 2499, description: 'Marketplace Purchase', date: 'Today • 14:30' },
-            { type: 'received', amount: 5000, description: 'Money Received', date: 'Yesterday • 09:15', from: 'John Doe' },
-            { type: 'received', amount: 125, description: 'Cashback Reward', date: '2 days ago • 16:45', note: 'Marketplace purchase' }
-        ];
+        let groupMembers = [];
+        let goalParticipants = [];
+        let selectedGiftCategory = null;
 
-        // Initialize
+        // Initialize the application
         document.addEventListener('DOMContentLoaded', function() {
+            // Clear any cached demo data
+            clearCachedData();
+            
+            // Initialize Firebase and check authentication
+            initFirebase();
+            
+            // Set up payment method selection
+            setupPaymentMethods();
+            
+            // Set up event listeners
             setupEventListeners();
-            updateUI();
-            initializeFirebase();
-            loadTransactions();
         });
 
-        function initializeFirebase() {
-            console.log('🔄 Testing Firebase connection...');
-            
-            // Test Firestore connection
-            db.collection('test').limit(1).get()
-                .then(() => {
-                    console.log('✅ Firebase Firestore connected successfully!');
-                    updateConnectionStatus('connected', 'Firebase Connected');
-                    showToast('Firebase connected successfully!', 'success');
-                })
-                .catch((error) => {
-                    console.error('❌ Firebase Firestore connection failed:', error);
-                    updateConnectionStatus('error', 'Connection Failed');
-                    showToast('Firebase connection failed. Using offline mode.', 'error');
-                });
+        // Clear all cached demo data
+        function clearCachedData() {
+            localStorage.removeItem('demoUserData');
+            localStorage.removeItem('demoTransactions');
+            sessionStorage.removeItem('demoBalance');
+            console.log('Cleared all cached demo data');
+        }
 
-            // Auth state listener
+        // Initialize Firebase and authentication
+        function initFirebase() {
+            updateConnectionStatus('connecting', 'Connecting to Firebase...');
+            
+            // Check authentication state
             auth.onAuthStateChanged((user) => {
                 if (user) {
-                    console.log('✅ User authenticated:', user.email);
+                    // User is signed in
+                    currentUser = user;
+                    updateConnectionStatus('connected', 'Connected to Firebase');
+                    loadUserData();
                 } else {
-                    console.log('🔐 No user signed in (this is normal for now)');
-                    // You can implement anonymous auth here if needed
+                    // User is signed out
+                    updateConnectionStatus('error', 'Not authenticated. Please log in.');
+                    showToast('Please log in to access payment features', 'error');
+                    
+                    // Redirect to login page after a delay
+                    setTimeout(() => {
+                        window.location.href = 'login.html';
+                    }, 3000);
                 }
+            }, (error) => {
+                console.error('Auth state change error:', error);
+                updateConnectionStatus('error', 'Authentication error');
+                showToast('Authentication error. Please try again.', 'error');
             });
         }
 
-        function setupEventListeners() {
-            // Payment method selection
-            document.querySelectorAll('.payment-method').forEach(method => {
-                method.addEventListener('click', function() {
-                    document.querySelectorAll('.payment-method').forEach(m => {
-                        m.classList.remove('selected');
-                    });
-                    this.classList.add('selected');
-                    selectedPaymentMethod = this.getAttribute('data-method');
-                    console.log(`✅ Selected payment method: ${selectedPaymentMethod}`);
-                    showToast(`${selectedPaymentMethod.toUpperCase()} selected as payment method`, 'info');
+        // Load user data from Firestore
+        function loadUserData() {
+            if (!currentUser) return;
+            
+            // Reference to the user's document in Firestore
+            const userRef = db.collection('users').doc(currentUser.uid);
+            
+            userRef.get().then((doc) => {
+                if (doc.exists) {
+                    userData = doc.data();
+                    updateUIWithUserData();
+                    loadTransactions();
+                    loadSecuritySettings();
+                } else {
+                    // User document doesn't exist, create one
+                    createUserDocument();
+                }
+            }).catch((error) => {
+                console.error('Error loading user data:', error);
+                showToast('Error loading user data', 'error');
+            });
+        }
+
+        // Create a new user document in Firestore
+        function createUserDocument() {
+            if (!currentUser) return;
+            
+            const userRef = db.collection('users').doc(currentUser.uid);
+            const initialUserData = {
+                uid: currentUser.uid,
+                email: currentUser.email,
+                displayName: currentUser.displayName || 'User',
+                balance: 0,
+                cashback: 0,
+                streak: 0,
+                security: {
+                    fraudDetection: true,
+                    biometricAuth: false,
+                    twoFA: false
+                },
+                createdAt: firebase.firestore.FieldValue.serverTimestamp(),
+                updatedAt: firebase.firestore.FieldValue.serverTimestamp()
+            };
+            
+            userRef.set(initialUserData).then(() => {
+                userData = initialUserData;
+                updateUIWithUserData();
+                showToast('Account setup complete!', 'success');
+            }).catch((error) => {
+                console.error('Error creating user document:', error);
+                showToast('Error setting up account', 'error');
+            });
+        }
+
+        // Update UI with real user data
+        function updateUIWithUserData() {
+            if (!userData) return;
+            
+            // Update balance
+            document.getElementById('userBalance').textContent = `KSh ${userData.balance?.toLocaleString() || '0'}`;
+            document.getElementById('balanceAmount').textContent = `KSh ${userData.balance?.toLocaleString() || '0'}`;
+            
+            // Update cashback
+            document.getElementById('cashbackAmount').textContent = `KSh ${userData.cashback?.toLocaleString() || '0'}`;
+            
+            // Update streak
+            document.getElementById('streakCount').textContent = `${userData.streak || 0} days`;
+            
+            // Update security status
+            if (userData.security) {
+                document.getElementById('fraudDetectionStatus').innerHTML = 
+                    `<i class="fas fa-shield-alt mr-1"></i> ${userData.security.fraudDetection ? 'Active' : 'Inactive'}`;
+                
+                document.getElementById('biometricStatus').innerHTML = 
+                    `<i class="fas fa-fingerprint mr-1"></i> ${userData.security.biometricAuth ? 'Enabled' : 'Disabled'}`;
+                
+                document.getElementById('twoFAStatus').innerHTML = 
+                    `<i class="fas fa-mobile-alt mr-1"></i> ${userData.security.twoFA ? 'Enabled' : 'Disabled'}`;
+            }
+        }
+
+        // Load transactions from Firestore
+        function loadTransactions() {
+            if (!currentUser) return;
+            
+            const transactionsRef = db.collection('users').doc(currentUser.uid).collection('transactions')
+                .orderBy('timestamp', 'desc')
+                .limit(5);
+            
+            transactionsRef.get().then((querySnapshot) => {
+                const transactionsList = document.getElementById('transactionsList');
+                transactionsList.innerHTML = '';
+                
+                if (querySnapshot.empty) {
+                    transactionsList.innerHTML = `
+                        <div class="text-center py-8 text-slate-400">
+                            <i class="fas fa-exchange-alt text-2xl mb-2"></i>
+                            <p>No transactions yet</p>
+                        </div>
+                    `;
+                    return;
+                }
+                
+                querySnapshot.forEach((doc) => {
+                    const transaction = doc.data();
+                    const transactionElement = createTransactionElement(transaction);
+                    transactionsList.appendChild(transactionElement);
                 });
+            }).catch((error) => {
+                console.error('Error loading transactions:', error);
+                document.getElementById('transactionsList').innerHTML = `
+                    <div class="text-center py-8 text-red-400">
+                        <i class="fas fa-exclamation-triangle text-2xl mb-2"></i>
+                        <p>Error loading transactions</p>
+                    </div>
+                `;
+            });
+        }
+
+        // Create a transaction element for the UI
+        function createTransactionElement(transaction) {
+            const div = document.createElement('div');
+            div.className = 'transaction-item flex justify-between items-center p-4 rounded-xl border border-slate-700';
+            
+            const isPositive = transaction.type === 'received' || transaction.type === 'cashback' || transaction.type === 'gift_received';
+            const icon = transaction.type === 'sent' ? 'fa-arrow-up' : 
+                         transaction.type === 'received' ? 'fa-arrow-down' : 
+                         transaction.type === 'cashback' ? 'fa-gift' : 
+                         transaction.type === 'gift_sent' ? 'fa-gift' :
+                         transaction.type === 'gift_received' ? 'fa-gift' : 'fa-exchange-alt';
+            
+            const colorClass = isPositive ? 'text-green-400' : 'text-red-400';
+            const sign = isPositive ? '+' : '-';
+            
+            div.innerHTML = `
+                <div class="flex items-center">
+                    <div class="w-10 h-10 rounded-full ${isPositive ? 'bg-green-500/20' : 'bg-red-500/20'} flex items-center justify-center mr-3">
+                        <i class="fas ${icon} ${isPositive ? 'text-green-400' : 'text-red-400'}"></i>
+                    </div>
+                    <div>
+                        <div class="font-semibold text-white">${transaction.description || 'Payment'}</div>
+                        <div class="text-slate-400 text-sm">${formatDate(transaction.timestamp?.toDate())}</div>
+                    </div>
+                </div>
+                <div class="text-right">
+                    <div class="font-bold ${colorClass}">${sign}KSh ${Math.abs(transaction.amount).toLocaleString()}</div>
+                    <div class="text-slate-400 text-sm">${transaction.status || 'Completed'}</div>
+                </div>
+            `;
+            
+            return div;
+        }
+
+        // Format date for display
+        function formatDate(date) {
+            if (!date) return 'Unknown date';
+            
+            const now = new Date();
+            const diffMs = now - date;
+            const diffMins = Math.floor(diffMs / 60000);
+            const diffHours = Math.floor(diffMs / 3600000);
+            const diffDays = Math.floor(diffMs / 86400000);
+            
+            if (diffMins < 1) return 'Just now';
+            if (diffMins < 60) return `${diffMins} min ago`;
+            if (diffHours < 24) return `${diffHours} hr ago`;
+            if (diffDays < 7) return `${diffDays} day${diffDays > 1 ? 's' : ''} ago`;
+            
+            return date.toLocaleDateString();
+        }
+
+        // Load security settings
+        function loadSecuritySettings() {
+            if (!userData || !userData.security) return;
+            
+            // Update toggle states in security modal
+            document.getElementById('fraudToggle').checked = userData.security.fraudDetection || false;
+            document.getElementById('biometricToggle').checked = userData.security.biometricAuth || false;
+            document.getElementById('twoFAToggle').checked = userData.security.twoFA || false;
+        }
+
+        // Set up payment method selection
+        function setupPaymentMethods() {
+            const paymentMethods = document.querySelectorAll('.payment-method');
+            
+            paymentMethods.forEach(method => {
+                method.addEventListener('click', function() {
+                    // Remove selected class from all methods
+                    paymentMethods.forEach(m => m.classList.remove('selected'));
+                    
+                    // Add selected class to clicked method
+                    this.classList.add('selected');
+                    
+                    // Store selected method
+                    selectedPaymentMethod = this.getAttribute('data-method');
+                    
+                    showToast(`Selected ${getPaymentMethodName(selectedPaymentMethod)}`, 'info');
+                });
+            });
+
+            // Set up payment option selection in Add Money modal
+            const paymentOptions = document.querySelectorAll('.payment-option');
+            paymentOptions.forEach(option => {
+                option.addEventListener('click', function() {
+                    // Remove selected class from all options
+                    paymentOptions.forEach(opt => opt.classList.remove('selected'));
+                    
+                    // Add selected class to clicked option
+                    this.classList.add('selected');
+                    
+                    // Store selected option
+                    selectedPaymentOption = this.getAttribute('data-method');
+                    
+                    console.log(`Selected payment option: ${selectedPaymentOption}`);
+                });
+            });
+        }
+
+        // Get display name for payment method
+        function getPaymentMethodName(method) {
+            const names = {
+                'mpesa': 'M-Pesa',
+                'card': 'Credit/Debit Card',
+                'bank': 'Bank Transfer',
+                'crypto': 'Cryptocurrency'
+            };
+            
+            return names[method] || method;
+        }
+
+        // Set up event listeners
+        function setupEventListeners() {
+            // Payment option selection
+            document.addEventListener('click', function(e) {
+                if (e.target.closest('.payment-option')) {
+                    const options = document.querySelectorAll('.payment-option');
+                    options.forEach(opt => opt.classList.remove('selected'));
+                    e.target.closest('.payment-option').classList.add('selected');
+                    selectedPaymentOption = e.target.closest('.payment-option').getAttribute('data-method');
+                }
             });
 
             // Fraud detection simulation
@@ -837,433 +1373,833 @@
             }
         }
 
-        function updateUI() {
-            document.getElementById('userBalance').textContent = `KSh ${userBalance.toLocaleString()}`;
-            document.getElementById('balanceAmount').textContent = `KSh ${userBalance.toLocaleString()}`;
-            document.getElementById('cashbackAmount').textContent = `KSh ${cashbackBalance}`;
-            document.getElementById('streakCount').textContent = `Day ${streakCount}`;
-        }
-
-        function loadTransactions() {
-            const transactionsList = document.getElementById('transactionsList');
-            transactionsList.innerHTML = '';
-            
-            transactions.forEach(transaction => {
-                const transactionClass = transaction.type === 'sent' ? 'text-red-400' : 'text-green-400';
-                const sign = transaction.type === 'sent' ? '-' : '+';
-                const icon = transaction.type === 'sent' ? 'fa-paper-plane' : 'fa-hand-holding-usd';
-                const gradient = transaction.type === 'sent' ? 'primary-gradient' : 'security-gradient';
-                
-                const transactionHTML = `
-                    <div class="transaction-item flex items-center justify-between p-4 bg-slate-800/50 rounded-xl">
-                        <div class="flex items-center">
-                            <div class="w-12 h-12 ${gradient} rounded-full flex items-center justify-center mr-4">
-                                <i class="fas ${icon} text-white"></i>
-                            </div>
-                            <div>
-                                <div class="font-semibold text-white">${transaction.description}</div>
-                                <div class="text-slate-400 text-sm">${transaction.date}</div>
-                            </div>
-                        </div>
-                        <div class="text-right">
-                            <div class="${transactionClass} font-bold">${sign} KSh ${transaction.amount.toLocaleString()}</div>
-                            <div class="text-slate-400 text-sm">${transaction.from || transaction.note || 'Completed'}</div>
-                        </div>
-                    </div>
-                `;
-                
-                transactionsList.innerHTML += transactionHTML;
-            });
-        }
-
-        // Modal Functions
-        function openSendMoneyModal() {
-            console.log('📤 Opening send money modal');
-            openModal('sendMoneyModal');
-        }
-
-        function openRequestMoneyModal() {
-            console.log('📥 Opening request money modal');
-            openModal('requestMoneyModal');
-        }
-
-        function openAddMoneyModal() {
-            console.log('💰 Opening add money modal');
-            openModal('addMoneyModal');
-        }
-
-        function openSecuritySettings() {
-            console.log('🔒 Opening security settings');
-            openModal('securitySettingsModal');
-        }
-
-        function openRewardsSpinModal() {
-            console.log('🎡 Opening rewards spin modal');
-            openModal('rewardsSpinModal');
-        }
-
-        function openMarketplaceModal() {
-            console.log('🛒 Redirecting to marketplace');
-            showToast('Redirecting to marketplace...', 'info');
-            // In a real app, this would redirect to the marketplace page
-            setTimeout(() => {
-                showToast('Marketplace feature coming soon!', 'info');
-            }, 1000);
-        }
-
-        function openCryptoModal() {
-            console.log('₿ Opening crypto features');
-            showToast('Crypto features coming soon!', 'info');
-        }
-
-        function openWithdrawModal() {
-            console.log('💸 Opening withdraw modal');
-            showToast('Withdrawal feature coming soon!', 'info');
-        }
-
-        // Social Payment Functions
-        function createGroup() {
-            console.log('👥 Creating group payment');
-            showToast('Group payment feature coming soon!', 'info');
-        }
-
-        function sendGift() {
-            console.log('🎁 Sending gift');
-            showToast('Social gifting feature coming soon!', 'info');
-        }
-
-        function startGoal() {
-            console.log('🎯 Starting shared goal');
-            showToast('Shared goals feature coming soon!', 'info');
-        }
-
-        function viewAllTransactions() {
-            console.log('📊 Viewing all transactions');
-            showToast('Loading all transactions...', 'info');
-        }
-
-        // Payment Processing Functions
-        function processPayment() {
-            const amountInput = document.getElementById('sendAmountInput');
-            const recipientInput = document.getElementById('recipientInput');
-            const amount = parseFloat(amountInput.value);
-            const recipient = recipientInput.value;
-            
-            if (!amount || amount <= 0) {
-                showToast('Please enter a valid amount', 'error');
-                return;
-            }
-
-            if (!recipient) {
-                showToast('Please enter a recipient', 'error');
-                return;
-            }
-
-            if (amount > userBalance) {
-                showToast('Insufficient balance', 'error');
-                return;
-            }
-
-            if (!selectedPaymentMethod) {
-                showToast('Please select a payment method', 'error');
-                return;
-            }
-
-            const processBtn = document.querySelector('#sendMoneyModal button:last-child');
-            processBtn.innerHTML = '<span class="loading-spinner"></span> Processing...';
-            processBtn.disabled = true;
-
-            console.log(`💸 Processing payment of KSh ${amount} to ${recipient} via ${selectedPaymentMethod}`);
-
-            // Simulate payment processing
-            setTimeout(() => {
-                userBalance -= amount;
-                updateUI();
-                
-                // Add transaction to history
-                transactions.unshift({
-                    type: 'sent',
-                    amount: amount,
-                    description: `Payment to ${recipient}`,
-                    date: 'Just now'
-                });
-                loadTransactions();
-                
-                showToast(`Payment of KSh ${amount.toLocaleString()} sent successfully to ${recipient}!`, 'success');
-                closeModal('sendMoneyModal');
-                processBtn.innerHTML = 'Send Money';
-                processBtn.disabled = false;
-                
-                // Reset form
-                amountInput.value = '';
-                recipientInput.value = '';
-                
-                // Log to Firebase if connected
-                logTransactionToFirebase('sent', amount, `Payment to ${recipient}`);
-            }, 2000);
-        }
-
-        function sendRequest() {
-            const amountInput = document.getElementById('requestAmountInput');
-            const fromInput = document.getElementById('requestFromInput');
-            const reasonInput = document.getElementById('requestReasonInput');
-            const amount = parseFloat(amountInput.value);
-            const from = fromInput.value;
-            const reason = reasonInput.value;
-            
-            if (!amount || amount <= 0) {
-                showToast('Please enter a valid amount', 'error');
-                return;
-            }
-
-            if (!from) {
-                showToast('Please enter who to request from', 'error');
-                return;
-            }
-
-            const processBtn = document.querySelector('#requestMoneyModal button:last-child');
-            processBtn.innerHTML = '<span class="loading-spinner"></span> Sending...';
-            processBtn.disabled = true;
-
-            console.log(`📥 Sending money request of KSh ${amount} to ${from} for ${reason}`);
-
-            // Simulate request sending
-            setTimeout(() => {
-                showToast(`Money request of KSh ${amount.toLocaleString()} sent to ${from}!`, 'success');
-                closeModal('requestMoneyModal');
-                processBtn.innerHTML = 'Send Request';
-                processBtn.disabled = false;
-                
-                // Reset form
-                amountInput.value = '';
-                fromInput.value = '';
-                reasonInput.value = '';
-            }, 2000);
-        }
-
-        function selectPaymentOption(element, method) {
-            document.querySelectorAll('.payment-option').forEach(opt => {
-                opt.classList.remove('border-blue-400', 'bg-blue-500/20');
-            });
-            element.classList.add('border-blue-400', 'bg-blue-500/20');
-            selectedPaymentOption = method;
-            console.log(`✅ Selected payment option: ${method}`);
-        }
-
-        function addMoney() {
-            const amountInput = document.getElementById('addAmountInput');
-            const amount = parseFloat(amountInput.value);
-            
-            if (!amount || amount <= 0) {
-                showToast('Please enter a valid amount', 'error');
-                return;
-            }
-
-            if (!selectedPaymentOption) {
-                showToast('Please select a payment method', 'error');
-                return;
-            }
-
-            const processBtn = document.querySelector('#addMoneyModal button:last-child');
-            processBtn.innerHTML = '<span class="loading-spinner"></span> Processing...';
-            processBtn.disabled = true;
-
-            console.log(`💰 Adding KSh ${amount} via ${selectedPaymentOption}`);
-
-            // Simulate adding money
-            setTimeout(() => {
-                userBalance += amount;
-                updateUI();
-                
-                // Add transaction to history
-                transactions.unshift({
-                    type: 'received',
-                    amount: amount,
-                    description: `Added via ${selectedPaymentOption.toUpperCase()}`,
-                    date: 'Just now'
-                });
-                loadTransactions();
-                
-                showToast(`Successfully added KSh ${amount.toLocaleString()} to your account!`, 'success');
-                closeModal('addMoneyModal');
-                processBtn.innerHTML = 'Add Money';
-                processBtn.disabled = false;
-                
-                // Reset form
-                amountInput.value = '';
-                document.querySelectorAll('.payment-option').forEach(opt => {
-                    opt.classList.remove('border-blue-400', 'bg-blue-500/20');
-                });
-                selectedPaymentOption = null;
-            }, 2000);
-        }
-
-        function saveSecuritySettings() {
-            const fraudToggle = document.getElementById('fraudToggle').checked;
-            const biometricToggle = document.getElementById('biometricToggle').checked;
-            const twoFAToggle = document.getElementById('twoFAToggle').checked;
-
-            // Update security status badges
-            document.getElementById('fraudDetectionStatus').innerHTML = 
-                `<i class="fas fa-shield-alt mr-1"></i> ${fraudToggle ? 'Active' : 'Inactive'}`;
-            document.getElementById('biometricStatus').innerHTML = 
-                `<i class="fas fa-fingerprint mr-1"></i> ${biometricToggle ? 'Enabled' : 'Disabled'}`;
-            document.getElementById('twoFAStatus').innerHTML = 
-                `<i class="fas fa-mobile-alt mr-1"></i> ${twoFAToggle ? 'Enabled' : 'Disabled'}`;
-
-            console.log('🔒 Security settings saved:', { fraudToggle, biometricToggle, twoFAToggle });
-            showToast('Security settings updated successfully!', 'success');
-            closeModal('securitySettingsModal');
-        }
-
-        function claimRewards() {
-            if (cashbackBalance <= 0) {
-                showToast('No cashback available to claim', 'info');
-                return;
-            }
-
-            console.log(`🎁 Claiming KSh ${cashbackBalance} cashback`);
-
-            // Simulate claiming rewards
-            userBalance += cashbackBalance;
-            
-            // Add transaction to history
-            transactions.unshift({
-                type: 'received',
-                amount: cashbackBalance,
-                description: 'Cashback Claimed',
-                date: 'Just now'
-            });
-            
-            showToast(`Successfully claimed KSh ${cashbackBalance} cashback!`, 'success');
-            
-            // Reset cashback
-            cashbackBalance = 0;
-            updateUI();
-            loadTransactions();
-        }
-
-        function spinRewardsWheel() {
-            const spinBtn = document.getElementById('spinButton');
-            const wheel = document.getElementById('rewardWheel');
-            const pointer = document.getElementById('wheelPointer');
-            
-            spinBtn.innerHTML = '<span class="loading-spinner"></span> Spinning...';
-            spinBtn.disabled = true;
-
-            console.log('🎡 Spinning rewards wheel...');
-
-            // Add spin animation
-            wheel.classList.add('spin-wheel');
-            pointer.classList.add('reward-spin');
-
-            // Simulate spin
-            setTimeout(() => {
-                const rewards = [50, 100, 25, 75, 150, 200];
-                const reward = rewards[Math.floor(Math.random() * rewards.length)];
-                
-                // Add reward to cashback
-                cashbackBalance += reward;
-                streakCount++;
-                
-                updateUI();
-                
-                showToast(`Congratulations! You won KSh ${reward} cashback!`, 'success');
-                
-                // Reset button
-                spinBtn.innerHTML = '<i class="fas fa-sync mr-2"></i> Spin Again';
-                spinBtn.disabled = false;
-                
-                // Remove animations
-                wheel.classList.remove('spin-wheel');
-                pointer.classList.remove('reward-spin');
-                
-                // Add transaction to history
-                transactions.unshift({
-                    type: 'received',
-                    amount: reward,
-                    description: 'Reward Spin',
-                    date: 'Just now'
-                });
-                loadTransactions();
-                
-                // Log to Firebase if connected
-                logTransactionToFirebase('received', reward, 'Reward Spin');
-            }, 3000);
-        }
-
-        function logTransactionToFirebase(type, amount, description) {
-            // Only log if Firebase is properly initialized
-            if (db) {
-                const transactionData = {
-                    type: type,
-                    amount: amount,
-                    description: description,
-                    timestamp: firebase.firestore.FieldValue.serverTimestamp(),
-                    userId: auth.currentUser ? auth.currentUser.uid : 'anonymous'
-                };
-
-                db.collection('transactions').add(transactionData)
-                    .then((docRef) => {
-                        console.log('✅ Transaction logged to Firebase with ID:', docRef.id);
-                    })
-                    .catch((error) => {
-                        console.error('❌ Error logging transaction to Firebase:', error);
-                    });
-            }
-        }
-
+        // Update connection status indicator
         function updateConnectionStatus(status, message) {
             const statusElement = document.getElementById('connectionStatus');
             statusElement.className = `connection-status ${status}`;
-            
-            const icon = status === 'connected' ? 'fa-check-circle' : 
-                        status === 'connecting' ? 'fa-sync fa-spin' : 'fa-exclamation-triangle';
-            
             statusElement.innerHTML = `
-                <i class="fas ${icon}"></i>
+                <i class="fas ${status === 'connected' ? 'fa-check-circle' : status === 'connecting' ? 'fa-sync fa-spin' : 'fa-exclamation-triangle'}"></i>
                 <span>${message}</span>
             `;
         }
 
-        function openModal(modalId) {
-            document.getElementById(modalId).classList.remove('hidden');
+        // Show toast notification
+        function showToast(message, type = 'info') {
+            const toastContainer = document.getElementById('toastContainer');
+            const toastId = 'toast-' + Date.now();
+            
+            const toast = document.createElement('div');
+            toast.id = toastId;
+            toast.className = `toast ${type}`;
+            toast.innerHTML = `
+                <div class="flex items-center">
+                    <i class="fas ${type === 'success' ? 'fa-check-circle' : type === 'error' ? 'fa-exclamation-triangle' : 'fa-info-circle'} mr-2"></i>
+                    <span>${message}</span>
+                </div>
+            `;
+            
+            toastContainer.appendChild(toast);
+            
+            // Show toast
+            setTimeout(() => {
+                toast.classList.add('show');
+            }, 10);
+            
+            // Hide toast after 5 seconds
+            setTimeout(() => {
+                toast.classList.remove('show');
+                setTimeout(() => {
+                    if (toast.parentNode) {
+                        toast.parentNode.removeChild(toast);
+                    }
+                }, 300);
+            }, 5000);
+        }
+
+        // Modal functions
+        function openSendMoneyModal() {
+            if (!currentUser) {
+                showToast('Please log in to send money', 'error');
+                return;
+            }
+            document.getElementById('sendMoneyModal').classList.remove('hidden');
+        }
+
+        function openRequestMoneyModal() {
+            if (!currentUser) {
+                showToast('Please log in to request money', 'error');
+                return;
+            }
+            document.getElementById('requestMoneyModal').classList.remove('hidden');
+        }
+
+        function openAddMoneyModal() {
+            if (!currentUser) {
+                showToast('Please log in to add money', 'error');
+                return;
+            }
+            document.getElementById('addMoneyModal').classList.remove('hidden');
+        }
+
+        function openSecuritySettings() {
+            document.getElementById('securitySettingsModal').classList.remove('hidden');
+        }
+
+        function openRewardsSpinModal() {
+            document.getElementById('rewardsSpinModal').classList.remove('hidden');
+        }
+
+        function openGroupPaymentModal() {
+            document.getElementById('groupPaymentModal').classList.remove('hidden');
+            groupMembers = [];
+            updateMembersList();
+        }
+
+        function openSocialGiftingModal() {
+            document.getElementById('socialGiftingModal').classList.remove('hidden');
+            selectedGiftCategory = null;
+        }
+
+        function openSharedGoalsModal() {
+            document.getElementById('sharedGoalsModal').classList.remove('hidden');
+            goalParticipants = [];
+            updateParticipantsList();
         }
 
         function closeModal(modalId) {
             document.getElementById(modalId).classList.add('hidden');
         }
 
-        function showToast(message, type = 'info') {
-            const toast = document.createElement('div');
-            toast.className = `toast ${type}`;
-            toast.innerHTML = `
-                <div class="flex items-center">
-                    <i class="fas fa-${type === 'success' ? 'check-circle' : type === 'error' ? 'exclamation-circle' : 'info-circle'} mr-2"></i>
-                    ${message}
-                </div>
-            `;
+        function selectPaymentOption(element, method) {
+            const options = document.querySelectorAll('.payment-option');
+            options.forEach(opt => opt.classList.remove('selected'));
+            element.classList.add('selected');
+            selectedPaymentOption = method;
+        }
+
+        // Process payment
+        function processPayment() {
+            const amount = parseFloat(document.getElementById('sendAmountInput').value);
+            const recipient = document.getElementById('recipientInput').value;
+            const message = document.getElementById('sendMessageInput').value;
             
-            document.getElementById('toastContainer').appendChild(toast);
+            if (!amount || amount <= 0) {
+                showToast('Please enter a valid amount', 'error');
+                return;
+            }
             
+            if (!recipient) {
+                showToast('Please enter a recipient', 'error');
+                return;
+            }
+            
+            if (!selectedPaymentMethod) {
+                showToast('Please select a payment method', 'error');
+                return;
+            }
+            
+            if (amount > userData.balance) {
+                showToast('Insufficient balance', 'error');
+                return;
+            }
+            
+            // Show loading state
+            const sendButton = document.querySelector('#sendMoneyModal button:last-child');
+            const originalText = sendButton.innerHTML;
+            sendButton.innerHTML = '<div class="loading-spinner"></div> Processing...';
+            sendButton.disabled = true;
+            
+            // Simulate payment processing
             setTimeout(() => {
-                toast.classList.add('show');
-            }, 100);
+                // In a real app, this would call your payment API
+                recordTransaction({
+                    type: 'sent',
+                    amount: amount,
+                    description: `Payment to ${recipient}`,
+                    method: selectedPaymentMethod,
+                    message: message,
+                    status: 'completed'
+                });
+                
+                // Update balance
+                updateBalance(-amount);
+                
+                // Reset form
+                document.getElementById('sendAmountInput').value = '';
+                document.getElementById('recipientInput').value = '';
+                document.getElementById('sendMessageInput').value = '';
+                
+                // Close modal
+                closeModal('sendMoneyModal');
+                
+                // Reset button
+                sendButton.innerHTML = originalText;
+                sendButton.disabled = false;
+                
+                showToast(`Payment of KSh ${amount.toLocaleString()} sent successfully!`, 'success');
+            }, 2000);
+        }
+
+        // Send money request
+        function sendRequest() {
+            const amount = parseFloat(document.getElementById('requestAmountInput').value);
+            const from = document.getElementById('requestFromInput').value;
+            const reason = document.getElementById('requestReasonInput').value;
+            const splitEqually = document.getElementById('splitEqually').checked;
             
+            if (!amount || amount <= 0) {
+                showToast('Please enter a valid amount', 'error');
+                return;
+            }
+            
+            if (!from) {
+                showToast('Please specify who to request from', 'error');
+                return;
+            }
+            
+            // Show loading state
+            const requestButton = document.querySelector('#requestMoneyModal button:last-child');
+            const originalText = requestButton.innerHTML;
+            requestButton.innerHTML = '<div class="loading-spinner"></div> Sending...';
+            requestButton.disabled = true;
+            
+            // Simulate request sending
             setTimeout(() => {
-                toast.classList.remove('show');
-                setTimeout(() => {
-                    toast.remove();
-                }, 300);
+                // In a real app, this would send notifications to the requested users
+                
+                // Reset form
+                document.getElementById('requestAmountInput').value = '';
+                document.getElementById('requestFromInput').value = '';
+                document.getElementById('requestReasonInput').value = '';
+                document.getElementById('splitEqually').checked = false;
+                
+                // Close modal
+                closeModal('requestMoneyModal');
+                
+                // Reset button
+                requestButton.innerHTML = originalText;
+                requestButton.disabled = false;
+                
+                showToast(`Money request sent to ${from}`, 'success');
+            }, 1500);
+        }
+
+        // Add money to account
+        function addMoney() {
+            const amount = parseFloat(document.getElementById('addAmountInput').value);
+            
+            if (!amount || amount <= 0) {
+                showToast('Please enter a valid amount', 'error');
+                return;
+            }
+            
+            if (!selectedPaymentOption) {
+                showToast('Please select a payment method', 'error');
+                return;
+            }
+            
+            // Show loading state
+            const addButton = document.querySelector('#addMoneyModal button:last-child');
+            const originalText = addButton.innerHTML;
+            addButton.innerHTML = '<div class="loading-spinner"></div> Processing...';
+            addButton.disabled = true;
+            
+            // Simulate adding money
+            setTimeout(() => {
+                // In a real app, this would integrate with payment gateway
+                recordTransaction({
+                    type: 'received',
+                    amount: amount,
+                    description: `Added via ${getPaymentMethodName(selectedPaymentOption)}`,
+                    method: selectedPaymentOption,
+                    status: 'completed'
+                });
+                
+                // Update balance
+                updateBalance(amount);
+                
+                // Reset form
+                document.getElementById('addAmountInput').value = '';
+                
+                // Close modal
+                closeModal('addMoneyModal');
+                
+                // Reset button
+                addButton.innerHTML = originalText;
+                addButton.disabled = false;
+                
+                showToast(`KSh ${amount.toLocaleString()} added to your account!`, 'success');
+            }, 2000);
+        }
+
+        // Save security settings
+        function saveSecuritySettings() {
+            if (!currentUser) return;
+            
+            const fraudDetection = document.getElementById('fraudToggle').checked;
+            const biometricAuth = document.getElementById('biometricToggle').checked;
+            const twoFA = document.getElementById('twoFAToggle').checked;
+            
+            // Update user data in Firestore
+            const userRef = db.collection('users').doc(currentUser.uid);
+            
+            userRef.update({
+                'security.fraudDetection': fraudDetection,
+                'security.biometricAuth': biometricAuth,
+                'security.twoFA': twoFA,
+                updatedAt: firebase.firestore.FieldValue.serverTimestamp()
+            }).then(() => {
+                // Update local user data
+                if (!userData.security) userData.security = {};
+                userData.security.fraudDetection = fraudDetection;
+                userData.security.biometricAuth = biometricAuth;
+                userData.security.twoFA = twoFA;
+                
+                // Update UI
+                updateUIWithUserData();
+                
+                // Close modal
+                closeModal('securitySettingsModal');
+                
+                showToast('Security settings updated successfully', 'success');
+            }).catch((error) => {
+                console.error('Error updating security settings:', error);
+                showToast('Error updating security settings', 'error');
+            });
+        }
+
+        // Spin rewards wheel
+        function spinRewardsWheel() {
+            const spinButton = document.querySelector('#rewardsSpinModal button:last-child');
+            const originalText = spinButton.innerHTML;
+            spinButton.innerHTML = '<div class="loading-spinner"></div> Spinning...';
+            spinButton.disabled = true;
+            
+            // Simulate spinning animation
+            setTimeout(() => {
+                // Determine reward (in a real app, this would be random)
+                const rewards = [
+                    { type: 'cashback', amount: 50, message: 'KSh 50 Cashback!' },
+                    { type: 'bonus', amount: 100, message: 'KSh 100 Bonus!' },
+                    { type: 'points', amount: 500, message: '500 Points!' }
+                ];
+                
+                const reward = rewards[Math.floor(Math.random() * rewards.length)];
+                
+                // Update user data
+                if (reward.type === 'cashback') {
+                    updateCashback(reward.amount);
+                }
+                
+                // Reset button
+                spinButton.innerHTML = originalText;
+                spinButton.disabled = false;
+                
+                // Close modal
+                closeModal('rewardsSpinModal');
+                
+                showToast(`Congratulations! You won ${reward.message}`, 'success');
             }, 3000);
         }
 
-        // Close modals when clicking outside
-        document.addEventListener('click', function(event) {
-            if (event.target.classList.contains('fixed')) {
-                event.target.classList.add('hidden');
+        // Claim rewards
+        function claimRewards() {
+            if (!userData || userData.cashback <= 0) {
+                showToast('No cashback available to claim', 'info');
+                return;
             }
-        });
+            
+            const cashbackAmount = userData.cashback;
+            
+            // Show loading state
+            const claimButton = document.querySelector('.rewards-gradient');
+            const originalText = claimButton.innerHTML;
+            claimButton.innerHTML = '<div class="loading-spinner"></div> Claiming...';
+            claimButton.disabled = true;
+            
+            // Simulate claiming rewards
+            setTimeout(() => {
+                // Update balance
+                updateBalance(cashbackAmount);
+                
+                // Reset cashback
+                updateCashback(-cashbackAmount);
+                
+                // Record transaction
+                recordTransaction({
+                    type: 'cashback',
+                    amount: cashbackAmount,
+                    description: 'Cashback Claimed',
+                    status: 'completed'
+                });
+                
+                // Reset button
+                claimButton.innerHTML = originalText;
+                claimButton.disabled = false;
+                
+                showToast(`Successfully claimed KSh ${cashbackAmount.toLocaleString()} cashback!`, 'success');
+            }, 1500);
+        }
+
+        // Group Payment Functions
+        function addMember() {
+            const memberInput = document.getElementById('memberSearchInput');
+            const memberName = memberInput.value.trim();
+            
+            if (!memberName) {
+                showToast('Please enter a member name', 'error');
+                return;
+            }
+            
+            // Check if member already exists
+            if (groupMembers.some(member => member.name === memberName)) {
+                showToast('Member already added', 'info');
+                return;
+            }
+            
+            // Add member to list
+            groupMembers.push({
+                name: memberName,
+                amount: 0
+            });
+            
+            // Clear input
+            memberInput.value = '';
+            
+            // Update UI
+            updateMembersList();
+            
+            showToast(`Added ${memberName} to group`, 'success');
+        }
+
+        function updateMembersList() {
+            const membersList = document.getElementById('membersList');
+            
+            if (groupMembers.length === 0) {
+                membersList.innerHTML = '<div class="text-slate-400 text-center py-2">No members added yet</div>';
+                return;
+            }
+            
+            membersList.innerHTML = '';
+            
+            groupMembers.forEach((member, index) => {
+                const memberElement = document.createElement('div');
+                memberElement.className = 'flex justify-between items-center py-2 border-b border-slate-700 last:border-b-0';
+                memberElement.innerHTML = `
+                    <div class="flex items-center">
+                        <div class="user-avatar mr-3">${member.name.charAt(0).toUpperCase()}</div>
+                        <span class="text-white">${member.name}</span>
+                    </div>
+                    <button class="text-red-400 hover:text-red-300" onclick="removeMember(${index})">
+                        <i class="fas fa-times"></i>
+                    </button>
+                `;
+                
+                membersList.appendChild(memberElement);
+            });
+        }
+
+        function removeMember(index) {
+            const removedMember = groupMembers.splice(index, 1)[0];
+            updateMembersList();
+            showToast(`Removed ${removedMember.name} from group`, 'info');
+        }
+
+        function setSplitOption(option) {
+            const buttons = document.querySelectorAll('#groupPaymentModal .form-group:last-child button');
+            buttons.forEach(button => {
+                if (button.textContent.includes(option === 'equal' ? 'Equal' : 'Custom')) {
+                    button.classList.add('border-blue-400', 'text-blue-400');
+                } else {
+                    button.classList.remove('border-blue-400', 'text-blue-400');
+                }
+            });
+            
+            showToast(`Split set to ${option === 'equal' ? 'equal amounts' : 'custom amounts'}`, 'info');
+        }
+
+        function createGroupPayment() {
+            const groupName = document.getElementById('groupNameInput').value.trim();
+            const amount = parseFloat(document.getElementById('groupAmountInput').value);
+            const description = document.getElementById('groupDescriptionInput').value.trim();
+            
+            if (!groupName) {
+                showToast('Please enter a group name', 'error');
+                return;
+            }
+            
+            if (!amount || amount <= 0) {
+                showToast('Please enter a valid amount', 'error');
+                return;
+            }
+            
+            if (groupMembers.length === 0) {
+                showToast('Please add at least one member to the group', 'error');
+                return;
+            }
+            
+            // Show loading state
+            const createButton = document.querySelector('#groupPaymentModal button:last-child');
+            const originalText = createButton.innerHTML;
+            createButton.innerHTML = '<div class="loading-spinner"></div> Creating...';
+            createButton.disabled = true;
+            
+            // Simulate group creation
+            setTimeout(() => {
+                // In a real app, this would create a group in Firestore and send notifications
+                
+                // Reset form
+                document.getElementById('groupNameInput').value = '';
+                document.getElementById('groupAmountInput').value = '';
+                document.getElementById('groupDescriptionInput').value = '';
+                document.getElementById('memberSearchInput').value = '';
+                groupMembers = [];
+                updateMembersList();
+                
+                // Close modal
+                closeModal('groupPaymentModal');
+                
+                // Reset button
+                createButton.innerHTML = originalText;
+                createButton.disabled = false;
+                
+                showToast(`Group "${groupName}" created successfully!`, 'success');
+                
+                // Integrate with chat system
+                integrateWithChatSystem(groupName, description, amount, groupMembers);
+            }, 2000);
+        }
+
+        // Social Gifting Functions
+        function selectGiftCategory(category) {
+            selectedGiftCategory = category;
+            
+            // Update UI to show selected category
+            const tags = document.querySelectorAll('.category-tag');
+            tags.forEach(tag => {
+                if (tag.textContent.includes(getCategoryDisplayName(category))) {
+                    tag.classList.add('border-2', 'border-white');
+                } else {
+                    tag.classList.remove('border-2', 'border-white');
+                }
+            });
+            
+            showToast(`Selected ${getCategoryDisplayName(category)} category`, 'info');
+        }
+
+        function getCategoryDisplayName(category) {
+            const names = {
+                'emergency': 'Emergency Aid',
+                'charity': 'Charity Donation',
+                'celebration': 'Celebration',
+                'appreciation': 'Appreciation'
+            };
+            
+            return names[category] || category;
+        }
+
+        function sendGift() {
+            const recipientType = document.getElementById('giftRecipientType').value;
+            const recipient = document.getElementById('giftRecipientInput').value.trim();
+            const amount = parseFloat(document.getElementById('giftAmountInput').value);
+            const message = document.getElementById('giftMessageInput').value.trim();
+            const anonymous = document.getElementById('anonymousGift').checked;
+            
+            if (!recipient) {
+                showToast('Please enter a recipient', 'error');
+                return;
+            }
+            
+            if (!amount || amount <= 0) {
+                showToast('Please enter a valid amount', 'error');
+                return;
+            }
+            
+            if (!selectedGiftCategory) {
+                showToast('Please select a gift category', 'error');
+                return;
+            }
+            
+            if (amount > userData.balance) {
+                showToast('Insufficient balance', 'error');
+                return;
+            }
+            
+            // Show loading state
+            const sendButton = document.querySelector('#socialGiftingModal button:last-child');
+            const originalText = sendButton.innerHTML;
+            sendButton.innerHTML = '<div class="loading-spinner"></div> Sending...';
+            sendButton.disabled = true;
+            
+            // Simulate gift sending
+            setTimeout(() => {
+                // In a real app, this would send the gift and notify the recipient
+                recordTransaction({
+                    type: 'gift_sent',
+                    amount: amount,
+                    description: `Gift to ${recipient}`,
+                    category: selectedGiftCategory,
+                    message: message,
+                    anonymous: anonymous,
+                    status: 'completed'
+                });
+                
+                // Update balance
+                updateBalance(-amount);
+                
+                // Reset form
+                document.getElementById('giftRecipientInput').value = '';
+                document.getElementById('giftAmountInput').value = '';
+                document.getElementById('giftMessageInput').value = '';
+                document.getElementById('anonymousGift').checked = false;
+                selectedGiftCategory = null;
+                
+                // Reset category tags
+                const tags = document.querySelectorAll('.category-tag');
+                tags.forEach(tag => tag.classList.remove('border-2', 'border-white'));
+                
+                // Close modal
+                closeModal('socialGiftingModal');
+                
+                // Reset button
+                sendButton.innerHTML = originalText;
+                sendButton.disabled = false;
+                
+                showToast(`Gift of KSh ${amount.toLocaleString()} sent to ${recipient}!`, 'success');
+            }, 2000);
+        }
+
+        // Shared Goals Functions
+        function addParticipant() {
+            const participantInput = document.getElementById('participantSearchInput');
+            const participantName = participantInput.value.trim();
+            
+            if (!participantName) {
+                showToast('Please enter a participant name', 'error');
+                return;
+            }
+            
+            // Check if participant already exists
+            if (goalParticipants.some(participant => participant.name === participantName)) {
+                showToast('Participant already added', 'info');
+                return;
+            }
+            
+            // Add participant to list
+            goalParticipants.push({
+                name: participantName,
+                contribution: 0
+            });
+            
+            // Clear input
+            participantInput.value = '';
+            
+            // Update UI
+            updateParticipantsList();
+            
+            showToast(`Added ${participantName} to goal`, 'success');
+        }
+
+        function updateParticipantsList() {
+            const participantsList = document.getElementById('participantsList');
+            
+            if (goalParticipants.length === 0) {
+                participantsList.innerHTML = '<div class="text-slate-400 text-center py-2">No participants added yet</div>';
+                return;
+            }
+            
+            participantsList.innerHTML = '';
+            
+            goalParticipants.forEach((participant, index) => {
+                const participantElement = document.createElement('div');
+                participantElement.className = 'flex justify-between items-center py-2 border-b border-slate-700 last:border-b-0';
+                participantElement.innerHTML = `
+                    <div class="flex items-center">
+                        <div class="user-avatar mr-3">${participant.name.charAt(0).toUpperCase()}</div>
+                        <span class="text-white">${participant.name}</span>
+                    </div>
+                    <button class="text-red-400 hover:text-red-300" onclick="removeParticipant(${index})">
+                        <i class="fas fa-times"></i>
+                    </button>
+                `;
+                
+                participantsList.appendChild(participantElement);
+            });
+        }
+
+        function removeParticipant(index) {
+            const removedParticipant = goalParticipants.splice(index, 1)[0];
+            updateParticipantsList();
+            showToast(`Removed ${removedParticipant.name} from goal`, 'info');
+        }
+
+        function setContributionType(type) {
+            const buttons = document.querySelectorAll('#sharedGoalsModal .form-group:last-child button');
+            buttons.forEach(button => {
+                if (button.textContent.includes(type === 'equal' ? 'Equal' : 'Custom')) {
+                    button.classList.add('border-blue-400', 'text-blue-400');
+                } else {
+                    button.classList.remove('border-blue-400', 'text-blue-400');
+                }
+            });
+            
+            showToast(`Contribution set to ${type === 'equal' ? 'equal shares' : 'custom amounts'}`, 'info');
+        }
+
+        function createSharedGoal() {
+            const goalName = document.getElementById('goalNameInput').value.trim();
+            const amount = parseFloat(document.getElementById('goalAmountInput').value);
+            const description = document.getElementById('goalDescriptionInput').value.trim();
+            const targetDate = document.getElementById('goalDateInput').value;
+            
+            if (!goalName) {
+                showToast('Please enter a goal name', 'error');
+                return;
+            }
+            
+            if (!amount || amount <= 0) {
+                showToast('Please enter a valid amount', 'error');
+                return;
+            }
+            
+            if (!targetDate) {
+                showToast('Please select a target date', 'error');
+                return;
+            }
+            
+            if (goalParticipants.length === 0) {
+                showToast('Please add at least one participant to the goal', 'error');
+                return;
+            }
+            
+            // Show loading state
+            const createButton = document.querySelector('#sharedGoalsModal button:last-child');
+            const originalText = createButton.innerHTML;
+            createButton.innerHTML = '<div class="loading-spinner"></div> Creating...';
+            createButton.disabled = true;
+            
+            // Simulate goal creation
+            setTimeout(() => {
+                // In a real app, this would create a goal in Firestore and notify participants
+                
+                // Reset form
+                document.getElementById('goalNameInput').value = '';
+                document.getElementById('goalAmountInput').value = '';
+                document.getElementById('goalDescriptionInput').value = '';
+                document.getElementById('goalDateInput').value = '';
+                document.getElementById('participantSearchInput').value = '';
+                goalParticipants = [];
+                updateParticipantsList();
+                
+                // Close modal
+                closeModal('sharedGoalsModal');
+                
+                // Reset button
+                createButton.innerHTML = originalText;
+                createButton.disabled = false;
+                
+                showToast(`Shared goal "${goalName}" created successfully!`, 'success');
+            }, 2000);
+        }
+
+        // Record a transaction in Firestore
+        function recordTransaction(transactionData) {
+            if (!currentUser) return;
+            
+            const transaction = {
+                ...transactionData,
+                timestamp: firebase.firestore.FieldValue.serverTimestamp(),
+                uid: currentUser.uid
+            };
+            
+            const transactionsRef = db.collection('users').doc(currentUser.uid).collection('transactions');
+            
+            transactionsRef.add(transaction).then(() => {
+                // Reload transactions to show the new one
+                loadTransactions();
+            }).catch((error) => {
+                console.error('Error recording transaction:', error);
+            });
+        }
+
+        // Update user balance in Firestore
+        function updateBalance(amount) {
+            if (!currentUser || !userData) return;
+            
+            const newBalance = (userData.balance || 0) + amount;
+            
+            const userRef = db.collection('users').doc(currentUser.uid);
+            
+            userRef.update({
+                balance: newBalance,
+                updatedAt: firebase.firestore.FieldValue.serverTimestamp()
+            }).then(() => {
+                // Update local user data
+                userData.balance = newBalance;
+                
+                // Update UI
+                updateUIWithUserData();
+            }).catch((error) => {
+                console.error('Error updating balance:', error);
+            });
+        }
+
+        // Update user cashback in Firestore
+        function updateCashback(amount) {
+            if (!currentUser || !userData) return;
+            
+            const newCashback = (userData.cashback || 0) + amount;
+            
+            const userRef = db.collection('users').doc(currentUser.uid);
+            
+            userRef.update({
+                cashback: newCashback,
+                updatedAt: firebase.firestore.FieldValue.serverTimestamp()
+            }).then(() => {
+                // Update local user data
+                userData.cashback = newCashback;
+                
+                // Update UI
+                updateUIWithUserData();
+            }).catch((error) => {
+                console.error('Error updating cashback:', error);
+            });
+        }
+
+        // Integrate with chat system
+        function integrateWithChatSystem(groupName, description, amount, members) {
+            // In a real implementation, this would create a chat group and send notifications
+            console.log(`Creating chat group for "${groupName}" with ${members.length} members`);
+            
+            // Simulate creating a chat group
+            setTimeout(() => {
+                showToast(`Chat group "${groupName}" created! Members have been notified.`, 'success');
+                
+                // Redirect to chat page with the new group
+                // window.location.href = `chat.html?group=${encodeURIComponent(groupName)}`;
+            }, 1000);
+        }
+
+        // Placeholder functions for other features
+        function openWithdrawModal() {
+            showToast('Withdrawal feature coming soon', 'info');
+        }
+
+        function openMarketplaceModal() {
+            showToast('Marketplace feature coming soon', 'info');
+        }
+
+        function openCryptoModal() {
+            showToast('Crypto feature coming soon', 'info');
+        }
+
+        function viewAllTransactions() {
+            showToast('Transaction history feature coming soon', 'info');
+        }
+
+        function setTransactionLimits() {
+            showToast('Transaction limits feature coming soon', 'info');
+        }
     </script>
 </body>
 </html>

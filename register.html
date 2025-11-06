@@ -7,7 +7,21 @@
     <script src="https://cdn.tailwindcss.com"></script>
     <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css" rel="stylesheet">
     
+    <!-- Firebase SDK (Using v9 Compat for wider browser support) -->
+    <script src="https://www.gstatic.com/firebasejs/9.22.1/firebase-app-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/9.22.1/firebase-auth-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/9.22.1/firebase-firestore-compat.js"></script>
+    
     <style>
+        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap');
+        
+        * {
+            font-family: 'Inter', sans-serif;
+        }
+
+        body {
+            background: linear-gradient(135deg, #1f2937 0%, #111827 100%);
+        }
         .glass-effect {
             background: rgba(255, 255, 255, 0.1);
             backdrop-filter: blur(20px);
@@ -15,774 +29,256 @@
         }
         .cyber-gradient {
             background: linear-gradient(135deg, #3B82F6 0%, #8B5CF6 100%);
+            transition: all 0.3s ease;
+        }
+        .cyber-gradient:hover {
+            background: linear-gradient(135deg, #1D4ED8 0%, #6D28D9 100%);
         }
         .quantum-glow {
             box-shadow: 0 0 30px rgba(59, 130, 246, 0.4);
         }
         .neon-text {
             text-shadow: 0 0 10px rgba(59, 130, 246, 0.7),
-                         0 0 20px rgba(59, 130, 246, 0.5),
-                         0 0 30px rgba(59, 130, 246, 0.3);
+                         0 0 20px rgba(59, 130, 246, 0.5);
         }
-        .error-message {
-            background: rgba(239, 68, 68, 0.1);
-            border: 1px solid rgba(239, 68, 68, 0.3);
-            color: #fca5a5;
-            padding: 0.75rem;
-            border-radius: 0.5rem;
-            margin-bottom: 1rem;
-        }
-        .success-message {
-            background: rgba(34, 197, 94, 0.1);
-            border: 1px solid rgba(34, 197, 94, 0.3);
-            color: #86efac;
-            padding: 0.75rem;
-            border-radius: 0.5rem;
-            margin-bottom: 1rem;
-        }
-        .info-message {
-            background: rgba(59, 130, 246, 0.1);
-            border: 1px solid rgba(59, 130, 246, 0.3);
-            color: #93c5fd;
-            padding: 0.75rem;
-            border-radius: 0.5rem;
-            margin-bottom: 1rem;
-        }
-        .back-btn {
+
+        /* Toast Styles */
+        #toastContainer {
             position: fixed;
-            left: 2rem;
-            top: 2rem;
-            z-index: 100;
-            background: rgba(255, 255, 255, 0.1);
-            backdrop-filter: blur(10px);
-            border: 1px solid rgba(255, 255, 255, 0.2);
-            color: white;
-            padding: 0.75rem 1.5rem;
-            border-radius: 2rem;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            cursor: pointer;
-            transition: all 0.3s ease;
-            font-weight: 600;
-        }
-        .back-btn:hover {
-            background: rgba(255, 255, 255, 0.2);
-            transform: scale(1.05);
-        }
-        .connection-status {
-            position: fixed;
-            top: 10px;
-            right: 10px;
-            padding: 8px 16px;
-            border-radius: 20px;
-            font-size: 0.8rem;
+            top: 1rem;
+            right: 1rem;
             z-index: 1000;
-            transition: all 0.3s;
         }
-        .connection-status.connected {
-            background: rgba(34, 197, 94, 0.8);
+        .toast {
+            opacity: 0;
+            transform: translateX(100%);
+            transition: all 0.3s ease-out;
+            margin-bottom: 0.5rem;
+            padding: 0.75rem 1rem;
+            border-radius: 0.5rem;
+            box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -2px rgba(0, 0, 0, 0.1);
             color: white;
+            min-width: 250px;
         }
-        .connection-status.connecting {
-            background: rgba(245, 158, 11, 0.8);
-            color: white;
+        .toast.show {
+            opacity: 1;
+            transform: translateX(0);
         }
-        .connection-status.disconnected {
-            background: rgba(239, 68, 68, 0.8);
-            color: white;
-        }
-        .password-strength {
-            height: 4px;
-            border-radius: 2px;
-            margin-top: 4px;
-            transition: all 0.3s ease;
-        }
-        .password-strength.weak {
-            background: #ef4444;
-            width: 25%;
-        }
-        .password-strength.fair {
-            background: #f59e0b;
-            width: 50%;
-        }
-        .password-strength.good {
-            background: #3b82f6;
-            width: 75%;
-        }
-        .password-strength.strong {
-            background: #10b981;
-            width: 100%;
-        }
-        .loading-spinner {
-            border: 2px solid rgba(255, 255, 255, 0.3);
-            border-radius: 50%;
-            border-top: 2px solid #3B82F6;
-            width: 16px;
-            height: 16px;
-            animation: spin 1s linear infinite;
-            display: inline-block;
-            margin-left: 8px;
-        }
-        @keyframes spin {
-            0% { transform: rotate(0deg); }
-            100% { transform: rotate(360deg); }
-        }
-        .input-error {
-            border-color: #ef4444 !important;
-            box-shadow: 0 0 0 3px rgba(239, 68, 68, 0.1) !important;
-        }
-        .input-success {
-            border-color: #10b981 !important;
-            box-shadow: 0 0 0 3px rgba(16, 185, 129, 0.1) !important;
-        }
+        .toast.success { background-color: #10B981; }
+        .toast.error { background-color: #EF4444; }
+        .toast.warning { background-color: #F59E0B; }
     </style>
 </head>
-<body class="h-full bg-gradient-to-br from-gray-900 via-blue-900 to-purple-900 text-white">
-    <!-- Connection Status -->
-    <div class="connection-status connecting" id="connectionStatus">
-        <i class="fas fa-circle-notch fa-spin mr-2"></i>
-        <span id="connectionText">Connecting to Firebase...</span>
-    </div>
+<body class="h-full flex items-center justify-center p-4">
 
-    <!-- Animated Background -->
-    <div class="fixed inset-0 overflow-hidden pointer-events-none">
-        <div class="absolute w-2 h-2 bg-blue-400 rounded-full animate-pulse" style="top: 20%; left: 10%;"></div>
-        <div class="absolute w-1 h-1 bg-purple-400 rounded-full animate-pulse" style="top: 60%; left: 80%; animation-delay: 1s;"></div>
-        <div class="absolute w-3 h-3 bg-cyan-400 rounded-full animate-pulse" style="top: 40%; left: 50%; animation-delay: 2s;"></div>
-    </div>
+    <div id="toastContainer"></div>
 
-    <!-- Back Button -->
-    <button class="back-btn glass-effect" onclick="goBack()">
-        <i class="fas fa-arrow-left mr-2"></i> Back to Home
-    </button>
+    <div class="w-full max-w-md">
+        <div class="text-center mb-8">
+            <h1 class="text-4xl font-extrabold text-white neon-text mb-2">ConnectSphere ID</h1>
+            <p class="text-gray-400">Create your Quantum Social Account</p>
+        </div>
 
-    <div class="min-h-full flex items-center justify-center py-12 px-4 sm:px-6 lg:px-8">
-        <div class="max-w-md w-full space-y-8">
-            <!-- Header -->
-            <div class="text-center">
-                <div class="flex items-center justify-center space-x-3 mb-6">
-                    <div class="w-12 h-12 cyber-gradient rounded-xl flex items-center justify-center quantum-glow">
-                        <i class="fas fa-user-plus text-white text-xl"></i>
-                    </div>
-                    <span class="text-3xl font-bold text-transparent bg-clip-text bg-gradient-to-r from-blue-400 to-purple-400 neon-text">
-                        Uniconnect ID
-                    </span>
+        <div class="glass-effect rounded-2xl p-8 shadow-2xl">
+            <h2 class="text-2xl font-semibold text-white mb-6">Register</h2>
+            <form id="registration-form">
+                <div class="mb-4">
+                    <label for="displayName" class="block text-sm font-medium text-gray-300 mb-1">Display Name</label>
+                    <input type="text" id="displayName" name="displayName" required autocomplete="name"
+                           class="w-full px-4 py-2 bg-white/10 border border-white/20 rounded-lg text-white placeholder-gray-400 focus:ring-2 focus:ring-blue-400 focus:border-blue-400 transition duration-150">
                 </div>
-                <h2 class="text-4xl font-bold text-white mb-2">Create Account</h2>
-                <p class="text-blue-300">
-                    Already have an account?{' '}
-                    <a href="login.html" class="font-medium text-purple-400 hover:text-purple-300 transition">
-                        Sign in now
-                    </a>
-                </p>
-            </div>
+                <div class="mb-4">
+                    <label for="email" class="block text-sm font-medium text-gray-300 mb-1">Email Address</label>
+                    <input type="email" id="email" name="email" required autocomplete="email"
+                           class="w-full px-4 py-2 bg-white/10 border border-white/20 rounded-lg text-white placeholder-gray-400 focus:ring-2 focus:ring-blue-400 focus:border-blue-400 transition duration-150">
+                </div>
+                <div class="mb-4 relative">
+                    <label for="password" class="block text-sm font-medium text-gray-300 mb-1">Password (6+ chars)</label>
+                    <input type="password" id="password" name="password" required autocomplete="new-password"
+                           class="w-full px-4 py-2 bg-white/10 border border-white/20 rounded-lg text-white placeholder-gray-400 focus:ring-2 focus:ring-blue-400 focus:border-blue-400 transition duration-150">
+                    <button type="button" id="togglePassword" class="absolute inset-y-0 right-0 top-6 flex items-center pr-3 text-gray-400 hover:text-white transition">
+                        <i class="fas fa-eye"></i>
+                    </button>
+                </div>
+                <div class="mb-6 relative">
+                    <label for="confirmPassword" class="block text-sm font-medium text-gray-300 mb-1">Confirm Password</label>
+                    <input type="password" id="confirmPassword" name="confirmPassword" required autocomplete="new-password"
+                           class="w-full px-4 py-2 bg-white/10 border border-white/20 rounded-lg text-white placeholder-gray-400 focus:ring-2 focus:ring-blue-400 focus:border-blue-400 transition duration-150">
+                    <button type="button" id="toggleConfirmPassword" class="absolute inset-y-0 right-0 top-6 flex items-center pr-3 text-gray-400 hover:text-white transition">
+                        <i class="fas fa-eye"></i>
+                    </button>
+                </div>
 
-            <!-- Messages -->
-            <div id="messageContainer"></div>
+                <button type="submit" id="submitBtn"
+                        class="w-full py-3 rounded-xl text-white font-bold text-lg cyber-gradient shadow-lg quantum-glow disabled:opacity-50 disabled:cursor-not-allowed">
+                    Create Account
+                </button>
+            </form>
 
-            <!-- Registration Form -->
-            <div class="space-y-6">
-                <form class="space-y-6" id="registerForm">
-                    <div>
-                        <label for="displayName" class="block text-sm font-medium text-cyan-400 mb-2">
-                            Display Name
-                            <span class="text-red-400 ml-1">*</span>
-                        </label>
-                        <div class="relative">
-                            <input id="displayName" name="displayName" type="text" autocomplete="name" required 
-                                   class="glass-effect appearance-none block w-full px-4 py-3 border border-blue-700 rounded-xl placeholder-blue-400 focus:outline-none focus:ring-2 focus:ring-cyan-400 focus:border-cyan-400 text-white pl-12 transition"
-                                   placeholder="Enter your display name">
-                            <div class="absolute left-4 top-1/2 transform -translate-y-1/2 text-blue-400">
-                                <i class="fas fa-user"></i>
-                            </div>
-                        </div>
-                        <div id="displayNameError" class="text-red-400 text-sm mt-1 hidden"></div>
-                    </div>
-
-                    <div>
-                        <label for="email" class="block text-sm font-medium text-cyan-400 mb-2">
-                            Email address
-                            <span class="text-red-400 ml-1">*</span>
-                        </label>
-                        <div class="relative">
-                            <input id="email" name="email" type="email" autocomplete="email" required 
-                                   class="glass-effect appearance-none block w-full px-4 py-3 border border-blue-700 rounded-xl placeholder-blue-400 focus:outline-none focus:ring-2 focus:ring-cyan-400 focus:border-cyan-400 text-white pl-12 transition"
-                                   placeholder="Enter your email">
-                            <div class="absolute left-4 top-1/2 transform -translate-y-1/2 text-blue-400">
-                                <i class="fas fa-envelope"></i>
-                            </div>
-                        </div>
-                        <div id="emailError" class="text-red-400 text-sm mt-1 hidden"></div>
-                    </div>
-
-                    <div>
-                        <label for="password" class="block text-sm font-medium text-blue-400 mb-2">
-                            Password
-                            <span class="text-red-400 ml-1">*</span>
-                        </label>
-                        <div class="relative">
-                            <input id="password" name="password" type="password" autocomplete="new-password" required 
-                                   class="glass-effect appearance-none block w-full px-4 py-3 border border-blue-700 rounded-xl placeholder-blue-400 focus:outline-none focus:ring-2 focus:ring-blue-400 focus:border-blue-400 text-white pl-12 pr-12 transition"
-                                   placeholder="Create a password">
-                            <div class="absolute left-4 top-1/2 transform -translate-y-1/2 text-blue-400">
-                                <i class="fas fa-lock"></i>
-                            </div>
-                            <button type="button" id="togglePassword" class="absolute right-4 top-1/2 transform -translate-y-1/2 text-blue-400 hover:text-cyan-400 transition">
-                                <i class="fas fa-eye"></i>
-                            </button>
-                        </div>
-                        <div id="passwordStrength" class="password-strength weak"></div>
-                        <p id="passwordFeedback" class="text-sm text-blue-300 mt-1">Password must be at least 8 characters</p>
-                        <div id="passwordError" class="text-red-400 text-sm mt-1 hidden"></div>
-                    </div>
-
-                    <div>
-                        <label for="confirmPassword" class="block text-sm font-medium text-purple-400 mb-2">
-                            Confirm Password
-                            <span class="text-red-400 ml-1">*</span>
-                        </label>
-                        <div class="relative">
-                            <input id="confirmPassword" name="confirmPassword" type="password" autocomplete="new-password" required 
-                                   class="glass-effect appearance-none block w-full px-4 py-3 border border-blue-700 rounded-xl placeholder-blue-400 focus:outline-none focus:ring-2 focus:ring-purple-400 focus:border-purple-400 text-white pl-12 pr-12 transition"
-                                   placeholder="Confirm your password">
-                            <div class="absolute left-4 top-1/2 transform -translate-y-1/2 text-blue-400">
-                                <i class="fas fa-lock"></i>
-                            </div>
-                            <button type="button" id="toggleConfirmPassword" class="absolute right-4 top-1/2 transform -translate-y-1/2 text-blue-400 hover:text-cyan-400 transition">
-                                <i class="fas fa-eye"></i>
-                            </button>
-                        </div>
-                        <div id="confirmPasswordError" class="text-red-400 text-sm mt-1 hidden"></div>
-                    </div>
-
-                    <div class="flex items-start space-x-3">
-                        <input id="agree-terms" name="agree-terms" type="checkbox" required
-                               class="h-5 w-5 text-cyan-400 focus:ring-cyan-400 border-blue-700 rounded glass-effect mt-1">
-                        <label for="agree-terms" class="block text-sm text-blue-300">
-                            I agree to the{' '}
-                            <a href="#" class="text-purple-400 hover:text-purple-300 transition">Terms of Service</a>
-                            {' '}and{' '}
-                            <a href="#" class="text-purple-400 hover:text-purple-300 transition">Privacy Policy</a>
-                        </label>
-                    </div>
-                    <div id="termsError" class="text-red-400 text-sm mt-1 hidden"></div>
-
-                    <div>
-                        <button type="submit" id="registerBtn"
-                                class="w-full cyber-gradient text-white py-3 px-4 rounded-xl text-lg font-semibold hover:scale-105 transition focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-cyan-400 quantum-glow disabled:opacity-50 disabled:cursor-not-allowed">
-                            <span id="registerBtnText">Create Account</span>
-                            <div id="registerSpinner" class="loading-spinner hidden"></div>
-                        </button>
-                    </div>
-                </form>
-            </div>
-
-            <!-- Security Features -->
-            <div class="glass-effect border border-blue-700 rounded-2xl p-6 mt-8">
-                <h3 class="text-sm font-medium text-cyan-400 mb-3">Secure Registration</h3>
-                <ul class="text-sm text-blue-400 space-y-2">
-                    <li class="flex items-center">
-                        <i class="fas fa-shield-alt text-green-400 mr-2"></i>
-                        <span>End-to-end encryption</span>
-                    </li>
-                    <li class="flex items-center">
-                        <i class="fas fa-user-check text-cyan-400 mr-2"></i>
-                        <span>Email verification</span>
-                    </li>
-                    <li class="flex items-center">
-                        <i class="fas fa-bolt text-purple-400 mr-2"></i>
-                        <span>Fast authentication</span>
-                    </li>
-                </ul>
-            </div>
+            <p class="mt-8 text-center text-sm text-gray-400">
+                Already have an account?
+                <a href="login.html" class="font-medium text-blue-400 hover:text-blue-300 transition duration-150">Sign In</a>
+            </p>
         </div>
     </div>
 
-    <!-- Firebase and App Script -->
-    <script type="module">
-        import { initializeApp } from "https://www.gstatic.com/firebasejs/10.7.1/firebase-app.js";
-        import { getFirestore, doc, setDoc, serverTimestamp } from "https://www.gstatic.com/firebasejs/10.7.1/firebase-firestore.js";
-        import { getAuth, createUserWithEmailAndPassword, sendEmailVerification, updateProfile } from "https://www.gstatic.com/firebasejs/10.7.1/firebase-auth.js";
-
-        // Firebase configuration
+    <script>
+        // --- FIREBASE CONFIGURATION & INITIALIZATION ---
         const firebaseConfig = {
             apiKey: "AIzaSyDHHyGgsSV18BcXrGgzi4C8frzDAE1C1zo",
             authDomain: "uniconnect-ee95c.firebaseapp.com",
             projectId: "uniconnect-ee95c",
-            storageBucket: "uniconnect-ee95c.appspot.com",
+            storageBucket: "uniconnect-ee95c.firebasestorage.app",
             messagingSenderId: "1003264444309",
             appId: "1:1003264444309:web:9f0307516e44d21e97d89c"
         };
 
-        // Initialize Firebase
-        const app = initializeApp(firebaseConfig);
-        const db = getFirestore(app);
-        const auth = getAuth(app);
-
-        // Make Firebase available globally
-        window.firebaseApp = {
-            app,
-            db,
-            auth,
-            authFunctions: {
-                createUserWithEmailAndPassword,
-                sendEmailVerification,
-                updateProfile
-            },
-            firestore: {
-                doc,
-                setDoc,
-                serverTimestamp
-            }
-        };
-
-        console.log('🔥 Firebase initialized successfully for registration!');
-
-        // Initialize registration app after Firebase is ready
-        if (window.initRegistrationApp) {
-            window.initRegistrationApp();
+        if (!firebase.apps.length) {
+            window.firebaseApp = firebase.initializeApp(firebaseConfig);
         }
-    </script>
+        const auth = firebase.auth();
+        const db = firebase.firestore(); // CRITICAL: Need Firestore for profile creation
+        // --- END FIREBASE INIT ---
 
-    <script>
-        // Registration Application Class
+        function showToast(message, type = 'info') {
+            const toastContainer = document.getElementById('toastContainer');
+            if (!toastContainer) return;
+
+            const toast = document.createElement('div');
+            toast.className = `toast ${type}`;
+            toast.innerHTML = `
+                <div class="flex items-center">
+                    <i class="fas fa-${type === 'success' ? 'check-circle' : type === 'error' ? 'exclamation-circle' : type === 'warning' ? 'exclamation-triangle' : 'info-circle'} mr-2"></i>
+                    <span class="font-medium">${message}</span>
+                </div>
+            `;
+            
+            toastContainer.appendChild(toast);
+            
+            setTimeout(() => {
+                toast.classList.add('show');
+            }, 100);
+            
+            setTimeout(() => {
+                toast.classList.remove('show');
+                setTimeout(() => {
+                    toastContainer.removeChild(toast);
+                }, 300);
+            }, 3000);
+        }
+
         class RegistrationApplication {
             constructor() {
-                this.isConnected = false;
-                this.passwordStrength = 0;
+                this.form = document.getElementById('registration-form');
+                this.submitBtn = document.getElementById('submitBtn');
+                this.initialize();
             }
 
-            async initialize() {
-                try {
-                    await this.initializeFirebase();
-                    this.setupEventListeners();
-                    this.updateConnectionStatus('connected');
-                    console.log('✅ Registration app initialized successfully');
-                } catch (error) {
-                    console.error('❌ Registration app initialization failed:', error);
-                    this.updateConnectionStatus('disconnected');
-                    this.showMessage('Firebase connection failed. Please check your connection.', 'error');
+            initialize() {
+                if (this.form) {
+                    this.form.addEventListener('submit', this.handleRegistration.bind(this));
                 }
+                this.setupShowPasswordToggle();
+            }
+            
+            showLoading() {
+                this.submitBtn.disabled = true;
+                this.submitBtn.innerHTML = '<i class="fas fa-spinner fa-spin mr-2"></i> Registering...';
             }
 
-            async initializeFirebase() {
-                if (!window.firebaseApp) {
-                    throw new Error('Firebase not available');
-                }
-                this.isConnected = true;
-                this.updateConnectionStatus('connected');
+            hideLoading() {
+                this.submitBtn.disabled = false;
+                this.submitBtn.innerHTML = 'Create Account';
             }
 
-            updateConnectionStatus(status) {
-                const statusElement = document.getElementById('connectionStatus');
-                const textElement = document.getElementById('connectionText');
-                
-                statusElement.className = `connection-status ${status}`;
-                
-                switch(status) {
-                    case 'connected':
-                        textElement.textContent = 'Connected to Firebase';
-                        statusElement.innerHTML = '<i class="fas fa-wifi mr-2"></i><span id="connectionText">Connected to Firebase</span>';
-                        break;
-                    case 'connecting':
-                        textElement.textContent = 'Connecting to Firebase...';
-                        statusElement.innerHTML = '<i class="fas fa-circle-notch fa-spin mr-2"></i><span id="connectionText">Connecting to Firebase...</span>';
-                        break;
-                    case 'disconnected':
-                        textElement.textContent = 'Connection Failed';
-                        statusElement.innerHTML = '<i class="fas fa-exclamation-triangle mr-2"></i><span id="connectionText">Connection Failed</span>';
-                        break;
-                }
-            }
+            setupShowPasswordToggle() {
+                const toggle = (btnId, inputId) => {
+                    const btn = document.getElementById(btnId);
+                    const input = document.getElementById(inputId);
+                    if (!btn || !input) return;
 
-            showMessage(message, type = 'error') {
-                const messageContainer = document.getElementById('messageContainer');
-                const messageClass = type === 'error' ? 'error-message' : 'success-message';
-                
-                messageContainer.innerHTML = `
-                    <div class="${messageClass}">
-                        <div class="flex items-center">
-                            <i class="fas ${type === 'error' ? 'fa-exclamation-triangle' : 'fa-check-circle'} mr-2"></i>
-                            <span>${message}</span>
-                        </div>
-                    </div>
-                `;
-                
-                if (type === 'success') {
-                    setTimeout(() => {
-                        if (messageContainer.innerHTML.includes(message)) {
-                            messageContainer.innerHTML = '';
-                        }
-                    }, 5000);
-                }
-            }
-
-            clearFieldError(fieldId) {
-                const errorElement = document.getElementById(fieldId + 'Error');
-                const field = document.getElementById(fieldId);
-                
-                if (errorElement) errorElement.classList.add('hidden');
-                if (field) {
-                    field.classList.remove('input-error');
-                    field.classList.remove('input-success');
-                }
-            }
-
-            showFieldError(fieldId, message) {
-                const field = document.getElementById(fieldId);
-                const errorElement = document.getElementById(fieldId + 'Error');
-                
-                field.classList.add('input-error');
-                field.classList.remove('input-success');
-                if (errorElement) {
-                    errorElement.textContent = message;
-                    errorElement.classList.remove('hidden');
-                }
-            }
-
-            showFieldSuccess(fieldId) {
-                const field = document.getElementById(fieldId);
-                field.classList.add('input-success');
-                field.classList.remove('input-error');
-                this.clearFieldError(fieldId);
-            }
-
-            validatePassword(password) {
-                const requirements = {
-                    length: password.length >= 8,
-                    uppercase: /[A-Z]/.test(password),
-                    lowercase: /[a-z]/.test(password),
-                    number: /[0-9]/.test(password),
-                    special: /[!@#$%^&*(),.?":{}|<>]/.test(password)
+                    btn.addEventListener('click', () => {
+                        const type = input.type === 'password' ? 'text' : 'password';
+                        input.type = type;
+                        btn.querySelector('i').className = type === 'password' ? 'fas fa-eye' : 'fas fa-eye-slash';
+                    });
                 };
-
-                const strength = Object.values(requirements).filter(Boolean).length;
-                this.passwordStrength = strength;
-
-                // Update strength indicator
-                const strengthBar = document.getElementById('passwordStrength');
-                const feedback = document.getElementById('passwordFeedback');
-                
-                let strengthClass = '';
-                let strengthText = '';
-
-                switch(strength) {
-                    case 0:
-                    case 1:
-                        strengthClass = 'weak';
-                        strengthText = 'Very weak password';
-                        break;
-                    case 2:
-                        strengthClass = 'weak';
-                        strengthText = 'Weak password';
-                        break;
-                    case 3:
-                        strengthClass = 'fair';
-                        strengthText = 'Fair password';
-                        break;
-                    case 4:
-                        strengthClass = 'good';
-                        strengthText = 'Good password';
-                        break;
-                    case 5:
-                        strengthClass = 'strong';
-                        strengthText = 'Strong password!';
-                        break;
-                }
-
-                strengthBar.className = `password-strength ${strengthClass}`;
-                feedback.textContent = strengthText;
-                feedback.className = `text-sm mt-1 ${
-                    strength <= 2 ? 'text-red-400' : 
-                    strength === 3 ? 'text-yellow-400' : 
-                    strength === 4 ? 'text-blue-400' : 'text-green-400'
-                }`;
-
-                return requirements;
+                toggle('togglePassword', 'password');
+                toggle('toggleConfirmPassword', 'confirmPassword');
             }
+            
+            // --- THE FIXED ASYNC REGISTRATION FUNCTION ---
+            async handleRegistration(e) {
+                e.preventDefault();
+                this.showLoading();
 
-            setLoadingState(isLoading, buttonText = 'Create Account') {
-                const registerBtn = document.getElementById('registerBtn');
-                const registerBtnText = document.getElementById('registerBtnText');
-                const registerSpinner = document.getElementById('registerSpinner');
+                const displayName = document.getElementById('displayName').value.trim();
+                const email = document.getElementById('email').value.trim();
+                const password = document.getElementById('password').value;
+                const confirmPassword = document.getElementById('confirmPassword').value;
 
-                registerBtn.disabled = isLoading;
-                
-                if (isLoading) {
-                    registerBtnText.textContent = 'Creating Account...';
-                    registerSpinner.classList.remove('hidden');
-                } else {
-                    registerBtnText.textContent = buttonText;
-                    registerSpinner.classList.add('hidden');
+                if (password !== confirmPassword) {
+                    this.hideLoading();
+                    showToast('Passwords do not match.', 'error');
+                    return;
                 }
-            }
-
-            async registerWithEmailPassword(userData) {
-                if (!this.isConnected || !window.firebaseApp) {
-                    this.showMessage('Firebase not connected. Please try again.', 'error');
-                    return false;
+                if (password.length < 6) {
+                    this.hideLoading();
+                    showToast('Password must be at least 6 characters.', 'error');
+                    return;
                 }
 
                 try {
-                    this.setLoadingState(true);
-
-                    console.log('Registering user:', userData.email);
-
-                    // Create user with Firebase Auth
-                    const userCredential = await window.firebaseApp.authFunctions.createUserWithEmailAndPassword(
-                        window.firebaseApp.auth, 
-                        userData.email, 
-                        userData.password
-                    );
-
+                    // 1. AWAIT user creation
+                    const userCredential = await auth.createUserWithEmailAndPassword(email, password);
                     const user = userCredential.user;
-                    console.log('✅ User created successfully:', user.email);
 
-                    // Update user profile with display name
-                    if (userData.displayName) {
-                        await window.firebaseApp.authFunctions.updateProfile(user, {
-                            displayName: userData.displayName
-                        });
-                    }
+                    // 2. AWAIT setting the display name
+                    await user.updateProfile({ displayName: displayName });
 
-                    // Send email verification
-                    await window.firebaseApp.authFunctions.sendEmailVerification(user);
-                    console.log('✅ Verification email sent');
+                    // 3. CRITICAL: AWAIT creating the initial Firestore user profile
+                    await db.collection('users').doc(user.uid).set({
+                        username: displayName,
+                        email: email,
+                        currentMood: 'calm', // Default mood
+                        bio: 'New ConnectSphere member!',
+                        photoURL: user.photoURL || 'https://via.placeholder.com/40',
+                        createdAt: firebase.firestore.FieldValue.serverTimestamp()
+                    });
 
-                    // Store user data in Firestore
-                    try {
-                        await window.firebaseApp.firestore.setDoc(
-                            window.firebaseApp.firestore.doc(window.firebaseApp.db, 'users', user.uid),
-                            {
-                                uid: user.uid,
-                                email: user.email,
-                                displayName: userData.displayName || '',
-                                emailVerified: false,
-                                profileComplete: false,
-                                createdAt: window.firebaseApp.firestore.serverTimestamp(),
-                                lastLogin: window.firebaseApp.firestore.serverTimestamp(),
-                                registrationSource: 'web'
-                            }
-                        );
-                        console.log('✅ User data saved to Firestore');
-                    } catch (firestoreError) {
-                        console.warn('⚠️ Firestore save warning:', firestoreError);
-                    }
-
-                    // Show success message
-                    this.showMessage(
-                        `Account created successfully! Verification email sent to ${user.email}.`,
-                        'success'
-                    );
-
-                    // Update button state
-                    this.setLoadingState(false, 'Account Created!');
-
-                    // Store registration data
-                    localStorage.setItem('userEmail', user.email);
-                    localStorage.setItem('userId', user.uid);
-                    localStorage.setItem('userDisplayName', userData.displayName || '');
-
-                    // Redirect to login after delay
+                    // 4. Success: Redirect
+                    this.hideLoading();
+                    showToast('Registration successful! Welcome!', 'success');
                     setTimeout(() => {
-                        window.location.href = 'login.html?message=registration_success';
-                    }, 3000);
-
-                    return true;
+                        window.location.href = 'home.html'; 
+                    }, 500);
 
                 } catch (error) {
-                    console.error('❌ Registration error:', error);
+                    // 5. Failure: Handle the error
+                    this.hideLoading();
                     
-                    // Reset button state
-                    this.setLoadingState(false, 'Create Account');
-
-                    // Handle specific errors
-                    let errorMessage = 'Registration failed. Please try again.';
-
+                    let message = 'Registration failed.';
                     switch (error.code) {
                         case 'auth/email-already-in-use':
-                            errorMessage = 'This email is already registered. Please sign in instead.';
-                            break;
-                        case 'auth/invalid-email':
-                            errorMessage = 'Invalid email address format.';
+                            message = 'This email is already registered.';
                             break;
                         case 'auth/weak-password':
-                            errorMessage = 'Password is too weak. Please use a stronger password.';
+                            message = 'Password must be at least 6 characters.';
                             break;
-                        case 'auth/network-request-failed':
-                            errorMessage = 'Network error. Please check your internet connection.';
+                        case 'auth/invalid-email':
+                            message = 'The email address is not valid.';
                             break;
+                        default:
+                            message = 'Registration failed: ' + error.message;
                     }
-
-                    this.showMessage(errorMessage, 'error');
-                    return false;
+                    showToast(message, 'error');
+                    console.error("Registration Error:", error.code, error.message);
                 }
-            }
-
-            validateFormData(formData) {
-                const errors = [];
-
-                // Display name validation
-                if (!formData.displayName || formData.displayName.trim().length < 2) {
-                    errors.push({ field: 'displayName', message: 'Display name must be at least 2 characters' });
-                }
-
-                // Email validation
-                const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
-                if (!formData.email || !emailRegex.test(formData.email)) {
-                    errors.push({ field: 'email', message: 'Please enter a valid email address' });
-                }
-
-                // Password validation
-                if (!formData.password) {
-                    errors.push({ field: 'password', message: 'Password is required' });
-                } else if (formData.password.length < 8) {
-                    errors.push({ field: 'password', message: 'Password must be at least 8 characters' });
-                } else if (this.passwordStrength < 3) {
-                    errors.push({ field: 'password', message: 'Please use a stronger password' });
-                }
-
-                // Password confirmation
-                if (formData.password !== formData.confirmPassword) {
-                    errors.push({ field: 'confirmPassword', message: 'Passwords do not match' });
-                }
-
-                // Terms agreement
-                if (!formData.agreeTerms) {
-                    errors.push({ field: 'terms', message: 'You must agree to the Terms of Service' });
-                }
-
-                return errors;
-            }
-
-            setupEventListeners() {
-                // Form submission
-                document.getElementById('registerForm').addEventListener('submit', async (e) => {
-                    e.preventDefault();
-                    
-                    // Clear previous errors
-                    this.clearFieldError('displayName');
-                    this.clearFieldError('email');
-                    this.clearFieldError('password');
-                    this.clearFieldError('confirmPassword');
-                    this.clearFieldError('terms');
-
-                    const formData = {
-                        displayName: document.getElementById('displayName').value.trim(),
-                        email: document.getElementById('email').value.trim().toLowerCase(),
-                        password: document.getElementById('password').value,
-                        confirmPassword: document.getElementById('confirmPassword').value,
-                        agreeTerms: document.getElementById('agree-terms').checked
-                    };
-
-                    // Validate form data
-                    const errors = this.validateFormData(formData);
-                    if (errors.length > 0) {
-                        errors.forEach(error => {
-                            if (error.field === 'terms') {
-                                this.showFieldError('terms', error.message);
-                            } else {
-                                this.showFieldError(error.field, error.message);
-                            }
-                        });
-                        return;
-                    }
-
-                    // Register user
-                    await this.registerWithEmailPassword(formData);
-                });
-
-                // Real-time validation
-                document.getElementById('displayName').addEventListener('input', (e) => {
-                    const value = e.target.value.trim();
-                    this.clearFieldError('displayName');
-                    if (value && value.length >= 2) {
-                        this.showFieldSuccess('displayName');
-                    }
-                });
-
-                document.getElementById('email').addEventListener('input', (e) => {
-                    const email = e.target.value.trim();
-                    this.clearFieldError('email');
-                    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
-                    if (email && emailRegex.test(email)) {
-                        this.showFieldSuccess('email');
-                    }
-                });
-
-                document.getElementById('password').addEventListener('input', (e) => {
-                    this.validatePassword(e.target.value);
-                    this.clearFieldError('password');
-                    if (e.target.value && e.target.value.length >= 8) {
-                        this.showFieldSuccess('password');
-                    }
-                });
-
-                document.getElementById('confirmPassword').addEventListener('input', (e) => {
-                    const password = document.getElementById('password').value;
-                    this.clearFieldError('confirmPassword');
-                    if (e.target.value && e.target.value === password) {
-                        this.showFieldSuccess('confirmPassword');
-                    }
-                });
-
-                // Password visibility toggle
-                document.getElementById('togglePassword').addEventListener('click', () => {
-                    const passwordInput = document.getElementById('password');
-                    const icon = document.getElementById('togglePassword').querySelector('i');
-                    
-                    if (passwordInput.type === 'password') {
-                        passwordInput.type = 'text';
-                        icon.className = 'fas fa-eye-slash';
-                    } else {
-                        passwordInput.type = 'password';
-                        icon.className = 'fas fa-eye';
-                    }
-                });
-
-                document.getElementById('toggleConfirmPassword').addEventListener('click', () => {
-                    const confirmInput = document.getElementById('confirmPassword');
-                    const icon = document.getElementById('toggleConfirmPassword').querySelector('i');
-                    
-                    if (confirmInput.type === 'password') {
-                        confirmInput.type = 'text';
-                        icon.className = 'fas fa-eye-slash';
-                    } else {
-                        confirmInput.type = 'password';
-                        icon.className = 'fas fa-eye';
-                    }
-                });
-
-                // Auto-focus first field
-                document.getElementById('displayName').focus();
             }
         }
 
-        // Global function to initialize registration
-        window.initRegistrationApp = function() {
-            window.registrationApp = new RegistrationApplication();
-            window.registrationApp.initialize();
-        };
-
-        // Back button function
-        function goBack() {
-            window.location.href = 'index.html';
-        }
-
-        // Initialize when DOM is loaded
         document.addEventListener('DOMContentLoaded', function() {
-            if (window.firebaseApp) {
-                window.initRegistrationApp();
-            } else {
-                // Wait for Firebase to initialize
-                const checkFirebase = setInterval(() => {
-                    if (window.firebaseApp) {
-                        clearInterval(checkFirebase);
-                        window.initRegistrationApp();
-                    }
-                }, 100);
-            }
+            window.registrationApp = new RegistrationApplication();
         });
 
         console.log('🚀 Registration application script loaded');

@@ -1,7 +1,7 @@
 {
-  "name": "UniConnect - University Connection Platform",
-  "short_name": "UniConnect",
-  "description": "Connect with university students, share resources, chat, and trade items",
+  "name": "University Connection Platform",
+  "short_name": "UniPlatform",
+  "description": "Connect with university students, share resources, and trade items",
   "start_url": "/",
   "display": "standalone",
   "theme_color": "#4F46E5",
@@ -26,11 +26,11 @@
   ],
   "screenshots": [
     {
-      "src": "https://via.placeholder.com/640x320/4F46E5/FFFFFF?text=UniConnect+Dashboard",
+      "src": "https://via.placeholder.com/640x320/4F46E5/FFFFFF?text=Dashboard",
       "sizes": "640x320",
       "type": "image/png",
       "form_factor": "wide",
-      "label": "UniConnect Dashboard View"
+      "label": "Dashboard View"
     }
   ],
   "shortcuts": [

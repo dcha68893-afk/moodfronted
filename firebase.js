@@ -1,477 +1,351 @@
-// firebase.js - Optimized for Chat System
-import { initializeApp } from "https://www.gstatic.com/firebasejs/10.7.1/firebase-app.js";
-import { 
-    getFirestore, 
-    collection, 
-    addDoc, 
-    onSnapshot, 
-    query, 
-    orderBy, 
-    serverTimestamp, 
-    getDocs, 
-    doc,
-    setDoc,
-    getDoc,
-    updateDoc,
-    deleteDoc,
-    where,
-    limit,
-    arrayUnion,
-    arrayRemove,
-    writeBatch
-} from "https://www.gstatic.com/firebasejs/10.7.1/firebase-firestore.js";
-import { 
-    getAuth, 
-    createUserWithEmailAndPassword,
-    signInWithEmailAndPassword,
-    signOut,
-    onAuthStateChanged,
-    sendEmailVerification,
-    GoogleAuthProvider,
-    signInWithPopup,
-    sendPasswordResetEmail,
-    updateProfile
-} from "https://www.gstatic.com/firebasejs/10.7.1/firebase-auth.js";
-import { 
-    getStorage, 
-    ref, 
-    uploadBytes, 
-    getDownloadURL,
-    deleteObject 
-} from "https://www.gstatic.com/firebasejs/10.7.1/firebase-storage.js";
+/**
+ * UniConnect - Firebase Authentication Module
+ * Handles user authentication with Firebase
+ */
 
+// Firebase configuration
 const firebaseConfig = {
-    apiKey: "AIzaSyDHHyGgsSV18BcXrGgzi4C8frzDAE1C1zo",
-    authDomain: "uniconnect-ee95c.firebaseapp.com",
-    projectId: "uniconnect-ee95c",
-    storageBucket: "uniconnect-ee95c.appspot.com",
-    messagingSenderId: "1003264444309",
-    appId: "1:1003264444309:web:9f0307516e44d21e97d89c"
+  apiKey: "AIzaSyDHHyGgsSV18BcXrGgzi4C8frzDAE1C1zo",
+  authDomain: "uniconnect-ee95c.firebaseapp.com",
+  projectId: "uniconnect-ee95c",
+  storageBucket: "uniconnect-ee95c.firebasestorage.app",
+  messagingSenderId: "1003264444309",
+  appId: "1:1003264444309:web:9f0307516e44d21e97d89c"
 };
 
-const app = initializeApp(firebaseConfig);
-const db = getFirestore(app);
-const auth = getAuth(app);
-const storage = getStorage(app);
-
-class FirebaseChatService {
+class FirebaseAuthService {
     constructor() {
-        this.app = app;
-        this.db = db;
-        this.auth = auth;
-        this.storage = storage;
-        this.currentUser = null;
-        this.isConnected = false;
-        this.unsubscribeFunctions = [];
+        this.app = null;
+        this.auth = null;
+        this.db = null;
+        this.isInitialized = false;
+        this.init();
     }
 
-    async initialize() {
+    /**
+     * Initializes Firebase authentication
+     */
+    async init() {
         try {
-            console.log("🔥 Initializing Firebase Chat Service...");
-            this.setupAuthListener();
-            this.isConnected = true;
-            console.log("✅ Firebase Chat Service initialized successfully");
-            return true;
+            // Update connection status
+            this.updateConnectionStatus('connecting', 'Connecting to Firebase...');
+            
+            // Import and initialize Firebase
+            const { initializeApp } = await import('https://www.gstatic.com/firebasejs/10.7.1/firebase-app.js');
+            const { getAuth, createUserWithEmailAndPassword, signInWithEmailAndPassword, updateProfile } = await import('https://www.gstatic.com/firebasejs/10.7.1/firebase-auth.js');
+            const { getFirestore, doc, setDoc, serverTimestamp } = await import('https://www.gstatic.com/firebasejs/10.7.1/firebase-firestore.js');
+
+            // Initialize Firebase
+            this.app = initializeApp(firebaseConfig);
+            this.auth = getAuth(this.app);
+            this.db = getFirestore(this.app);
+            
+            this.isInitialized = true;
+            this.updateConnectionStatus('connected', 'Connected to Firebase');
+            
+            // Show security status
+            document.getElementById('securityStatus').classList.remove('hidden');
+            
+            console.log('✅ Firebase initialized successfully!');
+            console.log('📊 Project: uniconnect-ee95c');
+            
         } catch (error) {
-            console.error("❌ Firebase initialization failed:", error);
-            this.isConnected = false;
-            throw error;
+            console.error('❌ Firebase initialization failed:', error);
+            this.updateConnectionStatus('disconnected', 'Firebase connection failed');
+            
+            // Show error message
+            if (window.uniConnectApp) {
+                window.uniConnectApp.showMessage('Firebase connection failed. Please check your connection.', 'error');
+            }
         }
     }
 
-    setupAuthListener() {
-        return onAuthStateChanged(this.auth, (user) => {
-            this.currentUser = user;
-            if (user) {
-                console.log("👤 User authenticated:", user.uid);
-                this.updateUserStatus(true);
-            } else {
-                console.log("👤 No user signed in");
-            }
-        });
-    }
+    /**
+     * Registers a new user with email and password
+     * @param {string} email - User's email
+     * @param {string} password - User's password
+     * @param {string} displayName - User's display name
+     * @returns {Promise<Object>} - User credentials
+     */
+    async registerUser(email, password, displayName) {
+        if (!this.isInitialized || !this.auth) {
+            throw new Error('Firebase not initialized. Please try again.');
+        }
 
-    // AUTH METHODS
-    async signUpWithEmail(email, password, userData = {}) {
         try {
+            // Import required functions
+            const { createUserWithEmailAndPassword, updateProfile } = await import('https://www.gstatic.com/firebasejs/10.7.1/firebase-auth.js');
+            const { doc, setDoc, serverTimestamp } = await import('https://www.gstatic.com/firebasejs/10.7.1/firebase-firestore.js');
+
+            // Create user with email and password
             const userCredential = await createUserWithEmailAndPassword(this.auth, email, password);
-            this.currentUser = userCredential.user;
+            const user = userCredential.user;
             
-            await sendEmailVerification(this.currentUser);
-            await this.createUserProfile(userData);
-            
-            return userCredential;
-        } catch (error) {
-            console.error("❌ Email sign-up failed:", error);
-            throw error;
-        }
-    }
-
-    async signInWithEmail(email, password) {
-        try {
-            const userCredential = await signInWithEmailAndPassword(this.auth, email, password);
-            this.currentUser = userCredential.user;
-            await this.updateUserStatus(true);
-            return userCredential;
-        } catch (error) {
-            console.error("❌ Email sign-in failed:", error);
-            throw error;
-        }
-    }
-
-    async signInWithGoogle() {
-        try {
-            const provider = new GoogleAuthProvider();
-            const userCredential = await signInWithPopup(this.auth, provider);
-            this.currentUser = userCredential.user;
-            await this.createUserProfile();
-            return userCredential;
-        } catch (error) {
-            console.error("❌ Google sign-in failed:", error);
-            throw error;
-        }
-    }
-
-    async signOut() {
-        try {
-            await this.updateUserStatus(false);
-            await signOut(this.auth);
-            this.cleanup();
-        } catch (error) {
-            console.error("❌ Sign out failed:", error);
-            throw error;
-        }
-    }
-
-    // USER MANAGEMENT
-    async createUserProfile(userData = {}) {
-        if (!this.currentUser) throw new Error("User not authenticated");
-
-        const userProfile = {
-            uid: this.currentUser.uid,
-            email: this.currentUser.email,
-            name: userData.name || this.currentUser.displayName || `User_${this.currentUser.uid.slice(-6)}`,
-            role: userData.role || 'student',
-            avatar: userData.avatar || this.getInitials(userData.name || this.currentUser.displayName || 'User'),
-            online: true,
-            createdAt: serverTimestamp(),
-            lastSeen: serverTimestamp(),
-            emailVerified: this.currentUser.emailVerified
-        };
-
-        await setDoc(doc(this.db, 'users', this.currentUser.uid), userProfile);
-        return userProfile;
-    }
-
-    async updateUserProfile(profileData) {
-        if (!this.currentUser) throw new Error("User not authenticated");
-
-        const updateData = {
-            ...profileData,
-            lastUpdated: serverTimestamp()
-        };
-
-        if (profileData.name) {
-            updateData.avatar = this.getInitials(profileData.name);
-        }
-
-        await setDoc(doc(this.db, 'users', this.currentUser.uid), updateData, { merge: true });
-
-        // Update auth profile
-        if (profileData.name) {
-            await updateProfile(this.currentUser, {
-                displayName: profileData.name
+            // Update user profile with display name
+            await updateProfile(user, {
+                displayName: displayName
             });
-        }
-    }
-
-    async updateUserStatus(online) {
-        if (!this.currentUser) return;
-        
-        await setDoc(doc(this.db, 'users', this.currentUser.uid), {
-            online: online,
-            lastSeen: serverTimestamp()
-        }, { merge: true });
-    }
-
-    async getUser(userId) {
-        const docRef = doc(this.db, 'users', userId);
-        const docSnap = await getDoc(docRef);
-        return docSnap.exists() ? docSnap.data() : null;
-    }
-
-    async getAllUsers() {
-        const usersRef = collection(this.db, 'users');
-        const q = query(usersRef, where('uid', '!=', this.currentUser.uid));
-        const snapshot = await getDocs(q);
-        return snapshot.docs.map(doc => doc.data());
-    }
-
-    // CHAT MANAGEMENT
-    async createChat(chatData) {
-        if (!this.currentUser) throw new Error("User not authenticated");
-
-        const chat = {
-            name: chatData.name,
-            type: chatData.type || 'public',
-            members: [this.currentUser.uid, ...chatData.members],
-            createdBy: this.currentUser.uid,
-            avatarText: chatData.avatarText || chatData.name.substring(0, 2).toUpperCase(),
-            createdAt: serverTimestamp(),
-            lastMessage: 'Chat created',
-            lastMessageTime: serverTimestamp(),
-            lastRead: {
-                [this.currentUser.uid]: serverTimestamp()
+            
+            // Create user document in Firestore
+            const userDocRef = doc(this.db, 'users', user.uid);
+            await setDoc(userDocRef, {
+                uid: user.uid,
+                email: user.email,
+                displayName: displayName,
+                photoURL: '',
+                bio: 'New UniConnect member!',
+                createdAt: serverTimestamp(),
+                lastLogin: serverTimestamp(),
+                emailVerified: false
+            });
+            
+            // Store user info in localStorage
+            localStorage.setItem('uniconnect-user', JSON.stringify({
+                uid: user.uid,
+                email: user.email,
+                displayName: displayName,
+                isNewUser: true
+            }));
+            
+            console.log('✅ User registered successfully:', user.email);
+            return userCredential;
+            
+        } catch (error) {
+            console.error('❌ Registration failed:', error);
+            
+            // Handle specific error cases
+            let errorMessage = 'Registration failed. Please try again.';
+            
+            switch (error.code) {
+                case 'auth/email-already-in-use':
+                    errorMessage = 'This email is already registered. Please try logging in.';
+                    break;
+                case 'auth/weak-password':
+                    errorMessage = 'Password is too weak. Please use a stronger password (at least 6 characters).';
+                    break;
+                case 'auth/invalid-email':
+                    errorMessage = 'Invalid email address. Please check your email.';
+                    break;
+                case 'auth/operation-not-allowed':
+                    errorMessage = 'Email/password accounts are not enabled. Please contact support.';
+                    break;
+                case 'auth/network-request-failed':
+                    errorMessage = 'Network error. Please check your internet connection.';
+                    break;
+                default:
+                    errorMessage = `Registration failed: ${error.message}`;
             }
-        };
-
-        const chatRef = await addDoc(collection(this.db, 'chats'), chat);
-        return chatRef.id;
-    }
-
-    async sendMessage(chatId, content, messageType = 'normal') {
-        if (!this.currentUser) throw new Error("User not authenticated");
-
-        const messageData = {
-            senderId: this.currentUser.uid,
-            content: content,
-            type: messageType,
-            timestamp: serverTimestamp(),
-            status: 'sent'
-        };
-
-        // Add message to subcollection
-        const messageRef = await addDoc(
-            collection(this.db, 'chats', chatId, 'messages'), 
-            messageData
-        );
-
-        // Update chat last message
-        await updateDoc(doc(this.db, 'chats', chatId), {
-            lastMessage: content,
-            lastMessageTime: serverTimestamp()
-        });
-
-        return messageRef.id;
-    }
-
-    subscribeToChats(callback) {
-        if (!this.currentUser) return;
-
-        const chatsRef = collection(this.db, 'chats');
-        const q = query(
-            chatsRef, 
-            where('members', 'array-contains', this.currentUser.uid),
-            orderBy('lastMessageTime', 'desc')
-        );
-
-        const unsubscribe = onSnapshot(q, async (snapshot) => {
-            const chats = await Promise.all(
-                snapshot.docs.map(async (docSnap) => {
-                    const chatData = docSnap.data();
-                    
-                    // Get members data
-                    const membersData = await Promise.all(
-                        chatData.members.map(memberId => this.getUser(memberId))
-                    );
-
-                    return {
-                        id: docSnap.id,
-                        ...chatData,
-                        members: membersData.filter(m => m !== null)
-                    };
-                })
-            );
-
-            callback(chats);
-        });
-
-        this.unsubscribeFunctions.push(unsubscribe);
-        return unsubscribe;
-    }
-
-    subscribeToMessages(chatId, callback, limit = 100) {
-        const messagesRef = collection(this.db, 'chats', chatId, 'messages');
-        const q = query(
-            messagesRef,
-            orderBy('timestamp', 'asc'),
-            limit(limit)
-        );
-
-        const unsubscribe = onSnapshot(q, async (snapshot) => {
-            const messages = await Promise.all(
-                snapshot.docs.map(async (docSnap) => {
-                    const messageData = docSnap.data();
-                    const sender = await this.getUser(messageData.senderId);
-                    
-                    return {
-                        id: docSnap.id,
-                        ...messageData,
-                        sender: sender || { name: 'Unknown User', avatar: 'UU' },
-                        time: this.formatTime(messageData.timestamp?.toDate()),
-                        timestamp: messageData.timestamp
-                    };
-                })
-            );
-
-            callback(messages);
-        });
-
-        this.unsubscribeFunctions.push(unsubscribe);
-        return unsubscribe;
-    }
-
-    async markAsRead(chatId) {
-        if (!this.currentUser) return;
-
-        await updateDoc(doc(this.db, 'chats', chatId), {
-            [`lastRead.${this.currentUser.uid}`]: serverTimestamp()
-        });
-    }
-
-    async leaveChat(chatId) {
-        if (!this.currentUser) return;
-
-        const chatRef = doc(this.db, 'chats', chatId);
-        const chatDoc = await getDoc(chatRef);
-        
-        if (chatDoc.exists()) {
-            const chatData = chatDoc.data();
-            const updatedMembers = chatData.members.filter(memberId => memberId !== this.currentUser.uid);
             
-            await updateDoc(chatRef, {
-                members: updatedMembers
-            });
+            throw new Error(errorMessage);
         }
     }
 
-    // GROUP MANAGEMENT
-    async addMembersToChat(chatId, memberIds) {
-        const chatRef = doc(this.db, 'chats', chatId);
-        await updateDoc(chatRef, {
-            members: arrayUnion(...memberIds)
-        });
-    }
+    /**
+     * Logs in a user with email and password
+     * @param {string} email - User's email
+     * @param {string} password - User's password
+     * @returns {Promise<Object>} - User credentials
+     */
+    async loginUser(email, password) {
+        if (!this.isInitialized || !this.auth) {
+            throw new Error('Firebase not initialized. Please try again.');
+        }
 
-    async removeMembersFromChat(chatId, memberIds) {
-        const chatRef = doc(this.db, 'chats', chatId);
-        await updateDoc(chatRef, {
-            members: arrayRemove(...memberIds)
-        });
-    }
+        try {
+            // Import required function
+            const { signInWithEmailAndPassword } = await import('https://www.gstatic.com/firebasejs/10.7.1/firebase-auth.js');
+            const { doc, setDoc, serverTimestamp } = await import('https://www.gstatic.com/firebasejs/10.7.1/firebase-firestore.js');
 
-    // FILE UPLOADS FOR CHAT
-    async uploadChatFile(file, chatId) {
-        if (!this.currentUser) throw new Error("User not authenticated");
-
-        const fileRef = ref(this.storage, `chats/${chatId}/${Date.now()}_${file.name}`);
-        const snapshot = await uploadBytes(fileRef, file);
-        const downloadURL = await getDownloadURL(snapshot.ref);
-        
-        return {
-            url: downloadURL,
-            name: file.name,
-            size: file.size,
-            type: file.type
-        };
-    }
-
-    async uploadProfilePicture(file) {
-        if (!this.currentUser) throw new Error("User not authenticated");
-
-        const fileRef = ref(this.storage, `profile-pictures/${this.currentUser.uid}`);
-        const snapshot = await uploadBytes(fileRef, file);
-        const downloadURL = await getDownloadURL(snapshot.ref);
-        
-        // Update user profile with new photo URL
-        await this.updateUserProfile({ photoURL: downloadURL });
-        
-        return downloadURL;
-    }
-
-    // NOTIFICATIONS
-    async sendChatNotification(chatId, title, message) {
-        const chatDoc = await getDoc(doc(this.db, 'chats', chatId));
-        if (!chatDoc.exists()) return;
-
-        const chatData = chatDoc.data();
-        const notifications = chatData.members
-            .filter(memberId => memberId !== this.currentUser.uid)
-            .map(memberId => ({
-                userId: memberId,
-                title: title,
-                message: message,
-                chatId: chatId,
-                type: 'chat',
-                read: false,
-                timestamp: serverTimestamp()
+            // Sign in user
+            const userCredential = await signInWithEmailAndPassword(this.auth, email, password);
+            const user = userCredential.user;
+            
+            // Update last login timestamp in Firestore
+            const userDocRef = doc(this.db, 'users', user.uid);
+            await setDoc(userDocRef, {
+                lastLogin: serverTimestamp()
+            }, { merge: true });
+            
+            // Store user info in localStorage
+            localStorage.setItem('uniconnect-user', JSON.stringify({
+                uid: user.uid,
+                email: user.email,
+                displayName: user.displayName || user.email.split('@')[0],
+                isNewUser: false
             }));
-
-        // Batch write for efficiency
-        const batch = writeBatch(this.db);
-        notifications.forEach(notification => {
-            const notificationRef = doc(collection(this.db, 'notifications'));
-            batch.set(notificationRef, notification);
-        });
-        await batch.commit();
+            
+            console.log('✅ User logged in successfully:', user.email);
+            return userCredential;
+            
+        } catch (error) {
+            console.error('❌ Login failed:', error);
+            
+            // Handle specific error cases
+            let errorMessage = 'Login failed. Please try again.';
+            
+            switch (error.code) {
+                case 'auth/user-not-found':
+                    errorMessage = 'No account found with this email. Please register first.';
+                    break;
+                case 'auth/wrong-password':
+                    errorMessage = 'Incorrect password. Please try again.';
+                    break;
+                case 'auth/invalid-email':
+                    errorMessage = 'Invalid email address. Please check your email.';
+                    break;
+                case 'auth/user-disabled':
+                    errorMessage = 'This account has been disabled. Please contact support.';
+                    break;
+                case 'auth/too-many-requests':
+                    errorMessage = 'Too many failed attempts. Please try again later.';
+                    break;
+                case 'auth/network-request-failed':
+                    errorMessage = 'Network error. Please check your internet connection.';
+                    break;
+                default:
+                    errorMessage = `Login failed: ${error.message}`;
+            }
+            
+            throw new Error(errorMessage);
+        }
     }
 
-    subscribeToUserNotifications(callback) {
-        if (!this.currentUser) return;
+    /**
+     * Signs out the current user
+     * @returns {Promise<void>}
+     */
+    async signOut() {
+        if (!this.isInitialized || !this.auth) {
+            throw new Error('Firebase not initialized.');
+        }
 
-        const notificationsRef = collection(this.db, 'notifications');
-        const q = query(
-            notificationsRef,
-            where('userId', '==', this.currentUser.uid),
-            orderBy('timestamp', 'desc'),
-            limit(20)
-        );
-
-        const unsubscribe = onSnapshot(q, (snapshot) => {
-            const notifications = snapshot.docs.map(doc => ({
-                id: doc.id,
-                ...doc.data()
-            }));
-            callback(notifications);
-        });
-
-        this.unsubscribeFunctions.push(unsubscribe);
-        return unsubscribe;
+        try {
+            const { signOut } = await import('https://www.gstatic.com/firebasejs/10.7.1/firebase-auth.js');
+            await signOut(this.auth);
+            
+            // Remove user data from localStorage
+            localStorage.removeItem('uniconnect-user');
+            localStorage.removeItem('uniconnect-email');
+            localStorage.removeItem('uniconnect-remember');
+            
+            console.log('✅ User signed out successfully');
+            
+        } catch (error) {
+            console.error('❌ Sign out failed:', error);
+            throw new Error('Sign out failed. Please try again.');
+        }
     }
 
-    // UTILITY METHODS
-    getInitials(name) {
-        return name.split(' ').map(n => n[0]).join('').toUpperCase().substring(0, 2);
-    }
-
-    formatTime(date) {
-        if (!date) return '';
-        return date.toLocaleTimeString('en-US', { 
-            hour: 'numeric', 
-            minute: '2-digit', 
-            hour12: true 
-        });
-    }
-
-    // CLEANUP
-    cleanup() {
-        this.unsubscribeFunctions.forEach(unsubscribe => {
-            if (typeof unsubscribe === 'function') unsubscribe();
-        });
-        this.unsubscribeFunctions = [];
-    }
-
+    /**
+     * Gets the current authenticated user
+     * @returns {Object|null} - The current user or null if not authenticated
+     */
     getCurrentUser() {
-        return this.currentUser;
+        if (!this.isInitialized || !this.auth) {
+            return null;
+        }
+
+        try {
+            // Check Firebase auth first
+            const firebaseUser = this.auth.currentUser;
+            if (firebaseUser) {
+                return {
+                    uid: firebaseUser.uid,
+                    email: firebaseUser.email,
+                    displayName: firebaseUser.displayName,
+                    emailVerified: firebaseUser.emailVerified,
+                    isNewUser: false
+                };
+            }
+            
+            // Fallback to localStorage for demo purposes
+            const userData = localStorage.getItem('uniconnect-user');
+            return userData ? JSON.parse(userData) : null;
+            
+        } catch (error) {
+            console.error('❌ Error getting current user:', error);
+            return null;
+        }
     }
 
-    getConnectionStatus() {
-        return this.isConnected;
+    /**
+     * Checks if user is authenticated
+     * @returns {boolean} - True if user is authenticated
+     */
+    isAuthenticated() {
+        const user = this.getCurrentUser();
+        return user !== null;
+    }
+
+    /**
+     * Updates the connection status display
+     * @param {string} status - The connection status (connected, connecting, disconnected)
+     * @param {string} message - The status message to display
+     */
+    updateConnectionStatus(status, message) {
+        const statusElement = document.getElementById('connectionStatus');
+        const textElement = document.getElementById('connectionText');
+        
+        if (statusElement && textElement) {
+            statusElement.className = `connection-status ${status}`;
+            
+            // Update icon and text based on status
+            if (status === 'connected') {
+                statusElement.innerHTML = '<i class="fas fa-check-circle mr-2"></i><span id="connectionText">Connected to Firebase</span>';
+            } else if (status === 'connecting') {
+                statusElement.innerHTML = '<i class="fas fa-circle-notch fa-spin mr-2"></i><span id="connectionText">Connecting to Firebase...</span>';
+            } else {
+                statusElement.innerHTML = '<i class="fas fa-exclamation-triangle mr-2"></i><span id="connectionText">Connection Failed</span>';
+            }
+            
+            // Update the text element reference
+            const newTextElement = document.getElementById('connectionText');
+            if (newTextElement) {
+                newTextElement.textContent = message;
+            }
+        }
+    }
+
+    /**
+     * Sends password reset email
+     * @param {string} email - User's email
+     * @returns {Promise<void>}
+     */
+    async sendPasswordResetEmail(email) {
+        if (!this.isInitialized || !this.auth) {
+            throw new Error('Firebase not initialized.');
+        }
+
+        try {
+            const { sendPasswordResetEmail } = await import('https://www.gstatic.com/firebasejs/10.7.1/firebase-auth.js');
+            await sendPasswordResetEmail(this.auth, email);
+            
+            console.log('✅ Password reset email sent successfully');
+            
+        } catch (error) {
+            console.error('❌ Password reset failed:', error);
+            
+            let errorMessage = 'Failed to send password reset email. Please try again.';
+            
+            switch (error.code) {
+                case 'auth/user-not-found':
+                    errorMessage = 'No account found with this email.';
+                    break;
+                case 'auth/invalid-email':
+                    errorMessage = 'Invalid email address.';
+                    break;
+                case 'auth/network-request-failed':
+                    errorMessage = 'Network error. Please check your connection.';
+                    break;
+            }
+            
+            throw new Error(errorMessage);
+        }
     }
 }
 
-const firebaseChatService = new FirebaseChatService();
-window.firebaseChatService = firebaseChatService;
-export { firebaseChatService };
+// Initialize Firebase Auth Service
+window.firebaseAuth = new FirebaseAuthService();
 
-console.log("🔥 Firebase Chat Service loaded successfully!");
+// Make Firebase available globally for debugging
+window.getFirebaseAuth = () => window.firebaseAuth;

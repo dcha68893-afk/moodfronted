@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Platform - Uniconnect</title>
+    <title>Support - Uniconnect</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css" rel="stylesheet">
     
@@ -29,23 +29,11 @@
                          0 0 20px rgba(59, 130, 246, 0.5),
                          0 0 30px rgba(59, 130, 246, 0.3);
         }
-        .tab-content {
-            display: none;
-        }
-        .tab-content.active {
-            display: block;
-            animation: fadeIn 0.5s ease-in;
-        }
-        @keyframes fadeIn {
-            from { opacity: 0; transform: translateY(20px); }
-            to { opacity: 1; transform: translateY(0); }
-        }
-        .nav-tab {
+        .support-card {
             transition: all 0.3s ease;
         }
-        .nav-tab.active {
-            background: rgba(59, 130, 246, 0.2);
-            border-color: #3B82F6;
+        .support-card:hover {
+            transform: translateY(-5px);
         }
         .notification {
             position: fixed;
@@ -98,7 +86,7 @@
                 
                 <div class="hidden md:flex items-center space-x-6">
                     <a href="index.html" class="text-blue-300 hover:text-white transition">Home</a>
-                    <a href="index.html#features" class="text-blue-300 hover:text-white transition">Features</a>
+                    <a href="platform.html" class="text-blue-300 hover:text-white transition">Platform</a>
                     <a href="index.html#security" class="text-blue-300 hover:text-white transition">Security</a>
                     <a href="support.html" class="text-blue-300 hover:text-white transition">Support</a>
                 </div>
@@ -110,261 +98,324 @@
         </div>
     </nav>
 
-    <!-- Platform Header -->
+    <!-- Support Header -->
     <div class="relative py-20 px-4 sm:px-6 lg:px-8">
         <div class="max-w-7xl mx-auto text-center">
             <h1 class="text-5xl md:text-6xl font-bold mb-6">
                 <span class="text-transparent bg-clip-text bg-gradient-to-r from-blue-400 via-purple-400 to-cyan-400 neon-text">
-                    Platform
+                    Support Center
                 </span>
             </h1>
             <p class="text-xl text-blue-300 mb-8 max-w-3xl mx-auto">
-                Explore our comprehensive platform features, pricing plans, and developer API
+                Get help, report issues, and access our comprehensive documentation
             </p>
             
-            <!-- Real-time Stats -->
+            <!-- Support Stats -->
             <div class="grid grid-cols-1 md:grid-cols-3 gap-6 max-w-2xl mx-auto mb-12">
                 <div class="glass-effect p-4 rounded-xl border border-blue-700/50">
-                    <div class="text-2xl font-bold text-cyan-400" id="platform-users">0</div>
-                    <div class="text-blue-300 text-sm">Platform Users</div>
+                    <div class="text-2xl font-bold text-cyan-400" id="support-tickets">0</div>
+                    <div class="text-blue-300 text-sm">Active Tickets</div>
                 </div>
                 <div class="glass-effect p-4 rounded-xl border border-purple-700/50">
-                    <div class="text-2xl font-bold text-purple-400" id="api-calls">0</div>
-                    <div class="text-blue-300 text-sm">API Calls Today</div>
+                    <div class="text-2xl font-bold text-purple-400" id="avg-response">0h</div>
+                    <div class="text-blue-300 text-sm">Avg Response Time</div>
                 </div>
                 <div class="glass-effect p-4 rounded-xl border border-cyan-700/50">
-                    <div class="text-2xl font-bold text-blue-400" id="active-plans">3</div>
-                    <div class="text-blue-300 text-sm">Pricing Plans</div>
+                    <div class="text-2xl font-bold text-blue-400" id="satisfaction-rate">0%</div>
+                    <div class="text-blue-300 text-sm">Satisfaction Rate</div>
                 </div>
             </div>
         </div>
     </div>
 
-    <!-- Platform Navigation -->
+    <!-- Support Navigation -->
     <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 mb-12">
         <div class="glass-effect rounded-2xl p-2 flex flex-wrap justify-center gap-2">
-            <button class="nav-tab px-6 py-3 rounded-xl border border-transparent text-blue-300 hover:text-white hover:border-blue-400 transition active" data-tab="features">
-                <i class="fas fa-star mr-2"></i>Features
+            <button class="nav-tab px-6 py-3 rounded-xl border border-transparent text-blue-300 hover:text-white hover:border-blue-400 transition active" data-tab="help">
+                <i class="fas fa-question-circle mr-2"></i>Help Center
             </button>
-            <button class="nav-tab px-6 py-3 rounded-xl border border-transparent text-blue-300 hover:text-white hover:border-blue-400 transition" data-tab="pricing">
-                <i class="fas fa-tag mr-2"></i>Pricing
+            <button class="nav-tab px-6 py-3 rounded-xl border border-transparent text-blue-300 hover:text-white hover:border-blue-400 transition" data-tab="contact">
+                <i class="fas fa-headset mr-2"></i>Contact Support
             </button>
-            <button class="nav-tab px-6 py-3 rounded-xl border border-transparent text-blue-300 hover:text-white hover:border-blue-400 transition" data-tab="api">
-                <i class="fas fa-code mr-2"></i>API
+            <button class="nav-tab px-6 py-3 rounded-xl border border-transparent text-blue-300 hover:text-white hover:border-blue-400 transition" data-tab="status">
+                <i class="fas fa-server mr-2"></i>System Status
+            </button>
+            <button class="nav-tab px-6 py-3 rounded-xl border border-transparent text-blue-300 hover:text-white hover:border-blue-400 transition" data-tab="docs">
+                <i class="fas fa-book mr-2"></i>Documentation
             </button>
         </div>
     </div>
 
     <!-- Tab Contents -->
     <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 pb-20">
-        <!-- Features Tab -->
-        <div id="features" class="tab-content active">
-            <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-8">
-                <div class="glass-effect p-6 rounded-2xl border border-blue-700/50 hover:border-blue-400 transition">
+        <!-- Help Center Tab -->
+        <div id="help" class="tab-content active">
+            <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-8 mb-12">
+                <div class="support-card glass-effect p-6 rounded-2xl border border-blue-700/50 cursor-pointer" onclick="showHelpCategory('getting-started')">
+                    <div class="w-12 h-12 cyber-gradient rounded-xl flex items-center justify-center mb-4 quantum-glow">
+                        <i class="fas fa-rocket text-white"></i>
+                    </div>
+                    <h3 class="text-xl font-semibold text-cyan-400 mb-3">Getting Started</h3>
+                    <p class="text-blue-300">Setup guides and first steps with Uniconnect</p>
+                </div>
+
+                <div class="support-card glass-effect p-6 rounded-2xl border border-purple-700/50 cursor-pointer" onclick="showHelpCategory('account')">
+                    <div class="w-12 h-12 cyber-gradient rounded-xl flex items-center justify-center mb-4 quantum-glow">
+                        <i class="fas fa-user-circle text-white"></i>
+                    </div>
+                    <h3 class="text-xl font-semibold text-purple-400 mb-3">Account & Billing</h3>
+                    <p class="text-blue-300">Manage your account, billing, and subscriptions</p>
+                </div>
+
+                <div class="support-card glass-effect p-6 rounded-2xl border border-cyan-700/50 cursor-pointer" onclick="showHelpCategory('troubleshooting')">
+                    <div class="w-12 h-12 cyber-gradient rounded-xl flex items-center justify-center mb-4 quantum-glow">
+                        <i class="fas fa-tools text-white"></i>
+                    </div>
+                    <h3 class="text-xl font-semibold text-blue-400 mb-3">Troubleshooting</h3>
+                    <p class="text-blue-300">Common issues and their solutions</p>
+                </div>
+
+                <div class="support-card glass-effect p-6 rounded-2xl border border-blue-700/50 cursor-pointer" onclick="showHelpCategory('api')">
+                    <div class="w-12 h-12 cyber-gradient rounded-xl flex items-center justify-center mb-4 quantum-glow">
+                        <i class="fas fa-code text-white"></i>
+                    </div>
+                    <h3 class="text-xl font-semibold text-cyan-400 mb-3">API & Development</h3>
+                    <p class="text-blue-300">Developer guides and API documentation</p>
+                </div>
+
+                <div class="support-card glass-effect p-6 rounded-2xl border border-purple-700/50 cursor-pointer" onclick="showHelpCategory('security')">
                     <div class="w-12 h-12 cyber-gradient rounded-xl flex items-center justify-center mb-4 quantum-glow">
                         <i class="fas fa-shield-alt text-white"></i>
                     </div>
-                    <h3 class="text-xl font-semibold text-cyan-400 mb-3">Advanced Security</h3>
-                    <p class="text-blue-300">Military-grade encryption, biometric authentication, and zero-trust architecture.</p>
+                    <h3 class="text-xl font-semibold text-purple-400 mb-3">Security & Privacy</h3>
+                    <p class="text-blue-300">Security features and privacy guidelines</p>
                 </div>
 
-                <div class="glass-effect p-6 rounded-2xl border border-purple-700/50 hover:border-purple-400 transition">
+                <div class="support-card glass-effect p-6 rounded-2xl border border-cyan-700/50 cursor-pointer" onclick="showHelpCategory('enterprise')">
                     <div class="w-12 h-12 cyber-gradient rounded-xl flex items-center justify-center mb-4 quantum-glow">
-                        <i class="fas fa-comments text-white"></i>
+                        <i class="fas fa-building text-white"></i>
                     </div>
-                    <h3 class="text-xl font-semibold text-purple-400 mb-3">Smart Messaging</h3>
-                    <p class="text-blue-300">AI-powered chat with end-to-end encryption and smart replies.</p>
-                </div>
-
-                <div class="glass-effect p-6 rounded-2xl border border-cyan-700/50 hover:border-cyan-400 transition">
-                    <div class="w-12 h-12 cyber-gradient rounded-xl flex items-center justify-center mb-4 quantum-glow">
-                        <i class="fas fa-video text-white"></i>
-                    </div>
-                    <h3 class="text-xl font-semibold text-blue-400 mb-3">Video Calls</h3>
-                    <p class="text-blue-300">HD video conferencing with screen sharing and recording.</p>
-                </div>
-
-                <div class="glass-effect p-6 rounded-2xl border border-blue-700/50 hover:border-blue-400 transition">
-                    <div class="w-12 h-12 cyber-gradient rounded-xl flex items-center justify-center mb-4 quantum-glow">
-                        <i class="fas fa-robot text-white"></i>
-                    </div>
-                    <h3 class="text-xl font-semibold text-cyan-400 mb-3">AI Assistant</h3>
-                    <p class="text-blue-300">Intelligent automation and smart task management.</p>
-                </div>
-
-                <div class="glass-effect p-6 rounded-2xl border border-purple-700/50 hover:border-purple-400 transition">
-                    <div class="w-12 h-12 cyber-gradient rounded-xl flex items-center justify-center mb-4 quantum-glow">
-                        <i class="fas fa-cloud text-white"></i>
-                    </div>
-                    <h3 class="text-xl font-semibold text-purple-400 mb-3">Cloud Storage</h3>
-                    <p class="text-blue-300">Secure cloud storage with automatic backup and sync.</p>
-                </div>
-
-                <div class="glass-effect p-6 rounded-2xl border border-cyan-700/50 hover:border-cyan-400 transition">
-                    <div class="w-12 h-12 cyber-gradient rounded-xl flex items-center justify-center mb-4 quantum-glow">
-                        <i class="fas fa-mobile-alt text-white"></i>
-                    </div>
-                    <h3 class="text-xl font-semibold text-blue-400 mb-3">Cross-Platform</h3>
-                    <p class="text-blue-300">Available on web, mobile, and desktop applications.</p>
+                    <h3 class="text-xl font-semibold text-blue-400 mb-3">Enterprise</h3>
+                    <p class="text-blue-300">Enterprise features and administration</p>
                 </div>
             </div>
-        </div>
 
-        <!-- Pricing Tab -->
-        <div id="pricing" class="tab-content">
-            <div class="grid grid-cols-1 md:grid-cols-3 gap-8 max-w-5xl mx-auto">
-                <!-- Basic Plan -->
-                <div class="glass-effect p-8 rounded-2xl border border-blue-700/50 text-center">
-                    <h3 class="text-2xl font-semibold text-cyan-400 mb-4">Basic</h3>
-                    <div class="text-4xl font-bold text-white mb-6">$9<span class="text-lg text-blue-300">/month</span></div>
-                    <ul class="space-y-3 mb-8">
-                        <li class="flex items-center text-blue-300">
-                            <i class="fas fa-check text-green-400 mr-3"></i>
-                            Up to 5 team members
-                        </li>
-                        <li class="flex items-center text-blue-300">
-                            <i class="fas fa-check text-green-400 mr-3"></i>
-                            10GB storage
-                        </li>
-                        <li class="flex items-center text-blue-300">
-                            <i class="fas fa-check text-green-400 mr-3"></i>
-                            Basic security features
-                        </li>
-                        <li class="flex items-center text-blue-300">
-                            <i class="fas fa-times text-red-400 mr-3"></i>
-                            No video calls
-                        </li>
-                    </ul>
-                    <button onclick="selectPlan('basic')" class="w-full cyber-gradient py-3 rounded-xl text-white font-semibold hover:scale-105 transition quantum-glow">
-                        Get Started
-                    </button>
-                </div>
-
-                <!-- Pro Plan -->
-                <div class="glass-effect p-8 rounded-2xl border-2 border-purple-500 relative quantum-glow">
-                    <div class="absolute -top-4 left-1/2 transform -translate-x-1/2">
-                        <span class="bg-purple-500 text-white px-4 py-1 rounded-full text-sm font-semibold">MOST POPULAR</span>
-                    </div>
-                    <h3 class="text-2xl font-semibold text-purple-400 mb-4">Professional</h3>
-                    <div class="text-4xl font-bold text-white mb-6">$29<span class="text-lg text-blue-300">/month</span></div>
-                    <ul class="space-y-3 mb-8">
-                        <li class="flex items-center text-blue-300">
-                            <i class="fas fa-check text-green-400 mr-3"></i>
-                            Up to 50 team members
-                        </li>
-                        <li class="flex items-center text-blue-300">
-                            <i class="fas fa-check text-green-400 mr-3"></i>
-                            100GB storage
-                        </li>
-                        <li class="flex items-center text-blue-300">
-                            <i class="fas fa-check text-green-400 mr-3"></i>
-                            Advanced security
-                        </li>
-                        <li class="flex items-center text-blue-300">
-                            <i class="fas fa-check text-green-400 mr-3"></i>
-                            HD video calls
-                        </li>
-                    </ul>
-                    <button onclick="selectPlan('professional')" class="w-full cyber-gradient py-3 rounded-xl text-white font-semibold hover:scale-105 transition quantum-glow">
-                        Get Started
-                    </button>
-                </div>
-
-                <!-- Enterprise Plan -->
-                <div class="glass-effect p-8 rounded-2xl border border-cyan-700/50 text-center">
-                    <h3 class="text-2xl font-semibold text-blue-400 mb-4">Enterprise</h3>
-                    <div class="text-4xl font-bold text-white mb-6">$99<span class="text-lg text-blue-300">/month</span></div>
-                    <ul class="space-y-3 mb-8">
-                        <li class="flex items-center text-blue-300">
-                            <i class="fas fa-check text-green-400 mr-3"></i>
-                            Unlimited team members
-                        </li>
-                        <li class="flex items-center text-blue-300">
-                            <i class="fas fa-check text-green-400 mr-3"></i>
-                            1TB+ storage
-                        </li>
-                        <li class="flex items-center text-blue-300">
-                            <i class="fas fa-check text-green-400 mr-3"></i>
-                            Enterprise security
-                        </li>
-                        <li class="flex items-center text-blue-300">
-                            <i class="fas fa-check text-green-400 mr-3"></i>
-                            All features included
-                        </li>
-                    </ul>
-                    <button onclick="selectPlan('enterprise')" class="w-full cyber-gradient py-3 rounded-xl text-white font-semibold hover:scale-105 transition quantum-glow">
-                        Contact Sales
-                    </button>
-                </div>
-            </div>
-        </div>
-
-        <!-- API Tab -->
-        <div id="api" class="tab-content">
+            <!-- FAQ Section -->
             <div class="glass-effect rounded-2xl p-8 border border-blue-700/50">
-                <h2 class="text-3xl font-bold text-cyan-400 mb-6">Developer API</h2>
-                <p class="text-blue-300 mb-8">
-                    Integrate Uniconnect's powerful features into your applications with our comprehensive REST API.
-                </p>
+                <h3 class="text-2xl font-semibold text-cyan-400 mb-6">Frequently Asked Questions</h3>
+                <div class="space-y-4" id="faq-list">
+                    <!-- FAQ items will be loaded dynamically -->
+                </div>
+            </div>
+        </div>
 
-                <div class="grid grid-cols-1 md:grid-cols-2 gap-8 mb-8">
-                    <div>
-                        <h3 class="text-xl font-semibold text-purple-400 mb-4">API Features</h3>
-                        <ul class="space-y-3 text-blue-300">
-                            <li class="flex items-center">
-                                <i class="fas fa-check text-green-400 mr-3"></i>
-                                RESTful API design
-                            </li>
-                            <li class="flex items-center">
-                                <i class="fas fa-check text-green-400 mr-3"></i>
-                                OAuth 2.0 authentication
-                            </li>
-                            <li class="flex items-center">
-                                <i class="fas fa-check text-green-400 mr-3"></i>
-                                Real-time WebSocket support
-                            </li>
-                            <li class="flex items-center">
-                                <i class="fas fa-check text-green-400 mr-3"></i>
-                                Comprehensive documentation
-                            </li>
-                        </ul>
+        <!-- Contact Support Tab -->
+        <div id="contact" class="tab-content">
+            <div class="grid grid-cols-1 lg:grid-cols-2 gap-8">
+                <div class="glass-effect rounded-2xl p-8 border border-blue-700/50">
+                    <h3 class="text-2xl font-semibold text-purple-400 mb-6">Contact Our Support Team</h3>
+                    <form id="support-form" class="space-y-6">
+                        <div>
+                            <label class="block text-blue-300 mb-2">Your Name</label>
+                            <input type="text" id="contact-name" class="w-full glass-effect border border-blue-700/50 rounded-lg px-4 py-3 text-white focus:border-blue-400 focus:outline-none transition" required>
+                        </div>
+                        <div>
+                            <label class="block text-blue-300 mb-2">Email Address</label>
+                            <input type="email" id="contact-email" class="w-full glass-effect border border-blue-700/50 rounded-lg px-4 py-3 text-white focus:border-blue-400 focus:outline-none transition" required>
+                        </div>
+                        <div>
+                            <label class="block text-blue-300 mb-2">Subject</label>
+                            <select id="contact-subject" class="w-full glass-effect border border-blue-700/50 rounded-lg px-4 py-3 text-white focus:border-blue-400 focus:outline-none transition">
+                                <option value="general">General Inquiry</option>
+                                <option value="technical">Technical Support</option>
+                                <option value="billing">Billing Issue</option>
+                                <option value="feature">Feature Request</option>
+                                <option value="bug">Bug Report</option>
+                            </select>
+                        </div>
+                        <div>
+                            <label class="block text-blue-300 mb-2">Message</label>
+                            <textarea id="contact-message" rows="6" class="w-full glass-effect border border-blue-700/50 rounded-lg px-4 py-3 text-white focus:border-blue-400 focus:outline-none transition" required></textarea>
+                        </div>
+                        <div>
+                            <label class="flex items-center text-blue-300">
+                                <input type="checkbox" id="contact-urgent" class="mr-2">
+                                <span>This is an urgent issue</span>
+                            </label>
+                        </div>
+                        <button type="submit" class="w-full cyber-gradient py-3 rounded-xl text-white font-semibold hover:scale-105 transition quantum-glow">
+                            Send Message
+                        </button>
+                    </form>
+                </div>
+
+                <div class="space-y-6">
+                    <!-- Contact Information -->
+                    <div class="glass-effect rounded-2xl p-6 border border-purple-700/50">
+                        <h4 class="text-xl font-semibold text-cyan-400 mb-4">Contact Information</h4>
+                        <div class="space-y-3 text-blue-300">
+                            <div class="flex items-center">
+                                <i class="fas fa-envelope text-purple-400 mr-3"></i>
+                                <span>nchagwadennis45@gmail.com</span>
+                            </div>
+                            <div class="flex items-center">
+                                <i class="fas fa-phone text-purple-400 mr-3"></i>
+                                <span>0746676627</span>
+                            </div>
+                            <div class="flex items-center">
+                                <i class="fas fa-clock text-purple-400 mr-3"></i>
+                                <span>24/7 Support Available</span>
+                            </div>
+                        </div>
                     </div>
+
+                    <!-- Support Hours -->
+                    <div class="glass-effect rounded-2xl p-6 border border-cyan-700/50">
+                        <h4 class="text-xl font-semibold text-blue-400 mb-4">Support Hours</h4>
+                        <div class="space-y-2 text-blue-300">
+                            <div class="flex justify-between">
+                                <span>Monday - Friday</span>
+                                <span>24/7</span>
+                            </div>
+                            <div class="flex justify-between">
+                                <span>Saturday - Sunday</span>
+                                <span>24/7</span>
+                            </div>
+                            <div class="flex justify-between">
+                                <span>Emergency Support</span>
+                                <span>Always Available</span>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Your Support Tickets -->
+                    <div class="glass-effect rounded-2xl p-6 border border-blue-700/50">
+                        <h4 class="text-xl font-semibold text-cyan-400 mb-4">Your Support Tickets</h4>
+                        <div id="user-tickets" class="space-y-3">
+                            <!-- User tickets will be loaded here -->
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- System Status Tab -->
+        <div id="status" class="tab-content">
+            <div class="glass-effect rounded-2xl p-8 border border-blue-700/50">
+                <h3 class="text-2xl font-semibold text-cyan-400 mb-6">System Status</h3>
+                
+                <!-- Status Overview -->
+                <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 mb-8">
+                    <div class="glass-effect p-4 rounded-xl border border-green-500/50 text-center">
+                        <div class="text-lg font-semibold text-green-400 mb-2">API Services</div>
+                        <div class="text-2xl font-bold text-green-400">Operational</div>
+                    </div>
+                    <div class="glass-effect p-4 rounded-xl border border-green-500/50 text-center">
+                        <div class="text-lg font-semibold text-green-400 mb-2">Messaging</div>
+                        <div class="text-2xl font-bold text-green-400">Operational</div>
+                    </div>
+                    <div class="glass-effect p-4 rounded-xl border border-green-500/50 text-center">
+                        <div class="text-lg font-semibold text-green-400 mb-2">Video Calls</div>
+                        <div class="text-2xl font-bold text-green-400">Operational</div>
+                    </div>
+                    <div class="glass-effect p-4 rounded-xl border border-green-500/50 text-center">
+                        <div class="text-lg font-semibold text-green-400 mb-2">Database</div>
+                        <div class="text-2xl font-bold text-green-400">Operational</div>
+                    </div>
+                </div>
+
+                <!-- Incident History -->
+                <div class="mt-8">
+                    <h4 class="text-xl font-semibold text-purple-400 mb-4">Recent Incidents</h4>
+                    <div id="incident-history" class="space-y-4">
+                        <!-- Incident history will be loaded here -->
+                    </div>
+                </div>
+
+                <!-- Performance Metrics -->
+                <div class="mt-8 glass-effect rounded-2xl p-6 border border-purple-700/50">
+                    <h4 class="text-xl font-semibold text-blue-400 mb-4">Performance Metrics</h4>
+                    <div class="grid grid-cols-1 md:grid-cols-3 gap-6 text-center">
+                        <div>
+                            <div class="text-2xl font-bold text-cyan-400" id="uptime-metric">99.98%</div>
+                            <div class="text-blue-300 text-sm">Uptime (30 days)</div>
+                        </div>
+                        <div>
+                            <div class="text-2xl font-bold text-purple-400" id="response-metric">128ms</div>
+                            <div class="text-blue-300 text-sm">Avg Response Time</div>
+                        </div>
+                        <div>
+                            <div class="text-2xl font-bold text-blue-400" id="throughput-metric">2.4M</div>
+                            <div class="text-blue-300 text-sm">Requests/Hour</div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Documentation Tab -->
+        <div id="docs" class="tab-content">
+            <div class="glass-effect rounded-2xl p-8 border border-blue-700/50">
+                <h3 class="text-2xl font-semibold text-cyan-400 mb-6">Documentation & Resources</h3>
+                
+                <div class="grid grid-cols-1 md:grid-cols-2 gap-8">
                     <div>
-                        <h3 class="text-xl font-semibold text-blue-400 mb-4">Quick Start</h3>
-                        <div class="bg-gray-800 rounded-lg p-4">
-                            <code class="text-green-400 text-sm">
-                                npm install uniconnect-sdk<br>
-                                const uniconnect = require('uniconnect-sdk');<br>
-                                const client = new Uniconnect(API_KEY);
-                            </code>
+                        <h4 class="text-xl font-semibold text-purple-400 mb-4">Quick Links</h4>
+                        <div class="space-y-3">
+                            <a href="#" class="flex items-center text-blue-300 hover:text-white transition">
+                                <i class="fas fa-book mr-3 text-purple-400"></i>
+                                <span>Getting Started Guide</span>
+                            </a>
+                            <a href="#" class="flex items-center text-blue-300 hover:text-white transition">
+                                <i class="fas fa-code mr-3 text-purple-400"></i>
+                                <span>API Reference</span>
+                            </a>
+                            <a href="#" class="flex items-center text-blue-300 hover:text-white transition">
+                                <i class="fas fa-shield-alt mr-3 text-purple-400"></i>
+                                <span>Security Best Practices</span>
+                            </a>
+                            <a href="#" class="flex items-center text-blue-300 hover:text-white transition">
+                                <i class="fas fa-video mr-3 text-purple-400"></i>
+                                <span>Video Tutorials</span>
+                            </a>
+                        </div>
+                    </div>
+                    
+                    <div>
+                        <h4 class="text-xl font-semibold text-blue-400 mb-4">Download Resources</h4>
+                        <div class="space-y-3">
+                            <a href="#" class="flex items-center text-blue-300 hover:text-white transition">
+                                <i class="fas fa-download mr-3 text-blue-400"></i>
+                                <span>SDK Libraries</span>
+                            </a>
+                            <a href="#" class="flex items-center text-blue-300 hover:text-white transition">
+                                <i class="fas fa-file-pdf mr-3 text-blue-400"></i>
+                                <span>API Documentation (PDF)</span>
+                            </a>
+                            <a href="#" class="flex items-center text-blue-300 hover:text-white transition">
+                                <i class="fas fa-mobile-alt mr-3 text-blue-400"></i>
+                                <span>Mobile App Guides</span>
+                            </a>
+                            <a href="#" class="flex items-center text-blue-300 hover:text-white transition">
+                                <i class="fas fa-plug mr-3 text-blue-400"></i>
+                                <span>Integration Guides</span>
+                            </a>
                         </div>
                     </div>
                 </div>
 
-                <div class="bg-gray-800 rounded-lg p-6">
-                    <h4 class="text-lg font-semibold text-white mb-4">Example Request</h4>
-                    <div class="text-sm text-green-400">
-                        <pre>POST /api/v1/auth/login
-Content-Type: application/json
-
-{
-  "email": "user@example.com",
-  "password": "securepassword"
-}</pre>
-                    </div>
-                </div>
-
-                <!-- API Test Section -->
+                <!-- Documentation Search -->
                 <div class="mt-8 glass-effect rounded-2xl p-6 border border-purple-700/50">
-                    <h4 class="text-xl font-semibold text-purple-400 mb-4">Test API Connection</h4>
-                    <p class="text-blue-300 mb-4">Check if your API key is working:</p>
+                    <h4 class="text-xl font-semibold text-purple-400 mb-4">Search Documentation</h4>
                     <div class="flex gap-4">
-                        <input type="text" id="api-key" placeholder="Enter your API key" class="flex-1 glass-effect border border-blue-700/50 rounded-lg px-4 py-2 text-white focus:border-blue-400 focus:outline-none transition">
-                        <button onclick="testApiConnection()" class="cyber-gradient px-6 py-2 rounded-lg text-white hover:scale-105 transition quantum-glow">
-                            Test Connection
+                        <input type="text" id="doc-search" placeholder="Search for help articles..." class="flex-1 glass-effect border border-blue-700/50 rounded-lg px-4 py-3 text-white focus:border-blue-400 focus:outline-none transition">
+                        <button onclick="searchDocumentation()" class="cyber-gradient px-6 py-3 rounded-lg text-white hover:scale-105 transition quantum-glow">
+                            <i class="fas fa-search mr-2"></i>Search
                         </button>
                     </div>
-                    <div id="api-test-result" class="mt-4 text-sm hidden"></div>
+                    <div id="search-results" class="mt-4 hidden">
+                        <!-- Search results will appear here -->
+                    </div>
                 </div>
             </div>
         </div>
@@ -442,13 +493,17 @@ Content-Type: application/json
             auth = firebase.auth();
             db = firebase.firestore();
             
-            console.log('✅ Firebase successfully connected in Platform!');
+            console.log('✅ Firebase successfully connected in Support!');
             console.log('🔐 Authentication service: Active');
             console.log('🗄️ Firestore database: Connected');
             
         } catch (error) {
             console.error('❌ Firebase initialization error:', error);
         }
+
+        // Clear cached data
+        localStorage.removeItem('demo_users');
+        sessionStorage.clear();
 
         // Notification System
         function showNotification(message, type = 'info') {
@@ -483,145 +538,204 @@ Content-Type: application/json
             }, 5000);
         }
 
-        // Get real platform stats from Firebase
-        async function getPlatformStats() {
+        // Get support statistics from Firebase
+        async function getSupportStats() {
             try {
                 if (!db) return;
                 
-                // Get user count
-                const usersRef = db.collection('users');
-                const usersSnapshot = await usersRef.get();
-                const userCount = usersSnapshot.size;
-                document.getElementById('platform-users').textContent = userCount.toLocaleString();
+                // Get active support tickets count
+                const ticketsRef = db.collection('support_tickets').where('status', '==', 'open');
+                const ticketsSnapshot = await ticketsRef.get();
+                document.getElementById('support-tickets').textContent = ticketsSnapshot.size;
                 
-                // Get API calls count (today)
-                const today = new Date();
-                today.setHours(0, 0, 0, 0);
-                const apiCallsRef = db.collection('api_calls')
-                    .where('timestamp', '>=', today);
-                const apiSnapshot = await apiCallsRef.get();
-                const apiCallCount = apiSnapshot.size;
-                document.getElementById('api-calls').textContent = apiCallCount.toLocaleString();
+                // Calculate average response time
+                const resolvedTicketsRef = db.collection('support_tickets').where('status', '==', 'resolved');
+                const resolvedSnapshot = await resolvedTicketsRef.get();
                 
-                console.log(`📊 Platform Stats: ${userCount} users, ${apiCallCount} API calls today`);
+                let totalResponseTime = 0;
+                let count = 0;
                 
-            } catch (error) {
-                console.error('Error getting platform stats:', error);
-                // Fallback data
-                document.getElementById('platform-users').textContent = '15,842';
-                document.getElementById('api-calls').textContent = '2,156';
-            }
-        }
-
-        // Plan selection function
-        async function selectPlan(plan) {
-            const user = auth?.currentUser;
-            
-            if (!user) {
-                showNotification('Please sign in to select a plan', 'info');
-                setTimeout(() => {
-                    window.location.href = 'register.html';
-                }, 2000);
-                return;
-            }
-
-            try {
-                // Save plan selection to Firebase
-                await db.collection('user_plans').doc(user.uid).set({
-                    plan: plan,
-                    selectedAt: firebase.firestore.FieldValue.serverTimestamp(),
-                    userId: user.uid,
-                    email: user.email
+                resolvedSnapshot.forEach(doc => {
+                    const ticket = doc.data();
+                    if (ticket.createdAt && ticket.resolvedAt) {
+                        const created = ticket.createdAt.toDate();
+                        const resolved = ticket.resolvedAt.toDate();
+                        const responseTime = (resolved - created) / (1000 * 60 * 60); // Convert to hours
+                        totalResponseTime += responseTime;
+                        count++;
+                    }
                 });
-
-                showNotification(`Successfully selected ${plan} plan!`, 'success');
-                console.log(`📦 User ${user.email} selected ${plan} plan`);
+                
+                const avgResponse = count > 0 ? Math.round(totalResponseTime / count) : 0;
+                document.getElementById('avg-response').textContent = `${avgResponse}h`;
+                
+                // Get satisfaction rate
+                const feedbackRef = db.collection('support_feedback').where('rating', '>=', 4);
+                const feedbackSnapshot = await feedbackRef.get();
+                const totalFeedback = await db.collection('support_feedback').get();
+                
+                const satisfactionRate = totalFeedback.size > 0 ? 
+                    Math.round((feedbackSnapshot.size / totalFeedback.size) * 100) : 0;
+                document.getElementById('satisfaction-rate').textContent = `${satisfactionRate}%`;
                 
             } catch (error) {
-                console.error('Error selecting plan:', error);
-                showNotification('Error selecting plan. Please try again.', 'error');
+                console.error('Error getting support stats:', error);
             }
         }
 
-        // Test API connection
-        async function testApiConnection() {
-            const apiKey = document.getElementById('api-key').value;
-            const resultDiv = document.getElementById('api-test-result');
+        // Load FAQ from Firebase
+        async function loadFAQ() {
+            try {
+                if (!db) return;
+                
+                const faqRef = db.collection('faq').where('published', '==', true);
+                const faqSnapshot = await faqRef.get();
+                const faqList = document.getElementById('faq-list');
+                
+                faqList.innerHTML = '';
+                
+                faqSnapshot.forEach(doc => {
+                    const faq = doc.data();
+                    const faqItem = document.createElement('div');
+                    faqItem.className = 'glass-effect p-4 rounded-xl border border-blue-700/50';
+                    faqItem.innerHTML = `
+                        <div class="flex justify-between items-center cursor-pointer" onclick="this.parentElement.classList.toggle('active')">
+                            <h4 class="font-semibold text-cyan-400">${faq.question}</h4>
+                            <i class="fas fa-chevron-down text-blue-400 transition-transform"></i>
+                        </div>
+                        <div class="mt-3 text-blue-300 hidden">
+                            ${faq.answer}
+                        </div>
+                    `;
+                    faqList.appendChild(faqItem);
+                });
+                
+            } catch (error) {
+                console.error('Error loading FAQ:', error);
+            }
+        }
+
+        // Load user support tickets
+        async function loadUserTickets() {
+            const user = auth?.currentUser;
+            if (!user) return;
             
-            if (!apiKey) {
-                resultDiv.className = 'mt-4 text-sm text-red-400';
-                resultDiv.textContent = 'Please enter an API key';
-                resultDiv.classList.remove('hidden');
+            try {
+                const ticketsRef = db.collection('support_tickets')
+                    .where('userId', '==', user.uid)
+                    .orderBy('createdAt', 'desc')
+                    .limit(5);
+                
+                const ticketsSnapshot = await ticketsRef.get();
+                const ticketsContainer = document.getElementById('user-tickets');
+                
+                ticketsContainer.innerHTML = '';
+                
+                if (ticketsSnapshot.empty) {
+                    ticketsContainer.innerHTML = '<p class="text-blue-300 text-sm">No support tickets found.</p>';
+                    return;
+                }
+                
+                ticketsSnapshot.forEach(doc => {
+                    const ticket = doc.data();
+                    const ticketElement = document.createElement('div');
+                    ticketElement.className = 'glass-effect p-3 rounded-lg border border-blue-700/50';
+                    ticketElement.innerHTML = `
+                        <div class="flex justify-between items-center mb-2">
+                            <span class="font-semibold text-white">${ticket.subject}</span>
+                            <span class="text-xs px-2 py-1 rounded-full ${
+                                ticket.status === 'open' ? 'bg-yellow-500/20 text-yellow-400' :
+                                ticket.status === 'resolved' ? 'bg-green-500/20 text-green-400' :
+                                'bg-blue-500/20 text-blue-400'
+                            }">${ticket.status}</span>
+                        </div>
+                        <p class="text-blue-300 text-sm truncate">${ticket.message}</p>
+                        <div class="text-xs text-blue-400 mt-2">${ticket.createdAt?.toDate().toLocaleDateString()}</div>
+                    `;
+                    ticketsContainer.appendChild(ticketElement);
+                });
+                
+            } catch (error) {
+                console.error('Error loading user tickets:', error);
+            }
+        }
+
+        // Submit support form
+        async function submitSupportForm(event) {
+            event.preventDefault();
+            
+            const user = auth?.currentUser;
+            if (!user) {
+                showNotification('Please sign in to submit a support ticket', 'info');
                 return;
             }
-
-            resultDiv.className = 'mt-4 text-sm text-blue-300';
-            resultDiv.textContent = 'Testing API connection...';
-            resultDiv.classList.remove('hidden');
-
-            try {
-                // Simulate API test (in real app, this would call your actual API)
-                await new Promise(resolve => setTimeout(resolve, 1500));
-                
-                // Log API test to Firebase
-                if (db) {
-                    await db.collection('api_tests').add({
-                        apiKey: apiKey.substring(0, 8) + '...', // Only store partial key
-                        timestamp: firebase.firestore.FieldValue.serverTimestamp(),
-                        success: true
-                    });
-                }
-
-                resultDiv.className = 'mt-4 text-sm text-green-400';
-                resultDiv.innerHTML = '<i class="fas fa-check-circle mr-2"></i>API connection successful! Your key is valid.';
-                console.log('🔑 API test completed successfully');
-                
-            } catch (error) {
-                resultDiv.className = 'mt-4 text-sm text-red-400';
-                resultDiv.innerHTML = '<i class="fas fa-exclamation-triangle mr-2"></i>API connection failed. Please check your key.';
-                console.error('API test failed:', error);
-            }
-        }
-
-        // Update UI based on authentication state
-        function updateUI(user) {
-            const authButtons = document.getElementById('auth-buttons');
             
-            if (user) {
-                // User is signed in
-                authButtons.innerHTML = `
-                    <div class="flex items-center space-x-4">
-                        <span class="text-blue-300">Welcome, ${user.email}</span>
-                        <a href="dashboard.html" class="glass-effect px-6 py-2 rounded-lg border border-blue-700 text-blue-300 hover:text-white hover:border-blue-400 transition">
-                            Dashboard
-                        </a>
-                        <button onclick="logout()" class="cyber-gradient px-6 py-2 rounded-lg text-white hover:scale-105 transition quantum-glow">
-                            Logout
-                        </button>
-                    </div>
-                `;
-            } else {
-                // User is signed out
-                authButtons.innerHTML = `
-                    <div class="flex items-center space-x-4">
-                        <a href="login.html" class="glass-effect px-6 py-2 rounded-lg border border-blue-700 text-blue-300 hover:text-white hover:border-blue-400 transition">
-                            Sign In
-                        </a>
-                        <a href="register.html" class="cyber-gradient px-6 py-2 rounded-lg text-white hover:scale-105 transition quantum-glow">
-                            Register
-                        </a>
-                    </div>
-                `;
+            const formData = {
+                name: document.getElementById('contact-name').value,
+                email: document.getElementById('contact-email').value,
+                subject: document.getElementById('contact-subject').value,
+                message: document.getElementById('contact-message').value,
+                urgent: document.getElementById('contact-urgent').checked,
+                userId: user.uid,
+                status: 'open',
+                createdAt: firebase.firestore.FieldValue.serverTimestamp()
+            };
+            
+            try {
+                await db.collection('support_tickets').add(formData);
+                showNotification('Support ticket submitted successfully!', 'success');
+                document.getElementById('support-form').reset();
+                loadUserTickets();
+                getSupportStats();
+                
+            } catch (error) {
+                console.error('Error submitting support ticket:', error);
+                showNotification('Error submitting support ticket. Please try again.', 'error');
             }
         }
 
-        // Logout function
-        async function logout() {
+        // Search documentation
+        async function searchDocumentation() {
+            const query = document.getElementById('doc-search').value.trim();
+            const resultsContainer = document.getElementById('search-results');
+            
+            if (!query) {
+                resultsContainer.innerHTML = '<p class="text-blue-300">Please enter a search term.</p>';
+                resultsContainer.classList.remove('hidden');
+                return;
+            }
+            
             try {
-                await auth.signOut();
-                showNotification('Successfully logged out', 'success');
+                const docsRef = db.collection('documentation');
+                const snapshot = await docsRef.get();
+                
+                const results = [];
+                snapshot.forEach(doc => {
+                    const article = doc.data();
+                    if (article.title.toLowerCase().includes(query.toLowerCase()) || 
+                        article.content.toLowerCase().includes(query.toLowerCase())) {
+                        results.push(article);
+                    }
+                });
+                
+                if (results.length === 0) {
+                    resultsContainer.innerHTML = '<p class="text-blue-300">No results found for your search.</p>';
+                } else {
+                    resultsContainer.innerHTML = results.map(article => `
+                        <div class="glass-effect p-4 rounded-xl border border-blue-700/50 mb-3">
+                            <h5 class="font-semibold text-cyan-400 mb-2">${article.title}</h5>
+                            <p class="text-blue-300 text-sm">${article.excerpt}</p>
+                            <a href="#" class="text-purple-400 text-sm hover:text-purple-300 transition">Read more</a>
+                        </div>
+                    `).join('');
+                }
+                
+                resultsContainer.classList.remove('hidden');
+                
             } catch (error) {
-                showNotification('Error logging out: ' + error.message, 'error');
+                console.error('Error searching documentation:', error);
+                resultsContainer.innerHTML = '<p class="text-red-400">Error searching documentation.</p>';
+                resultsContainer.classList.remove('hidden');
             }
         }
 
@@ -643,40 +757,103 @@ Content-Type: application/json
                         content.classList.remove('active');
                         if (content.id === targetTab) {
                             content.classList.add('active');
+                            
+                            // Load tab-specific data
+                            if (targetTab === 'help') {
+                                loadFAQ();
+                            } else if (targetTab === 'contact') {
+                                loadUserTickets();
+                            } else if (targetTab === 'status') {
+                                getSupportStats();
+                            }
                         }
                     });
                 });
             });
         }
 
-        // Initialize
-        document.addEventListener('DOMContentLoaded', function() {
-            // Initialize Firebase UI
-            if (typeof auth !== 'undefined') {
-                updateUI(auth.currentUser);
-                
-                // Auth state observer
-                auth.onAuthStateChanged((user) => {
-                    updateUI(user);
-                    if (user) {
-                        console.log('👤 User authenticated in Platform:', user.email);
-                    }
-                });
-            } else {
-                updateUI(null);
-            }
+        // Update UI based on authentication state
+        function updateUI(user) {
+            const authButtons = document.getElementById('auth-buttons');
             
-            // Get platform stats
-            getPlatformStats();
+            if (user) {
+                authButtons.innerHTML = `
+                    <div class="flex items-center space-x-4">
+                        <span class="text-blue-300 hidden md:inline">Welcome, ${user.displayName || user.email}</span>
+                        <a href="dashboard.html" class="glass-effect px-4 py-2 rounded-lg border border-blue-700 text-blue-300 hover:text-white hover:border-blue-400 transition">
+                            Dashboard
+                        </a>
+                        <button onclick="logout()" class="glass-effect px-4 py-2 rounded-lg border border-red-700/50 text-red-300 hover:text-white hover:border-red-400 transition">
+                            <i class="fas fa-sign-out-alt mr-2"></i>Logout
+                        </button>
+                    </div>
+                `;
+            } else {
+                authButtons.innerHTML = `
+                    <div class="flex items-center space-x-4">
+                        <a href="login.html" class="text-blue-300 hover:text-white transition">Login</a>
+                        <a href="register.html" class="cyber-gradient px-4 py-2 rounded-lg text-white hover:scale-105 transition quantum-glow">
+                            Sign Up
+                        </a>
+                    </div>
+                `;
+            }
+        }
+
+        // Logout function
+        async function logout() {
+            try {
+                await auth.signOut();
+                showNotification('Logged out successfully', 'success');
+                setTimeout(() => {
+                    window.location.href = 'index.html';
+                }, 1000);
+            } catch (error) {
+                console.error('Logout error:', error);
+                showNotification('Error logging out', 'error');
+            }
+        }
+
+        // Initialize support page
+        function initSupport() {
+            console.log('🚀 Initializing Support Page...');
+            
+            // Clear any cached data
+            localStorage.removeItem('demo_users');
+            sessionStorage.clear();
             
             // Initialize tabs
             initializeTabs();
+            
+            // Set up auth state listener
+            if (auth) {
+                auth.onAuthStateChanged((user) => {
+                    updateUI(user);
+                    loadUserTickets();
+                    
+                    if (user) {
+                        console.log(`👤 User authenticated: ${user.email}`);
+                    } else {
+                        console.log('👤 No user authenticated');
+                    document.getElementById('user-tickets').innerHTML = '<p class="text-blue-300 text-sm">Please sign in to view your support tickets.</p>';
+                    document.getElementById('contact-name').value = '';
+                        document.getElementById('contact-email').value = '';
+                    }
+                });
+            }
+            
+            // Load initial data
+            getSupportStats();
+            loadFAQ();
+            
+            // Set up form submission
+            document.getElementById('support-form').addEventListener('submit', submitSupportForm);
+            
+            console.log('✅ Support page initialized successfully');
+        }
 
-            console.log('🚀 Platform Page Loaded Successfully');
-            console.log('📊 Real-time stats: Active');
-            console.log('💳 Plan selection: Ready');
-            console.log('🔑 API testing: Available');
-        });
+        // Initialize when DOM is loaded
+        document.addEventListener('DOMContentLoaded', initSupport);
     </script>
 </body>
 </html>

@@ -1,18 +1,18 @@
-// Service Worker Registration for UniConnect
+// Service Worker Registration
 if ('serviceWorker' in navigator) {
   window.addEventListener('load', function() {
     navigator.serviceWorker.register('/service-worker.js')
       .then(function(registration) {
-        console.log('UniConnect ServiceWorker registered successfully with scope: ', registration.scope);
+        console.log('ServiceWorker registered successfully with scope: ', registration.scope);
         
         // Check for updates
         registration.addEventListener('updatefound', () => {
           const newWorker = registration.installing;
-          console.log('New UniConnect service worker found');
+          console.log('New service worker found');
           
           newWorker.addEventListener('statechange', () => {
             if (newWorker.state === 'installed' && navigator.serviceWorker.controller) {
-              console.log('New UniConnect content is available!');
+              console.log('New content is available!');
               // Show update notification to user
               showUpdateNotification();
             }
@@ -20,25 +20,25 @@ if ('serviceWorker' in navigator) {
         });
       })
       .catch(function(error) {
-        console.log('UniConnect ServiceWorker registration failed: ', error);
+        console.log('ServiceWorker registration failed: ', error);
       });
   });
 
   // Listen for controlled page updates
   navigator.serviceWorker.addEventListener('controllerchange', function() {
-    console.log('UniConnect controller changed - reloading page');
+    console.log('Controller changed - reloading page');
     window.location.reload();
   });
 }
 
 function showUpdateNotification() {
   // Create a simple update notification
-  if (confirm('UniConnect has been updated! Reload to see the latest features?')) {
+  if (confirm('A new version is available! Reload to see the latest features?')) {
     window.location.reload();
   }
 }
 
-// Initialize UniConnect specific features
+// Initialize app features
 document.addEventListener('DOMContentLoaded', function() {
-  console.log('UniConnect app initialized for project: uniconnect-ee95c');
+  console.log('App initialized');
 });

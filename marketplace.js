@@ -1,14 +1,14 @@
 // marketplace.js - Marketplace with User-specific Listings
 console.log('🛒 Marketplace script loaded');
 
-// Firebase configuration
+// Firebase configuration (to be configured before deployment)
 const firebaseConfig = {
-    apiKey: "AIzaSyDHHyGgsSV18BcXrGgzi4C8frzDAE1C1zo",
-    authDomain: "uniconnect-ee95c.firebasestorage.app",
-    projectId: "uniconnect-ee95c",
-    storageBucket: "uniconnect-ee95c.firebasestorage.app",
-    messagingSenderId: "1003264444309",
-    appId: "1:1003264444309:web:9f0307516e44d21e97d89c"
+  apiKey: "AIzaSyDHHyGgsSV18BcXrGgzi4C8frzDAE1C1zo",
+  authDomain: "uniconnect-ee95c.firebaseapp.com",
+  projectId: "uniconnect-ee95c",
+  storageBucket: "uniconnect-ee95c.firebasestorage.app",
+  messagingSenderId: "1003264444309",
+  appId: "1:1003264444309:web:9f0307516e44d21e97d89c"
 };
 
 // Initialize Firebase
@@ -29,8 +29,8 @@ const createListingBtn = document.getElementById('createListingBtn');
 const searchInput = document.getElementById('searchInput');
 const categoryFilter = document.getElementById('categoryFilter');
 
-// Cloudinary configuration
-const CLOUDINARY_UPLOAD_URL = 'http://localhost:3000/upload';
+// Cloudinary configuration (to be configured before deployment)
+const CLOUDINARY_UPLOAD_URL = '/upload';
 
 // Event Listeners
 document.addEventListener('DOMContentLoaded', function() {

@@ -7,8 +7,13 @@
     <script src="https://cdn.tailwindcss.com"></script>
     <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css" rel="stylesheet">
     
+    <!-- Firebase SDK -->
+    <script src="https://www.gstatic.com/firebasejs/9.22.0/firebase-app-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/9.22.0/firebase-auth-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/9.22.0/firebase-firestore-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/9.22.0/firebase-storage-compat.js"></script>
+    
     <style>
-        /* All existing styles remain the same */
         .glass-effect {
             background: rgba(255, 255, 255, 0.1);
             backdrop-filter: blur(20px);
@@ -30,112 +35,85 @@
             backdrop-filter: blur(10px);
         }
 
-        /* Emotion Reactive UI */
-        .emotion-joy { background: linear-gradient(135deg, #1a2a6c 0%, #b21f1f 0%, #fdbb2d 100%) !important; }
-        .emotion-love { background: linear-gradient(135deg, #834d9b 0%, #d04ed6 100%) !important; }
-        .emotion-calm { background: linear-gradient(135deg, #2193b0 0%, #6dd5ed 100%) !important; }
-        .emotion-excited { background: linear-gradient(135deg, #f46b45 0%, #eea849 100%) !important; }
-        .emotion-sad { background: linear-gradient(135deg, #3a7bd5 0%, #3a6073 100%) !important; }
-        .emotion-angry { background: linear-gradient(135deg, #c31432 0%, #240b36 100%) !important; }
-        .emotion-default { background: linear-gradient(135deg, #667eea 0%, #764ba2 100%) !important; }
-
-        .emotion-border-joy { border-color: #FFD93D !important; }
-        .emotion-border-love { border-color: #FF6B9D !important; }
-        .emotion-border-calm { border-color: #6BC5D2 !important; }
-        .emotion-border-excited { border-color: #FF9A3D !important; }
-        .emotion-border-sad { border-color: #7B8FD0 !important; }
-        .emotion-border-angry { border-color: #FF6B6B !important; }
-
-        /* Gamification Elements */
-        .streak-fire {
-            animation: firePulse 2s infinite;
-        }
-        @keyframes firePulse {
-            0%, 100% { transform: scale(1); }
-            50% { transform: scale(1.1); }
-        }
-        .connectcoin-glow {
-            animation: coinSpin 3s linear infinite;
-        }
-        @keyframes coinSpin {
-            0% { transform: rotateY(0deg); }
-            100% { transform: rotateY(360deg); }
-        }
-        .level-up-flash {
-            animation: levelUp 0.5s ease-out;
-        }
-        @keyframes levelUp {
-            0% { transform: scale(1); opacity: 1; }
-            50% { transform: scale(1.2); opacity: 0.8; }
-            100% { transform: scale(1); opacity: 1; }
-        }
-
-        /* Collab Room Styles */
-        .collab-room {
-            background: rgba(59, 130, 246, 0.1);
-            border: 2px dashed #3B82F6;
-            border-radius: 15px;
-            padding: 20px;
-            margin: 10px 0;
-        }
-        .collab-tool {
-            background: rgba(255, 255, 255, 0.1);
-            border-radius: 10px;
-            padding: 10px;
-            margin: 5px;
-            cursor: pointer;
-            transition: all 0.3s;
-        }
-        .collab-tool:hover {
-            background: rgba(59, 130, 246, 0.3);
-            transform: scale(1.05);
-        }
-
-        /* Time Capsule Styles */
-        .time-capsule {
-            background: linear-gradient(135deg, #8B5CF6 0%, #3B82F6 100%);
-            border-radius: 15px;
-            padding: 15px;
-            margin: 10px 0;
+        /* Quantum Features */
+        .quantum-entanglement {
             position: relative;
             overflow: hidden;
         }
-        .time-capsule::before {
+        .quantum-entanglement::before {
             content: '';
             position: absolute;
             top: -50%;
             left: -50%;
             width: 200%;
             height: 200%;
-            background: conic-gradient(transparent, rgba(255,255,255,0.3), transparent);
-            animation: rotate 4s linear infinite;
+            background: radial-gradient(circle, rgba(59,130,246,0.2) 0%, transparent 70%);
+            animation: quantumPulse 3s infinite alternate;
+            z-index: -1;
         }
-        @keyframes rotate {
-            100% { transform: rotate(360deg); }
+        @keyframes quantumPulse {
+            0% { transform: scale(1); opacity: 0.3; }
+            100% { transform: scale(1.2); opacity: 0.7; }
         }
 
-        /* Compatibility DNA Styles */
-        .dna-helix {
+        .mood-sync {
             display: flex;
             align-items: center;
-            justify-content: center;
-            height: 60px;
-            position: relative;
+            gap: 5px;
+            font-size: 0.7rem;
+            color: #8B5CF6;
+            margin-top: 5px;
         }
-        .dna-node {
-            width: 8px;
-            height: 8px;
-            background: #3B82F6;
-            border-radius: 50%;
-            margin: 0 2px;
-            animation: dnaFloat 2s ease-in-out infinite;
+        .mood-sync.active {
+            color: #22C55E;
         }
-        @keyframes dnaFloat {
-            0%, 100% { transform: translateY(0px); }
-            50% { transform: translateY(-10px); }
+        .mood-sync-bar {
+            width: 60px;
+            height: 4px;
+            background: rgba(139, 92, 246, 0.3);
+            border-radius: 2px;
+            overflow: hidden;
+        }
+        .mood-sync-progress {
+            height: 100%;
+            background: #8B5CF6;
+            border-radius: 2px;
+            transition: width 0.5s ease;
         }
 
-        /* Enhanced existing styles */
+        .thought-bubble {
+            position: relative;
+            background: rgba(255, 255, 255, 0.15);
+            border-radius: 20px;
+            padding: 15px;
+            margin: 10px 0;
+            border: 1px solid rgba(255, 255, 255, 0.2);
+            cursor: pointer;
+            transition: all 0.3s;
+        }
+        .thought-bubble:hover {
+            background: rgba(255, 255, 255, 0.2);
+            transform: translateY(-2px);
+        }
+
+        .memory-lane {
+            background: rgba(30, 30, 60, 0.7);
+            border-radius: 15px;
+            padding: 15px;
+            margin: 10px 0;
+            border-left: 4px solid #8B5CF6;
+        }
+
+        .quantum-state-message {
+            position: relative;
+            background: linear-gradient(135deg, rgba(59,130,246,0.2), rgba(139,92,246,0.2));
+            border: 1px solid rgba(59,130,246,0.3);
+            border-radius: 15px;
+            padding: 15px;
+            margin: 10px 0;
+            overflow: hidden;
+        }
+
         .connection-status {
             position: fixed;
             top: 10px;
@@ -145,6 +123,9 @@
             font-size: 0.8rem;
             z-index: 1000;
             transition: all 0.3s ease-in-out;
+            display: flex;
+            align-items: center;
+            gap: 8px;
         }
         .connection-status.connected {
             background: rgba(34, 197, 94, 0.8);
@@ -254,7 +235,6 @@
             transform: scale(1.1);
         }
         
-        /* Upload Progress */
         .upload-progress {
             width: 100%;
             height: 6px;
@@ -270,7 +250,6 @@
             transition: width 0.3s ease;
         }
         
-        /* Media Preview */
         .media-preview {
             max-height: 200px;
             object-fit: cover;
@@ -278,15 +257,6 @@
             margin-top: 10px;
         }
 
-        /* Cloudinary Optimized Images */
-        .optimized-image {
-            max-width: 100%;
-            height: auto;
-            border-radius: 12px;
-            object-fit: cover;
-        }
-
-        /* Chat specific styles */
         .chat-item {
             padding: 12px;
             border-radius: 12px;
@@ -364,24 +334,14 @@
         .type-personal { background: rgba(34, 197, 94, 0.3); color: #22C55E; }
         .type-group { background: rgba(249, 115, 22, 0.3); color: #F97316; }
 
-        .whisper-message {
-            border: 2px solid #F59E0B;
-        }
-        .whisper-indicator {
-            color: #F59E0B;
-            font-size: 0.75rem;
-            margin-bottom: 4px;
-            display: flex;
-            align-items: center;
-            gap: 4px;
-        }
-        .emotion-indicator {
-            margin-left: 8px;
-        }
-
         .message {
             margin-bottom: 16px;
             display: flex;
+            animation: messageSlideIn 0.3s ease-out;
+        }
+        @keyframes messageSlideIn {
+            from { opacity: 0; transform: translateY(10px); }
+            to { opacity: 1; transform: translateY(0); }
         }
         .message.sent {
             justify-content: flex-end;
@@ -393,6 +353,11 @@
             max-width: 70%;
             padding: 12px 16px;
             border-radius: 18px;
+            transition: all 0.3s;
+            position: relative;
+        }
+        .message-bubble:hover {
+            transform: scale(1.02);
         }
         .message-sender {
             font-size: 0.8rem;
@@ -417,18 +382,6 @@
         .message-status {
             margin-left: 8px;
         }
-        .message-date-divider {
-            text-align: center;
-            margin: 20px 0;
-            position: relative;
-        }
-        .date-label {
-            background: rgba(59, 130, 246, 0.3);
-            padding: 4px 12px;
-            border-radius: 12px;
-            font-size: 0.8rem;
-            color: #E2E8F0;
-        }
 
         .no-chats {
             text-align: center;
@@ -440,259 +393,249 @@
             display: none !important;
         }
 
-        /* Loading animation */
-        @keyframes pulse {
-            0%, 100% { opacity: 1; }
-            50% { opacity: 0.5; }
-        }
-        .animate-pulse {
-            animation: pulse 2s cubic-bezier(0.4, 0, 0.6, 1) infinite;
-        }
+        .bubble-blue { background: linear-gradient(135deg, #3B82F6 0%, #8B5CF6 100%) !important; }
+        .bubble-green { background: linear-gradient(135deg, #10B981 0%, #059669 100%) !important; }
+        .bubble-purple { background: linear-gradient(135deg, #8B5CF6 0%, #A855F7 100%) !important; }
         
-        /* NEW FEATURES STYLES */
-        
-        /* Quantum Entanglement Effect */
-        .quantum-entanglement {
-            position: relative;
+        .reply-container {
+            background: rgba(255, 255, 255, 0.1);
+            border-radius: 10px;
+            padding: 8px;
+            margin-bottom: 8px;
+            border-left: 3px solid #3B82F6;
+        }
+        .reply-sender {
+            font-size: 0.7rem;
+            font-weight: bold;
+            color: #3B82F6;
+        }
+        .reply-content {
+            font-size: 0.8rem;
+            color: #E2E8F0;
             overflow: hidden;
-        }
-        .quantum-entanglement::before {
-            content: '';
-            position: absolute;
-            top: -50%;
-            left: -50%;
-            width: 200%;
-            height: 200%;
-            background: radial-gradient(circle, rgba(59,130,246,0.2) 0%, transparent 70%);
-            animation: quantumPulse 3s infinite alternate;
-            z-index: -1;
-        }
-        @keyframes quantumPulse {
-            0% { transform: scale(1); opacity: 0.3; }
-            100% { transform: scale(1.2); opacity: 0.7; }
+            text-overflow: ellipsis;
+            white-space: nowrap;
         }
         
-        /* Mood Sync Indicator */
-        .mood-sync {
+        .pinned-message {
+            border: 2px solid #F59E0B;
+            background: rgba(245, 158, 11, 0.1);
+        }
+        
+        .typing-indicator {
             display: flex;
             align-items: center;
-            gap: 5px;
-            font-size: 0.7rem;
-            color: #8B5CF6;
-            margin-top: 5px;
+            padding: 8px 16px;
+            background: rgba(59, 130, 246, 0.1);
+            border-radius: 18px;
+            width: fit-content;
+            margin: 5px 0;
+            font-size: 0.8rem;
+            color: #94A3B8;
         }
-        .mood-sync.active {
-            color: #22C55E;
+        .typing-dots {
+            display: flex;
+            margin-left: 8px;
         }
-        .mood-sync-bar {
-            width: 60px;
-            height: 4px;
-            background: rgba(139, 92, 246, 0.3);
-            border-radius: 2px;
-            overflow: hidden;
+        .typing-dot {
+            width: 6px;
+            height: 6px;
+            background: #94A3B8;
+            border-radius: 50%;
+            margin: 0 2px;
+            animation: typingPulse 1.4s infinite ease-in-out;
         }
-        .mood-sync-progress {
-            height: 100%;
-            background: #8B5CF6;
-            border-radius: 2px;
-            transition: width 0.5s ease;
+        .typing-dot:nth-child(1) { animation-delay: -0.32s; }
+        .typing-dot:nth-child(2) { animation-delay: -0.16s; }
+        @keyframes typingPulse {
+            0%, 80%, 100% { transform: scale(0.8); opacity: 0.5; }
+            40% { transform: scale(1); opacity: 1; }
         }
         
-        /* Thought Bubble Feature */
-        .thought-bubble {
-            position: relative;
-            background: rgba(255, 255, 255, 0.15);
-            border-radius: 20px;
+        .sticker-picker {
+            position: absolute;
+            bottom: 70px;
+            right: 10px;
+            background: rgba(30, 30, 60, 0.95);
+            backdrop-filter: blur(20px);
+            border: 1px solid rgba(59, 130, 246, 0.3);
+            border-radius: 10px;
             padding: 15px;
-            margin: 10px 0;
-            border: 1px solid rgba(255, 255, 255, 0.2);
+            width: 300px;
+            max-height: 200px;
+            overflow-y: auto;
+            z-index: 1000;
+        }
+        .sticker-grid {
+            display: grid;
+            grid-template-columns: repeat(4, 1fr);
+            gap: 5px;
+        }
+        .sticker {
+            padding: 5px;
+            border-radius: 5px;
+            cursor: pointer;
+            text-align: center;
+            transition: all 0.2s;
+            font-size: 2rem;
+        }
+        .sticker:hover {
+            background: rgba(59, 130, 246, 0.3);
+            transform: scale(1.1);
+        }
+        
+        .gif-picker {
+            position: absolute;
+            bottom: 70px;
+            right: 10px;
+            background: rgba(30, 30, 60, 0.95);
+            backdrop-filter: blur(20px);
+            border: 1px solid rgba(59, 130, 246, 0.3);
+            border-radius: 10px;
+            padding: 15px;
+            width: 300px;
+            max-height: 300px;
+            overflow-y: auto;
+            z-index: 1000;
+        }
+        .gif-grid {
+            display: grid;
+            grid-template-columns: repeat(2, 1fr);
+            gap: 5px;
+        }
+        .gif-item {
+            border-radius: 5px;
+            cursor: pointer;
+            overflow: hidden;
+            transition: all 0.2s;
+        }
+        .gif-item:hover {
+            transform: scale(1.05);
+        }
+        .gif-item img {
+            width: 100%;
+            height: auto;
+            border-radius: 5px;
+        }
+        
+        .profile-pic {
+            width: 40px;
+            height: 40px;
+            border-radius: 50%;
+            object-fit: cover;
+            flex-shrink: 0;
+        }
+        
+        @media (max-width: 768px) {
+            .flex {
+                flex-direction: column;
+            }
+            .w-80 {
+                width: 100%;
+            }
+            .message-bubble {
+                max-width: 85%;
+            }
+            .modal-container {
+                width: 95%;
+                padding: 15px;
+            }
+        }
+
+        /* Video Call Styles */
+        .video-call-container {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: #000;
+            z-index: 2000;
+            display: none;
+        }
+        .local-video {
+            position: absolute;
+            bottom: 20px;
+            right: 20px;
+            width: 200px;
+            height: 150px;
+            border: 2px solid #3B82F6;
+            border-radius: 10px;
+        }
+        .remote-video {
+            width: 100%;
+            height: 100%;
+            object-fit: cover;
+        }
+        .call-controls {
+            position: absolute;
+            bottom: 20px;
+            left: 50%;
+            transform: translateX(-50%);
+            display: flex;
+            gap: 15px;
+        }
+        .call-btn {
+            width: 60px;
+            height: 60px;
+            border-radius: 50%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 1.5rem;
             cursor: pointer;
             transition: all 0.3s;
         }
-        .thought-bubble:hover {
-            background: rgba(255, 255, 255, 0.2);
-            transform: translateY(-2px);
+        .call-end {
+            background: #EF4444;
+            color: white;
         }
-        .thought-bubble::before {
-            content: '';
-            position: absolute;
-            top: -8px;
-            left: 20px;
-            width: 15px;
-            height: 15px;
-            background: rgba(255, 255, 255, 0.15);
-            border-radius: 50%;
+        .call-mute {
+            background: #6B7280;
+            color: white;
         }
-        .thought-bubble::after {
-            content: '';
-            position: absolute;
-            top: -15px;
-            left: 35px;
-            width: 10px;
-            height: 10px;
-            background: rgba(255, 255, 255, 0.1);
-            border-radius: 50%;
-        }
-        
-        /* Neural Connection Visualization */
-        .neural-connection {
-            position: relative;
-            height: 100px;
-            width: 100%;
-            overflow: hidden;
-            background: rgba(0, 0, 0, 0.2);
-            border-radius: 10px;
-            margin: 10px 0;
-        }
-        .neural-node {
-            position: absolute;
-            width: 8px;
-            height: 8px;
+        .call-video {
             background: #3B82F6;
-            border-radius: 50%;
-            animation: neuralPulse 2s infinite;
-        }
-        .neural-connection-line {
-            position: absolute;
-            height: 1px;
-            background: linear-gradient(90deg, transparent, #3B82F6, transparent);
-            transform-origin: left center;
-        }
-        @keyframes neuralPulse {
-            0%, 100% { transform: scale(1); opacity: 0.7; }
-            50% { transform: scale(1.5); opacity: 1; }
-        }
-        
-        /* Quantum State Message */
-        .quantum-state-message {
-            position: relative;
-            background: linear-gradient(135deg, rgba(59,130,246,0.2), rgba(139,92,246,0.2));
-            border: 1px solid rgba(59,130,246,0.3);
-            border-radius: 15px;
-            padding: 15px;
-            margin: 10px 0;
-            overflow: hidden;
-        }
-        .quantum-state-message::before {
-            content: '';
-            position: absolute;
-            top: 0;
-            left: 0;
-            right: 0;
-            height: 2px;
-            background: linear-gradient(90deg, transparent, #3B82F6, #8B5CF6, transparent);
-            animation: quantumFlow 3s linear infinite;
-        }
-        @keyframes quantumFlow {
-            0% { transform: translateX(-100%); }
-            100% { transform: translateX(100%); }
-        }
-        
-        /* Emotion Wave Visualization */
-        .emotion-wave {
-            height: 40px;
-            width: 100%;
-            position: relative;
-            overflow: hidden;
-            border-radius: 5px;
-            margin: 10px 0;
-        }
-        .emotion-wave-bar {
-            position: absolute;
-            bottom: 0;
-            width: 4px;
-            background: #3B82F6;
-            border-radius: 2px 2px 0 0;
-            animation: waveRise 1.5s ease-out;
-        }
-        @keyframes waveRise {
-            0% { height: 0; }
-            100% { height: var(--wave-height); }
-        }
-        
-        /* Memory Lane Feature */
-        .memory-lane {
-            background: rgba(30, 30, 60, 0.7);
-            border-radius: 15px;
-            padding: 15px;
-            margin: 10px 0;
-            border-left: 4px solid #8B5CF6;
-        }
-        .memory-date {
-            font-size: 0.8rem;
-            color: #8B5CF6;
-            margin-bottom: 5px;
-        }
-        .memory-content {
-            font-size: 0.9rem;
-            color: #E2E8F0;
-        }
-        
-        /* Quantum Typing Indicator */
-        .quantum-typing {
-            display: flex;
-            align-items: center;
-            gap: 5px;
-            padding: 10px 15px;
-            background: rgba(59, 130, 246, 0.1);
-            border-radius: 20px;
-            width: fit-content;
-            margin: 5px 0;
-        }
-        .quantum-dot {
-            width: 8px;
-            height: 8px;
-            background: #3B82F6;
-            border-radius: 50%;
-            animation: quantumBounce 1.4s infinite ease-in-out;
-        }
-        .quantum-dot:nth-child(1) { animation-delay: -0.32s; }
-        .quantum-dot:nth-child(2) { animation-delay: -0.16s; }
-        @keyframes quantumBounce {
-            0%, 80%, 100% { transform: scale(0); }
-            40% { transform: scale(1); }
+            color: white;
         }
     </style>
 </head>
-<body class="h-full bg-gradient-to-br from-gray-900 via-blue-900 to-gray-900 text-white emotion-default" id="emotionBody">
+<body class="h-full bg-gradient-to-br from-gray-900 via-blue-900 to-gray-900 text-white">
     <!-- Connection Status -->
     <div class="connection-status connecting" id="connectionStatus">
-        <i class="fas fa-circle-notch fa-spin mr-2"></i>
+        <i class="fas fa-circle-notch fa-spin"></i>
         <span>Connecting to Firebase...</span>
     </div>
 
-    <!-- Main App Content - No Loading Screen -->
-    <div id="chat-app" class="h-full flex flex-col">
-        <!-- Gamification Header -->
+    <!-- Authentication Required Screen -->
+    <div id="auth-required" class="h-full flex items-center justify-center">
+        <div class="text-center max-w-md p-8">
+            <div class="text-8xl mb-6 opacity-50">
+                <i class="fas fa-user-lock"></i>
+            </div>
+            <h2 class="text-3xl font-bold text-blue-300 mb-4">Authentication Required</h2>
+            <p class="text-blue-400 mb-8 text-lg">Please sign in to access the chat features</p>
+            <div class="space-y-4">
+                <button onclick="redirectToLogin()" class="bg-blue-600 text-white px-8 py-4 rounded-2xl font-semibold hover:bg-blue-700 transition-all duration-300 transform hover:scale-105 shadow-lg w-full">
+                    <i class="fas fa-sign-in-alt mr-2"></i>Sign In
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Main Chat App -->
+    <div id="chat-app" class="hidden h-full flex flex-col">
+        <!-- Header -->
         <div class="glass-effect border-b border-blue-800 p-3">
             <div class="flex items-center justify-between max-w-6xl mx-auto">
                 <div class="flex items-center space-x-4">
-                    <div class="flex items-center space-x-2">
-                        <div class="streak-fire text-yellow-400">
-                            <i class="fas fa-fire"></i>
-                        </div>
-                        <span class="text-sm font-bold" id="streakCount">0</span>
-                        <span class="text-xs text-blue-300">day streak</span>
-                    </div>
-                    <div class="flex items-center space-x-2">
-                        <div class="connectcoin-glow text-yellow-300">
-                            <i class="fas fa-coins"></i>
-                        </div>
-                        <span class="text-sm font-bold" id="connectcoinsCount">0</span>
-                        <span class="text-xs text-blue-300">ConnectCoins</span>
-                    </div>
-                    <div class="level-badge bg-blue-600 px-3 py-1 rounded-full text-xs">
-                        Level <span id="userLevel">1</span>
+                    <h1 class="text-xl font-bold text-blue-300">ConnectSphere Quantum Chat</h1>
+                    <div class="quantum-entanglement p-2 rounded-lg">
+                        <span class="text-xs text-blue-300">Quantum Entanglement: Active</span>
                     </div>
                 </div>
                 
                 <div class="flex items-center space-x-3">
-                    <button id="viewLeaderboard" class="text-blue-300 hover:text-blue-200 text-sm transition-colors">
-                        <i class="fas fa-trophy"></i> Leaderboard
-                    </button>
-                    <button id="viewChallenges" class="text-blue-300 hover:text-blue-200 text-sm transition-colors">
-                        <i class="fas fa-flag"></i> Challenges
-                    </button>
                     <button id="logout-btn" class="text-red-300 hover:text-red-200 text-sm transition-colors">
                         <i class="fas fa-sign-out-alt"></i> Logout
                     </button>
@@ -701,817 +644,1255 @@
         </div>
 
         <div class="flex flex-1 overflow-hidden">
-            <!-- Enhanced Sidebar -->
+            <!-- Sidebar -->
             <div class="w-80 bg-gray-900 border-r border-blue-800 flex flex-col">
                 <div class="p-4 border-b border-blue-800">
                     <div class="flex items-center justify-between mb-4">
                         <h2 class="text-xl font-bold text-blue-300">Quantum Chats</h2>
-                        <div class="flex space-x-2">
-                            <button class="text-blue-400 hover:text-blue-300 transition-colors" id="addFriendBtn" title="Add Friend">
-                                <i class="fas fa-user-plus"></i>
-                            </button>
-                            <button class="text-blue-400 hover:text-blue-300 transition-colors" id="createGroupBtn" title="Create Group">
-                                <i class="fas fa-users"></i>
-                            </button>
-                            <button class="text-blue-400 hover:text-blue-300 transition-colors" id="createCollabRoomBtn" title="Collab Room">
-                                <i class="fas fa-palette"></i>
-                            </button>
-                        </div>
-                    </div>
-                    
-                    <!-- Quick Actions -->
-                    <div class="grid grid-cols-2 gap-2 mb-4">
-                        <button class="p-2 glass-effect rounded-lg text-xs hover:bg-blue-800/50 transition-all duration-200" id="timeCapsuleBtn">
-                            <i class="fas fa-clock mr-1"></i> Time Capsule
-                        </button>
-                        <button class="p-2 glass-effect rounded-lg text-xs hover:bg-blue-800/50 transition-all duration-200" id="nearbyPulseBtn">
-                            <i class="fas fa-satellite mr-1"></i> Nearby Pulse
+                        <button class="text-blue-400 hover:text-blue-300 transition-colors" id="createGroupBtn" title="Create Group">
+                            <i class="fas fa-users"></i>
                         </button>
                     </div>
                     
+                    <!-- Search -->
                     <div class="relative mb-4">
-                        <input type="text" placeholder="Search chats..." 
-                               class="w-full p-2 pl-10 bg-gray-800 border border-blue-700 rounded-lg text-white placeholder-blue-400 focus:outline-none focus:ring-2 focus:ring-blue-400 transition-all duration-200"
-                               id="chat-search">
-                        <i class="fas fa-search absolute left-3 top-3 text-blue-400"></i>
+                        <input type="text" id="chatSearch" placeholder="Search chats..." class="w-full bg-gray-800 border border-blue-700 rounded-lg py-2 px-3 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500">
+                        <i class="fas fa-search absolute right-3 top-2.5 text-blue-400"></i>
                     </div>
-                    
-                    <!-- Chat Type Filters -->
-                    <div class="flex space-x-2 mb-4">
-                        <button class="chat-type-btn active px-3 py-1 bg-blue-600 rounded-lg text-xs transition-colors" data-type="all">All</button>
-                        <button class="chat-type-btn px-3 py-1 bg-gray-700 rounded-lg text-xs transition-colors hover:bg-gray-600" data-type="personal">Personal</button>
-                        <button class="chat-type-btn px-3 py-1 bg-gray-700 rounded-lg text-xs transition-colors hover:bg-gray-600" data-type="group">Groups</button>
+
+                    <!-- Friends List -->
+                    <div class="mb-4">
+                        <h3 class="text-sm font-semibold text-blue-300 mb-2">Friends</h3>
+                        <div id="friendsList" class="max-h-40 overflow-y-auto space-y-2">
+                            <!-- Friends will be populated from profile.html -->
+                        </div>
                     </div>
                 </div>
 
-                <div class="flex-1 overflow-y-auto p-4">
-                    <!-- User Profile with Compatibility -->
-                    <div class="p-3 mb-4 glass-effect rounded-lg">
-                        <p class="text-sm font-semibold" id="current-user-name">Loading...</p>
-                        <div class="flex items-center justify-between mt-2">
-                            <div class="text-xs text-blue-300">
-                                <div class="dna-helix">
-                                    <div class="dna-node" style="animation-delay: 0s"></div>
-                                    <div class="dna-node" style="animation-delay: 0.1s"></div>
-                                    <div class="dna-node" style="animation-delay: 0.2s"></div>
-                                    <div class="dna-node" style="animation-delay: 0.3s"></div>
-                                    <div class="dna-node" style="animation-delay: 0.4s"></div>
-                                </div>
-                                <span id="compatibilityScore">AI Ready</span>
-                            </div>
-                            <div class="text-xs bg-green-500 px-2 py-1 rounded-full" id="userStatus">Online</div>
-                        </div>
+                <!-- Chat List -->
+                <div class="flex-1 overflow-y-auto p-2" id="chatList">
+                    <div class="no-chats" id="noChatsMessage">
+                        <i class="fas fa-comments text-4xl mb-3 text-blue-400"></i>
+                        <p class="text-blue-300">No conversations yet</p>
+                        <p class="text-sm text-blue-400 mt-1">Start a chat with a friend</p>
                     </div>
-
-                    <!-- NEW FEATURE: Quantum Entanglement Status -->
-                    <div class="p-3 mb-4 glass-effect rounded-lg quantum-entanglement">
-                        <div class="flex items-center justify-between">
-                            <span class="text-xs text-blue-300">Quantum Entanglement</span>
-                            <span class="text-xs text-green-400" id="entanglementStatus">Active</span>
+                </div>
+                
+                <!-- User Profile -->
+                <div class="p-4 border-t border-blue-800">
+                    <div class="flex items-center space-x-3">
+                        <div class="relative">
+                            <img src="" alt="Profile" class="profile-pic" id="userProfilePic">
+                            <div class="absolute bottom-0 right-0 w-3 h-3 bg-green-500 rounded-full border-2 border-gray-900"></div>
                         </div>
-                        <div class="mood-sync mt-2">
-                            <span class="text-xs">Mood Sync:</span>
-                            <div class="mood-sync-bar">
-                                <div class="mood-sync-progress" style="width: 75%"></div>
-                            </div>
-                            <span class="text-xs">75%</span>
-                        </div>
-                    </div>
-
-                    <!-- Active Challenges -->
-                    <div class="mb-4">
-                        <h3 class="text-sm font-semibold text-blue-300 mb-2">Today's Challenges</h3>
-                        <div id="activeChallenges" class="space-y-2">
-                            <div class="glass-effect rounded-lg p-3">
-                                <div class="flex justify-between items-center mb-2">
-                                    <div class="text-sm font-semibold text-white">Send 5 Quantum Messages</div>
-                                    <span class="text-xs text-yellow-400">+25 🪙</span>
+                        <div class="flex-1 min-w-0">
+                            <p class="font-medium text-sm truncate" id="userDisplayName">Loading...</p>
+                            <div class="mood-sync active">
+                                <span class="text-xs">Mood Sync:</span>
+                                <div class="mood-sync-bar">
+                                    <div class="mood-sync-progress" style="width: 85%"></div>
                                 </div>
-                                <div class="w-full bg-gray-700 rounded-full h-2 mb-2">
-                                    <div class="bg-green-500 h-2 rounded-full" style="width: 40%"></div>
-                                </div>
-                                <div class="text-xs text-blue-400 text-right">2/5 completed</div>
                             </div>
                         </div>
-                    </div>
-                    
-                    <!-- Chat List -->
-                    <div class="space-y-2" id="chat-list">
-                        <!-- Sample chat items would be populated here -->
                     </div>
                 </div>
             </div>
 
             <!-- Main Chat Area -->
             <div class="flex-1 flex flex-col">
-                <!-- No Chat Selected View -->
-                <div id="no-chat-view" class="flex-1 flex items-center justify-center bg-gradient-to-br from-blue-900/20 to-purple-900/20">
-                    <div class="text-center max-w-md">
-                        <div class="text-8xl mb-6 opacity-50">💬</div>
-                        <h2 class="text-3xl font-bold text-blue-300 mb-4">Welcome to Quantum Chat</h2>
-                        <p class="text-blue-400 mb-8 text-lg">Select a conversation from the sidebar or start a new one to begin your messaging journey</p>
-                        <div class="flex flex-col sm:flex-row gap-4 justify-center">
-                            <button id="new-chat-btn" class="bg-blue-600 text-white px-8 py-4 rounded-2xl font-semibold hover:bg-blue-700 transition-all duration-300 transform hover:scale-105 shadow-lg">
-                                <i class="fas fa-plus mr-2"></i>Start New Chat
-                            </button>
-                            <button id="createCollabRoomBtnMain" class="bg-purple-600 text-white px-8 py-4 rounded-2xl font-semibold hover:bg-purple-700 transition-all duration-300 transform hover:scale-105 shadow-lg">
-                                <i class="fas fa-palette mr-2"></i>Create Room
-                            </button>
+                <!-- Chat Header -->
+                <div class="glass-effect border-b border-blue-800 p-4" id="chatHeader">
+                    <div class="flex items-center justify-between">
+                        <div class="flex items-center space-x-3">
+                            <div class="relative">
+                                <img src="" alt="Chat Avatar" class="profile-pic" id="chatHeaderAvatar">
+                                <div class="absolute bottom-0 right-0 w-3 h-3 bg-green-500 rounded-full border-2 border-gray-900"></div>
+                            </div>
+                            <div>
+                                <h3 class="font-bold" id="chatHeaderName">Select a chat</h3>
+                                <p class="text-xs text-blue-300" id="chatHeaderStatus">Start a conversation</p>
+                            </div>
                         </div>
-                        
-                        <!-- NEW FEATURE: Neural Connection Visualization -->
-                        <div class="neural-connection mt-8">
-                            <!-- Neural nodes and connections will be generated by JavaScript -->
+                        <div class="flex items-center space-x-4" id="chatActions">
+                            <button class="text-blue-400 hover:text-blue-300 transition-colors" id="videoCallBtn" title="Video Call">
+                                <i class="fas fa-video"></i>
+                            </button>
+                            <button class="text-blue-400 hover:text-blue-300 transition-colors" id="voiceCallBtn" title="Voice Call">
+                                <i class="fas fa-phone"></i>
+                            </button>
+                            <button class="text-blue-400 hover:text-blue-300 transition-colors" id="quantumMessageBtn" title="Quantum Message">
+                                <i class="fas fa-atom"></i>
+                            </button>
                         </div>
                     </div>
                 </div>
 
-                <!-- Active Chat View -->
-                <div id="active-chat-view" class="hidden flex-1 flex flex-col">
-                    <!-- Chat Header -->
-                    <div class="glass-effect border-b border-blue-800 px-6 py-4">
-                        <div class="flex items-center justify-between">
-                            <div class="flex items-center space-x-4">
-                                <div class="w-12 h-12 bg-gradient-to-r from-blue-500 to-purple-500 rounded-2xl flex items-center justify-center shadow-lg">
-                                    <span id="chat-avatar-text" class="text-white font-bold text-sm">CH</span>
-                                </div>
-                                <div>
-                                    <h2 id="chat-title" class="font-semibold text-lg text-white">Chat Name</h2>
-                                    <p id="chat-members" class="text-sm text-blue-300">2 members • group chat</p>
-                                    
-                                    <!-- NEW FEATURE: Mood Sync Indicator in Chat Header -->
-                                    <div class="mood-sync active mt-1">
-                                        <i class="fas fa-heart"></i>
-                                        <span class="text-xs">Mood Sync: 85%</span>
-                                        <div class="mood-sync-bar">
-                                            <div class="mood-sync-progress" style="width: 85%"></div>
-                                        </div>
-                                    </div>
-                                </div>
-                            </div>
-                            <div class="flex items-center space-x-4 text-blue-400">
-                                <button id="videoCallBtn" class="w-10 h-10 hover:bg-blue-800/50 rounded-full flex items-center justify-center hover:text-blue-300 transition-all duration-200" title="Video Call">
-                                    <i class="fas fa-video"></i>
-                                </button>
-                                <button id="voiceMessageBtn" class="w-10 h-10 hover:bg-blue-800/50 rounded-full flex items-center justify-center hover:text-blue-300 transition-all duration-200" title="Voice Message">
-                                    <i class="fas fa-microphone"></i>
-                                </button>
-                                <button id="fileShareBtn" class="w-10 h-10 hover:bg-blue-800/50 rounded-full flex items-center justify-center hover:text-blue-300 transition-all duration-200" title="Share File">
-                                    <i class="fas fa-paperclip"></i>
-                                </button>
-                                <button id="collabRoomBtn" class="w-10 h-10 hover:bg-blue-800/50 rounded-full flex items-center justify-center hover:text-blue-300 transition-all duration-200" title="Collab Room">
-                                    <i class="fas fa-palette"></i>
-                                </button>
-                                
-                                <!-- NEW FEATURE: Quantum Message Button -->
-                                <button id="quantumMessageBtn" class="w-10 h-10 hover:bg-blue-800/50 rounded-full flex items-center justify-center hover:text-blue-300 transition-all duration-200" title="Quantum Message">
-                                    <i class="fas fa-atom"></i>
-                                </button>
-                                
-                                <div class="relative">
-                                    <button id="chatMenuBtn" class="w-10 h-10 hover:bg-blue-800/50 rounded-full flex items-center justify-center hover:text-blue-300 transition-all duration-200" title="More Options">
-                                        <i class="fas fa-ellipsis-v"></i>
-                                    </button>
-                                </div>
-                            </div>
-                        </div>
+                <!-- Messages Area -->
+                <div class="flex-1 overflow-y-auto p-4" id="messagesContainer">
+                    <div class="text-center text-blue-300 py-10" id="noMessagesMessage">
+                        <i class="fas fa-comments text-4xl mb-3"></i>
+                        <p>No messages yet</p>
+                        <p class="text-sm mt-1">Select a chat to start messaging</p>
                     </div>
 
-                    <!-- Messages Area -->
-                    <div class="flex-1 overflow-y-auto p-6" id="messages-container">
-                        <!-- Messages will be populated here -->
-                        
-                        <!-- NEW FEATURE: Thought Bubble -->
-                        <div class="thought-bubble">
-                            <div class="text-xs text-blue-400 mb-1">Thought Bubble</div>
-                            <div class="text-sm">"What if we could send messages that change based on the reader's mood?"</div>
-                        </div>
-                        
-                        <!-- NEW FEATURE: Memory Lane -->
-                        <div class="memory-lane">
-                            <div class="memory-date">1 year ago today</div>
-                            <div class="memory-content">You and Alex discovered your shared love for quantum physics</div>
-                        </div>
-                        
-                        <!-- NEW FEATURE: Quantum State Message -->
-                        <div class="quantum-state-message">
-                            <div class="text-xs text-blue-400 mb-1">Quantum State Message</div>
-                            <div class="text-sm">This message exists in multiple states until observed</div>
-                        </div>
-                        
-                        <!-- NEW FEATURE: Emotion Wave Visualization -->
-                        <div class="emotion-wave" id="emotionWave">
-                            <!-- Emotion wave bars will be generated by JavaScript -->
-                        </div>
+                    <!-- Quantum Features -->
+                    <div class="thought-bubble hidden" id="thoughtBubble">
+                        <div class="text-xs text-blue-400 mb-1">Thought Bubble</div>
+                        <div class="text-sm">"What if we could send messages that change based on the reader's mood?"</div>
                     </div>
 
-                    <!-- NEW FEATURE: Quantum Typing Indicator -->
-                    <div class="quantum-typing hidden" id="quantumTypingIndicator">
-                        <div class="quantum-dot"></div>
-                        <div class="quantum-dot"></div>
-                        <div class="quantum-dot"></div>
-                        <span class="text-xs text-blue-300 ml-2">Quantum typing...</span>
+                    <div class="memory-lane hidden" id="memoryLane">
+                        <div class="memory-date">Memory Lane</div>
+                        <div class="memory-content">Your chat memories will appear here</div>
                     </div>
+                </div>
 
-                    <!-- Message Input Area -->
-                    <div class="glass-effect border-t border-blue-800 p-4">
-                        <div class="flex items-center space-x-4">
-                            <button class="text-blue-400 hover:text-blue-300 transition-colors" id="emojiBtn">
-                                <i class="far fa-smile text-xl"></i>
-                            </button>
-                            <button class="text-blue-400 hover:text-blue-300 transition-colors" id="attachmentBtn">
-                                <i class="fas fa-paperclip text-xl"></i>
-                            </button>
+                <!-- Typing Indicator -->
+                <div class="hidden" id="typingIndicator">
+                    <div class="typing-indicator">
+                        <span id="typingUsers"></span>
+                        <div class="typing-dots">
+                            <div class="typing-dot"></div>
+                            <div class="typing-dot"></div>
+                            <div class="typing-dot"></div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Message Input -->
+                <div class="glass-effect border-t border-blue-800 p-4">
+                    <div class="flex items-center space-x-2">
+                        <button class="text-blue-400 hover:text-blue-300 transition-colors p-2 rounded-full hover:bg-blue-800/50" id="emojiBtn">
+                            <i class="fas fa-smile"></i>
+                        </button>
+                        <button class="text-blue-400 hover:text-blue-300 transition-colors p-2 rounded-full hover:bg-blue-800/50" id="attachmentBtn">
+                            <i class="fas fa-paperclip"></i>
+                        </button>
+                        <button class="text-blue-400 hover:text-blue-300 transition-colors p-2 rounded-full hover:bg-blue-800/50" id="gifBtn">
+                            <i class="fas fa-film"></i>
+                        </button>
+                        <button class="text-blue-400 hover:text-blue-300 transition-colors p-2 rounded-full hover:bg-blue-800/50" id="stickerBtn">
+                            <i class="fas fa-sticky-note"></i>
+                        </button>
+                        
+                        <div class="flex-1 relative">
+                            <input type="text" id="messageInput" placeholder="Select a chat to start messaging..." class="w-full bg-gray-800 border border-blue-700 rounded-full py-3 px-4 focus:outline-none focus:ring-2 focus:ring-blue-500" disabled>
                             
-                            <!-- NEW FEATURE: Emotion Selector -->
-                            <div class="relative">
-                                <button class="text-blue-400 hover:text-blue-300 transition-colors" id="emotionBtn">
-                                    <i class="fas fa-heart text-xl"></i>
-                                </button>
-                                <div class="dropdown-menu hidden" id="emotionMenu">
-                                    <div class="dropdown-item" data-emotion="joy">
-                                        <i class="fas fa-laugh text-yellow-400"></i>
-                                        <span>Joy</span>
-                                    </div>
-                                    <div class="dropdown-item" data-emotion="love">
-                                        <i class="fas fa-heart text-red-400"></i>
-                                        <span>Love</span>
-                                    </div>
-                                    <div class="dropdown-item" data-emotion="calm">
-                                        <i class="fas fa-spa text-blue-400"></i>
-                                        <span>Calm</span>
-                                    </div>
-                                    <div class="dropdown-item" data-emotion="excited">
-                                        <i class="fas fa-star text-orange-400"></i>
-                                        <span>Excited</span>
-                                    </div>
-                                    <div class="dropdown-item" data-emotion="sad">
-                                        <i class="fas fa-sad-tear text-indigo-400"></i>
-                                        <span>Sad</span>
-                                    </div>
-                                    <div class="dropdown-item" data-emotion="angry">
-                                        <i class="fas fa-angry text-red-500"></i>
-                                        <span>Angry</span>
-                                    </div>
-                                </div>
+                            <!-- Emoji Picker -->
+                            <div class="emoji-picker hidden" id="emojiPicker">
+                                <div class="emoji-grid" id="emojiGrid"></div>
                             </div>
                             
-                            <div class="flex-1 relative">
-                                <input type="text" 
-                                       placeholder="Type a message..." 
-                                       class="w-full p-4 bg-gray-800 border border-blue-700 rounded-2xl text-white placeholder-blue-400 focus:outline-none focus:ring-2 focus:ring-blue-400 transition-all duration-200"
-                                       id="message-input">
-                                <div class="emoji-picker hidden" id="emojiPicker">
-                                    <div class="emoji-grid">
-                                        <!-- Emojis will be populated by JavaScript -->
-                                    </div>
-                                </div>
+                            <!-- Sticker Picker -->
+                            <div class="sticker-picker hidden" id="stickerPicker">
+                                <div class="sticker-grid" id="stickerGrid"></div>
                             </div>
-                            <button class="bg-blue-600 text-white p-4 rounded-2xl hover:bg-blue-700 transition-all duration-300 transform hover:scale-105 shadow-lg" id="send-btn">
-                                <i class="fas fa-paper-plane"></i>
-                            </button>
+                            
+                            <!-- GIF Picker -->
+                            <div class="gif-picker hidden" id="gifPicker">
+                                <div class="gif-grid" id="gifGrid"></div>
+                            </div>
                         </div>
                         
-                        <!-- Upload Progress -->
-                        <div class="upload-progress hidden" id="uploadProgress">
-                            <div class="upload-progress-bar" id="uploadProgressBar"></div>
-                        </div>
+                        <button class="bg-blue-600 hover:bg-blue-700 text-white p-3 rounded-full transition-colors" id="sendBtn" disabled>
+                            <i class="fas fa-paper-plane"></i>
+                        </button>
+                    </div>
+                    
+                    <!-- Upload Progress -->
+                    <div class="upload-progress hidden" id="uploadProgress">
+                        <div class="upload-progress-bar" id="uploadProgressBar"></div>
                     </div>
                 </div>
             </div>
+        </div>
+    </div>
+
+    <!-- Video Call Container -->
+    <div class="video-call-container" id="videoCallContainer">
+        <video class="remote-video" id="remoteVideo" autoplay></video>
+        <video class="local-video" id="localVideo" autoplay muted></video>
+        <div class="call-controls">
+            <button class="call-btn call-mute" id="muteBtn">
+                <i class="fas fa-microphone"></i>
+            </button>
+            <button class="call-btn call-video" id="videoToggleBtn">
+                <i class="fas fa-video"></i>
+            </button>
+            <button class="call-btn call-end" id="endCallBtn">
+                <i class="fas fa-phone"></i>
+            </button>
         </div>
     </div>
 
     <!-- Modals -->
-    <div class="modal" id="newChatModal">
+    <div class="modal" id="createGroupModal">
         <div class="modal-container">
-            <h2 class="text-xl font-bold mb-4 text-blue-300">Start a New Chat</h2>
-            <div class="space-y-4">
-                <input type="text" placeholder="Search for users..." class="w-full p-3 bg-gray-800 border border-blue-700 rounded-lg text-white placeholder-blue-400 focus:outline-none focus:ring-2 focus:ring-blue-400">
-                <div class="max-h-60 overflow-y-auto">
-                    <!-- User list would be populated here -->
+            <h3 class="text-xl font-bold mb-4">Create Quantum Group</h3>
+            <input type="text" id="groupName" placeholder="Group name" class="w-full bg-gray-800 border border-blue-700 rounded-lg py-2 px-3 mb-4 focus:outline-none focus:ring-2 focus:ring-blue-500">
+            <div class="mb-4">
+                <p class="mb-2 text-blue-300">Select friends:</p>
+                <div id="groupFriendsList" class="max-h-40 overflow-y-auto space-y-2">
+                    <!-- Friends will be populated here -->
                 </div>
-                <div class="flex justify-end space-x-3 mt-4">
-                    <button class="px-4 py-2 bg-gray-700 text-white rounded-lg hover:bg-gray-600 transition-colors" id="cancelNewChat">Cancel</button>
-                    <button class="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors">Start Chat</button>
-                </div>
+            </div>
+            <div class="flex justify-end space-x-2">
+                <button class="px-4 py-2 bg-gray-700 hover:bg-gray-600 rounded-lg transition-colors" id="cancelCreateGroup">Cancel</button>
+                <button class="px-4 py-2 bg-blue-600 hover:bg-blue-700 rounded-lg transition-colors" id="confirmCreateGroup">Create Quantum Group</button>
             </div>
         </div>
     </div>
 
-    <!-- NEW FEATURE: Quantum Message Modal -->
     <div class="modal" id="quantumMessageModal">
         <div class="modal-container">
-            <h2 class="text-xl font-bold mb-4 text-blue-300">Create Quantum Message</h2>
-            <div class="space-y-4">
-                <p class="text-blue-400">Quantum messages exist in multiple states until observed by the recipient.</p>
-                <textarea placeholder="Enter your quantum message..." class="w-full p-3 bg-gray-800 border border-blue-700 rounded-lg text-white placeholder-blue-400 focus:outline-none focus:ring-2 focus:ring-blue-400 h-32"></textarea>
-                <div class="flex items-center space-x-2">
-                    <input type="checkbox" id="superposition" class="rounded text-blue-600">
-                    <label for="superposition" class="text-sm text-blue-300">Enable superposition (message changes based on observation)</label>
-                </div>
-                <div class="flex justify-end space-x-3 mt-4">
-                    <button class="px-4 py-2 bg-gray-700 text-white rounded-lg hover:bg-gray-600 transition-colors" id="cancelQuantumMessage">Cancel</button>
-                    <button class="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors">Send Quantum</button>
-                </div>
+            <h3 class="text-xl font-bold mb-4">Create Quantum Message</h3>
+            <p class="text-blue-400 mb-4">Quantum messages exist in multiple states until observed by the recipient.</p>
+            <textarea id="quantumMessageText" placeholder="Enter your quantum message..." class="w-full bg-gray-800 border border-blue-700 rounded-lg py-2 px-3 mb-4 h-32 focus:outline-none focus:ring-2 focus:ring-blue-500"></textarea>
+            <div class="flex items-center space-x-2 mb-4">
+                <input type="checkbox" id="superposition" class="rounded text-blue-600">
+                <label for="superposition" class="text-sm text-blue-300">Enable superposition</label>
+            </div>
+            <div class="flex justify-end space-x-2">
+                <button class="px-4 py-2 bg-gray-700 hover:bg-gray-600 rounded-lg transition-colors" id="cancelQuantumMessage">Cancel</button>
+                <button class="px-4 py-2 bg-blue-600 hover:bg-blue-700 rounded-lg transition-colors" id="confirmQuantumMessage">Send Quantum</button>
             </div>
         </div>
     </div>
 
-    <!-- NEW FEATURE: Time Capsule Modal -->
-    <div class="modal" id="timeCapsuleModal">
-        <div class="modal-container">
-            <h2 class="text-xl font-bold mb-4 text-blue-300">Create Time Capsule</h2>
-            <div class="space-y-4">
-                <p class="text-blue-400">Create a message that will be delivered at a future date.</p>
-                <textarea placeholder="Your time capsule message..." class="w-full p-3 bg-gray-800 border border-blue-700 rounded-lg text-white placeholder-blue-400 focus:outline-none focus:ring-2 focus:ring-blue-400 h-32"></textarea>
-                <div class="grid grid-cols-2 gap-4">
-                    <div>
-                        <label class="text-sm text-blue-300 mb-1 block">Delivery Date</label>
-                        <input type="date" class="w-full p-3 bg-gray-800 border border-blue-700 rounded-lg text-white focus:outline-none focus:ring-2 focus:ring-blue-400">
-                    </div>
-                    <div>
-                        <label class="text-sm text-blue-300 mb-1 block">Delivery Time</label>
-                        <input type="time" class="w-full p-3 bg-gray-800 border border-blue-700 rounded-lg text-white focus:outline-none focus:ring-2 focus:ring-blue-400">
-                    </div>
-                </div>
-                <div class="flex justify-end space-x-3 mt-4">
-                    <button class="px-4 py-2 bg-gray-700 text-white rounded-lg hover:bg-gray-600 transition-colors" id="cancelTimeCapsule">Cancel</button>
-                    <button class="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors">Create Capsule</button>
-                </div>
-            </div>
-        </div>
-    </div>
-
-    <!-- NEW FEATURE: Collab Room Modal -->
-    <div class="modal" id="collabRoomModal">
-        <div class="modal-container">
-            <h2 class="text-xl font-bold mb-4 text-blue-300">Create Collaboration Room</h2>
-            <div class="space-y-4">
-                <input type="text" placeholder="Room Name" class="w-full p-3 bg-gray-800 border border-blue-700 rounded-lg text-white placeholder-blue-400 focus:outline-none focus:ring-2 focus:ring-blue-400">
-                <div class="collab-room">
-                    <h3 class="text-lg font-semibold mb-2 text-blue-300">Collaboration Tools</h3>
-                    <div class="grid grid-cols-2 gap-2">
-                        <div class="collab-tool">
-                            <i class="fas fa-paint-brush text-blue-400"></i>
-                            <span class="text-sm ml-2">Whiteboard</span>
-                        </div>
-                        <div class="collab-tool">
-                            <i class="fas fa-code text-blue-400"></i>
-                            <span class="text-sm ml-2">Code Editor</span>
-                        </div>
-                        <div class="collab-tool">
-                            <i class="fas fa-music text-blue-400"></i>
-                            <span class="text-sm ml-2">Music Player</span>
-                        </div>
-                        <div class="collab-tool">
-                            <i class="fas fa-video text-blue-400"></i>
-                            <span class="text-sm ml-2">Video Sync</span>
-                        </div>
-                    </div>
-                </div>
-                <div class="flex justify-end space-x-3 mt-4">
-                    <button class="px-4 py-2 bg-gray-700 text-white rounded-lg hover:bg-gray-600 transition-colors" id="cancelCollabRoom">Cancel</button>
-                    <button class="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors">Create Room</button>
-                </div>
-            </div>
-        </div>
-    </div>
-
-    <!-- Notification -->
-    <div class="notification hidden" id="notification">
-        <span id="notification-text"></span>
-    </div>
-
+    <!-- Firebase Configuration -->
     <script>
-        // Initialize the app immediately without loading screen
+        // Firebase Configuration
+        const firebaseConfig = {
+            apiKey: "AIzaSyDHHyGgsSV18BcXrGgzi4C8frzDAE1C1zo",
+            authDomain: "uniconnect-ee95c.firebaseapp.com",
+            projectId: "uniconnect-ee95c",
+            storageBucket: "uniconnect-ee95c.firebasestorage.app",
+            messagingSenderId: "1003264444309",
+            appId: "1:1003264444309:web:9f0307516e44d21e97d89c"
+        };
+
+        // Initialize Firebase
+        firebase.initializeApp(firebaseConfig);
+        const auth = firebase.auth();
+        const db = firebase.firestore();
+        const storage = firebase.storage();
+
+        // Global variables
+        let currentUser = null;
+        let currentChatId = null;
+        let typingTimeout = null;
+        let messagesListener = null;
+        let chatsListener = null;
+        let typingListener = null;
+        let localStream = null;
+        let remoteStream = null;
+        let peerConnection = null;
+    </script>
+
+    <!-- Application Logic -->
+    <script>
+        // DOM Elements
+        const authRequired = document.getElementById('auth-required');
+        const chatApp = document.getElementById('chat-app');
+        const connectionStatus = document.getElementById('connectionStatus');
+        const chatList = document.getElementById('chatList');
+        const noChatsMessage = document.getElementById('noChatsMessage');
+        const friendsList = document.getElementById('friendsList');
+        const messagesContainer = document.getElementById('messagesContainer');
+        const noMessagesMessage = document.getElementById('noMessagesMessage');
+        const messageInput = document.getElementById('messageInput');
+        const sendBtn = document.getElementById('sendBtn');
+        const typingIndicator = document.getElementById('typingIndicator');
+        const typingUsers = document.getElementById('typingUsers');
+        const userProfilePic = document.getElementById('userProfilePic');
+        const userDisplayName = document.getElementById('userDisplayName');
+        const chatHeaderName = document.getElementById('chatHeaderName');
+        const chatHeaderStatus = document.getElementById('chatHeaderStatus');
+        const chatHeaderAvatar = document.getElementById('chatHeaderAvatar');
+        const logoutBtn = document.getElementById('logout-btn');
+        const createGroupBtn = document.getElementById('createGroupBtn');
+        const videoCallBtn = document.getElementById('videoCallBtn');
+        const voiceCallBtn = document.getElementById('voiceCallBtn');
+        const quantumMessageBtn = document.getElementById('quantumMessageBtn');
+        const emojiBtn = document.getElementById('emojiBtn');
+        const emojiPicker = document.getElementById('emojiPicker');
+        const emojiGrid = document.getElementById('emojiGrid');
+        const attachmentBtn = document.getElementById('attachmentBtn');
+        const gifBtn = document.getElementById('gifBtn');
+        const gifPicker = document.getElementById('gifPicker');
+        const gifGrid = document.getElementById('gifGrid');
+        const stickerBtn = document.getElementById('stickerBtn');
+        const stickerPicker = document.getElementById('stickerPicker');
+        const stickerGrid = document.getElementById('stickerGrid');
+        const uploadProgress = document.getElementById('uploadProgress');
+        const uploadProgressBar = document.getElementById('uploadProgressBar');
+        const createGroupModal = document.getElementById('createGroupModal');
+        const quantumMessageModal = document.getElementById('quantumMessageModal');
+        const groupName = document.getElementById('groupName');
+        const groupFriendsList = document.getElementById('groupFriendsList');
+        const confirmCreateGroup = document.getElementById('confirmCreateGroup');
+        const cancelCreateGroup = document.getElementById('cancelCreateGroup');
+        const quantumMessageText = document.getElementById('quantumMessageText');
+        const confirmQuantumMessage = document.getElementById('confirmQuantumMessage');
+        const cancelQuantumMessage = document.getElementById('cancelQuantumMessage');
+        const videoCallContainer = document.getElementById('videoCallContainer');
+        const localVideo = document.getElementById('localVideo');
+        const remoteVideo = document.getElementById('remoteVideo');
+        const muteBtn = document.getElementById('muteBtn');
+        const videoToggleBtn = document.getElementById('videoToggleBtn');
+        const endCallBtn = document.getElementById('endCallBtn');
+        const thoughtBubble = document.getElementById('thoughtBubble');
+        const memoryLane = document.getElementById('memoryLane');
+
+        // Emoji list
+        const emojis = ['😀', '😂', '🥰', '😎', '😍', '🤔', '😴', '😭', '😡', '👍', '👎', '❤️', '🔥', '✨', '🎉', '💯'];
+        
+        // Sticker list
+        const stickers = ['😺', '🐶', '🐼', '🦊', '🐸', '🐨', '🦁', '🐯', '🐻', '🐰', '🐭', '🐹'];
+        
+        // GIF URLs
+        const gifs = [
+            'https://media.giphy.com/media/3o7aCTPPm4OHfRLSH6/giphy.gif',
+            'https://media.giphy.com/media/l0HlOBZcl7sbV6LnO/giphy.gif',
+            'https://media.giphy.com/media/3o72FfM5HJydzafgUE/giphy.gif',
+            'https://media.giphy.com/media/xT5LMHxhOfscxPfIfm/giphy.gif'
+        ];
+
+        // Initialize application
         document.addEventListener('DOMContentLoaded', function() {
-            // Initialize UI components
-            initializeUI();
-            
-            // Initialize Firebase connection
-            initializeFirebase();
-            
-            // Initialize unique features
-            initializeUniqueFeatures();
-            
-            // Set up event listeners
+            initializeApp();
             setupEventListeners();
-            
-            // Update connection status to connected
-            setTimeout(() => {
-                document.getElementById('connectionStatus').className = 'connection-status connected';
-                document.getElementById('connectionStatus').innerHTML = '<i class="fas fa-check-circle mr-2"></i><span>Connected to Firebase</span>';
-            }, 1500);
+            populateEmojiPicker();
+            populateStickerPicker();
+            populateGifPicker();
         });
 
-        // Initialize UI components
-        function initializeUI() {
-            // Set current user name
-            document.getElementById('current-user-name').textContent = "Quantum User";
+        // Initialize Firebase and check auth state
+        function initializeApp() {
+            updateConnectionStatus('connecting');
             
-            // Populate sample chat list
-            populateChatList();
-            
-            // Populate emoji picker
-            populateEmojiPicker();
-            
-            // Generate neural connection visualization
-            generateNeuralConnection();
-            
-            // Generate emotion wave visualization
-            generateEmotionWave();
-        }
-
-        // Initialize Firebase connection
-        function initializeFirebase() {
-            // Firebase initialization code would go here
-            // For demo purposes, we'll simulate a successful connection
-            console.log("Firebase initialized successfully");
-        }
-
-        // Initialize unique features
-        function initializeUniqueFeatures() {
-            // Set up quantum entanglement effect
-            setupQuantumEntanglement();
-            
-            // Set up mood sync
-            setupMoodSync();
-            
-            // Set up thought bubbles
-            setupThoughtBubbles();
-            
-            // Set up memory lane
-            setupMemoryLane();
-        }
-
-        // Set up event listeners
-        function setupEventListeners() {
-            // Chat type filter buttons
-            document.querySelectorAll('.chat-type-btn').forEach(btn => {
-                btn.addEventListener('click', function() {
-                    document.querySelectorAll('.chat-type-btn').forEach(b => b.classList.remove('active', 'bg-blue-600'));
-                    document.querySelectorAll('.chat-type-btn').forEach(b => b.classList.add('bg-gray-700'));
-                    this.classList.add('active', 'bg-blue-600');
-                    this.classList.remove('bg-gray-700');
-                    
-                    // Filter chat list based on type
-                    filterChats(this.dataset.type);
-                });
-            });
-            
-            // New chat button
-            document.getElementById('new-chat-btn').addEventListener('click', function() {
-                document.getElementById('newChatModal').style.display = 'flex';
-            });
-            
-            // Cancel new chat
-            document.getElementById('cancelNewChat').addEventListener('click', function() {
-                document.getElementById('newChatModal').style.display = 'none';
-            });
-            
-            // Send message button
-            document.getElementById('send-btn').addEventListener('click', sendMessage);
-            
-            // Message input enter key
-            document.getElementById('message-input').addEventListener('keypress', function(e) {
-                if (e.key === 'Enter') {
-                    sendMessage();
+            auth.onAuthStateChanged(user => {
+                if (user) {
+                    currentUser = user;
+                    initializeUser();
+                    setupRealTimeListeners();
+                    loadFriendsFromProfile();
+                    updateConnectionStatus('connected');
+                    showChatApp();
+                } else {
+                    updateConnectionStatus('disconnected');
+                    showAuthRequired();
                 }
             });
+        }
+
+        // Initialize user data
+        function initializeUser() {
+            userDisplayName.textContent = currentUser.displayName || currentUser.email;
+            userProfilePic.src = currentUser.photoURL || 'https://via.placeholder.com/40?text=' + (currentUser.displayName ? currentUser.displayName.charAt(0) : 'U');
             
-            // Emoji button
-            document.getElementById('emojiBtn').addEventListener('click', function() {
-                const picker = document.getElementById('emojiPicker');
-                picker.classList.toggle('hidden');
-            });
-            
-            // Emotion button
-            document.getElementById('emotionBtn').addEventListener('click', function() {
-                const menu = document.getElementById('emotionMenu');
-                menu.classList.toggle('hidden');
-            });
-            
-            // Emotion selection
-            document.querySelectorAll('#emotionMenu .dropdown-item').forEach(item => {
-                item.addEventListener('click', function() {
-                    const emotion = this.dataset.emotion;
-                    changeEmotionTheme(emotion);
-                    document.getElementById('emotionMenu').classList.add('hidden');
-                });
-            });
-            
-            // Quantum message button
-            document.getElementById('quantumMessageBtn').addEventListener('click', function() {
-                document.getElementById('quantumMessageModal').style.display = 'flex';
-            });
-            
-            // Cancel quantum message
-            document.getElementById('cancelQuantumMessage').addEventListener('click', function() {
-                document.getElementById('quantumMessageModal').style.display = 'none';
-            });
-            
-            // Time capsule button
-            document.getElementById('timeCapsuleBtn').addEventListener('click', function() {
-                document.getElementById('timeCapsuleModal').style.display = 'flex';
-            });
-            
-            // Cancel time capsule
-            document.getElementById('cancelTimeCapsule').addEventListener('click', function() {
-                document.getElementById('timeCapsuleModal').style.display = 'none';
-            });
-            
-            // Collab room buttons
-            document.getElementById('createCollabRoomBtn').addEventListener('click', showCollabRoomModal);
-            document.getElementById('createCollabRoomBtnMain').addEventListener('click', showCollabRoomModal);
-            document.getElementById('collabRoomBtn').addEventListener('click', showCollabRoomModal);
-            
-            // Cancel collab room
-            document.getElementById('cancelCollabRoom').addEventListener('click', function() {
-                document.getElementById('collabRoomModal').style.display = 'none';
-            });
-            
-            // Close modals when clicking outside
-            document.querySelectorAll('.modal').forEach(modal => {
-                modal.addEventListener('click', function(e) {
-                    if (e.target === this) {
-                        this.style.display = 'none';
-                    }
-                });
-            });
-            
-            // Logout button
-            document.getElementById('logout-btn').addEventListener('click', function() {
-                showNotification('Logged out successfully');
-                // In a real app, this would redirect to login page
+            // Ensure user document exists
+            db.collection('users').doc(currentUser.uid).set({
+                uid: currentUser.uid,
+                displayName: currentUser.displayName || currentUser.email,
+                email: currentUser.email,
+                photoURL: currentUser.photoURL || '',
+                status: 'online',
+                lastSeen: firebase.firestore.FieldValue.serverTimestamp()
+            }, { merge: true }).catch(error => {
+                console.error('Error creating user document:', error);
             });
         }
 
-        // Populate chat list with sample data
-        function populateChatList() {
-            const chatList = document.getElementById('chat-list');
-            const chats = [
-                { id: 1, name: "Alex Johnson", preview: "Hey, did you see the new quantum paper?", time: "10:30 AM", unread: 2, type: "personal", emotion: "excited" },
-                { id: 2, name: "Tech Innovators", preview: "Sarah: The new prototype is ready!", time: "9:15 AM", unread: 5, type: "group", emotion: "joy" },
-                { id: 3, name: "Maya Rodriguez", preview: "Thinking about you 💭", time: "Yesterday", unread: 0, type: "personal", emotion: "love" },
-                { id: 4, name: "Quantum Study Group", preview: "David: I solved the entanglement problem", time: "Yesterday", unread: 0, type: "group", emotion: "calm" },
-                { id: 5, name: "Ryan Chen", preview: "Let's meet up this weekend", time: "Wednesday", unread: 1, type: "personal", emotion: "excited" }
-            ];
+        // Load friends from profile data
+        function loadFriendsFromProfile() {
+            // Get friends from user's friends subcollection
+            db.collection('users').doc(currentUser.uid).collection('friends')
+                .onSnapshot(snapshot => {
+                    friendsList.innerHTML = '';
+                    groupFriendsList.innerHTML = '';
+                    
+                    if (snapshot.empty) {
+                        friendsList.innerHTML = '<p class="text-sm text-blue-400 text-center py-4">No friends yet</p>';
+                        return;
+                    }
+                    
+                    snapshot.forEach(doc => {
+                        const friend = doc.data();
+                        createFriendListItem(friend, friendsList);
+                        createFriendListItem(friend, groupFriendsList, true);
+                    });
+                }, error => {
+                    console.error('Error loading friends:', error);
+                });
+        }
+
+        // Create friend list item
+        function createFriendListItem(friend, container, isCheckbox = false) {
+            const friendItem = document.createElement('div');
+            friendItem.className = 'flex items-center space-x-3 p-2 rounded-lg hover:bg-blue-800/30 cursor-pointer transition-colors';
+            friendItem.dataset.friendId = friend.uid;
             
-            chatList.innerHTML = '';
-            
-            chats.forEach(chat => {
-                const chatItem = document.createElement('div');
-                chatItem.className = 'chat-item';
-                chatItem.innerHTML = `
-                    <div class="chat-avatar">${chat.name.charAt(0)}</div>
-                    <div class="chat-item-info">
-                        <div class="chat-item-header">
-                            <div class="chat-item-name">${chat.name}</div>
-                            <div class="chat-item-time">${chat.time}</div>
-                        </div>
-                        <div class="chat-item-preview">${chat.preview}</div>
-                        <div class="chat-item-meta">
-                            <div class="chat-type-indicator type-${chat.type}">${chat.type}</div>
-                            ${chat.unread > 0 ? `<div class="chat-badge">${chat.unread}</div>` : ''}
-                        </div>
-                    </div>
+            if (isCheckbox) {
+                friendItem.innerHTML = `
+                    <input type="checkbox" value="${friend.uid}" class="rounded text-blue-600 friend-checkbox">
+                    <img src="${friend.photoURL || 'https://via.placeholder.com/30'}" alt="${friend.displayName}" class="profile-pic w-8 h-8">
+                    <span class="text-sm flex-1">${friend.displayName}</span>
+                    <div class="w-2 h-2 bg-green-500 rounded-full"></div>
+                `;
+            } else {
+                friendItem.innerHTML = `
+                    <img src="${friend.photoURL || 'https://via.placeholder.com/30'}" alt="${friend.displayName}" class="profile-pic w-8 h-8">
+                    <span class="text-sm flex-1">${friend.displayName}</span>
+                    <div class="w-2 h-2 bg-green-500 rounded-full"></div>
+                    <button class="text-blue-400 hover:text-blue-300 start-chat-btn">
+                        <i class="fas fa-comment"></i>
+                    </button>
                 `;
                 
-                chatItem.addEventListener('click', function() {
-                    // Set this chat as active
-                    document.querySelectorAll('.chat-item').forEach(item => item.classList.remove('active'));
-                    this.classList.add('active');
-                    
-                    // Show the active chat view
-                    document.getElementById('no-chat-view').classList.add('hidden');
-                    document.getElementById('active-chat-view').classList.remove('hidden');
-                    
-                    // Update chat header
-                    document.getElementById('chat-title').textContent = chat.name;
-                    document.getElementById('chat-avatar-text').textContent = chat.name.charAt(0);
-                    document.getElementById('chat-members').textContent = chat.type === 'personal' ? 'Online • Direct message' : '5 members • Group chat';
-                    
-                    // Change emotion theme based on chat
-                    changeEmotionTheme(chat.emotion);
+                // Add click event to start chat
+                friendItem.querySelector('.start-chat-btn').addEventListener('click', (e) => {
+                    e.stopPropagation();
+                    startChatWithFriend(friend);
                 });
-                
-                chatList.appendChild(chatItem);
-            });
-        }
-
-        // Filter chats based on type
-        function filterChats(type) {
-            const chatItems = document.querySelectorAll('.chat-item');
+            }
             
-            chatItems.forEach(item => {
-                const chatType = item.querySelector('.chat-type-indicator').classList.contains('type-personal') ? 'personal' : 'group';
-                
-                if (type === 'all' || chatType === type) {
-                    item.style.display = 'flex';
-                } else {
-                    item.style.display = 'none';
+            friendItem.addEventListener('click', function() {
+                if (!isCheckbox) {
+                    startChatWithFriend(friend);
                 }
             });
+            
+            container.appendChild(friendItem);
         }
 
-        // Populate emoji picker
-        function populateEmojiPicker() {
-            const emojiPicker = document.getElementById('emojiPicker');
-            const emojiGrid = emojiPicker.querySelector('.emoji-grid');
-            
-            // Sample emojis
-            const emojis = ['😀', '😂', '🥰', '😎', '🤔', '😮', '👍', '❤️', '🔥', '✨', '🎉', '💯', '🤝', '🙏', '👏', '💪'];
-            
-            emojis.forEach(emoji => {
-                const emojiElement = document.createElement('div');
-                emojiElement.className = 'emoji';
-                emojiElement.textContent = emoji;
-                emojiElement.addEventListener('click', function() {
-                    const messageInput = document.getElementById('message-input');
-                    messageInput.value += emoji;
-                    messageInput.focus();
-                    emojiPicker.classList.add('hidden');
+        // Start chat with friend
+        function startChatWithFriend(friend) {
+            // Check if chat already exists
+            db.collection('chats')
+                .where('participants', 'array-contains', currentUser.uid)
+                .where('type', '==', 'personal')
+                .get()
+                .then(snapshot => {
+                    let existingChat = null;
+                    snapshot.forEach(doc => {
+                        const chat = doc.data();
+                        if (chat.participants.includes(friend.uid)) {
+                            existingChat = { id: doc.id, ...chat };
+                        }
+                    });
+                    
+                    if (existingChat) {
+                        selectChat(existingChat.id, existingChat);
+                    } else {
+                        // Create new chat
+                        const chatData = {
+                            type: 'personal',
+                            participants: [currentUser.uid, friend.uid],
+                            createdAt: firebase.firestore.FieldValue.serverTimestamp(),
+                            lastMessage: {
+                                text: 'Chat started',
+                                timestamp: firebase.firestore.FieldValue.serverTimestamp(),
+                                senderId: currentUser.uid
+                            },
+                            unreadCount: {
+                                [currentUser.uid]: 0,
+                                [friend.uid]: 1
+                            }
+                        };
+                        
+                        db.collection('chats').add(chatData)
+                            .then(docRef => {
+                                selectChat(docRef.id, chatData);
+                                showNotification(`Started chat with ${friend.displayName}`, 'success');
+                            })
+                            .catch(error => {
+                                console.error('Error creating chat:', error);
+                                showNotification('Failed to start chat', 'error');
+                            });
+                    }
+                })
+                .catch(error => {
+                    console.error('Error checking existing chats:', error);
                 });
-                
-                emojiGrid.appendChild(emojiElement);
+        }
+
+        // Set up real-time listeners
+        function setupRealTimeListeners() {
+            // Listen for user's chats
+            chatsListener = db.collection('chats')
+                .where('participants', 'array-contains', currentUser.uid)
+                .orderBy('lastMessage.timestamp', 'desc')
+                .onSnapshot(snapshot => {
+                    updateChatList(snapshot);
+                }, error => {
+                    console.error('Error getting chats:', error);
+                    showNotification('Error loading chats', 'error');
+                });
+        }
+
+        // Update chat list UI
+        function updateChatList(snapshot) {
+            chatList.innerHTML = '';
+            
+            if (snapshot.empty) {
+                noChatsMessage.classList.remove('hidden');
+                return;
+            }
+            
+            noChatsMessage.classList.add('hidden');
+            
+            snapshot.forEach(doc => {
+                const chat = doc.data();
+                const chatId = doc.id;
+                createChatListItem(chat, chatId);
             });
         }
 
-        // Send message function
-        function sendMessage() {
-            const messageInput = document.getElementById('message-input');
-            const message = messageInput.value.trim();
+        // Create chat list item
+        function createChatListItem(chat, chatId) {
+            const chatItem = document.createElement('div');
+            chatItem.className = 'chat-item';
+            chatItem.dataset.chatId = chatId;
             
-            if (message) {
-                // In a real app, this would send the message to Firebase
-                // For demo, we'll just add it to the UI
-                addMessageToUI(message, 'sent');
-                messageInput.value = '';
-                
-                // Show typing indicator for 2 seconds then add a response
-                showTypingIndicator();
-                setTimeout(() => {
-                    hideTypingIndicator();
-                    addMessageToUI("Thanks for your message! This is an automated response.", 'received');
-                }, 2000);
+            const otherParticipants = chat.participants.filter(uid => uid !== currentUser.uid);
+            let chatName = chat.name;
+            let chatAvatar = chat.avatar;
+            
+            if (!chatName && chat.type === 'personal' && otherParticipants.length === 1) {
+                // Get the other user's data
+                db.collection('users').doc(otherParticipants[0]).get().then(doc => {
+                    if (doc.exists) {
+                        const userData = doc.data();
+                        updateChatItemUI(chatItem, userData.displayName, userData.photoURL, chat);
+                    }
+                });
+            }
+            
+            chatItem.innerHTML = `
+                <div class="chat-avatar">
+                    <img src="${chatAvatar || 'https://via.placeholder.com/40'}" alt="${chatName || 'Chat'}" class="profile-pic">
+                </div>
+                <div class="chat-item-info">
+                    <div class="chat-item-header">
+                        <div class="chat-item-name">${chatName || 'Loading...'}</div>
+                        <div class="chat-item-time">${formatTime(chat.lastMessage?.timestamp)}</div>
+                    </div>
+                    <div class="chat-item-preview">${chat.lastMessage?.text || 'No messages yet'}</div>
+                    <div class="chat-item-meta">
+                        <div class="chat-type-indicator ${chat.type === 'group' ? 'type-group' : 'type-personal'}">${chat.type === 'group' ? 'Group' : 'Personal'}</div>
+                        ${chat.unreadCount && chat.unreadCount[currentUser.uid] > 0 ? 
+                            `<div class="chat-badge">${chat.unreadCount[currentUser.uid]}</div>` : ''}
+                    </div>
+                </div>
+            `;
+            
+            chatItem.addEventListener('click', () => {
+                selectChat(chatId, chat);
+            });
+            
+            chatList.appendChild(chatItem);
+        }
+
+        // Update chat item UI
+        function updateChatItemUI(chatItem, name, avatar, chat) {
+            const nameEl = chatItem.querySelector('.chat-item-name');
+            const avatarEl = chatItem.querySelector('.profile-pic');
+            
+            if (nameEl) nameEl.textContent = name;
+            if (avatarEl && avatar) avatarEl.src = avatar;
+        }
+
+        // Select a chat
+        function selectChat(chatId, chat) {
+            document.querySelectorAll('.chat-item').forEach(item => {
+                item.classList.remove('active');
+            });
+            
+            document.querySelector(`.chat-item[data-chat-id="${chatId}"]`).classList.add('active');
+            
+            currentChatId = chatId;
+            updateChatHeader(chat);
+            
+            messageInput.disabled = false;
+            messageInput.placeholder = "Type a message...";
+            sendBtn.disabled = false;
+            
+            messagesContainer.innerHTML = '';
+            noMessagesMessage.classList.remove('hidden');
+            
+            // Show quantum features
+            thoughtBubble.classList.remove('hidden');
+            memoryLane.classList.remove('hidden');
+            
+            setupMessagesListener(chatId);
+            setupTypingListener(chatId);
+            markMessagesAsRead(chatId);
+        }
+
+        // Update chat header
+        function updateChatHeader(chat) {
+            if (chat.type === 'group') {
+                chatHeaderName.textContent = chat.name;
+                chatHeaderAvatar.src = chat.avatar || 'https://via.placeholder.com/45';
+                chatHeaderStatus.textContent = `${chat.participants.length} members • Group chat`;
+            } else {
+                const otherParticipant = chat.participants.find(uid => uid !== currentUser.uid);
+                if (otherParticipant) {
+                    db.collection('users').doc(otherParticipant).get().then(doc => {
+                        if (doc.exists) {
+                            const userData = doc.data();
+                            chatHeaderName.textContent = userData.displayName;
+                            chatHeaderAvatar.src = userData.photoURL || 'https://via.placeholder.com/45';
+                            chatHeaderStatus.textContent = userData.status || 'online';
+                        }
+                    });
+                }
+            }
+        }
+
+        // Set up real-time messages listener
+        function setupMessagesListener(chatId) {
+            if (messagesListener) {
+                messagesListener();
+            }
+            
+            messagesListener = db.collection('chats').doc(chatId).collection('messages')
+                .orderBy('timestamp', 'asc')
+                .onSnapshot(snapshot => {
+                    noMessagesMessage.classList.add('hidden');
+                    
+                    snapshot.docChanges().forEach(change => {
+                        if (change.type === 'added') {
+                            addMessageToUI(change.doc.data(), change.doc.id);
+                        }
+                    });
+                    
+                    scrollToBottom();
+                }, error => {
+                    console.error('Error getting messages:', error);
+                });
+        }
+
+        // Set up typing indicator listener
+        function setupTypingListener(chatId) {
+            if (typingListener) {
+                typingListener();
+            }
+            
+            typingListener = db.collection('chats').doc(chatId).collection('typing')
+                .onSnapshot(snapshot => {
+                    const typingUserIds = [];
+                    snapshot.forEach(doc => {
+                        if (doc.id !== currentUser.uid) {
+                            typingUserIds.push(doc.id);
+                        }
+                    });
+                    
+                    updateTypingIndicator(typingUserIds);
+                }, error => {
+                    console.error('Error getting typing indicators:', error);
+                });
+        }
+
+        // Update typing indicator
+        function updateTypingIndicator(userIds) {
+            if (userIds.length > 0) {
+                Promise.all(userIds.map(uid => 
+                    db.collection('users').doc(uid).get().then(doc => doc.data().displayName)
+                )).then(names => {
+                    typingUsers.textContent = `${names.join(', ')} ${names.length > 1 ? 'are' : 'is'} typing...`;
+                    typingIndicator.classList.remove('hidden');
+                });
+            } else {
+                typingIndicator.classList.add('hidden');
             }
         }
 
         // Add message to UI
-        function addMessageToUI(message, type) {
-            const messagesContainer = document.getElementById('messages-container');
+        function addMessageToUI(message, messageId) {
             const messageElement = document.createElement('div');
-            messageElement.className = `message ${type}`;
+            messageElement.className = `message ${message.senderId === currentUser.uid ? 'sent' : 'received'}`;
+            messageElement.dataset.messageId = messageId;
             
-            const now = new Date();
-            const timeString = now.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+            const bubbleClass = message.senderId === currentUser.uid ? 'message-sent' : 'message-received';
+            
+            let messageContent = '';
+            if (message.type === 'text') {
+                messageContent = formatMessageText(message.text);
+            } else if (message.type === 'image') {
+                messageContent = `<img src="${message.content}" alt="Shared image" class="media-preview">`;
+            } else if (message.type === 'gif') {
+                messageContent = `<img src="${message.content}" alt="GIF" class="media-preview">`;
+            } else if (message.type === 'sticker') {
+                messageContent = `<div class="text-4xl text-center">${message.content}</div>`;
+            } else if (message.type === 'quantum') {
+                messageContent = `
+                    <div class="quantum-state-message">
+                        <div class="text-xs text-blue-400 mb-1">Quantum Message</div>
+                        <div class="text-sm">${message.text}</div>
+                    </div>
+                `;
+            }
+            
+            let replySection = '';
+            if (message.replyTo) {
+                replySection = `
+                    <div class="reply-container">
+                        <div class="reply-sender">Replying to ${message.replyTo.senderName}</div>
+                        <div class="reply-content">${message.replyTo.text}</div>
+                    </div>
+                `;
+            }
             
             messageElement.innerHTML = `
-                <div class="message-bubble ${type === 'sent' ? 'message-sent' : 'message-received'}">
-                    ${type === 'received' ? `<div class="message-sender">Alex Johnson</div>` : ''}
-                    <div class="message-content">${message}</div>
+                <div class="message-bubble ${bubbleClass}">
+                    ${message.senderId !== currentUser.uid ? `<div class="message-sender">${message.senderName}</div>` : ''}
+                    ${replySection}
+                    <div class="message-content">${messageContent}</div>
                     <div class="message-meta">
-                        <div class="message-time">${timeString}</div>
-                        ${type === 'sent' ? `<div class="message-status"><i class="fas fa-check"></i></div>` : ''}
+                        <div class="message-time">${formatTime(message.timestamp)}</div>
+                        ${message.senderId === currentUser.uid ? `
+                            <div class="message-status">
+                                ${message.status === 'seen' ? '<i class="fas fa-check-double text-blue-300"></i>' : 
+                                  message.status === 'delivered' ? '<i class="fas fa-check-double"></i>' : 
+                                  '<i class="fas fa-check"></i>'}
+                            </div>
+                        ` : ''}
                     </div>
                 </div>
             `;
             
             messagesContainer.appendChild(messageElement);
-            messagesContainer.scrollTop = messagesContainer.scrollHeight;
         }
 
-        // Show typing indicator
-        function showTypingIndicator() {
-            document.getElementById('quantumTypingIndicator').classList.remove('hidden');
+        // Format message text
+        function formatMessageText(text) {
+            let formattedText = text
+                .replace(/:smile:/g, '😀')
+                .replace(/:laughing:/g, '😂')
+                .replace(/:heart:/g, '❤️')
+                .replace(/:fire:/g, '🔥')
+                .replace(/:thumbsup:/g, '👍');
+            
+            const urlRegex = /(https?:\/\/[^\s]+)/g;
+            formattedText = formattedText.replace(urlRegex, url => {
+                return `<a href="${url}" target="_blank" class="text-blue-300 underline">${url}</a>`;
+            });
+            
+            return formattedText;
         }
 
-        // Hide typing indicator
-        function hideTypingIndicator() {
-            document.getElementById('quantumTypingIndicator').classList.add('hidden');
+        // Send message
+        function sendMessage() {
+            const text = messageInput.value.trim();
+            if (!text || !currentChatId) return;
+            
+            const message = {
+                text: text,
+                senderId: currentUser.uid,
+                senderName: currentUser.displayName || currentUser.email,
+                timestamp: firebase.firestore.FieldValue.serverTimestamp(),
+                type: 'text',
+                status: 'sent'
+            };
+            
+            db.collection('chats').doc(currentChatId).collection('messages').add(message)
+                .then(() => {
+                    messageInput.value = '';
+                    updateLastMessage(currentChatId, text);
+                    
+                    setTimeout(() => {
+                        updateMessageStatus(currentChatId, 'delivered');
+                    }, 1000);
+                })
+                .catch(error => {
+                    console.error('Error sending message:', error);
+                    showNotification('Failed to send message', 'error');
+                });
         }
 
-        // Change emotion theme
-        function changeEmotionTheme(emotion) {
-            const body = document.getElementById('emotionBody');
+        // Send quantum message
+        function sendQuantumMessage() {
+            const text = quantumMessageText.value.trim();
+            if (!text || !currentChatId) return;
             
-            // Remove all emotion classes
-            body.classList.remove('emotion-joy', 'emotion-love', 'emotion-calm', 'emotion-excited', 'emotion-sad', 'emotion-angry', 'emotion-default');
+            const message = {
+                text: text,
+                senderId: currentUser.uid,
+                senderName: currentUser.displayName || currentUser.email,
+                timestamp: firebase.firestore.FieldValue.serverTimestamp(),
+                type: 'quantum',
+                status: 'sent',
+                isQuantum: true,
+                superposition: document.getElementById('superposition').checked
+            };
             
-            // Add the new emotion class
-            body.classList.add(`emotion-${emotion}`);
-            
-            // Update emotion wave
-            updateEmotionWave(emotion);
-            
-            // Show notification
-            showNotification(`Emotion theme changed to ${emotion}`);
+            db.collection('chats').doc(currentChatId).collection('messages').add(message)
+                .then(() => {
+                    quantumMessageText.value = '';
+                    quantumMessageModal.classList.add('hidden');
+                    updateLastMessage(currentChatId, 'Sent a quantum message');
+                    showNotification('Quantum message sent!', 'success');
+                })
+                .catch(error => {
+                    console.error('Error sending quantum message:', error);
+                    showNotification('Failed to send quantum message', 'error');
+                });
         }
 
-        // Show notification
-        function showNotification(message) {
-            const notification = document.getElementById('notification');
-            const notificationText = document.getElementById('notification-text');
+        // Update last message in chat
+        function updateLastMessage(chatId, text) {
+            db.collection('chats').doc(chatId).update({
+                'lastMessage.text': text,
+                'lastMessage.timestamp': firebase.firestore.FieldValue.serverTimestamp(),
+                'lastMessage.senderId': currentUser.uid
+            }).catch(error => {
+                console.error('Error updating last message:', error);
+            });
+        }
+
+        // Update message status
+        function updateMessageStatus(chatId, status) {
+            db.collection('chats').doc(chatId).collection('messages')
+                .orderBy('timestamp', 'desc')
+                .limit(1)
+                .get()
+                .then(snapshot => {
+                    if (!snapshot.empty) {
+                        const messageDoc = snapshot.docs[0];
+                        if (messageDoc.data().senderId === currentUser.uid) {
+                            messageDoc.ref.update({ status: status });
+                        }
+                    }
+                });
+        }
+
+        // Mark messages as read
+        function markMessagesAsRead(chatId) {
+            db.collection('chats').doc(chatId).update({
+                [`unreadCount.${currentUser.uid}`]: 0
+            }).catch(error => {
+                console.error('Error marking messages as read:', error);
+            });
+        }
+
+        // Handle typing
+        function handleTyping() {
+            if (!currentChatId) return;
             
-            notificationText.textContent = message;
-            notification.classList.remove('hidden');
+            db.collection('chats').doc(currentChatId).collection('typing').doc(currentUser.uid).set({
+                timestamp: firebase.firestore.FieldValue.serverTimestamp()
+            }).catch(error => {
+                console.error('Error setting typing indicator:', error);
+            });
+            
+            if (typingTimeout) {
+                clearTimeout(typingTimeout);
+            }
+            
+            typingTimeout = setTimeout(() => {
+                db.collection('chats').doc(currentChatId).collection('typing').doc(currentUser.uid).delete()
+                    .catch(error => {
+                        console.error('Error removing typing indicator:', error);
+                    });
+            }, 2000);
+        }
+
+        // Upload file
+        function uploadFile(file, type) {
+            if (!currentChatId) return;
+            
+            uploadProgress.classList.remove('hidden');
+            uploadProgressBar.style.width = '0%';
+            
+            const storageRef = storage.ref();
+            const fileRef = storageRef.child(`chats/${currentChatId}/${Date.now()}_${file.name}`);
+            
+            const uploadTask = fileRef.put(file);
+            
+            uploadTask.on('state_changed',
+                (snapshot) => {
+                    const progress = (snapshot.bytesTransferred / snapshot.totalBytes) * 100;
+                    uploadProgressBar.style.width = `${progress}%`;
+                },
+                (error) => {
+                    console.error('Upload error:', error);
+                    uploadProgress.classList.add('hidden');
+                    showNotification('Failed to upload file', 'error');
+                },
+                () => {
+                    uploadTask.snapshot.ref.getDownloadURL().then((downloadURL) => {
+                        const message = {
+                            content: downloadURL,
+                            senderId: currentUser.uid,
+                            senderName: currentUser.displayName || currentUser.email,
+                            timestamp: firebase.firestore.FieldValue.serverTimestamp(),
+                            type: type,
+                            status: 'sent'
+                        };
+                        
+                        db.collection('chats').doc(currentChatId).collection('messages').add(message)
+                            .then(() => {
+                                updateLastMessage(currentChatId, type === 'image' ? 'Sent an image' : 'Sent a file');
+                                uploadProgress.classList.add('hidden');
+                            })
+                            .catch(error => {
+                                console.error('Error sending message:', error);
+                                uploadProgress.classList.add('hidden');
+                                showNotification('Failed to send message', 'error');
+                            });
+                    });
+                }
+            );
+        }
+
+        // Create group
+        function createGroup() {
+            const name = groupName.value.trim();
+            if (!name) return;
+            
+            const selectedFriends = Array.from(groupFriendsList.querySelectorAll('.friend-checkbox:checked')).map(input => input.value);
+            
+            if (selectedFriends.length === 0) {
+                showNotification('Please select at least one friend', 'error');
+                return;
+            }
+            
+            const participants = [currentUser.uid, ...selectedFriends];
+            
+            const chatData = {
+                type: 'group',
+                name: name,
+                participants: participants,
+                createdAt: firebase.firestore.FieldValue.serverTimestamp(),
+                lastMessage: {
+                    text: 'Group created',
+                    timestamp: firebase.firestore.FieldValue.serverTimestamp(),
+                    senderId: currentUser.uid
+                },
+                unreadCount: {}
+            };
+            
+            participants.forEach(uid => {
+                chatData.unreadCount[uid] = uid === currentUser.uid ? 0 : 1;
+            });
+            
+            db.collection('chats').add(chatData)
+                .then(() => {
+                    showNotification('Quantum group created successfully', 'success');
+                    createGroupModal.classList.add('hidden');
+                    groupName.value = '';
+                    
+                    groupFriendsList.querySelectorAll('.friend-checkbox').forEach(input => {
+                        input.checked = false;
+                    });
+                })
+                .catch(error => {
+                    console.error('Error creating group:', error);
+                    showNotification('Failed to create group', 'error');
+                });
+        }
+
+        // Video call functions
+        async function startVideoCall() {
+            if (!currentChatId) return;
+            
+            try {
+                localStream = await navigator.mediaDevices.getUserMedia({ video: true, audio: true });
+                localVideo.srcObject = localStream;
+                videoCallContainer.style.display = 'block';
+                
+                // In a real app, you would set up WebRTC peer connection here
+                showNotification('Video call started', 'success');
+            } catch (error) {
+                console.error('Error starting video call:', error);
+                showNotification('Failed to start video call', 'error');
+            }
+        }
+
+        function endVideoCall() {
+            if (localStream) {
+                localStream.getTracks().forEach(track => track.stop());
+                localStream = null;
+            }
+            videoCallContainer.style.display = 'none';
+            showNotification('Video call ended', 'info');
+        }
+
+        // Populate pickers
+        function populateEmojiPicker() {
+            emojis.forEach(emoji => {
+                const emojiElement = document.createElement('div');
+                emojiElement.className = 'emoji';
+                emojiElement.textContent = emoji;
+                emojiElement.addEventListener('click', () => {
+                    messageInput.value += emoji;
+                    emojiPicker.classList.add('hidden');
+                    messageInput.focus();
+                });
+                emojiGrid.appendChild(emojiElement);
+            });
+        }
+
+        function populateStickerPicker() {
+            stickers.forEach(sticker => {
+                const stickerElement = document.createElement('div');
+                stickerElement.className = 'sticker';
+                stickerElement.textContent = sticker;
+                stickerElement.addEventListener('click', () => {
+                    sendSticker(sticker);
+                    stickerPicker.classList.add('hidden');
+                });
+                stickerGrid.appendChild(stickerElement);
+            });
+        }
+
+        function populateGifPicker() {
+            gifs.forEach(gifUrl => {
+                const gifElement = document.createElement('div');
+                gifElement.className = 'gif-item';
+                
+                const img = document.createElement('img');
+                img.src = gifUrl;
+                img.alt = 'GIF';
+                
+                gifElement.appendChild(img);
+                gifElement.addEventListener('click', () => {
+                    sendGif(gifUrl);
+                    gifPicker.classList.add('hidden');
+                });
+                
+                gifGrid.appendChild(gifElement);
+            });
+        }
+
+        // Send sticker
+        function sendSticker(sticker) {
+            if (!currentChatId) return;
+            
+            const message = {
+                content: sticker,
+                senderId: currentUser.uid,
+                senderName: currentUser.displayName || currentUser.email,
+                timestamp: firebase.firestore.FieldValue.serverTimestamp(),
+                type: 'sticker',
+                status: 'sent'
+            };
+            
+            db.collection('chats').doc(currentChatId).collection('messages').add(message)
+                .then(() => {
+                    updateLastMessage(currentChatId, 'Sent a sticker');
+                })
+                .catch(error => {
+                    console.error('Error sending sticker:', error);
+                    showNotification('Failed to send sticker', 'error');
+                });
+        }
+
+        // Send GIF
+        function sendGif(gifUrl) {
+            if (!currentChatId) return;
+            
+            const message = {
+                content: gifUrl,
+                senderId: currentUser.uid,
+                senderName: currentUser.displayName || currentUser.email,
+                timestamp: firebase.firestore.FieldValue.serverTimestamp(),
+                type: 'gif',
+                status: 'sent'
+            };
+            
+            db.collection('chats').doc(currentChatId).collection('messages').add(message)
+                .then(() => {
+                    updateLastMessage(currentChatId, 'Sent a GIF');
+                })
+                .catch(error => {
+                    console.error('Error sending GIF:', error);
+                    showNotification('Failed to send GIF', 'error');
+                });
+        }
+
+        // UI management
+        function showAuthRequired() {
+            authRequired.classList.remove('hidden');
+            chatApp.classList.add('hidden');
+        }
+
+        function showChatApp() {
+            authRequired.classList.add('hidden');
+            chatApp.classList.remove('hidden');
+        }
+
+        function updateConnectionStatus(status) {
+            connectionStatus.className = `connection-status ${status}`;
+            
+            if (status === 'connected') {
+                connectionStatus.innerHTML = '<i class="fas fa-check-circle"></i><span>Connected</span>';
+            } else if (status === 'connecting') {
+                connectionStatus.innerHTML = '<i class="fas fa-circle-notch fa-spin"></i><span>Connecting...</span>';
+            } else if (status === 'disconnected') {
+                connectionStatus.innerHTML = '<i class="fas fa-exclamation-triangle"></i><span>Disconnected</span>';
+            }
+        }
+
+        function showNotification(message, type) {
+            const notification = document.createElement('div');
+            notification.className = 'notification';
+            notification.textContent = message;
+            
+            if (type === 'error') {
+                notification.style.background = 'rgba(239, 68, 68, 0.9)';
+            } else if (type === 'info') {
+                notification.style.background = 'rgba(59, 130, 246, 0.9)';
+            }
+            
+            document.body.appendChild(notification);
             
             setTimeout(() => {
-                notification.classList.add('hidden');
+                notification.remove();
             }, 3000);
         }
 
-        // Show collab room modal
-        function showCollabRoomModal() {
-            document.getElementById('collabRoomModal').style.display = 'flex';
-        }
-
-        // Generate neural connection visualization
-        function generateNeuralConnection() {
-            const neuralConnection = document.querySelector('.neural-connection');
-            const nodeCount = 15;
+        function formatTime(timestamp) {
+            if (!timestamp) return '';
             
-            // Create nodes
-            for (let i = 0; i < nodeCount; i++) {
-                const node = document.createElement('div');
-                node.className = 'neural-node';
-                node.style.left = `${Math.random() * 100}%`;
-                node.style.top = `${Math.random() * 100}%`;
-                node.style.animationDelay = `${Math.random() * 2}s`;
-                neuralConnection.appendChild(node);
-            }
+            const date = timestamp.toDate();
+            const now = new Date();
+            const diff = now.getTime() - date.getTime();
             
-            // Create connections
-            for (let i = 0; i < nodeCount * 2; i++) {
-                const line = document.createElement('div');
-                line.className = 'neural-connection-line';
-                line.style.left = `${Math.random() * 100}%`;
-                line.style.top = `${Math.random() * 100}%`;
-                line.style.width = `${10 + Math.random() * 50}px`;
-                line.style.transform = `rotate(${Math.random() * 360}deg)`;
-                neuralConnection.appendChild(line);
+            if (diff < 60000) {
+                return 'Just now';
+            } else if (diff < 3600000) {
+                return `${Math.floor(diff / 60000)}m ago`;
+            } else if (diff < 86400000) {
+                return `${Math.floor(diff / 3600000)}h ago`;
+            } else {
+                return date.toLocaleDateString();
             }
         }
 
-        // Generate emotion wave visualization
-        function generateEmotionWave() {
-            const emotionWave = document.getElementById('emotionWave');
-            const barCount = 20;
-            
-            for (let i = 0; i < barCount; i++) {
-                const bar = document.createElement('div');
-                bar.className = 'emotion-wave-bar';
-                bar.style.left = `${(i / barCount) * 100}%`;
-                bar.style.setProperty('--wave-height', `${10 + Math.random() * 30}px`);
-                bar.style.animationDelay = `${i * 0.1}s`;
-                emotionWave.appendChild(bar);
-            }
+        function scrollToBottom() {
+            messagesContainer.scrollTop = messagesContainer.scrollHeight;
         }
 
-        // Update emotion wave based on current emotion
-        function updateEmotionWave(emotion) {
-            const bars = document.querySelectorAll('.emotion-wave-bar');
-            const emotionHeights = {
-                joy: [30, 35, 40, 35, 30, 25, 30, 35, 40, 35, 30, 25, 30, 35, 40, 35, 30, 25, 30, 35],
-                love: [20, 25, 30, 35, 40, 35, 30, 25, 20, 25, 30, 35, 40, 35, 30, 25, 20, 25, 30, 35],
-                calm: [15, 18, 20, 18, 15, 12, 15, 18, 20, 18, 15, 12, 15, 18, 20, 18, 15, 12, 15, 18],
-                excited: [35, 40, 45, 40, 35, 30, 35, 40, 45, 40, 35, 30, 35, 40, 45, 40, 35, 30, 35, 40],
-                sad: [10, 12, 15, 12, 10, 8, 10, 12, 15, 12, 10, 8, 10, 12, 15, 12, 10, 8, 10, 12],
-                angry: [40, 45, 50, 45, 40, 35, 40, 45, 50, 45, 40, 35, 40, 45, 50, 45, 40, 35, 40, 45]
-            };
+        function logout() {
+            if (chatsListener) chatsListener();
+            if (messagesListener) messagesListener();
+            if (typingListener) typingListener();
             
-            const heights = emotionHeights[emotion] || emotionHeights.calm;
-            
-            bars.forEach((bar, index) => {
-                bar.style.setProperty('--wave-height', `${heights[index]}px`);
+            auth.signOut().then(() => {
+                localStorage.clear();
+                sessionStorage.clear();
+                showNotification('Logged out successfully', 'success');
+            }).catch(error => {
+                console.error('Error signing out:', error);
             });
         }
 
-        // Set up quantum entanglement effect
-        function setupQuantumEntanglement() {
-            // This would connect to a real quantum entanglement service in a production app
-            console.log("Quantum entanglement initialized");
+        function redirectToLogin() {
+            window.location.href = '/login';
         }
 
-        // Set up mood sync
-        function setupMoodSync() {
-            // This would sync moods between users in a real app
-            console.log("Mood sync initialized");
-        }
-
-        // Set up thought bubbles
-        function setupThoughtBubbles() {
-            // Add click handler to thought bubbles
-            document.querySelector('.thought-bubble').addEventListener('click', function() {
-                showNotification("Thought bubble saved to your memory lane");
+        // Set up event listeners
+        function setupEventListeners() {
+            sendBtn.addEventListener('click', sendMessage);
+            
+            messageInput.addEventListener('keypress', (e) => {
+                if (e.key === 'Enter') {
+                    sendMessage();
+                }
             });
-        }
-
-        // Set up memory lane
-        function setupMemoryLane() {
-            // This would fetch memories from the database in a real app
-            console.log("Memory lane initialized");
+            
+            messageInput.addEventListener('input', handleTyping);
+            
+            emojiBtn.addEventListener('click', () => {
+                emojiPicker.classList.toggle('hidden');
+                gifPicker.classList.add('hidden');
+                stickerPicker.classList.add('hidden');
+            });
+            
+            stickerBtn.addEventListener('click', () => {
+                stickerPicker.classList.toggle('hidden');
+                emojiPicker.classList.add('hidden');
+                gifPicker.classList.add('hidden');
+            });
+            
+            gifBtn.addEventListener('click', () => {
+                gifPicker.classList.toggle('hidden');
+                emojiPicker.classList.add('hidden');
+                stickerPicker.classList.add('hidden');
+            });
+            
+            attachmentBtn.addEventListener('click', () => {
+                const fileInput = document.createElement('input');
+                fileInput.type = 'file';
+                fileInput.accept = 'image/*,video/*';
+                
+                fileInput.addEventListener('change', (e) => {
+                    const file = e.target.files[0];
+                    if (file) {
+                        const type = file.type.startsWith('image/') ? 'image' : 'video';
+                        uploadFile(file, type);
+                    }
+                });
+                
+                fileInput.click();
+            });
+            
+            logoutBtn.addEventListener('click', logout);
+            
+            createGroupBtn.addEventListener('click', () => {
+                createGroupModal.classList.remove('hidden');
+            });
+            
+            videoCallBtn.addEventListener('click', startVideoCall);
+            
+            quantumMessageBtn.addEventListener('click', () => {
+                quantumMessageModal.classList.remove('hidden');
+            });
+            
+            confirmCreateGroup.addEventListener('click', createGroup);
+            cancelCreateGroup.addEventListener('click', () => {
+                createGroupModal.classList.add('hidden');
+                groupName.value = '';
+            });
+            
+            confirmQuantumMessage.addEventListener('click', sendQuantumMessage);
+            cancelQuantumMessage.addEventListener('click', () => {
+                quantumMessageModal.classList.add('hidden');
+                quantumMessageText.value = '';
+            });
+            
+            endCallBtn.addEventListener('click', endVideoCall);
+            
+            // Close modals and pickers when clicking outside
+            document.addEventListener('click', (e) => {
+                if (e.target.classList.contains('modal')) {
+                    e.target.classList.add('hidden');
+                }
+                
+                if (!e.target.closest('#emojiBtn') && !e.target.closest('#emojiPicker')) {
+                    emojiPicker.classList.add('hidden');
+                }
+                
+                if (!e.target.closest('#stickerBtn') && !e.target.closest('#stickerPicker')) {
+                    stickerPicker.classList.add('hidden');
+                }
+                
+                if (!e.target.closest('#gifBtn') && !e.target.closest('#gifPicker')) {
+                    gifPicker.classList.add('hidden');
+                }
+            });
+            
+            // Handle online/offline events
+            window.addEventListener('online', () => {
+                updateConnectionStatus('connected');
+            });
+            
+            window.addEventListener('offline', () => {
+                updateConnectionStatus('disconnected');
+            });
         }
     </script>
 </body>

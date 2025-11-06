@@ -6,21 +6,33 @@
   "main": "index.js",
   "scripts": {
     "start": "node index.js",
-    "dev": "nodemon index.js"
+    "dev": "nodemon index.js",
+    "prod": "NODE_ENV=production node index.js"
   },
-  "keywords": [],
-  "author": "",
+  "keywords": [
+    "cloudinary",
+    "file-upload",
+    "server",
+    "express",
+    "multer"
+  ],
+  "author": "Your Name or Organization",
   "license": "ISC",
   "dependencies": {
     "cloudinary": "^1.41.3",
     "compression": "^1.8.1",
+    "cors": "^2.8.5",
     "dotenv": "^16.6.1",
     "express": "^4.21.2",
     "express-rate-limit": "^8.2.1",
+    "helmet": "^8.1.0",
     "multer": "^1.4.5-lts.1"
   },
   "devDependencies": {
     "nodemon": "^3.0.1"
+  },
+  "engines": {
+    "node": ">=14.0.0"
   },
   "repository": {
     "type": "git",

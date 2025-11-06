@@ -1,5 +1,3 @@
-[file name]: games.html
-[file content begin]
 <!DOCTYPE html>
 <html lang="en" class="h-full">
 <head>
@@ -13,24 +11,35 @@
     <script src="https://www.gstatic.com/firebasejs/9.22.1/firebase-app-compat.js"></script>
     <script src="https://www.gstatic.com/firebasejs/9.22.1/firebase-firestore-compat.js"></script>
     <script src="https://www.gstatic.com/firebasejs/9.22.1/firebase-auth-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/9.22.1/firebase-storage-compat.js"></script>
     
     <style>
+        :root {
+            --primary-gradient: linear-gradient(135deg, #3b82f6 0%, #1d4ed8 100%);
+            --premium-gradient: linear-gradient(135deg, #f59e0b 0%, #d97706 100%);
+            --game-gradient-1: linear-gradient(135deg, #8b5cf6, #a855f7);
+            --game-gradient-2: linear-gradient(135deg, #ec4899, #db2777);
+            --game-gradient-3: linear-gradient(135deg, #10b981, #059669);
+            --game-gradient-4: linear-gradient(135deg, #06b6d4, #0891b2);
+            --game-gradient-5: linear-gradient(135deg, #f97316, #ea580c);
+        }
+
         .glass-card {
             background: rgba(255, 255, 255, 0.1);
             backdrop-filter: blur(20px);
             border: 1px solid rgba(255, 255, 255, 0.2);
         }
         .primary-gradient {
-            background: linear-gradient(135deg, #3b82f6 0%, #1d4ed8 100%);
+            background: var(--primary-gradient);
         }
         .premium-gradient {
-            background: linear-gradient(135deg, #f59e0b 0%, #d97706 100%);
+            background: var(--premium-gradient);
         }
-        .game-gradient-1 { background: linear-gradient(135deg, #8b5cf6, #a855f7); }
-        .game-gradient-2 { background: linear-gradient(135deg, #ec4899, #db2777); }
-        .game-gradient-3 { background: linear-gradient(135deg, #10b981, #059669); }
-        .game-gradient-4 { background: linear-gradient(135deg, #06b6d4, #0891b2); }
-        .game-gradient-5 { background: linear-gradient(135deg, #f97316, #ea580c); }
+        .game-gradient-1 { background: var(--game-gradient-1); }
+        .game-gradient-2 { background: var(--game-gradient-2); }
+        .game-gradient-3 { background: var(--game-gradient-3); }
+        .game-gradient-4 { background: var(--game-gradient-4); }
+        .game-gradient-5 { background: var(--game-gradient-5); }
         
         .card-glow {
             box-shadow: 0 0 30px rgba(59, 130, 246, 0.4);
@@ -40,10 +49,38 @@
         .game-card {
             transition: all 0.3s ease;
             cursor: pointer;
+            position: relative;
+            overflow: hidden;
         }
         .game-card:hover {
-            transform: translateY(-5px);
+            transform: translateY(-5px) scale(1.02);
             box-shadow: 0 10px 25px rgba(0, 0, 0, 0.3);
+        }
+        .game-card::before {
+            content: '';
+            position: absolute;
+            top: 0;
+            left: 0;
+            right: 0;
+            height: 4px;
+            background: var(--primary-gradient);
+            transform: scaleX(0);
+            transition: transform 0.3s ease;
+        }
+        .game-card:hover::before {
+            transform: scaleX(1);
+        }
+        
+        /* Animated backgrounds */
+        .animated-bg {
+            background: linear-gradient(-45deg, #ee7752, #e73c7e, #23a6d5, #23d5ab);
+            background-size: 400% 400%;
+            animation: gradient 15s ease infinite;
+        }
+        @keyframes gradient {
+            0% { background-position: 0% 50%; }
+            50% { background-position: 100% 50%; }
+            100% { background-position: 0% 50%; }
         }
         
         /* Chess Board */
@@ -151,9 +188,77 @@
             background: #ef4444;
         }
         
+        /* Tic Tac Toe */
+        .tic-tac-toe-board {
+            display: grid;
+            grid-template-columns: repeat(3, 1fr);
+            grid-template-rows: repeat(3, 1fr);
+            width: 300px;
+            height: 300px;
+            gap: 5px;
+            background: #374151;
+        }
+        .tic-tac-toe-cell {
+            background: #1f2937;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 48px;
+            cursor: pointer;
+            transition: all 0.2s ease;
+        }
+        .tic-tac-toe-cell:hover {
+            background: #374151;
+        }
+        .tic-tac-toe-cell.x {
+            color: #3b82f6;
+        }
+        .tic-tac-toe-cell.o {
+            color: #ef4444;
+        }
+        
+        /* Sudoku */
+        .sudoku-board {
+            display: grid;
+            grid-template-columns: repeat(9, 1fr);
+            grid-template-rows: repeat(9, 1fr);
+            width: 450px;
+            height: 450px;
+            border: 2px solid #374151;
+        }
+        .sudoku-cell {
+            border: 1px solid #4b5563;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 20px;
+            cursor: pointer;
+            background: #1f2937;
+        }
+        .sudoku-cell:nth-child(3n) {
+            border-right: 2px solid #374151;
+        }
+        .sudoku-cell:nth-child(9n) {
+            border-right: 1px solid #4b5563;
+        }
+        .sudoku-cell:nth-child(n+19):nth-child(-n+27),
+        .sudoku-cell:nth-child(n+46):nth-child(-n+54) {
+            border-bottom: 2px solid #374151;
+        }
+        .sudoku-cell.selected {
+            background: #3b82f6;
+        }
+        .sudoku-cell.prefilled {
+            background: #374151;
+            font-weight: bold;
+        }
+        .sudoku-cell.error {
+            background: #ef4444;
+        }
+        
         /* Premium Badge */
         .premium-badge {
-            background: linear-gradient(135deg, #f59e0b, #d97706);
+            background: var(--premium-gradient);
             animation: pulse 2s infinite;
         }
         @keyframes pulse {
@@ -275,6 +380,146 @@
             from { opacity: 0; transform: scale(0.9); }
             to { opacity: 1; transform: scale(1); }
         }
+
+        /* Chat styles */
+        .chat-container {
+            height: 300px;
+            overflow-y: auto;
+            border: 1px solid rgba(255, 255, 255, 0.2);
+            border-radius: 8px;
+            padding: 10px;
+            margin-bottom: 10px;
+        }
+        .chat-message {
+            margin-bottom: 10px;
+            padding: 8px 12px;
+            border-radius: 8px;
+            max-width: 80%;
+        }
+        .chat-message.own {
+            background: rgba(59, 130, 246, 0.3);
+            margin-left: auto;
+        }
+        .chat-message.other {
+            background: rgba(255, 255, 255, 0.1);
+        }
+
+        /* Leaderboard styles */
+        .leaderboard-item {
+            display: flex;
+            align-items: center;
+            padding: 10px;
+            border-radius: 8px;
+            margin-bottom: 5px;
+            transition: all 0.2s ease;
+        }
+        .leaderboard-item:hover {
+            background: rgba(255, 255, 255, 0.1);
+        }
+        .leaderboard-rank {
+            width: 30px;
+            height: 30px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            border-radius: 50%;
+            font-weight: bold;
+            margin-right: 10px;
+        }
+        .rank-1 { background: gold; color: black; }
+        .rank-2 { background: silver; color: black; }
+        .rank-3 { background: #cd7f32; color: white; }
+        .rank-other { background: #4b5563; color: white; }
+
+        /* Game image placeholder */
+        .game-image {
+            width: 100%;
+            height: 150px;
+            object-fit: cover;
+            background: linear-gradient(45deg, #3b82f6, #8b5cf6);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            color: white;
+            font-size: 48px;
+        }
+
+        /* Search and filter styles */
+        .search-container {
+            position: relative;
+        }
+        .search-results {
+            position: absolute;
+            top: 100%;
+            left: 0;
+            right: 0;
+            background: rgba(30, 41, 59, 0.95);
+            border-radius: 8px;
+            z-index: 10;
+            max-height: 300px;
+            overflow-y: auto;
+        }
+        .search-result-item {
+            padding: 10px 15px;
+            cursor: pointer;
+            transition: background 0.2s;
+        }
+        .search-result-item:hover {
+            background: rgba(59, 130, 246, 0.2);
+        }
+
+        /* Dark mode toggle */
+        .theme-toggle {
+            width: 60px;
+            height: 30px;
+            background: #4b5563;
+            border-radius: 15px;
+            position: relative;
+            cursor: pointer;
+            transition: background 0.3s;
+        }
+        .theme-toggle.active {
+            background: #3b82f6;
+        }
+        .theme-toggle::after {
+            content: '';
+            position: absolute;
+            width: 26px;
+            height: 26px;
+            background: white;
+            border-radius: 50%;
+            top: 2px;
+            left: 2px;
+            transition: transform 0.3s;
+        }
+        .theme-toggle.active::after {
+            transform: translateX(30px);
+        }
+
+        /* Responsive adjustments */
+        @media (max-width: 768px) {
+            .chess-board {
+                width: 300px;
+                height: 300px;
+            }
+            .memory-card {
+                width: 60px;
+                height: 60px;
+            }
+            .word-cell {
+                width: 40px;
+                height: 40px;
+                font-size: 18px;
+            }
+            .tic-tac-toe-board {
+                width: 250px;
+                height: 250px;
+            }
+            .sudoku-board {
+                width: 300px;
+                height: 300px;
+            }
+        }
     </style>
 </head>
 <body class="h-full bg-gradient-to-br from-slate-900 via-purple-900 to-slate-900 text-white">
@@ -306,6 +551,19 @@
                         </div>
                     </div>
                     <div class="flex items-center space-x-4">
+                        <!-- Theme Toggle -->
+                        <div class="theme-toggle" id="themeToggle" onclick="toggleTheme()">
+                            <i class="fas fa-moon absolute left-1 top-1 text-yellow-400 text-xs"></i>
+                            <i class="fas fa-sun absolute right-1 top-1 text-yellow-400 text-xs"></i>
+                        </div>
+                        
+                        <!-- Search Bar -->
+                        <div class="search-container relative">
+                            <input type="text" id="gameSearch" placeholder="Search games..." 
+                                   class="bg-slate-800 text-white px-4 py-2 rounded-lg w-64 focus:outline-none focus:ring-2 focus:ring-blue-500">
+                            <div class="search-results hidden" id="searchResults"></div>
+                        </div>
+                        
                         <div class="text-right">
                             <div class="font-semibold text-white" id="userCoins">0 coins</div>
                             <div class="text-slate-400 text-sm" id="userLevel">Level 1</div>
@@ -317,6 +575,77 @@
         </div>
 
         <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
+            <!-- Quick Stats & Mood-Based Suggestions -->
+            <div class="grid grid-cols-1 md:grid-cols-3 gap-6 mb-8">
+                <!-- Quick Stats -->
+                <div class="glass-card rounded-2xl p-6">
+                    <h3 class="text-lg font-bold text-white mb-4">Your Gaming Stats</h3>
+                    <div class="space-y-2">
+                        <div class="flex justify-between">
+                            <span class="text-slate-400">Games Played</span>
+                            <span class="text-white font-semibold" id="gamesPlayedCount">0</span>
+                        </div>
+                        <div class="flex justify-between">
+                            <span class="text-slate-400">Total Coins</span>
+                            <span class="text-yellow-400 font-semibold" id="totalCoinsEarned">0</span>
+                        </div>
+                        <div class="flex justify-between">
+                            <span class="text-slate-400">Current Streak</span>
+                            <span class="text-green-400 font-semibold" id="currentStreak">0 days</span>
+                        </div>
+                    </div>
+                </div>
+                
+                <!-- Mood-Based Suggestions -->
+                <div class="glass-card rounded-2xl p-6">
+                    <h3 class="text-lg font-bold text-white mb-4">Mood-Based Suggestions</h3>
+                    <div class="space-y-3">
+                        <button class="w-full text-left p-3 rounded-lg bg-slate-800 hover:bg-slate-700 transition" onclick="suggestGames('relaxing')">
+                            <div class="flex items-center">
+                                <i class="fas fa-spa text-green-400 mr-3"></i>
+                                <div>
+                                    <div class="font-medium text-white">Feeling relaxed?</div>
+                                    <div class="text-sm text-slate-400">Try puzzle games</div>
+                                </div>
+                            </div>
+                        </button>
+                        <button class="w-full text-left p-3 rounded-lg bg-slate-800 hover:bg-slate-700 transition" onclick="suggestGames('energetic')">
+                            <div class="flex items-center">
+                                <i class="fas fa-bolt text-yellow-400 mr-3"></i>
+                                <div>
+                                    <div class="font-medium text-white">Feeling energetic?</div>
+                                    <div class="text-sm text-slate-400">Try action games</div>
+                                </div>
+                            </div>
+                        </button>
+                        <button class="w-full text-left p-3 rounded-lg bg-slate-800 hover:bg-slate-700 transition" onclick="suggestGames('competitive')">
+                            <div class="flex items-center">
+                                <i class="fas fa-trophy text-purple-400 mr-3"></i>
+                                <div>
+                                    <div class="font-medium text-white">Feeling competitive?</div>
+                                    <div class="text-sm text-slate-400">Try multiplayer games</div>
+                                </div>
+                            </div>
+                        </button>
+                    </div>
+                </div>
+                
+                <!-- Daily Rewards -->
+                <div class="glass-card rounded-2xl p-6 premium-gradient text-white">
+                    <h3 class="text-lg font-bold mb-4">Daily Login Reward</h3>
+                    <div class="flex items-center justify-between mb-4">
+                        <div>
+                            <div class="text-2xl font-black" id="dailyReward">+100</div>
+                            <div class="text-sm opacity-80">coins waiting</div>
+                        </div>
+                        <i class="fas fa-gift text-3xl"></i>
+                    </div>
+                    <button class="w-full py-2 bg-white text-orange-600 rounded-lg font-semibold hover:bg-opacity-90 transition" onclick="claimDailyReward()">
+                        Claim Reward
+                    </button>
+                </div>
+            </div>
+
             <!-- Level Progression Banner -->
             <div class="glass-card rounded-2xl p-6 mb-8 border border-purple-500/30">
                 <div class="flex items-center justify-between">
@@ -337,16 +666,53 @@
                 </div>
             </div>
 
-            <!-- Premium Subscription Banner -->
-            <div class="premium-gradient rounded-2xl p-6 mb-8 text-center">
-                <div class="flex items-center justify-center mb-4">
-                    <i class="fas fa-crown text-white text-2xl mr-3"></i>
-                    <h2 class="text-2xl font-black text-white">Premium Games Access</h2>
+            <!-- Recently Played & Popular Games -->
+            <div class="grid grid-cols-1 lg:grid-cols-3 gap-8 mb-8">
+                <!-- Recently Played -->
+                <div class="lg:col-span-2">
+                    <div class="flex items-center justify-between mb-6">
+                        <h2 class="text-2xl font-black text-transparent bg-clip-text bg-gradient-to-r from-blue-400 to-cyan-400">
+                            Recently Played
+                        </h2>
+                        <button class="text-slate-400 hover:text-white text-sm" onclick="viewAllRecentGames()">
+                            View All
+                        </button>
+                    </div>
+                    <div class="grid grid-cols-1 md:grid-cols-2 gap-4" id="recentlyPlayed">
+                        <!-- Recently played games will be loaded here -->
+                    </div>
                 </div>
-                <p class="text-white mb-4">Unlock all premium games and exclusive features</p>
-                <button class="px-6 py-3 glass-card text-white rounded-xl font-semibold hover:scale-105 transition" onclick="showPremiumModal()">
-                    <i class="fas fa-gem mr-2"></i> Upgrade to Premium
-                </button>
+                
+                <!-- Popular Games -->
+                <div>
+                    <h2 class="text-2xl font-black text-transparent bg-clip-text bg-gradient-to-r from-purple-400 to-pink-400 mb-6">
+                        Popular Games
+                    </h2>
+                    <div class="space-y-4" id="popularGames">
+                        <!-- Popular games will be loaded here -->
+                    </div>
+                </div>
+            </div>
+
+            <!-- Game Categories & Filter -->
+            <div class="mb-6">
+                <div class="flex flex-wrap gap-2 mb-4">
+                    <button class="px-4 py-2 rounded-full glass-card text-white hover:bg-slate-700 transition active" data-category="all">
+                        All Games
+                    </button>
+                    <button class="px-4 py-2 rounded-full glass-card text-white hover:bg-slate-700 transition" data-category="puzzle">
+                        Puzzle
+                    </button>
+                    <button class="px-4 py-2 rounded-full glass-card text-white hover:bg-slate-700 transition" data-category="strategy">
+                        Strategy
+                    </button>
+                    <button class="px-4 py-2 rounded-full glass-card text-white hover:bg-slate-700 transition" data-category="trivia">
+                        Trivia
+                    </button>
+                    <button class="px-4 py-2 rounded-full glass-card text-white hover:bg-slate-700 transition" data-category="action">
+                        Action
+                    </button>
+                </div>
             </div>
 
             <!-- Featured Games -->
@@ -372,6 +738,85 @@
 
                 <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6" id="premiumGames">
                     <!-- Premium game cards will be loaded here -->
+                </div>
+            </div>
+
+            <!-- Leaderboard Section -->
+            <div class="mb-8">
+                <div class="flex items-center justify-between mb-6">
+                    <h2 class="text-3xl font-black text-transparent bg-clip-text bg-gradient-to-r from-green-400 to-blue-400">
+                        <i class="fas fa-trophy mr-2"></i>Leaderboards
+                    </h2>
+                    <div class="flex space-x-2">
+                        <button class="px-3 py-1 rounded-lg glass-card text-white text-sm" onclick="showLeaderboard('daily')">
+                            Daily
+                        </button>
+                        <button class="px-3 py-1 rounded-lg glass-card text-white text-sm" onclick="showLeaderboard('weekly')">
+                            Weekly
+                        </button>
+                        <button class="px-3 py-1 rounded-lg glass-card text-white text-sm active" onclick="showLeaderboard('alltime')">
+                            All Time
+                        </button>
+                    </div>
+                </div>
+                
+                <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
+                    <!-- Top Players -->
+                    <div class="glass-card rounded-2xl p-6">
+                        <h3 class="text-xl font-bold text-white mb-4">Top Players</h3>
+                        <div id="topPlayers">
+                            <!-- Top players will be loaded here -->
+                        </div>
+                    </div>
+                    
+                    <!-- Your Ranking -->
+                    <div class="glass-card rounded-2xl p-6">
+                        <h3 class="text-xl font-bold text-white mb-4">Your Ranking</h3>
+                        <div id="userRanking">
+                            <!-- User ranking will be loaded here -->
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Multiplayer & Challenges -->
+            <div class="mb-8">
+                <div class="flex items-center justify-between mb-6">
+                    <h2 class="text-3xl font-black text-transparent bg-clip-text bg-gradient-to-r from-red-400 to-pink-400">
+                        <i class="fas fa-users mr-2"></i>Multiplayer & Challenges
+                    </h2>
+                </div>
+                
+                <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
+                    <!-- Active Challenges -->
+                    <div class="glass-card rounded-2xl p-6">
+                        <h3 class="text-xl font-bold text-white mb-4">Active Challenges</h3>
+                        <div id="activeChallenges">
+                            <div class="text-center text-slate-400 py-8">
+                                <i class="fas fa-trophy text-4xl mb-4 text-yellow-400"></i>
+                                <p>No active challenges</p>
+                                <p class="text-sm">Challenge friends to play games together!</p>
+                            </div>
+                        </div>
+                        <button class="w-full mt-4 py-2 primary-gradient text-white rounded-lg font-semibold hover:scale-105 transition" onclick="showChallengeModal()">
+                            Create Challenge
+                        </button>
+                    </div>
+                    
+                    <!-- Friends Online -->
+                    <div class="glass-card rounded-2xl p-6">
+                        <h3 class="text-xl font-bold text-white mb-4">Friends Online</h3>
+                        <div id="friendsOnline">
+                            <div class="text-center text-slate-400 py-8">
+                                <i class="fas fa-users text-4xl mb-4 text-blue-400"></i>
+                                <p>No friends online</p>
+                                <p class="text-sm">Invite friends to join the fun!</p>
+                            </div>
+                        </div>
+                        <button class="w-full mt-4 py-2 glass-card border border-slate-700 text-white rounded-lg font-semibold hover:border-blue-400 transition" onclick="showFriendsModal()">
+                            Invite Friends
+                        </button>
+                    </div>
                 </div>
             </div>
         </div>
@@ -505,6 +950,75 @@
                 </button>
                 <button class="flex-1 px-4 py-2 primary-gradient text-white rounded-xl font-semibold hover:scale-105 transition" id="nextQuizQuestion" onclick="loadNextQuizQuestion()">
                     Next Question
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Tic Tac Toe Modal -->
+    <div id="ticTacToeModal" class="fixed inset-0 bg-black/80 flex items-center justify-center p-4 z-50 hidden">
+        <div class="glass-card rounded-2xl p-6 max-w-2xl w-full fade-in">
+            <div class="flex justify-between items-center mb-6">
+                <div>
+                    <h3 class="text-2xl font-black text-white">Tic Tac Toe</h3>
+                    <p class="text-slate-400">Play against the computer</p>
+                </div>
+                <div class="flex items-center space-x-4">
+                    <span class="text-green-400 font-bold" id="ticTacToeStatus">Your turn (X)</span>
+                    <button class="text-slate-400 hover:text-white" onclick="closeGameModal('ticTacToeModal')">
+                        <i class="fas fa-times"></i>
+                    </button>
+                </div>
+            </div>
+            
+            <div class="flex justify-center mb-6">
+                <div class="tic-tac-toe-board" id="ticTacToeBoard">
+                    <!-- Tic Tac Toe board will be generated here -->
+                </div>
+            </div>
+            
+            <div class="flex space-x-3">
+                <button class="flex-1 px-4 py-2 glass-card border border-slate-700 rounded-xl text-slate-400 hover:border-blue-400 hover:text-blue-400 transition" onclick="closeGameModal('ticTacToeModal')">
+                    Exit Game
+                </button>
+                <button class="flex-1 px-4 py-2 primary-gradient text-white rounded-xl font-semibold hover:scale-105 transition" onclick="resetTicTacToe()">
+                    New Game
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Sudoku Modal -->
+    <div id="sudokuModal" class="fixed inset-0 bg-black/80 flex items-center justify-center p-4 z-50 hidden">
+        <div class="glass-card rounded-2xl p-6 max-w-2xl w-full fade-in">
+            <div class="flex justify-between items-center mb-6">
+                <div>
+                    <h3 class="text-2xl font-black text-white">Sudoku</h3>
+                    <p class="text-slate-400">Level <span id="sudokuLevel">1</span> - Fill the grid with numbers</p>
+                </div>
+                <div class="flex items-center space-x-4">
+                    <span class="text-green-400 font-bold" id="sudokuStatus">Select a cell</span>
+                    <button class="text-slate-400 hover:text-white" onclick="closeGameModal('sudokuModal')">
+                        <i class="fas fa-times"></i>
+                    </button>
+                </div>
+            </div>
+            
+            <div class="flex flex-col items-center mb-6">
+                <div class="sudoku-board" id="sudokuBoard">
+                    <!-- Sudoku board will be generated here -->
+                </div>
+                <div class="mt-4 grid grid-cols-5 gap-2" id="sudokuControls">
+                    <!-- Number controls will be generated here -->
+                </div>
+            </div>
+            
+            <div class="flex space-x-3">
+                <button class="flex-1 px-4 py-2 glass-card border border-slate-700 rounded-xl text-slate-400 hover:border-blue-400 hover:text-blue-400 transition" onclick="closeGameModal('sudokuModal')">
+                    Exit Game
+                </button>
+                <button class="flex-1 px-4 py-2 primary-gradient text-white rounded-xl font-semibold hover:scale-105 transition" onclick="nextSudokuLevel()">
+                    Next Puzzle
                 </button>
             </div>
         </div>
@@ -649,15 +1163,32 @@
             appId: "1:1003264444309:web:9f0307516e44d21e97d89c"
         };
 
-        // Cloudinary configuration
-        const cloudinaryCloudName = 'your-cloudinary-name';
+        // Initialize Firebase
+        let auth, db, storage;
+        try {
+            firebase.initializeApp(firebaseConfig);
+            auth = firebase.auth();
+            db = firebase.firestore();
+            storage = firebase.storage();
+            
+            // Clear any cached data
+            localStorage.removeItem('userData');
+            sessionStorage.clear();
+            
+            document.getElementById('firebaseStatus').textContent = 'Connected ✅';
+            document.getElementById('firebaseStatus').style.color = '#10b981';
+        } catch (error) {
+            document.getElementById('firebaseStatus').textContent = 'Failed ❌';
+            document.getElementById('firebaseStatus').style.color = '#ef4444';
+            console.error("Firebase initialization error:", error);
+        }
 
-        // Firebase services
-        let auth;
-        let db;
+        // Current user and data
+        let currentUser = null;
+        let userData = null;
 
-        // Games data
-        const freeGames = [
+        // Game data
+        const gamesData = [
             {
                 id: "memory",
                 name: "Memory Matrix",
@@ -667,9 +1198,12 @@
                 coins: 80,
                 gradient: "game-gradient-1",
                 icon: "fa-brain",
+                image: "memory.jpg",
                 featured: true,
                 premium: false,
-                unlimitedLevels: true
+                unlimitedLevels: true,
+                popularity: 85,
+                rating: 4.5
             },
             {
                 id: "quiz",
@@ -680,13 +1214,13 @@
                 coins: 120,
                 gradient: "game-gradient-2",
                 icon: "fa-brain",
+                image: "quiz.jpg",
                 featured: true,
                 premium: false,
-                unlimitedLevels: true
-            }
-        ];
-
-        const premiumGames = [
+                unlimitedLevels: true,
+                popularity: 92,
+                rating: 4.7
+            },
             {
                 id: "chess",
                 name: "Quantum Chess",
@@ -696,9 +1230,12 @@
                 coins: 200,
                 gradient: "game-gradient-3",
                 icon: "fa-chess",
+                image: "chess.jpg",
                 featured: true,
                 premium: true,
-                unlimitedLevels: true
+                unlimitedLevels: true,
+                popularity: 78,
+                rating: 4.8
             },
             {
                 id: "wordpuzzle",
@@ -709,9 +1246,12 @@
                 coins: 150,
                 gradient: "game-gradient-4",
                 icon: "fa-font",
+                image: "wordpuzzle.jpg",
                 featured: true,
                 premium: true,
-                unlimitedLevels: true
+                unlimitedLevels: true,
+                popularity: 88,
+                rating: 4.6
             },
             {
                 id: "sudoku",
@@ -722,9 +1262,44 @@
                 coins: 180,
                 gradient: "game-gradient-5",
                 icon: "fa-th-large",
+                image: "sudoku.jpg",
                 featured: false,
                 premium: true,
-                unlimitedLevels: true
+                unlimitedLevels: true,
+                popularity: 75,
+                rating: 4.4
+            },
+            {
+                id: "tictactoe",
+                name: "Tic Tac Toe",
+                description: "Classic game with multiplayer support",
+                category: "strategy",
+                players: "2",
+                coins: 50,
+                gradient: "game-gradient-1",
+                icon: "fa-times",
+                image: "tictactoe.jpg",
+                featured: false,
+                premium: false,
+                unlimitedLevels: true,
+                popularity: 65,
+                rating: 4.2
+            },
+            {
+                id: "trivia",
+                name: "Quick Trivia",
+                description: "Fast-paced trivia with various topics",
+                category: "trivia",
+                players: "1-4",
+                coins: 100,
+                gradient: "game-gradient-2",
+                icon: "fa-question-circle",
+                image: "trivia.jpg",
+                featured: false,
+                premium: false,
+                unlimitedLevels: true,
+                popularity: 80,
+                rating: 4.3
             }
         ];
 
@@ -755,6 +1330,16 @@
                             "HTML"
                         ],
                         correct: 2
+                    },
+                    {
+                        question: "What does HTML stand for?",
+                        options: [
+                            "Hyper Text Markup Language",
+                            "High Tech Modern Language", 
+                            "Hyper Transfer Markup Language",
+                            "Home Tool Markup Language"
+                        ],
+                        correct: 0
                     }
                 ]
             },
@@ -773,29 +1358,32 @@
                             "Ag"
                         ],
                         correct: 2
+                    },
+                    {
+                        question: "Which planet is known as the Red Planet?",
+                        options: [
+                            "Venus",
+                            "Mars", 
+                            "Jupiter",
+                            "Saturn"
+                        ],
+                        correct: 1
+                    },
+                    {
+                        question: "What is the largest mammal in the world?",
+                        options: [
+                            "Elephant",
+                            "Blue Whale", 
+                            "Giraffe",
+                            "Polar Bear"
+                        ],
+                        correct: 1
                     }
                 ]
             }
         ];
 
         // Game state variables
-        let currentUser = null;
-        let userData = {
-            coins: 0,
-            level: 1,
-            gamesPlayed: 0,
-            displayName: "Guest",
-            isPremium: false,
-            profilePicture: null,
-            gameProgress: {
-                chess: { level: 1, xp: 0 },
-                wordpuzzle: { level: 1, xp: 0 },
-                memory: { level: 1, xp: 0 },
-                quiz: { level: 1, xp: 0 }
-            }
-        };
-
-        // Chess Game Variables
         let chessGame = {
             board: [],
             currentPlayer: 'white',
@@ -804,7 +1392,6 @@
             currentLevel: 1
         };
 
-        // Word Puzzle Variables
         let wordPuzzle = {
             targetWord: '',
             currentGuess: '',
@@ -814,11 +1401,12 @@
             currentLevel: 1,
             wordList: [
                 'APPLE', 'BRAIN', 'CHESS', 'DREAM', 'EARTH', 'FLAME', 'GRAPE', 'HOUSE',
-                'IMAGE', 'JOKER', 'KNIFE', 'LIGHT', 'MAGIC', 'NIGHT', 'OCEAN', 'PIANO'
+                'IMAGE', 'JOKER', 'KNIFE', 'LIGHT', 'MAGIC', 'NIGHT', 'OCEAN', 'PIANO',
+                'QUEEN', 'RIVER', 'SMILE', 'TIGER', 'UMBRA', 'VOICE', 'WATER', 'YACHT',
+                'ZEBRA', 'ALPHA', 'BROWN', 'CLOUD', 'DANCE', 'EAGLE', 'FRUIT', 'GHOST'
             ]
         };
 
-        // Memory Game Variables
         let memoryGame = {
             cards: [],
             flippedCards: [],
@@ -828,7 +1416,6 @@
             currentLevel: 1
         };
 
-        // Quiz Game Variables
         let quizGame = {
             questions: [],
             currentQuestion: 0,
@@ -836,6 +1423,21 @@
             totalQuestions: 5,
             currentLevel: 1,
             selectedCategory: null
+        };
+
+        let ticTacToe = {
+            board: Array(9).fill(''),
+            currentPlayer: 'X',
+            gameOver: false,
+            winner: null
+        };
+
+        let sudokuGame = {
+            board: [],
+            solution: [],
+            selectedCell: null,
+            currentLevel: 1,
+            mistakes: 0
         };
 
         // Payment state
@@ -850,22 +1452,10 @@
         // Initialize the application
         document.addEventListener('DOMContentLoaded', function() {
             initializeApp();
+            setupEventListeners();
         });
 
-        async function initializeApp() {
-            // Initialize Firebase
-            try {
-                firebase.initializeApp(firebaseConfig);
-                auth = firebase.auth();
-                db = firebase.firestore();
-                
-                document.getElementById('firebaseStatus').textContent = 'Connected ✅';
-                document.getElementById('firebaseStatus').style.color = '#10b981';
-            } catch (error) {
-                document.getElementById('firebaseStatus').textContent = 'Failed ❌';
-                document.getElementById('firebaseStatus').style.color = '#ef4444';
-            }
-
+        function initializeApp() {
             // Set up auth state listener
             auth.onAuthStateChanged(async (user) => {
                 currentUser = user;
@@ -889,13 +1479,14 @@
                             chess: { level: 1, xp: 0 },
                             wordpuzzle: { level: 1, xp: 0 },
                             memory: { level: 1, xp: 0 },
-                            quiz: { level: 1, xp: 0 }
+                            quiz: { level: 1, xp: 0 },
+                            tictactoe: { level: 1, xp: 0 },
+                            sudoku: { level: 1, xp: 0 }
                         }
                     };
                     updateUI();
+                    loadGames();
                 }
-                
-                loadGames();
             });
         }
 
@@ -904,42 +1495,42 @@
                 const userDoc = await db.collection('users').doc(userId).get();
                 
                 if (userDoc.exists) {
-                    const data = userDoc.data();
-                    userData = {
-                        coins: data.coins || 0,
-                        level: data.level || 1,
-                        gamesPlayed: data.gamesPlayed || 0,
-                        displayName: data.displayName || "Player",
-                        isPremium: data.isPremium || false,
-                        profilePicture: data.profilePicture || null,
-                        gameProgress: data.gameProgress || {
-                            chess: { level: 1, xp: 0 },
-                            wordpuzzle: { level: 1, xp: 0 },
-                            memory: { level: 1, xp: 0 },
-                            quiz: { level: 1, xp: 0 }
-                        }
-                    };
+                    userData = userDoc.data();
+                    updateUI();
+                    loadGames();
+                    loadLeaderboard();
+                    loadRecentGames();
+                    loadPopularGames();
                 } else {
                     // Create new user document
                     userData = {
                         coins: 100,
                         level: 1,
                         gamesPlayed: 0,
-                        displayName: "New Player",
+                        totalCoinsEarned: 0,
+                        displayName: currentUser.displayName || "Player",
+                        email: currentUser.email,
                         isPremium: false,
-                        profilePicture: null,
+                        profilePicture: currentUser.photoURL || "",
+                        streak: 0,
+                        lastLogin: new Date(),
+                        achievements: [],
+                        recentGames: [],
+                        friends: [],
+                        challenges: [],
                         gameProgress: {
                             chess: { level: 1, xp: 0 },
                             wordpuzzle: { level: 1, xp: 0 },
                             memory: { level: 1, xp: 0 },
-                            quiz: { level: 1, xp: 0 }
-                        },
-                        createdAt: firebase.firestore.FieldValue.serverTimestamp()
+                            quiz: { level: 1, xp: 0 },
+                            tictactoe: { level: 1, xp: 0 },
+                            sudoku: { level: 1, xp: 0 }
+                        }
                     };
                     await db.collection('users').doc(userId).set(userData);
+                    updateUI();
+                    loadGames();
                 }
-                
-                updateUI();
             } catch (error) {
                 console.error("Error loading user data:", error);
                 userData = { 
@@ -953,117 +1544,299 @@
                         chess: { level: 1, xp: 0 },
                         wordpuzzle: { level: 1, xp: 0 },
                         memory: { level: 1, xp: 0 },
-                        quiz: { level: 1, xp: 0 }
+                        quiz: { level: 1, xp: 0 },
+                        tictactoe: { level: 1, xp: 0 },
+                        sudoku: { level: 1, xp: 0 }
                     }
                 };
                 updateUI();
+                loadGames();
             }
         }
 
         function updateUI() {
-            document.getElementById('userCoins').textContent = `${userData.coins.toLocaleString()} coins`;
-            document.getElementById('userLevel').textContent = `Level ${userData.level}`;
-            document.getElementById('coinsStatus').textContent = userData.coins;
-            document.getElementById('levelStatus').textContent = userData.level;
-            document.getElementById('currentLevelDisplay').textContent = userData.level;
-            document.getElementById('currentLevel').textContent = userData.level;
-            document.getElementById('nextLevel').textContent = userData.level + 1;
-            document.getElementById('userCoinBalance').textContent = userData.coins.toLocaleString();
-            
-            // Update user avatar
-            updateUserAvatar();
-            
-            // Update level progress
-            const currentLevel = userData.level;
-            const currentXP = userData.gameProgress ? Object.values(userData.gameProgress).reduce((total, game) => total + game.xp, 0) : 0;
-            const xpForCurrentLevel = LEVEL_XP_REQUIREMENTS[currentLevel] || 100;
-            const xpForNextLevel = LEVEL_XP_REQUIREMENTS[currentLevel + 1] || xpForCurrentLevel * 2;
-            const progress = ((currentXP - xpForCurrentLevel) / (xpForNextLevel - xpForCurrentLevel)) * 100;
-            
-            document.getElementById('levelProgress').style.width = `${Math.max(0, Math.min(100, progress))}%`;
-        }
-
-        function updateUserAvatar() {
-            const avatarElement = document.getElementById('userAvatar');
-            if (userData.profilePicture) {
-                avatarElement.src = `https://res.cloudinary.com/${cloudinaryCloudName}/image/upload/w_100,h_100,c_fill/${userData.profilePicture}`;
-            } else {
-                avatarElement.src = `https://ui-avatars.com/api/?name=${encodeURIComponent(userData.displayName)}&background=3b82f6&color=fff`;
+            if (userData) {
+                document.getElementById('userCoins').textContent = userData.coins + ' coins';
+                document.getElementById('coinsStatus').textContent = userData.coins;
+                document.getElementById('userLevel').textContent = 'Level ' + userData.level;
+                document.getElementById('levelStatus').textContent = userData.level;
+                document.getElementById('currentLevelDisplay').textContent = userData.level;
+                document.getElementById('currentLevel').textContent = userData.level;
+                document.getElementById('nextLevel').textContent = userData.level + 1;
+                document.getElementById('gamesPlayedCount').textContent = userData.gamesPlayed || 0;
+                document.getElementById('totalCoinsEarned').textContent = userData.totalCoinsEarned || 0;
+                document.getElementById('currentStreak').textContent = (userData.streak || 0) + ' days';
+                document.getElementById('userCoinBalance').textContent = userData.coins.toLocaleString();
+                
+                // Update level progress
+                const currentLevel = userData.level;
+                const currentXP = userData.gameProgress ? Object.values(userData.gameProgress).reduce((total, game) => total + game.xp, 0) : 0;
+                const xpForCurrentLevel = LEVEL_XP_REQUIREMENTS[currentLevel] || 100;
+                const xpForNextLevel = LEVEL_XP_REQUIREMENTS[currentLevel + 1] || xpForCurrentLevel * 2;
+                const progress = ((currentXP - xpForCurrentLevel) / (xpForNextLevel - xpForCurrentLevel)) * 100;
+                
+                document.getElementById('levelProgress').style.width = `${Math.max(0, Math.min(100, progress))}%`;
+                
+                // Update user avatar
+                const avatar = document.getElementById('userAvatar');
+                if (userData.profilePicture) {
+                    avatar.src = userData.profilePicture;
+                } else {
+                    avatar.src = "https://ui-avatars.com/api/?name=" + encodeURIComponent(userData.displayName) + "&background=3b82f6&color=fff";
+                }
             }
         }
 
         function loadGames() {
-            loadFreeGames();
-            loadPremiumGames();
+            const featuredContainer = document.getElementById('featuredGames');
+            const premiumContainer = document.getElementById('premiumGames');
+            
+            featuredContainer.innerHTML = '';
+            premiumContainer.innerHTML = '';
+            
+            gamesData.forEach(game => {
+                const gameCard = createGameCard(game);
+                
+                if (game.featured) {
+                    featuredContainer.appendChild(gameCard);
+                }
+                
+                if (game.premium) {
+                    premiumContainer.appendChild(gameCard);
+                }
+            });
         }
 
-        function loadFreeGames() {
-            const featuredGamesContainer = document.getElementById('featuredGames');
+        function createGameCard(game) {
+            const card = document.createElement('div');
+            card.className = `game-card glass-card rounded-2xl overflow-hidden fade-in ${game.gradient}`;
+            card.onclick = () => startGame(game.id);
             
-            featuredGamesContainer.innerHTML = freeGames.map(game => `
-                <div class="game-card glass-card rounded-2xl border border-slate-700 overflow-hidden" onclick="startGame('${game.id}')">
-                    <div class="h-32 ${game.gradient} flex items-center justify-center">
-                        <i class="fas ${game.icon} text-white text-4xl"></i>
+            const isPremium = game.premium;
+            const isUnlocked = !isPremium || (userData && userData.isPremium);
+            
+            card.innerHTML = `
+                <div class="relative">
+                    <div class="game-image">
+                        <i class="${game.icon}"></i>
                     </div>
-                    <div class="p-6">
-                        <div class="flex justify-between items-start mb-3">
-                            <h3 class="text-xl font-black text-white">${game.name}</h3>
-                            <span class="px-2 py-1 bg-slate-700 text-slate-300 text-xs rounded-full">
-                                ${game.players} player
-                            </span>
+                    ${isPremium ? '<div class="absolute top-3 right-3 premium-badge px-2 py-1 rounded-full text-xs font-bold text-white"><i class="fas fa-crown mr-1"></i>PREMIUM</div>' : ''}
+                    ${!isUnlocked ? '<div class="absolute inset-0 bg-black bg-opacity-70 flex items-center justify-center"><i class="fas fa-lock text-3xl text-white"></i></div>' : ''}
+                </div>
+                <div class="p-4">
+                    <div class="flex justify-between items-start mb-2">
+                        <h3 class="font-bold text-white text-lg">${game.name}</h3>
+                        <div class="flex items-center text-sm text-white">
+                            <i class="fas fa-star text-yellow-400 mr-1"></i>
+                            <span>${game.rating}</span>
                         </div>
-                        <p class="text-slate-400 text-sm mb-4">${game.description}</p>
-                        <div class="flex justify-between items-center">
-                            <span class="text-yellow-400 font-bold">${game.coins} coins</span>
-                            <button class="px-4 py-2 primary-gradient text-white rounded-xl font-semibold hover:scale-105 transition">
-                                Play Free
-                            </button>
+                    </div>
+                    <p class="text-slate-300 text-sm mb-3">${game.description}</p>
+                    <div class="flex justify-between items-center">
+                        <div class="flex items-center text-sm text-slate-300">
+                            <i class="fas fa-users mr-1"></i>
+                            <span>${game.players}</span>
+                            <i class="fas fa-coins ml-3 mr-1 text-yellow-400"></i>
+                            <span>${game.coins}</span>
+                        </div>
+                        <div class="text-xs px-2 py-1 rounded-full bg-black bg-opacity-30 text-white">
+                            ${game.category}
                         </div>
                     </div>
                 </div>
-            `).join('');
-        }
-
-        function loadPremiumGames() {
-            const premiumGamesContainer = document.getElementById('premiumGames');
+            `;
             
-            premiumGamesContainer.innerHTML = premiumGames.map(game => `
-                <div class="game-card glass-card rounded-2xl border border-slate-700 overflow-hidden relative" onclick="startGame('${game.id}')">
-                    <div class="absolute top-3 right-3 premium-badge text-xs text-black font-bold px-2 py-1 rounded-full">
-                        <i class="fas fa-crown mr-1"></i> PREMIUM
-                    </div>
-                    <div class="h-32 ${game.gradient} flex items-center justify-center ${userData.isPremium ? '' : 'opacity-70'}">
-                        <i class="fas ${game.icon} text-white text-4xl"></i>
-                    </div>
-                    <div class="p-6">
-                        <div class="flex justify-between items-start mb-3">
-                            <h3 class="text-xl font-black text-white">${game.name}</h3>
-                            <span class="px-2 py-1 bg-slate-700 text-slate-300 text-xs rounded-full">
-                                ${game.players} player
-                            </span>
-                        </div>
-                        <p class="text-slate-400 text-sm mb-4">${game.description}</p>
-                        <div class="flex justify-between items-center">
-                            <span class="text-yellow-400 font-bold">${game.coins} coins</span>
-                            <button class="px-4 py-2 ${userData.isPremium ? 'primary-gradient' : 'premium-gradient'} text-white rounded-xl font-semibold hover:scale-105 transition">
-                                ${userData.isPremium ? 'Play Now' : 'Unlock'}
-                            </button>
-                        </div>
-                    </div>
-                </div>
-            `).join('');
+            return card;
         }
 
-        function startGame(gameId) {
-            const game = [...freeGames, ...premiumGames].find(g => g.id === gameId);
-            if (game.premium && !userData.isPremium) {
-                showToast('This is a premium game. Upgrade to play!', 'info');
-                showPremiumModal();
+        function loadRecentGames() {
+            const container = document.getElementById('recentlyPlayed');
+            container.innerHTML = '';
+            
+            if (userData && userData.recentGames && userData.recentGames.length > 0) {
+                userData.recentGames.slice(0, 4).forEach(gameId => {
+                    const game = gamesData.find(g => g.id === gameId);
+                    if (game) {
+                        const gameCard = createGameCard(game);
+                        container.appendChild(gameCard);
+                    }
+                });
+            } else {
+                container.innerHTML = '<p class="text-slate-400">No recently played games</p>';
+            }
+        }
+
+        function loadPopularGames() {
+            const container = document.getElementById('popularGames');
+            container.innerHTML = '';
+            
+            // Sort games by popularity and take top 3
+            const popularGames = [...gamesData]
+                .sort((a, b) => b.popularity - a.popularity)
+                .slice(0, 3);
+            
+            popularGames.forEach(game => {
+                const gameItem = document.createElement('div');
+                gameItem.className = 'glass-card rounded-xl p-4 flex items-center space-x-4';
+                gameItem.onclick = () => startGame(game.id);
+                
+                gameItem.innerHTML = `
+                    <div class="w-12 h-12 ${game.gradient} rounded-lg flex items-center justify-center text-white">
+                        <i class="${game.icon}"></i>
+                    </div>
+                    <div class="flex-1">
+                        <h4 class="font-semibold text-white">${game.name}</h4>
+                        <div class="flex items-center text-sm text-slate-400">
+                            <i class="fas fa-users mr-1"></i>
+                            <span>${game.popularity}% playing</span>
+                        </div>
+                    </div>
+                    <div class="text-sm text-slate-400">
+                        ${game.coins} <i class="fas fa-coins text-yellow-400 ml-1"></i>
+                    </div>
+                `;
+                
+                container.appendChild(gameItem);
+            });
+        }
+
+        function loadLeaderboard() {
+            // This would fetch real leaderboard data from Firestore
+            const topPlayersContainer = document.getElementById('topPlayers');
+            const userRankingContainer = document.getElementById('userRanking');
+            
+            // Mock data for demonstration
+            const topPlayers = [
+                { name: "ProGamer123", score: 15420, rank: 1 },
+                { name: "GameMaster", score: 14250, rank: 2 },
+                { name: "StrategyKing", score: 13890, rank: 3 },
+                { name: "PuzzleSolver", score: 12560, rank: 4 },
+                { name: "QuizWhiz", score: 11840, rank: 5 }
+            ];
+            
+            topPlayersContainer.innerHTML = '';
+            topPlayers.forEach(player => {
+                const playerElement = document.createElement('div');
+                playerElement.className = 'leaderboard-item';
+                
+                playerElement.innerHTML = `
+                    <div class="leaderboard-rank rank-${player.rank}">${player.rank}</div>
+                    <div class="flex-1">
+                        <div class="font-medium text-white">${player.name}</div>
+                        <div class="text-sm text-slate-400">${player.score.toLocaleString()} points</div>
+                    </div>
+                `;
+                
+                topPlayersContainer.appendChild(playerElement);
+            });
+            
+            // User ranking
+            if (userData) {
+                userRankingContainer.innerHTML = `
+                    <div class="leaderboard-item">
+                        <div class="leaderboard-rank rank-other">7</div>
+                        <div class="flex-1">
+                            <div class="font-medium text-white">${userData.displayName}</div>
+                            <div class="text-sm text-slate-400">${(userData.totalCoinsEarned || 0).toLocaleString()} points</div>
+                        </div>
+                    </div>
+                `;
+            } else {
+                userRankingContainer.innerHTML = '<p class="text-slate-400">Sign in to see your ranking</p>';
+            }
+        }
+
+        function setupEventListeners() {
+            // Search functionality
+            const searchInput = document.getElementById('gameSearch');
+            searchInput.addEventListener('input', handleSearch);
+            
+            // Category filters
+            document.querySelectorAll('[data-category]').forEach(button => {
+                button.addEventListener('click', function() {
+                    const category = this.getAttribute('data-category');
+                    filterGamesByCategory(category);
+                    
+                    // Update active state
+                    document.querySelectorAll('[data-category]').forEach(btn => {
+                        btn.classList.remove('active');
+                    });
+                    this.classList.add('active');
+                });
+            });
+        }
+
+        function handleSearch(e) {
+            const query = e.target.value.toLowerCase();
+            const resultsContainer = document.getElementById('searchResults');
+            
+            if (query.length < 2) {
+                resultsContainer.classList.add('hidden');
                 return;
             }
             
-            if (!currentUser && !game.premium) {
-                showToast('Sign in to save your progress and earn coins!', 'info');
+            const filteredGames = gamesData.filter(game => 
+                game.name.toLowerCase().includes(query) || 
+                game.category.toLowerCase().includes(query) ||
+                game.description.toLowerCase().includes(query)
+            );
+            
+            resultsContainer.innerHTML = '';
+            
+            if (filteredGames.length === 0) {
+                resultsContainer.innerHTML = '<div class="search-result-item text-slate-400">No games found</div>';
+            } else {
+                filteredGames.forEach(game => {
+                    const resultItem = document.createElement('div');
+                    resultItem.className = 'search-result-item';
+                    resultItem.innerHTML = `
+                        <div class="font-medium text-white">${game.name}</div>
+                        <div class="text-sm text-slate-400">${game.category}</div>
+                    `;
+                    resultItem.onclick = () => {
+                        startGame(game.id);
+                        resultsContainer.classList.add('hidden');
+                        searchInput.value = '';
+                    };
+                    resultsContainer.appendChild(resultItem);
+                });
+            }
+            
+            resultsContainer.classList.remove('hidden');
+        }
+
+        function filterGamesByCategory(category) {
+            const featuredContainer = document.getElementById('featuredGames');
+            const premiumContainer = document.getElementById('premiumGames');
+            
+            featuredContainer.innerHTML = '';
+            premiumContainer.innerHTML = '';
+            
+            const filteredGames = category === 'all' 
+                ? gamesData 
+                : gamesData.filter(game => game.category === category);
+            
+            filteredGames.forEach(game => {
+                const gameCard = createGameCard(game);
+                
+                if (game.featured) {
+                    featuredContainer.appendChild(gameCard);
+                }
+                
+                if (game.premium) {
+                    premiumContainer.appendChild(gameCard);
+                }
+            });
+        }
+
+        function startGame(gameId) {
+            const game = gamesData.find(g => g.id === gameId);
+            if (!game) return;
+            
+            // Check if game is premium and user doesn't have access
+            if (game.premium && (!userData || !userData.isPremium)) {
+                showPremiumModal();
+                return;
             }
             
             // Load current level for the game
@@ -1086,8 +1859,41 @@
                     quizGame.currentLevel = currentLevel;
                     showQuizCategorySelection();
                     break;
+                case 'tictactoe':
+                    startTicTacToe();
+                    break;
+                case 'sudoku':
+                    sudokuGame.currentLevel = currentLevel;
+                    startSudoku();
+                    break;
                 default:
                     showToast('Game coming soon!', 'info');
+            }
+            
+            // Update recent games
+            if (userData && currentUser) {
+                let recentGames = userData.recentGames || [];
+                
+                // Remove if already exists
+                recentGames = recentGames.filter(id => id !== gameId);
+                
+                // Add to beginning
+                recentGames.unshift(gameId);
+                
+                // Keep only last 10
+                if (recentGames.length > 10) {
+                    recentGames = recentGames.slice(0, 10);
+                }
+                
+                // Update in Firestore
+                if (currentUser) {
+                    db.collection('users').doc(currentUser.uid).update({
+                        recentGames: recentGames
+                    });
+                }
+                
+                userData.recentGames = recentGames;
+                loadRecentGames();
             }
         }
 
@@ -1598,6 +2404,259 @@
             awardCoins(quizGame.score * 20);
         }
 
+        // ==================== TIC TAC TOE GAME ====================
+        function startTicTacToe() {
+            openGameModal('ticTacToeModal');
+            resetTicTacToe();
+            renderTicTacToeBoard();
+        }
+
+        function resetTicTacToe() {
+            ticTacToe.board = Array(9).fill('');
+            ticTacToe.currentPlayer = 'X';
+            ticTacToe.gameOver = false;
+            ticTacToe.winner = null;
+            updateTicTacToeStatus();
+        }
+
+        function renderTicTacToeBoard() {
+            const board = document.getElementById('ticTacToeBoard');
+            board.innerHTML = '';
+            
+            for (let i = 0; i < 9; i++) {
+                const cell = document.createElement('div');
+                cell.className = `tic-tac-toe-cell ${ticTacToe.board[i] ? ticTacToe.board[i].toLowerCase() : ''}`;
+                cell.textContent = ticTacToe.board[i];
+                cell.onclick = () => handleTicTacToeClick(i);
+                board.appendChild(cell);
+            }
+        }
+
+        function handleTicTacToeClick(index) {
+            if (ticTacToe.gameOver || ticTacToe.board[index] !== '') return;
+            
+            ticTacToe.board[index] = ticTacToe.currentPlayer;
+            renderTicTacToeBoard();
+            
+            if (checkTicTacToeWinner()) {
+                ticTacToe.gameOver = true;
+                ticTacToe.winner = ticTacToe.currentPlayer;
+                showToast(`${ticTacToe.winner} wins!`, 'success');
+                awardCoins(30);
+                updateTicTacToeStatus();
+                return;
+            }
+            
+            if (ticTacToe.board.every(cell => cell !== '')) {
+                ticTacToe.gameOver = true;
+                showToast("It's a tie!", 'info');
+                awardCoins(10);
+                updateTicTacToeStatus();
+                return;
+            }
+            
+            ticTacToe.currentPlayer = ticTacToe.currentPlayer === 'X' ? 'O' : 'X';
+            updateTicTacToeStatus();
+            
+            // Computer's turn
+            if (ticTacToe.currentPlayer === 'O' && !ticTacToe.gameOver) {
+                setTimeout(makeComputerMove, 500);
+            }
+        }
+
+        function makeComputerMove() {
+            const emptyCells = ticTacToe.board
+                .map((cell, index) => cell === '' ? index : null)
+                .filter(index => index !== null);
+            
+            if (emptyCells.length > 0) {
+                const randomIndex = emptyCells[Math.floor(Math.random() * emptyCells.length)];
+                ticTacToe.board[randomIndex] = 'O';
+                renderTicTacToeBoard();
+                
+                if (checkTicTacToeWinner()) {
+                    ticTacToe.gameOver = true;
+                    ticTacToe.winner = 'O';
+                    showToast("Computer wins!", 'info');
+                    updateTicTacToeStatus();
+                    return;
+                }
+                
+                if (ticTacToe.board.every(cell => cell !== '')) {
+                    ticTacToe.gameOver = true;
+                    showToast("It's a tie!", 'info');
+                    awardCoins(10);
+                    updateTicTacToeStatus();
+                    return;
+                }
+                
+                ticTacToe.currentPlayer = 'X';
+                updateTicTacToeStatus();
+            }
+        }
+
+        function checkTicTacToeWinner() {
+            const winPatterns = [
+                [0, 1, 2], [3, 4, 5], [6, 7, 8], // rows
+                [0, 3, 6], [1, 4, 7], [2, 5, 8], // columns
+                [0, 4, 8], [2, 4, 6] // diagonals
+            ];
+            
+            return winPatterns.some(pattern => {
+                const [a, b, c] = pattern;
+                return ticTacToe.board[a] !== '' && 
+                       ticTacToe.board[a] === ticTacToe.board[b] && 
+                       ticTacToe.board[a] === ticTacToe.board[c];
+            });
+        }
+
+        function updateTicTacToeStatus() {
+            if (ticTacToe.gameOver) {
+                document.getElementById('ticTacToeStatus').textContent = 
+                    ticTacToe.winner ? `${ticTacToe.winner} wins!` : "It's a tie!";
+            } else {
+                document.getElementById('ticTacToeStatus').textContent = 
+                    `Player ${ticTacToe.currentPlayer}'s turn`;
+            }
+        }
+
+        // ==================== SUDOKU GAME ====================
+        function startSudoku() {
+            openGameModal('sudokuModal');
+            document.getElementById('sudokuLevel').textContent = sudokuGame.currentLevel;
+            generateSudoku();
+            renderSudoku();
+        }
+
+        function generateSudoku() {
+            // Generate a simple Sudoku puzzle (in a real app, this would be more complex)
+            sudokuGame.board = [
+                [5, 3, 0, 0, 7, 0, 0, 0, 0],
+                [6, 0, 0, 1, 9, 5, 0, 0, 0],
+                [0, 9, 8, 0, 0, 0, 0, 6, 0],
+                [8, 0, 0, 0, 6, 0, 0, 0, 3],
+                [4, 0, 0, 8, 0, 3, 0, 0, 1],
+                [7, 0, 0, 0, 2, 0, 0, 0, 6],
+                [0, 6, 0, 0, 0, 0, 2, 8, 0],
+                [0, 0, 0, 4, 1, 9, 0, 0, 5],
+                [0, 0, 0, 0, 8, 0, 0, 7, 9]
+            ];
+            
+            sudokuGame.solution = JSON.parse(JSON.stringify(sudokuGame.board));
+            // In a real app, we would have a complete solution
+            sudokuGame.mistakes = 0;
+            sudokuGame.selectedCell = null;
+            
+            updateSudokuStatus();
+        }
+
+        function renderSudoku() {
+            const board = document.getElementById('sudokuBoard');
+            const controls = document.getElementById('sudokuControls');
+            
+            board.innerHTML = '';
+            controls.innerHTML = '';
+            
+            for (let row = 0; row < 9; row++) {
+                for (let col = 0; col < 9; col++) {
+                    const cell = document.createElement('div');
+                    cell.className = `sudoku-cell ${sudokuGame.board[row][col] === 0 ? '' : 'prefilled'} ${sudokuGame.selectedCell && sudokuGame.selectedCell.row === row && sudokuGame.selectedCell.col === col ? 'selected' : ''}`;
+                    cell.textContent = sudokuGame.board[row][col] === 0 ? '' : sudokuGame.board[row][col];
+                    cell.onclick = () => selectSudokuCell(row, col);
+                    board.appendChild(cell);
+                }
+            }
+            
+            for (let num = 1; num <= 9; num++) {
+                const button = document.createElement('button');
+                button.className = 'px-4 py-2 glass-card text-white rounded-lg font-semibold hover:scale-105 transition';
+                button.textContent = num;
+                button.onclick = () => fillSudokuCell(num);
+                controls.appendChild(button);
+            }
+            
+            const clearButton = document.createElement('button');
+            clearButton.className = 'px-4 py-2 glass-card text-white rounded-lg font-semibold hover:scale-105 transition';
+            clearButton.innerHTML = '<i class="fas fa-eraser"></i>';
+            clearButton.onclick = clearSudokuCell;
+            controls.appendChild(clearButton);
+        }
+
+        function selectSudokuCell(row, col) {
+            if (sudokuGame.board[row][col] === 0) {
+                sudokuGame.selectedCell = { row, col };
+                renderSudoku();
+                updateSudokuStatus();
+            }
+        }
+
+        function fillSudokuCell(num) {
+            if (!sudokuGame.selectedCell) {
+                showToast('Please select a cell first', 'info');
+                return;
+            }
+            
+            const { row, col } = sudokuGame.selectedCell;
+            
+            // Check if the move is valid (simplified validation)
+            if (isValidSudokuMove(row, col, num)) {
+                sudokuGame.board[row][col] = num;
+                
+                if (checkSudokuComplete()) {
+                    showToast('Congratulations! Puzzle completed!', 'success');
+                    awardCoins(120);
+                }
+            } else {
+                sudokuGame.mistakes++;
+                showToast('Invalid move! Try again.', 'error');
+            }
+            
+            renderSudoku();
+            updateSudokuStatus();
+        }
+
+        function clearSudokuCell() {
+            if (!sudokuGame.selectedCell) return;
+            
+            const { row, col } = sudokuGame.selectedCell;
+            sudokuGame.board[row][col] = 0;
+            renderSudoku();
+        }
+
+        function isValidSudokuMove(row, col, num) {
+            // Simplified validation - in a real app, this would check row, column, and 3x3 box
+            return true;
+        }
+
+        function checkSudokuComplete() {
+            for (let row = 0; row < 9; row++) {
+                for (let col = 0; col < 9; col++) {
+                    if (sudokuGame.board[row][col] === 0) {
+                        return false;
+                    }
+                }
+            }
+            return true;
+        }
+
+        function updateSudokuStatus() {
+            if (checkSudokuComplete()) {
+                document.getElementById('sudokuStatus').textContent = 'Puzzle completed!';
+            } else if (sudokuGame.selectedCell) {
+                document.getElementById('sudokuStatus').textContent = `Selected: Row ${sudokuGame.selectedCell.row + 1}, Col ${sudokuGame.selectedCell.col + 1}`;
+            } else {
+                document.getElementById('sudokuStatus').textContent = 'Select a cell to fill';
+            }
+        }
+
+        function nextSudokuLevel() {
+            sudokuGame.currentLevel++;
+            document.getElementById('sudokuLevel').textContent = sudokuGame.currentLevel;
+            startSudoku();
+            showToast(`Advanced to Sudoku Level ${sudokuGame.currentLevel}!`, 'success');
+            awardCoins(50);
+        }
+
         // ==================== PAYMENT SYSTEM ====================
         function selectPaymentMethod(method) {
             selectedPaymentMethod = method;
@@ -1726,11 +2785,13 @@
                 
                 await db.collection('users').doc(currentUser.uid).update({
                     coins: newCoins,
+                    totalCoinsEarned: firebase.firestore.FieldValue.increment(finalAmount),
                     lastGamePlayed: firebase.firestore.FieldValue.serverTimestamp(),
                     gamesPlayed: firebase.firestore.FieldValue.increment(1)
                 });
                 
                 userData.coins = newCoins;
+                userData.totalCoinsEarned = (userData.totalCoinsEarned || 0) + finalAmount;
                 userData.gamesPlayed += 1;
                 
                 updateUI();
@@ -1742,7 +2803,100 @@
             }
         }
 
-        function showToast(message, type = 'info') {
+        function claimDailyReward() {
+            if (!currentUser) {
+                showToast('Please sign in to claim daily rewards', 'error');
+                return;
+            }
+            
+            const today = new Date().toDateString();
+            const lastClaim = userData.lastRewardClaim;
+            
+            if (lastClaim === today) {
+                showToast('You have already claimed your daily reward today', 'info');
+                return;
+            }
+            
+            // Award coins
+            const reward = 100;
+            const newCoins = (userData.coins || 0) + reward;
+            
+            // Update streak
+            const yesterday = new Date();
+            yesterday.setDate(yesterday.getDate() - 1);
+            const isConsecutive = lastClaim === yesterday.toDateString();
+            const newStreak = isConsecutive ? (userData.streak || 0) + 1 : 1;
+            
+            // Update user data
+            db.collection('users').doc(currentUser.uid).update({
+                coins: newCoins,
+                totalCoinsEarned: firebase.firestore.FieldValue.increment(reward),
+                streak: newStreak,
+                lastRewardClaim: today
+            }).then(() => {
+                userData.coins = newCoins;
+                userData.totalCoinsEarned = (userData.totalCoinsEarned || 0) + reward;
+                userData.streak = newStreak;
+                userData.lastRewardClaim = today;
+                
+                updateUI();
+                showToast(`Daily reward claimed! +${reward} coins`, 'success');
+            }).catch(error => {
+                console.error("Error claiming reward:", error);
+                showToast('Error claiming reward', 'error');
+            });
+        }
+
+        function suggestGames(mood) {
+            let suggestedGames = [];
+            
+            switch(mood) {
+                case 'relaxing':
+                    suggestedGames = gamesData.filter(g => g.category === 'puzzle');
+                    break;
+                case 'energetic':
+                    suggestedGames = gamesData.filter(g => g.category === 'action' || g.category === 'trivia');
+                    break;
+                case 'competitive':
+                    suggestedGames = gamesData.filter(g => g.players.includes('2') || g.players.includes('4'));
+                    break;
+            }
+            
+            // Filter games to show only available ones (non-premium or user has premium)
+            suggestedGames = suggestedGames.filter(game => 
+                !game.premium || (userData && userData.isPremium)
+            );
+            
+            if (suggestedGames.length > 0) {
+                // In a real app, this would highlight or filter to these games
+                showToast(`Showing ${suggestedGames.length} ${mood} games`, 'info');
+                
+                // For demo, just open the first suggested game
+                if (suggestedGames.length > 0) {
+                    startGame(suggestedGames[0].id);
+                }
+            } else {
+                showToast(`No ${mood} games available`, 'info');
+            }
+        }
+
+        function showLeaderboard(timeframe) {
+            // In a real app, this would fetch and display the leaderboard for the selected timeframe
+            showToast(`Showing ${timeframe} leaderboard`, 'info');
+        }
+
+        function toggleTheme() {
+            const toggle = document.getElementById('themeToggle');
+            toggle.classList.toggle('active');
+            
+            // In a real app, this would toggle between light and dark mode
+            // For this demo, we'll just show a toast
+            const isDark = toggle.classList.contains('active');
+            showToast(`Switched to ${isDark ? 'dark' : 'light'} mode`, 'info');
+        }
+
+        function showToast(message, type) {
+            const container = document.getElementById('toastContainer');
             const toast = document.createElement('div');
             toast.className = `toast ${type}`;
             toast.innerHTML = `
@@ -1752,20 +2906,35 @@
                 </div>
             `;
             
-            document.getElementById('toastContainer').appendChild(toast);
+            container.appendChild(toast);
             
+            // Show toast
             setTimeout(() => {
                 toast.classList.add('show');
-            }, 100);
+            }, 10);
             
+            // Hide after 3 seconds
             setTimeout(() => {
                 toast.classList.remove('show');
                 setTimeout(() => {
-                    toast.remove();
+                    container.removeChild(toast);
                 }, 300);
             }, 3000);
+        }
+
+        // Additional functions for multiplayer, challenges, etc.
+        function showChallengeModal() {
+            showToast('Challenge modal would open here', 'info');
+        }
+
+        function showFriendsModal() {
+            showToast('Friends modal would open here', 'info');
+        }
+
+        function viewAllRecentGames() {
+            // In a real app, this would navigate to a page with all recent games
+            showToast('Showing all recent games', 'info');
         }
     </script>
 </body>
 </html>
-[file content end]
