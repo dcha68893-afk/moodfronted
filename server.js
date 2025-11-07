@@ -68,8 +68,8 @@ const pages = [
 ];
 
 pages.forEach((page) => {
-  app.get(/${page === "index" ? "" : page}, (req, res) => {
-    res.sendFile(path.join(__dirname, ${page}.html));
+  app.get('/${page === "index" ? "" : page}', (req, res) => {
+    res.sendFile(path.join(__dirname, '${page}.html'));
   });
 });
 
