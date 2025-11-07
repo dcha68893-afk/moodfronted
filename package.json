@@ -2,7 +2,7 @@
   "name": "uniconnectsphere",
   "version": "1.0.2",
   "description": "UniConnectSphere — social media and chat app built with Node.js, Express, Firebase, and Cloudinary.",
-  "type": "commonjs",
+  "type": "module",
   "main": "server.js",
   "scripts": {
     "start": "node server.js",

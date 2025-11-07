@@ -5,14 +5,19 @@
  * and adds security + CSP headers for Firebase and Tailwind.
  */
 
-const express = require("express");
-const path = require("path");
-const compression = require("compression");
-const helmet = require("helmet");
-const cors = require("cors");
+import express from "express";
+import path from "path";
+import compression from "compression";
+import helmet from "helmet";
+import cors from "cors";
+import { fileURLToPath } from 'url';
 
 const app = express();
 const PORT = process.env.PORT || 3000;
+
+// Fix for __dirname in ES modules
+const __filename = fileURLToPath(import.meta.url);
+const _dirname = path.dirname(_filename);
 
 // --- MIDDLEWARE SETUP ---
 
@@ -30,7 +35,7 @@ app.use(compression());
 // --- CUSTOM CONTENT SECURITY POLICY (CSP) ---
 app.use((req, res, next) => {
   res.setHeader(
-    "Content-Security-Policy",
+    "Content-Scurity-Policy",
     [
       "default-src 'self' data: blob: https:;",
       "script-src 'self' 'unsafe-inline' 'unsafe-eval' https://cdn.tailwindcss.com https://cdnjs.cloudflare.com https://www.gstatic.com https://www.googleapis.com;",
@@ -63,8 +68,8 @@ const pages = [
 ];
 
 pages.forEach((page) => {
-  app.get('/${page === "index" ? "" : page}', (req, res) => {
-    res.sendFile(path.join(__dirname, '${page}.html'));
+  app.get(/${page === "index" ? "" : page}, (req, res) => {
+    res.sendFile(path.join(__dirname, ${page}.html));
   });
 });
 
