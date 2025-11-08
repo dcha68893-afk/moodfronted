@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>ConnectSphere - Enhanced Social Feed</title>
+    <title>Kynecta - Enhanced Social Feed</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css" rel="stylesheet">
     
@@ -495,13 +495,62 @@
             justify-content: center;
             z-index: 2000;
         }
+
+        /* Kynecta Unique Features */
+        .energy-ring {
+            width: 60px;
+            height: 60px;
+            border-radius: 50%;
+            background: conic-gradient(var(--accent-color) 0%, transparent 0%);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            position: relative;
+        }
+        
+        .energy-ring-inner {
+            width: 50px;
+            height: 50px;
+            border-radius: 50%;
+            background: var(--card-bg);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+        
+        .kynecta-badge {
+            background: linear-gradient(45deg, #ff6b6b, #ffa726, #4ecdc4, #45b7d1);
+            color: white;
+            padding: 2px 8px;
+            border-radius: 12px;
+            font-size: 0.7rem;
+            font-weight: bold;
+        }
+        
+        .collaboration-indicator {
+            display: flex;
+            align-items: center;
+            gap: 5px;
+            background: rgba(34, 211, 238, 0.2);
+            padding: 4px 8px;
+            border-radius: 12px;
+            font-size: 0.8rem;
+        }
+        
+        .ai-suggestion {
+            background: rgba(139, 92, 246, 0.1);
+            border-left: 3px solid var(--accent-color);
+            padding: 10px;
+            border-radius: 8px;
+            margin-top: 10px;
+        }
     </style>
 </head>
 <body class="h-full dark-theme">
     <!-- Connection Status -->
     <div class="connection-status connecting" id="connectionStatus">
         <i class="fas fa-circle-notch fa-spin mr-2"></i>
-        <span id="connectionText">Connecting to Firebase...</span>
+        <span id="connectionText">Connecting to Kynecta...</span>
     </div>
 
     <!-- Floating Create Button -->
@@ -535,10 +584,10 @@
         <div class="modal-container">
             <div class="text-center">
                 <div class="w-20 h-20 rounded-2xl flex items-center justify-center mx-auto mb-6" style="background: var(--accent-color);">
-                    <i class="fas fa-brain text-white text-2xl"></i>
+                    <i class="fas fa-network-wired text-white text-2xl"></i>
                 </div>
-                <h2 class="text-2xl font-bold text-theme-accent mb-2">Welcome to ConnectSphere</h2>
-                <p class="text-theme-secondary mb-6">Please sign in to continue</p>
+                <h2 class="text-2xl font-bold text-theme-accent mb-2">Welcome to Kynecta</h2>
+                <p class="text-theme-secondary mb-6">Connect with purpose, share with meaning</p>
                 <button id="googleSignIn" class="w-full py-3 px-4 bg-red-500 hover:bg-red-600 text-white rounded-2xl font-semibold transition mb-4">
                     <i class="fab fa-google mr-2"></i>Sign in with Google
                 </button>
@@ -555,10 +604,10 @@
             <div class="p-4">
                 <a href="#" class="flex items-center space-x-3">
                     <div class="w-10 h-10 rounded-2xl flex items-center justify-center" style="background: var(--accent-color);">
-                        <i class="fas fa-brain text-white"></i>
+                        <i class="fas fa-network-wired text-white"></i>
                     </div>
                     <span class="hidden lg:block text-xl font-black text-transparent bg-clip-text bg-gradient-to-r from-cyan-400 to-purple-400">
-                        ConnectSphere
+                        Kynecta
                     </span>
                 </a>
             </div>
@@ -584,6 +633,11 @@
                     <i class="fas fa-bookmark w-6"></i>
                     <span class="hidden lg:block">Collections</span>
                 </a>
+                <!-- Kynecta Unique Feature: Collaborative Spaces -->
+                <a href="spaces.html" class="flex items-center space-x-3 p-3 rounded-xl text-theme-secondary hover:bg-purple-900/30 hover:text-theme-accent transition">
+                    <i class="fas fa-users w-6"></i>
+                    <span class="hidden lg:block">Collaborative Spaces</span>
+                </a>
             </nav>
 
             <!-- User Status -->
@@ -596,6 +650,15 @@
                     <div class="hidden lg:block">
                         <p id="userDisplayName" class="text-sm font-semibold text-theme-accent">Loading...</p>
                         <p id="statusText" class="text-xs text-theme-secondary">Online</p>
+                    </div>
+                </div>
+                <!-- Kynecta Unique Feature: User Energy Level -->
+                <div class="flex items-center justify-between mt-2 mb-2">
+                    <span class="text-xs text-theme-secondary">Connection Energy</span>
+                    <div class="energy-ring" id="userEnergyRing">
+                        <div class="energy-ring-inner">
+                            <span class="text-xs font-bold" id="energyPercentage">0%</span>
+                        </div>
                     </div>
                 </div>
                 <button id="signOutBtn" class="w-full mt-2 py-2 glass border border-purple-700 rounded-2xl text-theme-secondary hover:text-theme-accent transition text-sm hidden">
@@ -679,6 +742,22 @@
                             </div>
                         </div>
                     </div>
+                    
+                    <!-- Kynecta Unique Feature: Content Type Filter -->
+                    <div class="relative content-type-filter">
+                        <button class="filter-btn" id="contentTypeFilterBtn">
+                            <i class="fas fa-filter mr-1"></i> Content Type
+                        </button>
+                        <div class="content-type-options absolute mt-2 p-3 glass rounded-xl z-10 hidden" id="contentTypeOptions">
+                            <div class="space-y-2">
+                                <div class="content-type-option" data-content-type="text">Text Only</div>
+                                <div class="content-type-option" data-content-type="image">With Images</div>
+                                <div class="content-type-option" data-content-type="video">With Videos</div>
+                                <div class="content-type-option" data-content-type="poll">Polls</div>
+                                <div class="content-type-option" data-content-type="collaborative">Collaborative</div>
+                            </div>
+                        </div>
+                    </div>
                 </div>
             </div>
 
@@ -726,6 +805,10 @@
                             <p class="font-bold text-theme-accent" id="followingCount">0</p>
                             <p class="text-xs text-theme-secondary">Following</p>
                         </div>
+                    </div>
+                    <!-- Kynecta Unique Feature: User Badges -->
+                    <div class="mt-4 flex flex-wrap gap-2" id="userBadges">
+                        <!-- Badges will be loaded dynamically -->
                     </div>
                 </div>
 
@@ -797,6 +880,17 @@
                 <textarea id="modalPostInput" placeholder="What's on your mind?" 
                           class="w-full p-4 glass border border-purple-700 rounded-2xl focus:outline-none focus:ring-2 focus:ring-theme-accent focus:border-transparent placeholder-theme-secondary h-32 resize-none"></textarea>
                 
+                <!-- Kynecta Unique Feature: AI Content Suggestions -->
+                <div id="aiSuggestion" class="ai-suggestion hidden">
+                    <div class="flex justify-between items-start">
+                        <div>
+                            <p class="text-sm font-semibold text-theme-accent mb-1">AI Suggestion</p>
+                            <p id="aiSuggestionText" class="text-sm">Try adding a question to engage your audience!</p>
+                        </div>
+                        <button id="applySuggestion" class="text-xs bg-theme-accent text-white px-2 py-1 rounded-lg">Apply</button>
+                    </div>
+                </div>
+                
                 <!-- Poll Creator -->
                 <div id="pollCreator" class="hidden">
                     <div class="mb-3">
@@ -816,6 +910,26 @@
                     <div class="flex items-center mt-3">
                         <input type="checkbox" id="multiplePollAnswers" class="mr-2">
                         <label for="multiplePollAnswers" class="text-sm">Allow multiple answers</label>
+                    </div>
+                </div>
+                
+                <!-- Kynecta Unique Feature: Collaborative Post -->
+                <div id="collaborativePost" class="hidden mt-4">
+                    <div class="flex items-center justify-between mb-2">
+                        <p class="text-sm font-semibold text-theme-accent">Collaborative Post</p>
+                        <button id="toggleCollaborative" class="text-xs bg-theme-accent text-white px-2 py-1 rounded-lg">Enable</button>
+                    </div>
+                    <div id="collaborativeSettings" class="hidden space-y-2">
+                        <input type="text" id="collaborativeTitle" placeholder="Collaboration title..." class="w-full p-2 glass border border-purple-700 rounded-lg">
+                        <select id="collaborativeType" class="w-full p-2 glass border border-purple-700 rounded-lg">
+                            <option value="brainstorming">Brainstorming</option>
+                            <option value="decision">Decision Making</option>
+                            <option value="project">Project Planning</option>
+                        </select>
+                        <div class="flex items-center">
+                            <input type="checkbox" id="allowEdits" class="mr-2">
+                            <label for="allowEdits" class="text-sm">Allow others to edit</label>
+                        </div>
                     </div>
                 </div>
                 
@@ -862,6 +976,11 @@
                         <i class="fas fa-link"></i>
                         <span>Link</span>
                     </button>
+                    <!-- Kynecta Unique Feature: Collaborative Post Button -->
+                    <button id="modalAddCollaborative" class="flex items-center space-x-2 hover:text-theme-accent transition">
+                        <i class="fas fa-users"></i>
+                        <span>Collaborate</span>
+                    </button>
                 </div>
                 
                 <div class="flex justify-end space-x-3 pt-4">
@@ -882,12 +1001,12 @@
     <input type="file" id="modalAudioInput" accept="audio/*" class="hidden">
 
     <script>
-        // Firebase Configuration
+        // Firebase Configuration for Kynecta
         const firebaseConfig = {
             apiKey: "AIzaSyDHHyGgsSV18BcXrGgzi4C8frzDAE1C1zo",
-            authDomain: "uniconnect-ee95c.firebaseapp.com",
-            projectId: "uniconnect-ee95c",
-            storageBucket: "uniconnect-ee95c.firebasestorage.app",
+            authDomain: "kynecta-social.firebaseapp.com",
+            projectId: "kynecta-social",
+            storageBucket: "kynecta-social.firebasestorage.app",
             messagingSenderId: "1003264444309",
             appId: "1:1003264444309:web:9f0307516e44d21e97d89c"
         };
@@ -906,6 +1025,7 @@
         let currentFilter = 'all';
         let currentEmotionFilter = null;
         let currentInterestFilter = null;
+        let currentContentTypeFilter = null;
         let selectedReaction = null;
 
         // DOM Elements
@@ -937,6 +1057,8 @@
         const emotionOptions = document.getElementById('emotionOptions');
         const interestFilterBtn = document.getElementById('interestFilterBtn');
         const interestOptions = document.getElementById('interestOptions');
+        const contentTypeFilterBtn = document.getElementById('contentTypeFilterBtn');
+        const contentTypeOptions = document.getElementById('contentTypeOptions');
         const storiesContainer = document.getElementById('storiesContainer');
         const trendingTopicsContainer = document.getElementById('trendingTopicsContainer');
         const leaderboardContainer = document.getElementById('leaderboardContainer');
@@ -947,6 +1069,16 @@
         const googleSignIn = document.getElementById('googleSignIn');
         const facebookSignIn = document.getElementById('facebookSignIn');
         const signOutBtn = document.getElementById('signOutBtn');
+        const userEnergyRing = document.getElementById('userEnergyRing');
+        const energyPercentage = document.getElementById('energyPercentage');
+        const userBadges = document.getElementById('userBadges');
+        const aiSuggestion = document.getElementById('aiSuggestion');
+        const aiSuggestionText = document.getElementById('aiSuggestionText');
+        const applySuggestion = document.getElementById('applySuggestion');
+        const collaborativePost = document.getElementById('collaborativePost');
+        const toggleCollaborative = document.getElementById('toggleCollaborative');
+        const collaborativeSettings = document.getElementById('collaborativeSettings');
+        const modalAddCollaborative = document.getElementById('modalAddCollaborative');
 
         // Initialize the application
         function init() {
@@ -1029,6 +1161,17 @@
                 });
             });
             
+            // Content type filter
+            contentTypeFilterBtn.addEventListener('click', toggleContentTypeOptions);
+            document.querySelectorAll('.content-type-option').forEach(option => {
+                option.addEventListener('click', function() {
+                    currentContentTypeFilter = this.dataset.contentType;
+                    contentTypeFilterBtn.innerHTML = `<i class="fas fa-filter mr-1"></i> ${this.textContent}`;
+                    contentTypeOptions.classList.add('hidden');
+                    reloadPosts();
+                });
+            });
+            
             // Close dropdowns when clicking outside
             document.addEventListener('click', function(event) {
                 if (!emotionFilterBtn.contains(event.target) && !emotionOptions.contains(event.target)) {
@@ -1036,6 +1179,9 @@
                 }
                 if (!interestFilterBtn.contains(event.target) && !interestOptions.contains(event.target)) {
                     interestOptions.classList.add('hidden');
+                }
+                if (!contentTypeFilterBtn.contains(event.target) && !contentTypeOptions.contains(event.target)) {
+                    contentTypeOptions.classList.add('hidden');
                 }
             });
             
@@ -1048,6 +1194,7 @@
             document.getElementById('modalAddAudio').addEventListener('click', () => document.getElementById('modalAudioInput').click());
             document.getElementById('modalAddPoll').addEventListener('click', togglePollCreator);
             document.getElementById('modalAddLink').addEventListener('click', addLinkToPost);
+            document.getElementById('modalAddCollaborative').addEventListener('click', toggleCollaborativePost);
             
             // File inputs
             document.getElementById('modalPhotoInput').addEventListener('change', handleMediaUpload);
@@ -1067,6 +1214,20 @@
                     } else {
                         alert('Poll must have at least 2 options');
                     }
+                }
+            });
+            
+            // AI Suggestion
+            applySuggestion.addEventListener('click', applyAISuggestion);
+            modalPostInput.addEventListener('input', generateAISuggestion);
+            
+            // Collaborative post
+            toggleCollaborative.addEventListener('click', function() {
+                collaborativeSettings.classList.toggle('hidden');
+                if (collaborativeSettings.classList.contains('hidden')) {
+                    this.textContent = 'Enable';
+                } else {
+                    this.textContent = 'Disable';
                 }
             });
             
@@ -1152,10 +1313,10 @@
             
             switch(status) {
                 case 'connected':
-                    connectionText.innerHTML = '<i class="fas fa-wifi mr-2"></i> Connected';
+                    connectionText.innerHTML = '<i class="fas fa-wifi mr-2"></i> Connected to Kynecta';
                     break;
                 case 'connecting':
-                    connectionText.innerHTML = '<i class="fas fa-circle-notch fa-spin mr-2"></i> Connecting...';
+                    connectionText.innerHTML = '<i class="fas fa-circle-notch fa-spin mr-2"></i> Connecting to Kynecta...';
                     break;
                 case 'disconnected':
                     connectionText.innerHTML = '<i class="fas fa-exclamation-triangle mr-2"></i> Offline';
@@ -1231,12 +1392,21 @@
         function toggleEmotionOptions() {
             emotionOptions.classList.toggle('hidden');
             interestOptions.classList.add('hidden');
+            contentTypeOptions.classList.add('hidden');
         }
 
         // Toggle interest options
         function toggleInterestOptions() {
             interestOptions.classList.toggle('hidden');
             emotionOptions.classList.add('hidden');
+            contentTypeOptions.classList.add('hidden');
+        }
+
+        // Toggle content type options
+        function toggleContentTypeOptions() {
+            contentTypeOptions.classList.toggle('hidden');
+            emotionOptions.classList.add('hidden');
+            interestOptions.classList.add('hidden');
         }
 
         // Toggle keyboard shortcuts display
@@ -1268,6 +1438,9 @@
             document.getElementById('linkPreview').classList.add('hidden');
             document.getElementById('postMood').value = '';
             document.getElementById('postAudience').value = 'public';
+            aiSuggestion.classList.add('hidden');
+            collaborativePost.classList.add('hidden');
+            collaborativeSettings.classList.add('hidden');
         }
 
         // Create Post Function
@@ -1301,7 +1474,11 @@
                 sharesCount: 0,
                 viewsCount: 0,
                 hashtags: extractHashtags(content),
-                mentions: extractMentions(content)
+                mentions: extractMentions(content),
+                // Kynecta Unique Feature: Post Energy
+                energy: calculatePostEnergy(content),
+                // Kynecta Unique Feature: AI Generated
+                aiGenerated: false
             };
             
             // Add poll data if applicable
@@ -1323,6 +1500,23 @@
                 }
             }
             
+            // Kynecta Unique Feature: Collaborative Post
+            if (!collaborativeSettings.classList.contains('hidden')) {
+                const collaborativeTitle = document.getElementById('collaborativeTitle').value;
+                const collaborativeType = document.getElementById('collaborativeType').value;
+                const allowEdits = document.getElementById('allowEdits').checked;
+                
+                if (collaborativeTitle) {
+                    postData.collaborative = {
+                        title: collaborativeTitle,
+                        type: collaborativeType,
+                        allowEdits: allowEdits,
+                        collaborators: [currentUser.uid],
+                        isActive: true
+                    };
+                }
+            }
+            
             // Save to Firebase
             db.collection('posts').add(postData)
                 .then(docRef => {
@@ -1333,6 +1527,9 @@
                     
                     // Update user's post count
                     updateUserPostCount(1);
+                    
+                    // Kynecta Unique Feature: Update user energy
+                    updateUserEnergy(5);
                 })
                 .catch(error => {
                     console.error('Error publishing post: ', error);
@@ -1382,6 +1579,11 @@
             }).then(likeAdded => {
                 console.log(likeAdded ? 'Post liked' : 'Post unliked');
                 reloadPosts();
+                
+                // Kynecta Unique Feature: Update user energy
+                if (likeAdded) {
+                    updateUserEnergy(1);
+                }
             }).catch(error => {
                 console.error('Transaction failed: ', error);
                 showNotification('Error liking post: ' + error.message, 'error');
@@ -1427,6 +1629,9 @@
                     console.log('Comment added successfully');
                     showNotification('Comment added!', 'success');
                     reloadPosts();
+                    
+                    // Kynecta Unique Feature: Update user energy
+                    updateUserEnergy(2);
                 })
                 .catch(error => {
                     console.error('Error adding comment: ', error);
@@ -1438,6 +1643,11 @@
         function togglePollCreator() {
             const pollCreator = document.getElementById('pollCreator');
             pollCreator.classList.toggle('hidden');
+        }
+
+        // Toggle collaborative post
+        function toggleCollaborativePost() {
+            collaborativePost.classList.toggle('hidden');
         }
 
         // Add poll option
@@ -1472,6 +1682,45 @@
                 document.getElementById('linkImage').src = 'https://via.placeholder.com/150';
                 document.getElementById('linkPreview').classList.remove('hidden');
             }
+        }
+
+        // Kynecta Unique Feature: Generate AI Suggestion
+        function generateAISuggestion() {
+            const content = modalPostInput.value.trim();
+            if (content.length > 10 && content.length < 100) {
+                // Simple AI suggestion logic - in a real app, this would call an AI API
+                const suggestions = [
+                    "Try adding a question to engage your audience!",
+                    "Consider adding relevant hashtags to increase visibility.",
+                    "This would be a great post to add a poll to!",
+                    "Your post might benefit from adding an image or video.",
+                    "This sounds like a perfect topic for a collaborative discussion!"
+                ];
+                
+                const randomSuggestion = suggestions[Math.floor(Math.random() * suggestions.length)];
+                aiSuggestionText.textContent = randomSuggestion;
+                aiSuggestion.classList.remove('hidden');
+            } else {
+                aiSuggestion.classList.add('hidden');
+            }
+        }
+
+        // Kynecta Unique Feature: Apply AI Suggestion
+        function applyAISuggestion() {
+            const suggestion = aiSuggestionText.textContent;
+            if (suggestion.includes("question")) {
+                modalPostInput.value += " What do you think?";
+            } else if (suggestion.includes("hashtags")) {
+                modalPostInput.value += " #Kynecta #SocialMedia";
+            } else if (suggestion.includes("poll")) {
+                togglePollCreator();
+            } else if (suggestion.includes("image") || suggestion.includes("video")) {
+                document.getElementById('modalAddPhoto').click();
+            } else if (suggestion.includes("collaborative")) {
+                toggleCollaborativePost();
+            }
+            
+            aiSuggestion.classList.add('hidden');
         }
 
         // Handle media upload
@@ -1651,6 +1900,12 @@
                         followingCount.textContent = userData.followingCount || 0;
                         statusText.textContent = userData.status || 'Online';
                         sidebarUserStatus.textContent = userData.status || 'Online';
+                        
+                        // Kynecta Unique Feature: Update user energy
+                        updateUserEnergyDisplay(userData.energy || 0);
+                        
+                        // Kynecta Unique Feature: Load user badges
+                        loadUserBadges(userData.badges || []);
                     } else {
                         // Create user document if it doesn't exist
                         createUserDocument();
@@ -1674,6 +1929,8 @@
                 postsCount: 0,
                 followersCount: 0,
                 followingCount: 0,
+                energy: 0,
+                badges: ['newcomer'],
                 createdAt: firebase.firestore.FieldValue.serverTimestamp()
             };
             
@@ -1702,6 +1959,72 @@
             });
         }
 
+        // Kynecta Unique Feature: Update user energy
+        function updateUserEnergy(points) {
+            if (!currentUser) return;
+            
+            db.collection('users').doc(currentUser.uid).update({
+                energy: firebase.firestore.FieldValue.increment(points)
+            })
+            .then(() => {
+                loadUserData();
+            })
+            .catch(error => {
+                console.error('Error updating user energy:', error);
+            });
+        }
+
+        // Kynecta Unique Feature: Update user energy display
+        function updateUserEnergyDisplay(energy) {
+            const percentage = Math.min(100, energy);
+            userEnergyRing.style.background = `conic-gradient(var(--accent-color) ${percentage}%, transparent ${percentage}%)`;
+            energyPercentage.textContent = `${percentage}%`;
+        }
+
+        // Kynecta Unique Feature: Load user badges
+        function loadUserBadges(badges) {
+            userBadges.innerHTML = '';
+            
+            const badgeConfig = {
+                'newcomer': { text: 'Newcomer', color: 'bg-blue-500' },
+                'contributor': { text: 'Contributor', color: 'bg-green-500' },
+                'influencer': { text: 'Influencer', color: 'bg-purple-500' },
+                'collaborator': { text: 'Collaborator', color: 'bg-yellow-500' },
+                'visionary': { text: 'Visionary', color: 'bg-pink-500' }
+            };
+            
+            badges.forEach(badge => {
+                if (badgeConfig[badge]) {
+                    const badgeElement = document.createElement('span');
+                    badgeElement.className = `kynecta-badge ${badgeConfig[badge].color}`;
+                    badgeElement.textContent = badgeConfig[badge].text;
+                    userBadges.appendChild(badgeElement);
+                }
+            });
+        }
+
+        // Kynecta Unique Feature: Calculate post energy
+        function calculatePostEnergy(content) {
+            // Simple algorithm to calculate post "energy" based on content
+            let energy = 0;
+            
+            // Base energy
+            energy += Math.min(content.length / 10, 10);
+            
+            // Bonus for hashtags
+            const hashtags = extractHashtags(content);
+            energy += hashtags.length * 2;
+            
+            // Bonus for mentions
+            const mentions = extractMentions(content);
+            energy += mentions.length * 2;
+            
+            // Bonus for questions
+            if (content.includes('?')) energy += 5;
+            
+            return Math.min(energy, 50);
+        }
+
         // Load initial posts from Firebase
         function loadInitialPosts() {
             if (!currentUser) return;
@@ -1722,6 +2045,12 @@
             
             if (currentEmotionFilter) {
                 query = query.where('mood', '==', currentEmotionFilter);
+            }
+            
+            if (currentContentTypeFilter === 'poll') {
+                query = query.where('poll', '!=', null);
+            } else if (currentContentTypeFilter === 'collaborative') {
+                query = query.where('collaborative', '!=', null);
             }
             
             query.get()
@@ -1769,6 +2098,12 @@
             
             if (currentEmotionFilter) {
                 query = query.where('mood', '==', currentEmotionFilter);
+            }
+            
+            if (currentContentTypeFilter === 'poll') {
+                query = query.where('poll', '!=', null);
+            } else if (currentContentTypeFilter === 'collaborative') {
+                query = query.where('collaborative', '!=', null);
             }
             
             query.get()
@@ -1919,6 +2254,31 @@
             // Check if current user liked the post
             const userLiked = post.likes && post.likes.includes(currentUser.uid);
             
+            // Kynecta Unique Feature: Collaborative Post Indicator
+            let collaborativeHtml = '';
+            if (post.collaborative) {
+                collaborativeHtml = `
+                    <div class="collaboration-indicator mt-2">
+                        <i class="fas fa-users text-theme-accent"></i>
+                        <span>Collaborative: ${post.collaborative.title}</span>
+                    </div>
+                `;
+            }
+            
+            // Kynecta Unique Feature: Post Energy Indicator
+            let energyHtml = '';
+            if (post.energy) {
+                const energyPercentage = Math.min(100, post.energy * 2);
+                energyHtml = `
+                    <div class="flex items-center mt-2 text-xs text-theme-secondary">
+                        <div class="w-16 h-2 bg-gray-700 rounded-full mr-2">
+                            <div class="h-2 bg-theme-accent rounded-full" style="width: ${energyPercentage}%"></div>
+                        </div>
+                        <span>${post.energy} energy</span>
+                    </div>
+                `;
+            }
+            
             postElement.innerHTML = `
                 <div class="flex items-start space-x-3">
                     <img src="${post.userAvatar || 'https://via.placeholder.com/40'}" alt="${post.userName}'s avatar" class="w-10 h-10 rounded-2xl object-cover cursor-pointer">
@@ -1931,6 +2291,7 @@
                                     ${post.mood ? `<span class="text-xs px-2 py-1 rounded-full bg-theme-accent/20 text-theme-accent">${getMoodEmoji(post.mood)} ${post.mood}</span>` : ''}
                                     ${post.audience === 'friends' ? '<span class="text-xs text-theme-secondary"><i class="fas fa-user-friends mr-1"></i>Friends</span>' : ''}
                                     ${post.audience === 'private' ? '<span class="text-xs text-theme-secondary"><i class="fas fa-lock mr-1"></i>Only Me</span>' : ''}
+                                    ${post.aiGenerated ? '<span class="kynecta-badge bg-purple-500">AI Enhanced</span>' : ''}
                                 </div>
                             </div>
                             <div class="relative">
@@ -1940,9 +2301,13 @@
                             </div>
                         </div>
                         
+                        ${collaborativeHtml}
+                        
                         <div class="mt-3 text-theme-primary">
                             ${content}
                         </div>
+                        
+                        ${energyHtml}
                         
                         ${mediaHtml}
                         ${pollHtml}

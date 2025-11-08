@@ -1,83 +1,534 @@
 <!DOCTYPE html>
-<html>
+<html lang="en">
 <head>
-    <title>Cloudinary Upload Test</title>
+    <title>Secure Cloudinary Upload Test</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <style>
-        body { font-family: Arial, sans-serif; max-width: 600px; margin: 50px auto; padding: 20px; }
-        .upload-box { border: 2px dashed #ccc; padding: 30px; text-align: center; margin: 20px 0; }
-        .result { margin-top: 20px; padding: 15px; border-radius: 5px; }
-        .success { background: #d4edda; border: 1px solid #c3e6cb; color: #155724; }
-        .error { background: #f8d7da; border: 1px solid #f5c6cb; color: #721c24; }
-        img { max-width: 300px; margin: 10px 0; }
-        button { padding: 10px 20px; font-size: 16px; cursor: pointer; }
+        * {
+            box-sizing: border-box;
+            margin: 0;
+            padding: 0;
+        }
+        
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+            padding: 20px;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+        }
+        
+        .container {
+            background: white;
+            border-radius: 15px;
+            box-shadow: 0 20px 40px rgba(0,0,0,0.1);
+            padding: 40px;
+            max-width: 600px;
+            width: 100%;
+        }
+        
+        h1 {
+            color: #333;
+            text-align: center;
+            margin-bottom: 10px;
+            font-size: 2.5rem;
+        }
+        
+        .subtitle {
+            color: #666;
+            text-align: center;
+            margin-bottom: 30px;
+            font-size: 1.1rem;
+        }
+        
+        .upload-area {
+            border: 3px dashed #667eea;
+            border-radius: 10px;
+            padding: 40px 20px;
+            text-align: center;
+            margin: 20px 0;
+            background: #f8f9ff;
+            transition: all 0.3s ease;
+            cursor: pointer;
+        }
+        
+        .upload-area:hover {
+            border-color: #764ba2;
+            background: #f0f2ff;
+        }
+        
+        .upload-area.dragover {
+            border-color: #764ba2;
+            background: #e8ebff;
+            transform: scale(1.02);
+        }
+        
+        .upload-icon {
+            font-size: 3rem;
+            margin-bottom: 15px;
+            color: #667eea;
+        }
+        
+        .file-input {
+            display: none;
+        }
+        
+        .upload-btn {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            border: none;
+            padding: 12px 30px;
+            border-radius: 25px;
+            font-size: 1rem;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.3s ease;
+            margin-top: 15px;
+        }
+        
+        .upload-btn:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 10px 20px rgba(102, 126, 234, 0.3);
+        }
+        
+        .upload-btn:disabled {
+            background: #ccc;
+            cursor: not-allowed;
+            transform: none;
+            box-shadow: none;
+        }
+        
+        .file-info {
+            margin-top: 15px;
+            padding: 15px;
+            background: #e8f4fd;
+            border-radius: 8px;
+            border-left: 4px solid #2196F3;
+        }
+        
+        .progress-bar {
+            width: 100%;
+            height: 6px;
+            background: #e0e0e0;
+            border-radius: 3px;
+            margin: 15px 0;
+            overflow: hidden;
+            display: none;
+        }
+        
+        .progress-fill {
+            height: 100%;
+            background: linear-gradient(90deg, #667eea, #764ba2);
+            width: 0%;
+            transition: width 0.3s ease;
+        }
+        
+        .result {
+            margin-top: 25px;
+            padding: 20px;
+            border-radius: 10px;
+            display: none;
+        }
+        
+        .success {
+            background: #e8f5e8;
+            border: 2px solid #4CAF50;
+            color: #2e7d32;
+        }
+        
+        .error {
+            background: #ffebee;
+            border: 2px solid #f44336;
+            color: #c62828;
+        }
+        
+        .preview {
+            max-width: 100%;
+            margin: 15px 0;
+            border-radius: 8px;
+            box-shadow: 0 5px 15px rgba(0,0,0,0.1);
+        }
+        
+        .url-box {
+            background: white;
+            padding: 12px;
+            border-radius: 6px;
+            border: 1px solid #ddd;
+            margin: 10px 0;
+            word-break: break-all;
+            font-family: monospace;
+            font-size: 0.9rem;
+        }
+        
+        .copy-btn {
+            background: #2196F3;
+            color: white;
+            border: none;
+            padding: 8px 15px;
+            border-radius: 5px;
+            cursor: pointer;
+            margin-left: 10px;
+            font-size: 0.9rem;
+        }
+        
+        .security-notice {
+            background: #fff3cd;
+            border: 1px solid #ffeaa7;
+            color: #856404;
+            padding: 15px;
+            border-radius: 8px;
+            margin-top: 20px;
+            font-size: 0.9rem;
+        }
+        
+        .loading {
+            display: inline-block;
+            width: 20px;
+            height: 20px;
+            border: 3px solid #f3f3f3;
+            border-top: 3px solid #667eea;
+            border-radius: 50%;
+            animation: spin 1s linear infinite;
+            margin-right: 10px;
+        }
+        
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
     </style>
 </head>
 <body>
-    <h1>🌤️ Cloudinary Upload Test</h1>
-    
-    <div class="upload-box">
-        <h3>Select a file to upload to Cloudinary:</h3>
-        <input type="file" id="fileInput">
-        <br><br>
-        <button onclick="uploadFile()">📤 Upload to Cloudinary</button>
+    <div class="container">
+        <h1>🌤️ Secure Cloudinary Upload</h1>
+        <p class="subtitle">Secure server-signed uploads with progress tracking</p>
+        
+        <div class="upload-area" id="uploadArea">
+            <div class="upload-icon">📁</div>
+            <h3>Drag & Drop your file here</h3>
+            <p>or click to browse files</p>
+            <input type="file" id="fileInput" class="file-input" accept="image/*,video/*,audio/*,.pdf,.doc,.docx">
+            <br>
+            <button class="upload-btn" onclick="document.getElementById('fileInput').click()">
+                Choose File
+            </button>
+        </div>
+        
+        <div id="fileInfo" class="file-info" style="display: none;"></div>
+        
+        <div class="progress-bar" id="progressBar">
+            <div class="progress-fill" id="progressFill"></div>
+        </div>
+        
+        <button class="upload-btn" id="uploadBtn" onclick="uploadFile()" disabled style="width: 100%;">
+            <span id="uploadText">📤 Upload to Cloudinary</span>
+        </button>
+        
+        <div id="result" class="result"></div>
+        
+        <div class="security-notice">
+            <strong>🔒 Secure Upload:</strong> All files are securely signed by our server before being uploaded to Cloudinary. 
+            Your API keys are never exposed to the client.
+        </div>
     </div>
 
-    <div id="result"></div>
-
     <script>
-        async function uploadFile() {
-            const fileInput = document.getElementById('fileInput');
-            const resultDiv = document.getElementById('result');
+        // DOM Elements
+        const fileInput = document.getElementById('fileInput');
+        const uploadArea = document.getElementById('uploadArea');
+        const fileInfo = document.getElementById('fileInfo');
+        const uploadBtn = document.getElementById('uploadBtn');
+        const uploadText = document.getElementById('uploadText');
+        const progressBar = document.getElementById('progressBar');
+        const progressFill = document.getElementById('progressFill');
+        const resultDiv = document.getElementById('result');
+
+        // Event Listeners
+        fileInput.addEventListener('change', handleFileSelect);
+        uploadArea.addEventListener('click', () => fileInput.click());
+        
+        // Drag and drop functionality
+        uploadArea.addEventListener('dragover', (e) => {
+            e.preventDefault();
+            uploadArea.classList.add('dragover');
+        });
+        
+        uploadArea.addEventListener('dragleave', () => {
+            uploadArea.classList.remove('dragover');
+        });
+        
+        uploadArea.addEventListener('drop', (e) => {
+            e.preventDefault();
+            uploadArea.classList.remove('dragover');
             
-            if (!fileInput.files[0]) {
-                alert('Please select a file first!');
+            if (e.dataTransfer.files.length) {
+                fileInput.files = e.dataTransfer.files;
+                handleFileSelect();
+            }
+        });
+
+        function handleFileSelect() {
+            const file = fileInput.files[0];
+            if (!file) return;
+
+            // Validate file size (10MB limit)
+            const maxSize = 10 * 1024 * 1024; // 10MB in bytes
+            if (file.size > maxSize) {
+                showError(`File size too large. Maximum allowed: 10MB. Your file: ${(file.size / (1024 * 1024)).toFixed(2)}MB`);
+                resetForm();
                 return;
             }
 
-            resultDiv.innerHTML = '<p>⏳ Uploading to Cloudinary...</p>';
+            // Validate file type
+            const allowedTypes = ['image/', 'video/', 'audio/', 'application/pdf', 
+                                 'application/msword', 'application/vnd.openxmlformats-officedocument.wordprocessingml.document'];
+            const isValidType = allowedTypes.some(type => file.type.startsWith(type));
             
-            const formData = new FormData();
-            formData.append('file', fileInput.files[0]);
-            
+            if (!isValidType) {
+                showError('Invalid file type. Please upload images, videos, audio, PDF, or Word documents.');
+                resetForm();
+                return;
+            }
+
+            // Display file info
+            fileInfo.innerHTML = `
+                <strong>Selected File:</strong> ${file.name}<br>
+                <strong>Type:</strong> ${file.type || 'Unknown'}<br>
+                <strong>Size:</strong> ${formatFileSize(file.size)}
+            `;
+            fileInfo.style.display = 'block';
+
+            // Enable upload button
+            uploadBtn.disabled = false;
+        }
+
+        // A) UPLOAD FUNCTION LOGIC - SECURE VERSION
+        async function uploadFile() {
+            const file = fileInput.files[0];
+            if (!file) {
+                showError('Please select a file first!');
+                return;
+            }
+
+            // Disable UI during upload
+            uploadBtn.disabled = true;
+            uploadText.innerHTML = '<div class="loading"></div>Uploading...';
+            progressBar.style.display = 'block';
+            resultDiv.style.display = 'none';
+
             try {
-                const response = await fetch('/upload', {
+                // B) CRITICAL SECURITY FIX: Two-step secure upload process
+                
+                // Step 1: Get signed upload parameters from our server
+                console.log('🔐 Requesting signed upload parameters from server...');
+                const signResponse = await fetch('/api/cloudinary/sign-upload', {
                     method: 'POST',
-                    body: formData
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify({
+                        filename: file.name,
+                        fileType: file.type,
+                        fileSize: file.size
+                    })
+                });
+
+                if (!signResponse.ok) {
+                    throw new Error(`Server error: ${signResponse.status}`);
+                }
+
+                const signData = await signResponse.json();
+                
+                if (!signData.success) {
+                    throw new Error(`Signing failed: ${signData.error}`);
+                }
+
+                console.log('✅ Received signed parameters:', signData);
+
+                // Step 2: Upload file to Cloudinary using signed parameters
+                console.log('📤 Uploading file to Cloudinary with signed request...');
+                
+                const cloudinaryFormData = new FormData();
+                
+                // Add all signed parameters from our server
+                Object.keys(signData.params).forEach(key => {
+                    cloudinaryFormData.append(key, signData.params[key]);
                 });
                 
-                const result = await response.json();
+                // Add the actual file
+                cloudinaryFormData.append('file', file);
+
+                // Upload to Cloudinary with progress tracking
+                const xhr = new XMLHttpRequest();
                 
-                if (result.success) {
-                    resultDiv.innerHTML = `
-                        <div class="result success">
-                            <h3>✅ Upload Successful!</h3>
-                            <p><strong>File:</strong> ${result.file.originalName}</p>
-                            <p><strong>Size:</strong> ${(result.file.size / 1024).toFixed(2)} KB</p>
-                            <p><strong>Cloudinary URL:</strong></p>
-                            <a href="${result.cloudinary.url}" target="_blank">${result.cloudinary.url}</a>
-                            ${result.cloudinary.format === 'jpg' || result.cloudinary.format === 'png' || result.cloudinary.format === 'gif' ? 
-                                `<br><img src="${result.cloudinary.url}" alt="Uploaded image">` : 
-                                '<p>📄 File uploaded successfully!</p>'
+                xhr.upload.addEventListener('progress', (e) => {
+                    if (e.lengthComputable) {
+                        const percentComplete = (e.loaded / e.total) * 100;
+                        progressFill.style.width = percentComplete + '%';
+                    }
+                });
+
+                const uploadPromise = new Promise((resolve, reject) => {
+                    xhr.addEventListener('load', () => {
+                        if (xhr.status === 200) {
+                            try {
+                                const response = JSON.parse(xhr.responseText);
+                                resolve(response);
+                            } catch (e) {
+                                reject(new Error('Invalid response from Cloudinary'));
                             }
-                        </div>
-                    `;
-                    console.log('Cloudinary Response:', result);
-                } else {
-                    resultDiv.innerHTML = `
-                        <div class="result error">
-                            <h3>❌ Upload Failed</h3>
-                            <p>${result.error}</p>
-                        </div>
-                    `;
-                }
+                        } else {
+                            reject(new Error(`Cloudinary upload failed: ${xhr.status}`));
+                        }
+                    });
+                    
+                    xhr.addEventListener('error', () => {
+                        reject(new Error('Network error during upload'));
+                    });
+                    
+                    xhr.addEventListener('abort', () => {
+                        reject(new Error('Upload cancelled'));
+                    });
+                });
+
+                xhr.open('POST', signData.uploadUrl);
+                xhr.send(cloudinaryFormData);
+
+                const cloudinaryResult = await uploadPromise;
+                console.log('✅ Cloudinary upload successful:', cloudinaryResult);
+
+                // Step 3: Verify upload with our server (optional but recommended)
+                console.log('🔍 Verifying upload with our server...');
+                const verifyResponse = await fetch('/api/cloudinary/verify-upload', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify({
+                        publicId: cloudinaryResult.public_id,
+                        signature: cloudinaryResult.signature,
+                        version: cloudinaryResult.version
+                    })
+                });
+
+                const verifyData = await verifyResponse.json();
+
+                // Display success result
+                showSuccess(cloudinaryResult, file);
+
             } catch (error) {
-                resultDiv.innerHTML = `
-                    <div class="result error">
-                        <h3>❌ Upload Error</h3>
-                        <p>${error.message}</p>
-                    </div>
+                console.error('❌ Upload error:', error);
+                showError(error.message);
+            } finally {
+                // Reset UI
+                uploadText.innerHTML = '📤 Upload to Cloudinary';
+                progressBar.style.display = 'none';
+                progressFill.style.width = '0%';
+            }
+        }
+
+        function showSuccess(cloudinaryResult, originalFile) {
+            const isImage = cloudinaryResult.resource_type === 'image';
+            const isVideo = cloudinaryResult.resource_type === 'video';
+            const isAudio = cloudinaryResult.resource_type === 'audio';
+            
+            let previewHtml = '';
+            if (isImage) {
+                previewHtml = `<img src="${cloudinaryResult.secure_url}" alt="Uploaded image" class="preview">`;
+            } else if (isVideo) {
+                previewHtml = `
+                    <video controls class="preview">
+                        <source src="${cloudinaryResult.secure_url}" type="video/mp4">
+                        Your browser does not support the video tag.
+                    </video>
+                `;
+            } else if (isAudio) {
+                previewHtml = `
+                    <audio controls style="width: 100%; margin: 15px 0;">
+                        <source src="${cloudinaryResult.secure_url}" type="audio/mpeg">
+                        Your browser does not support the audio tag.
+                    </audio>
                 `;
             }
+
+            resultDiv.innerHTML = `
+                <div class="success">
+                    <h3>✅ Upload Successful!</h3>
+                    <p><strong>File:</strong> ${originalFile.name}</p>
+                    <p><strong>Type:</strong> ${cloudinaryResult.resource_type} / ${cloudinaryResult.format}</p>
+                    <p><strong>Size:</strong> ${formatFileSize(cloudinaryResult.bytes)}</p>
+                    <p><strong>Public ID:</strong> ${cloudinaryResult.public_id}</p>
+                    
+                    ${previewHtml}
+                    
+                    <p><strong>Secure URL:</strong></p>
+                    <div style="display: flex; align-items: center;">
+                        <div class="url-box">${cloudinaryResult.secure_url}</div>
+                        <button class="copy-btn" onclick="copyToClipboard('${cloudinaryResult.secure_url}')">Copy</button>
+                    </div>
+                    
+                    <div style="margin-top: 15px;">
+                        <button class="copy-btn" onclick="copyToClipboard('${cloudinaryResult.secure_url}')" 
+                                style="background: #4CAF50;">Copy URL</button>
+                        <a href="${cloudinaryResult.secure_url}" target="_blank" class="copy-btn" 
+                           style="background: #2196F3; text-decoration: none;">Open</a>
+                    </div>
+                </div>
+            `;
+            resultDiv.style.display = 'block';
+            
+            // Reset form for new upload
+            resetForm();
+        }
+
+        function showError(message) {
+            resultDiv.innerHTML = `
+                <div class="error">
+                    <h3>❌ Upload Failed</h3>
+                    <p>${message}</p>
+                    <button class="upload-btn" onclick="resetForm()" 
+                            style="background: #f44336; margin-top: 10px;">Try Again</button>
+                </div>
+            `;
+            resultDiv.style.display = 'block';
+        }
+
+        function resetForm() {
+            fileInput.value = '';
+            fileInfo.style.display = 'none';
+            uploadBtn.disabled = true;
+            uploadText.innerHTML = '📤 Upload to Cloudinary';
+            progressBar.style.display = 'none';
+            progressFill.style.width = '0%';
+        }
+
+        function formatFileSize(bytes) {
+            if (bytes === 0) return '0 Bytes';
+            const k = 1024;
+            const sizes = ['Bytes', 'KB', 'MB', 'GB'];
+            const i = Math.floor(Math.log(bytes) / Math.log(k));
+            return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i];
+        }
+
+        function copyToClipboard(text) {
+            navigator.clipboard.writeText(text).then(() => {
+                alert('URL copied to clipboard!');
+            }).catch(err => {
+                console.error('Failed to copy: ', err);
+            });
+        }
+
+        // Service Worker Registration for PWA functionality
+        if ('serviceWorker' in navigator) {
+            navigator.serviceWorker.register('/service-worker.js')
+                .then(registration => {
+                    console.log('ServiceWorker registered: ', registration);
+                })
+                .catch(error => {
+                    console.log('ServiceWorker registration failed: ', error);
+                });
         }
     </script>
 </body>

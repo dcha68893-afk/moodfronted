@@ -8,10 +8,10 @@
     <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css" rel="stylesheet">
     
     <!-- Firebase SDK -->
-    <script src="https://www.gstatic.com/firebasejs/9.22.0/firebase-app-compat.js"></script>
-    <script src="https://www.gstatic.com/firebasejs/9.22.0/firebase-auth-compat.js"></script>
-    <script src="https://www.gstatic.com/firebasejs/9.22.0/firebase-firestore-compat.js"></script>
-    <script src="https://www.gstatic.com/firebasejs/9.22.0/firebase-storage-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/9.22.1/firebase-app-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/9.22.1/firebase-auth-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/9.22.1/firebase-firestore-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/9.22.1/firebase-storage-compat.js"></script>
     
     <style>
         .glass-effect {
@@ -150,6 +150,26 @@
         @keyframes spin {
             0% { transform: rotate(0deg); }
             100% { transform: rotate(360deg); }
+        }
+        
+        /* Theme-specific styles */
+        .blue-theme body {
+            background: linear-gradient(135deg, #1e3a8a 0%, #3b82f6 100%);
+        }
+        .purple-theme body {
+            background: linear-gradient(135deg, #7e22ce 0%, #a855f7 100%);
+        }
+        .green-theme body {
+            background: linear-gradient(135deg, #059669 0%, #10b981 100%);
+        }
+        .dark-theme body {
+            background: linear-gradient(135deg, #0f172a 0%, #334155 100%);
+        }
+        .cyber-theme body {
+            background: linear-gradient(135deg, #1e3a8a 0%, #7e22ce 100%);
+        }
+        .red-theme body {
+            background: linear-gradient(135deg, #dc2626 0%, #ef4444 100%);
         }
     </style>
 </head>
@@ -507,6 +527,7 @@
                 this.userSettings = {};
                 this.isConnected = false;
                 this.userData = {};
+                this.settingsListeners = [];
             }
 
             async initialize() {
@@ -570,6 +591,7 @@
                         if (this.userData.settings) {
                             this.userSettings = this.userData.settings;
                             this.applySettingsToUI();
+                            this.notifySettingsChange();
                         } else {
                             // Initialize default settings
                             await this.initializeDefaultSettings();
@@ -659,6 +681,7 @@
                 this.userSettings = defaultSettings;
                 await this.saveAllSettings();
                 this.applySettingsToUI();
+                this.notifySettingsChange();
             }
 
             applySettingsToUI() {
@@ -708,6 +731,9 @@
                         option.classList.add('active');
                     }
                 });
+                
+                // Save theme to localStorage for cross-page consistency
+                localStorage.setItem('uniconnect-theme', theme);
             }
 
             async saveSetting(key, value) {
@@ -730,7 +756,10 @@
                     console.log(`✅ Setting saved: ${key} = ${value}`);
                     
                     // Also save to localStorage as backup
-                    localStorage.setItem('kynectaSettings', JSON.stringify(this.userSettings));
+                    localStorage.setItem('uniconnectSettings', JSON.stringify(this.userSettings));
+                    
+                    // Notify listeners about settings change
+                    this.notifySettingsChange();
                 } catch (error) {
                     console.error('❌ Error saving setting:', error);
                     this.showNotification('Failed to save setting. Please try again.', 'error');
@@ -746,9 +775,28 @@
                     }, { merge: true });
                     
                     console.log("✅ All settings saved to Firebase");
+                    
+                    // Notify listeners about settings change
+                    this.notifySettingsChange();
                 } catch (error) {
                     console.error('❌ Error saving all settings:', error);
                 }
+            }
+
+            // Add listener for settings changes
+            addSettingsListener(callback) {
+                this.settingsListeners.push(callback);
+            }
+
+            // Notify all listeners about settings changes
+            notifySettingsChange() {
+                this.settingsListeners.forEach(callback => {
+                    try {
+                        callback(this.userSettings);
+                    } catch (error) {
+                        console.error('Error in settings listener:', error);
+                    }
+                });
             }
 
             async updateDisplayName(newName) {
@@ -1058,7 +1106,7 @@
 
             async loadUserSettings() {
                 // Load settings from localStorage as fallback
-                const savedSettings = localStorage.getItem('kynectaSettings');
+                const savedSettings = localStorage.getItem('uniconnectSettings');
                 if (savedSettings) {
                     this.userSettings = { ...this.userSettings, ...JSON.parse(savedSettings) };
                     this.applySettingsToUI();

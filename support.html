@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Support - Uniconnect</title>
+    <title>Support - Kynecta</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css" rel="stylesheet">
     
@@ -58,6 +58,61 @@
         .notification.info {
             background: linear-gradient(135deg, #3B82F6, #2563EB);
         }
+        .live-chat-bubble {
+            position: fixed;
+            bottom: 20px;
+            right: 20px;
+            width: 60px;
+            height: 60px;
+            border-radius: 50%;
+            background: linear-gradient(135deg, #3B82F6, #8B5CF6);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            cursor: pointer;
+            box-shadow: 0 4px 20px rgba(59, 130, 246, 0.5);
+            z-index: 1000;
+            animation: pulse 2s infinite;
+        }
+        @keyframes pulse {
+            0% { transform: scale(1); }
+            50% { transform: scale(1.05); }
+            100% { transform: scale(1); }
+        }
+        .live-chat-window {
+            position: fixed;
+            bottom: 90px;
+            right: 20px;
+            width: 350px;
+            height: 450px;
+            background: rgba(17, 24, 39, 0.95);
+            border-radius: 15px;
+            border: 1px solid rgba(59, 130, 246, 0.3);
+            box-shadow: 0 10px 30px rgba(0, 0, 0, 0.3);
+            z-index: 1001;
+            display: none;
+            flex-direction: column;
+        }
+        .live-chat-header {
+            padding: 15px;
+            border-bottom: 1px solid rgba(59, 130, 246, 0.3);
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+        .live-chat-messages {
+            flex: 1;
+            padding: 15px;
+            overflow-y: auto;
+        }
+        .live-chat-input {
+            padding: 15px;
+            border-top: 1px solid rgba(59, 130, 246, 0.3);
+        }
+        .community-highlight {
+            background: linear-gradient(135deg, rgba(59, 130, 246, 0.1), rgba(139, 92, 246, 0.1));
+            border: 1px solid rgba(59, 130, 246, 0.3);
+        }
     </style>
 </head>
 <body class="h-full bg-gradient-to-br from-gray-900 via-blue-900 to-purple-900 text-white">
@@ -66,6 +121,38 @@
         <div class="flex items-center space-x-3">
             <i id="notification-icon" class="fas fa-info-circle"></i>
             <span id="notification-message">Notification message</span>
+        </div>
+    </div>
+
+    <!-- Live Chat Bubble -->
+    <div class="live-chat-bubble" id="chat-bubble">
+        <i class="fas fa-comment-alt text-white text-xl"></i>
+    </div>
+
+    <!-- Live Chat Window -->
+    <div class="live-chat-window glass-effect" id="chat-window">
+        <div class="live-chat-header">
+            <div>
+                <h3 class="font-semibold text-cyan-400">Live Support</h3>
+                <p class="text-xs text-blue-300">We're online to help you</p>
+            </div>
+            <button id="close-chat" class="text-blue-300 hover:text-white">
+                <i class="fas fa-times"></i>
+            </button>
+        </div>
+        <div class="live-chat-messages" id="chat-messages">
+            <div class="text-center text-blue-300 py-4">
+                <i class="fas fa-robot text-4xl mb-2 text-purple-400"></i>
+                <p>Hello! How can we help you today?</p>
+            </div>
+        </div>
+        <div class="live-chat-input">
+            <div class="flex space-x-2">
+                <input type="text" id="chat-input" placeholder="Type your message..." class="flex-1 glass-effect border border-blue-700/50 rounded-lg px-4 py-2 text-white focus:border-blue-400 focus:outline-none transition text-sm">
+                <button id="send-chat" class="cyber-gradient px-4 py-2 rounded-lg text-white hover:scale-105 transition quantum-glow">
+                    <i class="fas fa-paper-plane"></i>
+                </button>
+            </div>
         </div>
     </div>
 
@@ -79,7 +166,7 @@
                             <i class="fas fa-comments text-white"></i>
                         </div>
                         <span class="text-xl font-bold text-transparent bg-clip-text bg-gradient-to-r from-blue-400 to-purple-400 neon-text">
-                            Uniconnect
+                            Kynecta
                         </span>
                     </a>
                 </div>
@@ -143,6 +230,9 @@
             <button class="nav-tab px-6 py-3 rounded-xl border border-transparent text-blue-300 hover:text-white hover:border-blue-400 transition" data-tab="docs">
                 <i class="fas fa-book mr-2"></i>Documentation
             </button>
+            <button class="nav-tab px-6 py-3 rounded-xl border border-transparent text-blue-300 hover:text-white hover:border-blue-400 transition" data-tab="community">
+                <i class="fas fa-users mr-2"></i>Community
+            </button>
         </div>
     </div>
 
@@ -156,7 +246,7 @@
                         <i class="fas fa-rocket text-white"></i>
                     </div>
                     <h3 class="text-xl font-semibold text-cyan-400 mb-3">Getting Started</h3>
-                    <p class="text-blue-300">Setup guides and first steps with Uniconnect</p>
+                    <p class="text-blue-300">Setup guides and first steps with Kynecta</p>
                 </div>
 
                 <div class="support-card glass-effect p-6 rounded-2xl border border-purple-700/50 cursor-pointer" onclick="showHelpCategory('account')">
@@ -256,7 +346,7 @@
                         <div class="space-y-3 text-blue-300">
                             <div class="flex items-center">
                                 <i class="fas fa-envelope text-purple-400 mr-3"></i>
-                                <span>nchagwadennis45@gmail.com</span>
+                                <span>support@kynecta.com or nchagwadennis45@gmail.com</span>
                             </div>
                             <div class="flex items-center">
                                 <i class="fas fa-phone text-purple-400 mr-3"></i>
@@ -419,6 +509,72 @@
                 </div>
             </div>
         </div>
+
+        <!-- Community Tab -->
+        <div id="community" class="tab-content">
+            <div class="glass-effect rounded-2xl p-8 border border-blue-700/50">
+                <h3 class="text-2xl font-semibold text-cyan-400 mb-6">Community & Resources</h3>
+                
+                <div class="grid grid-cols-1 md:grid-cols-2 gap-8 mb-8">
+                    <div class="community-highlight p-6 rounded-2xl">
+                        <div class="flex items-center mb-4">
+                            <div class="w-12 h-12 cyber-gradient rounded-xl flex items-center justify-center mr-4 quantum-glow">
+                                <i class="fas fa-users text-white"></i>
+                            </div>
+                            <div>
+                                <h4 class="text-xl font-semibold text-purple-400">Community Forum</h4>
+                                <p class="text-blue-300 text-sm">Connect with other Kynecta users</p>
+                            </div>
+                        </div>
+                        <p class="text-blue-300 mb-4">Join our community to share ideas, ask questions, and learn from other users.</p>
+                        <a href="#" class="inline-flex items-center text-cyan-400 hover:text-cyan-300 transition">
+                            <span>Visit Community Forum</span>
+                            <i class="fas fa-arrow-right ml-2"></i>
+                        </a>
+                    </div>
+                    
+                    <div class="community-highlight p-6 rounded-2xl">
+                        <div class="flex items-center mb-4">
+                            <div class="w-12 h-12 cyber-gradient rounded-xl flex items-center justify-center mr-4 quantum-glow">
+                                <i class="fas fa-lightbulb text-white"></i>
+                            </div>
+                            <div>
+                                <h4 class="text-xl font-semibold text-purple-400">Feature Requests</h4>
+                                <p class="text-blue-300 text-sm">Suggest and vote on new features</p>
+                            </div>
+                        </div>
+                        <p class="text-blue-300 mb-4">Help shape the future of Kynecta by suggesting and voting on new features.</p>
+                        <a href="#" class="inline-flex items-center text-cyan-400 hover:text-cyan-300 transition">
+                            <span>View Feature Requests</span>
+                            <i class="fas fa-arrow-right ml-2"></i>
+                        </a>
+                    </div>
+                </div>
+                
+                <!-- Community Stats -->
+                <div class="glass-effect rounded-2xl p-6 border border-purple-700/50">
+                    <h4 class="text-xl font-semibold text-blue-400 mb-4">Community Statistics</h4>
+                    <div class="grid grid-cols-2 md:grid-cols-4 gap-4 text-center">
+                        <div>
+                            <div class="text-2xl font-bold text-cyan-400" id="community-members">15K+</div>
+                            <div class="text-blue-300 text-sm">Community Members</div>
+                        </div>
+                        <div>
+                            <div class="text-2xl font-bold text-purple-400" id="forum-posts">42K+</div>
+                            <div class="text-blue-300 text-sm">Forum Posts</div>
+                        </div>
+                        <div>
+                            <div class="text-2xl font-bold text-blue-400" id="feature-requests">1.2K+</div>
+                            <div class="text-blue-300 text-sm">Feature Requests</div>
+                        </div>
+                        <div>
+                            <div class="text-2xl font-bold text-green-400" id="solved-topics">38K+</div>
+                            <div class="text-blue-300 text-sm">Solved Topics</div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
     </div>
 
     <!-- Footer -->
@@ -431,7 +587,7 @@
                             <i class="fas fa-comments text-white"></i>
                         </div>
                         <span class="text-lg font-bold text-transparent bg-clip-text bg-gradient-to-r from-blue-400 to-purple-400">
-                            Uniconnect
+                            Kynecta
                         </span>
                     </div>
                     <p class="text-blue-300 text-sm">
@@ -470,7 +626,7 @@
             </div>
             
             <div class="border-t border-blue-800/50 mt-8 pt-8 text-center text-sm text-blue-400">
-                <p>&copy; 2024 Uniconnect Secure Communication Platform. All rights reserved.</p>
+                <p>&copy; 2024 Kynecta Secure Communication Platform. All rights reserved.</p>
             </div>
         </div>
     </footer>
@@ -536,6 +692,71 @@
                 notification.classList.remove('show');
                 setTimeout(() => notification.classList.add('hidden'), 300);
             }, 5000);
+        }
+
+        // Live Chat Functionality
+        function initLiveChat() {
+            const chatBubble = document.getElementById('chat-bubble');
+            const chatWindow = document.getElementById('chat-window');
+            const closeChat = document.getElementById('close-chat');
+            const sendChat = document.getElementById('send-chat');
+            const chatInput = document.getElementById('chat-input');
+            const chatMessages = document.getElementById('chat-messages');
+            
+            chatBubble.addEventListener('click', () => {
+                chatWindow.style.display = 'flex';
+                chatBubble.style.display = 'none';
+            });
+            
+            closeChat.addEventListener('click', () => {
+                chatWindow.style.display = 'none';
+                chatBubble.style.display = 'flex';
+            });
+            
+            sendChat.addEventListener('click', sendChatMessage);
+            chatInput.addEventListener('keypress', (e) => {
+                if (e.key === 'Enter') {
+                    sendChatMessage();
+                }
+            });
+            
+            function sendChatMessage() {
+                const message = chatInput.value.trim();
+                if (!message) return;
+                
+                // Add user message
+                addChatMessage(message, 'user');
+                chatInput.value = '';
+                
+                // Simulate bot response after a delay
+                setTimeout(() => {
+                    const responses = [
+                        "Thanks for your message! Our support team will get back to you shortly.",
+                        "I understand your concern. Let me connect you with a support specialist.",
+                        "That's a great question! One of our experts will assist you soon.",
+                        "I've noted your issue. Our team typically responds within 15 minutes during business hours."
+                    ];
+                    const randomResponse = responses[Math.floor(Math.random() * responses.length)];
+                    addChatMessage(randomResponse, 'bot');
+                }, 1000);
+            }
+            
+            function addChatMessage(message, sender) {
+                const messageDiv = document.createElement('div');
+                messageDiv.className = `mb-3 ${sender === 'user' ? 'text-right' : 'text-left'}`;
+                
+                const messageBubble = document.createElement('div');
+                messageBubble.className = `inline-block max-w-xs px-4 py-2 rounded-xl ${
+                    sender === 'user' 
+                    ? 'bg-blue-600 text-white rounded-br-none' 
+                    : 'glass-effect border border-blue-700/50 text-blue-300 rounded-bl-none'
+                }`;
+                messageBubble.textContent = message;
+                
+                messageDiv.appendChild(messageBubble);
+                chatMessages.appendChild(messageDiv);
+                chatMessages.scrollTop = chatMessages.scrollHeight;
+            }
         }
 
         // Get support statistics from Firebase
@@ -824,6 +1045,9 @@
             
             // Initialize tabs
             initializeTabs();
+            
+            // Initialize live chat
+            initLiveChat();
             
             // Set up auth state listener
             if (auth) {

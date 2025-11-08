@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Premium Games Hub - ConnectSphere</title>
+    <title>Premium Games Hub - Kynecta</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css" rel="stylesheet">
     
@@ -496,6 +496,47 @@
             transform: translateX(30px);
         }
 
+        /* New Game Features */
+        .live-tournament {
+            background: linear-gradient(135deg, rgba(239, 68, 68, 0.2), rgba(249, 115, 22, 0.2));
+            border: 1px solid rgba(239, 68, 68, 0.3);
+        }
+        .achievement-badge {
+            width: 50px;
+            height: 50px;
+            border-radius: 50%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 20px;
+            margin-right: 10px;
+        }
+        .streak-counter {
+            background: linear-gradient(135deg, #f59e0b, #d97706);
+            animation: streakGlow 2s infinite;
+        }
+        @keyframes streakGlow {
+            0%, 100% { box-shadow: 0 0 10px rgba(245, 158, 11, 0.5); }
+            50% { box-shadow: 0 0 20px rgba(245, 158, 11, 0.8); }
+        }
+        .game-trailer {
+            width: 100%;
+            height: 200px;
+            background: linear-gradient(45deg, #3b82f6, #8b5cf6);
+            border-radius: 12px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            color: white;
+            font-size: 48px;
+            margin-bottom: 20px;
+            cursor: pointer;
+            transition: all 0.3s ease;
+        }
+        .game-trailer:hover {
+            transform: scale(1.02);
+        }
+
         /* Responsive adjustments */
         @media (max-width: 768px) {
             .chess-board {
@@ -518,6 +559,9 @@
             .sudoku-board {
                 width: 300px;
                 height: 300px;
+            }
+            .search-container input {
+                width: 200px;
             }
         }
     </style>
@@ -545,7 +589,7 @@
                         </div>
                         <div>
                             <h1 class="text-2xl font-black text-transparent bg-clip-text bg-gradient-to-r from-blue-400 to-cyan-400">
-                                Premium Game Center
+                                Kynecta Game Center
                             </h1>
                             <p class="text-slate-400 text-sm">Unlimited levels & premium rewards</p>
                         </div>
@@ -646,6 +690,22 @@
                 </div>
             </div>
 
+            <!-- Live Tournament Banner -->
+            <div class="live-tournament rounded-2xl p-6 mb-8 flex items-center justify-between">
+                <div class="flex items-center">
+                    <div class="w-12 h-12 bg-red-500 rounded-full flex items-center justify-center mr-4">
+                        <i class="fas fa-fire text-white"></i>
+                    </div>
+                    <div>
+                        <h2 class="text-xl font-black text-white">Live Tournament: Word Master</h2>
+                        <p class="text-red-200">Ends in 2:15:43 - 5,000 coin prize pool</p>
+                    </div>
+                </div>
+                <button class="px-6 py-2 bg-red-500 text-white rounded-lg font-semibold hover:bg-red-600 transition">
+                    Join Now
+                </button>
+            </div>
+
             <!-- Level Progression Banner -->
             <div class="glass-card rounded-2xl p-6 mb-8 border border-purple-500/30">
                 <div class="flex items-center justify-between">
@@ -738,6 +798,19 @@
 
                 <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6" id="premiumGames">
                     <!-- Premium game cards will be loaded here -->
+                </div>
+            </div>
+
+            <!-- New Games Section -->
+            <div class="mb-8">
+                <div class="flex items-center justify-between mb-6">
+                    <h2 class="text-3xl font-black text-transparent bg-clip-text bg-gradient-to-r from-green-400 to-blue-400">
+                        <i class="fas fa-star mr-2"></i>New & Trending
+                    </h2>
+                </div>
+
+                <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6" id="newGames">
+                    <!-- New game cards will be loaded here -->
                 </div>
             </div>
 
@@ -1057,7 +1130,7 @@
                 <div class="w-16 h-16 premium-gradient rounded-full flex items-center justify-center mx-auto mb-4">
                     <i class="fas fa-crown text-white text-2xl"></i>
                 </div>
-                <h3 class="text-2xl font-black text-white mb-2">Upgrade to Premium</h3>
+                <h3 class="text-2xl font-black text-white mb-2">Upgrade to Kynecta Premium</h3>
                 <p class="text-slate-400">Choose your preferred payment method</p>
             </div>
             
@@ -1187,7 +1260,7 @@
         let currentUser = null;
         let userData = null;
 
-        // Game data
+        // Game data - Updated with Kynecta branding and new games
         const gamesData = [
             {
                 id: "memory",
@@ -1203,7 +1276,8 @@
                 premium: false,
                 unlimitedLevels: true,
                 popularity: 85,
-                rating: 4.5
+                rating: 4.5,
+                new: false
             },
             {
                 id: "quiz",
@@ -1219,7 +1293,8 @@
                 premium: false,
                 unlimitedLevels: true,
                 popularity: 92,
-                rating: 4.7
+                rating: 4.7,
+                new: false
             },
             {
                 id: "chess",
@@ -1235,7 +1310,8 @@
                 premium: true,
                 unlimitedLevels: true,
                 popularity: 78,
-                rating: 4.8
+                rating: 4.8,
+                new: false
             },
             {
                 id: "wordpuzzle",
@@ -1251,7 +1327,8 @@
                 premium: true,
                 unlimitedLevels: true,
                 popularity: 88,
-                rating: 4.6
+                rating: 4.6,
+                new: false
             },
             {
                 id: "sudoku",
@@ -1267,7 +1344,8 @@
                 premium: true,
                 unlimitedLevels: true,
                 popularity: 75,
-                rating: 4.4
+                rating: 4.4,
+                new: false
             },
             {
                 id: "tictactoe",
@@ -1283,7 +1361,8 @@
                 premium: false,
                 unlimitedLevels: true,
                 popularity: 65,
-                rating: 4.2
+                rating: 4.2,
+                new: false
             },
             {
                 id: "trivia",
@@ -1299,7 +1378,42 @@
                 premium: false,
                 unlimitedLevels: true,
                 popularity: 80,
-                rating: 4.3
+                rating: 4.3,
+                new: true
+            },
+            {
+                id: "puzzle2048",
+                name: "2048 Challenge",
+                description: "Slide and combine numbers to reach 2048",
+                category: "puzzle",
+                players: "1",
+                coins: 90,
+                gradient: "game-gradient-3",
+                icon: "fa-th",
+                image: "2048.jpg",
+                featured: false,
+                premium: false,
+                unlimitedLevels: true,
+                popularity: 82,
+                rating: 4.5,
+                new: true
+            },
+            {
+                id: "wordsearch",
+                name: "Word Search Pro",
+                description: "Find hidden words in a grid",
+                category: "puzzle",
+                players: "1",
+                coins: 110,
+                gradient: "game-gradient-4",
+                icon: "fa-search",
+                image: "wordsearch.jpg",
+                featured: false,
+                premium: false,
+                unlimitedLevels: true,
+                popularity: 70,
+                rating: 4.2,
+                new: true
             }
         ];
 
@@ -1383,7 +1497,7 @@
             }
         ];
 
-        // Game state variables
+        // Game state variables (unchanged from original)
         let chessGame = {
             board: [],
             currentPlayer: 'white',
@@ -1453,6 +1567,7 @@
         document.addEventListener('DOMContentLoaded', function() {
             initializeApp();
             setupEventListeners();
+            loadNewGames();
         });
 
         function initializeApp() {
@@ -1607,6 +1722,18 @@
             });
         }
 
+        function loadNewGames() {
+            const newContainer = document.getElementById('newGames');
+            newContainer.innerHTML = '';
+            
+            const newGames = gamesData.filter(game => game.new);
+            
+            newGames.forEach(game => {
+                const gameCard = createGameCard(game);
+                newContainer.appendChild(gameCard);
+            });
+        }
+
         function createGameCard(game) {
             const card = document.createElement('div');
             card.className = `game-card glass-card rounded-2xl overflow-hidden fade-in ${game.gradient}`;
@@ -1614,6 +1741,7 @@
             
             const isPremium = game.premium;
             const isUnlocked = !isPremium || (userData && userData.isPremium);
+            const isNew = game.new;
             
             card.innerHTML = `
                 <div class="relative">
@@ -1621,6 +1749,7 @@
                         <i class="${game.icon}"></i>
                     </div>
                     ${isPremium ? '<div class="absolute top-3 right-3 premium-badge px-2 py-1 rounded-full text-xs font-bold text-white"><i class="fas fa-crown mr-1"></i>PREMIUM</div>' : ''}
+                    ${isNew ? '<div class="absolute top-3 left-3 bg-green-500 px-2 py-1 rounded-full text-xs font-bold text-white"><i class="fas fa-star mr-1"></i>NEW</div>' : ''}
                     ${!isUnlocked ? '<div class="absolute inset-0 bg-black bg-opacity-70 flex items-center justify-center"><i class="fas fa-lock text-3xl text-white"></i></div>' : ''}
                 </div>
                 <div class="p-4">
@@ -1808,9 +1937,11 @@
         function filterGamesByCategory(category) {
             const featuredContainer = document.getElementById('featuredGames');
             const premiumContainer = document.getElementById('premiumGames');
+            const newContainer = document.getElementById('newGames');
             
             featuredContainer.innerHTML = '';
             premiumContainer.innerHTML = '';
+            newContainer.innerHTML = '';
             
             const filteredGames = category === 'all' 
                 ? gamesData 
@@ -1825,6 +1956,10 @@
                 
                 if (game.premium) {
                     premiumContainer.appendChild(gameCard);
+                }
+                
+                if (game.new) {
+                    newContainer.appendChild(gameCard);
                 }
             });
         }
@@ -1865,6 +2000,11 @@
                 case 'sudoku':
                     sudokuGame.currentLevel = currentLevel;
                     startSudoku();
+                    break;
+                case 'puzzle2048':
+                case 'wordsearch':
+                case 'trivia':
+                    showToast('Game coming soon!', 'info');
                     break;
                 default:
                     showToast('Game coming soon!', 'info');
@@ -2704,7 +2844,7 @@
 
                     userData.coins -= 5000;
                     userData.isPremium = true;
-                    showPaymentResult('success', 'Premium Unlocked!', 'You have successfully unlocked premium using coins!');
+                    showPaymentResult('success', 'Premium Unlocked!', 'You have successfully unlocked Kynecta Premium using coins!');
                     
                 } else {
                     setTimeout(async () => {
@@ -2715,7 +2855,7 @@
                         });
 
                         userData.isPremium = true;
-                        showPaymentResult('success', 'Payment Successful!', 'Welcome to ConnectSphere Premium!');
+                        showPaymentResult('success', 'Payment Successful!', 'Welcome to Kynecta Premium!');
                     }, 3000);
                 }
 

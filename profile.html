@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Profile - ConnectSphere</title>
+    <title>Profile - Kynecta</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css" rel="stylesheet">
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/cropperjs/1.5.13/cropper.min.css">
@@ -25,7 +25,6 @@
             box-shadow: 0 0 20px rgba(79, 172, 254, 0.4);
         }
         
-        /* Enhanced Connection Status */
         .connection-status {
             position: fixed;
             top: 20px;
@@ -56,7 +55,6 @@
             border-color: rgba(239, 68, 68, 0.4);
         }
 
-        /* Modern Profile Styles */
         .profile-cover {
             height: 280px;
             background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
@@ -84,7 +82,6 @@
             transition: all 0.3s ease;
         }
 
-        /* Enhanced Stats */
         .profile-stats {
             display: flex;
             justify-content: space-around;
@@ -110,7 +107,6 @@
             background-clip: text;
         }
 
-        /* Modern Tabs */
         .profile-tabs {
             display: flex;
             border-bottom: 1px solid rgba(255, 255, 255, 0.1);
@@ -133,7 +129,6 @@
             background: linear-gradient(135deg, rgba(102, 126, 234, 0.1), transparent);
         }
 
-        /* Enhanced Buttons */
         .btn-primary {
             background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
             color: white;
@@ -150,7 +145,6 @@
             box-shadow: 0 12px 35px rgba(102, 126, 234, 0.4);
         }
 
-        /* Enhanced Cards */
         .feature-card {
             background: rgba(255, 255, 255, 0.05);
             border-radius: 20px;
@@ -164,7 +158,6 @@
             box-shadow: 0 20px 40px rgba(0, 0, 0, 0.3);
         }
 
-        /* Loading Spinner */
         .loading-spinner {
             display: none;
             position: fixed;
@@ -187,7 +180,6 @@
             100% { transform: rotate(360deg); }
         }
 
-        /* Enhanced Social Icons */
         .social-media-icons {
             display: flex;
             gap: 12px;
@@ -211,7 +203,6 @@
             box-shadow: 0 12px 30px rgba(0, 0, 0, 0.3);
         }
 
-        /* Unique Features Styling */
         .mood-selector {
             background: rgba(255, 255, 255, 0.05);
             border-radius: 15px;
@@ -262,7 +253,6 @@
             box-shadow: 0 4px 15px rgba(102, 126, 234, 0.3);
         }
         
-        /* Profile Completion Bar */
         .completion-bar {
             height: 6px;
             border-radius: 3px;
@@ -277,7 +267,6 @@
             transition: width 0.5s ease;
         }
         
-        /* Mood-based border glow */
         .mood-glow-happy {
             box-shadow: 0 0 20px rgba(250, 204, 21, 0.5);
         }
@@ -294,7 +283,6 @@
             box-shadow: 0 0 20px rgba(139, 92, 246, 0.5);
         }
         
-        /* Fade-in animations */
         .fade-in {
             opacity: 0;
             animation: fadeIn 1s ease forwards;
@@ -305,7 +293,6 @@
             to { opacity: 1; transform: translateY(0); }
         }
         
-        /* Badge styles */
         .badge {
             display: inline-flex;
             align-items: center;
@@ -327,7 +314,6 @@
             color: #fb923c;
         }
         
-        /* Media gallery */
         .media-grid {
             display: grid;
             grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
@@ -347,7 +333,6 @@
             transform: scale(1.05);
         }
         
-        /* Theme toggle */
         .theme-toggle {
             position: relative;
             width: 60px;
@@ -372,7 +357,6 @@
             transform: translateX(30px);
         }
         
-        /* Follow button animation */
         .follow-btn {
             position: relative;
             overflow: hidden;
@@ -404,7 +388,6 @@
             }
         }
         
-        /* Diary entry styles */
         .diary-entry {
             background: rgba(255, 255, 255, 0.05);
             border-radius: 15px;
@@ -413,7 +396,6 @@
             border-left: 4px solid #667eea;
         }
         
-        /* Color picker styles */
         .color-option {
             width: 30px;
             height: 30px;
@@ -428,7 +410,6 @@
             transform: scale(1.2);
         }
         
-        /* Privacy settings */
         .privacy-option {
             padding: 12px 16px;
             border-radius: 10px;
@@ -442,7 +423,6 @@
             background: rgba(102, 126, 234, 0.1);
         }
 
-        /* Music player */
         .music-player {
             background: rgba(255, 255, 255, 0.05);
             border-radius: 15px;
@@ -450,7 +430,6 @@
             margin: 10px 0;
         }
         
-        /* Engagement chart */
         .engagement-bar {
             height: 6px;
             border-radius: 3px;
@@ -463,7 +442,6 @@
             background: linear-gradient(135deg, #667eea, #764ba2);
         }
 
-        /* Floating particles background */
         .particles {
             position: fixed;
             top: 0;
@@ -484,7 +462,6 @@
             50% { transform: translateY(-20px) rotate(180deg); }
         }
 
-        /* Holographic effect */
         .holographic {
             background: linear-gradient(45deg, 
                 rgba(102, 126, 234, 0.1), 
@@ -499,12 +476,271 @@
             100% { background-position: 0% 50%; }
         }
 
-        /* Cyber grid background */
         .cyber-grid {
             background: 
                 linear-gradient(rgba(102, 126, 234, 0.1) 1px, transparent 1px),
                 linear-gradient(90deg, rgba(102, 126, 234, 0.1) 1px, transparent 1px);
             background-size: 50px 50px;
+        }
+
+        .friends-sidebar {
+            width: 350px;
+            background: rgba(255, 255, 255, 0.05);
+            border-left: 1px solid rgba(255, 255, 255, 0.1);
+            overflow-y: auto;
+        }
+        .friend-item {
+            display: flex;
+            align-items: center;
+            padding: 12px 16px;
+            cursor: pointer;
+            transition: all 0.3s ease;
+            border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+        }
+        .friend-item:hover {
+            background: rgba(255, 255, 255, 0.08);
+        }
+        .friend-item.active {
+            background: rgba(102, 126, 234, 0.15);
+            border-left: 3px solid #667eea;
+        }
+        .friend-avatar {
+            width: 40px;
+            height: 40px;
+            border-radius: 50%;
+            background: linear-gradient(135deg, #667eea, #764ba2);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            color: white;
+            font-weight: bold;
+            margin-right: 12px;
+            background-size: cover;
+            background-position: center;
+        }
+        .friend-info {
+            flex: 1;
+        }
+        .friend-name {
+            font-weight: 600;
+            color: white;
+        }
+        .friend-status {
+            font-size: 0.8rem;
+            color: #93C5FD;
+        }
+        .friend-online {
+            width: 8px;
+            height: 8px;
+            border-radius: 50%;
+            background: #10B981;
+            margin-left: auto;
+        }
+        .friend-offline {
+            width: 8px;
+            height: 8px;
+            border-radius: 50%;
+            background: #6B7280;
+            margin-left: auto;
+        }
+
+        .chat-window {
+            display: none;
+            flex-direction: column;
+            height: 100%;
+            background: rgba(255, 255, 255, 0.05);
+            border-radius: 16px;
+            overflow: hidden;
+        }
+        .chat-header {
+            padding: 16px 20px;
+            background: rgba(255, 255, 255, 0.08);
+            border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+            display: flex;
+            align-items: center;
+        }
+        .chat-avatar {
+            width: 36px;
+            height: 36px;
+            border-radius: 50%;
+            background: linear-gradient(135deg, #667eea, #764ba2);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            color: white;
+            font-weight: bold;
+            margin-right: 12px;
+        }
+        .chat-name {
+            font-weight: 600;
+            color: white;
+        }
+        .chat-status {
+            font-size: 0.8rem;
+            color: #93C5FD;
+            margin-left: auto;
+        }
+        .chat-messages {
+            flex: 1;
+            padding: 20px;
+            overflow-y: auto;
+            display: flex;
+            flex-direction: column;
+            gap: 16px;
+        }
+        .message {
+            max-width: 70%;
+            padding: 12px 16px;
+            border-radius: 18px;
+            position: relative;
+            word-wrap: break-word;
+        }
+        .message.sent {
+            align-self: flex-end;
+            background: linear-gradient(135deg, #667eea, #764ba2);
+            color: white;
+            border-bottom-right-radius: 4px;
+        }
+        .message.received {
+            align-self: flex-start;
+            background: rgba(255, 255, 255, 0.1);
+            color: white;
+            border-bottom-left-radius: 4px;
+        }
+        .message-sender {
+            font-size: 0.8rem;
+            margin-bottom: 4px;
+            opacity: 0.8;
+        }
+        .message-time {
+            font-size: 0.7rem;
+            opacity: 0.6;
+            margin-top: 4px;
+            text-align: right;
+        }
+        .chat-input-container {
+            padding: 16px 20px;
+            background: rgba(255, 255, 255, 0.08);
+            border-top: 1px solid rgba(255, 255, 255, 0.1);
+            display: flex;
+            gap: 12px;
+        }
+        .chat-input {
+            flex: 1;
+            background: rgba(255, 255, 255, 0.1);
+            border: 1px solid rgba(255, 255, 255, 0.2);
+            border-radius: 24px;
+            padding: 12px 20px;
+            color: white;
+            outline: none;
+        }
+        .chat-input:focus {
+            border-color: #667eea;
+        }
+        .send-button {
+            width: 44px;
+            height: 44px;
+            border-radius: 50%;
+            background: linear-gradient(135deg, #667eea, #764ba2);
+            border: none;
+            color: white;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            cursor: pointer;
+            transition: all 0.3s ease;
+        }
+        .send-button:hover {
+            transform: scale(1.05);
+            box-shadow: 0 4px 12px rgba(102, 126, 234, 0.4);
+        }
+        .send-button:disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
+            transform: none;
+        }
+        .no-chat-selected {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            height: 100%;
+            color: #93C5FD;
+            text-align: center;
+            padding: 40px;
+        }
+        .no-chat-icon {
+            font-size: 64px;
+            margin-bottom: 16px;
+            opacity: 0.5;
+        }
+
+        .friend-request-item {
+            display: flex;
+            align-items: center;
+            padding: 12px 16px;
+            border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+        }
+        .request-actions {
+            display: flex;
+            gap: 8px;
+            margin-left: auto;
+        }
+        .accept-btn {
+            background: linear-gradient(135deg, #10B981, #059669);
+            color: white;
+            border: none;
+            padding: 6px 12px;
+            border-radius: 8px;
+            cursor: pointer;
+            font-size: 0.8rem;
+        }
+        .reject-btn {
+            background: rgba(239, 68, 68, 0.2);
+            color: #EF4444;
+            border: 1px solid rgba(239, 68, 68, 0.3);
+            padding: 6px 12px;
+            border-radius: 8px;
+            cursor: pointer;
+            font-size: 0.8rem;
+        }
+
+        .suggestion-item {
+            display: flex;
+            align-items: center;
+            padding: 12px 16px;
+            border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+        }
+        .add-friend-btn {
+            background: linear-gradient(135deg, #667eea, #764ba2);
+            color: white;
+            border: none;
+            padding: 6px 12px;
+            border-radius: 8px;
+            cursor: pointer;
+            font-size: 0.8rem;
+            margin-left: auto;
+        }
+
+        .search-container {
+            padding: 16px;
+            border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+        }
+        .search-input {
+            width: 100%;
+            background: rgba(255, 255, 255, 0.1);
+            border: 1px solid rgba(255, 255, 255, 0.2);
+            border-radius: 12px;
+            padding: 10px 16px;
+            color: white;
+            outline: none;
+        }
+        .search-input:focus {
+            border-color: #667eea;
+        }
+        .search-results {
+            max-height: 300px;
+            overflow-y: auto;
         }
     </style>
 </head>
@@ -515,7 +751,7 @@
     <!-- Connection Status -->
     <div class="connection-status connecting" id="connectionStatus">
         <i class="fas fa-circle-notch fa-spin mr-2"></i>
-        <span id="connectionText">Connecting to Firebase...</span>
+        <span id="connectionText">Connecting to Kynecta...</span>
     </div>
 
     <!-- Loading Spinner -->
@@ -597,12 +833,20 @@
                             <input type="text" id="editTwitter" placeholder="Twitter URL" class="flex-1 glass-effect border border-blue-700 rounded-xl px-4 py-3 text-white">
                         </div>
                         <div class="flex items-center space-x-2">
-                            <i class="fab fa-github text-gray-400 w-5"></i>
-                            <input type="text" id="editGithub" placeholder="GitHub URL" class="flex-1 glass-effect border border-blue-700 rounded-xl px-4 py-3 text-white">
+                            <i class="fab fa-instagram text-pink-500 w-5"></i>
+                            <input type="text" id="editInstagram" placeholder="Instagram URL" class="flex-1 glass-effect border border-blue-700 rounded-xl px-4 py-3 text-white">
                         </div>
                         <div class="flex items-center space-x-2">
-                            <i class="fab fa-linkedin text-blue-600 w-5"></i>
+                            <i class="fab fa-facebook text-blue-600 w-5"></i>
+                            <input type="text" id="editFacebook" placeholder="Facebook URL" class="flex-1 glass-effect border border-blue-700 rounded-xl px-4 py-3 text-white">
+                        </div>
+                        <div class="flex items-center space-x-2">
+                            <i class="fab fa-linkedin text-blue-400 w-5"></i>
                             <input type="text" id="editLinkedin" placeholder="LinkedIn URL" class="flex-1 glass-effect border border-blue-700 rounded-xl px-4 py-3 text-white">
+                        </div>
+                        <div class="flex items-center space-x-2">
+                            <i class="fab fa-github text-gray-400 w-5"></i>
+                            <input type="text" id="editGithub" placeholder="GitHub URL" class="flex-1 glass-effect border border-blue-700 rounded-xl px-4 py-3 text-white">
                         </div>
                         <div class="flex items-center space-x-2">
                             <i class="fas fa-globe text-green-400 w-5"></i>
@@ -714,6 +958,32 @@
         </div>
     </div>
 
+    <!-- Find Friends Modal -->
+    <div class="fixed inset-0 bg-black bg-opacity-80 hidden items-center justify-center z-50" id="findFriendsModal">
+        <div class="bg-gray-800 rounded-2xl p-6 max-w-2xl w-full mx-4 max-h-[80vh] overflow-y-auto">
+            <h3 class="text-xl font-bold text-blue-300 mb-4 text-center">Find Friends</h3>
+            <div class="space-y-4">
+                <div class="search-container">
+                    <input type="text" id="friendSearchInput" placeholder="Search by name, email, or phone..." class="search-input">
+                </div>
+                <div class="search-results" id="friendSearchResults">
+                    <!-- Search results will appear here -->
+                </div>
+                <div>
+                    <h4 class="text-lg font-bold text-blue-300 mb-3">People You May Know</h4>
+                    <div id="peopleYouMayKnow">
+                        <!-- Suggestions will appear here -->
+                    </div>
+                </div>
+            </div>
+            <div class="flex justify-center mt-6">
+                <button id="closeFindFriends" class="px-6 py-2 glass-effect text-blue-400 rounded-xl hover:bg-blue-800/30 transition">
+                    Close
+                </button>
+            </div>
+        </div>
+    </div>
+
     <!-- Profile Layout -->
     <div class="flex h-full hidden" id="profileLayout">
         <!-- Navigation Sidebar -->
@@ -724,7 +994,7 @@
                         <i class="fas fa-brain text-white"></i>
                     </div>
                     <span class="hidden lg:block text-xl font-black text-transparent bg-clip-text bg-gradient-to-r from-cyan-400 to-purple-400">
-                        ConnectSphere
+                        Kynecta
                     </span>
                 </a>
             </div>
@@ -879,17 +1149,13 @@
                                     <i class="fas fa-edit mr-2"></i>
                                     Edit Profile
                                 </button>
+                                <button id="findFriendsBtn" class="px-4 py-2 glass-effect text-blue-400 rounded-xl hover:bg-blue-800/30 border border-blue-700 transition">
+                                    <i class="fas fa-user-plus mr-2"></i>
+                                    Find Friends
+                                </button>
                                 <button id="shareProfileBtn" class="px-4 py-2 glass-effect text-blue-400 rounded-xl hover:bg-blue-800/30 border border-blue-700 transition">
                                     <i class="fas fa-share-alt mr-2"></i>
                                     Share Profile
-                                </button>
-                                <button id="messageBtn" class="px-4 py-2 glass-effect text-blue-400 rounded-xl hover:bg-blue-800/30 border border-blue-700 transition">
-                                    <i class="fas fa-envelope mr-2"></i>
-                                    Message
-                                </button>
-                                <button id="followBtn" class="px-4 py-2 primary-gradient text-white rounded-xl hover:scale-105 transition follow-btn">
-                                    <i class="fas fa-user-plus mr-2"></i>
-                                    Follow
                                 </button>
                             </div>
                         </div>
@@ -916,89 +1182,162 @@
                     </div>
                 </div>
                 
-                <!-- Profile Tabs -->
-                <div class="glass-effect rounded-2xl border border-blue-700 overflow-hidden cyber-grid">
-                    <div class="profile-tabs">
-                        <div class="profile-tab active" data-tab="posts">
-                            <i class="fas fa-stream mr-2"></i>
-                            Posts
-                        </div>
-                        <div class="profile-tab" data-tab="about">
-                            <i class="fas fa-user mr-2"></i>
-                            About
-                        </div>
-                        <div class="profile-tab" data-tab="media">
-                            <i class="fas fa-images mr-2"></i>
-                            Media
-                        </div>
-                        <div class="profile-tab" data-tab="activity">
-                            <i class="fas fa-chart-line mr-2"></i>
-                            Activity
-                        </div>
-                        <div class="profile-tab" data-tab="achievements">
-                            <i class="fas fa-trophy mr-2"></i>
-                            Achievements
-                        </div>
-                        <div class="profile-tab" data-tab="diary">
-                            <i class="fas fa-book mr-2"></i>
-                            Diary
+                <!-- Profile Tabs and Chat Area -->
+                <div class="flex gap-6">
+                    <!-- Left Column: Profile Tabs -->
+                    <div class="flex-1">
+                        <div class="glass-effect rounded-2xl border border-blue-700 overflow-hidden cyber-grid">
+                            <div class="profile-tabs">
+                                <div class="profile-tab active" data-tab="posts">
+                                    <i class="fas fa-stream mr-2"></i>
+                                    Posts
+                                </div>
+                                <div class="profile-tab" data-tab="about">
+                                    <i class="fas fa-user mr-2"></i>
+                                    About
+                                </div>
+                                <div class="profile-tab" data-tab="media">
+                                    <i class="fas fa-images mr-2"></i>
+                                    Media
+                                </div>
+                                <div class="profile-tab" data-tab="activity">
+                                    <i class="fas fa-chart-line mr-2"></i>
+                                    Activity
+                                </div>
+                                <div class="profile-tab" data-tab="achievements">
+                                    <i class="fas fa-trophy mr-2"></i>
+                                    Achievements
+                                </div>
+                                <div class="profile-tab" data-tab="diary">
+                                    <i class="fas fa-book mr-2"></i>
+                                    Diary
+                                </div>
+                            </div>
+                            
+                            <!-- Tab Content -->
+                            <div class="p-6">
+                                <!-- Posts Tab -->
+                                <div class="tab-content active" id="postsTab">
+                                    <div class="text-center py-8" id="postsContent">
+                                        <i class="fas fa-circle-notch fa-spin text-4xl text-blue-400 mb-4"></i>
+                                        <p class="text-blue-300">Loading your posts...</p>
+                                    </div>
+                                </div>
+                                
+                                <!-- About Tab -->
+                                <div class="tab-content hidden" id="aboutTab">
+                                    <div class="text-center py-8" id="aboutContent">
+                                        <i class="fas fa-circle-notch fa-spin text-4xl text-blue-400 mb-4"></i>
+                                        <p class="text-blue-300">Loading your information...</p>
+                                    </div>
+                                </div>
+                                
+                                <!-- Media Tab -->
+                                <div class="tab-content hidden" id="mediaTab">
+                                    <div class="text-center py-8" id="mediaContent">
+                                        <i class="fas fa-circle-notch fa-spin text-4xl text-blue-400 mb-4"></i>
+                                        <p class="text-blue-300">Loading your media...</p>
+                                    </div>
+                                </div>
+                                
+                                <!-- Activity Tab -->
+                                <div class="tab-content hidden" id="activityTab">
+                                    <div class="text-center py-8" id="activityContent">
+                                        <i class="fas fa-circle-notch fa-spin text-4xl text-blue-400 mb-4"></i>
+                                        <p class="text-blue-300">Loading your activity...</p>
+                                    </div>
+                                </div>
+                                
+                                <!-- Achievements Tab -->
+                                <div class="tab-content hidden" id="achievementsTab">
+                                    <div class="text-center py-8" id="achievementsContent">
+                                        <i class="fas fa-circle-notch fa-spin text-4xl text-blue-400 mb-4"></i>
+                                        <p class="text-blue-300">Loading your achievements...</p>
+                                    </div>
+                                </div>
+                                
+                                <!-- Diary Tab -->
+                                <div class="tab-content hidden" id="diaryTab">
+                                    <div class="flex justify-between items-center mb-6">
+                                        <h3 class="text-xl font-bold text-blue-300">Personal Diary</h3>
+                                        <button id="addDiaryEntry" class="px-4 py-2 primary-gradient text-white rounded-xl hover:scale-105 transition">
+                                            <i class="fas fa-plus mr-2"></i>
+                                            New Entry
+                                        </button>
+                                    </div>
+                                    <div class="text-center py-8" id="diaryEntriesContent">
+                                        <i class="fas fa-circle-notch fa-spin text-4xl text-blue-400 mb-4"></i>
+                                        <p class="text-blue-300">Loading your diary entries...</p>
+                                    </div>
+                                </div>
+                            </div>
                         </div>
                     </div>
                     
-                    <!-- Tab Content -->
-                    <div class="p-6">
-                        <!-- Posts Tab -->
-                        <div class="tab-content active" id="postsTab">
-                            <div class="text-center py-8" id="postsContent">
-                                <i class="fas fa-circle-notch fa-spin text-4xl text-blue-400 mb-4"></i>
-                                <p class="text-blue-300">Loading your posts...</p>
+                    <!-- Right Column: Friends Sidebar and Chat -->
+                    <div class="w-80 flex flex-col gap-6">
+                        <!-- Friends Sidebar -->
+                        <div class="friends-sidebar rounded-2xl">
+                            <div class="p-4 border-b border-blue-800">
+                                <div class="flex justify-between items-center">
+                                    <h3 class="text-lg font-bold text-blue-300 flex items-center">
+                                        <i class="fas fa-user-friends mr-2"></i>
+                                        Friends
+                                        <span class="ml-2 text-sm bg-blue-500 text-white rounded-full px-2 py-1" id="friendsCount">0</span>
+                                    </h3>
+                                    <button id="viewFriendRequests" class="text-blue-400 hover:text-cyan-400 transition relative">
+                                        <i class="fas fa-user-clock"></i>
+                                        <span class="absolute -top-2 -right-2 bg-red-500 text-white rounded-full w-5 h-5 text-xs flex items-center justify-center hidden" id="friendRequestBadge">0</span>
+                                    </button>
+                                </div>
+                            </div>
+                            
+                            <!-- Friend Requests Section -->
+                            <div class="hidden" id="friendRequestsSection">
+                                <div class="p-3 border-b border-blue-800 bg-blue-900/20">
+                                    <h4 class="text-md font-semibold text-blue-300">Friend Requests</h4>
+                                </div>
+                                <div id="friendRequestsList">
+                                    <!-- Friend requests will appear here -->
+                                </div>
+                            </div>
+                            
+                            <!-- Friends List -->
+                            <div id="friendsList">
+                                <div class="p-4 text-center text-blue-300">
+                                    <i class="fas fa-circle-notch fa-spin mb-2"></i>
+                                    <p>Loading friends...</p>
+                                </div>
                             </div>
                         </div>
                         
-                        <!-- About Tab -->
-                        <div class="tab-content hidden" id="aboutTab">
-                            <div class="text-center py-8" id="aboutContent">
-                                <i class="fas fa-circle-notch fa-spin text-4xl text-blue-400 mb-4"></i>
-                                <p class="text-blue-300">Loading your information...</p>
+                        <!-- Chat Window -->
+                        <div class="chat-window flex-1" id="chatWindow">
+                            <div class="no-chat-selected" id="noChatSelected">
+                                <div class="no-chat-icon">
+                                    <i class="fas fa-comments"></i>
+                                </div>
+                                <h3 class="text-xl font-bold text-blue-300 mb-2">No Chat Selected</h3>
+                                <p class="text-blue-300">Select a friend from the list to start chatting</p>
                             </div>
-                        </div>
-                        
-                        <!-- Media Tab -->
-                        <div class="tab-content hidden" id="mediaTab">
-                            <div class="text-center py-8" id="mediaContent">
-                                <i class="fas fa-circle-notch fa-spin text-4xl text-blue-400 mb-4"></i>
-                                <p class="text-blue-300">Loading your media...</p>
-                            </div>
-                        </div>
-                        
-                        <!-- Activity Tab -->
-                        <div class="tab-content hidden" id="activityTab">
-                            <div class="text-center py-8" id="activityContent">
-                                <i class="fas fa-circle-notch fa-spin text-4xl text-blue-400 mb-4"></i>
-                                <p class="text-blue-300">Loading your activity...</p>
-                            </div>
-                        </div>
-                        
-                        <!-- Achievements Tab -->
-                        <div class="tab-content hidden" id="achievementsTab">
-                            <div class="text-center py-8" id="achievementsContent">
-                                <i class="fas fa-circle-notch fa-spin text-4xl text-blue-400 mb-4"></i>
-                                <p class="text-blue-300">Loading your achievements...</p>
-                            </div>
-                        </div>
-                        
-                        <!-- Diary Tab -->
-                        <div class="tab-content hidden" id="diaryTab">
-                            <div class="flex justify-between items-center mb-6">
-                                <h3 class="text-xl font-bold text-blue-300">Personal Diary</h3>
-                                <button id="addDiaryEntry" class="px-4 py-2 primary-gradient text-white rounded-xl hover:scale-105 transition">
-                                    <i class="fas fa-plus mr-2"></i>
-                                    New Entry
-                                </button>
-                            </div>
-                            <div class="text-center py-8" id="diaryEntriesContent">
-                                <i class="fas fa-circle-notch fa-spin text-4xl text-blue-400 mb-4"></i>
-                                <p class="text-blue-300">Loading your diary entries...</p>
+                            
+                            <div class="chat-container hidden" id="chatContainer">
+                                <div class="chat-header">
+                                    <div class="chat-avatar" id="chatFriendAvatar"></div>
+                                    <div class="chat-info">
+                                        <div class="chat-name" id="chatFriendName">Friend Name</div>
+                                        <div class="chat-status" id="chatFriendStatus">Online</div>
+                                    </div>
+                                </div>
+                                <div class="chat-messages" id="chatMessages">
+                                    <!-- Messages will be loaded here -->
+                                </div>
+                                <div class="chat-input-container">
+                                    <input type="text" class="chat-input" id="chatInput" placeholder="Type a message..." />
+                                    <button class="send-button" id="sendMessageBtn">
+                                        <i class="fas fa-paper-plane"></i>
+                                    </button>
+                                </div>
                             </div>
                         </div>
                     </div>
@@ -1010,7 +1349,7 @@
     <script type="module">
         // Import Firebase modules
         import { initializeApp } from "https://www.gstatic.com/firebasejs/10.7.1/firebase-app.js";
-        import { getFirestore, collection, addDoc, serverTimestamp, doc, getDoc, setDoc, onSnapshot, updateDoc, query, where, getDocs, orderBy } from "https://www.gstatic.com/firebasejs/10.7.1/firebase-firestore.js";
+        import { getFirestore, collection, addDoc, serverTimestamp, doc, getDoc, setDoc, onSnapshot, updateDoc, query, where, getDocs, orderBy, deleteDoc } from "https://www.gstatic.com/firebasejs/10.7.1/firebase-firestore.js";
         import { getAuth, signOut, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/10.7.1/firebase-auth.js";
         import { getStorage, ref, uploadBytes, getDownloadURL } from "https://www.gstatic.com/firebasejs/10.7.1/firebase-storage.js";
 
@@ -1052,7 +1391,8 @@
                 query,
                 where,
                 getDocs,
-                orderBy
+                orderBy,
+                deleteDoc
             },
             storageFunctions: {
                 ref,
@@ -1061,7 +1401,7 @@
             }
         };
 
-        console.log('🔥 Firebase initialized successfully in profile!');
+        console.log('🔥 Kynecta initialized successfully!');
 
         // Initialize profile app after Firebase is ready
         if (window.initProfileApp) {
@@ -1070,7 +1410,7 @@
     </script>
 
     <script>
-        // Profile Application Class
+        // Complete Profile Application Class
         class ProfileApplication {
             constructor() {
                 this.currentUser = null;
@@ -1084,7 +1424,16 @@
                 this.userAchievements = [];
                 this.diaryEntries = [];
                 this.friends = [];
+                this.friendRequests = [];
+                this.peopleSuggestions = [];
                 this.isDarkMode = true;
+                
+                // Chat properties
+                this.activeChat = null;
+                this.activeFriend = null;
+                this.chatUnsubscribe = null;
+                this.friendsUnsubscribe = null;
+                this.friendRequestsUnsubscribe = null;
             }
 
             async initialize() {
@@ -1093,11 +1442,11 @@
                     this.createParticles();
                     this.setupEventListeners();
                     this.checkAuthentication();
-                    console.log('✅ Profile app initialized successfully');
+                    console.log('✅ Kynecta profile app initialized successfully');
                 } catch (error) {
                     console.error('❌ Profile app initialization failed:', error);
                     this.updateConnectionStatus('error');
-                    this.showNotification('Firebase connection failed. Please check your connection.', 'error');
+                    this.showNotification('Connection failed. Please check your connection.', 'error');
                 }
             }
 
@@ -1143,7 +1492,7 @@
 
                 window.firebaseApp.authFunctions.onAuthStateChanged(window.firebaseApp.auth, (user) => {
                     if (user) {
-                        console.log('Firebase auth user detected:', user.email);
+                        console.log('Authenticated user detected:', user.email);
                         this.currentUser = user;
                         localStorage.setItem('userEmail', user.email);
                         localStorage.setItem('userId', user.uid);
@@ -1182,6 +1531,8 @@
                             await this.loadAchievements(uid);
                             await this.loadDiaryEntries(uid);
                             await this.loadFriends(uid);
+                            await this.loadFriendRequests(uid);
+                            await this.loadPeopleSuggestions(uid);
                             
                             this.showLoading(false);
                             this.showProfileLayout();
@@ -1217,6 +1568,7 @@
                     }));
                     
                     console.log("Loaded user posts:", this.userPosts.length);
+                    this.loadPostsTab();
                 } catch (error) {
                     console.error("Error loading user posts:", error);
                 }
@@ -1283,117 +1635,617 @@
 
             async loadFriends(uid) {
                 try {
+                    // Get the user's friends list
                     const friendsQuery = window.firebaseApp.firestore.query(
                         window.firebaseApp.firestore.collection(window.firebaseApp.db, "friends"),
                         window.firebaseApp.firestore.where("userId", "==", uid)
                     );
                     
                     const querySnapshot = await window.firebaseApp.firestore.getDocs(friendsQuery);
-                    this.friends = querySnapshot.docs.map(doc => ({
-                        id: doc.id,
-                        ...doc.data()
-                    }));
+                    const friendIds = [];
+                    
+                    querySnapshot.forEach(doc => {
+                        const friendData = doc.data();
+                        friendIds.push(friendData.friendId);
+                    });
+                    
+                    console.log("Friend IDs:", friendIds);
+                    
+                    // Get the actual user profiles for each friend
+                    this.friends = [];
+                    for (const friendId of friendIds) {
+                        const friendRef = window.firebaseApp.firestore.doc(window.firebaseApp.db, "users", friendId);
+                        const friendDoc = await window.firebaseApp.firestore.getDoc(friendRef);
+                        
+                        if (friendDoc.exists()) {
+                            this.friends.push({
+                                id: friendDoc.id,
+                                ...friendDoc.data()
+                            });
+                        }
+                    }
                     
                     console.log("Loaded friends:", this.friends.length);
+                    this.updateFriendsList();
+                    
+                    // Set up real-time listener for friends
+                    this.setupFriendsListener(uid);
+                    
                 } catch (error) {
                     console.error("Error loading friends:", error);
                 }
             }
 
-            async loadProfileOnce(uid) {
+            async loadFriendRequests(uid) {
                 try {
-                    const userRef = window.firebaseApp.firestore.doc(window.firebaseApp.db, "users", uid);
-                    const doc = await window.firebaseApp.firestore.getDoc(userRef);
+                    // Get incoming friend requests
+                    const requestsQuery = window.firebaseApp.firestore.query(
+                        window.firebaseApp.firestore.collection(window.firebaseApp.db, "friendRequests"),
+                        window.firebaseApp.firestore.where("toUserId", "==", uid),
+                        window.firebaseApp.firestore.where("status", "==", "pending")
+                    );
                     
-                    if (doc.exists()) {
-                        this.userProfile = { id: doc.id, ...doc.data() };
-                        this.updateProfileUI(this.userProfile);
-                        this.updateSidebar(this.userProfile);
-                        this.calculateProfileCompletion(this.userProfile);
-                        this.showLoading(false);
-                        this.showProfileLayout();
-                    } else {
-                        this.createNewProfile(uid);
+                    const querySnapshot = await window.firebaseApp.firestore.getDocs(requestsQuery);
+                    this.friendRequests = [];
+                    
+                    for (const doc of querySnapshot.docs) {
+                        const requestData = doc.data();
+                        const fromUserRef = window.firebaseApp.firestore.doc(window.firebaseApp.db, "users", requestData.fromUserId);
+                        const fromUserDoc = await window.firebaseApp.firestore.getDoc(fromUserRef);
+                        
+                        if (fromUserDoc.exists()) {
+                            this.friendRequests.push({
+                                id: doc.id,
+                                ...requestData,
+                                fromUser: { id: fromUserDoc.id, ...fromUserDoc.data() }
+                            });
+                        }
                     }
+                    
+                    console.log("Loaded friend requests:", this.friendRequests.length);
+                    this.updateFriendRequestsList();
+                    
+                    // Set up real-time listener for friend requests
+                    this.setupFriendRequestsListener(uid);
+                    
                 } catch (error) {
-                    console.error("Fallback load also failed:", error);
-                    this.createFallbackProfile();
+                    console.error("Error loading friend requests:", error);
                 }
             }
 
-            async createNewProfile(uid) {
+            async loadPeopleSuggestions(uid) {
                 try {
-                    const newProfile = {
-                        displayName: this.currentUser.displayName || this.currentUser.email.split('@')[0],
-                        email: this.currentUser.email,
-                        username: this.generateUsername(this.currentUser.email),
-                        bio: "Welcome to my ConnectSphere profile! 🌟 Share your thoughts, connect with friends, and explore the community!",
-                        location: "",
-                        interests: ["Technology", "Networking", "Learning", "Innovation"],
-                        skills: ["Communication", "Problem Solving", "Creativity"],
-                        socialLinks: {
-                            twitter: "",
-                            github: "",
-                            linkedin: "",
-                            website: ""
-                        },
-                        profilePicture: "",
-                        coverPhoto: "",
-                        privacy: "public",
-                        theme: "blue-purple",
-                        mood: "happy",
-                        createdAt: window.firebaseApp.firestore.serverTimestamp(),
-                        lastActive: window.firebaseApp.firestore.serverTimestamp(),
-                        stats: {
-                            posts: 0,
-                            followers: 0,
-                            following: 0,
-                            reputation: 100,
-                            profileViews: 0
-                        },
-                        isOnline: true
-                    };
-
-                    const userRef = window.firebaseApp.firestore.doc(window.firebaseApp.db, "users", uid);
-                    await window.firebaseApp.firestore.setDoc(userRef, newProfile);
+                    // Get random users for suggestions (excluding current user and friends)
+                    const usersQuery = window.firebaseApp.firestore.query(
+                        window.firebaseApp.firestore.collection(window.firebaseApp.db, "users"),
+                        window.firebaseApp.firestore.where("__name__", "!=", uid)
+                    );
                     
-                    console.log("New profile created successfully");
-                    this.userProfile = newProfile;
+                    const querySnapshot = await window.firebaseApp.firestore.getDocs(usersQuery);
+                    this.peopleSuggestions = [];
+                    
+                    const friendIds = this.friends.map(friend => friend.id);
+                    
+                    querySnapshot.forEach(doc => {
+                        if (doc.id !== uid && !friendIds.includes(doc.id)) {
+                            this.peopleSuggestions.push({
+                                id: doc.id,
+                                ...doc.data()
+                            });
+                        }
+                    });
+                    
+                    // Limit to 5 suggestions
+                    this.peopleSuggestions = this.peopleSuggestions.slice(0, 5);
+                    console.log("Loaded people suggestions:", this.peopleSuggestions.length);
                     
                 } catch (error) {
-                    console.error("Error creating new profile:", error);
-                    this.createFallbackProfile();
+                    console.error("Error loading people suggestions:", error);
                 }
             }
 
-            createFallbackProfile() {
-                console.log("Creating fallback profile UI");
-                const fallbackProfile = {
-                    displayName: this.currentUser.displayName || this.currentUser.email.split('@')[0],
-                    email: this.currentUser.email,
-                    username: this.generateUsername(this.currentUser.email),
-                    bio: "Welcome to my ConnectSphere profile! 🌟",
-                    location: "Unknown",
-                    interests: ["Technology", "Networking", "Learning"],
-                    skills: ["Communication", "Problem Solving"],
-                    stats: {
-                        posts: 0,
-                        followers: 0,
-                        following: 0,
-                        reputation: 100
-                    }
-                };
+            setupFriendsListener(uid) {
+                const friendsQuery = window.firebaseApp.firestore.query(
+                    window.firebaseApp.firestore.collection(window.firebaseApp.db, "friends"),
+                    window.firebaseApp.firestore.where("userId", "==", uid)
+                );
                 
-                this.userProfile = fallbackProfile;
-                this.updateProfileUI(fallbackProfile);
-                this.updateSidebar(fallbackProfile);
-                this.showLoading(false);
-                this.showProfileLayout();
+                this.friendsUnsubscribe = window.firebaseApp.firestore.onSnapshot(friendsQuery, async (snapshot) => {
+                    const friendIds = [];
+                    
+                    snapshot.forEach(doc => {
+                        const friendData = doc.data();
+                        friendIds.push(friendData.friendId);
+                    });
+                    
+                    // Update friends list
+                    this.friends = [];
+                    for (const friendId of friendIds) {
+                        const friendRef = window.firebaseApp.firestore.doc(window.firebaseApp.db, "users", friendId);
+                        const friendDoc = await window.firebaseApp.firestore.getDoc(friendRef);
+                        
+                        if (friendDoc.exists()) {
+                            this.friends.push({
+                                id: friendDoc.id,
+                                ...friendDoc.data()
+                            });
+                        }
+                    }
+                    
+                    this.updateFriendsList();
+                });
             }
 
-            generateUsername(email) {
-                return email.split('@')[0].toLowerCase().replace(/[^a-z0-9]/g, '');
+            setupFriendRequestsListener(uid) {
+                const requestsQuery = window.firebaseApp.firestore.query(
+                    window.firebaseApp.firestore.collection(window.firebaseApp.db, "friendRequests"),
+                    window.firebaseApp.firestore.where("toUserId", "==", uid),
+                    window.firebaseApp.firestore.where("status", "==", "pending")
+                );
+                
+                this.friendRequestsUnsubscribe = window.firebaseApp.firestore.onSnapshot(requestsQuery, async (snapshot) => {
+                    this.friendRequests = [];
+                    
+                    for (const doc of snapshot.docs) {
+                        const requestData = doc.data();
+                        const fromUserRef = window.firebaseApp.firestore.doc(window.firebaseApp.db, "users", requestData.fromUserId);
+                        const fromUserDoc = await window.firebaseApp.firestore.getDoc(fromUserRef);
+                        
+                        if (fromUserDoc.exists()) {
+                            this.friendRequests.push({
+                                id: doc.id,
+                                ...requestData,
+                                fromUser: { id: fromUserDoc.id, ...fromUserDoc.data() }
+                            });
+                        }
+                    }
+                    
+                    this.updateFriendRequestsList();
+                });
             }
+
+            updateFriendsList() {
+                const friendsList = document.getElementById('friendsList');
+                const friendsCount = document.getElementById('friendsCount');
+                
+                friendsCount.textContent = this.friends.length;
+                
+                if (this.friends.length === 0) {
+                    friendsList.innerHTML = `
+                        <div class="p-4 text-center text-blue-300">
+                            <i class="fas fa-user-friends text-2xl mb-2 opacity-50"></i>
+                            <p>No friends yet</p>
+                            <p class="text-sm mt-2">Connect with people to see them here</p>
+                        </div>
+                    `;
+                    return;
+                }
+                
+                let friendsHTML = '';
+                
+                this.friends.forEach(friend => {
+                    const isOnline = friend.isOnline;
+                    const lastActive = friend.lastActive?.toDate ? friend.lastActive.toDate() : new Date(friend.lastActive);
+                    const statusText = isOnline ? 'Online' : `Last seen ${this.formatLastSeen(lastActive)}`;
+                    const statusClass = isOnline ? 'friend-online' : 'friend-offline';
+                    
+                    friendsHTML += `
+                        <div class="friend-item" data-friend-id="${friend.id}">
+                            <div class="friend-avatar" style="${friend.profilePicture ? `background-image: url('${friend.profilePicture}')` : ''}">
+                                ${friend.profilePicture ? '' : friend.displayName?.charAt(0) || 'F'}
+                            </div>
+                            <div class="friend-info">
+                                <div class="friend-name">${friend.displayName}</div>
+                                <div class="friend-status">${statusText}</div>
+                            </div>
+                            <div class="${statusClass}"></div>
+                        </div>
+                    `;
+                });
+                
+                friendsList.innerHTML = friendsHTML;
+                
+                // Add click event listeners to friend items
+                document.querySelectorAll('.friend-item').forEach(item => {
+                    item.addEventListener('click', () => {
+                        const friendId = item.getAttribute('data-friend-id');
+                        this.selectFriend(friendId);
+                    });
+                });
+            }
+
+            updateFriendRequestsList() {
+                const friendRequestsSection = document.getElementById('friendRequestsSection');
+                const friendRequestsList = document.getElementById('friendRequestsList');
+                const friendRequestBadge = document.getElementById('friendRequestBadge');
+                
+                // Update badge
+                if (this.friendRequests.length > 0) {
+                    friendRequestBadge.textContent = this.friendRequests.length;
+                    friendRequestBadge.classList.remove('hidden');
+                    friendRequestsSection.classList.remove('hidden');
+                } else {
+                    friendRequestBadge.classList.add('hidden');
+                    friendRequestsSection.classList.add('hidden');
+                }
+                
+                if (this.friendRequests.length === 0) {
+                    friendRequestsList.innerHTML = `
+                        <div class="p-4 text-center text-blue-300">
+                            <p>No pending friend requests</p>
+                        </div>
+                    `;
+                    return;
+                }
+                
+                let requestsHTML = '';
+                
+                this.friendRequests.forEach(request => {
+                    requestsHTML += `
+                        <div class="friend-request-item">
+                            <div class="friend-avatar" style="${request.fromUser.profilePicture ? `background-image: url('${request.fromUser.profilePicture}')` : ''}">
+                                ${request.fromUser.profilePicture ? '' : request.fromUser.displayName?.charAt(0) || 'U'}
+                            </div>
+                            <div class="friend-info">
+                                <div class="friend-name">${request.fromUser.displayName}</div>
+                                <div class="friend-status">Wants to connect with you</div>
+                            </div>
+                            <div class="request-actions">
+                                <button class="accept-btn" data-request-id="${request.id}" data-from-user-id="${request.fromUserId}">
+                                    <i class="fas fa-check"></i>
+                                </button>
+                                <button class="reject-btn" data-request-id="${request.id}">
+                                    <i class="fas fa-times"></i>
+                                </button>
+                            </div>
+                        </div>
+                    `;
+                });
+                
+                friendRequestsList.innerHTML = requestsHTML;
+                
+                // Add event listeners to accept/reject buttons
+                document.querySelectorAll('.accept-btn').forEach(btn => {
+                    btn.addEventListener('click', (e) => {
+                        const requestId = btn.getAttribute('data-request-id');
+                        const fromUserId = btn.getAttribute('data-from-user-id');
+                        this.acceptFriendRequest(requestId, fromUserId);
+                    });
+                });
+                
+                document.querySelectorAll('.reject-btn').forEach(btn => {
+                    btn.addEventListener('click', (e) => {
+                        const requestId = btn.getAttribute('data-request-id');
+                        this.rejectFriendRequest(requestId);
+                    });
+                });
+            }
+
+            async acceptFriendRequest(requestId, fromUserId) {
+                try {
+                    // Update the friend request status
+                    const requestRef = window.firebaseApp.firestore.doc(window.firebaseApp.db, "friendRequests", requestId);
+                    await window.firebaseApp.firestore.updateDoc(requestRef, {
+                        status: "accepted",
+                        respondedAt: window.firebaseApp.firestore.serverTimestamp()
+                    });
+                    
+                    // Create friendship for current user
+                    const currentUserFriendRef = window.firebaseApp.firestore.collection(window.firebaseApp.db, "friends");
+                    await window.firebaseApp.firestore.addDoc(currentUserFriendRef, {
+                        userId: this.currentUser.uid,
+                        friendId: fromUserId,
+                        createdAt: window.firebaseApp.firestore.serverTimestamp()
+                    });
+                    
+                    // Create friendship for the other user
+                    const otherUserFriendRef = window.firebaseApp.firestore.collection(window.firebaseApp.db, "friends");
+                    await window.firebaseApp.firestore.addDoc(otherUserFriendRef, {
+                        userId: fromUserId,
+                        friendId: this.currentUser.uid,
+                        createdAt: window.firebaseApp.firestore.serverTimestamp()
+                    });
+                    
+                    this.showNotification('Friend request accepted!', 'success');
+                    
+                } catch (error) {
+                    console.error('Error accepting friend request:', error);
+                    this.showNotification('Error accepting friend request', 'error');
+                }
+            }
+
+            async rejectFriendRequest(requestId) {
+                try {
+                    // Update the friend request status
+                    const requestRef = window.firebaseApp.firestore.doc(window.firebaseApp.db, "friendRequests", requestId);
+                    await window.firebaseApp.firestore.updateDoc(requestRef, {
+                        status: "rejected",
+                        respondedAt: window.firebaseApp.firestore.serverTimestamp()
+                    });
+                    
+                    this.showNotification('Friend request rejected', 'info');
+                    
+                } catch (error) {
+                    console.error('Error rejecting friend request:', error);
+                    this.showNotification('Error rejecting friend request', 'error');
+                }
+            }
+
+            async searchUsers(searchTerm) {
+                try {
+                    // Search by display name
+                    const nameQuery = window.firebaseApp.firestore.query(
+                        window.firebaseApp.firestore.collection(window.firebaseApp.db, "users"),
+                        window.firebaseApp.firestore.where("displayName", ">=", searchTerm),
+                        window.firebaseApp.firestore.where("displayName", "<=", searchTerm + '\uf8ff')
+                    );
+                    
+                    // Search by email
+                    const emailQuery = window.firebaseApp.firestore.query(
+                        window.firebaseApp.firestore.collection(window.firebaseApp.db, "users"),
+                        window.firebaseApp.firestore.where("email", ">=", searchTerm),
+                        window.firebaseApp.firestore.where("email", "<=", searchTerm + '\uf8ff')
+                    );
+                    
+                    const [nameSnapshot, emailSnapshot] = await Promise.all([
+                        window.firebaseApp.firestore.getDocs(nameQuery),
+                        window.firebaseApp.firestore.getDocs(emailQuery)
+                    ]);
+                    
+                    const results = [];
+                    const addedIds = new Set();
+                    
+                    // Add name results
+                    nameSnapshot.forEach(doc => {
+                        if (doc.id !== this.currentUser.uid && !addedIds.has(doc.id)) {
+                            results.push({ id: doc.id, ...doc.data() });
+                            addedIds.add(doc.id);
+                        }
+                    });
+                    
+                    // Add email results
+                    emailSnapshot.forEach(doc => {
+                        if (doc.id !== this.currentUser.uid && !addedIds.has(doc.id)) {
+                            results.push({ id: doc.id, ...doc.data() });
+                            addedIds.add(doc.id);
+                        }
+                    });
+                    
+                    return results;
+                    
+                } catch (error) {
+                    console.error('Error searching users:', error);
+                    return [];
+                }
+            }
+
+            async sendFriendRequest(toUserId) {
+                try {
+                    // Check if request already exists
+                    const existingRequestQuery = window.firebaseApp.firestore.query(
+                        window.firebaseApp.firestore.collection(window.firebaseApp.db, "friendRequests"),
+                        window.firebaseApp.firestore.where("fromUserId", "==", this.currentUser.uid),
+                        window.firebaseApp.firestore.where("toUserId", "==", toUserId),
+                        window.firebaseApp.firestore.where("status", "==", "pending")
+                    );
+                    
+                    const existingRequest = await window.firebaseApp.firestore.getDocs(existingRequestQuery);
+                    
+                    if (!existingRequest.empty) {
+                        this.showNotification('Friend request already sent', 'info');
+                        return;
+                    }
+                    
+                    // Create new friend request
+                    const requestRef = window.firebaseApp.firestore.collection(window.firebaseApp.db, "friendRequests");
+                    await window.firebaseApp.firestore.addDoc(requestRef, {
+                        fromUserId: this.currentUser.uid,
+                        toUserId: toUserId,
+                        status: "pending",
+                        createdAt: window.firebaseApp.firestore.serverTimestamp()
+                    });
+                    
+                    this.showNotification('Friend request sent!', 'success');
+                    
+                } catch (error) {
+                    console.error('Error sending friend request:', error);
+                    this.showNotification('Error sending friend request', 'error');
+                }
+            }
+
+            formatLastSeen(date) {
+                const now = new Date();
+                const diffMs = now - date;
+                const diffMins = Math.floor(diffMs / 60000);
+                const diffHours = Math.floor(diffMins / 60);
+                const diffDays = Math.floor(diffHours / 24);
+                
+                if (diffMins < 1) return 'just now';
+                if (diffMins < 60) return `${diffMins} min ago`;
+                if (diffHours < 24) return `${diffHours} hour${diffHours > 1 ? 's' : ''} ago`;
+                if (diffDays < 7) return `${diffDays} day${diffDays > 1 ? 's' : ''} ago`;
+                
+                return date.toLocaleDateString();
+            }
+
+            async selectFriend(friendId) {
+                // Remove active class from all friends
+                document.querySelectorAll('.friend-item').forEach(item => {
+                    item.classList.remove('active');
+                });
+                
+                // Add active class to selected friend
+                const selectedFriend = document.querySelector(`.friend-item[data-friend-id="${friendId}"]`);
+                if (selectedFriend) {
+                    selectedFriend.classList.add('active');
+                }
+                
+                // Find friend data
+                this.activeFriend = this.friends.find(friend => friend.id === friendId);
+                
+                if (!this.activeFriend) {
+                    console.error('Friend not found:', friendId);
+                    return;
+                }
+                
+                // Show chat window
+                this.showChatWindow();
+                
+                // Load or create chat
+                await this.loadOrCreateChat(friendId);
+            }
+
+            showChatWindow() {
+                document.getElementById('noChatSelected').classList.add('hidden');
+                document.getElementById('chatContainer').classList.remove('hidden');
+                
+                // Update chat header
+                document.getElementById('chatFriendName').textContent = this.activeFriend.displayName;
+                document.getElementById('chatFriendStatus').textContent = this.activeFriend.isOnline ? 'Online' : 'Offline';
+                
+                const avatarElement = document.getElementById('chatFriendAvatar');
+                if (this.activeFriend.profilePicture) {
+                    avatarElement.style.backgroundImage = `url(${this.activeFriend.profilePicture})`;
+                    avatarElement.textContent = '';
+                } else {
+                    avatarElement.style.backgroundImage = '';
+                    avatarElement.textContent = this.activeFriend.displayName?.charAt(0) || 'F';
+                }
+            }
+
+            async loadOrCreateChat(friendId) {
+                // Generate a unique chat ID based on user IDs (sorted to ensure consistency)
+                const chatId = [this.currentUser.uid, friendId].sort().join('_');
+                
+                // Check if chat already exists
+                const chatRef = window.firebaseApp.firestore.doc(window.firebaseApp.db, "chats", chatId);
+                const chatDoc = await window.firebaseApp.firestore.getDoc(chatRef);
+                
+                if (chatDoc.exists()) {
+                    this.activeChat = { id: chatDoc.id, ...chatDoc.data() };
+                } else {
+                    // Create new chat
+                    const newChat = {
+                        members: [this.currentUser.uid, friendId],
+                        createdAt: window.firebaseApp.firestore.serverTimestamp(),
+                        lastMessage: null,
+                        lastMessageAt: null
+                    };
+                    
+                    await window.firebaseApp.firestore.setDoc(chatRef, newChat);
+                    this.activeChat = { id: chatId, ...newChat };
+                }
+                
+                // Load messages for this chat
+                this.loadChatMessages(chatId);
+            }
+
+            loadChatMessages(chatId) {
+                // Clear previous message listener
+                if (this.chatUnsubscribe) {
+                    this.chatUnsubscribe();
+                }
+                
+                const messagesQuery = window.firebaseApp.firestore.query(
+                    window.firebaseApp.firestore.collection(window.firebaseApp.db, "chats", chatId, "messages"),
+                    window.firebaseApp.firestore.orderBy("timestamp", "asc")
+                );
+                
+                // Set up real-time listener for messages
+                this.chatUnsubscribe = window.firebaseApp.firestore.onSnapshot(messagesQuery, (snapshot) => {
+                    const messages = [];
+                    
+                    snapshot.forEach(doc => {
+                        messages.push({
+                            id: doc.id,
+                            ...doc.data()
+                        });
+                    });
+                    
+                    this.displayMessages(messages);
+                    
+                    // Scroll to bottom of messages
+                    const messagesContainer = document.getElementById('chatMessages');
+                    setTimeout(() => {
+                        messagesContainer.scrollTop = messagesContainer.scrollHeight;
+                    }, 100);
+                });
+            }
+
+            displayMessages(messages) {
+                const messagesContainer = document.getElementById('chatMessages');
+                
+                if (messages.length === 0) {
+                    messagesContainer.innerHTML = `
+                        <div class="text-center text-blue-300 py-8">
+                            <i class="fas fa-comments text-2xl mb-2 opacity-50"></i>
+                            <p>No messages yet</p>
+                            <p class="text-sm">Start a conversation with ${this.activeFriend.displayName}</p>
+                        </div>
+                    `;
+                    return;
+                }
+                
+                let messagesHTML = '';
+                
+                messages.forEach(message => {
+                    const isSent = message.senderId === this.currentUser.uid;
+                    const senderName = isSent ? 'You' : this.activeFriend.displayName;
+                    const messageClass = isSent ? 'sent' : 'received';
+                    const timestamp = message.timestamp?.toDate ? message.timestamp.toDate() : new Date();
+                    const timeString = timestamp.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+                    
+                    messagesHTML += `
+                        <div class="message ${messageClass}">
+                            <div class="message-sender">${senderName}</div>
+                            <div class="message-text">${message.text}</div>
+                            <div class="message-time">${timeString}</div>
+                        </div>
+                    `;
+                });
+                
+                messagesContainer.innerHTML = messagesHTML;
+            }
+
+            async sendMessage() {
+                const messageInput = document.getElementById('chatInput');
+                const messageText = messageInput.value.trim();
+                
+                if (!messageText || !this.activeChat || !this.activeFriend) {
+                    return;
+                }
+                
+                try {
+                    // Create message object
+                    const newMessage = {
+                        text: messageText,
+                        senderId: this.currentUser.uid,
+                        timestamp: window.firebaseApp.firestore.serverTimestamp()
+                    };
+                    
+                    // Add message to Firestore
+                    await window.firebaseApp.firestore.addDoc(
+                        window.firebaseApp.firestore.collection(window.firebaseApp.db, "chats", this.activeChat.id, "messages"),
+                        newMessage
+                    );
+                    
+                    // Update chat's last message
+                    const chatRef = window.firebaseApp.firestore.doc(window.firebaseApp.db, "chats", this.activeChat.id);
+                    await window.firebaseApp.firestore.updateDoc(chatRef, {
+                        lastMessage: messageText,
+                        lastMessageAt: window.firebaseApp.firestore.serverTimestamp()
+                    });
+                    
+                    // Clear input
+                    messageInput.value = '';
+                    
+                } catch (error) {
+                    console.error('Error sending message:', error);
+                    this.showNotification('Failed to send message. Please try again.', 'error');
+                }
+            }
+
+            // ... (Previous methods for profile management, tabs, etc. remain the same)
 
             updateProfileUI(profile) {
                 // Update basic profile information
@@ -1487,8 +2339,10 @@
 
                 const platforms = [
                     { key: 'twitter', icon: 'fab fa-twitter', color: 'bg-blue-400', url: socialLinks.twitter },
+                    { key: 'instagram', icon: 'fab fa-instagram', color: 'bg-pink-500', url: socialLinks.instagram },
+                    { key: 'facebook', icon: 'fab fa-facebook', color: 'bg-blue-600', url: socialLinks.facebook },
+                    { key: 'linkedin', icon: 'fab fa-linkedin', color: 'bg-blue-500', url: socialLinks.linkedin },
                     { key: 'github', icon: 'fab fa-github', color: 'bg-gray-700', url: socialLinks.github },
-                    { key: 'linkedin', icon: 'fab fa-linkedin', color: 'bg-blue-600', url: socialLinks.linkedin },
                     { key: 'website', icon: 'fas fa-globe', color: 'bg-green-500', url: socialLinks.website }
                 ];
                 
@@ -1778,15 +2632,25 @@
                                             <i class="fab fa-twitter text-blue-400 w-5 mr-3"></i>
                                             <a href="${profile.socialLinks.twitter}" target="_blank" class="text-white hover:text-blue-300">Twitter</a>
                                         </div>` : ''}
+                                        ${profile.socialLinks.instagram ? `
+                                        <div class="flex items-center">
+                                            <i class="fab fa-instagram text-pink-500 w-5 mr-3"></i>
+                                            <a href="${profile.socialLinks.instagram}" target="_blank" class="text-white hover:text-blue-300">Instagram</a>
+                                        </div>` : ''}
+                                        ${profile.socialLinks.facebook ? `
+                                        <div class="flex items-center">
+                                            <i class="fab fa-facebook text-blue-600 w-5 mr-3"></i>
+                                            <a href="${profile.socialLinks.facebook}" target="_blank" class="text-white hover:text-blue-300">Facebook</a>
+                                        </div>` : ''}
+                                        ${profile.socialLinks.linkedin ? `
+                                        <div class="flex items-center">
+                                            <i class="fab fa-linkedin text-blue-400 w-5 mr-3"></i>
+                                            <a href="${profile.socialLinks.linkedin}" target="_blank" class="text-white hover:text-blue-300">LinkedIn</a>
+                                        </div>` : ''}
                                         ${profile.socialLinks.github ? `
                                         <div class="flex items-center">
                                             <i class="fab fa-github text-gray-400 w-5 mr-3"></i>
                                             <a href="${profile.socialLinks.github}" target="_blank" class="text-white hover:text-blue-300">GitHub</a>
-                                        </div>` : ''}
-                                        ${profile.socialLinks.linkedin ? `
-                                        <div class="flex items-center">
-                                            <i class="fab fa-linkedin text-blue-600 w-5 mr-3"></i>
-                                            <a href="${profile.socialLinks.linkedin}" target="_blank" class="text-white hover:text-blue-300">LinkedIn</a>
                                         </div>` : ''}
                                         ${profile.socialLinks.website ? `
                                         <div class="flex items-center">
@@ -2118,6 +2982,26 @@
                     this.openEditProfileModal();
                 });
 
+                // Find friends button
+                document.getElementById('findFriendsBtn').addEventListener('click', () => {
+                    this.openFindFriendsModal();
+                });
+
+                // View friend requests button
+                document.getElementById('viewFriendRequests').addEventListener('click', () => {
+                    this.toggleFriendRequests();
+                });
+
+                // Close find friends modal
+                document.getElementById('closeFindFriends').addEventListener('click', () => {
+                    document.getElementById('findFriendsModal').classList.add('hidden');
+                });
+
+                // Friend search input
+                document.getElementById('friendSearchInput').addEventListener('input', (e) => {
+                    this.handleFriendSearch(e.target.value);
+                });
+
                 // Cancel edit button
                 document.getElementById('cancelEdit').addEventListener('click', () => {
                     document.getElementById('editProfileModal').classList.add('hidden');
@@ -2227,6 +3111,246 @@
                         option.classList.add('active');
                     });
                 });
+
+                // Chat input and send button
+                document.getElementById('sendMessageBtn').addEventListener('click', () => {
+                    this.sendMessage();
+                });
+
+                document.getElementById('chatInput').addEventListener('keypress', (e) => {
+                    if (e.key === 'Enter') {
+                        this.sendMessage();
+                    }
+                });
+            }
+
+            toggleFriendRequests() {
+                const friendRequestsSection = document.getElementById('friendRequestsSection');
+                friendRequestsSection.classList.toggle('hidden');
+            }
+
+            async openFindFriendsModal() {
+                document.getElementById('findFriendsModal').classList.remove('hidden');
+                await this.loadPeopleSuggestions(this.currentUser.uid);
+                this.displayPeopleSuggestions();
+            }
+
+            async handleFriendSearch(searchTerm) {
+                const resultsContainer = document.getElementById('friendSearchResults');
+                
+                if (searchTerm.length < 2) {
+                    resultsContainer.innerHTML = '<p class="text-blue-300 text-center p-4">Type at least 2 characters to search</p>';
+                    return;
+                }
+                
+                resultsContainer.innerHTML = '<p class="text-blue-300 text-center p-4">Searching...</p>';
+                
+                const results = await this.searchUsers(searchTerm);
+                
+                if (results.length === 0) {
+                    resultsContainer.innerHTML = '<p class="text-blue-300 text-center p-4">No users found</p>';
+                    return;
+                }
+                
+                let resultsHTML = '';
+                results.forEach(user => {
+                    const isFriend = this.friends.some(friend => friend.id === user.id);
+                    const hasPendingRequest = this.friendRequests.some(req => req.fromUserId === user.id);
+                    
+                    resultsHTML += `
+                        <div class="suggestion-item">
+                            <div class="friend-avatar" style="${user.profilePicture ? `background-image: url('${user.profilePicture}')` : ''}">
+                                ${user.profilePicture ? '' : user.displayName?.charAt(0) || 'U'}
+                            </div>
+                            <div class="friend-info">
+                                <div class="friend-name">${user.displayName}</div>
+                                <div class="friend-status">@${user.username}</div>
+                            </div>
+                            ${!isFriend && !hasPendingRequest ? `
+                                <button class="add-friend-btn" data-user-id="${user.id}">
+                                    <i class="fas fa-user-plus"></i>
+                                </button>
+                            ` : ''}
+                            ${hasPendingRequest ? `
+                                <button class="add-friend-btn" disabled style="opacity: 0.5;">
+                                    <i class="fas fa-clock"></i> Pending
+                                </button>
+                            ` : ''}
+                            ${isFriend ? `
+                                <button class="add-friend-btn" disabled style="opacity: 0.5;">
+                                    <i class="fas fa-check"></i> Friends
+                                </button>
+                            ` : ''}
+                        </div>
+                    `;
+                });
+                
+                resultsContainer.innerHTML = resultsHTML;
+                
+                // Add event listeners to add friend buttons
+                document.querySelectorAll('.add-friend-btn:not(:disabled)').forEach(btn => {
+                    btn.addEventListener('click', (e) => {
+                        const userId = btn.getAttribute('data-user-id');
+                        this.sendFriendRequest(userId);
+                        btn.disabled = true;
+                        btn.innerHTML = '<i class="fas fa-clock"></i> Pending';
+                        btn.style.opacity = '0.5';
+                    });
+                });
+            }
+
+            displayPeopleSuggestions() {
+                const container = document.getElementById('peopleYouMayKnow');
+                
+                if (this.peopleSuggestions.length === 0) {
+                    container.innerHTML = '<p class="text-blue-300 text-center p-4">No suggestions available</p>';
+                    return;
+                }
+                
+                let suggestionsHTML = '';
+                this.peopleSuggestions.forEach(user => {
+                    const isFriend = this.friends.some(friend => friend.id === user.id);
+                    const hasPendingRequest = this.friendRequests.some(req => req.fromUserId === user.id);
+                    
+                    suggestionsHTML += `
+                        <div class="suggestion-item">
+                            <div class="friend-avatar" style="${user.profilePicture ? `background-image: url('${user.profilePicture}')` : ''}">
+                                ${user.profilePicture ? '' : user.displayName?.charAt(0) || 'U'}
+                            </div>
+                            <div class="friend-info">
+                                <div class="friend-name">${user.displayName}</div>
+                                <div class="friend-status">@${user.username}</div>
+                            </div>
+                            ${!isFriend && !hasPendingRequest ? `
+                                <button class="add-friend-btn" data-user-id="${user.id}">
+                                    <i class="fas fa-user-plus"></i>
+                                </button>
+                            ` : ''}
+                            ${hasPendingRequest ? `
+                                <button class="add-friend-btn" disabled style="opacity: 0.5;">
+                                    <i class="fas fa-clock"></i> Pending
+                                </button>
+                            ` : ''}
+                            ${isFriend ? `
+                                <button class="add-friend-btn" disabled style="opacity: 0.5;">
+                                    <i class="fas fa-check"></i> Friends
+                                </button>
+                            ` : ''}
+                        </div>
+                    `;
+                });
+                
+                container.innerHTML = suggestionsHTML;
+                
+                // Add event listeners to add friend buttons
+                document.querySelectorAll('.add-friend-btn:not(:disabled)').forEach(btn => {
+                    btn.addEventListener('click', (e) => {
+                        const userId = btn.getAttribute('data-user-id');
+                        this.sendFriendRequest(userId);
+                        btn.disabled = true;
+                        btn.innerHTML = '<i class="fas fa-clock"></i> Pending';
+                        btn.style.opacity = '0.5';
+                    });
+                });
+            }
+
+            // ... (Other methods like openEditProfileModal, saveProfileChanges, etc. remain the same)
+
+            async loadProfileOnce(uid) {
+                try {
+                    const userRef = window.firebaseApp.firestore.doc(window.firebaseApp.db, "users", uid);
+                    const doc = await window.firebaseApp.firestore.getDoc(userRef);
+                    
+                    if (doc.exists()) {
+                        this.userProfile = { id: doc.id, ...doc.data() };
+                        this.updateProfileUI(this.userProfile);
+                        this.updateSidebar(this.userProfile);
+                        this.calculateProfileCompletion(this.userProfile);
+                        this.showLoading(false);
+                        this.showProfileLayout();
+                    } else {
+                        this.createNewProfile(uid);
+                    }
+                } catch (error) {
+                    console.error("Fallback load also failed:", error);
+                    this.createFallbackProfile();
+                }
+            }
+
+            async createNewProfile(uid) {
+                try {
+                    const newProfile = {
+                        displayName: this.currentUser.displayName || this.currentUser.email.split('@')[0],
+                        email: this.currentUser.email,
+                        username: this.generateUsername(this.currentUser.email),
+                        bio: "Welcome to my Kynecta profile! 🌟 Share your thoughts, connect with friends, and explore the community!",
+                        location: "",
+                        interests: ["Technology", "Networking", "Learning", "Innovation"],
+                        skills: ["Communication", "Problem Solving", "Creativity"],
+                        socialLinks: {
+                            twitter: "",
+                            instagram: "",
+                            facebook: "",
+                            linkedin: "",
+                            github: "",
+                            website: ""
+                        },
+                        profilePicture: "",
+                        coverPhoto: "",
+                        privacy: "public",
+                        theme: "blue-purple",
+                        mood: "happy",
+                        createdAt: window.firebaseApp.firestore.serverTimestamp(),
+                        lastActive: window.firebaseApp.firestore.serverTimestamp(),
+                        stats: {
+                            posts: 0,
+                            followers: 0,
+                            following: 0,
+                            reputation: 100,
+                            profileViews: 0
+                        },
+                        isOnline: true
+                    };
+
+                    const userRef = window.firebaseApp.firestore.doc(window.firebaseApp.db, "users", uid);
+                    await window.firebaseApp.firestore.setDoc(userRef, newProfile);
+                    
+                    console.log("New profile created successfully");
+                    this.userProfile = newProfile;
+                    
+                } catch (error) {
+                    console.error("Error creating new profile:", error);
+                    this.createFallbackProfile();
+                }
+            }
+
+            createFallbackProfile() {
+                console.log("Creating fallback profile UI");
+                const fallbackProfile = {
+                    displayName: this.currentUser.displayName || this.currentUser.email.split('@')[0],
+                    email: this.currentUser.email,
+                    username: this.generateUsername(this.currentUser.email),
+                    bio: "Welcome to my Kynecta profile! 🌟",
+                    location: "Unknown",
+                    interests: ["Technology", "Networking", "Learning"],
+                    skills: ["Communication", "Problem Solving"],
+                    stats: {
+                        posts: 0,
+                        followers: 0,
+                        following: 0,
+                        reputation: 100
+                    }
+                };
+                
+                this.userProfile = fallbackProfile;
+                this.updateProfileUI(fallbackProfile);
+                this.updateSidebar(fallbackProfile);
+                this.showLoading(false);
+                this.showProfileLayout();
+            }
+
+            generateUsername(email) {
+                return email.split('@')[0].toLowerCase().replace(/[^a-z0-9]/g, '');
             }
 
             openEditProfileModal() {
@@ -2238,8 +3362,10 @@
                 document.getElementById('editBio').value = this.userProfile.bio || '';
                 document.getElementById('editLocation').value = this.userProfile.location || '';
                 document.getElementById('editTwitter').value = this.userProfile.socialLinks?.twitter || '';
-                document.getElementById('editGithub').value = this.userProfile.socialLinks?.github || '';
+                document.getElementById('editInstagram').value = this.userProfile.socialLinks?.instagram || '';
+                document.getElementById('editFacebook').value = this.userProfile.socialLinks?.facebook || '';
                 document.getElementById('editLinkedin').value = this.userProfile.socialLinks?.linkedin || '';
+                document.getElementById('editGithub').value = this.userProfile.socialLinks?.github || '';
                 document.getElementById('editWebsite').value = this.userProfile.socialLinks?.website || '';
                 
                 // Populate interests
@@ -2391,8 +3517,10 @@
                         skills: skills,
                         socialLinks: {
                             twitter: document.getElementById('editTwitter').value.trim(),
-                            github: document.getElementById('editGithub').value.trim(),
+                            instagram: document.getElementById('editInstagram').value.trim(),
+                            facebook: document.getElementById('editFacebook').value.trim(),
                             linkedin: document.getElementById('editLinkedin').value.trim(),
+                            github: document.getElementById('editGithub').value.trim(),
                             website: document.getElementById('editWebsite').value.trim()
                         },
                         privacy: selectedPrivacy,
@@ -2623,6 +3751,12 @@
                         });
                     }
                     
+                    // Unsubscribe from listeners
+                    if (this.profileUnsubscribe) this.profileUnsubscribe();
+                    if (this.chatUnsubscribe) this.chatUnsubscribe();
+                    if (this.friendsUnsubscribe) this.friendsUnsubscribe();
+                    if (this.friendRequestsUnsubscribe) this.friendRequestsUnsubscribe();
+                    
                     await window.firebaseApp.authFunctions.signOut(window.firebaseApp.auth);
                     localStorage.clear();
                     sessionStorage.clear();
@@ -2641,12 +3775,12 @@
                 
                 switch(status) {
                     case 'connected':
-                        textElement.textContent = 'Connected to Firebase';
-                        statusElement.innerHTML = '<i class="fas fa-wifi mr-2"></i><span id="connectionText">Connected to Firebase</span>';
+                        textElement.textContent = 'Connected to Kynecta';
+                        statusElement.innerHTML = '<i class="fas fa-wifi mr-2"></i><span id="connectionText">Connected to Kynecta</span>';
                         break;
                     case 'connecting':
-                        textElement.textContent = 'Connecting to Firebase...';
-                        statusElement.innerHTML = '<i class="fas fa-circle-notch fa-spin mr-2"></i><span id="connectionText">Connecting to Firebase...</span>';
+                        textElement.textContent = 'Connecting to Kynecta...';
+                        statusElement.innerHTML = '<i class="fas fa-circle-notch fa-spin mr-2"></i><span id="connectionText">Connecting to Kynecta...</span>';
                         break;
                     case 'error':
                         textElement.textContent = 'Connection Error';

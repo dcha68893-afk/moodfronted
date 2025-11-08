@@ -484,3 +484,13 @@ window.openImageModal = function(imageUrl) {
 
 // Global error handler for Firebase operations
 window.handleFirebaseError = handleFirebaseError;
+// Register for settings updates
+if (window.settingsApp) {
+    window.settingsApp.addSettingsListener((settings) => {
+        // Apply theme
+        document.body.className = document.body.className.replace(/theme-\w+/g, '') + ' ' + settings.theme;
+        
+        // Apply other settings as needed
+        console.log("Settings updated:", settings);
+    });
+}

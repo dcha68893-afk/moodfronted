@@ -6,6 +6,13 @@
     <title>Neural Alerts - ConnectSphere</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css" rel="stylesheet">
+    
+    <!-- Firebase SDK -->
+    <script src="https://www.gstatic.com/firebasejs/9.22.1/firebase-app-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/9.22.1/firebase-auth-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/9.22.1/firebase-firestore-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/9.22.1/firebase-storage-compat.js"></script>
+    
     <style>
         .neuro-glass {
             background: rgba(255, 255, 255, 0.1);
@@ -171,9 +178,51 @@
             background: rgba(147, 51, 234, 0.2);
             border: 1px solid rgba(147, 51, 234, 0.3);
         }
+        
+        /* Connection Status */
+        .connection-status {
+            position: fixed;
+            top: 10px;
+            right: 10px;
+            padding: 8px 16px;
+            border-radius: 20px;
+            font-size: 0.8rem;
+            z-index: 1000;
+            transition: all 0.3s;
+        }
+        .connection-status.connected {
+            background: rgba(34, 197, 94, 0.8);
+            color: white;
+        }
+        .connection-status.connecting {
+            background: rgba(245, 158, 11, 0.8);
+            color: white;
+        }
+        .connection-status.disconnected {
+            background: rgba(239, 68, 68, 0.8);
+            color: white;
+        }
+        .loading-spinner {
+            border: 3px solid rgba(255, 255, 255, 0.3);
+            border-radius: 50%;
+            border-top: 3px solid #3B82F6;
+            width: 20px;
+            height: 20px;
+            animation: spin 1s linear infinite;
+        }
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
     </style>
 </head>
 <body class="h-full bg-gradient-to-br from-gray-900 via-purple-900 to-gray-900 text-white">
+    <!-- Firebase Connection Status -->
+    <div class="connection-status connecting" id="connectionStatus">
+        <i class="fas fa-circle-notch fa-spin mr-2"></i>
+        <span id="connectionText">Connecting to Firebase...</span>
+    </div>
+
     <!-- Real-time Connection Indicator -->
     <div class="realtime-indicator realtime-connected" id="realtimeIndicator">
         <i class="fas fa-circle text-xs"></i>
@@ -586,6 +635,24 @@
     </div>
 
     <script>
+        // Firebase configuration
+        const firebaseConfig = {
+            apiKey: "AIzaSyDHHyGgsSV18BcXrGgzi4C8frzDAE1C1zo",
+            authDomain: "uniconnect-ee95c.firebaseapp.com",
+            projectId: "uniconnect-ee95c",
+            storageBucket: "uniconnect-ee95c.firebasestorage.app",
+            messagingSenderId: "1003264444309",
+            appId: "1:1003264444309:web:9f0307516e44d21e97d89c"
+        };
+
+        // Initialize Firebase
+        if (!firebase.apps.length) {
+            firebase.initializeApp(firebaseConfig);
+        }
+
+        const auth = firebase.auth();
+        const db = firebase.firestore();
+
         // Enhanced neural alerts data with detailed content
         const neuralAlerts = {
             messages: [
@@ -808,6 +875,263 @@
             desktop: false
         };
 
+        // Firebase Notifications Application
+        class NotificationsApplication {
+            constructor() {
+                this.currentUser = null;
+                this.isConnected = false;
+                this.userSettings = {};
+                this.realtimeUnsubscribe = null;
+            }
+
+            async initialize() {
+                try {
+                    console.log("🚀 Initializing Notifications Application...");
+                    await this.initializeFirebase();
+                    this.setupEventListeners();
+                    await this.loadUserSettings();
+                    await this.loadNotificationsFromFirebase();
+                    this.showToast("Notifications loaded successfully!", "success");
+                } catch (error) {
+                    console.error('❌ Initialization failed:', error);
+                    this.updateConnectionStatus('disconnected');
+                    this.showToast("Failed to load notifications. Please refresh the page.", "error");
+                }
+            }
+
+            async initializeFirebase() {
+                this.updateConnectionStatus('connecting');
+                
+                return new Promise((resolve, reject) => {
+                    const unsubscribe = auth.onAuthStateChanged(async (user) => {
+                        if (user) {
+                            this.currentUser = user;
+                            console.log("✅ User authenticated:", user.uid);
+                            
+                            try {
+                                // Load user settings
+                                await this.loadUserSettings();
+                                this.updateConnectionStatus('connected');
+                                resolve();
+                            } catch (error) {
+                                console.error("❌ Error loading user settings:", error);
+                                reject(error);
+                            }
+                        } else {
+                            console.log("❌ User not authenticated, redirecting to login...");
+                            window.location.href = 'index.html';
+                            reject(new Error('User not authenticated'));
+                        }
+                    }, (error) => {
+                        console.error("❌ Auth state change error:", error);
+                        reject(error);
+                    });
+                });
+            }
+
+            async loadUserSettings() {
+                try {
+                    const userDoc = await db.collection('users').doc(this.currentUser.uid).get();
+                    if (userDoc.exists) {
+                        const userData = userDoc.data();
+                        if (userData.settings) {
+                            this.userSettings = userData.settings;
+                            // Apply settings to notification settings
+                            if (this.userSettings.pushNotifications !== undefined) {
+                                notificationSettings.pushEnabled = this.userSettings.pushNotifications;
+                            }
+                            if (this.userSettings.messageNotifications !== undefined) {
+                                notificationSettings.categories.messages = this.userSettings.messageNotifications;
+                            }
+                            // Apply other settings as needed
+                        }
+                    }
+                } catch (error) {
+                    console.error('❌ Error loading user settings:', error);
+                }
+            }
+
+            async loadNotificationsFromFirebase() {
+                try {
+                    console.log("📥 Loading notifications from Firestore...");
+                    
+                    // In a real app, you would load actual notifications from Firestore
+                    // For now, we'll use the static data but mark it as loaded from Firebase
+                    
+                    this.setupRealtimeNotifications();
+                    renderNotifications();
+                    
+                } catch (error) {
+                    console.error('❌ Error loading notifications:', error);
+                    throw error;
+                }
+            }
+
+            setupRealtimeNotifications() {
+                // Set up real-time listener for new notifications
+                if (this.realtimeUnsubscribe) {
+                    this.realtimeUnsubscribe();
+                }
+
+                this.realtimeUnsubscribe = db.collection('notifications')
+                    .where('userId', '==', this.currentUser.uid)
+                    .where('read', '==', false)
+                    .orderBy('timestamp', 'desc')
+                    .limit(50)
+                    .onSnapshot(snapshot => {
+                        snapshot.docChanges().forEach(change => {
+                            if (change.type === 'added') {
+                                const notification = change.doc.data();
+                                console.log('🔔 New real-time notification:', notification);
+                                this.handleNewNotification(notification);
+                            }
+                        });
+                    }, error => {
+                        console.error('❌ Error in real-time notifications:', error);
+                    });
+            }
+
+            handleNewNotification(notification) {
+                // Convert Firebase notification to our format
+                const newAlert = {
+                    id: notification.id || Date.now(),
+                    type: notification.type || 'system',
+                    user: notification.senderName || 'System',
+                    avatar: this.getAvatarForType(notification.type),
+                    content: notification.message || 'New notification',
+                    time: 'Just now',
+                    read: notification.read || false,
+                    priority: notification.priority || 'medium',
+                    category: notification.category || 'system',
+                    actions: ['view', 'dismiss'],
+                    detailedContent: notification.details || '<p class="text-gray-400">No additional details available.</p>'
+                };
+
+                // Add to appropriate category
+                const category = notification.category || 'system';
+                if (neuralAlerts[category]) {
+                    neuralAlerts[category].unshift(newAlert);
+                    renderNotifications();
+                    
+                    // Show toast notification
+                    this.showToast(`New ${category} notification received`);
+                    
+                    // Show desktop notification if enabled
+                    if (notificationSettings.desktop && 'Notification' in window && Notification.permission === 'granted') {
+                        new Notification(`New ${category} notification`, {
+                            body: newAlert.content,
+                            icon: '/favicon.ico'
+                        });
+                    }
+                }
+            }
+
+            getAvatarForType(type) {
+                const avatars = {
+                    'message': 'bg-gradient-to-r from-cyan-500 to-blue-500',
+                    'game_invite': 'bg-gradient-to-r from-yellow-500 to-orange-500',
+                    'sale': 'bg-gradient-to-r from-blue-500 to-cyan-500',
+                    'security': 'bg-gradient-to-r from-red-500 to-orange-500'
+                };
+                return avatars[type] || 'bg-gradient-to-r from-gray-500 to-blue-500';
+            }
+
+            async markNotificationAsRead(notificationId) {
+                try {
+                    await db.collection('notifications').doc(notificationId.toString()).update({
+                        read: true,
+                        readAt: new Date()
+                    });
+                } catch (error) {
+                    console.error('❌ Error marking notification as read:', error);
+                }
+            }
+
+            async deleteNotification(notificationId) {
+                try {
+                    await db.collection('notifications').doc(notificationId.toString()).delete();
+                } catch (error) {
+                    console.error('❌ Error deleting notification:', error);
+                }
+            }
+
+            updateConnectionStatus(status) {
+                const statusElement = document.getElementById('connectionStatus');
+                
+                statusElement.className = `connection-status ${status}`;
+                
+                switch(status) {
+                    case 'connected':
+                        statusElement.innerHTML = '<i class="fas fa-wifi mr-2"></i><span id="connectionText">Connected to Firebase</span>';
+                        break;
+                    case 'connecting':
+                        statusElement.innerHTML = '<i class="fas fa-circle-notch fa-spin mr-2"></i><span id="connectionText">Connecting to Firebase...</span>';
+                        break;
+                    case 'disconnected':
+                        statusElement.innerHTML = '<i class="fas fa-exclamation-triangle mr-2"></i><span id="connectionText">Disconnected from Firebase</span>';
+                        break;
+                }
+            }
+
+            showToast(message, type = 'info') {
+                const toast = document.createElement('div');
+                const bgColor = type === 'success' ? 'border-green-500/50' : 
+                               type === 'error' ? 'border-red-500/50' : 
+                               'border-cyan-500/50';
+                const icon = type === 'success' ? 'fa-check-circle text-green-400' : 
+                            type === 'error' ? 'fa-exclamation-circle text-red-400' : 
+                            'fa-info-circle text-cyan-400';
+                
+                toast.className = `neuro-glass rounded-2xl p-4 mb-2 border ${bgColor} slide-in-right`;
+                toast.innerHTML = `
+                    <div class="flex items-center space-x-3">
+                        <i class="fas ${icon}"></i>
+                        <span class="text-gray-200">${message}</span>
+                        <button class="ml-auto text-purple-400 hover:text-cyan-400" onclick="this.parentElement.parentElement.remove()">
+                            <i class="fas fa-times"></i>
+                        </button>
+                    </div>
+                `;
+                
+                let toastContainer = document.querySelector('.toast');
+                if (!toastContainer) {
+                    toastContainer = document.createElement('div');
+                    toastContainer.className = 'toast';
+                    document.body.appendChild(toastContainer);
+                }
+                
+                toastContainer.appendChild(toast);
+                
+                setTimeout(() => {
+                    if (toast.parentElement) {
+                        toast.remove();
+                    }
+                }, 5000);
+            }
+
+            setupEventListeners() {
+                console.log("🔧 Setting up event listeners...");
+                
+                // Listen for settings changes from other pages
+                if (window.settingsApp) {
+                    window.settingsApp.addSettingsListener((settings) => {
+                        console.log("🎯 Settings updated in notifications:", settings);
+                        this.userSettings = settings;
+                        // Apply relevant settings to notification system
+                        if (settings.pushNotifications !== undefined) {
+                            notificationSettings.pushEnabled = settings.pushNotifications;
+                        }
+                    });
+                }
+            }
+
+            cleanup() {
+                if (this.realtimeUnsubscribe) {
+                    this.realtimeUnsubscribe();
+                }
+            }
+        }
+
         // Utility functions
         function getCategoryIcon(category) {
             const icons = {
@@ -840,39 +1164,45 @@
         }
 
         function showToast(message, type = 'info') {
-            const toast = document.createElement('div');
-            const bgColor = type === 'success' ? 'border-green-500/50' : 
-                           type === 'error' ? 'border-red-500/50' : 
-                           'border-cyan-500/50';
-            const icon = type === 'success' ? 'fa-check-circle text-green-400' : 
-                        type === 'error' ? 'fa-exclamation-circle text-red-400' : 
-                        'fa-info-circle text-cyan-400';
-            
-            toast.className = `neuro-glass rounded-2xl p-4 mb-2 border ${bgColor} slide-in-right`;
-            toast.innerHTML = `
-                <div class="flex items-center space-x-3">
-                    <i class="fas ${icon}"></i>
-                    <span class="text-gray-200">${message}</span>
-                    <button class="ml-auto text-purple-400 hover:text-cyan-400" onclick="this.parentElement.parentElement.remove()">
-                        <i class="fas fa-times"></i>
-                    </button>
-                </div>
-            `;
-            
-            let toastContainer = document.querySelector('.toast');
-            if (!toastContainer) {
-                toastContainer = document.createElement('div');
-                toastContainer.className = 'toast';
-                document.body.appendChild(toastContainer);
-            }
-            
-            toastContainer.appendChild(toast);
-            
-            setTimeout(() => {
-                if (toast.parentElement) {
-                    toast.remove();
+            // Use the instance method if available, otherwise fall back to static function
+            if (window.notificationsApp && window.notificationsApp.showToast) {
+                window.notificationsApp.showToast(message, type);
+            } else {
+                // Fallback implementation
+                const toast = document.createElement('div');
+                const bgColor = type === 'success' ? 'border-green-500/50' : 
+                               type === 'error' ? 'border-red-500/50' : 
+                               'border-cyan-500/50';
+                const icon = type === 'success' ? 'fa-check-circle text-green-400' : 
+                            type === 'error' ? 'fa-exclamation-circle text-red-400' : 
+                            'fa-info-circle text-cyan-400';
+                
+                toast.className = `neuro-glass rounded-2xl p-4 mb-2 border ${bgColor} slide-in-right`;
+                toast.innerHTML = `
+                    <div class="flex items-center space-x-3">
+                        <i class="fas ${icon}"></i>
+                        <span class="text-gray-200">${message}</span>
+                        <button class="ml-auto text-purple-400 hover:text-cyan-400" onclick="this.parentElement.parentElement.remove()">
+                            <i class="fas fa-times"></i>
+                        </button>
+                    </div>
+                `;
+                
+                let toastContainer = document.querySelector('.toast');
+                if (!toastContainer) {
+                    toastContainer = document.createElement('div');
+                    toastContainer.className = 'toast';
+                    document.body.appendChild(toastContainer);
                 }
-            }, 5000);
+                
+                toastContainer.appendChild(toast);
+                
+                setTimeout(() => {
+                    if (toast.parentElement) {
+                        toast.remove();
+                    }
+                }, 5000);
+            }
         }
 
         function updateNotificationStats() {
@@ -1051,6 +1381,9 @@
             // Mark as read when viewing
             if (!notification.read) {
                 notification.read = true;
+                if (window.notificationsApp) {
+                    window.notificationsApp.markNotificationAsRead(notification.id);
+                }
                 renderNotifications();
             }
         }
@@ -1084,6 +1417,9 @@
                         showToast('Game invite accepted! Starting Quantum Chess...', 'success');
                         // Remove the notification
                         neuralAlerts[category] = neuralAlerts[category].filter(a => a.id !== notificationId);
+                        if (window.notificationsApp) {
+                            window.notificationsApp.deleteNotification(notificationId);
+                        }
                     }
                     break;
                     
@@ -1091,6 +1427,9 @@
                     if (category === 'games') {
                         showToast('Game invite declined', 'info');
                         neuralAlerts[category] = neuralAlerts[category].filter(a => a.id !== notificationId);
+                        if (window.notificationsApp) {
+                            window.notificationsApp.deleteNotification(notificationId);
+                        }
                     }
                     break;
                     
@@ -1102,10 +1441,16 @@
                 case 'secure':
                     showToast('Security measures activated', 'success');
                     notification.read = true;
+                    if (window.notificationsApp) {
+                        window.notificationsApp.markNotificationAsRead(notificationId);
+                    }
                     break;
                     
                 case 'dismiss':
                     neuralAlerts[category] = neuralAlerts[category].filter(a => a.id !== notificationId);
+                    if (window.notificationsApp) {
+                        window.notificationsApp.deleteNotification(notificationId);
+                    }
                     showToast('Notification dismissed', 'info');
                     break;
             }
@@ -1182,10 +1527,13 @@
 
         // Event Listeners
         document.addEventListener('DOMContentLoaded', function() {
-            // Initialize
-            renderNotifications();
+            // Initialize Firebase notifications app
+            window.notificationsApp = new NotificationsApplication();
+            window.notificationsApp.initialize().catch(error => {
+                console.error("❌ Failed to initialize notifications application:", error);
+            });
             
-            // Start real-time simulation
+            // Start real-time simulation (for demo purposes)
             setInterval(simulateRealTimeNotification, 15000);
             
             // Tab switching
@@ -1238,6 +1586,11 @@
                         const alert = neuralAlerts[category].find(a => a.id === id);
                         if (alert) {
                             alert.read = !alert.read;
+                            if (window.notificationsApp) {
+                                if (alert.read) {
+                                    window.notificationsApp.markNotificationAsRead(id);
+                                }
+                            }
                         }
                     });
                     
@@ -1252,6 +1605,9 @@
                     
                     neuralAlerts[category].forEach(alert => {
                         alert.read = true;
+                        if (window.notificationsApp) {
+                            window.notificationsApp.markNotificationAsRead(alert.id);
+                        }
                     });
                     
                     renderNotifications();
@@ -1273,6 +1629,11 @@
             document.getElementById('markDetailReadBtn').addEventListener('click', function() {
                 if (currentDetailNotification) {
                     currentDetailNotification.read = !currentDetailNotification.read;
+                    if (window.notificationsApp) {
+                        if (currentDetailNotification.read) {
+                            window.notificationsApp.markNotificationAsRead(currentDetailNotification.id);
+                        }
+                    }
                     renderNotifications();
                     document.getElementById('notificationDetailModal').classList.add('hidden');
                     showToast('Notification status updated');
@@ -1283,6 +1644,9 @@
                 if (currentDetailNotification) {
                     const category = currentDetailNotification.category;
                     neuralAlerts[category] = neuralAlerts[category].filter(a => a.id !== currentDetailNotification.id);
+                    if (window.notificationsApp) {
+                        window.notificationsApp.deleteNotification(currentDetailNotification.id);
+                    }
                     renderNotifications();
                     document.getElementById('notificationDetailModal').classList.add('hidden');
                     showToast('Notification archived');
@@ -1389,6 +1753,9 @@
                 Object.keys(neuralAlerts).forEach(category => {
                     neuralAlerts[category].forEach(alert => {
                         alert.read = true;
+                        if (window.notificationsApp) {
+                            window.notificationsApp.markNotificationAsRead(alert.id);
+                        }
                     });
                 });
                 renderNotifications();
@@ -1399,6 +1766,11 @@
             document.getElementById('clearAllBtn').addEventListener('click', function() {
                 if (confirm('Are you sure you want to clear all notifications?')) {
                     Object.keys(neuralAlerts).forEach(category => {
+                        neuralAlerts[category].forEach(alert => {
+                            if (window.notificationsApp) {
+                                window.notificationsApp.deleteNotification(alert.id);
+                            }
+                        });
                         neuralAlerts[category] = [];
                     });
                     renderNotifications();
@@ -1424,6 +1796,9 @@
                     neuralAlerts[category] = neuralAlerts[category].filter(alert => {
                         if (alert.read) {
                             archivedCount++;
+                            if (window.notificationsApp) {
+                                window.notificationsApp.deleteNotification(alert.id);
+                            }
                             return false;
                         }
                         return true;
@@ -1441,6 +1816,13 @@
                 }
                 if (e.target === document.getElementById('notificationDetailModal')) {
                     document.getElementById('notificationDetailModal').classList.add('hidden');
+                }
+            });
+
+            // Cleanup on page unload
+            window.addEventListener('beforeunload', function() {
+                if (window.notificationsApp) {
+                    window.notificationsApp.cleanup();
                 }
             });
         });

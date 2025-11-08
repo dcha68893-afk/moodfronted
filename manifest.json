@@ -1,7 +1,7 @@
 {
-  "name": "University Connection Platform",
-  "short_name": "UniPlatform",
-  "description": "Connect with university students, share resources, and trade items",
+  "name": "kynecta communication platform",
+  "short_name": "kyPlatform",
+  "description": "Connect with uusers, share resources, and trade items",
   "start_url": "/",
   "display": "standalone",
   "theme_color": "#4F46E5",
@@ -9,52 +9,61 @@
   "orientation": "portrait-primary",
   "scope": "/",
   "lang": "en-US",
-  "categories": ["education", "social", "shopping"],
+  "categories": ["communication", "social", "shopping"],
   "icons": [
     {
-      "src": "data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🎓</text></svg>",
+      "src": "/icons/icon-192x192.png",
       "sizes": "192x192",
-      "type": "image/svg+xml",
+      "type": "image/png",
       "purpose": "any maskable"
     },
     {
-      "src": "data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🎓</text></svg>",
+      "src": "/icons/icon-512x512.png",
       "sizes": "512x512",
-      "type": "image/svg+xml",
+      "type": "image/png",
       "purpose": "any maskable"
     }
   ],
   "screenshots": [
     {
-      "src": "https://via.placeholder.com/640x320/4F46E5/FFFFFF?text=Dashboard",
+      "src": "/screenshots/dashboard-wide.png",
       "sizes": "640x320",
       "type": "image/png",
       "form_factor": "wide",
       "label": "Dashboard View"
+    },
+    {
+      "src": "/screenshots/dashboard-narrow.png",
+      "sizes": "320x640",
+      "type": "image/png",
+      "form_factor": "narrow",
+      "label": "Dashboard Mobile View"
     }
   ],
   "shortcuts": [
     {
-      "name": "University Chat",
+      "name": "kynecta chat",
       "short_name": "Chat",
       "description": "Connect with other students",
-      "url": "/chat.html",
+      "url": "/chat",
       "icons": [
         {
-          "src": "data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='currentColor'><path stroke-linecap='round' stroke-linejoin='round' stroke-width='2' d='M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z'/></svg>",
-          "sizes": "96x96"
+          "src": "/icons/chat-96x96.png",
+          "sizes": "96x96",
+          "type": "image/png"
         }
       ]
     },
     {
-      "name": "Campus Marketplace",
+      "name": " Marketplace",
       "short_name": "Market",
-      "description": "Buy and sell campus items",
-      "url": "/marketplace.html",
+      "description": "Buy and sell items",
+      "url": "/marketplace",
       "icons": [
         {
-          "src": "data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='currentColor'><path stroke-linecap='round' stroke-linejoin='round' stroke-width='2' d='M16 11V7a4 4 0 00-8 0v4M5 9h14l1 12H4L5 9z'/></svg>",
-          "sizes": "96x96"
+          "src": "/icons/market-96x96.png",
+          "sizes": "96x96",
+          "type": "image/png"
         }
       ]
     }

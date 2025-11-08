@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>ConnectSphere - Quantum Chat</title>
+    <title>Kynecta - Next-Gen Quantum Chat</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css" rel="stylesheet">
     
@@ -56,7 +56,7 @@
             100% { transform: scale(1.2); opacity: 0.7; }
         }
 
-        .mood-sync {
+        .connection-sync {
             display: flex;
             align-items: center;
             gap: 5px;
@@ -64,24 +64,24 @@
             color: #8B5CF6;
             margin-top: 5px;
         }
-        .mood-sync.active {
+        .connection-sync.active {
             color: #22C55E;
         }
-        .mood-sync-bar {
+        .connection-sync-bar {
             width: 60px;
             height: 4px;
             background: rgba(139, 92, 246, 0.3);
             border-radius: 2px;
             overflow: hidden;
         }
-        .mood-sync-progress {
+        .connection-sync-progress {
             height: 100%;
             background: #8B5CF6;
             border-radius: 2px;
             transition: width 0.5s ease;
         }
 
-        .thought-bubble {
+        .suggestion-bubble {
             position: relative;
             background: rgba(255, 255, 255, 0.15);
             border-radius: 20px;
@@ -91,7 +91,7 @@
             cursor: pointer;
             transition: all 0.3s;
         }
-        .thought-bubble:hover {
+        .suggestion-bubble:hover {
             background: rgba(255, 255, 255, 0.2);
             transform: translateY(-2px);
         }
@@ -526,6 +526,104 @@
             flex-shrink: 0;
         }
         
+        /* Kynecta Unique Features */
+        .sync-indicator {
+            position: absolute;
+            top: -5px;
+            right: -5px;
+            width: 12px;
+            height: 12px;
+            border-radius: 50%;
+            background: linear-gradient(135deg, #10B981, #059669);
+            border: 2px solid #1E293B;
+            animation: syncPulse 2s infinite;
+        }
+        @keyframes syncPulse {
+            0%, 100% { transform: scale(1); opacity: 1; }
+            50% { transform: scale(1.3); opacity: 0.7; }
+        }
+        
+        .hologram-effect {
+            position: relative;
+            overflow: hidden;
+        }
+        .hologram-effect::before {
+            content: '';
+            position: absolute;
+            top: -50%;
+            left: -50%;
+            width: 200%;
+            height: 200%;
+            background: linear-gradient(45deg, transparent, rgba(59, 130, 246, 0.1), transparent);
+            transform: rotate(45deg);
+            animation: hologramScan 3s linear infinite;
+            z-index: 1;
+        }
+        @keyframes hologramScan {
+            0% { transform: translateX(-100%) translateY(-100%) rotate(45deg); }
+            100% { transform: translateX(100%) translateY(100%) rotate(45deg); }
+        }
+        
+        .ai-suggestion {
+            background: rgba(139, 92, 246, 0.1);
+            border: 1px solid rgba(139, 92, 246, 0.3);
+            border-radius: 12px;
+            padding: 10px 15px;
+            margin: 8px 0;
+            cursor: pointer;
+            transition: all 0.3s;
+            position: relative;
+        }
+        .ai-suggestion:hover {
+            background: rgba(139, 92, 246, 0.2);
+            transform: translateY(-2px);
+        }
+        .ai-suggestion::before {
+            content: 'AI';
+            position: absolute;
+            top: -8px;
+            left: 10px;
+            background: #8B5CF6;
+            color: white;
+            font-size: 0.6rem;
+            padding: 2px 6px;
+            border-radius: 8px;
+        }
+        
+        .mood-adaptive {
+            transition: all 0.5s ease;
+        }
+        .mood-happy { background: linear-gradient(135deg, rgba(245, 158, 11, 0.2), rgba(251, 191, 36, 0.2)); }
+        .mood-calm { background: linear-gradient(135deg, rgba(59, 130, 246, 0.2), rgba(139, 92, 246, 0.2)); }
+        .mood-energetic { background: linear-gradient(135deg, rgba(239, 68, 68, 0.2), rgba(249, 115, 22, 0.2)); }
+        
+        .cosmic-background {
+            background: 
+                radial-gradient(circle at 20% 80%, rgba(59, 130, 246, 0.1) 0%, transparent 50%),
+                radial-gradient(circle at 80% 20%, rgba(139, 92, 246, 0.1) 0%, transparent 50%),
+                radial-gradient(circle at 40% 40%, rgba(16, 185, 129, 0.05) 0%, transparent 50%),
+                linear-gradient(135deg, #0F172A 0%, #1E293B 50%, #334155 100%);
+        }
+        
+        .quantum-tunnel {
+            position: relative;
+            overflow: hidden;
+        }
+        .quantum-tunnel::before {
+            content: '';
+            position: absolute;
+            top: 0;
+            left: -100%;
+            width: 100%;
+            height: 100%;
+            background: linear-gradient(90deg, transparent, rgba(59, 130, 246, 0.4), transparent);
+            animation: quantumTunnel 3s infinite;
+        }
+        @keyframes quantumTunnel {
+            0% { left: -100%; }
+            100% { left: 100%; }
+        }
+
         @media (max-width: 768px) {
             .flex {
                 flex-direction: column;
@@ -598,25 +696,53 @@
             background: #3B82F6;
             color: white;
         }
+        
+        /* AR Mode */
+        .ar-mode {
+            transform: perspective(1000px) rotateX(5deg);
+            transition: transform 0.5s ease;
+        }
+        
+        .network-activity {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            pointer-events: none;
+            z-index: -1;
+        }
+        .network-node {
+            position: absolute;
+            width: 4px;
+            height: 4px;
+            background: #3B82F6;
+            border-radius: 50%;
+            animation: networkConnect 3s infinite linear;
+        }
+        @keyframes networkConnect {
+            0%, 100% { opacity: 0; transform: scale(0); }
+            50% { opacity: 1; transform: scale(1); }
+        }
     </style>
 </head>
-<body class="h-full bg-gradient-to-br from-gray-900 via-blue-900 to-gray-900 text-white">
+<body class="h-full cosmic-background text-white">
     <!-- Connection Status -->
     <div class="connection-status connecting" id="connectionStatus">
         <i class="fas fa-circle-notch fa-spin"></i>
-        <span>Connecting to Firebase...</span>
+        <span>Connecting to Kynecta...</span>
     </div>
 
     <!-- Authentication Required Screen -->
     <div id="auth-required" class="h-full flex items-center justify-center">
-        <div class="text-center max-w-md p-8">
-            <div class="text-8xl mb-6 opacity-50">
+        <div class="text-center max-w-md p-8 glass-effect rounded-2xl border border-blue-800/50">
+            <div class="text-8xl mb-6 opacity-50 hologram-effect rounded-full w-32 h-32 mx-auto flex items-center justify-center">
                 <i class="fas fa-user-lock"></i>
             </div>
             <h2 class="text-3xl font-bold text-blue-300 mb-4">Authentication Required</h2>
-            <p class="text-blue-400 mb-8 text-lg">Please sign in to access the chat features</p>
+            <p class="text-blue-400 mb-8 text-lg">Sign in to access Kynecta</p>
             <div class="space-y-4">
-                <button onclick="redirectToLogin()" class="bg-blue-600 text-white px-8 py-4 rounded-2xl font-semibold hover:bg-blue-700 transition-all duration-300 transform hover:scale-105 shadow-lg w-full">
+                <button onclick="redirectToLogin()" class="primary-gradient text-white px-8 py-4 rounded-2xl font-semibold hover:opacity-90 transition-all duration-300 transform hover:scale-105 shadow-lg w-full quantum-tunnel">
                     <i class="fas fa-sign-in-alt mr-2"></i>Sign In
                 </button>
             </div>
@@ -626,29 +752,35 @@
     <!-- Main Chat App -->
     <div id="chat-app" class="hidden h-full flex flex-col">
         <!-- Header -->
-        <div class="glass-effect border-b border-blue-800 p-3">
+        <div class="glass-effect border-b border-blue-800/50 p-3">
             <div class="flex items-center justify-between max-w-6xl mx-auto">
                 <div class="flex items-center space-x-4">
-                    <h1 class="text-xl font-bold text-blue-300">ConnectSphere Quantum Chat</h1>
+                    <h1 class="text-xl font-bold text-blue-300">Kynecta Quantum Chat</h1>
                     <div class="quantum-entanglement p-2 rounded-lg">
-                        <span class="text-xs text-blue-300">Quantum Entanglement: Active</span>
+                        <span class="text-xs text-blue-300">Quantum Sync: Active</span>
                     </div>
                 </div>
                 
                 <div class="flex items-center space-x-3">
+                    <button id="ar-toggle" class="text-purple-300 hover:text-purple-200 text-sm transition-colors" title="AR Mode">
+                        <i class="fas fa-vr-cardboard"></i>
+                    </button>
+                    <button id="ai-mode" class="text-green-300 hover:text-green-200 text-sm transition-colors" title="AI Mode">
+                        <i class="fas fa-robot"></i>
+                    </button>
                     <button id="logout-btn" class="text-red-300 hover:text-red-200 text-sm transition-colors">
-                        <i class="fas fa-sign-out-alt"></i> Logout
+                        <i class="fas fa-sign-out-alt"></i> Sign Out
                     </button>
                 </div>
             </div>
         </div>
 
-        <div class="flex flex-1 overflow-hidden">
+        <div class="flex flex-1 overflow-hidden" id="mainContainer">
             <!-- Sidebar -->
-            <div class="w-80 bg-gray-900 border-r border-blue-800 flex flex-col">
-                <div class="p-4 border-b border-blue-800">
+            <div class="w-80 bg-gray-900/80 border-r border-blue-800/50 flex flex-col">
+                <div class="p-4 border-b border-blue-800/50">
                     <div class="flex items-center justify-between mb-4">
-                        <h2 class="text-xl font-bold text-blue-300">Quantum Chats</h2>
+                        <h2 class="text-xl font-bold text-blue-300">Connections</h2>
                         <button class="text-blue-400 hover:text-blue-300 transition-colors" id="createGroupBtn" title="Create Group">
                             <i class="fas fa-users"></i>
                         </button>
@@ -656,15 +788,21 @@
                     
                     <!-- Search -->
                     <div class="relative mb-4">
-                        <input type="text" id="chatSearch" placeholder="Search chats..." class="w-full bg-gray-800 border border-blue-700 rounded-lg py-2 px-3 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500">
+                        <input type="text" id="chatSearch" placeholder="Search connections..." class="w-full bg-gray-800/50 border border-blue-700/50 rounded-lg py-2 px-3 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500">
                         <i class="fas fa-search absolute right-3 top-2.5 text-blue-400"></i>
+                    </div>
+
+                    <!-- AI Assistant -->
+                    <div class="ai-suggestion mb-4" id="aiAssistant">
+                        <div class="text-xs text-purple-400 mb-1">Kynecta AI</div>
+                        <div class="text-sm">Ready to help optimize your connections</div>
                     </div>
 
                     <!-- Friends List -->
                     <div class="mb-4">
-                        <h3 class="text-sm font-semibold text-blue-300 mb-2">Friends</h3>
+                        <h3 class="text-sm font-semibold text-blue-300 mb-2">Online Now</h3>
                         <div id="friendsList" class="max-h-40 overflow-y-auto space-y-2">
-                            <!-- Friends will be populated from profile.html -->
+                            <!-- Friends will be populated dynamically -->
                         </div>
                     </div>
                 </div>
@@ -674,23 +812,23 @@
                     <div class="no-chats" id="noChatsMessage">
                         <i class="fas fa-comments text-4xl mb-3 text-blue-400"></i>
                         <p class="text-blue-300">No conversations yet</p>
-                        <p class="text-sm text-blue-400 mt-1">Start a chat with a friend</p>
+                        <p class="text-sm text-blue-400 mt-1">Start a conversation to begin</p>
                     </div>
                 </div>
                 
                 <!-- User Profile -->
-                <div class="p-4 border-t border-blue-800">
+                <div class="p-4 border-t border-blue-800/50">
                     <div class="flex items-center space-x-3">
                         <div class="relative">
                             <img src="" alt="Profile" class="profile-pic" id="userProfilePic">
-                            <div class="absolute bottom-0 right-0 w-3 h-3 bg-green-500 rounded-full border-2 border-gray-900"></div>
+                            <div class="sync-indicator"></div>
                         </div>
                         <div class="flex-1 min-w-0">
                             <p class="font-medium text-sm truncate" id="userDisplayName">Loading...</p>
-                            <div class="mood-sync active">
-                                <span class="text-xs">Mood Sync:</span>
-                                <div class="mood-sync-bar">
-                                    <div class="mood-sync-progress" style="width: 85%"></div>
+                            <div class="connection-sync active">
+                                <span class="text-xs">Connection:</span>
+                                <div class="connection-sync-bar">
+                                    <div class="connection-sync-progress" style="width: 92%"></div>
                                 </div>
                             </div>
                         </div>
@@ -701,16 +839,16 @@
             <!-- Main Chat Area -->
             <div class="flex-1 flex flex-col">
                 <!-- Chat Header -->
-                <div class="glass-effect border-b border-blue-800 p-4" id="chatHeader">
+                <div class="glass-effect border-b border-blue-800/50 p-4" id="chatHeader">
                     <div class="flex items-center justify-between">
                         <div class="flex items-center space-x-3">
                             <div class="relative">
                                 <img src="" alt="Chat Avatar" class="profile-pic" id="chatHeaderAvatar">
-                                <div class="absolute bottom-0 right-0 w-3 h-3 bg-green-500 rounded-full border-2 border-gray-900"></div>
+                                <div class="sync-indicator"></div>
                             </div>
                             <div>
                                 <h3 class="font-bold" id="chatHeaderName">Select a chat</h3>
-                                <p class="text-xs text-blue-300" id="chatHeaderStatus">Start a conversation</p>
+                                <p class="text-xs text-blue-300" id="chatHeaderStatus">Choose a conversation</p>
                             </div>
                         </div>
                         <div class="flex items-center space-x-4" id="chatActions">
@@ -722,6 +860,9 @@
                             </button>
                             <button class="text-blue-400 hover:text-blue-300 transition-colors" id="quantumMessageBtn" title="Quantum Message">
                                 <i class="fas fa-atom"></i>
+                            </button>
+                            <button class="text-blue-400 hover:text-blue-300 transition-colors" id="aiEnhanceBtn" title="AI Enhance">
+                                <i class="fas fa-magic"></i>
                             </button>
                         </div>
                     </div>
@@ -735,15 +876,15 @@
                         <p class="text-sm mt-1">Select a chat to start messaging</p>
                     </div>
 
-                    <!-- Quantum Features -->
-                    <div class="thought-bubble hidden" id="thoughtBubble">
-                        <div class="text-xs text-blue-400 mb-1">Thought Bubble</div>
-                        <div class="text-sm">"What if we could send messages that change based on the reader's mood?"</div>
+                    <!-- Kynecta Features -->
+                    <div class="suggestion-bubble hidden" id="suggestionBubble">
+                        <div class="text-xs text-blue-400 mb-1">AI Suggestion</div>
+                        <div class="text-sm">Try asking about their interests for better engagement</div>
                     </div>
 
                     <div class="memory-lane hidden" id="memoryLane">
                         <div class="memory-date">Memory Lane</div>
-                        <div class="memory-content">Your chat memories will appear here</div>
+                        <div class="memory-content">Your conversation highlights will appear here</div>
                     </div>
                 </div>
 
@@ -759,8 +900,16 @@
                     </div>
                 </div>
 
+                <!-- AI Suggestions -->
+                <div class="hidden" id="aiSuggestions">
+                    <div class="ai-suggestion">
+                        <div class="text-xs text-purple-400 mb-1">Conversation Helper</div>
+                        <div class="text-sm">Try asking about their recent activities</div>
+                    </div>
+                </div>
+
                 <!-- Message Input -->
-                <div class="glass-effect border-t border-blue-800 p-4">
+                <div class="glass-effect border-t border-blue-800/50 p-4">
                     <div class="flex items-center space-x-2">
                         <button class="text-blue-400 hover:text-blue-300 transition-colors p-2 rounded-full hover:bg-blue-800/50" id="emojiBtn">
                             <i class="fas fa-smile"></i>
@@ -776,7 +925,7 @@
                         </button>
                         
                         <div class="flex-1 relative">
-                            <input type="text" id="messageInput" placeholder="Select a chat to start messaging..." class="w-full bg-gray-800 border border-blue-700 rounded-full py-3 px-4 focus:outline-none focus:ring-2 focus:ring-blue-500" disabled>
+                            <input type="text" id="messageInput" placeholder="Select a chat to start messaging..." class="w-full bg-gray-800/50 border border-blue-700/50 rounded-full py-3 px-4 focus:outline-none focus:ring-2 focus:ring-blue-500" disabled>
                             
                             <!-- Emoji Picker -->
                             <div class="emoji-picker hidden" id="emojiPicker">
@@ -794,7 +943,7 @@
                             </div>
                         </div>
                         
-                        <button class="bg-blue-600 hover:bg-blue-700 text-white p-3 rounded-full transition-colors" id="sendBtn" disabled>
+                        <button class="primary-gradient hover:opacity-90 text-white p-3 rounded-full transition-colors" id="sendBtn" disabled>
                             <i class="fas fa-paper-plane"></i>
                         </button>
                     </div>
@@ -828,17 +977,17 @@
     <!-- Modals -->
     <div class="modal" id="createGroupModal">
         <div class="modal-container">
-            <h3 class="text-xl font-bold mb-4">Create Quantum Group</h3>
+            <h3 class="text-xl font-bold mb-4">Create Group</h3>
             <input type="text" id="groupName" placeholder="Group name" class="w-full bg-gray-800 border border-blue-700 rounded-lg py-2 px-3 mb-4 focus:outline-none focus:ring-2 focus:ring-blue-500">
             <div class="mb-4">
-                <p class="mb-2 text-blue-300">Select friends:</p>
+                <p class="mb-2 text-blue-300">Select members:</p>
                 <div id="groupFriendsList" class="max-h-40 overflow-y-auto space-y-2">
                     <!-- Friends will be populated here -->
                 </div>
             </div>
             <div class="flex justify-end space-x-2">
                 <button class="px-4 py-2 bg-gray-700 hover:bg-gray-600 rounded-lg transition-colors" id="cancelCreateGroup">Cancel</button>
-                <button class="px-4 py-2 bg-blue-600 hover:bg-blue-700 rounded-lg transition-colors" id="confirmCreateGroup">Create Quantum Group</button>
+                <button class="px-4 py-2 primary-gradient hover:opacity-90 rounded-lg transition-colors" id="confirmCreateGroup">Create Group</button>
             </div>
         </div>
     </div>
@@ -850,11 +999,11 @@
             <textarea id="quantumMessageText" placeholder="Enter your quantum message..." class="w-full bg-gray-800 border border-blue-700 rounded-lg py-2 px-3 mb-4 h-32 focus:outline-none focus:ring-2 focus:ring-blue-500"></textarea>
             <div class="flex items-center space-x-2 mb-4">
                 <input type="checkbox" id="superposition" class="rounded text-blue-600">
-                <label for="superposition" class="text-sm text-blue-300">Enable superposition</label>
+                <label for="superposition" class="text-sm text-blue-300">Enable quantum superposition</label>
             </div>
             <div class="flex justify-end space-x-2">
                 <button class="px-4 py-2 bg-gray-700 hover:bg-gray-600 rounded-lg transition-colors" id="cancelQuantumMessage">Cancel</button>
-                <button class="px-4 py-2 bg-blue-600 hover:bg-blue-700 rounded-lg transition-colors" id="confirmQuantumMessage">Send Quantum</button>
+                <button class="px-4 py-2 primary-gradient hover:opacity-90 rounded-lg transition-colors" id="confirmQuantumMessage">Send Quantum</button>
             </div>
         </div>
     </div>
@@ -887,6 +1036,8 @@
         let localStream = null;
         let remoteStream = null;
         let peerConnection = null;
+        let isArMode = false;
+        let isAiMode = false;
     </script>
 
     <!-- Application Logic -->
@@ -925,6 +1076,7 @@
         const videoCallBtn = document.getElementById('videoCallBtn');
         const voiceCallBtn = document.getElementById('voiceCallBtn');
         const quantumMessageBtn = document.getElementById('quantumMessageBtn');
+        const aiEnhanceBtn = document.getElementById('aiEnhanceBtn');
         const videoCallContainer = document.getElementById('videoCallContainer');
         const localVideo = document.getElementById('localVideo');
         const remoteVideo = document.getElementById('remoteVideo');
@@ -941,8 +1093,14 @@
         const cancelQuantumMessage = document.getElementById('cancelQuantumMessage');
         const confirmQuantumMessage = document.getElementById('confirmQuantumMessage');
         const quantumMessageText = document.getElementById('quantumMessageText');
-        const thoughtBubble = document.getElementById('thoughtBubble');
+        const suggestionBubble = document.getElementById('suggestionBubble');
         const memoryLane = document.getElementById('memoryLane');
+        const aiAssistant = document.getElementById('aiAssistant');
+        const aiSuggestions = document.getElementById('aiSuggestions');
+        const arToggle = document.getElementById('ar-toggle');
+        const aiMode = document.getElementById('ai-mode');
+        const mainContainer = document.getElementById('mainContainer');
+        const chatSearch = document.getElementById('chatSearch');
 
         // Initialize the app
         document.addEventListener('DOMContentLoaded', function() {
@@ -956,6 +1114,7 @@
                     loadFriends();
                     loadChats();
                     updateConnectionStatus('connected');
+                    initializeNetworkActivity();
                 } else {
                     currentUser = null;
                     authRequired.classList.remove('hidden');
@@ -996,6 +1155,7 @@
             videoCallBtn.addEventListener('click', startVideoCall);
             voiceCallBtn.addEventListener('click', startVoiceCall);
             quantumMessageBtn.addEventListener('click', showQuantumMessageModal);
+            aiEnhanceBtn.addEventListener('click', toggleAIEnhance);
             endCallBtn.addEventListener('click', endCall);
             muteBtn.addEventListener('click', toggleMute);
             videoToggleBtn.addEventListener('click', toggleVideo);
@@ -1008,6 +1168,16 @@
             // Quantum message
             cancelQuantumMessage.addEventListener('click', hideQuantumMessageModal);
             confirmQuantumMessage.addEventListener('click', sendQuantumMessage);
+            
+            // AI Assistant
+            aiAssistant.addEventListener('click', interactWithAI);
+            
+            // AR/AI modes
+            arToggle.addEventListener('click', toggleARMode);
+            aiMode.addEventListener('click', toggleAIMode);
+            
+            // Search
+            chatSearch.addEventListener('input', filterChats);
             
             // Close modals when clicking outside
             document.addEventListener('click', e => {
@@ -1033,13 +1203,13 @@
             connectionStatus.className = 'connection-status ' + status;
             switch(status) {
                 case 'connected':
-                    connectionStatus.innerHTML = '<i class="fas fa-check-circle"></i><span>Connected to Firebase</span>';
+                    connectionStatus.innerHTML = '<i class="fas fa-check-circle"></i><span>Connected to Kynecta</span>';
                     break;
                 case 'connecting':
-                    connectionStatus.innerHTML = '<i class="fas fa-circle-notch fa-spin"></i><span>Connecting to Firebase...</span>';
+                    connectionStatus.innerHTML = '<i class="fas fa-circle-notch fa-spin"></i><span>Connecting to Kynecta...</span>';
                     break;
                 case 'disconnected':
-                    connectionStatus.innerHTML = '<i class="fas fa-exclamation-triangle"></i><span>Disconnected from Firebase</span>';
+                    connectionStatus.innerHTML = '<i class="fas fa-exclamation-triangle"></i><span>Connection Lost</span>';
                     break;
             }
         }
@@ -1053,125 +1223,119 @@
             // Set user profile picture
             if (currentUser.photoURL) {
                 userProfilePic.src = currentUser.photoURL;
+                chatHeaderAvatar.src = currentUser.photoURL;
             } else {
                 // Generate a default avatar based on user initials
                 const initials = currentUser.displayName ? 
                     currentUser.displayName.split(' ').map(n => n[0]).join('').toUpperCase() : 
                     'U';
                 userProfilePic.src = `https://ui-avatars.com/api/?name=${initials}&background=3B82F6&color=fff&size=40`;
+                chatHeaderAvatar.src = `https://ui-avatars.com/api/?name=${initials}&background=3B82F6&color=fff&size=40`;
             }
         }
 
         function loadFriends() {
             // In a real app, this would fetch from Firestore
-            // For demo purposes, we'll use mock data
-            const mockFriends = [
-                { id: 'friend1', name: 'Alex Johnson', status: 'Online', avatar: 'https://randomuser.me/api/portraits/men/32.jpg' },
-                { id: 'friend2', name: 'Sam Smith', status: 'Online', avatar: 'https://randomuser.me/api/portraits/women/44.jpg' },
-                { id: 'friend3', name: 'Jordan Lee', status: 'Away', avatar: 'https://randomuser.me/api/portraits/men/22.jpg' },
-                { id: 'friend4', name: 'Taylor Swift', status: 'Offline', avatar: 'https://randomuser.me/api/portraits/women/68.jpg' }
-            ];
+            // For demo purposes, we'll generate dynamic data
+            const friendNames = ['Alex Johnson', 'Sam Wilson', 'Jordan Lee', 'Taylor Swift', 'Morgan Freeman'];
+            const statuses = ['Online', 'Away', 'Busy', 'Offline'];
             
             friendsList.innerHTML = '';
-            mockFriends.forEach(friend => {
+            friendNames.forEach((name, index) => {
+                const status = statuses[Math.floor(Math.random() * statuses.length)];
+                const friendId = 'friend' + (index + 1);
+                const avatarUrl = `https://i.pravatar.cc/150?img=${Math.floor(Math.random() * 70) + 1}`;
+                
                 const friendElement = document.createElement('div');
                 friendElement.className = 'flex items-center space-x-3 p-2 rounded-lg hover:bg-blue-800/50 cursor-pointer';
                 friendElement.innerHTML = `
                     <div class="relative">
-                        <img src="${friend.avatar}" alt="${friend.name}" class="w-8 h-8 rounded-full">
-                        <div class="absolute bottom-0 right-0 w-2 h-2 ${friend.status === 'Online' ? 'bg-green-500' : friend.status === 'Away' ? 'bg-yellow-500' : 'bg-gray-500'} rounded-full border border-white"></div>
+                        <img src="${avatarUrl}" alt="${name}" class="w-8 h-8 rounded-full">
+                        <div class="absolute bottom-0 right-0 w-2 h-2 ${status === 'Online' ? 'bg-green-500' : status === 'Away' ? 'bg-yellow-500' : status === 'Busy' ? 'bg-red-500' : 'bg-gray-500'} rounded-full border border-white"></div>
                     </div>
                     <div class="flex-1 min-w-0">
-                        <p class="text-sm font-medium truncate">${friend.name}</p>
-                        <p class="text-xs text-blue-300">${friend.status}</p>
+                        <p class="text-sm font-medium truncate">${name}</p>
+                        <p class="text-xs text-blue-300">${status}</p>
                     </div>
                 `;
-                friendElement.addEventListener('click', () => startChatWithFriend(friend));
+                friendElement.addEventListener('click', () => startChatWithFriend({id: friendId, name: name, avatar: avatarUrl, status: status}));
                 friendsList.appendChild(friendElement);
             });
         }
 
         function loadChats() {
             // In a real app, this would fetch from Firestore
-            // For demo purposes, we'll use mock data
-            const mockChats = [
-                { 
-                    id: 'chat1', 
-                    name: 'Alex Johnson', 
-                    lastMessage: 'Hey, how are you doing?', 
-                    timestamp: new Date(Date.now() - 5 * 60000), 
-                    unread: 2, 
-                    type: 'personal',
-                    avatar: 'https://randomuser.me/api/portraits/men/32.jpg',
-                    participants: ['user1', 'friend1']
-                },
-                { 
-                    id: 'chat2', 
-                    name: 'Quantum Study Group', 
-                    lastMessage: 'Sam: Did anyone finish the homework?', 
-                    timestamp: new Date(Date.now() - 2 * 3600000), 
-                    unread: 0, 
-                    type: 'group',
-                    avatar: null,
-                    participants: ['user1', 'friend1', 'friend2', 'friend3']
-                },
-                { 
-                    id: 'chat3', 
-                    name: 'Sam Smith', 
-                    lastMessage: 'Thanks for your help yesterday!', 
-                    timestamp: new Date(Date.now() - 24 * 3600000), 
-                    unread: 0, 
-                    type: 'personal',
-                    avatar: 'https://randomuser.me/api/portraits/women/44.jpg',
-                    participants: ['user1', 'friend2']
-                }
+            // For demo purposes, we'll generate dynamic data
+            const chatNames = ['Tech Team', 'Family Group', 'Project Discussion', 'Friends Circle'];
+            const lastMessages = [
+                'Let me know when you are available for a call',
+                'Did you see the latest updates?',
+                'The meeting has been rescheduled to tomorrow',
+                'Thanks for your help with the project!'
             ];
             
             chatList.innerHTML = '';
             
-            if (mockChats.length === 0) {
+            if (chatNames.length === 0) {
                 noChatsMessage.classList.remove('hidden');
                 return;
             }
             
             noChatsMessage.classList.add('hidden');
             
-            mockChats.forEach(chat => {
+            chatNames.forEach((name, index) => {
+                const chatId = 'chat' + (index + 1);
+                const lastMessage = lastMessages[index];
+                const timestamp = new Date(Date.now() - Math.random() * 7 * 24 * 3600000); // Random time in last 7 days
+                const unread = Math.random() > 0.7 ? Math.floor(Math.random() * 5) + 1 : 0;
+                const type = Math.random() > 0.5 ? 'group' : 'personal';
+                const participants = ['user1', 'friend1', 'friend2', 'friend3'].slice(0, Math.floor(Math.random() * 4) + 2);
+                
                 const chatElement = document.createElement('div');
                 chatElement.className = 'chat-item';
-                chatElement.dataset.chatId = chat.id;
+                chatElement.dataset.chatId = chatId;
+                chatElement.dataset.chatName = name;
                 
-                const timeString = formatTime(chat.timestamp);
-                const avatarUrl = chat.avatar || `https://ui-avatars.com/api/?name=${encodeURIComponent(chat.name)}&background=8B5CF6&color=fff&size=40`;
+                const timeString = formatTime(timestamp);
+                const avatarUrl = type === 'personal' ? `https://i.pravatar.cc/150?img=${Math.floor(Math.random() * 70) + 1}` : null;
                 
                 chatElement.innerHTML = `
                     <div class="chat-avatar">
-                        ${!chat.avatar ? chat.name.split(' ').map(n => n[0]).join('').toUpperCase() : ''}
+                        ${!avatarUrl ? name.split(' ').map(n => n[0]).join('').toUpperCase() : ''}
                     </div>
                     <div class="chat-item-info">
                         <div class="chat-item-header">
-                            <span class="chat-item-name">${chat.name}</span>
+                            <span class="chat-item-name">${name}</span>
                             <span class="chat-item-time">${timeString}</span>
                         </div>
-                        <div class="chat-item-preview">${chat.lastMessage}</div>
+                        <div class="chat-item-preview">${lastMessage}</div>
                         <div class="chat-item-meta">
-                            <span class="chat-type-indicator ${chat.type === 'group' ? 'type-group' : 'type-personal'}">${chat.type === 'group' ? 'Group' : 'Personal'}</span>
-                            ${chat.unread > 0 ? `<span class="chat-badge">${chat.unread}</span>` : ''}
+                            <span class="chat-type-indicator ${type === 'group' ? 'type-group' : 'type-personal'}">${type === 'group' ? 'Group' : 'Direct'}</span>
+                            ${unread > 0 ? `<span class="chat-badge">${unread}</span>` : ''}
                         </div>
                     </div>
                 `;
                 
-                if (chat.avatar) {
+                if (avatarUrl) {
                     const avatarImg = chatElement.querySelector('.chat-avatar');
                     avatarImg.innerHTML = '';
                     const img = document.createElement('img');
-                    img.src = chat.avatar;
-                    img.alt = chat.name;
+                    img.src = avatarUrl;
+                    img.alt = name;
                     img.className = 'profile-pic';
                     avatarImg.appendChild(img);
                 }
                 
-                chatElement.addEventListener('click', () => selectChat(chat));
+                chatElement.addEventListener('click', () => selectChat({
+                    id: chatId,
+                    name: name,
+                    lastMessage: lastMessage,
+                    timestamp: timestamp,
+                    unread: unread,
+                    type: type,
+                    avatar: avatarUrl,
+                    participants: participants
+                }));
                 chatList.appendChild(chatElement);
             });
         }
@@ -1215,8 +1379,11 @@
             // Load messages for this chat
             loadMessages(chat.id);
             
-            // Show quantum features occasionally
-            showQuantumFeatures();
+            // Show features occasionally
+            showSpecialFeatures();
+            
+            // Show AI suggestions
+            showAISuggestions();
         }
 
         function loadMessages(chatId) {
@@ -1224,54 +1391,40 @@
             messagesContainer.innerHTML = '';
             
             // In a real app, this would fetch from Firestore
-            // For demo purposes, we'll use mock data
-            const mockMessages = [
-                {
-                    id: 'msg1',
-                    senderId: 'friend1',
-                    senderName: 'Alex Johnson',
-                    content: 'Hey there! How are you doing?',
-                    timestamp: new Date(Date.now() - 30 * 60000),
-                    type: 'text'
-                },
-                {
-                    id: 'msg2',
-                    senderId: currentUser.uid,
-                    senderName: currentUser.displayName,
-                    content: "I'm good! Just working on the quantum chat project.",
-                    timestamp: new Date(Date.now() - 25 * 60000),
-                    type: 'text'
-                },
-                {
-                    id: 'msg3',
-                    senderId: 'friend1',
-                    senderName: 'Alex Johnson',
-                    content: 'That sounds interesting! How is it going?',
-                    timestamp: new Date(Date.now() - 20 * 60000),
-                    type: 'text'
-                },
-                {
-                    id: 'msg4',
-                    senderId: currentUser.uid,
-                    senderName: currentUser.displayName,
-                    content: 'Pretty well! Just added Firebase 9.22.1 with compat mode.',
-                    timestamp: new Date(Date.now() - 15 * 60000),
-                    type: 'text'
-                },
-                {
-                    id: 'msg5',
-                    senderId: 'friend1',
-                    senderName: 'Alex Johnson',
-                    content: 'Awesome! The quantum features look really cool.',
-                    timestamp: new Date(Date.now() - 10 * 60000),
-                    type: 'text'
-                }
+            // For demo purposes, we'll generate dynamic messages
+            const messageCount = Math.floor(Math.random() * 10) + 5;
+            const senders = [currentUser.uid, 'friend1', 'friend2', 'friend3'];
+            const senderNames = [currentUser.displayName || 'You', 'Alex Johnson', 'Sam Wilson', 'Jordan Lee'];
+            const messageTemplates = [
+                "Hey, how are you doing today?",
+                "Did you get a chance to look at the document I sent?",
+                "Let's schedule a meeting for next week",
+                "The project is coming along really well",
+                "Thanks for your help with this!",
+                "Can you send me those files when you get a chance?",
+                "I'll be available for a call in about an hour",
+                "Let me know if you need anything else",
+                "That sounds like a great idea!",
+                "Looking forward to working together on this"
             ];
             
             // Display messages
-            mockMessages.forEach(message => {
+            for (let i = 0; i < messageCount; i++) {
+                const senderIndex = Math.floor(Math.random() * senders.length);
+                const messageIndex = Math.floor(Math.random() * messageTemplates.length);
+                const timestamp = new Date(Date.now() - Math.random() * 24 * 3600000); // Random time in last 24 hours
+                
+                const message = {
+                    id: 'msg' + i,
+                    senderId: senders[senderIndex],
+                    senderName: senderNames[senderIndex],
+                    content: messageTemplates[messageIndex],
+                    timestamp: timestamp,
+                    type: 'text'
+                };
+                
                 displayMessage(message);
-            });
+            }
             
             // Scroll to bottom
             messagesContainer.scrollTop = messagesContainer.scrollHeight;
@@ -1279,7 +1432,14 @@
 
         function displayMessage(message) {
             const messageDiv = document.createElement('div');
-            messageDiv.className = `message ${message.senderId === currentUser.uid ? 'sent' : 'received'}`;
+            messageDiv.className = `message ${message.senderId === currentUser.uid ? 'sent' : 'received'} mood-adaptive`;
+            
+            // Add random mood class for visual variety
+            const moods = ['mood-happy', 'mood-calm', 'mood-energetic'];
+            const randomMood = moods[Math.floor(Math.random() * moods.length)];
+            if (message.senderId !== currentUser.uid) {
+                messageDiv.classList.add(randomMood);
+            }
             
             const timeString = formatTime(message.timestamp);
             
@@ -1313,7 +1473,7 @@
             const message = {
                 id: generateId(),
                 senderId: currentUser.uid,
-                senderName: currentUser.displayName,
+                senderName: currentUser.displayName || 'You',
                 content: content,
                 timestamp: new Date(),
                 type: 'text'
@@ -1334,6 +1494,34 @@
             
             // Show notification
             showNotification('Message sent');
+            
+            // Simulate AI response occasionally
+            if (Math.random() > 0.7) {
+                setTimeout(() => {
+                    const aiResponse = generateAIResponse(content);
+                    const responseMessage = {
+                        id: generateId(),
+                        senderId: 'ai-assistant',
+                        senderName: 'Kynecta AI',
+                        content: aiResponse,
+                        timestamp: new Date(),
+                        type: 'text'
+                    };
+                    displayMessage(responseMessage);
+                    messagesContainer.scrollTop = messagesContainer.scrollHeight;
+                }, 1000 + Math.random() * 2000);
+            }
+        }
+
+        function generateAIResponse(userMessage) {
+            const responses = [
+                "That's an interesting point! Have you considered other perspectives?",
+                "I'm here to help if you need any assistance with that.",
+                "Great conversation! Would you like me to suggest some related topics?",
+                "Based on our chat history, you might find this information useful...",
+                "I notice you're discussing this topic in depth. Would you like me to provide additional resources?"
+            ];
+            return responses[Math.floor(Math.random() * responses.length)];
         }
 
         function startTyping() {
@@ -1369,7 +1557,7 @@
         }
 
         function initializeEmojiPicker() {
-            const emojis = ['😀', '😂', '🥰', '😎', '🤔', '😮', '👍', '❤️', '🔥', '🎉', '🙏', '💯'];
+            const emojis = ['😀', '😂', '🥰', '😎', '🤔', '😮', '👍', '❤️', '🔥', '🎉', '🙏', '💯', '🚀', '🤖', '👽', '⚡'];
             
             emojis.forEach(emoji => {
                 const emojiElement = document.createElement('div');
@@ -1385,7 +1573,7 @@
         }
 
         function initializeStickerPicker() {
-            const stickers = ['😺', '🐶', '🐼', '🦊', '🐨', '🐯', '🦁', '🐮'];
+            const stickers = ['😺', '🐶', '🐼', '🦊', '🐨', '🐯', '🦁', '🐮', '👾', '🤖', '🚀', '⭐'];
             
             stickers.forEach(sticker => {
                 const stickerElement = document.createElement('div');
@@ -1477,7 +1665,7 @@
                     const message = {
                         id: generateId(),
                         senderId: currentUser.uid,
-                        senderName: currentUser.displayName,
+                        senderName: currentUser.displayName || 'You',
                         content: `Sent a file: ${file.name}`,
                         timestamp: new Date(),
                         type: 'file',
@@ -1509,6 +1697,20 @@
             // In a real app, this would initialize WebRTC
             // For demo purposes, we'll just show the UI
             showNotification('Starting video call...');
+            
+            // Simulate getting camera access
+            if (navigator.mediaDevices && navigator.mediaDevices.getUserMedia) {
+                navigator.mediaDevices.getUserMedia({ video: true, audio: true })
+                    .then(stream => {
+                        localStream = stream;
+                        localVideo.srcObject = stream;
+                        showNotification('Camera and microphone access granted');
+                    })
+                    .catch(error => {
+                        console.error('Error accessing media devices:', error);
+                        showNotification('Could not access camera or microphone');
+                    });
+            }
         }
 
         function startVoiceCall() {
@@ -1519,39 +1721,83 @@
             
             // In a real app, this would initialize a voice call
             showNotification('Starting voice call...');
+            
+            // Simulate getting microphone access
+            if (navigator.mediaDevices && navigator.mediaDevices.getUserMedia) {
+                navigator.mediaDevices.getUserMedia({ audio: true })
+                    .then(stream => {
+                        localStream = stream;
+                        showNotification('Microphone access granted');
+                    })
+                    .catch(error => {
+                        console.error('Error accessing microphone:', error);
+                        showNotification('Could not access microphone');
+                    });
+            }
         }
 
         function endCall() {
             // Hide video call container
             videoCallContainer.style.display = 'none';
             
+            // Stop local stream
+            if (localStream) {
+                localStream.getTracks().forEach(track => track.stop());
+                localStream = null;
+            }
+            
             // In a real app, this would end the call and clean up resources
             showNotification('Call ended');
         }
 
         function toggleMute() {
-            const icon = muteBtn.querySelector('i');
-            if (icon.classList.contains('fa-microphone')) {
-                icon.classList.remove('fa-microphone');
-                icon.classList.add('fa-microphone-slash');
-                showNotification('Microphone muted');
-            } else {
-                icon.classList.remove('fa-microphone-slash');
-                icon.classList.add('fa-microphone');
-                showNotification('Microphone unmuted');
+            if (!localStream) return;
+            
+            const audioTracks = localStream.getAudioTracks();
+            if (audioTracks.length > 0) {
+                const enabled = audioTracks[0].enabled;
+                audioTracks[0].enabled = !enabled;
+                
+                const icon = muteBtn.querySelector('i');
+                if (enabled) {
+                    icon.classList.remove('fa-microphone');
+                    icon.classList.add('fa-microphone-slash');
+                    showNotification('Microphone muted');
+                } else {
+                    icon.classList.remove('fa-microphone-slash');
+                    icon.classList.add('fa-microphone');
+                    showNotification('Microphone unmuted');
+                }
             }
         }
 
         function toggleVideo() {
-            const icon = videoToggleBtn.querySelector('i');
-            if (icon.classList.contains('fa-video')) {
-                icon.classList.remove('fa-video');
-                icon.classList.add('fa-video-slash');
-                showNotification('Video turned off');
+            if (!localStream) return;
+            
+            const videoTracks = localStream.getVideoTracks();
+            if (videoTracks.length > 0) {
+                const enabled = videoTracks[0].enabled;
+                videoTracks[0].enabled = !enabled;
+                
+                const icon = videoToggleBtn.querySelector('i');
+                if (enabled) {
+                    icon.classList.remove('fa-video');
+                    icon.classList.add('fa-video-slash');
+                    showNotification('Video turned off');
+                } else {
+                    icon.classList.remove('fa-video-slash');
+                    icon.classList.add('fa-video');
+                    showNotification('Video turned on');
+                }
+            }
+        }
+
+        function toggleAIEnhance() {
+            aiSuggestions.classList.toggle('hidden');
+            if (aiSuggestions.classList.contains('hidden')) {
+                showNotification('AI suggestions disabled');
             } else {
-                icon.classList.remove('fa-video-slash');
-                icon.classList.add('fa-video');
-                showNotification('Video turned on');
+                showNotification('AI suggestions enabled');
             }
         }
 
@@ -1640,7 +1886,7 @@
             const message = {
                 id: generateId(),
                 senderId: currentUser.uid,
-                senderName: currentUser.displayName,
+                senderName: currentUser.displayName || 'You',
                 content: content,
                 timestamp: new Date(),
                 type: 'quantum',
@@ -1660,12 +1906,12 @@
             messagesContainer.scrollTop = messagesContainer.scrollHeight;
         }
 
-        function showQuantumFeatures() {
-            // Randomly show quantum features
+        function showSpecialFeatures() {
+            // Randomly show special features
             if (Math.random() > 0.7) {
-                thoughtBubble.classList.remove('hidden');
+                suggestionBubble.classList.remove('hidden');
             } else {
-                thoughtBubble.classList.add('hidden');
+                suggestionBubble.classList.add('hidden');
             }
             
             if (Math.random() > 0.8) {
@@ -1673,6 +1919,106 @@
             } else {
                 memoryLane.classList.add('hidden');
             }
+        }
+
+        function showAISuggestions() {
+            // Randomly show AI suggestions
+            if (Math.random() > 0.5) {
+                const suggestions = [
+                    "Ask about their weekend plans",
+                    "Share something interesting you learned recently",
+                    "Discuss common interests you both have",
+                    "Ask for their opinion on a topic you care about"
+                ];
+                const suggestion = suggestions[Math.floor(Math.random() * suggestions.length)];
+                
+                const suggestionElement = aiSuggestions.querySelector('.ai-suggestion .text-sm');
+                suggestionElement.textContent = suggestion;
+                
+                aiSuggestions.classList.remove('hidden');
+            } else {
+                aiSuggestions.classList.add('hidden');
+            }
+        }
+
+        function interactWithAI() {
+            const responses = [
+                "I'm analyzing your conversation patterns to provide better suggestions...",
+                "Your communication style is very effective!",
+                "I notice you have great engagement with your connections.",
+                "Would you like me to help optimize your conversation flow?",
+                "Your recent messages show positive interaction patterns."
+            ];
+            const response = responses[Math.floor(Math.random() * responses.length)];
+            
+            showNotification('Kynecta AI: ' + response);
+        }
+
+        function toggleARMode() {
+            isArMode = !isArMode;
+            if (isArMode) {
+                mainContainer.classList.add('ar-mode');
+                arToggle.classList.add('text-purple-500');
+                showNotification('AR Mode Activated');
+            } else {
+                mainContainer.classList.remove('ar-mode');
+                arToggle.classList.remove('text-purple-500');
+                showNotification('AR Mode Disabled');
+            }
+        }
+
+        function toggleAIMode() {
+            isAiMode = !isAiMode;
+            if (isAiMode) {
+                document.body.classList.add('ai-mode-active');
+                aiMode.classList.add('text-green-500');
+                showNotification('AI Mode Activated');
+                
+                // Add network activity visualization
+                initializeNetworkActivity();
+            } else {
+                document.body.classList.remove('ai-mode-active');
+                aiMode.classList.remove('text-green-500');
+                showNotification('AI Mode Disabled');
+                
+                // Remove network activity
+                const existingActivity = document.querySelector('.network-activity');
+                if (existingActivity) {
+                    existingActivity.remove();
+                }
+            }
+        }
+
+        function initializeNetworkActivity() {
+            if (!isAiMode) return;
+            
+            const networkActivity = document.createElement('div');
+            networkActivity.className = 'network-activity';
+            document.body.appendChild(networkActivity);
+            
+            // Create network nodes
+            for (let i = 0; i < 20; i++) {
+                const node = document.createElement('div');
+                node.className = 'network-node';
+                node.style.left = Math.random() * 100 + 'vw';
+                node.style.top = Math.random() * 100 + 'vh';
+                node.style.animationDelay = Math.random() * 3 + 's';
+                networkActivity.appendChild(node);
+            }
+        }
+
+        function filterChats() {
+            const searchTerm = chatSearch.value.toLowerCase();
+            const chatItems = document.querySelectorAll('.chat-item');
+            
+            chatItems.forEach(item => {
+                const chatName = item.querySelector('.chat-item-name').textContent.toLowerCase();
+                if (chatName.includes(searchTerm)) {
+                    item.style.display = 'flex';
+                } else {
+                    item.style.display = 'none';
+                }
+            });
         }
 
         function startChatWithFriend(friend) {
@@ -1737,13 +2083,13 @@
             const diffDays = Math.floor(diffMs / 86400000);
             
             if (diffMins < 1) {
-                return 'Just now';
+                return 'Now';
             } else if (diffMins < 60) {
-                return `${diffMins}m ago`;
+                return `${diffMins}m`;
             } else if (diffHours < 24) {
-                return `${diffHours}h ago`;
+                return `${diffHours}h`;
             } else if (diffDays < 7) {
-                return `${diffDays}d ago`;
+                return `${diffDays}d`;
             } else {
                 return date.toLocaleDateString();
             }
