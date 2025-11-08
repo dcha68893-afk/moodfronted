@@ -17,7 +17,7 @@ const PORT = process.env.PORT || 3000;
 
 // ✅ Correct fix for __dirname and __filename in ES modules
 const __filename = fileURLToPath(import.meta.url);
-const _dirname = path.dirname(_filename);
+const __dirname = path.dirname(__filename);
 
 // --- MIDDLEWARE SETUP ---
 
