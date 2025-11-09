@@ -9,10 +9,10 @@
     <link rel="stylesheet" href="responsive.css">
     
     <!-- Firebase SDKs -->
-    <script src="https://www.gstatic.com/firebasejs/8.10.0/firebase-app.js"></script>
-    <script src="https://www.gstatic.com/firebasejs/8.10.0/firebase-firestore.js"></script>
-    <script src="https://www.gstatic.com/firebasejs/8.10.0/firebase-auth.js"></script>
-    <script src="https://www.gstatic.com/firebasejs/8.10.0/firebase-storage.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/9.22.1/firebase-app-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/9.22.1/firebase-firestore-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/9.22.1/firebase-auth-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/9.22.1/firebase-storage-compat.js"></script>
     
     <style>
         /* CSS Variables for Themes */
@@ -483,20 +483,6 @@
             border-radius: 20px;
         }
 
-        /* Login Modal */
-        .login-modal {
-            position: fixed;
-            top: 0;
-            left: 0;
-            width: 100%;
-            height: 100%;
-            background: rgba(0, 0, 0, 0.8);
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            z-index: 2000;
-        }
-
         /* Kynecta Unique Features */
         .energy-ring {
             width: 60px;
@@ -545,6 +531,251 @@
             border-radius: 8px;
             margin-top: 10px;
         }
+
+        /* NEW FEATURES STYLES */
+
+        /* Mood-based Filtering */
+        .mood-filter-container {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            margin-bottom: 15px;
+            padding: 10px;
+            background: var(--glass-bg);
+            border-radius: 12px;
+        }
+
+        .mood-option {
+            padding: 8px 12px;
+            border-radius: 20px;
+            background: var(--card-bg);
+            cursor: pointer;
+            transition: all 0.3s ease;
+            font-size: 0.9rem;
+        }
+
+        .mood-option.active {
+            background: var(--accent-color);
+            color: white;
+        }
+
+        /* Interactive Reactions */
+        .vibe-reactions {
+            display: flex;
+            gap: 8px;
+            margin-top: 10px;
+        }
+
+        .vibe-reaction {
+            padding: 6px 12px;
+            border-radius: 20px;
+            background: var(--glass-bg);
+            cursor: pointer;
+            transition: all 0.2s ease;
+            font-size: 0.85rem;
+            display: flex;
+            align-items: center;
+            gap: 5px;
+        }
+
+        .vibe-reaction.active {
+            background: var(--accent-color);
+            color: white;
+        }
+
+        .vibe-reaction:hover {
+            transform: scale(1.05);
+        }
+
+        /* AI Content Suggestions */
+        .ai-content-suggestions {
+            background: var(--card-bg);
+            border-radius: 12px;
+            padding: 15px;
+            margin-bottom: 20px;
+        }
+
+        .ai-suggestion-item {
+            padding: 10px;
+            background: var(--glass-bg);
+            border-radius: 8px;
+            margin-bottom: 10px;
+            cursor: pointer;
+            transition: all 0.2s ease;
+        }
+
+        .ai-suggestion-item:hover {
+            background: rgba(139, 92, 246, 0.2);
+        }
+
+        /* Gamified Engagement System */
+        .gamification-panel {
+            background: var(--card-bg);
+            border-radius: 12px;
+            padding: 15px;
+            margin-bottom: 20px;
+        }
+
+        .streak-counter {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            margin-bottom: 15px;
+        }
+
+        .streak-days {
+            font-size: 1.5rem;
+            font-weight: bold;
+            color: var(--accent-color);
+        }
+
+        .badge-collection {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 8px;
+        }
+
+        .badge-item {
+            width: 40px;
+            height: 40px;
+            border-radius: 50%;
+            background: var(--glass-bg);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 1.2rem;
+        }
+
+        /* Enhanced Comment System */
+        .nested-comment {
+            margin-left: 20px;
+            border-left: 2px solid var(--glass-border);
+            padding-left: 10px;
+        }
+
+        .voice-comment-btn {
+            background: var(--accent-color);
+            color: white;
+            border-radius: 50%;
+            width: 30px;
+            height: 30px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            cursor: pointer;
+        }
+
+        .emoji-picker {
+            position: absolute;
+            bottom: 40px;
+            background: var(--card-bg);
+            border-radius: 12px;
+            padding: 10px;
+            box-shadow: 0 10px 25px rgba(0, 0, 0, 0.3);
+            z-index: 10;
+            display: none;
+            grid-template-columns: repeat(6, 1fr);
+            gap: 5px;
+        }
+
+        .emoji-picker.show {
+            display: grid;
+        }
+
+        .emoji-option {
+            width: 30px;
+            height: 30px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            cursor: pointer;
+            border-radius: 6px;
+            transition: all 0.2s ease;
+        }
+
+        .emoji-option:hover {
+            background: var(--accent-color);
+        }
+
+        /* Daily Vibe Section */
+        .daily-vibe-section {
+            background: var(--card-bg);
+            border-radius: 12px;
+            padding: 15px;
+            margin-bottom: 20px;
+            text-align: center;
+        }
+
+        .daily-vibe-title {
+            font-size: 1.2rem;
+            font-weight: bold;
+            margin-bottom: 10px;
+            color: var(--accent-color);
+        }
+
+        /* Anti-toxicity Filter */
+        .toxicity-warning {
+            background: rgba(239, 68, 68, 0.2);
+            border-left: 3px solid #EF4444;
+            padding: 10px;
+            border-radius: 8px;
+            margin-top: 10px;
+            font-size: 0.9rem;
+        }
+
+        /* Appreciation Button */
+        .appreciation-btn {
+            background: linear-gradient(45deg, #FFD93D, #FF6B6B);
+            color: white;
+            padding: 8px 16px;
+            border-radius: 20px;
+            cursor: pointer;
+            transition: all 0.3s ease;
+            font-weight: bold;
+            display: flex;
+            align-items: center;
+            gap: 5px;
+        }
+
+        .appreciation-btn:hover {
+            transform: scale(1.05);
+        }
+
+        /* Mobile Responsiveness */
+        @media (max-width: 768px) {
+            .mood-filter-container {
+                flex-wrap: wrap;
+                justify-content: center;
+            }
+            
+            .vibe-reactions {
+                flex-wrap: wrap;
+            }
+            
+            .streak-counter {
+                flex-direction: column;
+                gap: 10px;
+                text-align: center;
+            }
+            
+            .badge-collection {
+                justify-content: center;
+            }
+            
+            .emoji-picker {
+                grid-template-columns: repeat(4, 1fr);
+            }
+        }
+
+        @media (max-width: 480px) {
+            .filter-controls {
+                justify-content: center;
+            }
+            
+            .emoji-picker {
+                grid-template-columns: repeat(3, 1fr);
+            }
+        }
     </style>
 </head>
 <body class="h-full dark-theme">
@@ -577,25 +808,6 @@
         <div class="shortcut-item">
             <span>Show Shortcuts</span>
             <span class="shortcut-key">?</span>
-        </div>
-    </div>
-
-    <!-- Login Modal -->
-    <div id="loginModal" class="login-modal">
-        <div class="modal-container">
-            <div class="text-center">
-                <div class="w-20 h-20 rounded-2xl flex items-center justify-center mx-auto mb-6" style="background: var(--accent-color);">
-                    <i class="fas fa-network-wired text-white text-2xl"></i>
-                </div>
-                <h2 class="text-2xl font-bold text-theme-accent mb-2">Welcome to Kynecta</h2>
-                <p class="text-theme-secondary mb-6">Connect with purpose, share with meaning</p>
-                <button id="googleSignIn" class="w-full py-3 px-4 bg-red-500 hover:bg-red-600 text-white rounded-2xl font-semibold transition mb-4">
-                    <i class="fab fa-google mr-2"></i>Sign in with Google
-                </button>
-                <button id="facebookSignIn" class="w-full py-3 px-4 bg-blue-600 hover:bg-blue-700 text-white rounded-2xl font-semibold transition">
-                    <i class="fab fa-facebook mr-2"></i>Sign in with Facebook
-                </button>
-            </div>
         </div>
     </div>
 
@@ -695,11 +907,31 @@
                 </div>
             </header>
 
+            <!-- NEW FEATURE: Daily Vibe Section -->
+            <div class="daily-vibe-section glass border-b border-purple-800">
+                <div class="daily-vibe-title">Today's Vibe: Gratitude</div>
+                <p class="text-theme-secondary mb-3">Share what you're thankful for today</p>
+                <button class="appreciation-btn" id="shareGratitudeBtn">
+                    <i class="fas fa-heart mr-1"></i> Share Gratitude
+                </button>
+            </div>
+
             <!-- Stories Section -->
             <div class="glass border-b border-purple-800 p-4">
                 <div class="flex space-x-6 overflow-x-auto scrollbar-hide pb-2" id="storiesContainer">
                     <!-- Stories will be loaded dynamically -->
                 </div>
+            </div>
+
+            <!-- NEW FEATURE: Mood-based Filtering -->
+            <div class="mood-filter-container glass border-b border-purple-800">
+                <span class="text-theme-primary font-medium">My Mood:</span>
+                <div class="mood-option active" data-mood="all">All</div>
+                <div class="mood-option" data-mood="happy">😊 Happy</div>
+                <div class="mood-option" data-mood="creative">🎨 Creative</div>
+                <div class="mood-option" data-mood="motivated">💪 Motivated</div>
+                <div class="mood-option" data-mood="calm">😌 Calm</div>
+                <div class="mood-option" data-mood="reflective">🤔 Reflective</div>
             </div>
 
             <!-- Filter & Sort Controls -->
@@ -765,6 +997,27 @@
             <!-- Main Feed -->
             <main class="flex-1 overflow-y-auto bg-gradient-to-b from-purple-900/20 to-gray-900/50 custom-scrollbar">
                 <div class="max-w-7xl mx-auto p-4">
+                    <!-- NEW FEATURE: AI Content Suggestions -->
+                    <div class="ai-content-suggestions glass mb-6">
+                        <h3 class="font-bold text-theme-accent mb-3 flex items-center">
+                            <i class="fas fa-robot mr-2"></i> AI Content Ideas
+                        </h3>
+                        <div id="aiContentSuggestionsList">
+                            <div class="ai-suggestion-item">
+                                <p>Share a recent accomplishment and what you learned from it</p>
+                            </div>
+                            <div class="ai-suggestion-item">
+                                <p>Ask your network for recommendations on [your interest]</p>
+                            </div>
+                            <div class="ai-suggestion-item">
+                                <p>Post about a book, movie, or podcast that inspired you recently</p>
+                            </div>
+                        </div>
+                        <button id="refreshAISuggestions" class="w-full mt-3 py-2 glass border border-purple-700 rounded-2xl text-theme-secondary hover:text-theme-accent transition">
+                            <i class="fas fa-sync-alt mr-2"></i> Get New Ideas
+                        </button>
+                    </div>
+
                     <div class="masonry-grid" id="feedContainer">
                         <!-- Posts will be loaded dynamically from Firebase -->
                     </div>
@@ -811,6 +1064,35 @@
                     <div class="mt-4 flex flex-wrap gap-2" id="userBadges">
                         <!-- Badges will be loaded dynamically -->
                     </div>
+                </div>
+
+                <!-- NEW FEATURE: Gamified Engagement System -->
+                <div class="gamification-panel glass border border-purple-700 rounded-2xl p-4 mb-6">
+                    <h3 class="font-bold text-theme-accent mb-4 flex items-center">
+                        <i class="fas fa-trophy mr-2"></i> Engagement Streak
+                    </h3>
+                    <div class="streak-counter">
+                        <div>
+                            <p class="text-sm text-theme-secondary">Current Streak</p>
+                            <div class="streak-days">7 days</div>
+                        </div>
+                        <div class="text-right">
+                            <p class="text-sm text-theme-secondary">Points</p>
+                            <div class="streak-days">245</div>
+                        </div>
+                    </div>
+                    <div class="mb-3">
+                        <p class="text-sm text-theme-secondary mb-2">Your Badges</p>
+                        <div class="badge-collection">
+                            <div class="badge-item" title="Newcomer">🥚</div>
+                            <div class="badge-item" title="Contributor">🌟</div>
+                            <div class="badge-item" title="Social Butterfly">🦋</div>
+                            <div class="badge-item" title="Thought Leader">💡</div>
+                        </div>
+                    </div>
+                    <button id="viewAllBadges" class="w-full py-2 glass border border-purple-700 rounded-2xl text-theme-secondary hover:text-theme-accent transition text-sm">
+                        View All Achievements
+                    </button>
                 </div>
 
                 <!-- Trending Topics -->
@@ -890,6 +1172,12 @@
                         </div>
                         <button id="applySuggestion" class="text-xs bg-theme-accent text-white px-2 py-1 rounded-lg">Apply</button>
                     </div>
+                </div>
+                
+                <!-- NEW FEATURE: Anti-toxicity Filter Warning -->
+                <div id="toxicityWarning" class="toxicity-warning hidden">
+                    <i class="fas fa-exclamation-triangle mr-2"></i>
+                    <span>Our AI detected potentially harmful content. Please review before posting.</span>
                 </div>
                 
                 <!-- Poll Creator -->
@@ -996,6 +1284,11 @@
         </div>
     </div>
 
+    <!-- NEW FEATURE: Emoji Picker -->
+    <div class="emoji-picker" id="emojiPicker">
+        <!-- Emojis will be populated dynamically -->
+    </div>
+
     <!-- File Inputs (Hidden) -->
     <input type="file" id="modalPhotoInput" accept="image/*" class="hidden">
     <input type="file" id="modalVideoInput" accept="video/*" class="hidden">
@@ -1028,6 +1321,7 @@
         let currentInterestFilter = null;
         let currentContentTypeFilter = null;
         let selectedReaction = null;
+        let currentMoodFilter = 'all'; // NEW: Mood-based filtering
 
         // DOM Elements
         const connectionStatus = document.getElementById('connectionStatus');
@@ -1066,9 +1360,6 @@
         const suggestedUsersContainer = document.getElementById('suggestedUsersContainer');
         const currentUserAvatar = document.getElementById('currentUserAvatar');
         const currentUserName = document.getElementById('currentUserName');
-        const loginModal = document.getElementById('loginModal');
-        const googleSignIn = document.getElementById('googleSignIn');
-        const facebookSignIn = document.getElementById('facebookSignIn');
         const signOutBtn = document.getElementById('signOutBtn');
         const userEnergyRing = document.getElementById('userEnergyRing');
         const energyPercentage = document.getElementById('energyPercentage');
@@ -1080,6 +1371,25 @@
         const toggleCollaborative = document.getElementById('toggleCollaborative');
         const collaborativeSettings = document.getElementById('collaborativeSettings');
         const modalAddCollaborative = document.getElementById('modalAddCollaborative');
+        
+        // NEW FEATURE: Mood-based Filtering Elements
+        const moodOptions = document.querySelectorAll('.mood-option');
+        
+        // NEW FEATURE: AI Content Suggestions Elements
+        const refreshAISuggestions = document.getElementById('refreshAISuggestions');
+        const aiContentSuggestionsList = document.getElementById('aiContentSuggestionsList');
+        
+        // NEW FEATURE: Gamification Elements
+        const viewAllBadges = document.getElementById('viewAllBadges');
+        
+        // NEW FEATURE: Daily Vibe Elements
+        const shareGratitudeBtn = document.getElementById('shareGratitudeBtn');
+        
+        // NEW FEATURE: Emoji Picker
+        const emojiPicker = document.getElementById('emojiPicker');
+        
+        // NEW FEATURE: Anti-toxicity Filter
+        const toxicityWarning = document.getElementById('toxicityWarning');
 
         // Initialize the application
         function init() {
@@ -1088,7 +1398,6 @@
                 if (user) {
                     // User is signed in
                     currentUser = user;
-                    loginModal.classList.add('hidden');
                     updateUserUI();
                     loadUserData();
                     loadInitialPosts();
@@ -1097,12 +1406,15 @@
                     loadLeaderboard();
                     loadSuggestedUsers();
                     signOutBtn.classList.remove('hidden');
+                    
+                    // NEW: Initialize new features
+                    initializeNewFeatures();
                 } else {
-                    // User is signed out
-                    currentUser = null;
-                    loginModal.classList.remove('hidden');
-                    feedContainer.innerHTML = '';
-                    signOutBtn.classList.add('hidden');
+                    // User is signed out - redirect to your dashboard
+                    // Since you have a separate dashboard for signing in
+                    // You can redirect or handle this as needed
+                    console.log('User not signed in, redirecting to dashboard...');
+                    // window.location.href = 'your-dashboard-url.html'; // Uncomment if you want automatic redirect
                 }
             });
 
@@ -1117,6 +1429,72 @@
             
             // Set up connection monitoring
             setupConnectionMonitoring();
+        }
+
+        // NEW: Initialize new features
+        function initializeNewFeatures() {
+            // Initialize emoji picker
+            initializeEmojiPicker();
+            
+            // Load AI content suggestions
+            loadAIContentSuggestions();
+            
+            // Initialize mood-based filtering
+            initializeMoodFiltering();
+            
+            // Initialize gamification data
+            initializeGamificationData();
+        }
+
+        // NEW: Initialize emoji picker
+        function initializeEmojiPicker() {
+            const emojis = ['😀', '😂', '🥰', '😎', '🤔', '🙌', '🔥', '💯', '✨', '🌟', '💖', '👍', '👏', '🎉', '💡', '🌈', '🚀', '📚', '🎨', '🎵', '🍕', '☕', '🌍', '💪'];
+            
+            emojiPicker.innerHTML = '';
+            emojis.forEach(emoji => {
+                const emojiOption = document.createElement('div');
+                emojiOption.className = 'emoji-option';
+                emojiOption.textContent = emoji;
+                emojiOption.addEventListener('click', function() {
+                    // TODO: Insert emoji into active comment or post input
+                    const activeInput = document.activeElement;
+                    if (activeInput && (activeInput.tagName === 'TEXTAREA' || activeInput.tagName === 'INPUT')) {
+                        const cursorPosition = activeInput.selectionStart;
+                        const textBefore = activeInput.value.substring(0, cursorPosition);
+                        const textAfter = activeInput.value.substring(cursorPosition);
+                        activeInput.value = textBefore + emoji + textAfter;
+                        activeInput.focus();
+                        activeInput.setSelectionRange(cursorPosition + emoji.length, cursorPosition + emoji.length);
+                    }
+                    emojiPicker.classList.remove('show');
+                });
+                emojiPicker.appendChild(emojiOption);
+            });
+        }
+
+        // NEW: Load AI content suggestions
+        function loadAIContentSuggestions() {
+            // TODO: Fetch AI content suggestions from backend
+            // For now, using static suggestions
+            console.log('Loading AI content suggestions...');
+        }
+
+        // NEW: Initialize mood-based filtering
+        function initializeMoodFiltering() {
+            moodOptions.forEach(option => {
+                option.addEventListener('click', function() {
+                    moodOptions.forEach(opt => opt.classList.remove('active'));
+                    this.classList.add('active');
+                    currentMoodFilter = this.dataset.mood;
+                    reloadPosts();
+                });
+            });
+        }
+
+        // NEW: Initialize gamification data
+        function initializeGamificationData() {
+            // TODO: Fetch user's gamification data from Firebase
+            console.log('Initializing gamification data...');
         }
 
         // Set up event listeners
@@ -1184,6 +1562,9 @@
                 if (!contentTypeFilterBtn.contains(event.target) && !contentTypeOptions.contains(event.target)) {
                     contentTypeOptions.classList.add('hidden');
                 }
+                if (!emojiPicker.contains(event.target)) {
+                    emojiPicker.classList.remove('show');
+                }
             });
             
             // Search functionality
@@ -1232,10 +1613,61 @@
                 }
             });
             
-            // Auth buttons
-            googleSignIn.addEventListener('click', signInWithGoogle);
-            facebookSignIn.addEventListener('click', signInWithFacebook);
+            // Sign out button
             signOutBtn.addEventListener('click', signOut);
+            
+            // NEW FEATURE: AI Content Suggestions
+            refreshAISuggestions.addEventListener('click', refreshAISuggestionsHandler);
+            
+            // NEW FEATURE: Daily Vibe
+            shareGratitudeBtn.addEventListener('click', shareGratitudeHandler);
+            
+            // NEW FEATURE: Gamification
+            viewAllBadges.addEventListener('click', viewAllBadgesHandler);
+            
+            // NEW FEATURE: Anti-toxicity filter
+            modalPostInput.addEventListener('input', checkToxicity);
+        }
+
+        // NEW: Refresh AI content suggestions
+        function refreshAISuggestionsHandler() {
+            // TODO: Fetch new AI content suggestions from backend
+            showNotification('Getting fresh content ideas...', 'success');
+            
+            // Simulate API call delay
+            setTimeout(() => {
+                showNotification('New content ideas loaded!', 'success');
+            }, 1000);
+        }
+
+        // NEW: Share gratitude post
+        function shareGratitudeHandler() {
+            openCreatePostModal();
+            modalPostInput.value = "I'm grateful for... #Gratitude";
+            modalPostInput.focus();
+        }
+
+        // NEW: View all badges
+        function viewAllBadgesHandler() {
+            // TODO: Open modal with all user badges and achievements
+            showNotification('Opening achievements dashboard...', 'success');
+        }
+
+        // NEW: Check for toxic content
+        function checkToxicity() {
+            const content = modalPostInput.value;
+            // TODO: Implement actual toxicity detection with AI/ML API
+            // For now, using simple keyword matching as placeholder
+            const toxicKeywords = ['hate', 'stupid', 'idiot', 'kill', 'hurt'];
+            const hasToxicContent = toxicKeywords.some(keyword => 
+                content.toLowerCase().includes(keyword)
+            );
+            
+            if (hasToxicContent && content.length > 10) {
+                toxicityWarning.classList.remove('hidden');
+            } else {
+                toxicityWarning.classList.add('hidden');
+            }
         }
 
         // Set up keyboard shortcuts
@@ -1335,36 +1767,12 @@
         }
 
         // Auth Functions
-        function signInWithGoogle() {
-            const provider = new firebase.auth.GoogleAuthProvider();
-            auth.signInWithPopup(provider)
-                .then((result) => {
-                    // User signed in
-                    console.log('Google sign-in successful', result.user);
-                })
-                .catch((error) => {
-                    console.error('Google sign-in error:', error);
-                    alert('Error signing in with Google: ' + error.message);
-                });
-        }
-
-        function signInWithFacebook() {
-            const provider = new firebase.auth.FacebookAuthProvider();
-            auth.signInWithPopup(provider)
-                .then((result) => {
-                    // User signed in
-                    console.log('Facebook sign-in successful', result.user);
-                })
-                .catch((error) => {
-                    console.error('Facebook sign-in error:', error);
-                    alert('Error signing in with Facebook: ' + error.message);
-                });
-        }
-
         function signOut() {
             auth.signOut()
                 .then(() => {
                     console.log('User signed out');
+                    // Redirect to your dashboard or login page
+                    // window.location.href = 'your-dashboard-url.html';
                 })
                 .catch((error) => {
                     console.error('Sign out error:', error);
@@ -1442,6 +1850,7 @@
             aiSuggestion.classList.add('hidden');
             collaborativePost.classList.add('hidden');
             collaborativeSettings.classList.add('hidden');
+            toxicityWarning.classList.add('hidden');
         }
 
         // Create Post Function
@@ -1479,7 +1888,16 @@
                 // Kynecta Unique Feature: Post Energy
                 energy: calculatePostEnergy(content),
                 // Kynecta Unique Feature: AI Generated
-                aiGenerated: false
+                aiGenerated: false,
+                // NEW: Vibe reactions
+                vibeReactions: {
+                    energy: 0,
+                    deep: 0,
+                    pure: 0,
+                    creative: 0
+                },
+                // NEW: Appreciation count
+                appreciationCount: 0
             };
             
             // Add poll data if applicable
@@ -1531,11 +1949,20 @@
                     
                     // Kynecta Unique Feature: Update user energy
                     updateUserEnergy(5);
+                    
+                    // NEW: Update user streak
+                    updateUserStreak();
                 })
                 .catch(error => {
                     console.error('Error publishing post: ', error);
                     showNotification('Error publishing post: ' + error.message, 'error');
                 });
+        }
+
+        // NEW: Update user streak
+        function updateUserStreak() {
+            // TODO: Implement streak tracking logic in Firebase
+            console.log('Updating user streak...');
         }
 
         // Like Post Function
@@ -1591,6 +2018,88 @@
             });
         }
 
+        // NEW: Add vibe reaction to post
+        function addVibeReaction(postId, vibeType) {
+            if (!currentUser) {
+                alert('Please sign in to react to posts');
+                return;
+            }
+
+            const postRef = db.collection('posts').doc(postId);
+            
+            // Use a transaction to safely update the vibe reactions
+            db.runTransaction(transaction => {
+                return transaction.get(postRef).then(postDoc => {
+                    if (!postDoc.exists) {
+                        throw new Error('Post does not exist!');
+                    }
+                    
+                    const postData = postDoc.data();
+                    const vibeReactions = postData.vibeReactions || {
+                        energy: 0,
+                        deep: 0,
+                        pure: 0,
+                        creative: 0
+                    };
+                    
+                    // Increment the selected vibe reaction
+                    vibeReactions[vibeType] = (vibeReactions[vibeType] || 0) + 1;
+                    
+                    transaction.update(postRef, {
+                        vibeReactions: vibeReactions
+                    });
+                    
+                    return true;
+                });
+            }).then(success => {
+                console.log(`Added ${vibeType} vibe reaction`);
+                reloadPosts();
+                
+                // Update user energy
+                updateUserEnergy(1);
+            }).catch(error => {
+                console.error('Transaction failed: ', error);
+                showNotification('Error adding reaction: ' + error.message, 'error');
+            });
+        }
+
+        // NEW: Add appreciation to post
+        function addAppreciation(postId) {
+            if (!currentUser) {
+                alert('Please sign in to appreciate posts');
+                return;
+            }
+
+            const postRef = db.collection('posts').doc(postId);
+            
+            // Use a transaction to safely update the appreciation count
+            db.runTransaction(transaction => {
+                return transaction.get(postRef).then(postDoc => {
+                    if (!postDoc.exists) {
+                        throw new Error('Post does not exist!');
+                    }
+                    
+                    const postData = postDoc.data();
+                    const appreciationCount = postData.appreciationCount || 0;
+                    
+                    transaction.update(postRef, {
+                        appreciationCount: appreciationCount + 1
+                    });
+                    
+                    return true;
+                });
+            }).then(success => {
+                console.log('Added appreciation');
+                reloadPosts();
+                
+                // TODO: Process payment through Flutterwave/M-Pesa API
+                showNotification('Thank you for your appreciation!', 'success');
+            }).catch(error => {
+                console.error('Transaction failed: ', error);
+                showNotification('Error adding appreciation: ' + error.message, 'error');
+            });
+        }
+
         // Submit Comment Function
         function submitComment(postId, commentText) {
             if (!currentUser) {
@@ -1608,7 +2117,11 @@
                 userName: currentUser.displayName || 'Anonymous',
                 userAvatar: currentUser.photoURL || '',
                 content: commentText.trim(),
-                timestamp: firebase.firestore.FieldValue.serverTimestamp()
+                timestamp: firebase.firestore.FieldValue.serverTimestamp(),
+                // NEW: Nested replies
+                replies: [],
+                // NEW: Voice comment placeholder
+                hasVoiceComment: false
             };
 
             const postRef = db.collection('posts').doc(postId);
@@ -1638,6 +2151,60 @@
                     console.error('Error adding comment: ', error);
                     showNotification('Error adding comment: ' + error.message, 'error');
                 });
+        }
+
+        // NEW: Submit nested reply to comment
+        function submitReply(postId, commentId, replyText) {
+            if (!currentUser) {
+                alert('Please sign in to reply');
+                return;
+            }
+
+            if (!replyText.trim()) {
+                alert('Please enter a reply');
+                return;
+            }
+
+            const replyData = {
+                userId: currentUser.uid,
+                userName: currentUser.displayName || 'Anonymous',
+                userAvatar: currentUser.photoURL || '',
+                content: replyText.trim(),
+                timestamp: firebase.firestore.FieldValue.serverTimestamp()
+            };
+
+            const commentRef = db.collection('posts').doc(postId).collection('comments').doc(commentId);
+            
+            // Use a transaction to add the reply to the comment's replies array
+            db.runTransaction(transaction => {
+                return transaction.get(commentRef).then(commentDoc => {
+                    if (!commentDoc.exists) {
+                        throw new Error('Comment does not exist!');
+                    }
+                    
+                    const commentData = commentDoc.data();
+                    const replies = commentData.replies || [];
+                    
+                    // Add the new reply
+                    replies.push(replyData);
+                    
+                    transaction.update(commentRef, {
+                        replies: replies
+                    });
+                    
+                    return true;
+                });
+            }).then(success => {
+                console.log('Reply added successfully');
+                showNotification('Reply added!', 'success');
+                reloadPosts();
+                
+                // Update user energy
+                updateUserEnergy(1);
+            }).catch(error => {
+                console.error('Error adding reply: ', error);
+                showNotification('Error adding reply: ' + error.message, 'error');
+            });
         }
 
         // Toggle poll creator
@@ -1932,7 +2499,11 @@
                 followingCount: 0,
                 energy: 0,
                 badges: ['newcomer'],
-                createdAt: firebase.firestore.FieldValue.serverTimestamp()
+                createdAt: firebase.firestore.FieldValue.serverTimestamp(),
+                // NEW: Gamification data
+                streak: 0,
+                points: 0,
+                achievements: []
             };
             
             db.collection('users').doc(currentUser.uid).set(userData)
@@ -2048,6 +2619,13 @@
                 query = query.where('mood', '==', currentEmotionFilter);
             }
             
+            // NEW: Apply mood-based filtering
+            if (currentMoodFilter && currentMoodFilter !== 'all') {
+                // TODO: Implement mood-based filtering logic
+                // This would require posts to have mood metadata
+                console.log('Filtering by mood:', currentMoodFilter);
+            }
+            
             if (currentContentTypeFilter === 'poll') {
                 query = query.where('poll', '!=', null);
             } else if (currentContentTypeFilter === 'collaborative') {
@@ -2099,6 +2677,12 @@
             
             if (currentEmotionFilter) {
                 query = query.where('mood', '==', currentEmotionFilter);
+            }
+            
+            // NEW: Apply mood-based filtering
+            if (currentMoodFilter && currentMoodFilter !== 'all') {
+                // TODO: Implement mood-based filtering logic
+                console.log('Filtering by mood:', currentMoodFilter);
             }
             
             if (currentContentTypeFilter === 'poll') {
@@ -2255,6 +2839,17 @@
             // Check if current user liked the post
             const userLiked = post.likes && post.likes.includes(currentUser.uid);
             
+            // NEW: Vibe reactions
+            const vibeReactions = post.vibeReactions || {
+                energy: 0,
+                deep: 0,
+                pure: 0,
+                creative: 0
+            };
+            
+            // NEW: Appreciation count
+            const appreciationCount = post.appreciationCount || 0;
+            
             // Kynecta Unique Feature: Collaborative Post Indicator
             let collaborativeHtml = '';
             if (post.collaborative) {
@@ -2314,6 +2909,26 @@
                         ${pollHtml}
                         ${linkPreviewHtml}
                         
+                        <!-- NEW: Vibe Reactions -->
+                        <div class="vibe-reactions mt-3">
+                            <div class="vibe-reaction" data-vibe="energy" data-post-id="${post.id}">
+                                <span>🔥</span>
+                                <span>${vibeReactions.energy || 0}</span>
+                            </div>
+                            <div class="vibe-reaction" data-vibe="deep" data-post-id="${post.id}">
+                                <span>💭</span>
+                                <span>${vibeReactions.deep || 0}</span>
+                            </div>
+                            <div class="vibe-reaction" data-vibe="pure" data-post-id="${post.id}">
+                                <span>💚</span>
+                                <span>${vibeReactions.pure || 0}</span>
+                            </div>
+                            <div class="vibe-reaction" data-vibe="creative" data-post-id="${post.id}">
+                                <span>🌈</span>
+                                <span>${vibeReactions.creative || 0}</span>
+                            </div>
+                        </div>
+                        
                         <div class="flex items-center justify-between mt-4 pt-3 border-t border-purple-800">
                             <div class="flex items-center space-x-4 text-theme-secondary">
                                 <div class="relative reaction-container">
@@ -2330,6 +2945,11 @@
                                     <i class="fas fa-share"></i>
                                     <span>${post.sharesCount || 0}</span>
                                 </button>
+                                <!-- NEW: Appreciation Button -->
+                                <button class="appreciation-btn flex items-center space-x-1" data-post-id="${post.id}">
+                                    <i class="fas fa-gift"></i>
+                                    <span>${appreciationCount}</span>
+                                </button>
                             </div>
                             <button class="save-post-btn text-theme-secondary hover:text-theme-accent transition">
                                 <i class="far fa-bookmark"></i>
@@ -2342,6 +2962,12 @@
                                 <img src="${currentUser.photoURL || 'https://via.placeholder.com/32'}" alt="Your avatar" class="w-8 h-8 rounded-full object-cover">
                                 <div class="flex-1 flex space-x-2">
                                     <input type="text" placeholder="Write a comment..." class="flex-1 p-2 glass border border-purple-700 rounded-2xl text-sm">
+                                    <button class="emoji-picker-btn px-3 py-2 glass border border-purple-700 rounded-2xl text-sm">
+                                        <i class="far fa-smile"></i>
+                                    </button>
+                                    <button class="voice-comment-btn">
+                                        <i class="fas fa-microphone"></i>
+                                    </button>
                                     <button class="submit-comment px-3 py-2 rounded-2xl text-sm" style="background: var(--accent-color); color: white;" data-post-id="${post.id}">Post</button>
                                 </div>
                             </div>
@@ -2364,11 +2990,42 @@
                 likePost(post.id);
             });
             
+            // NEW: Vibe reaction buttons
+            const vibeReactionBtns = postElement.querySelectorAll('.vibe-reaction');
+            vibeReactionBtns.forEach(btn => {
+                btn.addEventListener('click', function() {
+                    const vibeType = this.dataset.vibe;
+                    addVibeReaction(post.id, vibeType);
+                });
+            });
+            
+            // NEW: Appreciation button
+            const appreciationBtn = postElement.querySelector('.appreciation-btn');
+            appreciationBtn.addEventListener('click', function() {
+                addAppreciation(post.id);
+            });
+            
             // Comment button
             const commentBtn = postElement.querySelector('.comment-btn');
             const commentInput = postElement.querySelector('.comment-input');
             commentBtn.addEventListener('click', function() {
                 commentInput.classList.toggle('hidden');
+            });
+            
+            // NEW: Emoji picker button
+            const emojiPickerBtn = postElement.querySelector('.emoji-picker-btn');
+            emojiPickerBtn.addEventListener('click', function() {
+                const rect = this.getBoundingClientRect();
+                emojiPicker.style.bottom = `${window.innerHeight - rect.top + 10}px`;
+                emojiPicker.style.left = `${rect.left}px`;
+                emojiPicker.classList.toggle('show');
+            });
+            
+            // NEW: Voice comment button
+            const voiceCommentBtn = postElement.querySelector('.voice-comment-btn');
+            voiceCommentBtn.addEventListener('click', function() {
+                // TODO: Implement voice recording functionality
+                showNotification('Voice comments coming soon!', 'success');
             });
             
             // Submit comment

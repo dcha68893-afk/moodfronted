@@ -2,20 +2,30 @@
 <html lang="en" class="h-full">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=5.0, user-scalable=yes">
     <title>kynecta - Connect Globally, Create Together</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css" rel="stylesheet">
-    <link rel="stylesheet" href="responsive.css">
     <!-- Firebase SDK -->
     <script src="https://www.gstatic.com/firebasejs/9.22.1/firebase-app-compat.js"></script>
     <script src="https://www.gstatic.com/firebasejs/9.22.1/firebase-auth-compat.js"></script>
     <script src="https://www.gstatic.com/firebasejs/9.22.1/firebase-firestore-compat.js"></script>
     
     <style>
-        /* All your existing CSS styles remain the same */
+        /* Improved responsive base sizes */
+        html {
+            font-size: 14px;
+        }
+        
+        @media (min-width: 768px) {
+            html {
+                font-size: 16px;
+            }
+        }
+        
         .section {
-            transition: all 0.5s ease-in-out;
+            transition: all 0.4s ease-in-out;
+            width: 100%;
         }
         
         .section-hidden {
@@ -26,6 +36,8 @@
             top: 0;
             left: 0;
             width: 100%;
+            height: 0;
+            overflow: hidden;
         }
         
         .section-active {
@@ -33,6 +45,8 @@
             transform: translateX(0);
             pointer-events: all;
             position: relative;
+            height: auto;
+            overflow: visible;
         }
         
         .glass-effect {
@@ -234,12 +248,18 @@
         }
         
         .stats-counter {
-            font-size: 2.5rem;
+            font-size: 2rem;
             font-weight: bold;
             background: linear-gradient(135deg, #60a5fa, #a78bfa);
             -webkit-background-clip: text;
             -webkit-text-fill-color: transparent;
             background-clip: text;
+        }
+        
+        @media (min-width: 768px) {
+            .stats-counter {
+                font-size: 2.5rem;
+            }
         }
         
         /* Unified Dashboard Layout */
@@ -251,6 +271,8 @@
         
         .content-area {
             transition: all 0.5s ease-in-out;
+            position: relative;
+            min-height: 500px;
         }
         
         .form-container {
@@ -399,6 +421,42 @@
             box-shadow: 0 10px 20px rgba(0, 0, 0, 0.2);
             border-color: #3b82f6;
         }
+
+        /* Improved responsive text sizes */
+        .responsive-text {
+            font-size: clamp(1rem, 4vw, 1.5rem);
+        }
+        
+        .responsive-heading {
+            font-size: clamp(1.5rem, 6vw, 2.5rem);
+        }
+        
+        .responsive-subheading {
+            font-size: clamp(1rem, 3vw, 1.25rem);
+        }
+
+        /* Better mobile layout */
+        @media (max-width: 767px) {
+            .mobile-padding {
+                padding: 1rem;
+            }
+            
+            .mobile-margin {
+                margin-bottom: 1.5rem;
+            }
+            
+            .mobile-text-center {
+                text-align: center;
+            }
+            
+            .mobile-stack {
+                flex-direction: column;
+            }
+            
+            .mobile-space-y > * + * {
+                margin-top: 1rem;
+            }
+        }
     </style>
 </head>
 <body class="h-full dashboard-container bg-grid-pattern theme-calm">
@@ -406,7 +464,7 @@
     <div class="mood-selector">
         <button class="mood-btn flex items-center space-x-2">
             <i class="fas fa-palette"></i>
-            <span>Mood</span>
+            <span class="hidden sm:inline">Mood</span>
         </button>
         <div class="mood-options">
             <div class="mood-option mood-calm" data-theme="calm" title="Calm"></div>
@@ -433,16 +491,16 @@
             <div class="flex flex-col md:flex-row items-center justify-between">
                 <div class="flex-1 mb-4 md:mb-0">
                     <h3 class="text-xl font-bold mb-2">🍪 We Value Your Privacy</h3>
-                    <p class="text-blue-200">
+                    <p class="text-blue-200 text-sm md:text-base">
                         We use cookies to enhance your experience, analyze traffic, and personalize content. 
                         By continuing to use kynecta, you agree to our use of cookies and our Privacy Policy.
                     </p>
                 </div>
-                <div class="flex space-x-4">
-                    <button id="cookieReject" class="px-6 py-2 border border-blue-400 text-blue-400 rounded-lg hover:bg-blue-400 hover:text-white transition">
+                <div class="flex space-x-4 mobile-stack mobile-space-y">
+                    <button id="cookieReject" class="px-4 py-2 md:px-6 md:py-2 border border-blue-400 text-blue-400 rounded-lg hover:bg-blue-400 hover:text-white transition text-sm md:text-base">
                         Reject Non-Essential
                     </button>
-                    <button id="cookieAccept" class="px-6 py-2 bg-blue-500 text-white rounded-lg hover:bg-blue-600 transition pulse-glow">
+                    <button id="cookieAccept" class="px-4 py-2 md:px-6 md:py-2 bg-blue-500 text-white rounded-lg hover:bg-blue-600 transition pulse-glow text-sm md:text-base">
                         Accept All
                     </button>
                 </div>
@@ -456,7 +514,7 @@
             <div class="flex items-center justify-between mb-6">
                 <div class="flex items-center space-x-3">
                     <i class="fas fa-lock text-2xl text-blue-400"></i>
-                    <h2 class="text-2xl font-bold text-white">Account Recovery</h2>
+                    <h2 class="text-xl md:text-2xl font-bold text-white">Account Recovery</h2>
                 </div>
                 <button id="closeForgotPassword" class="text-gray-400 hover:text-white transition">
                     <i class="fas fa-times text-xl"></i>
@@ -464,64 +522,63 @@
             </div>
 
             <!-- Step 1: Email/Identifier Input -->
-            <div id="forgot-step-1-email" class="">
-                <p class="text-gray-300 mb-6">
+            <div id="forgot-step-1-email">
+                <p class="text-gray-300 mb-6 text-sm md:text-base">
                     Please enter your registered email to find your account.
                 </p>
                 <form id="forgotEmailForm">
                     <div class="mb-6">
                         <label for="forgotIdentifier" class="block text-sm font-medium text-gray-300 mb-2">Email Address</label>
                         <input type="email" id="forgotIdentifier" name="identifier" required placeholder="name@example.com"
-                               class="w-full p-3 rounded-xl glass-effect border border-blue-700 focus:ring-blue-500 focus:border-blue-500 transition duration-200 text-white">
+                               class="w-full p-3 rounded-xl glass-effect border border-blue-700 focus:ring-blue-500 focus:border-blue-500 transition duration-200 text-white text-sm md:text-base">
                     </div>
                     <button type="submit" id="forgotSubmitBtn"
-                            class="w-full cyber-gradient text-white py-3 rounded-xl font-semibold shadow-lg hover:shadow-blue-500/50 transition duration-300 transform hover:scale-[1.01] flex items-center justify-center">
+                            class="w-full cyber-gradient text-white py-3 rounded-xl font-semibold shadow-lg hover:shadow-blue-500/50 transition duration-300 transform hover:scale-[1.01] flex items-center justify-center text-sm md:text-base">
                         <i class="fas fa-search mr-2"></i> Find Account
                     </button>
                 </form>
             </div>
 
-            <!-- Step 2: Method Selection (Hidden initially) -->
+            <!-- Step 2: Method Selection -->
             <div id="forgot-step-2-methods" class="hidden">
-                <h2 class="text-xl font-semibold mb-4 text-gray-100">Choose Recovery Method</h2>
-                <p class="text-gray-300 mb-6">
+                <h2 class="text-lg md:text-xl font-semibold mb-4 text-gray-100">Choose Recovery Method</h2>
+                <p class="text-gray-300 mb-6 text-sm md:text-base">
                     Select how you'd like to receive your password reset instructions.
                 </p>
                 <div class="space-y-4">
-                    
                     <!-- Option 1: Email Link (Firebase Default) -->
                     <div onclick="selectRecoveryMethod('email')" class="recovery-option-card glass-effect p-4 rounded-xl flex items-center space-x-4">
-                        <i class="fas fa-envelope text-2xl text-green-400"></i>
+                        <i class="fas fa-envelope text-xl md:text-2xl text-green-400"></i>
                         <div>
-                            <h3 class="font-bold text-lg">Email Link</h3>
-                            <p class="text-sm text-gray-400">Send a password reset link to your registered email.</p>
+                            <h3 class="font-bold text-base md:text-lg">Email Link</h3>
+                            <p class="text-xs md:text-sm text-gray-400">Send a password reset link to your registered email.</p>
                         </div>
                     </div>
 
                     <!-- Option 2: Phone Number (Code) -->
                     <div onclick="selectRecoveryMethod('phone')" class="recovery-option-card glass-effect p-4 rounded-xl flex items-center space-x-4">
-                        <i class="fas fa-mobile-alt text-2xl text-yellow-400"></i>
+                        <i class="fas fa-mobile-alt text-xl md:text-2xl text-yellow-400"></i>
                         <div>
-                            <h3 class="font-bold text-lg">Phone Number (SMS Code)</h3>
-                            <p class="text-sm text-gray-400">Receive a one-time code via SMS to reset your password.</p>
+                            <h3 class="font-bold text-base md:text-lg">Phone Number (SMS Code)</h3>
+                            <p class="text-xs md:text-sm text-gray-400">Receive a one-time code via SMS to reset your password.</p>
                         </div>
                     </div>
 
                     <!-- Option 3: Voice Call -->
                     <div onclick="selectRecoveryMethod('voice')" class="recovery-option-card glass-effect p-4 rounded-xl flex items-center space-x-4">
-                        <i class="fas fa-phone-volume text-2xl text-red-400"></i>
+                        <i class="fas fa-phone-volume text-xl md:text-2xl text-red-400"></i>
                         <div>
-                            <h3 class="font-bold text-lg">Voice Call</h3>
-                            <p class="text-sm text-gray-400">Receive an automated voice call with a verification code.</p>
+                            <h3 class="font-bold text-base md:text-lg">Voice Call</h3>
+                            <p class="text-xs md:text-sm text-gray-400">Receive an automated voice call with a verification code.</p>
                         </div>
                     </div>
 
                     <!-- Option 4: Secret Text (Security Question) -->
                     <div onclick="selectRecoveryMethod('secret')" class="recovery-option-card glass-effect p-4 rounded-xl flex items-center space-x-4">
-                        <i class="fas fa-user-secret text-2xl text-purple-400"></i>
+                        <i class="fas fa-user-secret text-xl md:text-2xl text-purple-400"></i>
                         <div>
-                            <h3 class="font-bold text-lg">Secret Text / Security Question</h3>
-                            <p class="text-sm text-gray-400">Answer your security question for direct reset access.</p>
+                            <h3 class="font-bold text-base md:text-lg">Secret Text / Security Question</h3>
+                            <p class="text-xs md:text-sm text-gray-400">Answer your security question for direct reset access.</p>
                         </div>
                     </div>
                 </div>
@@ -529,30 +586,30 @@
             
             <!-- Step 3: Specific Recovery Form (Secret Text example) -->
             <div id="forgot-step-3-secret-reset" class="hidden">
-                <h2 class="text-xl font-semibold mb-4 text-gray-100">Secret Text Recovery</h2>
-                <p class="text-gray-300 mb-6">
+                <h2 class="text-lg md:text-xl font-semibold mb-4 text-gray-100">Secret Text Recovery</h2>
+                <p class="text-gray-300 mb-6 text-sm md:text-base">
                     To confirm your identity, please answer your secret question.
                 </p>
                 <form id="forgotSecretForm">
                     <div class="mb-4">
                         <label for="forgotSecurityQuestion" class="block text-sm font-medium text-gray-300 mb-2">Security Question</label>
-                        <p id="forgotSecurityQuestion" class="p-3 rounded-xl glass-effect border border-blue-700">
+                        <p id="forgotSecurityQuestion" class="p-3 rounded-xl glass-effect border border-blue-700 text-sm md:text-base">
                             What was the name of your first pet? (Simulated)
                         </p>
                     </div>
                     <div class="mb-6">
                         <label for="forgotSecurityAnswer" class="block text-sm font-medium text-gray-300 mb-2">Your Answer</label>
                         <input type="text" id="forgotSecurityAnswer" name="securityAnswer" required
-                               class="w-full p-3 rounded-xl glass-effect border border-blue-700 focus:ring-blue-500 focus:border-blue-500 transition duration-200 text-white">
+                               class="w-full p-3 rounded-xl glass-effect border border-blue-700 focus:ring-blue-500 focus:border-blue-500 transition duration-200 text-white text-sm md:text-base">
                     </div>
                     
                     <button type="submit" id="forgotSecretSubmitBtn"
-                            class="w-full cyber-gradient text-white py-3 rounded-xl font-semibold shadow-lg hover:shadow-blue-500/50 transition duration-300 transform hover:scale-[1.01] flex items-center justify-center">
+                            class="w-full cyber-gradient text-white py-3 rounded-xl font-semibold shadow-lg hover:shadow-blue-500/50 transition duration-300 transform hover:scale-[1.01] flex items-center justify-center text-sm md:text-base">
                         <i class="fas fa-check-circle mr-2"></i> Verify & Reset
                     </button>
                 </form>
                 <button onclick="changeRecoveryMethod()"
-                        class="w-full mt-4 text-gray-400 py-3 rounded-xl font-semibold hover:text-gray-100 transition duration-200">
+                        class="w-full mt-4 text-gray-400 py-3 rounded-xl font-semibold hover:text-gray-100 transition duration-200 text-sm md:text-base">
                     Change Recovery Method
                 </button>
             </div>
@@ -561,9 +618,9 @@
 
     <!-- Loading Modal -->
     <div id="loadingModal" class="fixed inset-0 bg-black bg-opacity-70 flex items-center justify-center hidden z-50">
-        <div class="flex flex-col items-center p-8 rounded-xl glass-effect">
+        <div class="flex flex-col items-center p-8 rounded-xl glass-effect mx-4">
             <i class="fas fa-spinner fa-spin text-4xl text-blue-400 mb-4"></i>
-            <p class="text-lg font-medium text-gray-100" id="loadingText">Processing...</p>
+            <p class="text-lg font-medium text-gray-100 text-center" id="loadingText">Processing...</p>
         </div>
     </div>
 
@@ -575,91 +632,91 @@
     </div>
 
     <!-- Main Dashboard Container -->
-    <div class="min-h-screen flex">
+    <div class="min-h-screen flex flex-col lg:flex-row">
         <!-- Left Side - Advertisement Section (Always Visible) -->
-        <div class="hidden lg:flex flex-1 p-8 items-center justify-center">
-            <div class="max-w-2xl">
+        <div class="hidden lg:flex flex-1 p-4 md:p-8 items-center justify-center">
+            <div class="max-w-2xl w-full">
                 <!-- Header -->
-                <div class="text-center mb-8">
-                    <div class="flex items-center justify-center space-x-4 mb-6">
-                        <div class="w-20 h-20 cyber-gradient rounded-2xl flex items-center justify-center quantum-glow floating">
-                            <i class="fas fa-globe-americas text-white text-3xl"></i>
+                <div class="text-center mb-6 md:mb-8">
+                    <div class="flex items-center justify-center space-x-3 md:space-x-4 mb-4 md:mb-6">
+                        <div class="w-16 h-16 md:w-20 md:h-20 cyber-gradient rounded-xl md:rounded-2xl flex items-center justify-center quantum-glow floating">
+                            <i class="fas fa-globe-americas text-white text-2xl md:text-3xl"></i>
                         </div>
                         <div>
-                            <span class="text-5xl font-bold text-transparent bg-clip-text bg-gradient-to-r from-blue-400 to-purple-400 neon-text">
+                            <span class="text-3xl md:text-5xl font-bold text-transparent bg-clip-text bg-gradient-to-r from-blue-400 to-purple-400 neon-text">
                                 kynecta
                             </span>
-                            <p class="text-blue-300 text-lg mt-2">Where the World Connects</p>
+                            <p class="text-blue-300 text-sm md:text-lg mt-1 md:mt-2">Where the World Connects</p>
                         </div>
                     </div>
                 </div>
 
                 <!-- Attractive Advertisement Content -->
-                <div class="space-y-8">
+                <div class="space-y-6 md:space-y-8">
                     <div class="text-center">
-                        <h2 class="text-4xl font-bold gradient-text mb-4">Join 500,000+ Global Connectors!</h2>
-                        <p class="text-xl text-blue-200 mb-6">The world's most vibrant community is waiting for you</p>
+                        <h2 class="text-2xl md:text-4xl font-bold gradient-text mb-3 md:mb-4 responsive-heading">Join 500,000+ Global Connectors!</h2>
+                        <p class="text-blue-200 text-base md:text-xl mb-4 md:mb-6 responsive-subheading">The world's most vibrant community is waiting for you</p>
                     </div>
 
                     <!-- Live Stats Counter -->
-                    <div class="grid grid-cols-2 gap-6 mb-8">
+                    <div class="grid grid-cols-2 gap-4 md:gap-6 mb-6 md:mb-8">
                         <div class="text-center">
                             <div class="stats-counter" id="onlineCount">500K+</div>
-                            <div class="text-blue-300 text-sm">Active Users</div>
+                            <div class="text-blue-300 text-xs md:text-sm">Active Users</div>
                         </div>
                         <div class="text-center">
                             <div class="stats-counter" id="countryCount">190+</div>
-                            <div class="text-blue-300 text-sm">Countries</div>
+                            <div class="text-blue-300 text-xs md:text-sm">Countries</div>
                         </div>
                         <div class="text-center">
                             <div class="stats-counter" id="languageCount">50+</div>
-                            <div class="text-blue-300 text-sm">Languages</div>
+                            <div class="text-blue-300 text-xs md:text-sm">Languages</div>
                         </div>
                         <div class="text-center">
                             <div class="stats-counter" id="communityCount">10K+</div>
-                            <div class="text-blue-300 text-sm">Communities</div>
+                            <div class="text-blue-300 text-xs md:text-sm">Communities</div>
                         </div>
                     </div>
 
                     <!-- Feature Highlights -->
-                    <div class="grid grid-cols-1 gap-4 mb-8">
-                        <div class="feature-highlight rounded-xl p-6 text-center">
-                            <div class="w-16 h-16 bg-gradient-to-br from-green-400 to-blue-500 rounded-full flex items-center justify-center mx-auto mb-4">
-                                <i class="fas fa-comments text-white text-2xl"></i>
+                    <div class="grid grid-cols-1 gap-3 md:gap-4 mb-6 md:mb-8">
+                        <div class="feature-highlight rounded-xl p-4 md:p-6 text-center">
+                            <div class="w-12 h-12 md:w-16 md:h-16 bg-gradient-to-br from-green-400 to-blue-500 rounded-full flex items-center justify-center mx-auto mb-3 md:mb-4">
+                                <i class="fas fa-comments text-white text-xl md:text-2xl"></i>
                             </div>
-                            <h3 class="text-lg font-bold text-white mb-2">Real-time Chat</h3>
-                            <p class="text-blue-300 text-sm">Connect instantly with people worldwide in 50+ languages</p>
+                            <h3 class="text-base md:text-lg font-bold text-white mb-1 md:mb-2">Real-time Chat</h3>
+                            <p class="text-blue-300 text-xs md:text-sm">Connect instantly with people worldwide in 50+ languages</p>
                         </div>
                         
-                        <div class="feature-highlight rounded-xl p-6 text-center">
-                            <div class="w-16 h-16 bg-gradient-to-br from-purple-400 to-pink-500 rounded-full flex items-center justify-center mx-auto mb-4">
-                                <i class="fas fa-users text-white text-2xl"></i>
+                        <div class="feature-highlight rounded-xl p-4 md:p-6 text-center">
+                            <div class="w-12 h-12 md:w-16 md:h-16 bg-gradient-to-br from-purple-400 to-pink-500 rounded-full flex items-center justify-center mx-auto mb-3 md:mb-4">
+                                <i class="fas fa-users text-white text-xl md:text-2xl"></i>
                             </div>
-                            <h3 class="text-lg font-bold text-white mb-2">Global Communities</h3>
-                            <p class="text-blue-300 text-sm">Join interest-based groups from tech to travel</p>
+                            <h3 class="text-base md:text-lg font-bold text-white mb-1 md:mb-2">Global Communities</h3>
+                            <p class="text-blue-300 text-xs md:text-sm">Join interest-based groups from tech to travel</p>
                         </div>
                     </div>
 
                     <!-- Success Stories -->
-                    <div class="bg-black/30 rounded-xl p-6 border border-purple-500/30">
-                        <h3 class="text-xl font-bold text-center text-white mb-6">🌟 Success Stories</h3>
-                        <div class="space-y-4">
+                    <div class="bg-black/30 rounded-xl p-4 md:p-6 border border-purple-500/30">
+                        <h3 class="text-lg md:text-xl font-bold text-center text-white mb-4 md:mb-6">🌟 Success Stories</h3>
+                        <div class="space-y-3 md:space-y-4">
                             <div class="flex items-start space-x-3">
-                                <div class="w-12 h-12 bg-gradient-to-br from-blue-500 to-purple-600 rounded-full flex items-center justify-center">
-                                    <span class="text-white font-bold">S</span>
+                                <div class="w-10 h-10 md:w-12 md:h-12 bg-gradient-to-br from-blue-500 to-purple-600 rounded-full flex items-center justify-center flex-shrink-0">
+                                    <span class="text-white font-bold text-sm">S</span>
                                 </div>
                                 <div>
-                                    <p class="text-white font-semibold">"Found my business partner in Japan! kynecta made global networking effortless."</p>
-                                    <p class="text-blue-300 text-sm">- Sarah, Entrepreneur from USA</p>
+                                    <p class="text-white font-semibold text-sm md:text-base">"Found my business partner in Japan! kynecta made global networking effortless."</p>
+                                    <p class="text-blue-300 text-xs md:text-sm">- Sarah, Entrepreneur from USA</p>
                                 </div>
                             </div>
                             <div class="flex items-start space-x-3">
-                                <div class="w-12 h-12 bg-gradient-to-br from-green-500 to-blue-600 rounded-full flex items-center justify-center">
-                                    <span class="text-white font-bold">A</span>
+                                <div class="w-10 h-10 md:w-12 md:h-12 bg-gradient-to-br from-green-500 to-blue-600 rounded-full flex items-center justify-center flex-shrink-0">
+                                    <span class="text-white font-bold text-sm">A</span>
                                 </div>
                                 <div>
-                                    <p class="text-white font-semibold">"Learned Spanish while making friends from Mexico! Best language exchange platform."</p>
-                                    <p class="text-blue-300 text-sm">- Alex, Student from UK</p>
+                                    <p class="text-white font-semibold text-sm md:text-base">"Learned Spanish while making friends from Mexico! Best language exchange platform."</p>
+                                    <p class="text-blue-300 text-xs md:text-sm">- Alex, Student from UK</p>
                                 </div>
                             </div>
                         </div>
@@ -669,19 +726,19 @@
         </div>
 
         <!-- Right Side - Content Area (Forms & Interactions) -->
-        <div class="flex-1 flex items-center justify-center p-8">
+        <div class="flex-1 flex items-center justify-center p-4 md:p-8">
             <div class="w-full max-w-md">
                 <!-- Mobile Header -->
-                <div class="lg:hidden text-center mb-8">
-                    <div class="flex items-center justify-center space-x-3 mb-6">
-                        <div class="w-16 h-16 cyber-gradient rounded-xl flex items-center justify-center quantum-glow">
-                            <i class="fas fa-globe text-white text-2xl"></i>
+                <div class="lg:hidden text-center mb-6 md:mb-8 mobile-margin">
+                    <div class="flex items-center justify-center space-x-3 mb-4 md:mb-6">
+                        <div class="w-12 h-12 md:w-16 md:h-16 cyber-gradient rounded-xl flex items-center justify-center quantum-glow">
+                            <i class="fas fa-globe text-white text-xl md:text-2xl"></i>
                         </div>
                         <div>
-                            <span class="text-3xl font-bold text-transparent bg-clip-text bg-gradient-to-r from-blue-400 to-purple-400 neon-text">
+                            <span class="text-2xl md:text-3xl font-bold text-transparent bg-clip-text bg-gradient-to-r from-blue-400 to-purple-400 neon-text">
                                 kynecta
                             </span>
-                            <p class="text-blue-300 text-sm">Where the World Connects</p>
+                            <p class="text-blue-300 text-xs md:text-sm">Where the World Connects</p>
                         </div>
                     </div>
                 </div>
@@ -690,20 +747,20 @@
                 <div id="messageContainer"></div>
 
                 <!-- Security Status -->
-                <div id="securityStatus" class="glass-effect border border-blue-700 rounded-2xl p-4 mb-6 hidden">
+                <div id="securityStatus" class="glass-effect border border-blue-700 rounded-2xl p-3 md:p-4 mb-4 md:mb-6 hidden">
                     <div class="flex items-center justify-between">
-                        <div class="flex items-center space-x-3">
-                            <i class="fas fa-shield-check text-green-400 text-lg"></i>
+                        <div class="flex items-center space-x-2 md:space-x-3">
+                            <i class="fas fa-shield-check text-green-400 text-base md:text-lg"></i>
                             <div>
-                                <span class="text-sm font-medium text-green-400">Secure Connection Established</span>
+                                <span class="text-xs md:text-sm font-medium text-green-400">Secure Connection Established</span>
                                 <p class="text-xs text-blue-300 mt-1">All data is encrypted and secure</p>
                             </div>
                         </div>
                         <div class="flex space-x-1">
-                            <span class="security-badge">
+                            <span class="security-badge text-xs">
                                 <i class="fas fa-lock mr-1"></i> HTTPS
                             </span>
-                            <span class="security-badge">
+                            <span class="security-badge text-xs">
                                 <i class="fas fa-shield-alt mr-1"></i> Encrypted
                             </span>
                         </div>
@@ -715,50 +772,50 @@
                     <!-- Landing Section -->
                     <div id="landingSection" class="section section-active">
                         <div class="text-center">
-                            <h2 class="text-3xl font-bold text-white mb-4">Your Global Journey Starts Here</h2>
-                            <p class="text-blue-300 mb-8">
+                            <h2 class="text-2xl md:text-3xl font-bold text-white mb-3 md:mb-4 responsive-heading">Your Global Journey Starts Here</h2>
+                            <p class="text-blue-300 mb-6 md:mb-8 text-sm md:text-base responsive-text">
                                 Join millions who have transformed how they connect, learn, and grow with people from every corner of the world.
                             </p>
                             
-                            <div class="space-y-4">
-                                <button id="showLoginBtn" class="w-full cyber-gradient text-white py-4 px-6 rounded-xl text-lg font-semibold hover:scale-105 transition focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-cyan-400 quantum-glow pulse-glow">
+                            <div class="space-y-3 md:space-y-4">
+                                <button id="showLoginBtn" class="w-full cyber-gradient text-white py-3 md:py-4 px-4 md:px-6 rounded-xl text-base md:text-lg font-semibold hover:scale-105 transition focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-cyan-400 quantum-glow pulse-glow">
                                     <i class="fas fa-sign-in-alt mr-2"></i>Continue Your Journey
                                 </button>
-                                <button id="showRegisterBtn" class="w-full glass-effect text-white py-4 px-6 rounded-xl text-lg font-semibold hover:scale-105 transition focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-cyan-400 border border-blue-700 hover:border-cyan-500">
+                                <button id="showRegisterBtn" class="w-full glass-effect text-white py-3 md:py-4 px-4 md:px-6 rounded-xl text-base md:text-lg font-semibold hover:scale-105 transition focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-cyan-400 border border-blue-700 hover:border-cyan-500">
                                     <i class="fas fa-user-plus mr-2"></i>Start Free Adventure
                                 </button>
                             </div>
                             
-                            <div class="mt-8 flex justify-center space-x-6 text-sm text-blue-300">
+                            <div class="mt-6 md:mt-8 flex justify-center space-x-4 md:space-x-6 text-xs md:text-sm text-blue-300 flex-wrap gap-2">
                                 <div class="flex items-center">
-                                    <i class="fas fa-bolt text-yellow-400 mr-2"></i>
+                                    <i class="fas fa-bolt text-yellow-400 mr-1 md:mr-2"></i>
                                     <span>Instant Setup</span>
                                 </div>
                                 <div class="flex items-center">
-                                    <i class="fas fa-globe text-green-400 mr-2"></i>
+                                    <i class="fas fa-globe text-green-400 mr-1 md:mr-2"></i>
                                     <span>Global Access</span>
                                 </div>
                                 <div class="flex items-center">
-                                    <i class="fas fa-heart text-pink-400 mr-2"></i>
+                                    <i class="fas fa-heart text-pink-400 mr-1 md:mr-2"></i>
                                     <span>Always Free</span>
                                 </div>
                             </div>
                         </div>
 
                         <!-- Security Features -->
-                        <div class="glass-effect border border-blue-700 rounded-2xl p-6 mt-8">
-                            <h3 class="text-sm font-medium text-cyan-400 mb-3">Why Choose kynecta?</h3>
-                            <ul class="text-sm text-blue-400 space-y-2">
+                        <div class="glass-effect border border-blue-700 rounded-2xl p-4 md:p-6 mt-6 md:mt-8">
+                            <h3 class="text-xs md:text-sm font-medium text-cyan-400 mb-2 md:mb-3">Why Choose kynecta?</h3>
+                            <ul class="text-xs md:text-sm text-blue-400 space-y-1 md:space-y-2">
                                 <li class="flex items-center">
-                                    <i class="fas fa-check-circle text-green-400 mr-2"></i>
+                                    <i class="fas fa-check-circle text-green-400 mr-1 md:mr-2 text-xs"></i>
                                     <span>No hidden fees - completely free forever</span>
                                 </li>
                                 <li class="flex items-center">
-                                    <i class="fas fa-check-circle text-green-400 mr-2"></i>
+                                    <i class="fas fa-check-circle text-green-400 mr-1 md:mr-2 text-xs"></i>
                                     <span>Connect with verified users worldwide</span>
                                 </li>
                                 <li class="flex items-center">
-                                    <i class="fas fa-check-circle text-green-400 mr-2"></i>
+                                    <i class="fas fa-check-circle text-green-400 mr-1 md:mr-2 text-xs"></i>
                                     <span>Advanced translation for seamless communication</span>
                                 </li>
                             </ul>
@@ -767,66 +824,66 @@
 
                     <!-- Login Section -->
                     <div id="loginSection" class="section section-hidden">
-                        <div class="text-center mb-6">
-                            <h2 class="text-3xl font-bold text-white mb-2">Welcome Back</h2>
-                            <p class="text-blue-300">
+                        <div class="text-center mb-4 md:mb-6">
+                            <h2 class="text-2xl md:text-3xl font-bold text-white mb-1 md:mb-2 responsive-heading">Welcome Back</h2>
+                            <p class="text-blue-300 text-sm md:text-base responsive-text">
                                 Continue your global journey with kynecta
                             </p>
                         </div>
 
                         <!-- Password Login Form -->
-                        <div class="space-y-6">
-                            <form class="space-y-6" id="loginForm">
+                        <div class="space-y-4 md:space-y-6">
+                            <form class="space-y-4 md:space-y-6" id="loginForm">
                                 <div>
-                                    <label for="loginEmail" class="block text-sm font-medium text-cyan-400 mb-2">
+                                    <label for="loginEmail" class="block text-xs md:text-sm font-medium text-cyan-400 mb-1 md:mb-2">
                                         Email address
                                         <span class="text-red-400 ml-1">*</span>
                                     </label>
                                     <div class="relative">
                                         <input id="loginEmail" name="email" type="email" autocomplete="email" required 
-                                               class="glass-effect appearance-none block w-full px-4 py-3 border border-blue-700 rounded-xl placeholder-blue-400 focus:outline-none focus:ring-2 focus:ring-cyan-400 focus:border-cyan-400 text-white pl-12 transition"
+                                               class="glass-effect appearance-none block w-full px-3 md:px-4 py-2 md:py-3 border border-blue-700 rounded-xl placeholder-blue-400 focus:outline-none focus:ring-2 focus:ring-cyan-400 focus:border-cyan-400 text-white pl-10 md:pl-12 transition text-sm md:text-base"
                                                placeholder="Enter your email">
-                                        <div class="absolute left-4 top-1/2 transform -translate-y-1/2 text-blue-400">
-                                            <i class="fas fa-envelope"></i>
+                                        <div class="absolute left-3 md:left-4 top-1/2 transform -translate-y-1/2 text-blue-400">
+                                            <i class="fas fa-envelope text-sm md:text-base"></i>
                                         </div>
                                     </div>
-                                    <div id="loginEmailError" class="text-red-400 text-sm mt-1 hidden"></div>
+                                    <div id="loginEmailError" class="text-red-400 text-xs mt-1 hidden"></div>
                                 </div>
 
                                 <div>
-                                    <label for="loginPassword" class="block text-sm font-medium text-blue-400 mb-2">
+                                    <label for="loginPassword" class="block text-xs md:text-sm font-medium text-blue-400 mb-1 md:mb-2">
                                         Password
                                         <span class="text-red-400 ml-1">*</span>
                                     </label>
                                     <div class="relative">
                                         <input id="loginPassword" name="password" type="password" autocomplete="current-password" required 
-                                               class="glass-effect appearance-none block w-full px-4 py-3 border border-blue-700 rounded-xl placeholder-blue-400 focus:outline-none focus:ring-2 focus:ring-blue-400 focus:border-blue-400 text-white pl-12 pr-12 transition"
+                                               class="glass-effect appearance-none block w-full px-3 md:px-4 py-2 md:py-3 border border-blue-700 rounded-xl placeholder-blue-400 focus:outline-none focus:ring-2 focus:ring-blue-400 focus:border-blue-400 text-white pl-10 md:pl-12 pr-10 md:pr-12 transition text-sm md:text-base"
                                                placeholder="Enter your password">
-                                        <div class="absolute left-4 top-1/2 transform -translate-y-1/2 text-blue-400">
-                                            <i class="fas fa-lock"></i>
+                                        <div class="absolute left-3 md:left-4 top-1/2 transform -translate-y-1/2 text-blue-400">
+                                            <i class="fas fa-lock text-sm md:text-base"></i>
                                         </div>
-                                        <button type="button" id="toggleLoginPassword" class="absolute right-4 top-1/2 transform -translate-y-1/2 text-blue-400 hover:text-cyan-400 transition">
-                                            <i class="fas fa-eye"></i>
+                                        <button type="button" id="toggleLoginPassword" class="absolute right-3 md:right-4 top-1/2 transform -translate-y-1/2 text-blue-400 hover:text-cyan-400 transition">
+                                            <i class="fas fa-eye text-sm md:text-base"></i>
                                         </button>
                                     </div>
-                                    <div id="loginPasswordError" class="text-red-400 text-sm mt-1 hidden"></div>
+                                    <div id="loginPasswordError" class="text-red-400 text-xs mt-1 hidden"></div>
                                 </div>
 
-                                <div class="flex items-center justify-between">
+                                <div class="flex items-center justify-between text-xs md:text-sm">
                                     <div class="flex items-center">
                                         <input id="remember-me" name="remember-me" type="checkbox" 
-                                               class="h-4 w-4 text-cyan-400 focus:ring-cyan-400 border-blue-700 rounded glass-effect">
-                                        <label for="remember-me" class="ml-2 block text-sm text-blue-300">Remember me</label>
+                                               class="h-3 w-3 md:h-4 md:w-4 text-cyan-400 focus:ring-cyan-400 border-blue-700 rounded glass-effect">
+                                        <label for="remember-me" class="ml-2 block text-blue-300">Remember me</label>
                                     </div>
-                                    <div class="text-sm">
+                                    <div>
                                         <button type="button" id="forgotPasswordBtn" class="font-medium text-purple-400 hover:text-purple-300 transition">Forgot password?</button>
                                     </div>
                                 </div>
 
                                 <div>
                                     <button type="submit" id="loginBtn"
-                                            class="w-full cyber-gradient text-white py-3 px-4 rounded-xl text-lg font-semibold hover:scale-105 transition focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-cyan-400 quantum-glow disabled:opacity-50 disabled:cursor-not-allowed">
-                                        <span id="loginBtnText">Sign In</span>
+                                            class="w-full cyber-gradient text-white py-2 md:py-3 px-4 rounded-xl text-base md:text-lg font-semibold hover:scale-105 transition focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-cyan-400 quantum-glow disabled:opacity-50 disabled:cursor-not-allowed">
+                                        <span id="loginBtnText" class="text-sm md:text-base">Sign In</span>
                                         <div id="loginSpinner" class="loading-spinner hidden"></div>
                                     </button>
                                 </div>
@@ -834,8 +891,8 @@
                         </div>
 
                         <!-- Switch to Register -->
-                        <div class="mt-6 text-center">
-                            <p class="text-blue-300">
+                        <div class="mt-4 md:mt-6 text-center">
+                            <p class="text-blue-300 text-xs md:text-sm">
                                 Don't have an account?{' '}
                                 <button id="switchToRegisterFromLogin" class="font-medium text-purple-400 hover:text-purple-300 transition">
                                     Create one now
@@ -844,114 +901,114 @@
                         </div>
 
                         <!-- Back Button -->
-                        <div class="mt-4 text-center">
-                            <button id="backToLandingFromLogin" class="text-blue-400 hover:text-cyan-400 transition">
-                                <i class="fas fa-arrow-left mr-2"></i> Back to Home
+                        <div class="mt-3 md:mt-4 text-center">
+                            <button id="backToLandingFromLogin" class="text-blue-400 hover:text-cyan-400 transition text-xs md:text-sm">
+                                <i class="fas fa-arrow-left mr-1 md:mr-2"></i> Back to Home
                             </button>
                         </div>
                     </div>
 
                     <!-- Register Section -->
                     <div id="registerSection" class="section section-hidden">
-                        <div class="text-center mb-6">
-                            <h2 class="text-3xl font-bold text-white mb-2">Join kynecta</h2>
-                            <p class="text-blue-300">
+                        <div class="text-center mb-4 md:mb-6">
+                            <h2 class="text-2xl md:text-3xl font-bold text-white mb-1 md:mb-2 responsive-heading">Join kynecta</h2>
+                            <p class="text-blue-300 text-sm md:text-base responsive-text">
                                 Start your global adventure today
                             </p>
                         </div>
 
                         <!-- Registration Form -->
-                        <form id="registration-form" class="space-y-6">
+                        <form id="registration-form" class="space-y-4 md:space-y-6">
                             <div>
-                                <label for="displayName" class="block text-sm font-medium text-cyan-400 mb-2">
+                                <label for="displayName" class="block text-xs md:text-sm font-medium text-cyan-400 mb-1 md:mb-2">
                                     Display Name
                                     <span class="text-red-400 ml-1">*</span>
                                 </label>
                                 <div class="relative">
                                     <input type="text" id="displayName" name="displayName" required autocomplete="name"
-                                           class="glass-effect appearance-none block w-full px-4 py-3 border border-blue-700 rounded-xl placeholder-blue-400 focus:outline-none focus:ring-2 focus:ring-cyan-400 focus:border-cyan-400 text-white pl-12 transition"
+                                           class="glass-effect appearance-none block w-full px-3 md:px-4 py-2 md:py-3 border border-blue-700 rounded-xl placeholder-blue-400 focus:outline-none focus:ring-2 focus:ring-cyan-400 focus:border-cyan-400 text-white pl-10 md:pl-12 transition text-sm md:text-base"
                                            placeholder="Enter your display name">
-                                    <div class="absolute left-4 top-1/2 transform -translate-y-1/2 text-blue-400">
-                                        <i class="fas fa-user"></i>
+                                    <div class="absolute left-3 md:left-4 top-1/2 transform -translate-y-1/2 text-blue-400">
+                                        <i class="fas fa-user text-sm md:text-base"></i>
                                     </div>
                                 </div>
-                                <div id="displayNameError" class="text-red-400 text-sm mt-1 hidden"></div>
+                                <div id="displayNameError" class="text-red-400 text-xs mt-1 hidden"></div>
                             </div>
                             
                             <div>
-                                <label for="registerEmail" class="block text-sm font-medium text-cyan-400 mb-2">
+                                <label for="registerEmail" class="block text-xs md:text-sm font-medium text-cyan-400 mb-1 md:mb-2">
                                     Email Address
                                     <span class="text-red-400 ml-1">*</span>
                                 </label>
                                 <div class="relative">
                                     <input type="email" id="registerEmail" name="email" required autocomplete="email"
-                                           class="glass-effect appearance-none block w-full px-4 py-3 border border-blue-700 rounded-xl placeholder-blue-400 focus:outline-none focus:ring-2 focus:ring-cyan-400 focus:border-cyan-400 text-white pl-12 transition"
+                                           class="glass-effect appearance-none block w-full px-3 md:px-4 py-2 md:py-3 border border-blue-700 rounded-xl placeholder-blue-400 focus:outline-none focus:ring-2 focus:ring-cyan-400 focus:border-cyan-400 text-white pl-10 md:pl-12 transition text-sm md:text-base"
                                            placeholder="Enter your email">
-                                    <div class="absolute left-4 top-1/2 transform -translate-y-1/2 text-blue-400">
-                                        <i class="fas fa-envelope"></i>
+                                    <div class="absolute left-3 md:left-4 top-1/2 transform -translate-y-1/2 text-blue-400">
+                                        <i class="fas fa-envelope text-sm md:text-base"></i>
                                     </div>
                                 </div>
-                                <div id="registerEmailError" class="text-red-400 text-sm mt-1 hidden"></div>
+                                <div id="registerEmailError" class="text-red-400 text-xs mt-1 hidden"></div>
                             </div>
                             
                             <div>
-                                <label for="registerPassword" class="block text-sm font-medium text-blue-400 mb-2">
+                                <label for="registerPassword" class="block text-xs md:text-sm font-medium text-blue-400 mb-1 md:mb-2">
                                     Password (6+ characters)
                                     <span class="text-red-400 ml-1">*</span>
                                 </label>
                                 <div class="relative">
                                     <input type="password" id="registerPassword" name="password" required autocomplete="new-password"
-                                           class="glass-effect appearance-none block w-full px-4 py-3 border border-blue-700 rounded-xl placeholder-blue-400 focus:outline-none focus:ring-2 focus:ring-blue-400 focus:border-blue-400 text-white pl-12 pr-12 transition"
+                                           class="glass-effect appearance-none block w-full px-3 md:px-4 py-2 md:py-3 border border-blue-700 rounded-xl placeholder-blue-400 focus:outline-none focus:ring-2 focus:ring-blue-400 focus:border-blue-400 text-white pl-10 md:pl-12 pr-10 md:pr-12 transition text-sm md:text-base"
                                            placeholder="Enter your password">
-                                    <div class="absolute left-4 top-1/2 transform -translate-y-1/2 text-blue-400">
-                                        <i class="fas fa-lock"></i>
+                                    <div class="absolute left-3 md:left-4 top-1/2 transform -translate-y-1/2 text-blue-400">
+                                        <i class="fas fa-lock text-sm md:text-base"></i>
                                     </div>
-                                    <button type="button" id="toggleRegisterPassword" class="absolute right-4 top-1/2 transform -translate-y-1/2 text-blue-400 hover:text-cyan-400 transition">
-                                        <i class="fas fa-eye"></i>
+                                    <button type="button" id="toggleRegisterPassword" class="absolute right-3 md:right-4 top-1/2 transform -translate-y-1/2 text-blue-400 hover:text-cyan-400 transition">
+                                        <i class="fas fa-eye text-sm md:text-base"></i>
                                     </button>
                                 </div>
-                                <div id="registerPasswordError" class="text-red-400 text-sm mt-1 hidden"></div>
+                                <div id="registerPasswordError" class="text-red-400 text-xs mt-1 hidden"></div>
                             </div>
                             
                             <div>
-                                <label for="confirmPassword" class="block text-sm font-medium text-blue-400 mb-2">
+                                <label for="confirmPassword" class="block text-xs md:text-sm font-medium text-blue-400 mb-1 md:mb-2">
                                     Confirm Password
                                     <span class="text-red-400 ml-1">*</span>
                                 </label>
                                 <div class="relative">
                                     <input type="password" id="confirmPassword" name="confirmPassword" required autocomplete="new-password"
-                                           class="glass-effect appearance-none block w-full px-4 py-3 border border-blue-700 rounded-xl placeholder-blue-400 focus:outline-none focus:ring-2 focus:ring-blue-400 focus:border-blue-400 text-white pl-12 pr-12 transition"
+                                           class="glass-effect appearance-none block w-full px-3 md:px-4 py-2 md:py-3 border border-blue-700 rounded-xl placeholder-blue-400 focus:outline-none focus:ring-2 focus:ring-blue-400 focus:border-blue-400 text-white pl-10 md:pl-12 pr-10 md:pr-12 transition text-sm md:text-base"
                                            placeholder="Confirm your password">
-                                    <div class="absolute left-4 top-1/2 transform -translate-y-1/2 text-blue-400">
-                                        <i class="fas fa-lock"></i>
+                                    <div class="absolute left-3 md:left-4 top-1/2 transform -translate-y-1/2 text-blue-400">
+                                        <i class="fas fa-lock text-sm md:text-base"></i>
                                     </div>
-                                    <button type="button" id="toggleConfirmPassword" class="absolute right-4 top-1/2 transform -translate-y-1/2 text-blue-400 hover:text-cyan-400 transition">
-                                        <i class="fas fa-eye"></i>
+                                    <button type="button" id="toggleConfirmPassword" class="absolute right-3 md:right-4 top-1/2 transform -translate-y-1/2 text-blue-400 hover:text-cyan-400 transition">
+                                        <i class="fas fa-eye text-sm md:text-base"></i>
                                     </button>
                                 </div>
-                                <div id="confirmPasswordError" class="text-red-400 text-sm mt-1 hidden"></div>
+                                <div id="confirmPasswordError" class="text-red-400 text-xs mt-1 hidden"></div>
                             </div>
 
                             <!-- Terms Agreement -->
-                            <div class="flex items-start space-x-3">
+                            <div class="flex items-start space-x-2 md:space-x-3 text-xs md:text-sm">
                                 <input type="checkbox" id="termsAgreement" required
-                                       class="h-4 w-4 text-cyan-400 focus:ring-cyan-400 border-blue-700 rounded glass-effect mt-1">
-                                <label for="termsAgreement" class="text-sm text-blue-300">
+                                       class="h-3 w-3 md:h-4 md:w-4 text-cyan-400 focus:ring-cyan-400 border-blue-700 rounded glass-effect mt-0.5">
+                                <label for="termsAgreement" class="text-blue-300">
                                     I agree to the <a href="#" class="text-purple-400 hover:text-purple-300">Terms of Service</a> and <a href="#" class="text-purple-400 hover:text-purple-300">Privacy Policy</a>
                                 </label>
                             </div>
-                            <div id="termsError" class="text-red-400 text-sm hidden">Please accept the terms and conditions</div>
+                            <div id="termsError" class="text-red-400 text-xs hidden">Please accept the terms and conditions</div>
 
                             <button type="submit" id="registerBtn"
-                                    class="w-full cyber-gradient text-white py-3 px-4 rounded-xl text-lg font-semibold hover:scale-105 transition focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-cyan-400 quantum-glow disabled:opacity-50 disabled:cursor-not-allowed">
-                                <span id="registerBtnText">Create Account</span>
+                                    class="w-full cyber-gradient text-white py-2 md:py-3 px-4 rounded-xl text-base md:text-lg font-semibold hover:scale-105 transition focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-cyan-400 quantum-glow disabled:opacity-50 disabled:cursor-not-allowed">
+                                <span id="registerBtnText" class="text-sm md:text-base">Create Account</span>
                                 <div id="registerSpinner" class="loading-spinner hidden"></div>
                             </button>
                         </form>
 
                         <!-- Switch to Login -->
-                        <div class="mt-6 text-center">
-                            <p class="text-blue-300">
+                        <div class="mt-4 md:mt-6 text-center">
+                            <p class="text-blue-300 text-xs md:text-sm">
                                 Already have an account?{' '}
                                 <button id="switchToLoginFromRegister" class="font-medium text-purple-400 hover:text-purple-300 transition">
                                     Sign in here
@@ -960,9 +1017,9 @@
                         </div>
 
                         <!-- Back Button -->
-                        <div class="mt-4 text-center">
-                            <button id="backToLandingFromRegister" class="text-blue-400 hover:text-cyan-400 transition">
-                                <i class="fas fa-arrow-left mr-2"></i> Back to Home
+                        <div class="mt-3 md:mt-4 text-center">
+                            <button id="backToLandingFromRegister" class="text-blue-400 hover:text-cyan-400 transition text-xs md:text-sm">
+                                <i class="fas fa-arrow-left mr-1 md:mr-2"></i> Back to Home
                             </button>
                         </div>
                     </div>
@@ -1035,18 +1092,18 @@
                     securityStatus.classList.remove('hidden');
                     securityStatus.innerHTML = `
                         <div class="flex items-center justify-between">
-                            <div class="flex items-center space-x-3">
-                                <i class="fas fa-check-circle text-green-400 text-lg"></i>
+                            <div class="flex items-center space-x-2 md:space-x-3">
+                                <i class="fas fa-check-circle text-green-400 text-base md:text-lg"></i>
                                 <div>
-                                    <span class="text-sm font-medium text-green-400">Secure Connection Established</span>
+                                    <span class="text-xs md:text-sm font-medium text-green-400">Secure Connection Established</span>
                                     <p class="text-xs text-blue-300 mt-1">All data is encrypted and secure</p>
                                 </div>
                             </div>
                             <div class="flex space-x-1">
-                                <span class="security-badge">
+                                <span class="security-badge text-xs">
                                     <i class="fas fa-lock mr-1"></i> HTTPS
                                 </span>
-                                <span class="security-badge">
+                                <span class="security-badge text-xs">
                                     <i class="fas fa-shield-alt mr-1"></i> Encrypted
                                 </span>
                             </div>
@@ -1064,15 +1121,15 @@
                     securityStatus.classList.remove('hidden');
                     securityStatus.innerHTML = `
                         <div class="flex items-center justify-between">
-                            <div class="flex items-center space-x-3">
-                                <i class="fas fa-times-circle text-red-400 text-lg"></i>
+                            <div class="flex items-center space-x-2 md:space-x-3">
+                                <i class="fas fa-times-circle text-red-400 text-base md:text-lg"></i>
                                 <div>
-                                    <span class="text-sm font-medium text-red-400">Connection Failed</span>
+                                    <span class="text-xs md:text-sm font-medium text-red-400">Connection Failed</span>
                                     <p class="text-xs text-blue-300 mt-1">Please check your internet connection</p>
                                 </div>
                             </div>
                             <div class="flex space-x-1">
-                                <span class="security-badge" style="background: rgba(239, 68, 68, 0.1); border-color: rgba(239, 68, 68, 0.3); color: #fca5a5;">
+                                <span class="security-badge text-xs" style="background: rgba(239, 68, 68, 0.1); border-color: rgba(239, 68, 68, 0.3); color: #fca5a5;">
                                     <i class="fas fa-unlock mr-1"></i> Offline
                                 </span>
                             </div>
@@ -1749,29 +1806,52 @@
                     return;
                 }
                 
-                // Hide current section
-                currentSectionEl.classList.remove('section-active');
-                currentSectionEl.classList.add('section-hidden');
+                // Add exit animation to current section
+                currentSectionEl.style.transition = 'all 0.4s ease-in-out';
+                currentSectionEl.style.opacity = '0';
+                currentSectionEl.style.transform = 'translateX(-50px)';
                 
-                // Show new section after a brief delay for smooth transition
+                // Hide current section and show new section after transition
                 setTimeout(() => {
+                    // Hide current section completely
+                    currentSectionEl.classList.remove('section-active');
+                    currentSectionEl.classList.add('section-hidden');
+                    currentSectionEl.style.opacity = '';
+                    currentSectionEl.style.transform = '';
+                    
+                    // Show new section with enter animation
                     newSectionEl.classList.remove('section-hidden');
                     newSectionEl.classList.add('section-active');
+                    newSectionEl.style.opacity = '0';
+                    newSectionEl.style.transform = 'translateX(50px)';
                     
-                    this.currentSection = sectionId;
-                    this.isTransitioning = false;
+                    // Trigger reflow
+                    newSectionEl.offsetHeight;
                     
-                    // Focus on first input in form sections
-                    if (sectionId === 'login') {
-                        const emailInput = document.getElementById('loginEmail');
-                        if (emailInput) emailInput.focus();
-                    } else if (sectionId === 'register') {
-                        const displayNameInput = document.getElementById('displayName');
-                        if (displayNameInput) displayNameInput.focus();
-                    }
-                    
-                    console.log(`🔄 Switched to ${sectionId} section`);
-                }, 300);
+                    // Animate in new section
+                    setTimeout(() => {
+                        newSectionEl.style.opacity = '1';
+                        newSectionEl.style.transform = 'translateX(0)';
+                        
+                        this.currentSection = sectionId;
+                        this.isTransitioning = false;
+                        
+                        // Focus on first input in form sections
+                        if (sectionId === 'login') {
+                            const emailInput = document.getElementById('loginEmail');
+                            if (emailInput) {
+                                setTimeout(() => emailInput.focus(), 100);
+                            }
+                        } else if (sectionId === 'register') {
+                            const displayNameInput = document.getElementById('displayName');
+                            if (displayNameInput) {
+                                setTimeout(() => displayNameInput.focus(), 100);
+                            }
+                        }
+                        
+                        console.log(`🔄 Switched to ${sectionId} section`);
+                    }, 50);
+                }, 400);
             }
 
             /**
@@ -2005,7 +2085,7 @@
                         <div class="${messageClass}">
                             <div class="flex items-center">
                                 <i class="fas ${type === 'error' ? 'fa-exclamation-triangle' : 'fa-check-circle'} mr-2"></i>
-                                <span>${message}</span>
+                                <span class="text-sm">${message}</span>
                             </div>
                         </div>
                     `;
@@ -2037,7 +2117,7 @@
                 toast.innerHTML = `
                     <div class="flex items-center">
                         <i class="fas fa-${type === 'success' ? 'check-circle' : type === 'error' ? 'exclamation-circle' : type === 'warning' ? 'exclamation-triangle' : 'info-circle'} mr-2"></i>
-                        <span class="font-medium">${message}</span>
+                        <span class="font-medium text-sm">${message}</span>
                     </div>
                 `;
                 

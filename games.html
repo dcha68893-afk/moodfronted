@@ -6,7 +6,6 @@
     <title>Premium Games Hub - Kynecta</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css" rel="stylesheet">
-    <link rel="stylesheet" href="responsive.css">
     
     <!-- Firebase SDK -->
     <script src="https://www.gstatic.com/firebasejs/9.22.1/firebase-app-compat.js"></script>
@@ -89,15 +88,17 @@
             display: grid;
             grid-template-columns: repeat(8, 1fr);
             grid-template-rows: repeat(8, 1fr);
-            width: 400px;
-            height: 400px;
+            width: 100%;
+            max-width: 400px;
+            height: auto;
+            aspect-ratio: 1/1;
             border: 2px solid #374151;
         }
         .chess-square {
             display: flex;
             align-items: center;
             justify-content: center;
-            font-size: 30px;
+            font-size: clamp(18px, 4vw, 30px);
             cursor: pointer;
             transition: all 0.2s ease;
         }
@@ -118,17 +119,20 @@
         .word-puzzle-grid {
             display: grid;
             grid-template-columns: repeat(5, 1fr);
-            gap: 5px;
-            margin-bottom: 20px;
+            gap: 4px;
+            margin-bottom: 16px;
+            max-width: 300px;
+            margin-left: auto;
+            margin-right: auto;
         }
         .word-cell {
-            width: 50px;
-            height: 50px;
+            width: 100%;
+            aspect-ratio: 1/1;
             border: 2px solid #374151;
             display: flex;
             align-items: center;
             justify-content: center;
-            font-size: 24px;
+            font-size: clamp(16px, 4vw, 24px);
             font-weight: bold;
             text-transform: uppercase;
         }
@@ -150,14 +154,14 @@
         
         /* Memory Game */
         .memory-card {
-            width: 80px;
-            height: 80px;
+            width: 100%;
+            aspect-ratio: 1/1;
             background: linear-gradient(135deg, #667eea, #764ba2);
             border-radius: 8px;
             display: flex;
             align-items: center;
             justify-content: center;
-            font-size: 24px;
+            font-size: clamp(16px, 4vw, 24px);
             cursor: pointer;
             transition: transform 0.3s ease;
             transform-style: preserve-3d;
@@ -194,9 +198,11 @@
             display: grid;
             grid-template-columns: repeat(3, 1fr);
             grid-template-rows: repeat(3, 1fr);
-            width: 300px;
-            height: 300px;
-            gap: 5px;
+            width: 100%;
+            max-width: 300px;
+            height: auto;
+            aspect-ratio: 1/1;
+            gap: 4px;
             background: #374151;
         }
         .tic-tac-toe-cell {
@@ -204,7 +210,7 @@
             display: flex;
             align-items: center;
             justify-content: center;
-            font-size: 48px;
+            font-size: clamp(32px, 8vw, 48px);
             cursor: pointer;
             transition: all 0.2s ease;
         }
@@ -223,8 +229,10 @@
             display: grid;
             grid-template-columns: repeat(9, 1fr);
             grid-template-rows: repeat(9, 1fr);
-            width: 450px;
-            height: 450px;
+            width: 100%;
+            max-width: 450px;
+            height: auto;
+            aspect-ratio: 1/1;
             border: 2px solid #374151;
         }
         .sudoku-cell {
@@ -232,7 +240,7 @@
             display: flex;
             align-items: center;
             justify-content: center;
-            font-size: 20px;
+            font-size: clamp(14px, 3vw, 20px);
             cursor: pointer;
             background: #1f2937;
         }
@@ -292,6 +300,7 @@
             z-index: 10000;
             transform: translateX(400px);
             transition: transform 0.3s ease;
+            max-width: calc(100vw - 40px);
         }
         .toast.show {
             transform: translateX(0);
@@ -318,17 +327,21 @@
             font-family: monospace;
             font-size: 12px;
             z-index: 1000;
+            max-width: calc(100vw - 20px);
         }
 
         /* Keyboard for word puzzle */
         .keyboard {
             display: grid;
             grid-template-columns: repeat(10, 1fr);
-            gap: 5px;
-            margin-top: 20px;
+            gap: 4px;
+            margin-top: 16px;
+            max-width: 500px;
+            margin-left: auto;
+            margin-right: auto;
         }
         .key {
-            padding: 10px;
+            padding: 8px 4px;
             background: #4b5563;
             border: none;
             border-radius: 4px;
@@ -336,6 +349,7 @@
             font-weight: bold;
             cursor: pointer;
             transition: all 0.2s ease;
+            font-size: clamp(12px, 3vw, 14px);
         }
         .key:hover {
             background: #6b7280;
@@ -442,7 +456,7 @@
             align-items: center;
             justify-content: center;
             color: white;
-            font-size: 48px;
+            font-size: clamp(32px, 8vw, 48px);
         }
 
         /* Search and filter styles */
@@ -529,7 +543,7 @@
             align-items: center;
             justify-content: center;
             color: white;
-            font-size: 48px;
+            font-size: clamp(32px, 8vw, 48px);
             margin-bottom: 20px;
             cursor: pointer;
             transition: all 0.3s ease;
@@ -538,38 +552,51 @@
             transform: scale(1.02);
         }
 
-        /* Responsive adjustments */
-        @media (max-width: 768px) {
+        /* Mobile-first responsive adjustments */
+        @media (max-width: 640px) {
             .chess-board {
-                width: 300px;
-                height: 300px;
+                max-width: 300px;
             }
             .memory-card {
-                width: 60px;
-                height: 60px;
-            }
-            .word-cell {
-                width: 40px;
-                height: 40px;
                 font-size: 18px;
             }
+            .word-cell {
+                font-size: 16px;
+            }
             .tic-tac-toe-board {
-                width: 250px;
-                height: 250px;
+                max-width: 250px;
             }
             .sudoku-board {
-                width: 300px;
-                height: 300px;
+                max-width: 300px;
             }
             .search-container input {
-                width: 200px;
+                width: 150px;
+            }
+            .keyboard {
+                grid-template-columns: repeat(8, 1fr);
+            }
+            .key {
+                padding: 6px 2px;
+                font-size: 12px;
+            }
+        }
+
+        @media (max-width: 768px) {
+            .debug-panel {
+                font-size: 10px;
+                padding: 6px;
+            }
+            .toast {
+                right: 10px;
+                left: 10px;
+                max-width: calc(100vw - 20px);
             }
         }
     </style>
 </head>
 <body class="h-full bg-gradient-to-br from-slate-900 via-purple-900 to-slate-900 text-white">
     <!-- Debug Panel -->
-    <div class="debug-panel" id="debugPanel">
+    <div class="debug-panel hidden md:block" id="debugPanel">
         <div>Firebase: <span id="firebaseStatus">Checking...</span></div>
         <div>User: <span id="userStatus">Unknown</span></div>
         <div>Coins: <span id="coinsStatus">0</span></div>
@@ -583,21 +610,21 @@
         <!-- Header -->
         <div class="glass-card border-b border-slate-700">
             <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-                <div class="flex justify-between items-center py-4">
+                <div class="flex flex-col sm:flex-row justify-between items-center py-4 space-y-4 sm:space-y-0">
                     <div class="flex items-center space-x-3">
                         <div class="w-10 h-10 primary-gradient rounded-2xl flex items-center justify-center">
                             <i class="fas fa-gamepad text-white"></i>
                         </div>
                         <div>
-                            <h1 class="text-2xl font-black text-transparent bg-clip-text bg-gradient-to-r from-blue-400 to-cyan-400">
+                            <h1 class="text-xl sm:text-2xl font-black text-transparent bg-clip-text bg-gradient-to-r from-blue-400 to-cyan-400">
                                 Kynecta Game Center
                             </h1>
-                            <p class="text-slate-400 text-sm">Unlimited levels & premium rewards</p>
+                            <p class="text-slate-400 text-xs sm:text-sm">Unlimited levels & premium rewards</p>
                         </div>
                     </div>
                     <div class="flex items-center space-x-4">
                         <!-- Theme Toggle -->
-                        <div class="theme-toggle" id="themeToggle" onclick="toggleTheme()">
+                        <div class="theme-toggle hidden sm:block" id="themeToggle" onclick="toggleTheme()">
                             <i class="fas fa-moon absolute left-1 top-1 text-yellow-400 text-xs"></i>
                             <i class="fas fa-sun absolute right-1 top-1 text-yellow-400 text-xs"></i>
                         </div>
@@ -605,51 +632,51 @@
                         <!-- Search Bar -->
                         <div class="search-container relative">
                             <input type="text" id="gameSearch" placeholder="Search games..." 
-                                   class="bg-slate-800 text-white px-4 py-2 rounded-lg w-64 focus:outline-none focus:ring-2 focus:ring-blue-500">
+                                   class="bg-slate-800 text-white px-4 py-2 rounded-lg w-40 sm:w-64 focus:outline-none focus:ring-2 focus:ring-blue-500 text-sm">
                             <div class="search-results hidden" id="searchResults"></div>
                         </div>
                         
                         <div class="text-right">
-                            <div class="font-semibold text-white" id="userCoins">0 coins</div>
-                            <div class="text-slate-400 text-sm" id="userLevel">Level 1</div>
+                            <div class="font-semibold text-white text-sm sm:text-base" id="userCoins">0 coins</div>
+                            <div class="text-slate-400 text-xs sm:text-sm" id="userLevel">Level 1</div>
                         </div>
-                        <img id="userAvatar" class="w-10 h-10 rounded-full border-2 border-slate-600" alt="User Avatar">
+                        <img id="userAvatar" class="w-8 h-8 sm:w-10 sm:h-10 rounded-full border-2 border-slate-600" alt="User Avatar">
                     </div>
                 </div>
             </div>
         </div>
 
-        <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
+        <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-6 sm:py-8">
             <!-- Quick Stats & Mood-Based Suggestions -->
-            <div class="grid grid-cols-1 md:grid-cols-3 gap-6 mb-8">
+            <div class="grid grid-cols-1 md:grid-cols-3 gap-4 sm:gap-6 mb-6 sm:mb-8">
                 <!-- Quick Stats -->
-                <div class="glass-card rounded-2xl p-6">
+                <div class="glass-card rounded-2xl p-4 sm:p-6">
                     <h3 class="text-lg font-bold text-white mb-4">Your Gaming Stats</h3>
                     <div class="space-y-2">
                         <div class="flex justify-between">
-                            <span class="text-slate-400">Games Played</span>
-                            <span class="text-white font-semibold" id="gamesPlayedCount">0</span>
+                            <span class="text-slate-400 text-sm sm:text-base">Games Played</span>
+                            <span class="text-white font-semibold text-sm sm:text-base" id="gamesPlayedCount">0</span>
                         </div>
                         <div class="flex justify-between">
-                            <span class="text-slate-400">Total Coins</span>
-                            <span class="text-yellow-400 font-semibold" id="totalCoinsEarned">0</span>
+                            <span class="text-slate-400 text-sm sm:text-base">Total Coins</span>
+                            <span class="text-yellow-400 font-semibold text-sm sm:text-base" id="totalCoinsEarned">0</span>
                         </div>
                         <div class="flex justify-between">
-                            <span class="text-slate-400">Current Streak</span>
-                            <span class="text-green-400 font-semibold" id="currentStreak">0 days</span>
+                            <span class="text-slate-400 text-sm sm:text-base">Current Streak</span>
+                            <span class="text-green-400 font-semibold text-sm sm:text-base" id="currentStreak">0 days</span>
                         </div>
                     </div>
                 </div>
                 
                 <!-- Mood-Based Suggestions -->
-                <div class="glass-card rounded-2xl p-6">
+                <div class="glass-card rounded-2xl p-4 sm:p-6">
                     <h3 class="text-lg font-bold text-white mb-4">Mood-Based Suggestions</h3>
                     <div class="space-y-3">
                         <button class="w-full text-left p-3 rounded-lg bg-slate-800 hover:bg-slate-700 transition" onclick="suggestGames('relaxing')">
                             <div class="flex items-center">
                                 <i class="fas fa-spa text-green-400 mr-3"></i>
                                 <div>
-                                    <div class="font-medium text-white">Feeling relaxed?</div>
+                                    <div class="font-medium text-white text-sm sm:text-base">Feeling relaxed?</div>
                                     <div class="text-sm text-slate-400">Try puzzle games</div>
                                 </div>
                             </div>
@@ -658,7 +685,7 @@
                             <div class="flex items-center">
                                 <i class="fas fa-bolt text-yellow-400 mr-3"></i>
                                 <div>
-                                    <div class="font-medium text-white">Feeling energetic?</div>
+                                    <div class="font-medium text-white text-sm sm:text-base">Feeling energetic?</div>
                                     <div class="text-sm text-slate-400">Try action games</div>
                                 </div>
                             </div>
@@ -667,7 +694,7 @@
                             <div class="flex items-center">
                                 <i class="fas fa-trophy text-purple-400 mr-3"></i>
                                 <div>
-                                    <div class="font-medium text-white">Feeling competitive?</div>
+                                    <div class="font-medium text-white text-sm sm:text-base">Feeling competitive?</div>
                                     <div class="text-sm text-slate-400">Try multiplayer games</div>
                                 </div>
                             </div>
@@ -676,50 +703,50 @@
                 </div>
                 
                 <!-- Daily Rewards -->
-                <div class="glass-card rounded-2xl p-6 premium-gradient text-white">
+                <div class="glass-card rounded-2xl p-4 sm:p-6 premium-gradient text-white">
                     <h3 class="text-lg font-bold mb-4">Daily Login Reward</h3>
                     <div class="flex items-center justify-between mb-4">
                         <div>
                             <div class="text-2xl font-black" id="dailyReward">+100</div>
                             <div class="text-sm opacity-80">coins waiting</div>
                         </div>
-                        <i class="fas fa-gift text-3xl"></i>
+                        <i class="fas fa-gift text-2xl sm:text-3xl"></i>
                     </div>
-                    <button class="w-full py-2 bg-white text-orange-600 rounded-lg font-semibold hover:bg-opacity-90 transition" onclick="claimDailyReward()">
+                    <button class="w-full py-2 bg-white text-orange-600 rounded-lg font-semibold hover:bg-opacity-90 transition text-sm sm:text-base" onclick="claimDailyReward()">
                         Claim Reward
                     </button>
                 </div>
             </div>
 
             <!-- Live Tournament Banner -->
-            <div class="live-tournament rounded-2xl p-6 mb-8 flex items-center justify-between">
+            <div class="live-tournament rounded-2xl p-4 sm:p-6 mb-6 sm:mb-8 flex flex-col sm:flex-row items-center justify-between space-y-4 sm:space-y-0">
                 <div class="flex items-center">
-                    <div class="w-12 h-12 bg-red-500 rounded-full flex items-center justify-center mr-4">
+                    <div class="w-10 h-10 sm:w-12 sm:h-12 bg-red-500 rounded-full flex items-center justify-center mr-3 sm:mr-4">
                         <i class="fas fa-fire text-white"></i>
                     </div>
                     <div>
-                        <h2 class="text-xl font-black text-white">Live Tournament: Word Master</h2>
-                        <p class="text-red-200">Ends in 2:15:43 - 5,000 coin prize pool</p>
+                        <h2 class="text-lg sm:text-xl font-black text-white">Live Tournament: Word Master</h2>
+                        <p class="text-red-200 text-sm">Ends in 2:15:43 - 5,000 coin prize pool</p>
                     </div>
                 </div>
-                <button class="px-6 py-2 bg-red-500 text-white rounded-lg font-semibold hover:bg-red-600 transition">
+                <button class="px-4 sm:px-6 py-2 bg-red-500 text-white rounded-lg font-semibold hover:bg-red-600 transition text-sm sm:text-base w-full sm:w-auto">
                     Join Now
                 </button>
             </div>
 
             <!-- Level Progression Banner -->
-            <div class="glass-card rounded-2xl p-6 mb-8 border border-purple-500/30">
-                <div class="flex items-center justify-between">
-                    <div>
-                        <h2 class="text-2xl font-black text-white mb-2">Unlimited Gaming Experience</h2>
-                        <p class="text-slate-400">Play thousands of levels across all games. Progress never resets!</p>
+            <div class="glass-card rounded-2xl p-4 sm:p-6 mb-6 sm:mb-8 border border-purple-500/30">
+                <div class="flex flex-col sm:flex-row items-center justify-between space-y-4 sm:space-y-0">
+                    <div class="text-center sm:text-left">
+                        <h2 class="text-xl sm:text-2xl font-black text-white mb-2">Unlimited Gaming Experience</h2>
+                        <p class="text-slate-400 text-sm sm:text-base">Play thousands of levels across all games. Progress never resets!</p>
                     </div>
-                    <div class="level-badge px-4 py-2 rounded-full text-white font-bold">
+                    <div class="level-badge px-4 py-2 rounded-full text-white font-bold text-sm sm:text-base">
                         Level <span id="currentLevelDisplay">1</span>
                     </div>
                 </div>
-                <div class="mt-4 bg-slate-700 rounded-full h-3">
-                    <div id="levelProgress" class="bg-gradient-to-r from-purple-500 to-pink-500 h-3 rounded-full transition-all duration-500" style="width: 0%"></div>
+                <div class="mt-4 bg-slate-700 rounded-full h-2 sm:h-3">
+                    <div id="levelProgress" class="bg-gradient-to-r from-purple-500 to-pink-500 h-2 sm:h-3 rounded-full transition-all duration-500" style="width: 0%"></div>
                 </div>
                 <div class="flex justify-between text-sm text-slate-400 mt-2">
                     <span>Level <span id="currentLevel">1</span></span>
@@ -728,25 +755,25 @@
             </div>
 
             <!-- Recently Played & Popular Games -->
-            <div class="grid grid-cols-1 lg:grid-cols-3 gap-8 mb-8">
+            <div class="grid grid-cols-1 lg:grid-cols-3 gap-6 sm:gap-8 mb-6 sm:mb-8">
                 <!-- Recently Played -->
                 <div class="lg:col-span-2">
-                    <div class="flex items-center justify-between mb-6">
-                        <h2 class="text-2xl font-black text-transparent bg-clip-text bg-gradient-to-r from-blue-400 to-cyan-400">
+                    <div class="flex items-center justify-between mb-4 sm:mb-6">
+                        <h2 class="text-xl sm:text-2xl font-black text-transparent bg-clip-text bg-gradient-to-r from-blue-400 to-cyan-400">
                             Recently Played
                         </h2>
-                        <button class="text-slate-400 hover:text-white text-sm" onclick="viewAllRecentGames()">
+                        <button class="text-slate-400 hover:text-white text-xs sm:text-sm" onclick="viewAllRecentGames()">
                             View All
                         </button>
                     </div>
-                    <div class="grid grid-cols-1 md:grid-cols-2 gap-4" id="recentlyPlayed">
+                    <div class="grid grid-cols-1 sm:grid-cols-2 gap-4" id="recentlyPlayed">
                         <!-- Recently played games will be loaded here -->
                     </div>
                 </div>
                 
                 <!-- Popular Games -->
                 <div>
-                    <h2 class="text-2xl font-black text-transparent bg-clip-text bg-gradient-to-r from-purple-400 to-pink-400 mb-6">
+                    <h2 class="text-xl sm:text-2xl font-black text-transparent bg-clip-text bg-gradient-to-r from-purple-400 to-pink-400 mb-4 sm:mb-6">
                         Popular Games
                     </h2>
                     <div class="space-y-4" id="popularGames">
@@ -758,94 +785,94 @@
             <!-- Game Categories & Filter -->
             <div class="mb-6">
                 <div class="flex flex-wrap gap-2 mb-4">
-                    <button class="px-4 py-2 rounded-full glass-card text-white hover:bg-slate-700 transition active" data-category="all">
+                    <button class="px-3 py-2 sm:px-4 sm:py-2 rounded-full glass-card text-white hover:bg-slate-700 transition active text-xs sm:text-sm" data-category="all">
                         All Games
                     </button>
-                    <button class="px-4 py-2 rounded-full glass-card text-white hover:bg-slate-700 transition" data-category="puzzle">
+                    <button class="px-3 py-2 sm:px-4 sm:py-2 rounded-full glass-card text-white hover:bg-slate-700 transition text-xs sm:text-sm" data-category="puzzle">
                         Puzzle
                     </button>
-                    <button class="px-4 py-2 rounded-full glass-card text-white hover:bg-slate-700 transition" data-category="strategy">
+                    <button class="px-3 py-2 sm:px-4 sm:py-2 rounded-full glass-card text-white hover:bg-slate-700 transition text-xs sm:text-sm" data-category="strategy">
                         Strategy
                     </button>
-                    <button class="px-4 py-2 rounded-full glass-card text-white hover:bg-slate-700 transition" data-category="trivia">
+                    <button class="px-3 py-2 sm:px-4 sm:py-2 rounded-full glass-card text-white hover:bg-slate-700 transition text-xs sm:text-sm" data-category="trivia">
                         Trivia
                     </button>
-                    <button class="px-4 py-2 rounded-full glass-card text-white hover:bg-slate-700 transition" data-category="action">
+                    <button class="px-3 py-2 sm:px-4 sm:py-2 rounded-full glass-card text-white hover:bg-slate-700 transition text-xs sm:text-sm" data-category="action">
                         Action
                     </button>
                 </div>
             </div>
 
             <!-- Featured Games -->
-            <div class="mb-8">
-                <div class="flex items-center justify-between mb-6">
-                    <h2 class="text-3xl font-black text-transparent bg-clip-text bg-gradient-to-r from-purple-400 to-pink-400">
+            <div class="mb-6 sm:mb-8">
+                <div class="flex items-center justify-between mb-4 sm:mb-6">
+                    <h2 class="text-2xl sm:text-3xl font-black text-transparent bg-clip-text bg-gradient-to-r from-purple-400 to-pink-400">
                         Featured Games
                     </h2>
                 </div>
 
-                <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6" id="featuredGames">
+                <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4 sm:gap-6" id="featuredGames">
                     <!-- Game cards will be loaded here -->
                 </div>
             </div>
 
             <!-- Premium Games Section -->
-            <div class="mb-8">
-                <div class="flex items-center justify-between mb-6">
-                    <h2 class="text-3xl font-black text-transparent bg-clip-text bg-gradient-to-r from-yellow-400 to-orange-400">
+            <div class="mb-6 sm:mb-8">
+                <div class="flex items-center justify-between mb-4 sm:mb-6">
+                    <h2 class="text-2xl sm:text-3xl font-black text-transparent bg-clip-text bg-gradient-to-r from-yellow-400 to-orange-400">
                         <i class="fas fa-crown mr-2"></i>Premium Games
                     </h2>
                 </div>
 
-                <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6" id="premiumGames">
+                <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4 sm:gap-6" id="premiumGames">
                     <!-- Premium game cards will be loaded here -->
                 </div>
             </div>
 
             <!-- New Games Section -->
-            <div class="mb-8">
-                <div class="flex items-center justify-between mb-6">
-                    <h2 class="text-3xl font-black text-transparent bg-clip-text bg-gradient-to-r from-green-400 to-blue-400">
+            <div class="mb-6 sm:mb-8">
+                <div class="flex items-center justify-between mb-4 sm:mb-6">
+                    <h2 class="text-2xl sm:text-3xl font-black text-transparent bg-clip-text bg-gradient-to-r from-green-400 to-blue-400">
                         <i class="fas fa-star mr-2"></i>New & Trending
                     </h2>
                 </div>
 
-                <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6" id="newGames">
+                <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4 sm:gap-6" id="newGames">
                     <!-- New game cards will be loaded here -->
                 </div>
             </div>
 
             <!-- Leaderboard Section -->
-            <div class="mb-8">
-                <div class="flex items-center justify-between mb-6">
-                    <h2 class="text-3xl font-black text-transparent bg-clip-text bg-gradient-to-r from-green-400 to-blue-400">
+            <div class="mb-6 sm:mb-8">
+                <div class="flex flex-col sm:flex-row items-center justify-between mb-4 sm:mb-6 space-y-4 sm:space-y-0">
+                    <h2 class="text-2xl sm:text-3xl font-black text-transparent bg-clip-text bg-gradient-to-r from-green-400 to-blue-400">
                         <i class="fas fa-trophy mr-2"></i>Leaderboards
                     </h2>
                     <div class="flex space-x-2">
-                        <button class="px-3 py-1 rounded-lg glass-card text-white text-sm" onclick="showLeaderboard('daily')">
+                        <button class="px-3 py-1 rounded-lg glass-card text-white text-xs sm:text-sm" onclick="showLeaderboard('daily')">
                             Daily
                         </button>
-                        <button class="px-3 py-1 rounded-lg glass-card text-white text-sm" onclick="showLeaderboard('weekly')">
+                        <button class="px-3 py-1 rounded-lg glass-card text-white text-xs sm:text-sm" onclick="showLeaderboard('weekly')">
                             Weekly
                         </button>
-                        <button class="px-3 py-1 rounded-lg glass-card text-white text-sm active" onclick="showLeaderboard('alltime')">
+                        <button class="px-3 py-1 rounded-lg glass-card text-white text-xs sm:text-sm active" onclick="showLeaderboard('alltime')">
                             All Time
                         </button>
                     </div>
                 </div>
                 
-                <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
+                <div class="grid grid-cols-1 md:grid-cols-2 gap-4 sm:gap-6">
                     <!-- Top Players -->
-                    <div class="glass-card rounded-2xl p-6">
-                        <h3 class="text-xl font-bold text-white mb-4">Top Players</h3>
+                    <div class="glass-card rounded-2xl p-4 sm:p-6">
+                        <h3 class="text-lg sm:text-xl font-bold text-white mb-4">Top Players</h3>
                         <div id="topPlayers">
                             <!-- Top players will be loaded here -->
                         </div>
                     </div>
                     
                     <!-- Your Ranking -->
-                    <div class="glass-card rounded-2xl p-6">
-                        <h3 class="text-xl font-bold text-white mb-4">Your Ranking</h3>
+                    <div class="glass-card rounded-2xl p-4 sm:p-6">
+                        <h3 class="text-lg sm:text-xl font-bold text-white mb-4">Your Ranking</h3>
                         <div id="userRanking">
                             <!-- User ranking will be loaded here -->
                         </div>
@@ -854,40 +881,40 @@
             </div>
 
             <!-- Multiplayer & Challenges -->
-            <div class="mb-8">
-                <div class="flex items-center justify-between mb-6">
-                    <h2 class="text-3xl font-black text-transparent bg-clip-text bg-gradient-to-r from-red-400 to-pink-400">
+            <div class="mb-6 sm:mb-8">
+                <div class="flex items-center justify-between mb-4 sm:mb-6">
+                    <h2 class="text-2xl sm:text-3xl font-black text-transparent bg-clip-text bg-gradient-to-r from-red-400 to-pink-400">
                         <i class="fas fa-users mr-2"></i>Multiplayer & Challenges
                     </h2>
                 </div>
                 
-                <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
+                <div class="grid grid-cols-1 md:grid-cols-2 gap-4 sm:gap-6">
                     <!-- Active Challenges -->
-                    <div class="glass-card rounded-2xl p-6">
-                        <h3 class="text-xl font-bold text-white mb-4">Active Challenges</h3>
+                    <div class="glass-card rounded-2xl p-4 sm:p-6">
+                        <h3 class="text-lg sm:text-xl font-bold text-white mb-4">Active Challenges</h3>
                         <div id="activeChallenges">
                             <div class="text-center text-slate-400 py-8">
                                 <i class="fas fa-trophy text-4xl mb-4 text-yellow-400"></i>
-                                <p>No active challenges</p>
-                                <p class="text-sm">Challenge friends to play games together!</p>
+                                <p class="text-sm sm:text-base">No active challenges</p>
+                                <p class="text-xs sm:text-sm">Challenge friends to play games together!</p>
                             </div>
                         </div>
-                        <button class="w-full mt-4 py-2 primary-gradient text-white rounded-lg font-semibold hover:scale-105 transition" onclick="showChallengeModal()">
+                        <button class="w-full mt-4 py-2 primary-gradient text-white rounded-lg font-semibold hover:scale-105 transition text-sm sm:text-base" onclick="showChallengeModal()">
                             Create Challenge
                         </button>
                     </div>
                     
                     <!-- Friends Online -->
-                    <div class="glass-card rounded-2xl p-6">
-                        <h3 class="text-xl font-bold text-white mb-4">Friends Online</h3>
+                    <div class="glass-card rounded-2xl p-4 sm:p-6">
+                        <h3 class="text-lg sm:text-xl font-bold text-white mb-4">Friends Online</h3>
                         <div id="friendsOnline">
                             <div class="text-center text-slate-400 py-8">
                                 <i class="fas fa-users text-4xl mb-4 text-blue-400"></i>
-                                <p>No friends online</p>
-                                <p class="text-sm">Invite friends to join the fun!</p>
+                                <p class="text-sm sm:text-base">No friends online</p>
+                                <p class="text-xs sm:text-sm">Invite friends to join the fun!</p>
                             </div>
                         </div>
-                        <button class="w-full mt-4 py-2 glass-card border border-slate-700 text-white rounded-lg font-semibold hover:border-blue-400 transition" onclick="showFriendsModal()">
+                        <button class="w-full mt-4 py-2 glass-card border border-slate-700 text-white rounded-lg font-semibold hover:border-blue-400 transition text-sm sm:text-base" onclick="showFriendsModal()">
                             Invite Friends
                         </button>
                     </div>
@@ -900,31 +927,31 @@
     
     <!-- Chess Game Modal -->
     <div id="chessGameModal" class="fixed inset-0 bg-black/80 flex items-center justify-center p-4 z-50 hidden">
-        <div class="glass-card rounded-2xl p-6 max-w-2xl w-full fade-in">
-            <div class="flex justify-between items-center mb-6">
-                <div>
-                    <h3 class="text-2xl font-black text-white">Quantum Chess</h3>
-                    <p class="text-slate-400">Level <span id="chessLevel">1</span> - Unlimited progression</p>
+        <div class="glass-card rounded-2xl p-4 sm:p-6 max-w-2xl w-full max-h-[90vh] overflow-y-auto fade-in">
+            <div class="flex flex-col sm:flex-row justify-between items-center mb-4 sm:mb-6 space-y-4 sm:space-y-0">
+                <div class="text-center sm:text-left">
+                    <h3 class="text-xl sm:text-2xl font-black text-white">Quantum Chess</h3>
+                    <p class="text-slate-400 text-sm sm:text-base">Level <span id="chessLevel">1</span> - Unlimited progression</p>
                 </div>
                 <div class="flex items-center space-x-4">
-                    <span class="text-green-400 font-bold" id="chessStatus">White's Turn</span>
+                    <span class="text-green-400 font-bold text-sm sm:text-base" id="chessStatus">White's Turn</span>
                     <button class="text-slate-400 hover:text-white" onclick="closeGameModal('chessGameModal')">
                         <i class="fas fa-times"></i>
                     </button>
                 </div>
             </div>
             
-            <div class="flex justify-center mb-6">
+            <div class="flex justify-center mb-4 sm:mb-6">
                 <div class="chess-board" id="chessBoard">
                     <!-- Chess board will be generated here -->
                 </div>
             </div>
             
-            <div class="flex space-x-3">
-                <button class="flex-1 px-4 py-2 glass-card border border-slate-700 rounded-xl text-slate-400 hover:border-blue-400 hover:text-blue-400 transition" onclick="closeGameModal('chessGameModal')">
+            <div class="flex flex-col sm:flex-row space-y-3 sm:space-y-0 sm:space-x-3">
+                <button class="flex-1 px-4 py-2 glass-card border border-slate-700 rounded-xl text-slate-400 hover:border-blue-400 hover:text-blue-400 transition text-sm sm:text-base" onclick="closeGameModal('chessGameModal')">
                     Exit Game
                 </button>
-                <button class="flex-1 px-4 py-2 primary-gradient text-white rounded-xl font-semibold hover:scale-105 transition" onclick="nextChessLevel()">
+                <button class="flex-1 px-4 py-2 primary-gradient text-white rounded-xl font-semibold hover:scale-105 transition text-sm sm:text-base" onclick="nextChessLevel()">
                     Next Level
                 </button>
             </div>
@@ -933,21 +960,21 @@
 
     <!-- Word Puzzle Modal -->
     <div id="wordPuzzleModal" class="fixed inset-0 bg-black/80 flex items-center justify-center p-4 z-50 hidden">
-        <div class="glass-card rounded-2xl p-6 max-w-2xl w-full fade-in">
-            <div class="flex justify-between items-center mb-6">
-                <div>
-                    <h3 class="text-2xl font-black text-white">Word Master</h3>
-                    <p class="text-slate-400">Level <span id="wordPuzzleLevel">1</span> - Unlimited words</p>
+        <div class="glass-card rounded-2xl p-4 sm:p-6 max-w-2xl w-full max-h-[90vh] overflow-y-auto fade-in">
+            <div class="flex flex-col sm:flex-row justify-between items-center mb-4 sm:mb-6 space-y-4 sm:space-y-0">
+                <div class="text-center sm:text-left">
+                    <h3 class="text-xl sm:text-2xl font-black text-white">Word Master</h3>
+                    <p class="text-slate-400 text-sm sm:text-base">Level <span id="wordPuzzleLevel">1</span> - Unlimited words</p>
                 </div>
                 <div class="flex items-center space-x-4">
-                    <span class="text-green-400 font-bold" id="wordPuzzleStatus">Guess the 5-letter word!</span>
+                    <span class="text-green-400 font-bold text-sm sm:text-base" id="wordPuzzleStatus">Guess the 5-letter word!</span>
                     <button class="text-slate-400 hover:text-white" onclick="closeGameModal('wordPuzzleModal')">
                         <i class="fas fa-times"></i>
                     </button>
                 </div>
             </div>
             
-            <div class="mb-6 text-center">
+            <div class="mb-4 sm:mb-6 text-center">
                 <div id="wordPuzzleGrid" class="word-puzzle-grid">
                     <!-- Word puzzle grid will be generated here -->
                 </div>
@@ -956,11 +983,11 @@
                 </div>
             </div>
             
-            <div class="flex space-x-3">
-                <button class="flex-1 px-4 py-2 glass-card border border-slate-700 rounded-xl text-slate-400 hover:border-blue-400 hover:text-blue-400 transition" onclick="closeGameModal('wordPuzzleModal')">
+            <div class="flex flex-col sm:flex-row space-y-3 sm:space-y-0 sm:space-x-3">
+                <button class="flex-1 px-4 py-2 glass-card border border-slate-700 rounded-xl text-slate-400 hover:border-blue-400 hover:text-blue-400 transition text-sm sm:text-base" onclick="closeGameModal('wordPuzzleModal')">
                     Exit Game
                 </button>
-                <button class="flex-1 px-4 py-2 primary-gradient text-white rounded-xl font-semibold hover:scale-105 transition" onclick="nextWordPuzzleLevel()">
+                <button class="flex-1 px-4 py-2 primary-gradient text-white rounded-xl font-semibold hover:scale-105 transition text-sm sm:text-base" onclick="nextWordPuzzleLevel()">
                     Next Word
                 </button>
             </div>
@@ -969,14 +996,14 @@
 
     <!-- Memory Game Modal -->
     <div id="memoryGameModal" class="fixed inset-0 bg-black/80 flex items-center justify-center p-4 z-50 hidden">
-        <div class="glass-card rounded-2xl p-6 max-w-2xl w-full fade-in">
-            <div class="flex justify-between items-center mb-6">
-                <div>
-                    <h3 class="text-2xl font-black text-white">Memory Matrix</h3>
-                    <p class="text-slate-400">Level <span id="memoryLevel">1</span> - Increasing difficulty</p>
+        <div class="glass-card rounded-2xl p-4 sm:p-6 max-w-2xl w-full max-h-[90vh] overflow-y-auto fade-in">
+            <div class="flex flex-col sm:flex-row justify-between items-center mb-4 sm:mb-6 space-y-4 sm:space-y-0">
+                <div class="text-center sm:text-left">
+                    <h3 class="text-xl sm:text-2xl font-black text-white">Memory Matrix</h3>
+                    <p class="text-slate-400 text-sm sm:text-base">Level <span id="memoryLevel">1</span> - Increasing difficulty</p>
                 </div>
                 <div class="flex items-center space-x-4">
-                    <span class="text-green-400 font-bold" id="memoryMoves">Moves: 0</span>
+                    <span class="text-green-400 font-bold text-sm sm:text-base" id="memoryMoves">Moves: 0</span>
                     <button class="text-slate-400 hover:text-white" onclick="closeGameModal('memoryGameModal')">
                         <i class="fas fa-times"></i>
                     </button>
@@ -987,11 +1014,11 @@
                 <!-- Memory cards will be generated here -->
             </div>
             
-            <div class="flex space-x-3">
-                <button class="flex-1 px-4 py-2 glass-card border border-slate-700 rounded-xl text-slate-400 hover:border-blue-400 hover:text-blue-400 transition" onclick="closeGameModal('memoryGameModal')">
+            <div class="flex flex-col sm:flex-row space-y-3 sm:space-y-0 sm:space-x-3">
+                <button class="flex-1 px-4 py-2 glass-card border border-slate-700 rounded-xl text-slate-400 hover:border-blue-400 hover:text-blue-400 transition text-sm sm:text-base" onclick="closeGameModal('memoryGameModal')">
                     Exit Game
                 </button>
-                <button class="flex-1 px-4 py-2 primary-gradient text-white rounded-xl font-semibold hover:scale-105 transition" onclick="nextMemoryLevel()">
+                <button class="flex-1 px-4 py-2 primary-gradient text-white rounded-xl font-semibold hover:scale-105 transition text-sm sm:text-base" onclick="nextMemoryLevel()">
                     Next Level
                 </button>
             </div>
@@ -1000,29 +1027,29 @@
 
     <!-- Quiz Game Modal -->
     <div id="quizGameModal" class="fixed inset-0 bg-black/80 flex items-center justify-center p-4 z-50 hidden">
-        <div class="glass-card rounded-2xl p-6 max-w-2xl w-full fade-in">
-            <div class="flex justify-between items-center mb-6">
-                <div>
-                    <h3 class="text-2xl font-black text-white" id="quizGameTitle">Knowledge Challenge</h3>
-                    <p class="text-slate-400">Level <span id="quizLevel">1</span> - Choose your category</p>
+        <div class="glass-card rounded-2xl p-4 sm:p-6 max-w-2xl w-full max-h-[90vh] overflow-y-auto fade-in">
+            <div class="flex flex-col sm:flex-row justify-between items-center mb-4 sm:mb-6 space-y-4 sm:space-y-0">
+                <div class="text-center sm:text-left">
+                    <h3 class="text-xl sm:text-2xl font-black text-white" id="quizGameTitle">Knowledge Challenge</h3>
+                    <p class="text-slate-400 text-sm sm:text-base">Level <span id="quizLevel">1</span> - Choose your category</p>
                 </div>
                 <div class="flex items-center space-x-4">
-                    <span class="text-green-400 font-bold" id="quizScore">Score: 0/0</span>
+                    <span class="text-green-400 font-bold text-sm sm:text-base" id="quizScore">Score: 0/0</span>
                     <button class="text-slate-400 hover:text-white" onclick="closeGameModal('quizGameModal')">
                         <i class="fas fa-times"></i>
                     </button>
                 </div>
             </div>
             
-            <div class="mb-6" id="quizGameContent">
+            <div class="mb-4 sm:mb-6" id="quizGameContent">
                 <!-- Quiz content will be loaded here -->
             </div>
             
-            <div class="flex space-x-3">
-                <button class="flex-1 px-4 py-2 glass-card border border-slate-700 rounded-xl text-slate-400 hover:border-blue-400 hover:text-blue-400 transition" onclick="closeGameModal('quizGameModal')">
+            <div class="flex flex-col sm:flex-row space-y-3 sm:space-y-0 sm:space-x-3">
+                <button class="flex-1 px-4 py-2 glass-card border border-slate-700 rounded-xl text-slate-400 hover:border-blue-400 hover:text-blue-400 transition text-sm sm:text-base" onclick="closeGameModal('quizGameModal')">
                     Exit Game
                 </button>
-                <button class="flex-1 px-4 py-2 primary-gradient text-white rounded-xl font-semibold hover:scale-105 transition" id="nextQuizQuestion" onclick="loadNextQuizQuestion()">
+                <button class="flex-1 px-4 py-2 primary-gradient text-white rounded-xl font-semibold hover:scale-105 transition text-sm sm:text-base" id="nextQuizQuestion" onclick="loadNextQuizQuestion()">
                     Next Question
                 </button>
             </div>
@@ -1031,31 +1058,31 @@
 
     <!-- Tic Tac Toe Modal -->
     <div id="ticTacToeModal" class="fixed inset-0 bg-black/80 flex items-center justify-center p-4 z-50 hidden">
-        <div class="glass-card rounded-2xl p-6 max-w-2xl w-full fade-in">
-            <div class="flex justify-between items-center mb-6">
-                <div>
-                    <h3 class="text-2xl font-black text-white">Tic Tac Toe</h3>
-                    <p class="text-slate-400">Play against the computer</p>
+        <div class="glass-card rounded-2xl p-4 sm:p-6 max-w-2xl w-full max-h-[90vh] overflow-y-auto fade-in">
+            <div class="flex flex-col sm:flex-row justify-between items-center mb-4 sm:mb-6 space-y-4 sm:space-y-0">
+                <div class="text-center sm:text-left">
+                    <h3 class="text-xl sm:text-2xl font-black text-white">Tic Tac Toe</h3>
+                    <p class="text-slate-400 text-sm sm:text-base">Play against the computer</p>
                 </div>
                 <div class="flex items-center space-x-4">
-                    <span class="text-green-400 font-bold" id="ticTacToeStatus">Your turn (X)</span>
+                    <span class="text-green-400 font-bold text-sm sm:text-base" id="ticTacToeStatus">Your turn (X)</span>
                     <button class="text-slate-400 hover:text-white" onclick="closeGameModal('ticTacToeModal')">
                         <i class="fas fa-times"></i>
                     </button>
                 </div>
             </div>
             
-            <div class="flex justify-center mb-6">
+            <div class="flex justify-center mb-4 sm:mb-6">
                 <div class="tic-tac-toe-board" id="ticTacToeBoard">
                     <!-- Tic Tac Toe board will be generated here -->
                 </div>
             </div>
             
-            <div class="flex space-x-3">
-                <button class="flex-1 px-4 py-2 glass-card border border-slate-700 rounded-xl text-slate-400 hover:border-blue-400 hover:text-blue-400 transition" onclick="closeGameModal('ticTacToeModal')">
+            <div class="flex flex-col sm:flex-row space-y-3 sm:space-y-0 sm:space-x-3">
+                <button class="flex-1 px-4 py-2 glass-card border border-slate-700 rounded-xl text-slate-400 hover:border-blue-400 hover:text-blue-400 transition text-sm sm:text-base" onclick="closeGameModal('ticTacToeModal')">
                     Exit Game
                 </button>
-                <button class="flex-1 px-4 py-2 primary-gradient text-white rounded-xl font-semibold hover:scale-105 transition" onclick="resetTicTacToe()">
+                <button class="flex-1 px-4 py-2 primary-gradient text-white rounded-xl font-semibold hover:scale-105 transition text-sm sm:text-base" onclick="resetTicTacToe()">
                     New Game
                 </button>
             </div>
@@ -1064,34 +1091,34 @@
 
     <!-- Sudoku Modal -->
     <div id="sudokuModal" class="fixed inset-0 bg-black/80 flex items-center justify-center p-4 z-50 hidden">
-        <div class="glass-card rounded-2xl p-6 max-w-2xl w-full fade-in">
-            <div class="flex justify-between items-center mb-6">
-                <div>
-                    <h3 class="text-2xl font-black text-white">Sudoku</h3>
-                    <p class="text-slate-400">Level <span id="sudokuLevel">1</span> - Fill the grid with numbers</p>
+        <div class="glass-card rounded-2xl p-4 sm:p-6 max-w-2xl w-full max-h-[90vh] overflow-y-auto fade-in">
+            <div class="flex flex-col sm:flex-row justify-between items-center mb-4 sm:mb-6 space-y-4 sm:space-y-0">
+                <div class="text-center sm:text-left">
+                    <h3 class="text-xl sm:text-2xl font-black text-white">Sudoku</h3>
+                    <p class="text-slate-400 text-sm sm:text-base">Level <span id="sudokuLevel">1</span> - Fill the grid with numbers</p>
                 </div>
                 <div class="flex items-center space-x-4">
-                    <span class="text-green-400 font-bold" id="sudokuStatus">Select a cell</span>
+                    <span class="text-green-400 font-bold text-sm sm:text-base" id="sudokuStatus">Select a cell</span>
                     <button class="text-slate-400 hover:text-white" onclick="closeGameModal('sudokuModal')">
                         <i class="fas fa-times"></i>
                     </button>
                 </div>
             </div>
             
-            <div class="flex flex-col items-center mb-6">
+            <div class="flex flex-col items-center mb-4 sm:mb-6">
                 <div class="sudoku-board" id="sudokuBoard">
                     <!-- Sudoku board will be generated here -->
                 </div>
-                <div class="mt-4 grid grid-cols-5 gap-2" id="sudokuControls">
+                <div class="mt-4 grid grid-cols-5 gap-2 max-w-xs" id="sudokuControls">
                     <!-- Number controls will be generated here -->
                 </div>
             </div>
             
-            <div class="flex space-x-3">
-                <button class="flex-1 px-4 py-2 glass-card border border-slate-700 rounded-xl text-slate-400 hover:border-blue-400 hover:text-blue-400 transition" onclick="closeGameModal('sudokuModal')">
+            <div class="flex flex-col sm:flex-row space-y-3 sm:space-y-0 sm:space-x-3">
+                <button class="flex-1 px-4 py-2 glass-card border border-slate-700 rounded-xl text-slate-400 hover:border-blue-400 hover:text-blue-400 transition text-sm sm:text-base" onclick="closeGameModal('sudokuModal')">
                     Exit Game
                 </button>
-                <button class="flex-1 px-4 py-2 primary-gradient text-white rounded-xl font-semibold hover:scale-105 transition" onclick="nextSudokuLevel()">
+                <button class="flex-1 px-4 py-2 primary-gradient text-white rounded-xl font-semibold hover:scale-105 transition text-sm sm:text-base" onclick="nextSudokuLevel()">
                     Next Puzzle
                 </button>
             </div>
@@ -1100,24 +1127,24 @@
 
     <!-- Quiz Category Selection Modal -->
     <div id="quizCategoryModal" class="fixed inset-0 bg-black/80 flex items-center justify-center p-4 z-50 hidden">
-        <div class="glass-card rounded-2xl p-6 max-w-md w-full fade-in">
-            <div class="text-center mb-6">
-                <div class="w-16 h-16 primary-gradient rounded-full flex items-center justify-center mx-auto mb-4">
-                    <i class="fas fa-brain text-white text-2xl"></i>
+        <div class="glass-card rounded-2xl p-4 sm:p-6 max-w-md w-full fade-in">
+            <div class="text-center mb-4 sm:mb-6">
+                <div class="w-12 h-12 sm:w-16 sm:h-16 primary-gradient rounded-full flex items-center justify-center mx-auto mb-4">
+                    <i class="fas fa-brain text-white text-xl sm:text-2xl"></i>
                 </div>
-                <h3 class="text-2xl font-black text-white mb-2">Choose Quiz Category</h3>
-                <p class="text-slate-400">Select your preferred topic</p>
+                <h3 class="text-xl sm:text-2xl font-black text-white mb-2">Choose Quiz Category</h3>
+                <p class="text-slate-400 text-sm sm:text-base">Select your preferred topic</p>
             </div>
             
-            <div class="space-y-3 mb-6" id="quizCategories">
+            <div class="space-y-3 mb-4 sm:mb-6" id="quizCategories">
                 <!-- Categories will be loaded here -->
             </div>
             
-            <div class="flex space-x-3">
-                <button class="flex-1 px-4 py-2 glass-card border border-slate-700 rounded-xl text-slate-400 hover:border-blue-400 hover:text-blue-400 transition" onclick="closeGameModal('quizCategoryModal')">
+            <div class="flex flex-col sm:flex-row space-y-3 sm:space-y-0 sm:space-x-3">
+                <button class="flex-1 px-4 py-2 glass-card border border-slate-700 rounded-xl text-slate-400 hover:border-blue-400 hover:text-blue-400 transition text-sm sm:text-base" onclick="closeGameModal('quizCategoryModal')">
                     Cancel
                 </button>
-                <button class="flex-1 px-4 py-2 primary-gradient text-white rounded-xl font-semibold hover:scale-105 transition" onclick="startSelectedQuiz()">
+                <button class="flex-1 px-4 py-2 primary-gradient text-white rounded-xl font-semibold hover:scale-105 transition text-sm sm:text-base" onclick="startSelectedQuiz()">
                     Start Quiz
                 </button>
             </div>
@@ -1126,85 +1153,85 @@
 
     <!-- Premium Subscription Modal -->
     <div id="premiumModal" class="fixed inset-0 bg-black/80 flex items-center justify-center p-4 z-50 hidden">
-        <div class="glass-card rounded-2xl p-6 max-w-2xl w-full fade-in">
-            <div class="text-center mb-6">
-                <div class="w-16 h-16 premium-gradient rounded-full flex items-center justify-center mx-auto mb-4">
-                    <i class="fas fa-crown text-white text-2xl"></i>
+        <div class="glass-card rounded-2xl p-4 sm:p-6 max-w-2xl w-full max-h-[90vh] overflow-y-auto fade-in">
+            <div class="text-center mb-4 sm:mb-6">
+                <div class="w-12 h-12 sm:w-16 sm:h-16 premium-gradient rounded-full flex items-center justify-center mx-auto mb-4">
+                    <i class="fas fa-crown text-white text-xl sm:text-2xl"></i>
                 </div>
-                <h3 class="text-2xl font-black text-white mb-2">Upgrade to Kynecta Premium</h3>
-                <p class="text-slate-400">Choose your preferred payment method</p>
+                <h3 class="text-xl sm:text-2xl font-black text-white mb-2">Upgrade to Kynecta Premium</h3>
+                <p class="text-slate-400 text-sm sm:text-base">Choose your preferred payment method</p>
             </div>
             
-            <div class="grid grid-cols-1 md:grid-cols-2 gap-6 mb-6">
+            <div class="grid grid-cols-1 md:grid-cols-2 gap-4 sm:gap-6 mb-4 sm:mb-6">
                 <!-- Coins Payment -->
-                <div class="payment-method glass-card p-6 rounded-xl cursor-pointer" onclick="selectPaymentMethod('coins')">
+                <div class="payment-method glass-card p-4 sm:p-6 rounded-xl cursor-pointer" onclick="selectPaymentMethod('coins')">
                     <div class="flex items-center mb-4">
-                        <i class="fas fa-coins text-yellow-400 text-2xl mr-3"></i>
-                        <h4 class="text-lg font-bold text-white">Pay with Coins</h4>
+                        <i class="fas fa-coins text-yellow-400 text-xl sm:text-2xl mr-3"></i>
+                        <h4 class="text-base sm:text-lg font-bold text-white">Pay with Coins</h4>
                     </div>
-                    <p class="text-slate-400 text-sm mb-4">Use your earned coins to unlock premium</p>
+                    <p class="text-slate-400 text-xs sm:text-sm mb-4">Use your earned coins to unlock premium</p>
                     <div class="text-center">
-                        <div class="text-2xl font-black text-yellow-400">5,000</div>
-                        <div class="text-slate-400 text-sm">coins</div>
+                        <div class="text-xl sm:text-2xl font-black text-yellow-400">5,000</div>
+                        <div class="text-slate-400 text-xs sm:text-sm">coins</div>
                     </div>
                     <div class="text-xs text-slate-500 mt-2">Your coins: <span id="userCoinBalance">0</span></div>
                 </div>
 
                 <!-- M-Pesa Payment -->
-                <div class="payment-method glass-card p-6 rounded-xl cursor-pointer" onclick="selectPaymentMethod('mpesa')">
+                <div class="payment-method glass-card p-4 sm:p-6 rounded-xl cursor-pointer" onclick="selectPaymentMethod('mpesa')">
                     <div class="flex items-center mb-4">
-                        <i class="fas fa-mobile-alt text-green-400 text-2xl mr-3"></i>
-                        <h4 class="text-lg font-bold text-white">M-Pesa</h4>
+                        <i class="fas fa-mobile-alt text-green-400 text-xl sm:text-2xl mr-3"></i>
+                        <h4 class="text-base sm:text-lg font-bold text-white">M-Pesa</h4>
                     </div>
-                    <p class="text-slate-400 text-sm mb-4">Instant activation via M-Pesa</p>
+                    <p class="text-slate-400 text-xs sm:text-sm mb-4">Instant activation via M-Pesa</p>
                     <div class="text-center">
-                        <div class="text-2xl font-black text-green-400">KSh 99</div>
-                        <div class="text-slate-400 text-sm">per month</div>
+                        <div class="text-xl sm:text-2xl font-black text-green-400">KSh 99</div>
+                        <div class="text-slate-400 text-xs sm:text-sm">per month</div>
                     </div>
                     <div class="text-xs text-slate-500 mt-2">+254 XXX XXX XXX</div>
                 </div>
 
                 <!-- Bank Transfer -->
-                <div class="payment-method glass-card p-6 rounded-xl cursor-pointer" onclick="selectPaymentMethod('bank')">
+                <div class="payment-method glass-card p-4 sm:p-6 rounded-xl cursor-pointer" onclick="selectPaymentMethod('bank')">
                     <div class="flex items-center mb-4">
-                        <i class="fas fa-university text-blue-400 text-2xl mr-3"></i>
-                        <h4 class="text-lg font-bold text-white">Bank Transfer</h4>
+                        <i class="fas fa-university text-blue-400 text-xl sm:text-2xl mr-3"></i>
+                        <h4 class="text-base sm:text-lg font-bold text-white">Bank Transfer</h4>
                     </div>
-                    <p class="text-slate-400 text-sm mb-4">Direct bank transfer option</p>
+                    <p class="text-slate-400 text-xs sm:text-sm mb-4">Direct bank transfer option</p>
                     <div class="text-center">
-                        <div class="text-2xl font-black text-blue-400">KSh 99</div>
-                        <div class="text-slate-400 text-sm">per month</div>
+                        <div class="text-xl sm:text-2xl font-black text-blue-400">KSh 99</div>
+                        <div class="text-slate-400 text-xs sm:text-sm">per month</div>
                     </div>
                     <div class="text-xs text-slate-500 mt-2">Account: 1234567890</div>
                 </div>
 
                 <!-- Credit Card -->
-                <div class="payment-method glass-card p-6 rounded-xl cursor-pointer" onclick="selectPaymentMethod('card')">
+                <div class="payment-method glass-card p-4 sm:p-6 rounded-xl cursor-pointer" onclick="selectPaymentMethod('card')">
                     <div class="flex items-center mb-4">
-                        <i class="fas fa-credit-card text-purple-400 text-2xl mr-3"></i>
-                        <h4 class="text-lg font-bold text-white">Credit Card</h4>
+                        <i class="fas fa-credit-card text-purple-400 text-xl sm:text-2xl mr-3"></i>
+                        <h4 class="text-base sm:text-lg font-bold text-white">Credit Card</h4>
                     </div>
-                    <p class="text-slate-400 text-sm mb-4">Secure card payment</p>
+                    <p class="text-slate-400 text-xs sm:text-sm mb-4">Secure card payment</p>
                     <div class="text-center">
-                        <div class="text-2xl font-black text-purple-400">$0.99</div>
-                        <div class="text-slate-400 text-sm">per month</div>
+                        <div class="text-xl sm:text-2xl font-black text-purple-400">$0.99</div>
+                        <div class="text-slate-400 text-xs sm:text-sm">per month</div>
                     </div>
                     <div class="text-xs text-slate-500 mt-2">Visa, MasterCard, Amex</div>
                 </div>
             </div>
 
-            <div class="text-center mb-6">
-                <div class="text-sm text-slate-400">
+            <div class="text-center mb-4 sm:mb-6">
+                <div class="text-xs sm:text-sm text-slate-400">
                     <i class="fas fa-shield-check text-green-400 mr-1"></i>
                     All payments are secure and encrypted
                 </div>
             </div>
             
-            <div class="flex space-x-3">
-                <button class="flex-1 px-4 py-2 glass-card border border-slate-700 rounded-xl text-slate-400 hover:border-blue-400 hover:text-blue-400 transition" onclick="closePremiumModal()">
+            <div class="flex flex-col sm:flex-row space-y-3 sm:space-y-0 sm:space-x-3">
+                <button class="flex-1 px-4 py-2 glass-card border border-slate-700 rounded-xl text-slate-400 hover:border-blue-400 hover:text-blue-400 transition text-sm sm:text-base" onclick="closePremiumModal()">
                     Maybe Later
                 </button>
-                <button class="flex-1 px-4 py-2 premium-gradient text-white rounded-xl font-semibold hover:scale-105 transition" id="subscribeButton" onclick="processPremiumPayment()">
+                <button class="flex-1 px-4 py-2 premium-gradient text-white rounded-xl font-semibold hover:scale-105 transition text-sm sm:text-base" id="subscribeButton" onclick="processPremiumPayment()">
                     Subscribe Now
                 </button>
             </div>
@@ -1213,14 +1240,14 @@
 
     <!-- Payment Processing Modal -->
     <div id="paymentModal" class="fixed inset-0 bg-black/80 flex items-center justify-center p-4 z-50 hidden">
-        <div class="glass-card rounded-2xl p-6 max-w-md w-full fade-in text-center">
-            <div class="w-16 h-16 primary-gradient rounded-full flex items-center justify-center mx-auto mb-4">
-                <i class="fas fa-spinner fa-spin text-white text-2xl" id="paymentIcon"></i>
+        <div class="glass-card rounded-2xl p-4 sm:p-6 max-w-md w-full fade-in text-center">
+            <div class="w-12 h-12 sm:w-16 sm:h-16 primary-gradient rounded-full flex items-center justify-center mx-auto mb-4">
+                <i class="fas fa-spinner fa-spin text-white text-xl sm:text-2xl" id="paymentIcon"></i>
             </div>
-            <h3 class="text-2xl font-black text-white mb-2" id="paymentTitle">Processing Payment</h3>
-            <p class="text-slate-400 mb-6" id="paymentMessage">Please wait while we process your payment...</p>
+            <h3 class="text-xl sm:text-2xl font-black text-white mb-2" id="paymentTitle">Processing Payment</h3>
+            <p class="text-slate-400 text-sm sm:text-base mb-4 sm:mb-6" id="paymentMessage">Please wait while we process your payment...</p>
             <div class="loading-spinner mx-auto mb-4"></div>
-            <button class="w-full px-4 py-2 glass-card border border-slate-700 rounded-xl text-slate-400 hover:border-blue-400 hover:text-blue-400 transition hidden" id="paymentCloseButton" onclick="closePaymentModal()">
+            <button class="w-full px-4 py-2 glass-card border border-slate-700 rounded-xl text-slate-400 hover:border-blue-400 hover:text-blue-400 transition text-sm sm:text-base hidden" id="paymentCloseButton" onclick="closePaymentModal()">
                 Close
             </button>
         </div>
@@ -1755,15 +1782,15 @@
                 </div>
                 <div class="p-4">
                     <div class="flex justify-between items-start mb-2">
-                        <h3 class="font-bold text-white text-lg">${game.name}</h3>
+                        <h3 class="font-bold text-white text-base sm:text-lg">${game.name}</h3>
                         <div class="flex items-center text-sm text-white">
                             <i class="fas fa-star text-yellow-400 mr-1"></i>
                             <span>${game.rating}</span>
                         </div>
                     </div>
-                    <p class="text-slate-300 text-sm mb-3">${game.description}</p>
+                    <p class="text-slate-300 text-xs sm:text-sm mb-3">${game.description}</p>
                     <div class="flex justify-between items-center">
-                        <div class="flex items-center text-sm text-slate-300">
+                        <div class="flex items-center text-xs sm:text-sm text-slate-300">
                             <i class="fas fa-users mr-1"></i>
                             <span>${game.players}</span>
                             <i class="fas fa-coins ml-3 mr-1 text-yellow-400"></i>
@@ -1792,7 +1819,7 @@
                     }
                 });
             } else {
-                container.innerHTML = '<p class="text-slate-400">No recently played games</p>';
+                container.innerHTML = '<p class="text-slate-400 text-center col-span-2">No recently played games</p>';
             }
         }
 
@@ -1811,17 +1838,17 @@
                 gameItem.onclick = () => startGame(game.id);
                 
                 gameItem.innerHTML = `
-                    <div class="w-12 h-12 ${game.gradient} rounded-lg flex items-center justify-center text-white">
+                    <div class="w-10 h-10 sm:w-12 sm:h-12 ${game.gradient} rounded-lg flex items-center justify-center text-white">
                         <i class="${game.icon}"></i>
                     </div>
                     <div class="flex-1">
-                        <h4 class="font-semibold text-white">${game.name}</h4>
-                        <div class="flex items-center text-sm text-slate-400">
+                        <h4 class="font-semibold text-white text-sm sm:text-base">${game.name}</h4>
+                        <div class="flex items-center text-xs sm:text-sm text-slate-400">
                             <i class="fas fa-users mr-1"></i>
                             <span>${game.popularity}% playing</span>
                         </div>
                     </div>
-                    <div class="text-sm text-slate-400">
+                    <div class="text-xs sm:text-sm text-slate-400">
                         ${game.coins} <i class="fas fa-coins text-yellow-400 ml-1"></i>
                     </div>
                 `;
@@ -1852,8 +1879,8 @@
                 playerElement.innerHTML = `
                     <div class="leaderboard-rank rank-${player.rank}">${player.rank}</div>
                     <div class="flex-1">
-                        <div class="font-medium text-white">${player.name}</div>
-                        <div class="text-sm text-slate-400">${player.score.toLocaleString()} points</div>
+                        <div class="font-medium text-white text-sm sm:text-base">${player.name}</div>
+                        <div class="text-xs sm:text-sm text-slate-400">${player.score.toLocaleString()} points</div>
                     </div>
                 `;
                 
@@ -1866,13 +1893,13 @@
                     <div class="leaderboard-item">
                         <div class="leaderboard-rank rank-other">7</div>
                         <div class="flex-1">
-                            <div class="font-medium text-white">${userData.displayName}</div>
-                            <div class="text-sm text-slate-400">${(userData.totalCoinsEarned || 0).toLocaleString()} points</div>
+                            <div class="font-medium text-white text-sm sm:text-base">${userData.displayName}</div>
+                            <div class="text-xs sm:text-sm text-slate-400">${(userData.totalCoinsEarned || 0).toLocaleString()} points</div>
                         </div>
                     </div>
                 `;
             } else {
-                userRankingContainer.innerHTML = '<p class="text-slate-400">Sign in to see your ranking</p>';
+                userRankingContainer.innerHTML = '<p class="text-slate-400 text-center">Sign in to see your ranking</p>';
             }
         }
 
@@ -1920,8 +1947,8 @@
                     const resultItem = document.createElement('div');
                     resultItem.className = 'search-result-item';
                     resultItem.innerHTML = `
-                        <div class="font-medium text-white">${game.name}</div>
-                        <div class="text-sm text-slate-400">${game.category}</div>
+                        <div class="font-medium text-white text-sm">${game.name}</div>
+                        <div class="text-xs text-slate-400">${game.category}</div>
                     `;
                     resultItem.onclick = () => {
                         startGame(game.id);
@@ -2413,7 +2440,7 @@
             categoriesContainer.innerHTML = quizCategories.map(category => `
                 <div class="quiz-option flex items-center p-4" onclick="selectQuizCategory('${category.id}')">
                     <i class="fas ${category.icon} ${category.color} text-xl mr-3"></i>
-                    <span class="text-white font-medium">${category.name}</span>
+                    <span class="text-white font-medium text-sm sm:text-base">${category.name}</span>
                 </div>
             `).join('');
             
@@ -2484,11 +2511,11 @@
             const content = document.getElementById('quizGameContent');
             
             content.innerHTML = `
-                <div class="glass-card rounded-xl p-6 mb-4">
-                    <h4 class="text-xl font-semibold text-white mb-4">${question.question}</h4>
+                <div class="glass-card rounded-xl p-4 sm:p-6 mb-4">
+                    <h4 class="text-lg sm:text-xl font-semibold text-white mb-4">${question.question}</h4>
                     <div class="space-y-3" id="quizOptions">
                         ${question.options.map((option, index) => `
-                            <div class="quiz-option" onclick="selectQuizAnswer(${index})">
+                            <div class="quiz-option text-sm sm:text-base" onclick="selectQuizAnswer(${index})">
                                 ${option}
                             </div>
                         `).join('')}
@@ -2528,15 +2555,15 @@
         function showQuizResults() {
             const content = document.getElementById('quizGameContent');
             content.innerHTML = `
-                <div class="glass-card rounded-xl p-6 text-center">
-                    <h4 class="text-2xl font-black text-white mb-4">Quiz Complete!</h4>
-                    <div class="text-4xl font-black text-green-400 mb-4">${quizGame.score}/${quizGame.questions.length}</div>
-                    <p class="text-slate-400 mb-4">You scored ${Math.round((quizGame.score / quizGame.questions.length) * 100)}%</p>
+                <div class="glass-card rounded-xl p-4 sm:p-6 text-center">
+                    <h4 class="text-xl sm:text-2xl font-black text-white mb-4">Quiz Complete!</h4>
+                    <div class="text-3xl sm:text-4xl font-black text-green-400 mb-4">${quizGame.score}/${quizGame.questions.length}</div>
+                    <p class="text-slate-400 mb-4 text-sm sm:text-base">You scored ${Math.round((quizGame.score / quizGame.questions.length) * 100)}%</p>
                     ${quizGame.score === quizGame.questions.length ? 
-                        '<p class="text-yellow-400 font-semibold">Perfect score! Amazing job! 🎉</p>' :
+                        '<p class="text-yellow-400 font-semibold text-sm sm:text-base">Perfect score! Amazing job! 🎉</p>' :
                         quizGame.score >= quizGame.questions.length * 0.7 ?
-                        '<p class="text-green-400 font-semibold">Great job! Well done! 👍</p>' :
-                        '<p class="text-blue-400 font-semibold">Good effort! Keep practicing! 💪</p>'
+                        '<p class="text-green-400 font-semibold text-sm sm:text-base">Great job! Well done! 👍</p>' :
+                        '<p class="text-blue-400 font-semibold text-sm sm:text-base">Good effort! Keep practicing! 💪</p>'
                     }
                 </div>
             `;
@@ -2710,14 +2737,14 @@
             
             for (let num = 1; num <= 9; num++) {
                 const button = document.createElement('button');
-                button.className = 'px-4 py-2 glass-card text-white rounded-lg font-semibold hover:scale-105 transition';
+                button.className = 'px-3 py-2 sm:px-4 sm:py-2 glass-card text-white rounded-lg font-semibold hover:scale-105 transition text-sm sm:text-base';
                 button.textContent = num;
                 button.onclick = () => fillSudokuCell(num);
                 controls.appendChild(button);
             }
             
             const clearButton = document.createElement('button');
-            clearButton.className = 'px-4 py-2 glass-card text-white rounded-lg font-semibold hover:scale-105 transition';
+            clearButton.className = 'px-3 py-2 sm:px-4 sm:py-2 glass-card text-white rounded-lg font-semibold hover:scale-105 transition text-sm sm:text-base';
             clearButton.innerHTML = '<i class="fas fa-eraser"></i>';
             clearButton.onclick = clearSudokuCell;
             controls.appendChild(clearButton);
@@ -3041,7 +3068,7 @@
             const toast = document.createElement('div');
             toast.className = `toast ${type}`;
             toast.innerHTML = `
-                <div class="flex items-center">
+                <div class="flex items-center text-sm sm:text-base">
                     <i class="fas fa-${type === 'success' ? 'check-circle' : type === 'error' ? 'exclamation-circle' : 'info-circle'} mr-2"></i>
                     ${message}
                 </div>
