@@ -523,6 +523,7 @@
             transition: all 0.3s ease;
         }
         
+        /* Improved mobile styles */
         @media (max-width: 768px) {
             .hamburger-menu {
                 display: flex;
@@ -560,6 +561,137 @@
             .modal-content {
                 padding: 1rem;
             }
+            
+            /* Improved mobile layout for better visibility */
+            .stats-grid {
+                grid-template-columns: repeat(2, 1fr);
+                gap: 0.75rem;
+            }
+            
+            .stats-grid .glass-card {
+                padding: 0.75rem;
+            }
+            
+            .stats-grid .glass-card div:first-child {
+                font-size: 1.125rem;
+            }
+            
+            .stats-grid .glass-card div:last-child {
+                font-size: 0.75rem;
+            }
+            
+            .tab-buttons-container {
+                overflow-x: auto;
+                padding-bottom: 0.5rem;
+                margin-bottom: 1rem;
+            }
+            
+            .tab-buttons-scroll {
+                display: flex;
+                flex-wrap: nowrap;
+                gap: 0.5rem;
+            }
+            
+            .tab-button {
+                white-space: nowrap;
+                padding: 0.5rem 1rem;
+                font-size: 0.875rem;
+            }
+            
+            .filter-controls {
+                flex-direction: column;
+                gap: 1rem;
+            }
+            
+            .filter-controls > div {
+                width: 100%;
+            }
+            
+            .filter-buttons {
+                display: flex;
+                gap: 0.5rem;
+                width: 100%;
+            }
+            
+            .filter-buttons button {
+                flex: 1;
+            }
+            
+            .product-grid {
+                grid-template-columns: repeat(2, 1fr);
+                gap: 0.75rem;
+            }
+            
+            .product-card .product-details {
+                padding: 0.75rem;
+            }
+            
+            .product-card .product-details h3 {
+                font-size: 0.875rem;
+            }
+            
+            .product-card .product-details .price {
+                font-size: 1rem;
+            }
+            
+            .product-card .product-details .seller-info {
+                font-size: 0.75rem;
+            }
+            
+            .product-card .product-details .description {
+                font-size: 0.75rem;
+                margin-bottom: 0.5rem;
+            }
+            
+            .product-card .product-details .rating {
+                font-size: 0.75rem;
+            }
+            
+            .product-card .product-details .date {
+                font-size: 0.75rem;
+            }
+            
+            .product-actions {
+                flex-direction: column;
+                gap: 0.5rem;
+            }
+            
+            .product-actions button {
+                width: 100%;
+                padding: 0.5rem;
+                font-size: 0.875rem;
+            }
+            
+            .mobile-search-container {
+                padding: 0.75rem 1rem;
+            }
+            
+            .mobile-user-info {
+                display: flex;
+                align-items: center;
+                gap: 0.5rem;
+                margin-top: 0.5rem;
+            }
+            
+            .mobile-user-info img {
+                width: 32px;
+                height: 32px;
+            }
+            
+            .mobile-user-details {
+                display: flex;
+                flex-direction: column;
+            }
+            
+            .mobile-user-details .name {
+                font-size: 0.875rem;
+                font-weight: 600;
+            }
+            
+            .mobile-user-details .status {
+                font-size: 0.75rem;
+                color: var(--text-secondary);
+            }
         }
         
         /* Responsive text sizes */
@@ -595,6 +727,33 @@
             
             .mobile-space-y > * + * {
                 margin-top: 1rem;
+            }
+        }
+        
+        /* Additional mobile optimizations */
+        @media (max-width: 480px) {
+            .product-grid {
+                grid-template-columns: 1fr;
+            }
+            
+            .carousel-item img {
+                height: 150px;
+            }
+            
+            .carousel-caption {
+                padding: 0.75rem;
+            }
+            
+            .carousel-caption h2 {
+                font-size: 1.125rem;
+            }
+            
+            .carousel-caption p {
+                font-size: 0.75rem;
+            }
+            
+            .stats-grid {
+                grid-template-columns: 1fr;
             }
         }
     </style>
@@ -709,10 +868,19 @@
             </div>
             
             <!-- Mobile Search Bar -->
-            <div class="md:hidden pb-4">
+            <div class="md:hidden pb-4 mobile-search-container">
                 <div class="relative">
                     <input type="text" id="mobileSearchInput" placeholder="Search products..." class="w-full pl-10 pr-4 py-2 border border-gray-300 dark:border-slate-600 dark:bg-slate-700 dark:text-white rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent">
                     <i class="fas fa-search absolute left-3 top-3 text-gray-400"></i>
+                </div>
+                
+                <!-- Mobile User Info -->
+                <div class="mobile-user-info">
+                    <img id="mobileNavUserAvatar" src="https://ui-avatars.com/api/?name=User&background=6366f1&color=fff&size=32" alt="User" class="w-8 h-8 rounded-full object-cover">
+                    <div class="mobile-user-details">
+                        <p id="mobileNavUserName" class="name">Loading...</p>
+                        <p id="mobileNavUserStatus" class="status">Student</p>
+                    </div>
                 </div>
             </div>
         </div>
@@ -757,7 +925,7 @@
         </section>
 
         <!-- Stats Section -->
-        <section class="grid grid-cols-2 md:grid-cols-4 gap-4 mb-8">
+        <section class="grid grid-cols-2 md:grid-cols-4 gap-4 mb-8 stats-grid">
             <div class="glass-card p-4 text-center">
                 <div class="text-indigo-600 text-xl font-bold mb-1" id="activeListingsCount">0</div>
                 <div class="text-gray-600 dark:text-gray-400 text-sm">Active Listings</div>
@@ -782,7 +950,7 @@
                 <h2 class="text-2xl font-bold text-gray-900 dark:text-white">Trending Items</h2>
                 <a href="#" class="text-indigo-600 hover:text-indigo-800 dark:text-indigo-400 font-medium">View All</a>
             </div>
-            <div class="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4" id="trendingItemsContainer">
+            <div class="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4 product-grid" id="trendingItemsContainer">
                 <div class="col-span-full text-center py-12">
                     <div class="loading-spinner mx-auto mb-4" style="width: 40px; height: 40px;"></div>
                     <p class="text-gray-500 dark:text-gray-400">Loading trending items...</p>
@@ -793,16 +961,18 @@
         <!-- Marketplace Tabs -->
         <section class="mb-8">
             <div class="flex flex-wrap justify-between items-center mb-6">
-                <div class="flex flex-wrap gap-2 mb-4 md:mb-0">
-                    <button class="tab-button active" data-category="all">All Listings</button>
-                    <button class="tab-button" data-category="electronics">Electronics</button>
-                    <button class="tab-button" data-category="textbooks">Textbooks</button>
-                    <button class="tab-button" data-category="furniture">Furniture</button>
-                    <button class="tab-button" data-category="clothing">Clothing</button>
-                    <button class="tab-button" data-category="services">Services</button>
+                <div class="tab-buttons-container">
+                    <div class="tab-buttons-scroll">
+                        <button class="tab-button active" data-category="all">All Listings</button>
+                        <button class="tab-button" data-category="electronics">Electronics</button>
+                        <button class="tab-button" data-category="textbooks">Textbooks</button>
+                        <button class="tab-button" data-category="furniture">Furniture</button>
+                        <button class="tab-button" data-category="clothing">Clothing</button>
+                        <button class="tab-button" data-category="services">Services</button>
+                    </div>
                 </div>
 
-                <div class="flex items-center space-x-4">
+                <div class="flex items-center space-x-4 mt-4 md:mt-0">
                     <div class="flex items-center space-x-2">
                         <button id="gridViewBtn" class="p-2 border border-gray-300 dark:border-slate-600 rounded-lg text-gray-600 dark:text-gray-300 hover:text-gray-900 dark:hover:text-white bg-indigo-50 dark:bg-indigo-900/20">
                             <i class="fas fa-th-large"></i>
@@ -824,7 +994,7 @@
 
             <!-- Filters -->
             <div class="glass-card p-4 mb-6">
-                <div class="flex flex-col md:flex-row flex-wrap gap-4 items-start md:items-center">
+                <div class="flex flex-col md:flex-row flex-wrap gap-4 items-start md:items-center filter-controls">
                     <div>
                         <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Price Range</label>
                         <div class="flex items-center space-x-2">
@@ -855,7 +1025,7 @@
                         </select>
                     </div>
                     
-                    <div class="flex space-x-2 mt-2 md:mt-0">
+                    <div class="filter-buttons">
                         <button id="applyFilters" class="bg-indigo-600 text-white px-4 py-2 rounded-lg font-semibold hover:bg-indigo-700 transition">Apply Filters</button>
                         <button id="clearFilters" class="bg-gray-300 dark:bg-slate-600 text-gray-700 dark:text-gray-300 px-4 py-2 rounded-lg font-semibold hover:bg-gray-400 dark:hover:bg-slate-500 transition">Clear</button>
                     </div>
@@ -863,7 +1033,7 @@
             </div>
 
             <!-- Product Grid/List -->
-            <div id="listingsContainer" class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6">
+            <div id="listingsContainer" class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6 product-grid">
                 <div class="col-span-full text-center py-12">
                     <div class="loading-spinner mx-auto mb-4" style="width: 40px; height: 40px;"></div>
                     <p class="text-gray-500 dark:text-gray-400">Loading listings...</p>
@@ -881,7 +1051,7 @@
         <!-- Recommended For You -->
         <section class="mb-8">
             <h2 class="text-2xl font-bold text-gray-900 dark:text-white mb-4">Recommended For You</h2>
-            <div class="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4" id="recommendedContainer">
+            <div class="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4 product-grid" id="recommendedContainer">
                 <div class="col-span-full text-center py-12">
                     <div class="loading-spinner mx-auto mb-4" style="width: 40px; height: 40px;"></div>
                     <p class="text-gray-500 dark:text-gray-400">Loading recommendations...</p>
@@ -1128,10 +1298,13 @@
         const themeToggle = document.getElementById('themeToggle');
         const userAvatar = document.getElementById('userAvatar');
         const mobileUserAvatar = document.getElementById('mobileUserAvatar');
+        const mobileNavUserAvatar = document.getElementById('mobileNavUserAvatar');
         const userName = document.getElementById('userName');
         const mobileUserName = document.getElementById('mobileUserName');
+        const mobileNavUserName = document.getElementById('mobileNavUserName');
         const userStatus = document.getElementById('userStatus');
         const mobileUserStatus = document.getElementById('mobileUserStatus');
+        const mobileNavUserStatus = document.getElementById('mobileNavUserStatus');
         const activeListingsCount = document.getElementById('activeListingsCount');
         const totalUsersCount = document.getElementById('totalUsersCount');
         const successfulSalesCount = document.getElementById('successfulSalesCount');
@@ -1517,10 +1690,10 @@
                 <div class="p-4 product-details">
                     <div class="flex justify-between items-start mb-2">
                         <h3 class="font-semibold text-gray-900 dark:text-white line-clamp-2 flex-1">${listing.title}</h3>
-                        <span class="text-indigo-600 dark:text-indigo-400 font-bold ml-2">$${listing.price.toFixed(2)}</span>
+                        <span class="text-indigo-600 dark:text-indigo-400 font-bold ml-2 price">$${listing.price.toFixed(2)}</span>
                     </div>
                     
-                    <div class="flex items-center mb-2">
+                    <div class="flex items-center mb-2 seller-info">
                         <img src="${listing.sellerAvatar || 'https://ui-avatars.com/api/?name=Seller&background=6366f1&color=fff&size=32'}" 
                              alt="${listing.sellerName}" 
                              class="w-6 h-6 rounded-full object-cover mr-2">
@@ -1528,19 +1701,19 @@
                         ${listing.sellerVerified ? '<span class="verified-badge"><i class="fas fa-check mr-1"></i>Verified</span>' : ''}
                     </div>
                     
-                    <p class="text-gray-600 dark:text-gray-400 text-sm mb-4 line-clamp-2">${listing.description || 'No description available'}</p>
+                    <p class="text-gray-600 dark:text-gray-400 text-sm mb-4 line-clamp-2 description">${listing.description || 'No description available'}</p>
                     
                     <div class="flex justify-between items-center">
-                        <div class="flex items-center space-x-1">
+                        <div class="flex items-center space-x-1 rating">
                             <i class="fas fa-star text-yellow-400 text-sm"></i>
                             <span class="text-sm text-gray-600 dark:text-gray-400">${listing.rating || '4.5'}</span>
                             <span class="text-sm text-gray-400 dark:text-gray-500">(${listing.reviewCount || '0'})</span>
                         </div>
-                        <span class="text-xs text-gray-500 dark:text-gray-400">${listingDate}</span>
+                        <span class="text-xs text-gray-500 dark:text-gray-400 date">${listingDate}</span>
                     </div>
                     
                     ${!isSmall ? `
-                        <div class="flex justify-between mt-4">
+                        <div class="flex justify-between mt-4 product-actions">
                             <button class="bg-indigo-600 text-white px-4 py-2 rounded-lg font-semibold hover:bg-indigo-700 transition flex-1 mr-2 contact-seller-btn" data-listing-id="${listing.id}">
                                 Contact
                             </button>
@@ -2224,10 +2397,13 @@
             if (userData) {
                 userAvatar.src = userData.avatar || `https://ui-avatars.com/api/?name=${encodeURIComponent(userData.name || 'User')}&background=6366f1&color=fff&size=40`;
                 mobileUserAvatar.src = userData.avatar || `https://ui-avatars.com/api/?name=${encodeURIComponent(userData.name || 'User')}&background=6366f1&color=fff&size=40`;
+                mobileNavUserAvatar.src = userData.avatar || `https://ui-avatars.com/api/?name=${encodeURIComponent(userData.name || 'User')}&background=6366f1&color=fff&size=32`;
                 userName.textContent = userData.name || 'User';
                 mobileUserName.textContent = userData.name || 'User';
+                mobileNavUserName.textContent = userData.name || 'User';
                 userStatus.textContent = userData.status || 'Student';
                 mobileUserStatus.textContent = userData.status || 'Student';
+                mobileNavUserStatus.textContent = userData.status || 'Student';
             }
         }
 

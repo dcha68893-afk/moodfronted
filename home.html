@@ -761,6 +761,47 @@
             .emoji-picker {
                 grid-template-columns: repeat(4, 1fr);
             }
+            
+            /* Mobile-specific improvements */
+            .container {
+                padding-left: 10px;
+                padding-right: 10px;
+            }
+            
+            .post-card {
+                margin-bottom: 15px;
+            }
+            
+            .filter-controls {
+                justify-content: center;
+            }
+            
+            .filter-btn {
+                padding: 6px 12px;
+                font-size: 0.8rem;
+            }
+            
+            .mood-option {
+                padding: 6px 10px;
+                font-size: 0.8rem;
+            }
+            
+            .daily-vibe-section {
+                padding: 12px;
+            }
+            
+            .ai-content-suggestions {
+                padding: 12px;
+            }
+            
+            .gamification-panel {
+                padding: 12px;
+            }
+            
+            .modal-container {
+                width: 95%;
+                padding: 20px;
+            }
         }
 
         @media (max-width: 480px) {
@@ -770,6 +811,62 @@
             
             .emoji-picker {
                 grid-template-columns: repeat(3, 1fr);
+            }
+            
+            /* Extra small screen improvements */
+            .post-card {
+                padding: 15px;
+            }
+            
+            .vibe-reaction {
+                padding: 4px 8px;
+                font-size: 0.75rem;
+            }
+            
+            .daily-vibe-title {
+                font-size: 1rem;
+            }
+            
+            .appreciation-btn {
+                padding: 6px 12px;
+                font-size: 0.9rem;
+            }
+            
+            .mood-filter-container {
+                padding: 8px;
+            }
+            
+            .ai-suggestion-item {
+                padding: 8px;
+            }
+        }
+        
+        /* Ensure all content is visible on mobile */
+        @media (max-width: 768px) {
+            #rightSidebar {
+                display: none;
+            }
+            
+            #sidebar {
+                width: 100%;
+                max-width: 280px;
+            }
+            
+            .main-content-container {
+                width: 100%;
+            }
+            
+            .connection-status {
+                right: 5px;
+                top: 5px;
+                font-size: 0.7rem;
+                padding: 6px 12px;
+            }
+            
+            .keyboard-shortcuts {
+                max-width: 90%;
+                left: 5%;
+                bottom: 10px;
             }
         }
     </style>
@@ -860,7 +957,7 @@
             <div class="p-4 border-t border-purple-800">
                 <div id="userStatusContainer" class="flex items-center space-x-3 p-3 glass rounded-xl cursor-pointer hover:bg-cyan-900/30 transition">
                     <div class="relative">
-                        <img id="userAvatar" class="w-8 h-8 rounded-2xl object-cover" src="" alt="User Avatar">
+                        <img id="userAvatar" class="w-8 h-8 rounded-2xl object-cover" src="https://via.placeholder.com/40" alt="User Avatar">
                         <div id="statusIndicator" class="status-indicator status-online absolute -bottom-1 -right-1 border-2 border-gray-900"></div>
                     </div>
                     <div class="hidden lg:block">
@@ -877,14 +974,14 @@
                         </div>
                     </div>
                 </div>
-                <button id="signOutBtn" class="w-full mt-2 py-2 glass border border-purple-700 rounded-2xl text-theme-secondary hover:text-theme-accent transition text-sm hidden">
+                <button id="signOutBtn" class="w-full mt-2 py-2 glass border border-purple-700 rounded-2xl text-theme-secondary hover:text-theme-accent transition text-sm">
                     <i class="fas fa-sign-out-alt mr-2"></i>Sign Out
                 </button>
             </div>
         </div>
 
         <!-- Main Content -->
-        <div class="flex-1 flex flex-col overflow-hidden w-full lg:w-auto">
+        <div class="flex-1 flex flex-col overflow-hidden w-full lg:w-auto main-content-container">
             <!-- Header -->
             <header class="glass border-b border-purple-800 px-4 md:px-6 py-4">
                 <div class="flex items-center justify-between">
@@ -1043,7 +1140,7 @@
                 <!-- User Profile Card -->
                 <div class="glass border border-purple-700 rounded-2xl p-4 mb-6">
                     <div class="flex items-center space-x-3 mb-4">
-                        <img id="sidebarUserAvatar" class="w-12 h-12 rounded-2xl object-cover" src="" alt="User Avatar">
+                        <img id="sidebarUserAvatar" class="w-12 h-12 rounded-2xl object-cover" src="https://via.placeholder.com/40" alt="User Avatar">
                         <div>
                             <h3 id="sidebarUserName" class="font-bold text-theme-accent">Loading...</h3>
                             <p id="sidebarUserStatus" class="text-xs text-theme-secondary">Online</p>
@@ -1141,7 +1238,7 @@
             
             <div class="space-y-4">
                 <div class="flex items-center space-x-3 mb-4">
-                    <img id="currentUserAvatar" class="w-10 h-10 rounded-2xl object-cover" src="" alt="Your Avatar">
+                    <img id="currentUserAvatar" class="w-10 h-10 rounded-2xl object-cover" src="https://via.placeholder.com/40" alt="Your Avatar">
                     <div>
                         <p id="currentUserName" class="font-semibold text-theme-primary">Loading...</p>
                         <div class="flex space-x-2 mt-1">
@@ -1316,6 +1413,7 @@
 
         // Global Variables
         let currentUser = null;
+        let userData = null;
         let posts = [];
         let lastPost = null;
         let hasMorePosts = true;
@@ -1406,17 +1504,24 @@
                 if (user) {
                     // User is signed in
                     currentUser = user;
-                    updateUserUI();
-                    loadUserData();
-                    loadInitialPosts();
-                    loadStories();
-                    loadTrendingTopics();
-                    loadLeaderboard();
-                    loadSuggestedUsers();
-                    signOutBtn.classList.remove('hidden');
+                    console.log('User signed in:', user.uid);
                     
-                    // NEW: Initialize new features
-                    initializeNewFeatures();
+                    // Load user data from Firestore
+                    loadUserData().then(() => {
+                        updateUserUI();
+                        loadInitialPosts();
+                        loadStories();
+                        loadTrendingTopics();
+                        loadLeaderboard();
+                        loadSuggestedUsers();
+                        
+                        // NEW: Initialize new features
+                        initializeNewFeatures();
+                    }).catch(error => {
+                        console.error('Error loading user data:', error);
+                    });
+                    
+                    signOutBtn.classList.remove('hidden');
                 } else {
                     // User is signed out - redirect to index page
                     console.log('User not signed in, redirecting to index...');
@@ -1793,6 +1898,99 @@
                 });
         }
 
+        // Load user data from Firebase
+        async function loadUserData() {
+            if (!currentUser) return;
+            
+            try {
+                const userDoc = await db.collection('users').doc(currentUser.uid).get();
+                
+                if (userDoc.exists) {
+                    userData = userDoc.data();
+                    console.log('User data loaded:', userData);
+                    
+                    // Update UI with user data
+                    updateUserUI();
+                    
+                    return userData;
+                } else {
+                    // Create user document if it doesn't exist
+                    return createUserDocument();
+                }
+            } catch (error) {
+                console.error('Error loading user data:', error);
+                throw error;
+            }
+        }
+
+        // Create user document
+        function createUserDocument() {
+            if (!currentUser) return;
+            
+            const userData = {
+                userId: currentUser.uid,
+                userName: currentUser.displayName || 'User',
+                userAvatar: currentUser.photoURL || '',
+                email: currentUser.email || '',
+                status: 'Online',
+                postsCount: 0,
+                followersCount: 0,
+                followingCount: 0,
+                energy: 0,
+                badges: ['newcomer'],
+                createdAt: firebase.firestore.FieldValue.serverTimestamp(),
+                // NEW: Gamification data
+                streak: 0,
+                points: 0,
+                achievements: []
+            };
+            
+            return db.collection('users').doc(currentUser.uid).set(userData)
+                .then(() => {
+                    console.log('User document created');
+                    return userData;
+                })
+                .catch(error => {
+                    console.error('Error creating user document:', error);
+                    throw error;
+                });
+        }
+
+        // Update user UI with current user data
+        function updateUserUI() {
+            if (currentUser && userData) {
+                const displayName = userData.userName || currentUser.displayName || 'User';
+                const photoURL = userData.userAvatar || currentUser.photoURL || 'https://via.placeholder.com/40';
+                
+                userAvatar.src = photoURL;
+                userDisplayName.textContent = displayName;
+                sidebarUserAvatar.src = photoURL;
+                sidebarUserName.textContent = displayName;
+                currentUserAvatar.src = photoURL;
+                currentUserName.textContent = displayName;
+                
+                postCount.textContent = userData.postsCount || 0;
+                followerCount.textContent = userData.followersCount || 0;
+                followingCount.textContent = userData.followingCount || 0;
+                statusText.textContent = userData.status || 'Online';
+                sidebarUserStatus.textContent = userData.status || 'Online';
+                
+                // Kynecta Unique Feature: Update user energy
+                updateUserEnergyDisplay(userData.energy || 0);
+                
+                // Kynecta Unique Feature: Load user badges
+                loadUserBadges(userData.badges || []);
+            } else if (currentUser) {
+                // Fallback to Firebase Auth data if userData not loaded yet
+                userAvatar.src = currentUser.photoURL || 'https://via.placeholder.com/40';
+                userDisplayName.textContent = currentUser.displayName || 'User';
+                sidebarUserAvatar.src = currentUser.photoURL || 'https://via.placeholder.com/40';
+                sidebarUserName.textContent = currentUser.displayName || 'User';
+                currentUserAvatar.src = currentUser.photoURL || 'https://via.placeholder.com/40';
+                currentUserName.textContent = currentUser.displayName || 'User';
+            }
+        }
+
         // Toggle theme
         function toggleTheme() {
             const body = document.body;
@@ -1887,8 +2085,8 @@
             const postData = {
                 content: content,
                 userId: currentUser.uid,
-                userName: currentUser.displayName || 'Anonymous',
-                userAvatar: currentUser.photoURL || '',
+                userName: userData?.userName || currentUser.displayName || 'Anonymous',
+                userAvatar: userData?.userAvatar || currentUser.photoURL || '',
                 mood: mood,
                 audience: audience,
                 timestamp: firebase.firestore.FieldValue.serverTimestamp(),
@@ -1971,6 +2169,67 @@
                     console.error('Error publishing post: ', error);
                     showNotification('Error publishing post: ' + error.message, 'error');
                 });
+        }
+
+        // Update user post count
+        function updateUserPostCount(increment) {
+            if (!currentUser) return;
+            
+            db.collection('users').doc(currentUser.uid).update({
+                postsCount: firebase.firestore.FieldValue.increment(increment)
+            })
+            .then(() => {
+                // Reload user data to reflect changes
+                loadUserData();
+            })
+            .catch(error => {
+                console.error('Error updating user post count:', error);
+            });
+        }
+
+        // Kynecta Unique Feature: Update user energy
+        function updateUserEnergy(points) {
+            if (!currentUser) return;
+            
+            db.collection('users').doc(currentUser.uid).update({
+                energy: firebase.firestore.FieldValue.increment(points)
+            })
+            .then(() => {
+                // Reload user data to reflect changes
+                loadUserData();
+            })
+            .catch(error => {
+                console.error('Error updating user energy:', error);
+            });
+        }
+
+        // Kynecta Unique Feature: Update user energy display
+        function updateUserEnergyDisplay(energy) {
+            const percentage = Math.min(100, energy);
+            userEnergyRing.style.background = `conic-gradient(var(--accent-color) ${percentage}%, transparent ${percentage}%)`;
+            energyPercentage.textContent = `${percentage}%`;
+        }
+
+        // Kynecta Unique Feature: Load user badges
+        function loadUserBadges(badges) {
+            userBadges.innerHTML = '';
+            
+            const badgeConfig = {
+                'newcomer': { text: 'Newcomer', color: 'bg-blue-500' },
+                'contributor': { text: 'Contributor', color: 'bg-green-500' },
+                'influencer': { text: 'Influencer', color: 'bg-purple-500' },
+                'collaborator': { text: 'Collaborator', color: 'bg-yellow-500' },
+                'visionary': { text: 'Visionary', color: 'bg-pink-500' }
+            };
+            
+            badges.forEach(badge => {
+                if (badgeConfig[badge]) {
+                    const badgeElement = document.createElement('span');
+                    badgeElement.className = `kynecta-badge ${badgeConfig[badge].color}`;
+                    badgeElement.textContent = badgeConfig[badge].text;
+                    userBadges.appendChild(badgeElement);
+                }
+            });
         }
 
         // NEW: Update user streak
@@ -2128,8 +2387,8 @@
 
             const commentData = {
                 userId: currentUser.uid,
-                userName: currentUser.displayName || 'Anonymous',
-                userAvatar: currentUser.photoURL || '',
+                userName: userData?.userName || currentUser.displayName || 'Anonymous',
+                userAvatar: userData?.userAvatar || currentUser.photoURL || '',
                 content: commentText.trim(),
                 timestamp: firebase.firestore.FieldValue.serverTimestamp(),
                 // NEW: Nested replies
@@ -2181,8 +2440,8 @@
 
             const replyData = {
                 userId: currentUser.uid,
-                userName: currentUser.displayName || 'Anonymous',
-                userAvatar: currentUser.photoURL || '',
+                userName: userData?.userName || currentUser.displayName || 'Anonymous',
+                userAvatar: userData?.userAvatar || currentUser.photoURL || '',
                 content: replyText.trim(),
                 timestamp: firebase.firestore.FieldValue.serverTimestamp()
             };
@@ -2455,160 +2714,6 @@
             if (!text) return '';
             const regex = new RegExp(`(${query})`, 'gi');
             return text.replace(regex, '<mark class="bg-yellow-300 text-black">$1</mark>');
-        }
-
-        // Update user UI with current user data
-        function updateUserUI() {
-            if (currentUser) {
-                userAvatar.src = currentUser.photoURL || 'https://via.placeholder.com/40';
-                userDisplayName.textContent = currentUser.displayName || 'User';
-                sidebarUserAvatar.src = currentUser.photoURL || 'https://via.placeholder.com/40';
-                sidebarUserName.textContent = currentUser.displayName || 'User';
-                currentUserAvatar.src = currentUser.photoURL || 'https://via.placeholder.com/40';
-                currentUserName.textContent = currentUser.displayName || 'User';
-            }
-        }
-
-        // Load user data from Firebase
-        function loadUserData() {
-            if (!currentUser) return;
-            
-            db.collection('users').doc(currentUser.uid).get()
-                .then(doc => {
-                    if (doc.exists) {
-                        const userData = doc.data();
-                        postCount.textContent = userData.postsCount || 0;
-                        followerCount.textContent = userData.followersCount || 0;
-                        followingCount.textContent = userData.followingCount || 0;
-                        statusText.textContent = userData.status || 'Online';
-                        sidebarUserStatus.textContent = userData.status || 'Online';
-                        
-                        // Kynecta Unique Feature: Update user energy
-                        updateUserEnergyDisplay(userData.energy || 0);
-                        
-                        // Kynecta Unique Feature: Load user badges
-                        loadUserBadges(userData.badges || []);
-                    } else {
-                        // Create user document if it doesn't exist
-                        createUserDocument();
-                    }
-                })
-                .catch(error => {
-                    console.error('Error loading user data:', error);
-                });
-        }
-
-        // Create user document
-        function createUserDocument() {
-            if (!currentUser) return;
-            
-            const userData = {
-                userId: currentUser.uid,
-                userName: currentUser.displayName || 'User',
-                userAvatar: currentUser.photoURL || '',
-                email: currentUser.email || '',
-                status: 'Online',
-                postsCount: 0,
-                followersCount: 0,
-                followingCount: 0,
-                energy: 0,
-                badges: ['newcomer'],
-                createdAt: firebase.firestore.FieldValue.serverTimestamp(),
-                // NEW: Gamification data
-                streak: 0,
-                points: 0,
-                achievements: []
-            };
-            
-            db.collection('users').doc(currentUser.uid).set(userData)
-                .then(() => {
-                    console.log('User document created');
-                    loadUserData();
-                })
-                .catch(error => {
-                    console.error('Error creating user document:', error);
-                });
-        }
-
-        // Update user post count
-        function updateUserPostCount(increment) {
-            if (!currentUser) return;
-            
-            db.collection('users').doc(currentUser.uid).update({
-                postsCount: firebase.firestore.FieldValue.increment(increment)
-            })
-            .then(() => {
-                loadUserData();
-            })
-            .catch(error => {
-                console.error('Error updating user post count:', error);
-            });
-        }
-
-        // Kynecta Unique Feature: Update user energy
-        function updateUserEnergy(points) {
-            if (!currentUser) return;
-            
-            db.collection('users').doc(currentUser.uid).update({
-                energy: firebase.firestore.FieldValue.increment(points)
-            })
-            .then(() => {
-                loadUserData();
-            })
-            .catch(error => {
-                console.error('Error updating user energy:', error);
-            });
-        }
-
-        // Kynecta Unique Feature: Update user energy display
-        function updateUserEnergyDisplay(energy) {
-            const percentage = Math.min(100, energy);
-            userEnergyRing.style.background = `conic-gradient(var(--accent-color) ${percentage}%, transparent ${percentage}%)`;
-            energyPercentage.textContent = `${percentage}%`;
-        }
-
-        // Kynecta Unique Feature: Load user badges
-        function loadUserBadges(badges) {
-            userBadges.innerHTML = '';
-            
-            const badgeConfig = {
-                'newcomer': { text: 'Newcomer', color: 'bg-blue-500' },
-                'contributor': { text: 'Contributor', color: 'bg-green-500' },
-                'influencer': { text: 'Influencer', color: 'bg-purple-500' },
-                'collaborator': { text: 'Collaborator', color: 'bg-yellow-500' },
-                'visionary': { text: 'Visionary', color: 'bg-pink-500' }
-            };
-            
-            badges.forEach(badge => {
-                if (badgeConfig[badge]) {
-                    const badgeElement = document.createElement('span');
-                    badgeElement.className = `kynecta-badge ${badgeConfig[badge].color}`;
-                    badgeElement.textContent = badgeConfig[badge].text;
-                    userBadges.appendChild(badgeElement);
-                }
-            });
-        }
-
-        // Kynecta Unique Feature: Calculate post energy
-        function calculatePostEnergy(content) {
-            // Simple algorithm to calculate post "energy" based on content
-            let energy = 0;
-            
-            // Base energy
-            energy += Math.min(content.length / 10, 10);
-            
-            // Bonus for hashtags
-            const hashtags = extractHashtags(content);
-            energy += hashtags.length * 2;
-            
-            // Bonus for mentions
-            const mentions = extractMentions(content);
-            energy += mentions.length * 2;
-            
-            // Bonus for questions
-            if (content.includes('?')) energy += 5;
-            
-            return Math.min(energy, 50);
         }
 
         // Load initial posts from Firebase
@@ -3199,6 +3304,28 @@
             if (!text) return [];
             const mentions = text.match(/@\w+/g) || [];
             return mentions.map(mention => mention.substring(1));
+        }
+
+        // Kynecta Unique Feature: Calculate post energy
+        function calculatePostEnergy(content) {
+            // Simple algorithm to calculate post "energy" based on content
+            let energy = 0;
+            
+            // Base energy
+            energy += Math.min(content.length / 10, 10);
+            
+            // Bonus for hashtags
+            const hashtags = extractHashtags(content);
+            energy += hashtags.length * 2;
+            
+            // Bonus for mentions
+            const mentions = extractMentions(content);
+            energy += mentions.length * 2;
+            
+            // Bonus for questions
+            if (content.includes('?')) energy += 5;
+            
+            return Math.min(energy, 50);
         }
 
         // Format date

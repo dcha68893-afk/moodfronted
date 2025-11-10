@@ -7,11 +7,10 @@
     <script src="https://cdn.tailwindcss.com"></script>
     <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css" rel="stylesheet">
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/cropperjs/1.5.13/cropper.min.css">
-    <link rel="stylesheet" href="responsive.css">
     <script src="https://cdnjs.cloudflare.com/ajax/libs/cropperjs/1.5.13/cropper.min.js"></script>
     
     <style>
-        /* Keep existing styles but add responsive improvements */
+        /* Glass effect and gradients */
         .glass-effect {
             background: rgba(255, 255, 255, 0.08);
             backdrop-filter: blur(25px);
@@ -27,6 +26,7 @@
             box-shadow: 0 0 20px rgba(79, 172, 254, 0.4);
         }
         
+        /* Connection Status */
         .connection-status {
             position: fixed;
             top: 20px;
@@ -57,6 +57,7 @@
             border-color: rgba(239, 68, 68, 0.4);
         }
 
+        /* Profile Components */
         .profile-cover {
             height: 200px;
             background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
@@ -162,6 +163,7 @@
             background: linear-gradient(135deg, rgba(102, 126, 234, 0.1), transparent);
         }
 
+        /* Buttons */
         .btn-primary {
             background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
             color: white;
@@ -185,6 +187,51 @@
             box-shadow: 0 12px 35px rgba(102, 126, 234, 0.4);
         }
 
+        .btn-secondary {
+            background: rgba(255, 255, 255, 0.1);
+            color: white;
+            padding: 10px 20px;
+            border-radius: 15px;
+            border: 1px solid rgba(255, 255, 255, 0.2);
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.3s ease;
+            font-size: 0.9rem;
+        }
+        @media (min-width: 768px) {
+            .btn-secondary {
+                padding: 12px 24px;
+                font-size: 1rem;
+            }
+        }
+        .btn-secondary:hover {
+            background: rgba(255, 255, 255, 0.15);
+            transform: translateY(-2px);
+        }
+
+        .btn-danger {
+            background: rgba(239, 68, 68, 0.2);
+            color: #ef4444;
+            padding: 10px 20px;
+            border-radius: 15px;
+            border: 1px solid rgba(239, 68, 68, 0.3);
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.3s ease;
+            font-size: 0.9rem;
+        }
+        @media (min-width: 768px) {
+            .btn-danger {
+                padding: 12px 24px;
+                font-size: 1rem;
+            }
+        }
+        .btn-danger:hover {
+            background: rgba(239, 68, 68, 0.3);
+            transform: translateY(-2px);
+        }
+
+        /* Cards and Layout */
         .feature-card {
             background: rgba(255, 255, 255, 0.05);
             border-radius: 20px;
@@ -225,6 +272,7 @@
             100% { transform: rotate(360deg); }
         }
 
+        /* Social Media */
         .social-media-icons {
             display: flex;
             gap: 10px;
@@ -256,6 +304,7 @@
             box-shadow: 0 12px 30px rgba(0, 0, 0, 0.3);
         }
 
+        /* Mood Selector */
         .mood-selector {
             background: rgba(255, 255, 255, 0.05);
             border-radius: 15px;
@@ -288,6 +337,8 @@
             border-color: #667eea;
             background: rgba(102, 126, 234, 0.1);
         }
+
+        /* Skills and Interests */
         .skill-tag {
             display: inline-block;
             background: rgba(102, 126, 234, 0.2);
@@ -339,6 +390,7 @@
             }
         }
         
+        /* Progress Bars */
         .completion-bar {
             height: 6px;
             border-radius: 3px;
@@ -353,6 +405,7 @@
             transition: width 0.5s ease;
         }
         
+        /* Mood Glow Effects */
         .mood-glow-happy {
             box-shadow: 0 0 20px rgba(250, 204, 21, 0.5);
         }
@@ -369,6 +422,7 @@
             box-shadow: 0 0 20px rgba(139, 92, 246, 0.5);
         }
         
+        /* Animations */
         .fade-in {
             opacity: 0;
             animation: fadeIn 1s ease forwards;
@@ -379,6 +433,7 @@
             to { opacity: 1; transform: translateY(0); }
         }
         
+        /* Badges */
         .badge {
             display: inline-flex;
             align-items: center;
@@ -407,6 +462,7 @@
             color: #fb923c;
         }
         
+        /* Media Grid */
         .media-grid {
             display: grid;
             grid-template-columns: repeat(auto-fill, minmax(120px, 1fr));
@@ -432,6 +488,7 @@
             transform: scale(1.05);
         }
         
+        /* Theme Toggle */
         .theme-toggle {
             position: relative;
             width: 60px;
@@ -456,6 +513,7 @@
             transform: translateX(30px);
         }
         
+        /* Follow Button Effects */
         .follow-btn {
             position: relative;
             overflow: hidden;
@@ -487,6 +545,7 @@
             }
         }
         
+        /* Diary Entries */
         .diary-entry {
             background: rgba(255, 255, 255, 0.05);
             border-radius: 15px;
@@ -501,6 +560,7 @@
             }
         }
         
+        /* Color Options */
         .color-option {
             width: 28px;
             height: 28px;
@@ -522,6 +582,7 @@
             transform: scale(1.2);
         }
         
+        /* Privacy Options */
         .privacy-option {
             padding: 10px 14px;
             border-radius: 10px;
@@ -541,6 +602,7 @@
             background: rgba(102, 126, 234, 0.1);
         }
 
+        /* Music Player */
         .music-player {
             background: rgba(255, 255, 255, 0.05);
             border-radius: 15px;
@@ -554,6 +616,7 @@
             }
         }
         
+        /* Engagement Bars */
         .engagement-bar {
             height: 6px;
             border-radius: 3px;
@@ -566,6 +629,7 @@
             background: linear-gradient(135deg, #667eea, #764ba2);
         }
 
+        /* Particles Background */
         .particles {
             position: fixed;
             top: 0;
@@ -586,6 +650,7 @@
             50% { transform: translateY(-20px) rotate(180deg); }
         }
 
+        /* Holographic Effect */
         .holographic {
             background: linear-gradient(45deg, 
                 rgba(102, 126, 234, 0.1), 
@@ -600,6 +665,7 @@
             100% { background-position: 0% 50%; }
         }
 
+        /* Cyber Grid */
         .cyber-grid {
             background: 
                 linear-gradient(rgba(102, 126, 234, 0.1) 1px, transparent 1px),
@@ -607,6 +673,7 @@
             background-size: 50px 50px;
         }
 
+        /* Friends Sidebar */
         .friends-sidebar {
             width: 100%;
             background: rgba(255, 255, 255, 0.05);
@@ -698,6 +765,7 @@
             margin-left: auto;
         }
 
+        /* Chat Window */
         .chat-window {
             display: none;
             flex-direction: column;
@@ -913,6 +981,7 @@
             }
         }
 
+        /* Friend Request Items */
         .friend-request-item {
             display: flex;
             align-items: center;
@@ -965,6 +1034,7 @@
             }
         }
 
+        /* Suggestion Items */
         .suggestion-item {
             display: flex;
             align-items: center;
@@ -993,6 +1063,7 @@
             }
         }
 
+        /* Search Components */
         .search-container {
             padding: 14px;
             border-bottom: 1px solid rgba(255, 255, 255, 0.1);
@@ -1026,7 +1097,7 @@
             overflow-y: auto;
         }
 
-        /* Mobile hamburger menu */
+        /* Mobile Menu */
         .mobile-menu {
             display: none;
             position: fixed;
@@ -1075,6 +1146,126 @@
             .hamburger {
                 display: flex;
             }
+        }
+
+        /* Friend Request Cards */
+        .friend-request-card {
+            background: rgba(255, 255, 255, 0.05);
+            border-radius: 12px;
+            padding: 16px;
+            margin-bottom: 12px;
+            border: 1px solid rgba(255, 255, 255, 0.1);
+        }
+        .friend-request-header {
+            display: flex;
+            align-items: center;
+            margin-bottom: 12px;
+        }
+        .friend-request-avatar {
+            width: 48px;
+            height: 48px;
+            border-radius: 50%;
+            background: linear-gradient(135deg, #667eea, #764ba2);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            color: white;
+            font-weight: bold;
+            margin-right: 12px;
+            background-size: cover;
+            background-position: center;
+        }
+        .friend-request-info {
+            flex: 1;
+        }
+        .friend-request-name {
+            font-weight: 600;
+            color: white;
+            font-size: 1rem;
+        }
+        .friend-request-meta {
+            color: #93C5FD;
+            font-size: 0.85rem;
+        }
+        .friend-request-actions {
+            display: flex;
+            gap: 8px;
+        }
+        .sent-request-item {
+            display: flex;
+            align-items: center;
+            padding: 12px;
+            background: rgba(255, 255, 255, 0.05);
+            border-radius: 12px;
+            margin-bottom: 8px;
+        }
+        .sent-request-status {
+            margin-left: auto;
+            padding: 4px 8px;
+            border-radius: 6px;
+            font-size: 0.75rem;
+            font-weight: 500;
+        }
+        .status-pending {
+            background: rgba(251, 191, 36, 0.2);
+            color: #fbbf24;
+        }
+        .status-accepted {
+            background: rgba(34, 197, 94, 0.2);
+            color: #4ade80;
+        }
+        .status-rejected {
+            background: rgba(239, 68, 68, 0.2);
+            color: #ef4444;
+        }
+        .status-cancelled {
+            background: rgba(107, 114, 128, 0.2);
+            color: #9ca3af;
+        }
+
+        /* Action Buttons */
+        .action-buttons {
+            display: flex;
+            gap: 8px;
+            flex-wrap: wrap;
+        }
+        .btn-small {
+            padding: 6px 12px;
+            font-size: 0.75rem;
+        }
+        @media (min-width: 768px) {
+            .btn-small {
+                padding: 8px 16px;
+                font-size: 0.8rem;
+            }
+        }
+
+        /* Profile Actions */
+        .profile-actions {
+            display: flex;
+            gap: 8px;
+            margin-top: 16px;
+            flex-wrap: wrap;
+        }
+
+        /* Empty States */
+        .empty-state {
+            text-align: center;
+            padding: 40px 20px;
+            color: #93C5FD;
+        }
+        .empty-state-icon {
+            font-size: 48px;
+            margin-bottom: 16px;
+            opacity: 0.5;
+        }
+        .empty-state-text {
+            font-size: 1rem;
+            margin-bottom: 8px;
+        }
+        .empty-state-subtext {
+            font-size: 0.85rem;
+            opacity: 0.8;
         }
     </style>
 </head>
@@ -1270,6 +1461,14 @@
                             <i class="fas fa-palette text-purple-400 mr-2"></i>
                             Creative
                         </button>
+                        <button class="mood-option" data-mood="focused">
+                            <i class="fas fa-bullseye text-blue-400 mr-2"></i>
+                            Focused
+                        </button>
+                        <button class="mood-option" data-mood="relaxed">
+                            <i class="fas fa-couch text-indigo-400 mr-2"></i>
+                            Relaxed
+                        </button>
                     </div>
                 </div>
                 <div>
@@ -1298,7 +1497,7 @@
             <h3 class="text-lg md:text-xl font-bold text-blue-300 mb-4 text-center">Find Friends</h3>
             <div class="space-y-4">
                 <div class="search-container">
-                    <input type="text" id="friendSearchInput" placeholder="Search by name, email, or phone..." class="search-input">
+                    <input type="text" id="friendSearchInput" placeholder="Search by name, email, or username..." class="search-input">
                 </div>
                 <div class="search-results" id="friendSearchResults">
                     <!-- Search results will appear here -->
@@ -1388,7 +1587,7 @@
                     <i class="fas fa-moon"></i>
                     <span>Dark Mode</span>
                 </div>
-                <div class="theme-toggle" id="themeToggle"></div>
+                <div class="theme-toggle dark" id="themeToggle"></div>
             </div>
 
             <!-- Quick User Info -->
@@ -1550,6 +1749,40 @@
                                 <div class="stat-value" id="reputationScore">0</div>
                                 <div class="stat-label">Reputation</div>
                             </div>
+                        </div>
+                    </div>
+                </div>
+                
+                <!-- Friend Requests Section -->
+                <div class="glass-effect rounded-2xl p-6 mb-6">
+                    <div class="flex justify-between items-center mb-4">
+                        <h3 class="text-lg font-bold text-blue-300">Friend Requests</h3>
+                        <span class="bg-blue-500 text-white rounded-full px-2 py-1 text-sm" id="friendRequestsCount">0</span>
+                    </div>
+                    <div id="friendRequestsContainer">
+                        <div class="empty-state">
+                            <div class="empty-state-icon">
+                                <i class="fas fa-user-clock"></i>
+                            </div>
+                            <div class="empty-state-text">No pending requests</div>
+                            <div class="empty-state-subtext">When someone sends you a friend request, it will appear here</div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Sent Requests Section -->
+                <div class="glass-effect rounded-2xl p-6 mb-6">
+                    <div class="flex justify-between items-center mb-4">
+                        <h3 class="text-lg font-bold text-blue-300">Sent Requests</h3>
+                        <span class="bg-blue-500 text-white rounded-full px-2 py-1 text-sm" id="sentRequestsCount">0</span>
+                    </div>
+                    <div id="sentRequestsContainer">
+                        <div class="empty-state">
+                            <div class="empty-state-icon">
+                                <i class="fas fa-paper-plane"></i>
+                            </div>
+                            <div class="empty-state-text">No sent requests</div>
+                            <div class="empty-state-subtext">Your sent friend requests will appear here</div>
                         </div>
                     </div>
                 </div>
@@ -1797,6 +2030,7 @@
                 this.diaryEntries = [];
                 this.friends = [];
                 this.friendRequests = [];
+                this.sentRequests = [];
                 this.peopleSuggestions = [];
                 this.isDarkMode = true;
                 
@@ -1806,6 +2040,10 @@
                 this.chatUnsubscribe = null;
                 this.friendsUnsubscribe = null;
                 this.friendRequestsUnsubscribe = null;
+                this.sentRequestsUnsubscribe = null;
+                
+                // Store the app instance globally for external access
+                window.profileApp = this;
             }
 
             async initialize() {
@@ -1904,6 +2142,7 @@
                             await this.loadDiaryEntries(uid);
                             await this.loadFriends(uid);
                             await this.loadFriendRequests(uid);
+                            await this.loadSentRequests(uid);
                             await this.loadPeopleSuggestions(uid);
                             
                             this.showLoading(false);
@@ -2085,6 +2324,43 @@
                 }
             }
 
+            async loadSentRequests(uid) {
+                try {
+                    // Get sent friend requests
+                    const sentRequestsQuery = window.firebaseApp.firestore.query(
+                        window.firebaseApp.firestore.collection(window.firebaseApp.db, "friendRequests"),
+                        window.firebaseApp.firestore.where("fromUserId", "==", uid),
+                        window.firebaseApp.firestore.orderBy("createdAt", "desc")
+                    );
+                    
+                    const querySnapshot = await window.firebaseApp.firestore.getDocs(sentRequestsQuery);
+                    this.sentRequests = [];
+                    
+                    for (const doc of querySnapshot.docs) {
+                        const requestData = doc.data();
+                        const toUserRef = window.firebaseApp.firestore.doc(window.firebaseApp.db, "users", requestData.toUserId);
+                        const toUserDoc = await window.firebaseApp.firestore.getDoc(toUserRef);
+                        
+                        if (toUserDoc.exists()) {
+                            this.sentRequests.push({
+                                id: doc.id,
+                                ...requestData,
+                                toUser: { id: toUserDoc.id, ...toUserDoc.data() }
+                            });
+                        }
+                    }
+                    
+                    console.log("Loaded sent requests:", this.sentRequests.length);
+                    this.updateSentRequestsList();
+                    
+                    // Set up real-time listener for sent requests
+                    this.setupSentRequestsListener(uid);
+                    
+                } catch (error) {
+                    console.error("Error loading sent requests:", error);
+                }
+            }
+
             async loadPeopleSuggestions(uid) {
                 try {
                     // Get random users for suggestions (excluding current user and friends)
@@ -2176,6 +2452,34 @@
                 });
             }
 
+            setupSentRequestsListener(uid) {
+                const sentRequestsQuery = window.firebaseApp.firestore.query(
+                    window.firebaseApp.firestore.collection(window.firebaseApp.db, "friendRequests"),
+                    window.firebaseApp.firestore.where("fromUserId", "==", uid),
+                    window.firebaseApp.firestore.orderBy("createdAt", "desc")
+                );
+                
+                this.sentRequestsUnsubscribe = window.firebaseApp.firestore.onSnapshot(sentRequestsQuery, async (snapshot) => {
+                    this.sentRequests = [];
+                    
+                    for (const doc of snapshot.docs) {
+                        const requestData = doc.data();
+                        const toUserRef = window.firebaseApp.firestore.doc(window.firebaseApp.db, "users", requestData.toUserId);
+                        const toUserDoc = await window.firebaseApp.firestore.getDoc(toUserRef);
+                        
+                        if (toUserDoc.exists()) {
+                            this.sentRequests.push({
+                                id: doc.id,
+                                ...requestData,
+                                toUser: { id: toUserDoc.id, ...toUserDoc.data() }
+                            });
+                        }
+                    }
+                    
+                    this.updateSentRequestsList();
+                });
+            }
+
             updateFriendsList() {
                 const friendsList = document.getElementById('friendsList');
                 const friendsCount = document.getElementById('friendsCount');
@@ -2184,10 +2488,12 @@
                 
                 if (this.friends.length === 0) {
                     friendsList.innerHTML = `
-                        <div class="p-4 text-center text-blue-300">
-                            <i class="fas fa-user-friends text-2xl mb-2 opacity-50"></i>
-                            <p>No friends yet</p>
-                            <p class="text-sm mt-2">Connect with people to see them here</p>
+                        <div class="empty-state">
+                            <div class="empty-state-icon">
+                                <i class="fas fa-user-friends"></i>
+                            </div>
+                            <div class="empty-state-text">No friends yet</div>
+                            <div class="empty-state-subtext">Connect with people to see them here</div>
                         </div>
                     `;
                     return;
@@ -2227,24 +2533,27 @@
             }
 
             updateFriendRequestsList() {
-                const friendRequestsSection = document.getElementById('friendRequestsSection');
-                const friendRequestsList = document.getElementById('friendRequestsList');
-                const friendRequestBadge = document.getElementById('friendRequestBadge');
+                const container = document.getElementById('friendRequestsContainer');
+                const badge = document.getElementById('friendRequestsCount');
+                const sidebarBadge = document.getElementById('friendRequestBadge');
                 
-                // Update badge
+                badge.textContent = this.friendRequests.length;
+                
                 if (this.friendRequests.length > 0) {
-                    friendRequestBadge.textContent = this.friendRequests.length;
-                    friendRequestBadge.classList.remove('hidden');
-                    friendRequestsSection.classList.remove('hidden');
+                    sidebarBadge.textContent = this.friendRequests.length;
+                    sidebarBadge.classList.remove('hidden');
                 } else {
-                    friendRequestBadge.classList.add('hidden');
-                    friendRequestsSection.classList.add('hidden');
+                    sidebarBadge.classList.add('hidden');
                 }
                 
                 if (this.friendRequests.length === 0) {
-                    friendRequestsList.innerHTML = `
-                        <div class="p-4 text-center text-blue-300">
-                            <p>No pending friend requests</p>
+                    container.innerHTML = `
+                        <div class="empty-state">
+                            <div class="empty-state-icon">
+                                <i class="fas fa-user-clock"></i>
+                            </div>
+                            <div class="empty-state-text">No pending requests</div>
+                            <div class="empty-state-subtext">When someone sends you a friend request, it will appear here</div>
                         </div>
                     `;
                     return;
@@ -2254,27 +2563,29 @@
                 
                 this.friendRequests.forEach(request => {
                     requestsHTML += `
-                        <div class="friend-request-item">
-                            <div class="friend-avatar" style="${request.fromUser.profilePicture ? `background-image: url('${request.fromUser.profilePicture}')` : ''}">
-                                ${request.fromUser.profilePicture ? '' : request.fromUser.displayName?.charAt(0) || 'U'}
+                        <div class="friend-request-card">
+                            <div class="friend-request-header">
+                                <div class="friend-request-avatar" style="${request.fromUser.profilePicture ? `background-image: url('${request.fromUser.profilePicture}')` : ''}">
+                                    ${request.fromUser.profilePicture ? '' : request.fromUser.displayName?.charAt(0) || 'U'}
+                                </div>
+                                <div class="friend-request-info">
+                                    <div class="friend-request-name">${request.fromUser.displayName}</div>
+                                    <div class="friend-request-meta">@${request.fromUser.username}</div>
+                                </div>
                             </div>
-                            <div class="friend-info">
-                                <div class="friend-name">${request.fromUser.displayName}</div>
-                                <div class="friend-status">Wants to connect with you</div>
-                            </div>
-                            <div class="request-actions">
+                            <div class="friend-request-actions">
                                 <button class="accept-btn" data-request-id="${request.id}" data-from-user-id="${request.fromUserId}">
-                                    <i class="fas fa-check"></i>
+                                    <i class="fas fa-check mr-1"></i> Accept
                                 </button>
                                 <button class="reject-btn" data-request-id="${request.id}">
-                                    <i class="fas fa-times"></i>
+                                    <i class="fas fa-times mr-1"></i> Reject
                                 </button>
                             </div>
                         </div>
                     `;
                 });
                 
-                friendRequestsList.innerHTML = requestsHTML;
+                container.innerHTML = requestsHTML;
                 
                 // Add event listeners to accept/reject buttons
                 document.querySelectorAll('.accept-btn').forEach(btn => {
@@ -2291,6 +2602,48 @@
                         this.rejectFriendRequest(requestId);
                     });
                 });
+            }
+
+            updateSentRequestsList() {
+                const container = document.getElementById('sentRequestsContainer');
+                const badge = document.getElementById('sentRequestsCount');
+                
+                badge.textContent = this.sentRequests.length;
+                
+                if (this.sentRequests.length === 0) {
+                    container.innerHTML = `
+                        <div class="empty-state">
+                            <div class="empty-state-icon">
+                                <i class="fas fa-paper-plane"></i>
+                            </div>
+                            <div class="empty-state-text">No sent requests</div>
+                            <div class="empty-state-subtext">Your sent friend requests will appear here</div>
+                        </div>
+                    `;
+                    return;
+                }
+                
+                let requestsHTML = '';
+                
+                this.sentRequests.forEach(request => {
+                    const statusClass = `sent-request-status status-${request.status}`;
+                    const statusText = request.status.charAt(0).toUpperCase() + request.status.slice(1);
+                    
+                    requestsHTML += `
+                        <div class="sent-request-item">
+                            <div class="friend-avatar" style="${request.toUser.profilePicture ? `background-image: url('${request.toUser.profilePicture}')` : ''}">
+                                ${request.toUser.profilePicture ? '' : request.toUser.displayName?.charAt(0) || 'U'}
+                            </div>
+                            <div class="friend-info">
+                                <div class="friend-name">${request.toUser.displayName}</div>
+                                <div class="friend-status">@${request.toUser.username}</div>
+                            </div>
+                            <div class="${statusClass}">${statusText}</div>
+                        </div>
+                    `;
+                });
+                
+                container.innerHTML = requestsHTML;
             }
 
             async acceptFriendRequest(requestId, fromUserId) {
@@ -2343,6 +2696,87 @@
                 }
             }
 
+            async cancelFriendRequest(requestId) {
+                try {
+                    // Delete the friend request
+                    const requestRef = window.firebaseApp.firestore.doc(window.firebaseApp.db, "friendRequests", requestId);
+                    await window.firebaseApp.firestore.deleteDoc(requestRef);
+                    
+                    this.showNotification('Friend request cancelled', 'info');
+                    
+                } catch (error) {
+                    console.error('Error cancelling friend request:', error);
+                    this.showNotification('Error cancelling friend request', 'error');
+                }
+            }
+
+            async sendFriendRequest(toUserId) {
+                try {
+                    // Check if request already exists
+                    const existingRequestQuery = window.firebaseApp.firestore.query(
+                        window.firebaseApp.firestore.collection(window.firebaseApp.db, "friendRequests"),
+                        window.firebaseApp.firestore.where("fromUserId", "==", this.currentUser.uid),
+                        window.firebaseApp.firestore.where("toUserId", "==", toUserId)
+                    );
+                    
+                    const existingRequest = await window.firebaseApp.firestore.getDocs(existingRequestQuery);
+                    
+                    if (!existingRequest.empty) {
+                        this.showNotification('Friend request already sent', 'info');
+                        return;
+                    }
+                    
+                    // Create new friend request
+                    const requestRef = window.firebaseApp.firestore.collection(window.firebaseApp.db, "friendRequests");
+                    await window.firebaseApp.firestore.addDoc(requestRef, {
+                        fromUserId: this.currentUser.uid,
+                        toUserId: toUserId,
+                        status: "pending",
+                        createdAt: window.firebaseApp.firestore.serverTimestamp()
+                    });
+                    
+                    this.showNotification('Friend request sent!', 'success');
+                    
+                } catch (error) {
+                    console.error('Error sending friend request:', error);
+                    this.showNotification('Error sending friend request', 'error');
+                }
+            }
+
+            async removeFriend(friendId) {
+                try {
+                    // Remove friendship for current user
+                    const currentUserFriendQuery = window.firebaseApp.firestore.query(
+                        window.firebaseApp.firestore.collection(window.firebaseApp.db, "friends"),
+                        window.firebaseApp.firestore.where("userId", "==", this.currentUser.uid),
+                        window.firebaseApp.firestore.where("friendId", "==", friendId)
+                    );
+                    
+                    const currentUserFriendDocs = await window.firebaseApp.firestore.getDocs(currentUserFriendQuery);
+                    currentUserFriendDocs.forEach(async (doc) => {
+                        await window.firebaseApp.firestore.deleteDoc(doc.ref);
+                    });
+                    
+                    // Remove friendship for the other user
+                    const otherUserFriendQuery = window.firebaseApp.firestore.query(
+                        window.firebaseApp.firestore.collection(window.firebaseApp.db, "friends"),
+                        window.firebaseApp.firestore.where("userId", "==", friendId),
+                        window.firebaseApp.firestore.where("friendId", "==", this.currentUser.uid)
+                    );
+                    
+                    const otherUserFriendDocs = await window.firebaseApp.firestore.getDocs(otherUserFriendQuery);
+                    otherUserFriendDocs.forEach(async (doc) => {
+                        await window.firebaseApp.firestore.deleteDoc(doc.ref);
+                    });
+                    
+                    this.showNotification('Friend removed successfully', 'success');
+                    
+                } catch (error) {
+                    console.error('Error removing friend:', error);
+                    this.showNotification('Error removing friend', 'error');
+                }
+            }
+
             async searchUsers(searchTerm) {
                 try {
                     // Search by display name
@@ -2388,40 +2822,6 @@
                 } catch (error) {
                     console.error('Error searching users:', error);
                     return [];
-                }
-            }
-
-            async sendFriendRequest(toUserId) {
-                try {
-                    // Check if request already exists
-                    const existingRequestQuery = window.firebaseApp.firestore.query(
-                        window.firebaseApp.firestore.collection(window.firebaseApp.db, "friendRequests"),
-                        window.firebaseApp.firestore.where("fromUserId", "==", this.currentUser.uid),
-                        window.firebaseApp.firestore.where("toUserId", "==", toUserId),
-                        window.firebaseApp.firestore.where("status", "==", "pending")
-                    );
-                    
-                    const existingRequest = await window.firebaseApp.firestore.getDocs(existingRequestQuery);
-                    
-                    if (!existingRequest.empty) {
-                        this.showNotification('Friend request already sent', 'info');
-                        return;
-                    }
-                    
-                    // Create new friend request
-                    const requestRef = window.firebaseApp.firestore.collection(window.firebaseApp.db, "friendRequests");
-                    await window.firebaseApp.firestore.addDoc(requestRef, {
-                        fromUserId: this.currentUser.uid,
-                        toUserId: toUserId,
-                        status: "pending",
-                        createdAt: window.firebaseApp.firestore.serverTimestamp()
-                    });
-                    
-                    this.showNotification('Friend request sent!', 'success');
-                    
-                } catch (error) {
-                    console.error('Error sending friend request:', error);
-                    this.showNotification('Error sending friend request', 'error');
                 }
             }
 
@@ -3546,7 +3946,7 @@
                 let resultsHTML = '';
                 results.forEach(user => {
                     const isFriend = this.friends.some(friend => friend.id === user.id);
-                    const hasPendingRequest = this.friendRequests.some(req => req.fromUserId === user.id);
+                    const hasPendingRequest = this.sentRequests.some(req => req.toUserId === user.id && req.status === 'pending');
                     
                     resultsHTML += `
                         <div class="suggestion-item">
@@ -3559,7 +3959,7 @@
                             </div>
                             ${!isFriend && !hasPendingRequest ? `
                                 <button class="add-friend-btn" data-user-id="${user.id}">
-                                    <i class="fas fa-user-plus"></i>
+                                    <i class="fas fa-user-plus"></i> Add
                                 </button>
                             ` : ''}
                             ${hasPendingRequest ? `
@@ -3568,7 +3968,7 @@
                                 </button>
                             ` : ''}
                             ${isFriend ? `
-                                <button class="add-friend-btn" disabled style="opacity: 0.5;">
+                                <button class="btn-secondary btn-small" disabled style="opacity: 0.5;">
                                     <i class="fas fa-check"></i> Friends
                                 </button>
                             ` : ''}
@@ -3601,7 +4001,7 @@
                 let suggestionsHTML = '';
                 this.peopleSuggestions.forEach(user => {
                     const isFriend = this.friends.some(friend => friend.id === user.id);
-                    const hasPendingRequest = this.friendRequests.some(req => req.fromUserId === user.id);
+                    const hasPendingRequest = this.sentRequests.some(req => req.toUserId === user.id && req.status === 'pending');
                     
                     suggestionsHTML += `
                         <div class="suggestion-item">
@@ -3614,7 +4014,7 @@
                             </div>
                             ${!isFriend && !hasPendingRequest ? `
                                 <button class="add-friend-btn" data-user-id="${user.id}">
-                                    <i class="fas fa-user-plus"></i>
+                                    <i class="fas fa-user-plus"></i> Add
                                 </button>
                             ` : ''}
                             ${hasPendingRequest ? `
@@ -3623,7 +4023,7 @@
                                 </button>
                             ` : ''}
                             ${isFriend ? `
-                                <button class="add-friend-btn" disabled style="opacity: 0.5;">
+                                <button class="btn-secondary btn-small" disabled style="opacity: 0.5;">
                                     <i class="fas fa-check"></i> Friends
                                 </button>
                             ` : ''}
@@ -4145,6 +4545,7 @@
                     if (this.chatUnsubscribe) this.chatUnsubscribe();
                     if (this.friendsUnsubscribe) this.friendsUnsubscribe();
                     if (this.friendRequestsUnsubscribe) this.friendRequestsUnsubscribe();
+                    if (this.sentRequestsUnsubscribe) this.sentRequestsUnsubscribe();
                     
                     await window.firebaseApp.authFunctions.signOut(window.firebaseApp.auth);
                     localStorage.clear();
@@ -4163,13 +4564,13 @@
                 
                 switch(status) {
                     case 'connected':
-                        statusElement.innerHTML = '<i class="fas fa-check mr-2"></i>';
+                        statusElement.innerHTML = '<i class="fas fa-check mr-2"></i><span>Connected to Kynecta</span>';
                         break;
                     case 'connecting':
-                        statusElement.innerHTML = '<i class="fas fa-circle-notch fa-spin mr-2"></i>';
+                        statusElement.innerHTML = '<i class="fas fa-circle-notch fa-spin mr-2"></i><span>Connecting to Kynecta...</span>';
                         break;
                     case 'error':
-                        statusElement.innerHTML = '<i class="fas fa-exclamation-triangle mr-2"></i>';
+                        statusElement.innerHTML = '<i class="fas fa-exclamation-triangle mr-2"></i><span>Connection Error</span>';
                         break;
                 }
             }
@@ -4205,6 +4606,25 @@
         window.initProfileApp = function() {
             const app = new ProfileApplication();
             app.initialize();
+        };
+
+        // Global functions for friend management
+        window.sendFriendRequest = function(userId) {
+            if (window.profileApp) {
+                window.profileApp.sendFriendRequest(userId);
+            }
+        };
+
+        window.removeFriend = function(friendId) {
+            if (window.profileApp) {
+                window.profileApp.removeFriend(friendId);
+            }
+        };
+
+        window.cancelFriendRequest = function(requestId) {
+            if (window.profileApp) {
+                window.profileApp.cancelFriendRequest(requestId);
+            }
         };
 
         // Start the app when DOM is ready
