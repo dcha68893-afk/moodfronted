@@ -749,7 +749,7 @@
     <!-- Connection Status -->
     <div class="connection-status connecting" id="connectionStatus">
         <i class="fas fa-circle-notch fa-spin mr-2"></i>
-        <span id="connectionText">Connecting to kynecta...</span>
+        <span id="connectionText">Connecting...</span>
     </div>
 
     <!-- Toast Container -->
@@ -1490,7 +1490,7 @@
             async init() {
                 try {
                     console.log('🔄 Starting Firebase initialization...');
-                    this.updateConnectionStatus('connecting', 'Connecting to kynecta...');
+                    this.updateConnectionStatus('connecting', 'Connecting...');
                     
                     // Check if Firebase is available
                     if (typeof firebase === 'undefined') {
@@ -1523,7 +1523,7 @@
                     });
                     
                     this.isInitialized = true;
-                    this.updateConnectionStatus('connected', 'KYNECTA');
+                    this.updateConnectionStatus('connected', '✓');
                     
                     // Show security status with checkmark
                     const securityStatus = document.getElementById('securityStatus');
