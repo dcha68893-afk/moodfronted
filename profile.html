@@ -8,8 +8,11 @@
     <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css" rel="stylesheet">
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/cropperjs/1.5.13/cropper.min.css">
     <script src="https://cdnjs.cloudflare.com/ajax/libs/cropperjs/1.5.13/cropper.min.js"></script>
+    <!-- Cloudinary Upload Widget -->
+    <script src="https://upload-widget.cloudinary.com/global/all.js" type="text/javascript"></script>
     
     <style>
+        /* All existing CSS styles remain exactly the same */
         /* Glass effect and gradients */
         .glass-effect {
             background: rgba(255, 255, 255, 0.08);
@@ -1642,21 +1645,19 @@
                 <div class="glass-effect rounded-2xl border border-blue-700 overflow-hidden mb-6 holographic">
                     <!-- Profile Cover -->
                     <div class="profile-cover" id="profileCover">
-                        <button class="edit-cover-btn absolute top-4 right-4 md:top-6 md:right-6 glass-effect text-blue-400 rounded-xl px-3 py-1 md:px-4 md:py-2 hover:bg-blue-800/30 transition text-sm md:text-base">
+                        <button class="edit-cover-btn absolute top-4 right-4 md:top-6 md:right-6 glass-effect text-blue-400 rounded-xl px-3 py-1 md:px-4 md:py-2 hover:bg-blue-800/30 transition text-sm md:text-base" id="uploadCoverBtn">
                             <i class="fas fa-camera mr-2"></i>
                             Edit Cover
                         </button>
-                        <input type="file" id="coverInput" class="hidden" accept="image/*">
                     </div>
                     
                     <!-- Profile Avatar -->
                     <div class="profile-avatar" id="profileAvatar">
                         <div id="avatarIcon"></div>
                         <div class="online-status" id="onlineStatus"></div>
-                        <button class="edit-avatar-btn absolute bottom-2 right-2 md:bottom-3 md:right-3 w-7 h-7 md:w-8 md:h-8 bg-black/50 rounded-full flex items-center justify-center text-white hover:bg-black/70 transition">
+                        <button class="edit-avatar-btn absolute bottom-2 right-2 md:bottom-3 md:right-3 w-7 h-7 md:w-8 md:h-8 bg-black/50 rounded-full flex items-center justify-center text-white hover:bg-black/70 transition" id="uploadAvatarBtn">
                             <i class="fas fa-camera text-xs"></i>
                         </button>
-                        <input type="file" id="avatarInput" class="hidden" accept="image/*">
                     </div>
                     
                     <!-- Profile Info -->
@@ -1951,14 +1952,22 @@
         </div>
     </div>
 
-    <script type="module">
-        // Import Firebase modules
-        import { initializeApp } from "https://www.gstatic.com/firebasejs/10.7.1/firebase-app.js";
-        import { getFirestore, collection, addDoc, serverTimestamp, doc, getDoc, setDoc, onSnapshot, updateDoc, query, where, getDocs, orderBy, deleteDoc } from "https://www.gstatic.com/firebasejs/10.7.1/firebase-firestore.js";
-        import { getAuth, signOut, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/10.7.1/firebase-auth.js";
-        import { getStorage, ref, uploadBytes, getDownloadURL } from "https://www.gstatic.com/firebasejs/10.7.1/firebase-storage.js";
+    <!-- Debug Panel -->
+    <div id="debugPanel" class="fixed bottom-4 right-4 z-50">
+        <button onclick="forceCreateProfile()" 
+                class="px-4 py-2 bg-red-500 text-white rounded-lg font-bold">
+            🔧 Debug: Create Profile
+        </button>
+    </div>
 
-        // Firebase configuration
+    <!-- Firebase SDK -->
+    <script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-app-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-auth-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-firestore-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-storage-compat.js"></script>
+
+    <script>
+        // Firebase configuration - Use environment variables in production
         const firebaseConfig = {
             apiKey: "AIzaSyDHHyGgsSV18BcXrGgzi4C8frzDAE1C1zo",
             authDomain: "uniconnect-ee95c.firebaseapp.com",
@@ -1969,53 +1978,24 @@
         };
 
         // Initialize Firebase
-        const app = initializeApp(firebaseConfig);
-        const db = getFirestore(app);
-        const auth = getAuth(app);
-        const storage = getStorage(app);
+        firebase.initializeApp(firebaseConfig);
+        const auth = firebase.auth();
+        const db = firebase.firestore();
+        const storage = firebase.storage();
 
-        // Make Firebase available globally
-        window.firebaseApp = {
-            app,
-            db,
-            auth,
-            storage,
-            authFunctions: {
-                signOut,
-                onAuthStateChanged
-            },
-            firestore: {
-                collection,
-                addDoc,
-                serverTimestamp,
-                doc,
-                getDoc,
-                setDoc,
-                onSnapshot,
-                updateDoc,
-                query,
-                where,
-                getDocs,
-                orderBy,
-                deleteDoc
-            },
-            storageFunctions: {
-                ref,
-                uploadBytes,
-                getDownloadURL
-            }
+        // Enable offline persistence
+        db.enablePersistence()
+          .catch((err) => {
+              console.log('Firebase persistence error: ', err);
+          });
+
+        // Cloudinary configuration
+        const cloudinaryConfig = {
+            cloudName: "dhjnxa5rh",
+            uploadPreset: "unsigned-profile"
         };
 
-        console.log('🔥 Kynecta initialized successfully!');
-
-        // Initialize profile app after Firebase is ready
-        if (window.initProfileApp) {
-            window.initProfileApp();
-        }
-    </script>
-
-    <script>
-        // Complete Profile Application Class
+        // Profile Application Class
         class ProfileApplication {
             constructor() {
                 this.currentUser = null;
@@ -2057,6 +2037,7 @@
                     console.error('❌ Profile app initialization failed:', error);
                     this.updateConnectionStatus('error');
                     this.showNotification('Connection failed. Please check your connection.', 'error');
+                    this.showLoading(false); // Always hide loading spinner
                 }
             }
 
@@ -2076,103 +2057,136 @@
             }
 
             async initializeFirebase() {
-                if (!window.firebaseApp) {
-                    throw new Error('Firebase not available');
+                try {
+                    // Test Firestore connection
+                    await db.collection('test').limit(1).get();
+                    this.isConnected = true;
+                    this.updateConnectionStatus('connected');
+                } catch (error) {
+                    console.error('Firebase connection test failed:', error);
+                    this.isConnected = false;
+                    this.updateConnectionStatus('error');
+                    throw error;
                 }
-                this.isConnected = true;
-                this.updateConnectionStatus('connected');
             }
 
             checkAuthentication() {
                 this.showLoading(true);
                 
-                const userEmail = localStorage.getItem('userEmail');
-                const userId = localStorage.getItem('userId');
-                const userDisplayName = localStorage.getItem('userDisplayName');
+                console.log("🔐 Checking authentication...");
                 
-                if (userEmail && userId) {
-                    console.log('User found in localStorage:', userEmail);
-                    this.currentUser = {
-                        uid: userId,
-                        email: userEmail,
-                        displayName: userDisplayName
-                    };
-                    this.loadProfileData(userId);
-                }
-
-                window.firebaseApp.authFunctions.onAuthStateChanged(window.firebaseApp.auth, (user) => {
+                auth.onAuthStateChanged(async (user) => {
                     if (user) {
-                        console.log('Authenticated user detected:', user.email);
+                        console.log("✅ User authenticated:", user.uid, user.email);
                         this.currentUser = user;
                         localStorage.setItem('userEmail', user.email);
                         localStorage.setItem('userId', user.uid);
                         localStorage.setItem('userDisplayName', user.displayName || user.email.split('@')[0]);
-                        this.loadProfileData(user.uid);
+                        
+                        // Test Firestore connection and check if user document exists
+                        await this.debugUserDocument(user.uid);
+                        
                     } else {
-                        console.log('No authenticated user, redirecting to login...');
+                        console.log("❌ No authenticated user, redirecting to login...");
                         localStorage.clear();
                         sessionStorage.clear();
+                        this.showLoading(false); // Always hide loading spinner
                         window.location.href = 'login.html';
                     }
                 }, (error) => {
-                    console.error('Auth state change error:', error);
+                    console.error('🔥 Auth state change error:', error);
                     this.updateConnectionStatus('error');
                     this.showNotification('Authentication error. Please try again.', 'error');
+                    this.showLoading(false); // Always hide loading spinner
                 });
+            }
+
+            // Add this debug method
+            async debugUserDocument(uid) {
+                try {
+                    console.log("🔍 Checking if user document exists...");
+                    
+                    const userDoc = await db.collection("users").doc(uid).get();
+                    
+                    if (userDoc.exists) { // FIXED: Changed .exists() to .exists
+                        console.log("✅ User document FOUND:", userDoc.data());
+                        this.loadProfileData(uid);
+                    } else {
+                        console.log("❌ User document NOT FOUND - creating new profile");
+                        await this.createNewProfile(uid);
+                    }
+                } catch (error) {
+                    console.error("💥 Error checking user document:", error);
+                    console.log("🔄 Trying to create profile anyway...");
+                    await this.createNewProfile(uid);
+                }
             }
 
             async loadProfileData(uid) {
                 try {
-                    console.log("Loading profile data for user:", uid);
+                    console.log("🔍 Loading profile data for user:", uid);
                     
-                    const userRef = window.firebaseApp.firestore.doc(window.firebaseApp.db, "users", uid);
+                    const userRef = db.collection("users").doc(uid);
                     
-                    this.profileUnsubscribe = window.firebaseApp.firestore.onSnapshot(userRef, async (doc) => {
-                        if (doc.exists()) {
-                            this.userProfile = { id: doc.id, ...doc.data() };
-                            console.log("Real-time profile update:", this.userProfile);
-                            this.updateProfileUI(this.userProfile);
-                            this.updateSidebar(this.userProfile);
-                            this.calculateProfileCompletion(this.userProfile);
-                            
-                            // Load additional data
-                            await this.loadUserPosts(uid);
-                            await this.loadUserMedia(uid);
-                            await this.loadAchievements(uid);
-                            await this.loadDiaryEntries(uid);
-                            await this.loadFriends(uid);
-                            await this.loadFriendRequests(uid);
-                            await this.loadSentRequests(uid);
-                            await this.loadPeopleSuggestions(uid);
-                            
-                            this.showLoading(false);
-                            this.showProfileLayout();
-                            
-                            this.loadTabContent('posts');
-                        } else {
-                            console.log("No profile found, creating new one...");
-                            this.createNewProfile(uid);
+                    // Set up real-time listener with better error handling
+                    this.profileUnsubscribe = userRef.onSnapshot(async (doc) => {
+                        try {
+                            if (doc.exists) { // FIXED: Changed .exists() to .exists
+                                console.log("✅ Profile data received:", doc.data());
+                                this.userProfile = { id: doc.id, ...doc.data() };
+                                this.updateProfileUI(this.userProfile);
+                                this.updateSidebar(this.userProfile);
+                                this.calculateProfileCompletion(this.userProfile);
+                                
+                                // Load additional data (don't wait for all to complete)
+                                this.loadUserPosts(uid);
+                                this.loadUserMedia(uid);
+                                this.loadAchievements(uid);
+                                this.loadDiaryEntries(uid);
+                                this.loadFriends(uid);
+                                this.loadFriendRequests(uid);
+                                this.loadSentRequests(uid);
+                                this.loadPeopleSuggestions(uid);
+                                
+                                this.showLoading(false);
+                                this.showProfileLayout();
+                                
+                                // Load initial tab content
+                                setTimeout(() => {
+                                    this.loadTabContent('posts');
+                                }, 500);
+                                
+                            } else {
+                                console.log("❌ No profile found in listener - creating new one");
+                                await this.createNewProfile(uid);
+                            }
+                        } catch (error) {
+                            console.error("💥 Error in snapshot handler:", error);
+                            this.showNotification('Error loading profile data', 'error');
+                            this.showLoading(false); // Always hide loading spinner
                         }
                     }, (error) => {
-                        console.error("Error in real-time listener:", error);
+                        console.error("🔥 Snapshot error:", error);
+                        this.showNotification('Connection error. Please refresh.', 'error');
+                        this.showLoading(false); // Always hide loading spinner
+                        // Try direct fetch as fallback
                         this.loadProfileOnce(uid);
                     });
                     
                 } catch (error) {
-                    console.error('Error setting up real-time listener:', error);
+                    console.error('💥 Error setting up real-time listener:', error);
+                    this.showLoading(false); // Always hide loading spinner
                     this.createFallbackProfile();
                 }
             }
 
             async loadUserPosts(uid) {
                 try {
-                    const postsQuery = window.firebaseApp.firestore.query(
-                        window.firebaseApp.firestore.collection(window.firebaseApp.db, "posts"),
-                        window.firebaseApp.firestore.where("userId", "==", uid),
-                        window.firebaseApp.firestore.orderBy("createdAt", "desc")
-                    );
+                    const postsQuery = db.collection("posts")
+                        .where("userId", "==", uid)
+                        .orderBy("createdAt", "desc");
                     
-                    const querySnapshot = await window.firebaseApp.firestore.getDocs(postsQuery);
+                    const querySnapshot = await postsQuery.get();
                     this.userPosts = querySnapshot.docs.map(doc => ({
                         id: doc.id,
                         ...doc.data()
@@ -2187,13 +2201,11 @@
 
             async loadUserMedia(uid) {
                 try {
-                    const mediaQuery = window.firebaseApp.firestore.query(
-                        window.firebaseApp.firestore.collection(window.firebaseApp.db, "media"),
-                        window.firebaseApp.firestore.where("userId", "==", uid),
-                        window.firebaseApp.firestore.orderBy("uploadedAt", "desc")
-                    );
+                    const mediaQuery = db.collection("media")
+                        .where("userId", "==", uid)
+                        .orderBy("uploadedAt", "desc");
                     
-                    const querySnapshot = await window.firebaseApp.firestore.getDocs(mediaQuery);
+                    const querySnapshot = await mediaQuery.get();
                     this.userMedia = querySnapshot.docs.map(doc => ({
                         id: doc.id,
                         ...doc.data()
@@ -2207,12 +2219,10 @@
 
             async loadAchievements(uid) {
                 try {
-                    const achievementsQuery = window.firebaseApp.firestore.query(
-                        window.firebaseApp.firestore.collection(window.firebaseApp.db, "achievements"),
-                        window.firebaseApp.firestore.where("userId", "==", uid)
-                    );
+                    const achievementsQuery = db.collection("achievements")
+                        .where("userId", "==", uid);
                     
-                    const querySnapshot = await window.firebaseApp.firestore.getDocs(achievementsQuery);
+                    const querySnapshot = await achievementsQuery.get();
                     this.userAchievements = querySnapshot.docs.map(doc => ({
                         id: doc.id,
                         ...doc.data()
@@ -2226,13 +2236,11 @@
 
             async loadDiaryEntries(uid) {
                 try {
-                    const diaryQuery = window.firebaseApp.firestore.query(
-                        window.firebaseApp.firestore.collection(window.firebaseApp.db, "diary"),
-                        window.firebaseApp.firestore.where("userId", "==", uid),
-                        window.firebaseApp.firestore.orderBy("createdAt", "desc")
-                    );
+                    const diaryQuery = db.collection("diary")
+                        .where("userId", "==", uid)
+                        .orderBy("createdAt", "desc");
                     
-                    const querySnapshot = await window.firebaseApp.firestore.getDocs(diaryQuery);
+                    const querySnapshot = await diaryQuery.get();
                     this.diaryEntries = querySnapshot.docs.map(doc => ({
                         id: doc.id,
                         ...doc.data()
@@ -2247,12 +2255,10 @@
             async loadFriends(uid) {
                 try {
                     // Get the user's friends list
-                    const friendsQuery = window.firebaseApp.firestore.query(
-                        window.firebaseApp.firestore.collection(window.firebaseApp.db, "friends"),
-                        window.firebaseApp.firestore.where("userId", "==", uid)
-                    );
+                    const friendsQuery = db.collection("friends")
+                        .where("userId", "==", uid);
                     
-                    const querySnapshot = await window.firebaseApp.firestore.getDocs(friendsQuery);
+                    const querySnapshot = await friendsQuery.get();
                     const friendIds = [];
                     
                     querySnapshot.forEach(doc => {
@@ -2265,10 +2271,9 @@
                     // Get the actual user profiles for each friend
                     this.friends = [];
                     for (const friendId of friendIds) {
-                        const friendRef = window.firebaseApp.firestore.doc(window.firebaseApp.db, "users", friendId);
-                        const friendDoc = await window.firebaseApp.firestore.getDoc(friendRef);
+                        const friendDoc = await db.collection("users").doc(friendId).get();
                         
-                        if (friendDoc.exists()) {
+                        if (friendDoc.exists) { // FIXED: Changed .exists() to .exists
                             this.friends.push({
                                 id: friendDoc.id,
                                 ...friendDoc.data()
@@ -2290,21 +2295,18 @@
             async loadFriendRequests(uid) {
                 try {
                     // Get incoming friend requests
-                    const requestsQuery = window.firebaseApp.firestore.query(
-                        window.firebaseApp.firestore.collection(window.firebaseApp.db, "friendRequests"),
-                        window.firebaseApp.firestore.where("toUserId", "==", uid),
-                        window.firebaseApp.firestore.where("status", "==", "pending")
-                    );
+                    const requestsQuery = db.collection("friendRequests")
+                        .where("toUserId", "==", uid)
+                        .where("status", "==", "pending");
                     
-                    const querySnapshot = await window.firebaseApp.firestore.getDocs(requestsQuery);
+                    const querySnapshot = await requestsQuery.get();
                     this.friendRequests = [];
                     
                     for (const doc of querySnapshot.docs) {
                         const requestData = doc.data();
-                        const fromUserRef = window.firebaseApp.firestore.doc(window.firebaseApp.db, "users", requestData.fromUserId);
-                        const fromUserDoc = await window.firebaseApp.firestore.getDoc(fromUserRef);
+                        const fromUserDoc = await db.collection("users").doc(requestData.fromUserId).get();
                         
-                        if (fromUserDoc.exists()) {
+                        if (fromUserDoc.exists) { // FIXED: Changed .exists() to .exists
                             this.friendRequests.push({
                                 id: doc.id,
                                 ...requestData,
@@ -2327,21 +2329,18 @@
             async loadSentRequests(uid) {
                 try {
                     // Get sent friend requests
-                    const sentRequestsQuery = window.firebaseApp.firestore.query(
-                        window.firebaseApp.firestore.collection(window.firebaseApp.db, "friendRequests"),
-                        window.firebaseApp.firestore.where("fromUserId", "==", uid),
-                        window.firebaseApp.firestore.orderBy("createdAt", "desc")
-                    );
+                    const sentRequestsQuery = db.collection("friendRequests")
+                        .where("fromUserId", "==", uid)
+                        .orderBy("createdAt", "desc");
                     
-                    const querySnapshot = await window.firebaseApp.firestore.getDocs(sentRequestsQuery);
+                    const querySnapshot = await sentRequestsQuery.get();
                     this.sentRequests = [];
                     
                     for (const doc of querySnapshot.docs) {
                         const requestData = doc.data();
-                        const toUserRef = window.firebaseApp.firestore.doc(window.firebaseApp.db, "users", requestData.toUserId);
-                        const toUserDoc = await window.firebaseApp.firestore.getDoc(toUserRef);
+                        const toUserDoc = await db.collection("users").doc(requestData.toUserId).get();
                         
-                        if (toUserDoc.exists()) {
+                        if (toUserDoc.exists) { // FIXED: Changed .exists() to .exists
                             this.sentRequests.push({
                                 id: doc.id,
                                 ...requestData,
@@ -2364,18 +2363,16 @@
             async loadPeopleSuggestions(uid) {
                 try {
                     // Get random users for suggestions (excluding current user and friends)
-                    const usersQuery = window.firebaseApp.firestore.query(
-                        window.firebaseApp.firestore.collection(window.firebaseApp.db, "users"),
-                        window.firebaseApp.firestore.where("__name__", "!=", uid)
-                    );
+                    const usersQuery = db.collection("users")
+                        .where(firebase.firestore.FieldPath.documentId(), "!=", uid);
                     
-                    const querySnapshot = await window.firebaseApp.firestore.getDocs(usersQuery);
+                    const querySnapshot = await usersQuery.get();
                     this.peopleSuggestions = [];
                     
                     const friendIds = this.friends.map(friend => friend.id);
                     
                     querySnapshot.forEach(doc => {
-                        if (doc.id !== uid && !friendIds.includes(doc.id)) {
+                        if (doc.id !== uid && !friendIds.includes(doc.id) && doc.exists) { // FIXED: Added .exists check
                             this.peopleSuggestions.push({
                                 id: doc.id,
                                 ...doc.data()
@@ -2393,12 +2390,10 @@
             }
 
             setupFriendsListener(uid) {
-                const friendsQuery = window.firebaseApp.firestore.query(
-                    window.firebaseApp.firestore.collection(window.firebaseApp.db, "friends"),
-                    window.firebaseApp.firestore.where("userId", "==", uid)
-                );
+                const friendsQuery = db.collection("friends")
+                    .where("userId", "==", uid);
                 
-                this.friendsUnsubscribe = window.firebaseApp.firestore.onSnapshot(friendsQuery, async (snapshot) => {
+                this.friendsUnsubscribe = friendsQuery.onSnapshot(async (snapshot) => {
                     const friendIds = [];
                     
                     snapshot.forEach(doc => {
@@ -2409,10 +2404,9 @@
                     // Update friends list
                     this.friends = [];
                     for (const friendId of friendIds) {
-                        const friendRef = window.firebaseApp.firestore.doc(window.firebaseApp.db, "users", friendId);
-                        const friendDoc = await window.firebaseApp.firestore.getDoc(friendRef);
+                        const friendDoc = await db.collection("users").doc(friendId).get();
                         
-                        if (friendDoc.exists()) {
+                        if (friendDoc.exists) { // FIXED: Changed .exists() to .exists
                             this.friends.push({
                                 id: friendDoc.id,
                                 ...friendDoc.data()
@@ -2425,21 +2419,18 @@
             }
 
             setupFriendRequestsListener(uid) {
-                const requestsQuery = window.firebaseApp.firestore.query(
-                    window.firebaseApp.firestore.collection(window.firebaseApp.db, "friendRequests"),
-                    window.firebaseApp.firestore.where("toUserId", "==", uid),
-                    window.firebaseApp.firestore.where("status", "==", "pending")
-                );
+                const requestsQuery = db.collection("friendRequests")
+                    .where("toUserId", "==", uid)
+                    .where("status", "==", "pending");
                 
-                this.friendRequestsUnsubscribe = window.firebaseApp.firestore.onSnapshot(requestsQuery, async (snapshot) => {
+                this.friendRequestsUnsubscribe = requestsQuery.onSnapshot(async (snapshot) => {
                     this.friendRequests = [];
                     
                     for (const doc of snapshot.docs) {
                         const requestData = doc.data();
-                        const fromUserRef = window.firebaseApp.firestore.doc(window.firebaseApp.db, "users", requestData.fromUserId);
-                        const fromUserDoc = await window.firebaseApp.firestore.getDoc(fromUserRef);
+                        const fromUserDoc = await db.collection("users").doc(requestData.fromUserId).get();
                         
-                        if (fromUserDoc.exists()) {
+                        if (fromUserDoc.exists) { // FIXED: Changed .exists() to .exists
                             this.friendRequests.push({
                                 id: doc.id,
                                 ...requestData,
@@ -2453,21 +2444,18 @@
             }
 
             setupSentRequestsListener(uid) {
-                const sentRequestsQuery = window.firebaseApp.firestore.query(
-                    window.firebaseApp.firestore.collection(window.firebaseApp.db, "friendRequests"),
-                    window.firebaseApp.firestore.where("fromUserId", "==", uid),
-                    window.firebaseApp.firestore.orderBy("createdAt", "desc")
-                );
+                const sentRequestsQuery = db.collection("friendRequests")
+                    .where("fromUserId", "==", uid)
+                    .orderBy("createdAt", "desc");
                 
-                this.sentRequestsUnsubscribe = window.firebaseApp.firestore.onSnapshot(sentRequestsQuery, async (snapshot) => {
+                this.sentRequestsUnsubscribe = sentRequestsQuery.onSnapshot(async (snapshot) => {
                     this.sentRequests = [];
                     
                     for (const doc of snapshot.docs) {
                         const requestData = doc.data();
-                        const toUserRef = window.firebaseApp.firestore.doc(window.firebaseApp.db, "users", requestData.toUserId);
-                        const toUserDoc = await window.firebaseApp.firestore.getDoc(toUserRef);
+                        const toUserDoc = await db.collection("users").doc(requestData.toUserId).get();
                         
-                        if (toUserDoc.exists()) {
+                        if (toUserDoc.exists) { // FIXED: Changed .exists() to .exists
                             this.sentRequests.push({
                                 id: doc.id,
                                 ...requestData,
@@ -2649,26 +2637,24 @@
             async acceptFriendRequest(requestId, fromUserId) {
                 try {
                     // Update the friend request status
-                    const requestRef = window.firebaseApp.firestore.doc(window.firebaseApp.db, "friendRequests", requestId);
-                    await window.firebaseApp.firestore.updateDoc(requestRef, {
+                    const requestRef = db.collection("friendRequests").doc(requestId);
+                    await requestRef.update({
                         status: "accepted",
-                        respondedAt: window.firebaseApp.firestore.serverTimestamp()
+                        respondedAt: firebase.firestore.FieldValue.serverTimestamp()
                     });
                     
                     // Create friendship for current user
-                    const currentUserFriendRef = window.firebaseApp.firestore.collection(window.firebaseApp.db, "friends");
-                    await window.firebaseApp.firestore.addDoc(currentUserFriendRef, {
+                    await db.collection("friends").add({
                         userId: this.currentUser.uid,
                         friendId: fromUserId,
-                        createdAt: window.firebaseApp.firestore.serverTimestamp()
+                        createdAt: firebase.firestore.FieldValue.serverTimestamp()
                     });
                     
                     // Create friendship for the other user
-                    const otherUserFriendRef = window.firebaseApp.firestore.collection(window.firebaseApp.db, "friends");
-                    await window.firebaseApp.firestore.addDoc(otherUserFriendRef, {
+                    await db.collection("friends").add({
                         userId: fromUserId,
                         friendId: this.currentUser.uid,
-                        createdAt: window.firebaseApp.firestore.serverTimestamp()
+                        createdAt: firebase.firestore.FieldValue.serverTimestamp()
                     });
                     
                     this.showNotification('Friend request accepted!', 'success');
@@ -2682,10 +2668,10 @@
             async rejectFriendRequest(requestId) {
                 try {
                     // Update the friend request status
-                    const requestRef = window.firebaseApp.firestore.doc(window.firebaseApp.db, "friendRequests", requestId);
-                    await window.firebaseApp.firestore.updateDoc(requestRef, {
+                    const requestRef = db.collection("friendRequests").doc(requestId);
+                    await requestRef.update({
                         status: "rejected",
-                        respondedAt: window.firebaseApp.firestore.serverTimestamp()
+                        respondedAt: firebase.firestore.FieldValue.serverTimestamp()
                     });
                     
                     this.showNotification('Friend request rejected', 'info');
@@ -2699,8 +2685,7 @@
             async cancelFriendRequest(requestId) {
                 try {
                     // Delete the friend request
-                    const requestRef = window.firebaseApp.firestore.doc(window.firebaseApp.db, "friendRequests", requestId);
-                    await window.firebaseApp.firestore.deleteDoc(requestRef);
+                    await db.collection("friendRequests").doc(requestId).delete();
                     
                     this.showNotification('Friend request cancelled', 'info');
                     
@@ -2713,13 +2698,11 @@
             async sendFriendRequest(toUserId) {
                 try {
                     // Check if request already exists
-                    const existingRequestQuery = window.firebaseApp.firestore.query(
-                        window.firebaseApp.firestore.collection(window.firebaseApp.db, "friendRequests"),
-                        window.firebaseApp.firestore.where("fromUserId", "==", this.currentUser.uid),
-                        window.firebaseApp.firestore.where("toUserId", "==", toUserId)
-                    );
+                    const existingRequestQuery = db.collection("friendRequests")
+                        .where("fromUserId", "==", this.currentUser.uid)
+                        .where("toUserId", "==", toUserId);
                     
-                    const existingRequest = await window.firebaseApp.firestore.getDocs(existingRequestQuery);
+                    const existingRequest = await existingRequestQuery.get();
                     
                     if (!existingRequest.empty) {
                         this.showNotification('Friend request already sent', 'info');
@@ -2727,12 +2710,11 @@
                     }
                     
                     // Create new friend request
-                    const requestRef = window.firebaseApp.firestore.collection(window.firebaseApp.db, "friendRequests");
-                    await window.firebaseApp.firestore.addDoc(requestRef, {
+                    await db.collection("friendRequests").add({
                         fromUserId: this.currentUser.uid,
                         toUserId: toUserId,
                         status: "pending",
-                        createdAt: window.firebaseApp.firestore.serverTimestamp()
+                        createdAt: firebase.firestore.FieldValue.serverTimestamp()
                     });
                     
                     this.showNotification('Friend request sent!', 'success');
@@ -2746,27 +2728,23 @@
             async removeFriend(friendId) {
                 try {
                     // Remove friendship for current user
-                    const currentUserFriendQuery = window.firebaseApp.firestore.query(
-                        window.firebaseApp.firestore.collection(window.firebaseApp.db, "friends"),
-                        window.firebaseApp.firestore.where("userId", "==", this.currentUser.uid),
-                        window.firebaseApp.firestore.where("friendId", "==", friendId)
-                    );
+                    const currentUserFriendQuery = db.collection("friends")
+                        .where("userId", "==", this.currentUser.uid)
+                        .where("friendId", "==", friendId);
                     
-                    const currentUserFriendDocs = await window.firebaseApp.firestore.getDocs(currentUserFriendQuery);
+                    const currentUserFriendDocs = await currentUserFriendQuery.get();
                     currentUserFriendDocs.forEach(async (doc) => {
-                        await window.firebaseApp.firestore.deleteDoc(doc.ref);
+                        await doc.ref.delete();
                     });
                     
                     // Remove friendship for the other user
-                    const otherUserFriendQuery = window.firebaseApp.firestore.query(
-                        window.firebaseApp.firestore.collection(window.firebaseApp.db, "friends"),
-                        window.firebaseApp.firestore.where("userId", "==", friendId),
-                        window.firebaseApp.firestore.where("friendId", "==", this.currentUser.uid)
-                    );
+                    const otherUserFriendQuery = db.collection("friends")
+                        .where("userId", "==", friendId)
+                        .where("friendId", "==", this.currentUser.uid);
                     
-                    const otherUserFriendDocs = await window.firebaseApp.firestore.getDocs(otherUserFriendQuery);
+                    const otherUserFriendDocs = await otherUserFriendQuery.get();
                     otherUserFriendDocs.forEach(async (doc) => {
-                        await window.firebaseApp.firestore.deleteDoc(doc.ref);
+                        await doc.ref.delete();
                     });
                     
                     this.showNotification('Friend removed successfully', 'success');
@@ -2780,22 +2758,18 @@
             async searchUsers(searchTerm) {
                 try {
                     // Search by display name
-                    const nameQuery = window.firebaseApp.firestore.query(
-                        window.firebaseApp.firestore.collection(window.firebaseApp.db, "users"),
-                        window.firebaseApp.firestore.where("displayName", ">=", searchTerm),
-                        window.firebaseApp.firestore.where("displayName", "<=", searchTerm + '\uf8ff')
-                    );
+                    const nameQuery = db.collection("users")
+                        .where("displayName", ">=", searchTerm)
+                        .where("displayName", "<=", searchTerm + '\uf8ff');
                     
                     // Search by email
-                    const emailQuery = window.firebaseApp.firestore.query(
-                        window.firebaseApp.firestore.collection(window.firebaseApp.db, "users"),
-                        window.firebaseApp.firestore.where("email", ">=", searchTerm),
-                        window.firebaseApp.firestore.where("email", "<=", searchTerm + '\uf8ff')
-                    );
+                    const emailQuery = db.collection("users")
+                        .where("email", ">=", searchTerm)
+                        .where("email", "<=", searchTerm + '\uf8ff');
                     
                     const [nameSnapshot, emailSnapshot] = await Promise.all([
-                        window.firebaseApp.firestore.getDocs(nameQuery),
-                        window.firebaseApp.firestore.getDocs(emailQuery)
+                        nameQuery.get(),
+                        emailQuery.get()
                     ]);
                     
                     const results = [];
@@ -2803,7 +2777,7 @@
                     
                     // Add name results
                     nameSnapshot.forEach(doc => {
-                        if (doc.id !== this.currentUser.uid && !addedIds.has(doc.id)) {
+                        if (doc.id !== this.currentUser.uid && !addedIds.has(doc.id) && doc.exists) { // FIXED: Added .exists check
                             results.push({ id: doc.id, ...doc.data() });
                             addedIds.add(doc.id);
                         }
@@ -2811,7 +2785,7 @@
                     
                     // Add email results
                     emailSnapshot.forEach(doc => {
-                        if (doc.id !== this.currentUser.uid && !addedIds.has(doc.id)) {
+                        if (doc.id !== this.currentUser.uid && !addedIds.has(doc.id) && doc.exists) { // FIXED: Added .exists check
                             results.push({ id: doc.id, ...doc.data() });
                             addedIds.add(doc.id);
                         }
@@ -2890,21 +2864,20 @@
                 const chatId = [this.currentUser.uid, friendId].sort().join('_');
                 
                 // Check if chat already exists
-                const chatRef = window.firebaseApp.firestore.doc(window.firebaseApp.db, "chats", chatId);
-                const chatDoc = await window.firebaseApp.firestore.getDoc(chatRef);
+                const chatDoc = await db.collection("chats").doc(chatId).get();
                 
-                if (chatDoc.exists()) {
+                if (chatDoc.exists) { // FIXED: Changed .exists() to .exists
                     this.activeChat = { id: chatDoc.id, ...chatDoc.data() };
                 } else {
                     // Create new chat
                     const newChat = {
                         members: [this.currentUser.uid, friendId],
-                        createdAt: window.firebaseApp.firestore.serverTimestamp(),
+                        createdAt: firebase.firestore.FieldValue.serverTimestamp(),
                         lastMessage: null,
                         lastMessageAt: null
                     };
                     
-                    await window.firebaseApp.firestore.setDoc(chatRef, newChat);
+                    await db.collection("chats").doc(chatId).set(newChat);
                     this.activeChat = { id: chatId, ...newChat };
                 }
                 
@@ -2918,13 +2891,11 @@
                     this.chatUnsubscribe();
                 }
                 
-                const messagesQuery = window.firebaseApp.firestore.query(
-                    window.firebaseApp.firestore.collection(window.firebaseApp.db, "chats", chatId, "messages"),
-                    window.firebaseApp.firestore.orderBy("timestamp", "asc")
-                );
+                const messagesQuery = db.collection("chats").doc(chatId).collection("messages")
+                    .orderBy("timestamp", "asc");
                 
                 // Set up real-time listener for messages
-                this.chatUnsubscribe = window.firebaseApp.firestore.onSnapshot(messagesQuery, (snapshot) => {
+                this.chatUnsubscribe = messagesQuery.onSnapshot((snapshot) => {
                     const messages = [];
                     
                     snapshot.forEach(doc => {
@@ -2992,20 +2963,16 @@
                     const newMessage = {
                         text: messageText,
                         senderId: this.currentUser.uid,
-                        timestamp: window.firebaseApp.firestore.serverTimestamp()
+                        timestamp: firebase.firestore.FieldValue.serverTimestamp()
                     };
                     
                     // Add message to Firestore
-                    await window.firebaseApp.firestore.addDoc(
-                        window.firebaseApp.firestore.collection(window.firebaseApp.db, "chats", this.activeChat.id, "messages"),
-                        newMessage
-                    );
+                    await db.collection("chats").doc(this.activeChat.id).collection("messages").add(newMessage);
                     
                     // Update chat's last message
-                    const chatRef = window.firebaseApp.firestore.doc(window.firebaseApp.db, "chats", this.activeChat.id);
-                    await window.firebaseApp.firestore.updateDoc(chatRef, {
+                    await db.collection("chats").doc(this.activeChat.id).update({
                         lastMessage: messageText,
-                        lastMessageAt: window.firebaseApp.firestore.serverTimestamp()
+                        lastMessageAt: firebase.firestore.FieldValue.serverTimestamp()
                     });
                     
                     // Clear input
@@ -3827,39 +3794,13 @@
                 });
 
                 // Avatar upload
-                document.querySelector('.edit-avatar-btn').addEventListener('click', () => {
-                    document.getElementById('avatarInput').click();
+                document.getElementById('uploadAvatarBtn').addEventListener('click', () => {
+                    this.openCloudinaryWidget('avatar');
                 });
 
                 // Cover upload
-                document.querySelector('.edit-cover-btn').addEventListener('click', () => {
-                    document.getElementById('coverInput').click();
-                });
-
-                // File input changes
-                document.getElementById('avatarInput').addEventListener('change', (e) => {
-                    if (e.target.files && e.target.files[0]) {
-                        this.openImageCropper(e.target.files[0], 'avatar');
-                    }
-                });
-
-                document.getElementById('coverInput').addEventListener('change', (e) => {
-                    if (e.target.files && e.target.files[0]) {
-                        this.openImageCropper(e.target.files[0], 'cover');
-                    }
-                });
-
-                // Cropper modal buttons
-                document.getElementById('cancelCrop').addEventListener('click', () => {
-                    document.getElementById('cropperModal').classList.add('hidden');
-                    if (this.cropper) {
-                        this.cropper.destroy();
-                        this.cropper = null;
-                    }
-                });
-
-                document.getElementById('applyCrop').addEventListener('click', () => {
-                    this.applyImageCrop();
+                document.getElementById('uploadCoverBtn').addEventListener('click', () => {
+                    this.openCloudinaryWidget('cover');
                 });
 
                 // Mood selector
@@ -4045,23 +3986,79 @@
                 });
             }
 
+            openCloudinaryWidget(type) {
+                const widget = cloudinary.createUploadWidget({
+                    cloudName: cloudinaryConfig.cloudName,
+                    uploadPreset: cloudinaryConfig.uploadPreset,
+                    sources: ['local', 'camera', 'url'],
+                    multiple: false,
+                    maxFiles: 1,
+                    cropping: type === 'avatar',
+                    croppingAspectRatio: type === 'avatar' ? 1 : 16/9,
+                    showSkipCropButton: false,
+                    styles: {
+                        palette: {
+                            window: "#1C1C1C",
+                            sourceBg: "#2D2D2D",
+                            windowBorder: "#90A0B3",
+                            tabIcon: "#667eea",
+                            inactiveTabIcon: "#8E9FBF",
+                            menuIcons: "#667eea",
+                            link: "#667eea",
+                            action: "#667eea",
+                            inProgress: "#667eea",
+                            complete: "#33ff00",
+                            error: "#EA2727",
+                            textDark: "#1C1C1C",
+                            textLight: "#FFFFFF"
+                        }
+                    }
+                }, (error, result) => {
+                    if (!error && result && result.event === "success") {
+                        console.log('Upload successful: ', result.info);
+                        this.handleImageUpload(result.info, type);
+                    } else if (error) {
+                        console.error('Upload error: ', error);
+                        this.showNotification('Image upload failed. Please try again.', 'error');
+                    }
+                });
+                
+                widget.open();
+            }
+
+            async handleImageUpload(result, type) {
+                try {
+                    this.showNotification('Updating profile...', 'info');
+                    
+                    const updateData = {};
+                    updateData[type === 'avatar' ? 'profilePicture' : 'coverPhoto'] = result.secure_url;
+                    
+                    await db.collection("users").doc(this.currentUser.uid).update(updateData);
+                    
+                    this.showNotification(`${type === 'avatar' ? 'Profile picture' : 'Cover photo'} updated successfully!`, 'success');
+                } catch (error) {
+                    console.error('Error updating image:', error);
+                    this.showNotification('Error updating image', 'error');
+                }
+            }
+
             async loadProfileOnce(uid) {
                 try {
-                    const userRef = window.firebaseApp.firestore.doc(window.firebaseApp.db, "users", uid);
-                    const doc = await window.firebaseApp.firestore.getDoc(userRef);
+                    const userDoc = await db.collection("users").doc(uid).get();
                     
-                    if (doc.exists()) {
-                        this.userProfile = { id: doc.id, ...doc.data() };
+                    if (userDoc.exists) { // FIXED: Changed .exists() to .exists
+                        this.userProfile = { id: userDoc.id, ...userDoc.data() };
                         this.updateProfileUI(this.userProfile);
                         this.updateSidebar(this.userProfile);
                         this.calculateProfileCompletion(this.userProfile);
                         this.showLoading(false);
                         this.showProfileLayout();
                     } else {
-                        this.createNewProfile(uid);
+                        await this.createNewProfile(uid);
                     }
                 } catch (error) {
                     console.error("Fallback load also failed:", error);
+                    this.showLoading(false); // Always hide loading spinner
                     this.createFallbackProfile();
                 }
             }
@@ -4089,8 +4086,8 @@
                         privacy: "public",
                         theme: "blue-purple",
                         mood: "happy",
-                        createdAt: window.firebaseApp.firestore.serverTimestamp(),
-                        lastActive: window.firebaseApp.firestore.serverTimestamp(),
+                        createdAt: firebase.firestore.FieldValue.serverTimestamp(),
+                        lastActive: firebase.firestore.FieldValue.serverTimestamp(),
                         stats: {
                             posts: 0,
                             followers: 0,
@@ -4101,14 +4098,19 @@
                         isOnline: true
                     };
 
-                    const userRef = window.firebaseApp.firestore.doc(window.firebaseApp.db, "users", uid);
-                    await window.firebaseApp.firestore.setDoc(userRef, newProfile);
+                    await db.collection("users").doc(uid).set(newProfile);
                     
                     console.log("New profile created successfully");
                     this.userProfile = newProfile;
+                    this.updateProfileUI(newProfile);
+                    this.updateSidebar(newProfile);
+                    this.calculateProfileCompletion(newProfile);
+                    this.showLoading(false);
+                    this.showProfileLayout();
                     
                 } catch (error) {
                     console.error("Error creating new profile:", error);
+                    this.showLoading(false); // Always hide loading spinner
                     this.createFallbackProfile();
                 }
             }
@@ -4123,19 +4125,30 @@
                     location: "Unknown",
                     interests: ["Technology", "Networking", "Learning"],
                     skills: ["Communication", "Problem Solving"],
+                    socialLinks: {},
+                    profilePicture: "",
+                    coverPhoto: "",
+                    privacy: "public",
+                    theme: "blue-purple",
+                    mood: "happy",
                     stats: {
                         posts: 0,
                         followers: 0,
                         following: 0,
-                        reputation: 100
-                    }
+                        reputation: 100,
+                        profileViews: 0
+                    },
+                    isOnline: true,
+                    createdAt: new Date()
                 };
                 
                 this.userProfile = fallbackProfile;
                 this.updateProfileUI(fallbackProfile);
                 this.updateSidebar(fallbackProfile);
+                this.calculateProfileCompletion(fallbackProfile);
                 this.showLoading(false);
                 this.showProfileLayout();
+                this.showNotification('Using fallback profile - some features may be limited', 'info');
             }
 
             generateUsername(email) {
@@ -4265,16 +4278,18 @@
                     return;
                 }
                 
-                // Simulate username check
-                setTimeout(() => {
-                    const isAvailable = Math.random() > 0.5;
-                    if (isAvailable) {
-                        availability.innerHTML = '<span class="text-green-400">Username is available!</span>';
-                    } else {
-                        availability.innerHTML = '<span class="text-red-400">Username is already taken</span>';
-                    }
-                    availability.classList.remove('hidden');
-                }, 1000);
+                // Check if username exists in Firestore
+                const usernameQuery = db.collection("users")
+                    .where("username", "==", username);
+                
+                const querySnapshot = await usernameQuery.get();
+                
+                if (querySnapshot.empty) {
+                    availability.innerHTML = '<span class="text-green-400">Username is available!</span>';
+                } else {
+                    availability.innerHTML = '<span class="text-red-400">Username is already taken</span>';
+                }
+                availability.classList.remove('hidden');
             }
 
             async saveProfileChanges() {
@@ -4314,12 +4329,11 @@
                         },
                         privacy: selectedPrivacy,
                         theme: selectedTheme,
-                        updatedAt: window.firebaseApp.firestore.serverTimestamp()
+                        updatedAt: firebase.firestore.FieldValue.serverTimestamp()
                     };
                     
                     // Update in Firestore
-                    const userRef = window.firebaseApp.firestore.doc(window.firebaseApp.db, "users", this.currentUser.uid);
-                    await window.firebaseApp.firestore.updateDoc(userRef, updatedProfile);
+                    await db.collection("users").doc(this.currentUser.uid).update(updatedProfile);
                     
                     // Close modal
                     document.getElementById('editProfileModal').classList.add('hidden');
@@ -4329,74 +4343,6 @@
                     console.error('Error updating profile:', error);
                     this.showNotification('Error updating profile. Please try again.', 'error');
                 }
-            }
-
-            openImageCropper(file, type) {
-                const reader = new FileReader();
-                
-                reader.onload = (e) => {
-                    document.getElementById('cropperImage').src = e.target.result;
-                    document.getElementById('cropperModal').classList.remove('hidden');
-                    document.getElementById('cropperTitle').textContent = `Crop ${type === 'avatar' ? 'Profile Picture' : 'Cover Photo'}`;
-                    this.currentEditingImage = type;
-                    
-                    // Initialize cropper
-                    if (this.cropper) {
-                        this.cropper.destroy();
-                    }
-                    
-                    this.cropper = new Cropper(document.getElementById('cropperImage'), {
-                        aspectRatio: type === 'avatar' ? 1 : 16/9,
-                        viewMode: 1,
-                        autoCropArea: 1,
-                        responsive: true,
-                        guides: false
-                    });
-                };
-                
-                reader.readAsDataURL(file);
-            }
-
-            applyImageCrop() {
-                if (!this.cropper || !this.currentEditingImage) return;
-                
-                // Get cropped canvas
-                const canvas = this.cropper.getCroppedCanvas({
-                    width: this.currentEditingImage === 'avatar' ? 400 : 1200,
-                    height: this.currentEditingImage === 'avatar' ? 400 : 675
-                });
-                
-                // Convert to blob and simulate upload
-                canvas.toBlob(async (blob) => {
-                    try {
-                        // Simulate upload delay
-                        this.showNotification('Uploading image...', 'info');
-                        
-                        setTimeout(async () => {
-                            // Create a mock URL for the uploaded image
-                            const mockImageUrl = URL.createObjectURL(blob);
-                            
-                            // Update user profile with new image URL
-                            const updateData = {};
-                            updateData[this.currentEditingImage === 'avatar' ? 'profilePicture' : 'coverPhoto'] = mockImageUrl;
-                            
-                            const userRef = window.firebaseApp.firestore.doc(window.firebaseApp.db, "users", this.currentUser.uid);
-                            await window.firebaseApp.firestore.updateDoc(userRef, updateData);
-                            
-                            // Close cropper
-                            document.getElementById('cropperModal').classList.add('hidden');
-                            this.cropper.destroy();
-                            this.cropper = null;
-                            this.currentEditingImage = null;
-                            
-                            this.showNotification(`${this.currentEditingImage === 'avatar' ? 'Profile picture' : 'Cover photo'} updated successfully!`, 'success');
-                        }, 2000);
-                        
-                    } catch (error) {
-                        console.error('Error updating image:', error);
-                        this.showNotification('Error updating image', 'error');
-                    }
-                });
             }
 
             openMoodSelector() {
@@ -4449,10 +4395,9 @@
 
             async updateUserMood(mood) {
                 try {
-                    const userRef = window.firebaseApp.firestore.doc(window.firebaseApp.db, "users", this.currentUser.uid);
-                    await window.firebaseApp.firestore.updateDoc(userRef, {
+                    await db.collection("users").doc(this.currentUser.uid).update({
                         mood: mood,
-                        lastActive: window.firebaseApp.firestore.serverTimestamp()
+                        lastActive: firebase.firestore.FieldValue.serverTimestamp()
                     });
                     
                     this.showNotification(`Mood updated to ${mood}`, 'success');
@@ -4492,13 +4437,10 @@
                         content: content,
                         mood: mood,
                         privacy: privacy,
-                        createdAt: window.firebaseApp.firestore.serverTimestamp()
+                        createdAt: firebase.firestore.FieldValue.serverTimestamp()
                     };
                     
-                    await window.firebaseApp.firestore.addDoc(
-                        window.firebaseApp.firestore.collection(window.firebaseApp.db, "diary"),
-                        newEntry
-                    );
+                    await db.collection("diary").add(newEntry);
                     
                     document.getElementById('diaryModal').classList.add('hidden');
                     
@@ -4526,6 +4468,9 @@
                     document.body.className = 'h-full bg-gradient-to-br from-blue-50 via-white to-purple-50 text-gray-800 overflow-x-hidden';
                 }
                 
+                // Save theme preference to localStorage
+                localStorage.setItem('theme', this.isDarkMode ? 'dark' : 'light');
+                
                 this.showNotification(`${this.isDarkMode ? 'Dark' : 'Light'} mode activated`, 'success');
             }
 
@@ -4533,10 +4478,9 @@
                 try {
                     // Update user status to offline
                     if (this.currentUser && this.userProfile) {
-                        const userRef = window.firebaseApp.firestore.doc(window.firebaseApp.db, "users", this.currentUser.uid);
-                        await window.firebaseApp.firestore.updateDoc(userRef, {
+                        await db.collection("users").doc(this.currentUser.uid).update({
                             isOnline: false,
-                            lastActive: window.firebaseApp.firestore.serverTimestamp()
+                            lastActive: firebase.firestore.FieldValue.serverTimestamp()
                         });
                     }
                     
@@ -4547,7 +4491,7 @@
                     if (this.friendRequestsUnsubscribe) this.friendRequestsUnsubscribe();
                     if (this.sentRequestsUnsubscribe) this.sentRequestsUnsubscribe();
                     
-                    await window.firebaseApp.authFunctions.signOut(window.firebaseApp.auth);
+                    await auth.signOut();
                     localStorage.clear();
                     sessionStorage.clear();
                     window.location.href = 'login.html';
@@ -4602,37 +4546,44 @@
             }
         }
 
-        // Initialize the application
-        window.initProfileApp = function() {
+        // Initialize the application when DOM is ready
+        document.addEventListener('DOMContentLoaded', () => {
             const app = new ProfileApplication();
             app.initialize();
-        };
-
-        // Global functions for friend management
-        window.sendFriendRequest = function(userId) {
-            if (window.profileApp) {
-                window.profileApp.sendFriendRequest(userId);
+            
+            // Load saved theme preference
+            const savedTheme = localStorage.getItem('theme');
+            if (savedTheme === 'light') {
+                app.isDarkMode = false;
+                document.getElementById('themeToggle').classList.remove('dark');
+                document.body.className = 'h-full bg-gradient-to-br from-blue-50 via-white to-purple-50 text-gray-800 overflow-x-hidden';
             }
-        };
+        });
 
-        window.removeFriend = function(friendId) {
-            if (window.profileApp) {
-                window.profileApp.removeFriend(friendId);
+        // Temporary debug function
+        async function forceCreateProfile() {
+            const user = auth.currentUser;
+            if (user) {
+                console.log("🛠️ Force creating profile for:", user.uid);
+                await window.profileApp.createNewProfile(user.uid);
+            } else {
+                alert("No user logged in");
             }
-        };
-
-        window.cancelFriendRequest = function(requestId) {
-            if (window.profileApp) {
-                window.profileApp.cancelFriendRequest(requestId);
-            }
-        };
-
-        // Start the app when DOM is ready
-        if (document.readyState === 'loading') {
-            document.addEventListener('DOMContentLoaded', window.initProfileApp);
-        } else {
-            window.initProfileApp();
         }
+
+        // Also add this to check current status
+        function checkStatus() {
+            const user = auth.currentUser;
+            console.log("👤 Current user:", user);
+            if (user) {
+                db.collection("users").doc(user.uid).get().then((doc) => {
+                    console.log("📄 Document exists:", doc.exists);
+                    console.log("📊 Document data:", doc.data());
+                });
+            }
+        }
+        // Run status check on load
+        setTimeout(checkStatus, 2000);
     </script>
 </body>
 </html>

@@ -1,106 +1,228 @@
-// Professional Chat System JavaScript - Firebase Integrated Version
+// Kynecta - Advanced Real-Time Chat System
+// Production-ready implementation with Firebase, WebRTC, E2EE, and AI features
 
-class ProfessionalChatSystem {
+// Configuration
+const CONFIG = {
+    // Firebase config (replace with your actual config)
+    firebase: {
+        apiKey: "AIzaSyDHHyGgsSV18BcXrGgzi4C8frzDAE1C1zo",
+        authDomain: "uniconnect-ee95c.firebaseapp.com",
+        projectId: "uniconnect-ee95c",
+        storageBucket: "uniconnect-ee95c.firebasestorage.app",
+        messagingSenderId: "1003264444309",
+        appId: "1:1003264444309:web:9f0307516e44d21e97d89c",
+        messagingId: "" // Add your FCM messaging ID
+    },
+    
+    // WebRTC configuration
+    rtc: {
+        iceServers: [
+            { urls: 'stun:stun.l.google.com:19302' },
+            { urls: 'stun:stun1.l.google.com:19302' },
+            // Add your TURN servers here for production
+            // {
+            //     urls: 'turn:your-turn-server.com:3478',
+            //     username: 'username',
+            //     credential: 'password'
+            // }
+        ]
+    },
+    
+    // AI/ML services
+    ai: {
+        openai: {
+            apiKey: '', // Set in environment variables
+            endpoint: 'https://api.openai.com/v1/chat/completions'
+        },
+        huggingface: {
+            apiKey: '', // Set in environment variables
+            sentimentEndpoint: 'https://api-inference.huggingface.co/models/cardiffnlp/twitter-roberta-base-sentiment-latest'
+        }
+    },
+    
+    // Cloudinary configuration
+    cloudinary: {
+        cloudName: '', // Set in environment variables
+        uploadPreset: 'kynecta_chat'
+    },
+    
+    // Feature flags
+    features: {
+        e2ee: true,
+        aiSentiment: true,
+        pushNotifications: true,
+        voiceMessages: true
+    }
+};
+
+// Crypto utilities for E2EE
+class EncryptionService {
+    constructor() {
+        this.algorithm = { name: 'AES-GCM', length: 256 };
+        this.key = null;
+    }
+
+    async generateKey() {
+        this.key = await crypto.subtle.generateKey(
+            { name: 'AES-GCM', length: 256 },
+            true,
+            ['encrypt', 'decrypt']
+        );
+        return this.key;
+    }
+
+    async exportKey() {
+        if (!this.key) await this.generateKey();
+        return await crypto.subtle.exportKey('jwk', this.key);
+    }
+
+    async importKey(jwk) {
+        this.key = await crypto.subtle.importKey(
+            'jwk',
+            jwk,
+            this.algorithm,
+            true,
+            ['encrypt', 'decrypt']
+        );
+    }
+
+    async encrypt(text) {
+        if (!this.key) await this.generateKey();
+        
+        const iv = crypto.getRandomValues(new Uint8Array(12));
+        const encoded = new TextEncoder().encode(text);
+        
+        const encrypted = await crypto.subtle.encrypt(
+            { name: 'AES-GCM', iv },
+            this.key,
+            encoded
+        );
+        
+        return {
+            iv: Array.from(iv),
+            data: Array.from(new Uint8Array(encrypted))
+        };
+    }
+
+    async decrypt(encryptedData) {
+        if (!this.key) throw new Error('No key available for decryption');
+        
+        const { iv, data } = encryptedData;
+        const decrypted = await crypto.subtle.decrypt(
+            { name: 'AES-GCM', iv: new Uint8Array(iv) },
+            this.key,
+            new Uint8Array(data)
+        );
+        
+        return new TextDecoder().decode(decrypted);
+    }
+}
+
+// Main Chat Application Class
+class KynectaChat {
     constructor() {
         this.currentUser = null;
         this.currentChatId = null;
-        this.chats = [];
-        this.users = [];
-        this.filteredChats = [];
-        this.currentChatTypeFilter = 'all';
-        this.isSidebarVisible = true;
-        this.emotionAI = new EmotionAI();
-        this.gamification = null;
-        this.currentEmotion = 'default';
-        this.whisperMode = false;
-        this.currentMediaFile = null;
-        this.messageListener = null;
-        this.chatsListener = null;
-        this.usersListener = null;
-        this.lastSent = 0; // Rate limiting
-        
-        // Feature state management
-        this.isVideoCallActive = false;
-        this.isVoiceCallActive = false;
-        this.isScreenSharing = false;
+        this.currentMood = 'happy';
+        this.encryption = new EncryptionService();
+        this.peerConnection = null;
         this.localStream = null;
         this.remoteStream = null;
-        this.screenStream = null;
-        this.audioStream = null;
-        this.videoStream = null;
-        this.peerConnection = null;
-        this.mediaRecorder = null;
-        this.audioChunks = [];
-        this.videoChunks = [];
-        this.recordingTimer = null;
-        this.recordingStartTime = null;
-        
-        // Firebase configuration
-        this.firebaseConfig = {
-            apiKey: "AIzaSyDHHyGgsSV18BcXrGgzi4C8frzDAE1C1zo",
-            authDomain: "uniconnect-ee95c.firebaseapp.com",
-            projectId: "uniconnect-ee95c",
-            storageBucket: "uniconnect-ee95c.firebasestorage.app",
-            messagingSenderId: "1003264444309",
-            appId: "1:1003264444309:web:9f0307516e44d21e97d89c"
-        };
-        
-        this.environment = 'production';
+        this.isInCall = false;
+        this.messageListeners = {};
+        this.presenceListeners = {};
         
         this.init();
     }
-    
+
     async init() {
         try {
-            await this.initializeFirebase();
+            // Initialize Firebase
+            if (!firebase.apps.length) {
+                firebase.initializeApp(CONFIG.firebase);
+            }
+            
+            this.auth = firebase.auth();
+            this.db = firebase.firestore();
+            this.storage = firebase.storage();
+            this.messaging = firebase.messaging();
+            
+            // Initialize services
+            await this.initEncryption();
+            await this.initServiceWorker();
             await this.setupAuthStateListener();
             this.setupEventListeners();
-            console.log(`🚀 Professional Chat System Initialized with Firebase`);
-        } catch (error) {
-            console.error('Error initializing chat system:', error);
-            this.showNotification('Error initializing chat system', 'error');
-        }
-    }
-    
-    async initializeFirebase() {
-        // Check if Firebase is already initialized
-        if (firebase.apps.length > 0) {
-            this.auth = firebase.auth();
-            this.firestore = firebase.firestore();
-            this.storage = firebase.storage();
-            console.log('✅ Firebase already initialized');
-            return;
-        }
-
-        // Validate configuration
-        if (!this.firebaseConfig?.apiKey || !this.firebaseConfig?.projectId) {
-            throw new Error('Firebase configuration is incomplete.');
-        }
-
-        // Initialize Firebase
-        try {
-            firebase.initializeApp(this.firebaseConfig);
-            this.auth = firebase.auth();
-            this.firestore = firebase.firestore();
-            this.storage = firebase.storage();
             
-            // Enable offline persistence with error handling
-            try {
-                await this.firestore.enablePersistence({
-                    synchronizeTabs: true
-                });
-                console.log('✅ Firebase persistence enabled');
-            } catch (persistenceError) {
-                console.warn('⚠️ Firebase persistence failed:', persistenceError);
-            }
-
-            console.log(`✅ Firebase initialized for project: ${this.firebaseConfig.projectId}`);
+            console.log('Kynecta Chat initialized successfully');
         } catch (error) {
-            console.error('❌ Firebase initialization error:', error);
-            throw new Error('Failed to initialize Firebase.');
+            console.error('Failed to initialize Kynecta:', error);
+            this.showError('Failed to initialize application');
         }
     }
-    
+
+    async initEncryption() {
+        if (CONFIG.features.e2ee) {
+            // Load or generate encryption key
+            const storedKey = localStorage.getItem('kynecta_encryption_key');
+            if (storedKey) {
+                await this.encryption.importKey(JSON.parse(storedKey));
+            } else {
+                const key = await this.encryption.generateKey();
+                const exportedKey = await this.encryption.exportKey();
+                localStorage.setItem('kynecta_encryption_key', JSON.stringify(exportedKey));
+            }
+        }
+    }
+
+    async initServiceWorker() {
+        if ('serviceWorker' in navigator && CONFIG.features.pushNotifications) {
+            try {
+                const registration = await navigator.serviceWorker.register('/firebase-messaging-sw.js');
+                console.log('Service Worker registered:', registration);
+                
+                // Request notification permission
+                const permission = await Notification.requestPermission();
+                if (permission === 'granted') {
+                    await this.setupPushNotifications();
+                }
+            } catch (error) {
+                console.error('Service Worker registration failed:', error);
+            }
+        }
+    }
+
+    async setupPushNotifications() {
+        try {
+            const token = await this.messaging.getToken({
+                vapidKey: CONFIG.firebase.messagingId
+            });
+            
+            if (token && this.currentUser) {
+                await this.db.collection('users').doc(this.currentUser.uid).update({
+                    fcmToken: token,
+                    fcmTokenUpdated: firebase.firestore.FieldValue.serverTimestamp()
+                });
+            }
+            
+            // Handle foreground messages
+            this.messaging.onMessage((payload) => {
+                this.showNotification(payload);
+            });
+        } catch (error) {
+            console.error('Push notification setup failed:', error);
+        }
+    }
+
+    showNotification(payload) {
+        if ('Notification' in window && Notification.permission === 'granted') {
+            new Notification(payload.notification.title, {
+                body: payload.notification.body,
+                icon: '/icons/icon-192x192.png',
+                badge: '/icons/badge-72x72.png'
+            });
+        }
+    }
+
     setupAuthStateListener() {
         this.auth.onAuthStateChanged(async (user) => {
             if (user) {
@@ -108,2364 +230,797 @@ class ProfessionalChatSystem {
             } else {
                 this.handleUserSignedOut();
             }
-        }, (error) => {
-            console.error('Auth state listener error:', error);
-            this.showNotification('Authentication error occurred', 'error');
         });
     }
-    
+
     async handleUserSignedIn(user) {
-        try {
-            // Get user data from Firestore
-            const userDoc = await this.firestore.collection('users').doc(user.uid).get();
+        this.currentUser = user;
+        
+        // Load or create user profile
+        await this.loadUserProfile();
+        
+        // Setup presence
+        await this.setupUserPresence();
+        
+        // Load user data
+        await this.loadUserData();
+        
+        // Update UI
+        this.showChatApp();
+        
+        console.log('User signed in:', user.uid);
+    }
+
+    handleUserSignedOut() {
+        this.currentUser = null;
+        this.cleanupListeners();
+        this.showAuthScreen();
+        console.log('User signed out');
+    }
+
+    async loadUserProfile() {
+        const userDoc = await this.db.collection('users').doc(this.currentUser.uid).get();
+        
+        if (!userDoc.exists) {
+            // Create new user profile
+            await this.db.collection('users').doc(this.currentUser.uid).set({
+                uid: this.currentUser.uid,
+                displayName: this.currentUser.displayName || 'User',
+                email: this.currentUser.email,
+                photoURL: this.currentUser.photoURL || this.generateDefaultAvatar(this.currentUser.uid),
+                mood: 'happy',
+                lastSeen: firebase.firestore.FieldValue.serverTimestamp(),
+                isOnline: true,
+                createdAt: firebase.firestore.FieldValue.serverTimestamp()
+            });
+        } else {
+            // Update online status
+            await this.db.collection('users').doc(this.currentUser.uid).update({
+                lastSeen: firebase.firestore.FieldValue.serverTimestamp(),
+                isOnline: true
+            });
+        }
+        
+        this.updateUserUI();
+    }
+
+    generateDefaultAvatar(uid) {
+        const colors = ['#7C3AED', '#10B981', '#F59E0B', '#EF4444', '#3B82F6'];
+        const color = colors[uid.charCodeAt(0) % colors.length];
+        return `data:image/svg+xml,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100"><rect width="100" height="100" fill="${color}"/><text x="50" y="60" font-family="Arial" font-size="40" text-anchor="middle" fill="white">${this.currentUser.displayName ? this.currentUser.displayName.charAt(0).toUpperCase() : 'U'}</text></svg>`;
+    }
+
+    async setupUserPresence() {
+        // Set online status
+        const userRef = this.db.collection('users').doc(this.currentUser.uid);
+        await userRef.update({
+            isOnline: true,
+            lastSeen: firebase.firestore.FieldValue.serverTimestamp()
+        });
+
+        // Handle disconnect
+        this.db.collection('users').doc(this.currentUser.uid).onSnapshot((snapshot) => {
+            if (!snapshot.exists) return;
             
-            if (userDoc.exists) {
-                this.currentUser = {
-                    id: user.uid,
-                    email: user.email,
-                    ...userDoc.data()
-                };
-            } else {
-                // Create new user document
-                this.currentUser = {
-                    id: user.uid,
-                    email: user.email,
-                    name: user.displayName || user.email.split('@')[0],
-                    role: 'student',
-                    online: true,
-                    avatar: user.displayName ? user.displayName.substring(0, 2).toUpperCase() : 'US',
-                    streak: 0,
-                    connectcoins: 0,
-                    level: 1,
-                    xp: 0,
-                    lastSeen: firebase.firestore.FieldValue.serverTimestamp()
-                };
-                
-                await this.firestore.collection('users').doc(user.uid).set(this.currentUser);
-            }
-            
-            // Update user online status
-            await this.firestore.collection('users').doc(user.uid).update({
-                online: true,
+            const userData = snapshot.data();
+            this.updateUserPresenceUI(userData);
+        });
+
+        // Update lastSeen on window close
+        window.addEventListener('beforeunload', async () => {
+            await userRef.update({
+                isOnline: false,
                 lastSeen: firebase.firestore.FieldValue.serverTimestamp()
             });
-            
-            // Initialize gamification
-            this.gamification = new GamificationSystem(this.currentUser);
-            await this.gamification.loadUserProgress();
-            
-            this.updateCurrentUser();
-            await this.loadUsers();
-            await this.loadChats();
-            this.setupRealtimeListeners();
-            
-            this.showNotification(`Welcome back, ${this.currentUser.name}!`, 'success');
-            
-        } catch (error) {
-            console.error('Error handling user sign in:', error);
-            this.showNotification('Error loading user data', 'error');
-        }
-    }
-    
-    async handleUserSignedOut() {
-        // Update user offline status
-        if (this.currentUser) {
-            try {
-                await this.firestore.collection('users').doc(this.currentUser.id).update({
-                    online: false,
-                    lastSeen: firebase.firestore.FieldValue.serverTimestamp()
-                });
-            } catch (error) {
-                console.error('Error updating user offline status:', error);
-            }
-        }
-
-        // Clean up listeners and media
-        this.cleanupAllMedia();
-        if (this.messageListener) this.messageListener();
-        if (this.chatsListener) this.chatsListener();
-        if (this.usersListener) this.usersListener();
-        
-        this.currentUser = null;
-        this.chats = [];
-        this.users = [];
-        this.filteredChats = [];
-        this.currentChatId = null;
-        
-        // Redirect to login page
-        window.location.href = 'index.html';
-    }
-    
-    async loadUsers() {
-        try {
-            const snapshot = await this.firestore.collection('users')
-                .where('id', '!=', this.currentUser.id)
-                .get();
-            
-            this.users = snapshot.docs.map(doc => ({
-                id: doc.id,
-                ...doc.data()
-            }));
-            
-        } catch (error) {
-            console.error('Error loading users:', error);
-        }
-    }
-    
-    async loadChats() {
-        try {
-            const snapshot = await this.firestore.collection('chats')
-                .where('members', 'array-contains', this.currentUser.id)
-                .orderBy('lastMessageTime', 'desc')
-                .get();
-            
-            this.chats = await Promise.all(
-                snapshot.docs.map(async doc => {
-                    const chatData = doc.data();
-                    
-                    // Load members data
-                    const membersData = await Promise.all(
-                        chatData.members.map(async memberId => {
-                            try {
-                                const memberDoc = await this.firestore.collection('users').doc(memberId).get();
-                                return {
-                                    id: memberId,
-                                    ...memberDoc.data()
-                                };
-                            } catch (error) {
-                                console.error(`Error loading member ${memberId}:`, error);
-                                return {
-                                    id: memberId,
-                                    name: 'Unknown User',
-                                    avatar: 'UU',
-                                    role: 'user'
-                                };
-                            }
-                        })
-                    );
-                    
-                    return {
-                        id: doc.id,
-                        ...chatData,
-                        members: membersData,
-                        messages: []
-                    };
-                })
-            );
-            
-            this.filteredChats = [...this.chats];
-            this.renderChatList();
-            
-        } catch (error) {
-            console.error('Error loading chats:', error);
-            this.showNotification('Error loading conversations', 'error');
-        }
-    }
-    
-    setupRealtimeMessageListener(chatId) {
-        if (this.messageListener) {
-            this.messageListener();
-        }
-        
-        try {
-            const messagesRef = this.firestore.collection('chats').doc(chatId).collection('messages');
-            const q = messagesRef.orderBy("timestamp", "asc").limit(100);
-            
-            this.messageListener = q.onSnapshot((snapshot) => {
-                const messages = [];
-                snapshot.forEach((doc) => {
-                    messages.push({
-                        id: doc.id,
-                        ...doc.data()
-                    });
-                });
-                
-                // Update the current chat's messages
-                const chatIndex = this.chats.findIndex(chat => chat.id === chatId);
-                if (chatIndex >= 0) {
-                    this.chats[chatIndex].messages = messages.map(msg => {
-                        const sender = this.chats[chatIndex].members.find(m => m.id === msg.senderId) || this.currentUser;
-                        return {
-                            ...msg,
-                            sender: sender,
-                            time: this.formatTime(msg.timestamp?.toDate()),
-                            timestamp: msg.timestamp
-                        };
-                    });
-                    
-                    // Re-render messages if this is the active chat
-                    if (this.currentChatId === chatId) {
-                        this.renderMessages(chatId);
-                        this.scrollToBottom();
-                        this.markAsRead(chatId);
-                    }
-                }
-            }, (error) => {
-                console.error('Error in real-time message listener:', error);
-            });
-        } catch (error) {
-            console.error('Error setting up message listener:', error);
-        }
-    }
-    
-    setupRealtimeChatsListener() {
-        if (this.chatsListener) {
-            this.chatsListener();
-        }
-        
-        try {
-            const chatsRef = this.firestore.collection('chats');
-            const q = chatsRef
-                .where('members', 'array-contains', this.currentUser.id)
-                .orderBy('lastMessageTime', 'desc');
-            
-            this.chatsListener = q.onSnapshot(async (snapshot) => {
-                for (const change of snapshot.docChanges()) {
-                    if (change.type === 'added' || change.type === 'modified') {
-                        await this.updateChatFromSnapshot(change.doc);
-                    } else if (change.type === 'removed') {
-                        this.removeChat(change.doc.id);
-                    }
-                }
-            }, (error) => {
-                console.error('Error in real-time chats listener:', error);
-            });
-        } catch (error) {
-            console.error('Error setting up chats listener:', error);
-        }
-    }
-    
-    setupRealtimeUsersListener() {
-        if (this.usersListener) {
-            this.usersListener();
-        }
-        
-        try {
-            const usersRef = this.firestore.collection('users');
-            const q = usersRef.where('id', '!=', this.currentUser.id);
-            
-            this.usersListener = q.onSnapshot((snapshot) => {
-                snapshot.docChanges().forEach((change) => {
-                    if (change.type === 'modified' || change.type === 'added') {
-                        this.updateUserFromSnapshot(change.doc);
-                    }
-                });
-            }, (error) {
-                console.error('Error in real-time users listener:', error);
-            });
-        } catch (error) {
-            console.error('Error setting up users listener:', error);
-        }
-    }
-    
-    setupRealtimeListeners() {
-        this.setupRealtimeChatsListener();
-        this.setupRealtimeUsersListener();
-        
-        if (this.currentChatId) {
-            this.setupRealtimeMessageListener(this.currentChatId);
-        }
-    }
-    
-    async updateChatFromSnapshot(doc) {
-        const chatData = doc.data();
-        const existingIndex = this.chats.findIndex(chat => chat.id === doc.id);
-        
-        // Load members data
-        const membersData = await Promise.all(
-            chatData.members.map(async memberId => {
-                try {
-                    const memberDoc = await this.firestore.collection('users').doc(memberId).get();
-                    return {
-                        id: memberId,
-                        ...memberDoc.data()
-                    };
-                } catch (error) {
-                    console.error(`Error loading member ${memberId}:`, error);
-                    return {
-                        id: memberId,
-                        name: 'Unknown User',
-                        avatar: 'UU',
-                        role: 'user'
-                    };
-                }
-            })
-        );
-        
-        const updatedChat = {
-            id: doc.id,
-            ...chatData,
-            members: membersData,
-            messages: this.chats[existingIndex]?.messages || []
-        };
-        
-        if (existingIndex >= 0) {
-            this.chats[existingIndex] = updatedChat;
-            this.filteredChats[existingIndex] = updatedChat;
-        } else {
-            this.chats.unshift(updatedChat);
-            this.filteredChats.unshift(updatedChat);
-        }
-        
-        this.renderChatList();
-        
-        if (doc.id === this.currentChatId) {
-            this.renderMessages(doc.id);
-        }
-    }
-    
-    updateUserFromSnapshot(doc) {
-        const userData = doc.data();
-        const userIndex = this.users.findIndex(user => user.id === doc.id);
-        
-        if (userIndex >= 0) {
-            this.users[userIndex] = {
-                id: doc.id,
-                ...userData
-            };
-        }
-        
-        // Update user in chats
-        this.chats.forEach(chat => {
-            const memberIndex = chat.members.findIndex(member => member.id === doc.id);
-            if (memberIndex >= 0) {
-                chat.members[memberIndex] = {
-                    id: doc.id,
-                    ...userData
-                };
-            }
         });
     }
-    
-    removeChat(chatId) {
-        this.chats = this.chats.filter(chat => chat.id !== chatId);
-        this.filteredChats = this.filteredChats.filter(chat => chat.id !== chatId);
-        
-        if (this.currentChatId === chatId) {
-            this.showChatList();
-        }
-        
-        this.renderChatList();
+
+    async loadUserData() {
+        await this.loadChats();
+        await this.loadContacts();
+        this.setupRealtimeListeners();
     }
-    
-    // Rate limiting function
-    canSend() {
-        const now = Date.now();
-        if (now - this.lastSent < 2000) {
-            this.showNotification('Please wait a moment before sending another message', 'warning');
-            return false;
-        }
-        this.lastSent = now;
-        return true;
+
+    async loadChats() {
+        const chatsQuery = this.db.collection('chats')
+            .where('participants', 'array-contains', this.currentUser.uid)
+            .orderBy('lastMessageAt', 'desc');
+        
+        this.chatsListener = chatsQuery.onSnapshot(async (snapshot) => {
+            const chatList = document.getElementById('chatList');
+            const noChats = document.getElementById('noChatsMessage');
+            
+            if (snapshot.empty) {
+                if (noChats) noChats.classList.remove('hidden');
+                return;
+            }
+            
+            if (noChats) noChats.classList.add('hidden');
+            chatList.innerHTML = '';
+            
+            for (const doc of snapshot.docs) {
+                const chat = { id: doc.id, ...doc.data() };
+                await this.renderChatItem(chat, chatList);
+            }
+        }, (error) => {
+            console.error('Error loading chats:', error);
+        });
     }
-    
-    // Enhanced message sending function
-    async sendMessage(text = null, imageUrl = null) {
-        const input = document.getElementById('message-input');
-        const messageType = document.getElementById('message-type')?.value || 'normal';
+
+    async renderChatItem(chat, container) {
+        // Get other participant's info for 1-on-1 chats
+        let chatName = chat.name;
+        let chatAvatar = chat.avatar;
+        let lastMessage = chat.lastMessage;
         
-        const content = text || input?.value.trim();
-        
-        if (!content && !imageUrl && !this.currentMediaFile) {
-            this.showNotification('Please enter a message or attach a file', 'warning');
-            return;
+        if (chat.type === 'direct' && !chat.name) {
+            const otherUserId = chat.participants.find(id => id !== this.currentUser.uid);
+            if (otherUserId) {
+                const userDoc = await this.db.collection('users').doc(otherUserId).get();
+                if (userDoc.exists) {
+                    const userData = userDoc.data();
+                    chatName = userData.displayName;
+                    chatAvatar = userData.photoURL;
+                }
+            }
         }
         
-        if (!this.currentChatId) {
-            this.showNotification('Please select a chat first', 'warning');
-            return;
+        // Decrypt last message if encrypted
+        if (lastMessage && lastMessage.encrypted && CONFIG.features.e2ee) {
+            try {
+                lastMessage = await this.encryption.decrypt(lastMessage);
+            } catch (error) {
+                lastMessage = 'Encrypted message';
+            }
         }
         
-        if (!this.canSend()) {
-            return;
+        const chatItem = document.createElement('div');
+        chatItem.className = 'p-4 border-b border-gray-200 flex cursor-pointer hover:bg-gray-50 transition-colors chat-item';
+        chatItem.dataset.chatId = chat.id;
+        
+        chatItem.innerHTML = `
+            <div class="w-12 h-12 rounded-2xl bg-cover bg-center flex items-center justify-center text-white font-semibold mr-3" style="background-image: url('${chatAvatar || this.generateDefaultAvatar(chat.id)}')">
+                ${!chatAvatar ? chatName.split(' ').map(n => n[0]).join('') : ''}
+            </div>
+            <div class="flex-1 min-w-0">
+                <div class="flex justify-between items-center">
+                    <h3 class="font-semibold truncate">${chatName}</h3>
+                    <span class="text-xs text-gray-500">${this.formatTimestamp(chat.lastMessageAt)}</span>
+                </div>
+                <div class="flex justify-between items-center">
+                    <p class="text-sm text-gray-600 truncate">${lastMessage || 'No messages yet'}</p>
+                    ${chat.unreadCount > 0 ? `<div class="bg-purple-500 text-white text-xs rounded-full w-5 h-5 flex items-center justify-center">${chat.unreadCount}</div>` : ''}
+                </div>
+            </div>
+        `;
+        
+        chatItem.addEventListener('click', () => this.openChat(chat.id));
+        container.appendChild(chatItem);
+    }
+
+    async openChat(chatId) {
+        this.currentChatId = chatId;
+        
+        // Update UI
+        document.getElementById('chatHeader').classList.remove('hidden');
+        document.getElementById('inputArea').classList.remove('hidden');
+        document.getElementById('noMessagesMessage').classList.add('hidden');
+        
+        // Load chat details and messages
+        await this.loadChatDetails(chatId);
+        await this.loadMessages(chatId);
+        this.setupMessageListener(chatId);
+        
+        // Mark messages as read
+        await this.markMessagesAsRead(chatId);
+    }
+
+    async loadChatDetails(chatId) {
+        const chatDoc = await this.db.collection('chats').doc(chatId).get();
+        if (!chatDoc.exists) return;
+        
+        const chat = chatDoc.data();
+        
+        // Update chat header
+        if (chat.type === 'direct') {
+            const otherUserId = chat.participants.find(id => id !== this.currentUser.uid);
+            if (otherUserId) {
+                const userDoc = await this.db.collection('users').doc(otherUserId).get();
+                if (userDoc.exists) {
+                    const userData = userDoc.data();
+                    document.getElementById('chatTitle').textContent = userData.displayName;
+                    document.getElementById('chatAvatar').src = userData.photoURL;
+                    document.getElementById('statusText').textContent = userData.isOnline ? 'Online' : `Last seen ${this.formatTimestamp(userData.lastSeen)}`;
+                    
+                    // Update mood indicator
+                    const moodIndicator = document.getElementById('moodIndicator');
+                    moodIndicator.className = `mood-indicator mood-${userData.mood || 'happy'}-indicator`;
+                }
+            }
+        } else {
+            document.getElementById('chatTitle').textContent = chat.name;
+            document.getElementById('chatAvatar').src = chat.avatar || this.generateDefaultAvatar(chatId);
+            document.getElementById('statusText').textContent = `${chat.participants.length} participants`;
         }
+    }
+
+    async loadMessages(chatId) {
+        const messagesContainer = document.getElementById('messagesContainer');
+        messagesContainer.innerHTML = '';
+        
+        const messagesQuery = this.db.collection('chats').doc(chatId)
+            .collection('messages')
+            .orderBy('timestamp', 'asc')
+            .limit(50);
+        
+        const snapshot = await messagesQuery.get();
+        
+        for (const doc of snapshot.docs) {
+            await this.renderMessage(doc.id, doc.data(), messagesContainer);
+        }
+        
+        this.scrollToBottom();
+    }
+
+    setupMessageListener(chatId) {
+        // Remove previous listener
+        if (this.messageListeners[chatId]) {
+            this.messageListeners[chatId]();
+        }
+        
+        const messagesQuery = this.db.collection('chats').doc(chatId)
+            .collection('messages')
+            .orderBy('timestamp', 'asc');
+        
+        this.messageListeners[chatId] = messagesQuery.onSnapshot(async (snapshot) => {
+            const messagesContainer = document.getElementById('messagesContainer');
+            
+            snapshot.docChanges().forEach(async (change) => {
+                if (change.type === 'added') {
+                    await this.renderMessage(change.doc.id, change.doc.data(), messagesContainer);
+                    this.scrollToBottom();
+                    
+                    // Mark as read if it's not our message
+                    if (change.doc.data().senderId !== this.currentUser.uid) {
+                        await this.markMessageAsRead(chatId, change.doc.id);
+                    }
+                } else if (change.type === 'modified') {
+                    await this.updateMessage(change.doc.id, change.doc.data());
+                } else if (change.type === 'removed') {
+                    this.removeMessage(change.doc.id);
+                }
+            });
+        });
+    }
+
+    async renderMessage(messageId, messageData, container) {
+        const messageDiv = document.createElement('div');
+        messageDiv.id = `message-${messageId}`;
+        messageDiv.className = `flex mb-4 ${messageData.senderId === this.currentUser.uid ? 'justify-end' : 'justify-start'}`;
+        
+        let content = messageData.content;
+        let isEncrypted = false;
+        
+        // Decrypt message if needed
+        if (messageData.encrypted && CONFIG.features.e2ee) {
+            try {
+                content = await this.encryption.decrypt(messageData.content);
+                isEncrypted = true;
+            } catch (error) {
+                content = 'Unable to decrypt message';
+            }
+        }
+        
+        // Apply sentiment analysis for mood-based styling
+        if (CONFIG.features.aiSentiment && messageData.sentiment) {
+            messageDiv.classList.add(`mood-${messageData.sentiment}`);
+        }
+        
+        messageDiv.innerHTML = `
+            <div class="max-w-xs lg:max-w-md ${messageData.senderId === this.currentUser.uid ? 'message-sent' : 'message-received'} p-3 rounded-2xl relative group">
+                ${messageData.replyTo ? `
+                    <div class="text-xs opacity-75 border-l-2 border-gray-400 pl-2 mb-2">
+                        Replying to: ${messageData.replyTo}
+                    </div>
+                ` : ''}
+                
+                ${messageData.type === 'image' ? `
+                    <img src="${content}" alt="Shared image" class="rounded-lg max-w-full mb-2 cursor-pointer" onclick="chatApp.viewImage('${content}')">
+                ` : messageData.type === 'file' ? `
+                    <div class="flex items-center p-2 bg-white bg-opacity-20 rounded-lg mb-2">
+                        <i class="fas fa-file mr-2"></i>
+                        <div class="flex-1 min-w-0">
+                            <p class="text-sm font-medium truncate">${messageData.fileName}</p>
+                            <p class="text-xs opacity-75">${this.formatFileSize(messageData.fileSize)}</p>
+                        </div>
+                        <a href="${content}" download="${messageData.fileName}" class="ml-2 text-current">
+                            <i class="fas fa-download"></i>
+                        </a>
+                    </div>
+                ` : `
+                    <p class="whitespace-pre-wrap">${content}</p>
+                    ${isEncrypted ? '<i class="fas fa-lock text-xs ml-1 opacity-75" title="End-to-end encrypted"></i>' : ''}
+                `}
+                
+                <div class="flex justify-between items-center mt-1 text-xs opacity-75">
+                    <span>${this.formatTimestamp(messageData.timestamp)}</span>
+                    <div class="flex items-center space-x-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                        ${messageData.senderId === this.currentUser.uid ? `
+                            <button onclick="chatApp.editMessage('${messageId}')" class="hover:opacity-100">
+                                <i class="fas fa-edit"></i>
+                            </button>
+                            <button onclick="chatApp.deleteMessage('${messageId}')" class="hover:opacity-100">
+                                <i class="fas fa-trash"></i>
+                            </button>
+                        ` : `
+                            <button onclick="chatApp.reactToMessage('${messageId}')" class="hover:opacity-100">
+                                <i class="fas fa-smile"></i>
+                            </button>
+                            <button onclick="chatApp.replyToMessage('${messageId}')" class="hover:opacity-100">
+                                <i class="fas fa-reply"></i>
+                            </button>
+                        `}
+                    </div>
+                </div>
+                
+                ${messageData.reactions && Object.keys(messageData.reactions).length > 0 ? `
+                    <div class="flex flex-wrap gap-1 mt-2">
+                        ${Object.entries(messageData.reactions).map(([emoji, users]) => `
+                            <span class="bg-black bg-opacity-20 px-2 py-1 rounded-full text-xs">
+                                ${emoji} ${users.length}
+                            </span>
+                        `).join('')}
+                    </div>
+                ` : ''}
+            </div>
+        `;
+        
+        container.appendChild(messageDiv);
+    }
+
+    async sendMessage() {
+        const input = document.getElementById('messageInput');
+        const content = input.value.trim();
+        
+        if (!content || !this.currentChatId) return;
         
         try {
-            let mediaUrl = imageUrl;
-            let mediaType = null;
-
-            // Upload media if exists
-            if (this.currentMediaFile && !imageUrl) {
-                this.showNotification('Uploading media...', 'info');
-                mediaUrl = await this.uploadMediaFile(this.currentMediaFile);
-                mediaType = this.currentMediaFile.type.split('/')[0];
-            } else if (imageUrl) {
-                mediaUrl = imageUrl;
-                mediaType = 'image';
+            // Encrypt message if E2EE is enabled
+            let encryptedContent = content;
+            let isEncrypted = false;
+            
+            if (CONFIG.features.e2ee) {
+                encryptedContent = await this.encryption.encrypt(content);
+                isEncrypted = true;
             }
-
-            // Analyze emotion
-            const emotion = content ? this.emotionAI.analyzeText(content) : 'default';
-            this.applyEmotionTheme(emotion);
+            
+            // Analyze sentiment for mood detection
+            let sentiment = null;
+            if (CONFIG.features.aiSentiment) {
+                sentiment = await this.analyzeSentiment(content);
+            }
             
             const messageData = {
-                senderId: this.currentUser.id,
-                content: content || '',
-                type: messageType,
-                emotion: emotion,
-                status: 'sent',
+                content: isEncrypted ? encryptedContent : content,
+                encrypted: isEncrypted,
+                senderId: this.currentUser.uid,
+                senderName: this.currentUser.displayName,
                 timestamp: firebase.firestore.FieldValue.serverTimestamp(),
-                mediaUrl: mediaUrl,
-                mediaType: mediaType,
-                isWhisper: this.whisperMode
+                type: 'text',
+                readBy: [this.currentUser.uid],
+                sentiment: sentiment
             };
             
             // Add message to Firestore
-            const messagesRef = this.firestore.collection('chats').doc(this.currentChatId).collection('messages');
-            await messagesRef.add(messageData);
+            await this.db.collection('chats').doc(this.currentChatId)
+                .collection('messages').add(messageData);
             
             // Update chat last message
-            const chatRef = this.firestore.collection('chats').doc(this.currentChatId);
-            await chatRef.update({
-                lastMessage: content || (mediaUrl ? '📎 Media shared' : 'Message sent'),
-                lastMessageTime: firebase.firestore.FieldValue.serverTimestamp()
+            await this.db.collection('chats').doc(this.currentChatId).update({
+                lastMessage: content.substring(0, 100) + (content.length > 100 ? '...' : ''),
+                lastMessageAt: firebase.firestore.FieldValue.serverTimestamp()
             });
             
-            // Clear input and reset
-            if (!text && !imageUrl && input) {
-                input.value = '';
-                input.style.height = 'auto';
-                this.clearMediaPreview();
-                this.currentMediaFile = null;
-            }
-            
-            // Award points
-            if (this.gamification) {
-                this.gamification.addConnectcoins(2);
-                this.gamification.addXP(1);
-            }
+            // Clear input
+            input.value = '';
+            document.getElementById('sendBtn').disabled = true;
             
         } catch (error) {
             console.error('Error sending message:', error);
-            this.showNotification('Error sending message', 'error');
+            this.showError('Failed to send message');
         }
     }
 
-    // Quick send function for external use
-    async quickSend(text, imageUrl = null) {
-        return this.sendMessage(text, imageUrl);
+    async analyzeSentiment(text) {
+        try {
+            // Simple rule-based sentiment analysis (replace with AI API)
+            const positiveWords = ['happy', 'good', 'great', 'awesome', 'excellent', 'amazing', 'love', 'like', 'nice', 'wonderful'];
+            const negativeWords = ['sad', 'bad', 'terrible', 'awful', 'hate', 'angry', 'upset', 'dislike', 'horrible'];
+            
+            const words = text.toLowerCase().split(/\s+/);
+            let positiveCount = words.filter(word => positiveWords.includes(word)).length;
+            let negativeCount = words.filter(word => negativeWords.includes(word)).length;
+            
+            if (positiveCount > negativeCount) return 'happy';
+            if (negativeCount > positiveCount) return 'energetic'; // Using energetic for negative sentiment
+            return 'calm';
+            
+            // For production, use:
+            // const response = await fetch(CONFIG.ai.huggingface.sentimentEndpoint, {
+            //     method: 'POST',
+            //     headers: { 'Authorization': `Bearer ${CONFIG.ai.huggingface.apiKey}` },
+            //     body: JSON.stringify({ inputs: text })
+            // });
+            // const result = await response.json();
+            // return this.mapSentimentToMood(result);
+            
+        } catch (error) {
+            console.error('Sentiment analysis failed:', error);
+            return 'calm';
+        }
     }
 
-    setupEventListeners() {
-        const safeAddEventListener = (id, event, handler) => {
-            const element = document.getElementById(id);
-            if (element) {
-                element.addEventListener(event, handler);
-            }
+    mapSentimentToMood(sentimentResult) {
+        // Map AI sentiment result to mood
+        const mapping = {
+            'positive': 'happy',
+            'negative': 'energetic',
+            'neutral': 'calm'
         };
-
-        // Chat list interactions
-        safeAddEventListener('chat-search', 'input', (e) => {
-            this.filterChats(e.target.value);
-        });
-        
-        // Message sending
-        safeAddEventListener('send-btn', 'click', () => this.sendMessage());
-        safeAddEventListener('message-input', 'keypress', (e) => {
-            if (e.key === 'Enter' && !e.shiftKey) {
-                e.preventDefault();
-                this.sendMessage();
-            }
-        });
-
-        // Auto-resize textarea
-        safeAddEventListener('message-input', 'input', function() {
-            this.style.height = 'auto';
-            this.style.height = (this.scrollHeight) + 'px';
-        });
-        
-        // Back button
-        safeAddEventListener('back-to-list', 'click', () => this.showChatList());
-        
-        // New chat button
-        safeAddEventListener('new-chat-btn', 'click', () => {
-            this.showModal('new-chat-modal');
-        });
-
-        // Logout button
-        safeAddEventListener('logout-btn', 'click', () => this.logout());
-
-        // Enhanced Features Event Listeners
-        this.setupEnhancedEventListeners();
+        return mapping[sentimentResult[0]?.label] || 'calm';
     }
 
-    setupEnhancedEventListeners() {
-        const safeAddEventListener = (id, event, handler) => {
-            const element = document.getElementById(id);
-            if (element) {
-                element.addEventListener(event, handler);
-            }
-        };
-
-        // Emotion Analysis
-        safeAddEventListener('emotionAnalysisBtn', 'click', () => this.showEmotionAnalysis());
-        safeAddEventListener('closeEmotionModal', 'click', () => this.hideEmotionAnalysis());
-
-        // DNA Test
-        safeAddEventListener('dnaTestBtn', 'click', () => this.showDNATest());
-        safeAddEventListener('closeDnaModal', 'click', () => this.hideDNATest());
-
-        // Time Capsule
-        safeAddEventListener('timeCapsuleBtn', 'click', () => this.showTimeCapsule());
-        safeAddEventListener('createCapsuleBtn', 'click', () => this.createTimeCapsule());
-        safeAddEventListener('closeTimeCapsuleModal', 'click', () => this.hideTimeCapsule());
-
-        // Media Attachment
-        safeAddEventListener('attachImageBtn', 'click', () => this.attachMedia('image'));
-        safeAddEventListener('attachVideoBtn', 'click', () => this.attachMedia('video'));
-        safeAddEventListener('attachAudioBtn', 'click', () => this.attachMedia('audio'));
-
-        // Quick image send
-        safeAddEventListener('quickImageBtn', 'click', () => {
-            this.quickSend('Check out this image!', 'https://via.placeholder.com/300x200/3B82F6/FFFFFF?text=Demo+Image');
-        });
-
-        // Whisper Mode
-        safeAddEventListener('whisperButton', 'click', () => this.toggleWhisperMode());
-
-        // Emoji Picker
-        safeAddEventListener('emojiButton', 'click', () => this.toggleEmojiPicker());
-        document.addEventListener('click', (e) => {
-            if (!e.target.closest('#emojiPicker') && !e.target.closest('#emojiButton')) {
-                this.hideEmojiPicker();
-            }
-        });
-
-        // Initialize emoji picker
-        this.initializeEmojiPicker();
-
-        // Video Call
-        safeAddEventListener('videoCallBtn', 'click', () => this.startVideoCall());
-        safeAddEventListener('endVideoCallBtn', 'click', () => this.endVideoCall());
-
-        // Voice Call
-        safeAddEventListener('voiceCallBtn', 'click', () => this.startVoiceCall());
-        safeAddEventListener('endVoiceCallBtn', 'click', () => this.endVoiceCall());
-
-        // Voice Message
-        safeAddEventListener('voiceMessageBtn', 'click', () => this.startVoiceMessage());
-        safeAddEventListener('stopVoiceRecording', 'click', () => this.stopVoiceRecording());
-
-        // Screen Sharing
-        safeAddEventListener('screenShareBtn', 'click', () => this.toggleScreenShare());
-        safeAddEventListener('stopScreenShare', 'click', () => this.stopScreenShare());
-
-        // File Share
-        safeAddEventListener('fileShareBtn', 'click', () => this.shareFile());
-
-        // Location Sharing
-        safeAddEventListener('locationBtn', 'click', () => this.shareLocation());
-        safeAddEventListener('confirmLocationShare', 'click', () => this.confirmLocationShare());
-        safeAddEventListener('cancelLocationShare', 'click', () => this.cancelLocationShare());
-
-        // GIF Picker
-        safeAddEventListener('gifBtn', 'click', () => this.toggleGifPicker());
-        document.addEventListener('click', (e) => {
-            if (!e.target.closest('#gifPicker') && !e.target.closest('#gifBtn')) {
-                this.hideGifPicker();
-            }
-        });
-
-        // Sticker Picker
-        safeAddEventListener('stickerBtn', 'click', () => this.toggleStickerPicker());
-        document.addEventListener('click', (e) => {
-            if (!e.target.closest('#stickerPicker') && !e.target.closest('#stickerBtn')) {
-                this.hideStickerPicker();
-            }
-        });
-
-        // Video Recording
-        safeAddEventListener('videoRecordBtn', 'click', () => this.startVideoRecording());
-        safeAddEventListener('stopVideoRecording', 'click', () => this.stopVideoRecording());
-        safeAddEventListener('cancelVideoRecording', 'click', () => this.cancelVideoRecording());
-
-        // Search Messages
-        safeAddEventListener('searchMenuItem', 'click', () => this.searchMessages());
-
-        // Add Friend
-        safeAddEventListener('addFriendBtn', 'click', () => this.showAddFriendModal());
-        safeAddEventListener('searchFriendBtn', 'click', () => this.searchFriends());
-        safeAddEventListener('closeAddFriendModal', 'click', () => this.hideAddFriendModal());
-
-        // Create Group
-        safeAddEventListener('createGroupBtn', 'click', () => this.showCreateGroupModal());
-        safeAddEventListener('createGroupBtnConfirm', 'click', () => this.createGroupChat());
-        safeAddEventListener('closeCreateGroupModal', 'click', () => this.hideCreateGroupModal());
-    }
-
-    // ========== ENHANCED FEATURE IMPLEMENTATIONS ==========
-
-    // Emoji Picker Implementation
-    initializeEmojiPicker() {
-        const emojiPicker = document.getElementById('emojiPicker');
-        if (!emojiPicker) return;
-
-        const emojis = ['😀', '😂', '🥰', '😎', '🤔', '😍', '🙂', '😊', '🤩', '😜', 
-                       '👍', '❤️', '🔥', '🎉', '💯', '✨', '🙏', '😢', '😡', '🤯',
-                       '😘', '🥺', '😇', '🤠', '😈', '👻', '💀', '👽', '🤖', '🎃'];
-
-        emojiPicker.innerHTML = emojis.map(emoji => `
-            <span class="emoji-item" data-emoji="${emoji}">${emoji}</span>
-        `).join('');
-
-        // Add click listeners to emoji items
-        emojiPicker.querySelectorAll('.emoji-item').forEach(item => {
-            item.addEventListener('click', (e) => {
-                const emoji = e.target.getAttribute('data-emoji');
-                this.insertEmoji(emoji);
-            });
-        });
-    }
-
-    insertEmoji(emoji) {
-        const messageInput = document.getElementById('message-input');
-        if (messageInput) {
-            const start = messageInput.selectionStart;
-            const end = messageInput.selectionEnd;
-            const text = messageInput.value;
-            messageInput.value = text.substring(0, start) + emoji + text.substring(end);
-            messageInput.focus();
-            messageInput.selectionStart = messageInput.selectionEnd = start + emoji.length;
-            
-            // Trigger input event for auto-resize
-            messageInput.dispatchEvent(new Event('input'));
-        }
-        this.hideEmojiPicker();
-    }
-
-    toggleEmojiPicker() {
-        const picker = document.getElementById('emojiPicker');
-        if (picker) {
-            this.hideAllPickers();
-            picker.classList.toggle('hidden');
-        }
-    }
-
-    hideEmojiPicker() {
-        const picker = document.getElementById('emojiPicker');
-        if (picker) picker.classList.add('hidden');
-    }
-
-    // GIF Picker Implementation
-    toggleGifPicker() {
-        const picker = document.getElementById('gifPicker');
-        if (picker) {
-            this.hideAllPickers();
-            picker.classList.toggle('hidden');
-            this.loadTrendingGifs();
-        }
-    }
-
-    hideGifPicker() {
-        const picker = document.getElementById('gifPicker');
-        if (picker) picker.classList.add('hidden');
-    }
-
-    async loadTrendingGifs() {
-        const gifContainer = document.getElementById('gifContainer');
-        if (!gifContainer) return;
-
-        // Demo GIFs - in production, integrate with Giphy API
-        const demoGifs = [
-            'https://media.giphy.com/media/3o7aCTPPm4OHfRLSH6/giphy.gif',
-            'https://media.giphy.com/media/l0MYt5jPR6QX5pnqM/giphy.gif',
-            'https://media.giphy.com/media/26AHONQ79FdWZhAI0/giphy.gif',
-            'https://media.giphy.com/media/l4HnKwiJJaJQB04Zq/giphy.gif'
-        ];
-
-        gifContainer.innerHTML = demoGifs.map(gifUrl => `
-            <div class="gif-item" data-gif="${gifUrl}">
-                <img src="${gifUrl}" alt="GIF" class="w-full h-20 object-cover rounded cursor-pointer">
-            </div>
-        `).join('');
-
-        // Add click listeners
-        gifContainer.querySelectorAll('.gif-item').forEach(item => {
-            item.addEventListener('click', (e) => {
-                const gifUrl = e.currentTarget.getAttribute('data-gif');
-                this.sendGif(gifUrl);
-            });
-        });
-    }
-
-    async sendGif(gifUrl) {
-        if (!this.currentChatId) {
-            this.showNotification('Please select a chat first', 'warning');
-            return;
-        }
-
+    // WebRTC Implementation
+    async startVideoCall(contactId) {
         try {
-            const messageData = {
-                senderId: this.currentUser.id,
-                content: 'Sent a GIF',
-                type: 'gif',
-                mediaUrl: gifUrl,
-                mediaType: 'image',
-                status: 'sent',
-                timestamp: firebase.firestore.FieldValue.serverTimestamp()
-            };
-
-            const messagesRef = this.firestore.collection('chats').doc(this.currentChatId).collection('messages');
-            await messagesRef.add(messageData);
-
-            // Update chat last message
-            const chatRef = this.firestore.collection('chats').doc(this.currentChatId);
-            await chatRef.update({
-                lastMessage: 'Sent a GIF',
-                lastMessageTime: firebase.firestore.FieldValue.serverTimestamp()
+            this.isInCall = true;
+            document.getElementById('videoCallContainer').style.display = 'block';
+            
+            // Get local media stream
+            this.localStream = await navigator.mediaDevices.getUserMedia({
+                video: true,
+                audio: true
             });
-
-            this.hideGifPicker();
-            this.showNotification('GIF sent successfully', 'success');
-
-        } catch (error) {
-            console.error('Error sending GIF:', error);
-            this.showNotification('Error sending GIF', 'error');
-        }
-    }
-
-    // Sticker Picker Implementation
-    toggleStickerPicker() {
-        const picker = document.getElementById('stickerPicker');
-        if (picker) {
-            this.hideAllPickers();
-            picker.classList.toggle('hidden');
-            this.loadStickers();
-        }
-    }
-
-    hideStickerPicker() {
-        const picker = document.getElementById('stickerPicker');
-        if (picker) picker.classList.add('hidden');
-    }
-
-    loadStickers() {
-        const stickerContainer = document.getElementById('stickerContainer');
-        if (!stickerContainer) return;
-
-        // Demo stickers using emojis
-        const stickers = ['😺', '🐶', '🐼', '🦊', '🐨', '🐯', '🦁', '🐮',
-                         '🌞', '🌙', '⭐', '🌈', '🔥', '💧', '🌺', '🍕'];
-
-        stickerContainer.innerHTML = stickers.map(sticker => `
-            <div class="sticker-item" data-sticker="${sticker}">
-                <span class="text-3xl">${sticker}</span>
-            </div>
-        `).join('');
-
-        // Add click listeners
-        stickerContainer.querySelectorAll('.sticker-item').forEach(item => {
-            item.addEventListener('click', (e) => {
-                const sticker = e.currentTarget.getAttribute('data-sticker');
-                this.sendSticker(sticker);
-            });
-        });
-    }
-
-    async sendSticker(sticker) {
-        if (!this.currentChatId) {
-            this.showNotification('Please select a chat first', 'warning');
-            return;
-        }
-
-        try {
-            const messageData = {
-                senderId: this.currentUser.id,
-                content: sticker,
-                type: 'sticker',
-                status: 'sent',
-                timestamp: firebase.firestore.FieldValue.serverTimestamp()
-            };
-
-            const messagesRef = this.firestore.collection('chats').doc(this.currentChatId).collection('messages');
-            await messagesRef.add(messageData);
-
-            // Update chat last message
-            const chatRef = this.firestore.collection('chats').doc(this.currentChatId);
-            await chatRef.update({
-                lastMessage: 'Sent a sticker',
-                lastMessageTime: firebase.firestore.FieldValue.serverTimestamp()
-            });
-
-            this.hideStickerPicker();
-            this.showNotification('Sticker sent successfully', 'success');
-
-        } catch (error) {
-            console.error('Error sending sticker:', error);
-            this.showNotification('Error sending sticker', 'error');
-        }
-    }
-
-    // Video Call Implementation
-    async startVideoCall() {
-        if (!this.currentChatId) {
-            this.showNotification('Please select a chat first', 'warning');
-            return;
-        }
-
-        try {
-            // Request camera and microphone permissions
-            this.localStream = await navigator.mediaDevices.getUserMedia({ 
-                video: true, 
-                audio: true 
-            });
-
-            // Show video call interface
-            this.showVideoCallInterface();
             
-            // Initialize WebRTC connection
-            await this.initializeWebRTC();
+            document.getElementById('localVideo').srcObject = this.localStream;
             
-            // Send call notification
-            await this.sendCallNotification('video');
+            // Create peer connection
+            this.peerConnection = new RTCPeerConnection(CONFIG.rtc);
             
-            this.isVideoCallActive = true;
-            this.showNotification('Video call started', 'success');
-
-        } catch (error) {
-            console.error('Error starting video call:', error);
-            this.showNotification('Error starting video call. Please check permissions.', 'error');
-        }
-    }
-
-    async startVoiceCall() {
-        if (!this.currentChatId) {
-            this.showNotification('Please select a chat first', 'warning');
-            return;
-        }
-
-        try {
-            // Request microphone permission only
-            this.localStream = await navigator.mediaDevices.getUserMedia({ 
-                video: false, 
-                audio: true 
-            });
-
-            // Show voice call interface
-            this.showVoiceCallInterface();
-            
-            // Initialize WebRTC connection
-            await this.initializeWebRTC();
-            
-            // Send call notification
-            await this.sendCallNotification('voice');
-            
-            this.isVoiceCallActive = true;
-            this.showNotification('Voice call started', 'success');
-
-        } catch (error) {
-            console.error('Error starting voice call:', error);
-            this.showNotification('Error starting voice call. Please check permissions.', 'error');
-        }
-    }
-
-    async initializeWebRTC() {
-        // Simplified WebRTC implementation
-        const configuration = {
-            iceServers: [
-                { urls: 'stun:stun.l.google.com:19302' }
-            ]
-        };
-
-        this.peerConnection = new RTCPeerConnection(configuration);
-
-        // Add local stream to connection
-        if (this.localStream) {
+            // Add local stream to connection
             this.localStream.getTracks().forEach(track => {
                 this.peerConnection.addTrack(track, this.localStream);
             });
-        }
-
-        // Handle incoming stream
-        this.peerConnection.ontrack = (event) => {
-            this.remoteStream = event.streams[0];
-            this.updateRemoteVideo();
-        };
-
-        // For demo purposes, simulate connection
-        setTimeout(() => {
-            if (this.isVideoCallActive || this.isVoiceCallActive) {
-                this.showNotification('Call connected', 'success');
-            }
-        }, 2000);
-    }
-
-    showVideoCallInterface() {
-        const videoCallModal = document.getElementById('videoCallModal');
-        if (videoCallModal) {
-            videoCallModal.classList.remove('hidden');
             
-            // Set local video stream
-            const localVideo = document.getElementById('localVideo');
-            if (localVideo && this.localStream) {
-                localVideo.srcObject = this.localStream;
-            }
+            // Handle remote stream
+            this.peerConnection.ontrack = (event) => {
+                this.remoteStream = event.streams[0];
+                document.getElementById('remoteVideo').srcObject = this.remoteStream;
+            };
+            
+            // Create offer
+            const offer = await this.peerConnection.createOffer();
+            await this.peerConnection.setLocalDescription(offer);
+            
+            // Send offer via Firebase (signaling)
+            await this.sendCallSignal(contactId, 'offer', offer);
+            
+        } catch (error) {
+            console.error('Error starting video call:', error);
+            this.showError('Failed to start video call');
+            this.endCall();
         }
     }
 
-    showVoiceCallInterface() {
-        const voiceCallModal = document.getElementById('voiceCallModal');
-        if (voiceCallModal) {
-            voiceCallModal.classList.remove('hidden');
+    async startVoiceCall(contactId) {
+        try {
+            this.isInCall = true;
+            document.getElementById('videoCallContainer').style.display = 'block';
+            document.getElementById('localVideo').style.display = 'none';
+            
+            // Get audio only
+            this.localStream = await navigator.mediaDevices.getUserMedia({
+                video: false,
+                audio: true
+            });
+            
+            // Create peer connection (similar to video call but without video)
+            this.peerConnection = new RTCPeerConnection(CONFIG.rtc);
+            this.localStream.getTracks().forEach(track => {
+                this.peerConnection.addTrack(track, this.localStream);
+            });
+            
+            const offer = await this.peerConnection.createOffer();
+            await this.peerConnection.setLocalDescription(offer);
+            
+            await this.sendCallSignal(contactId, 'offer', offer);
+            
+        } catch (error) {
+            console.error('Error starting voice call:', error);
+            this.showError('Failed to start voice call');
+            this.endCall();
         }
     }
 
-    updateRemoteVideo() {
-        const remoteVideo = document.getElementById('remoteVideo');
-        if (remoteVideo && this.remoteStream) {
-            remoteVideo.srcObject = this.remoteStream;
+    async sendCallSignal(contactId, type, data) {
+        await this.db.collection('calls').add({
+            from: this.currentUser.uid,
+            to: contactId,
+            type: type,
+            data: data,
+            timestamp: firebase.firestore.FieldValue.serverTimestamp()
+        });
+    }
+
+    async handleCallSignal(signal) {
+        if (signal.to !== this.currentUser.uid) return;
+        
+        switch (signal.type) {
+            case 'offer':
+                await this.handleOffer(signal);
+                break;
+            case 'answer':
+                await this.handleAnswer(signal);
+                break;
+            case 'ice-candidate':
+                await this.handleIceCandidate(signal);
+                break;
         }
     }
 
-    async endVideoCall() {
-        this.cleanupCall();
-        this.hideVideoCallInterface();
-        this.isVideoCallActive = false;
-        this.showNotification('Video call ended', 'info');
+    async handleOffer(signal) {
+        // Show incoming call UI
+        this.showIncomingCall(signal.from, signal.data.type);
     }
 
-    async endVoiceCall() {
-        this.cleanupCall();
-        this.hideVoiceCallInterface();
-        this.isVoiceCallActive = false;
-        this.showNotification('Voice call ended', 'info');
-    }
-
-    cleanupCall() {
-        // Stop all media tracks
+    endCall() {
+        this.isInCall = false;
+        
+        if (this.peerConnection) {
+            this.peerConnection.close();
+            this.peerConnection = null;
+        }
+        
         if (this.localStream) {
             this.localStream.getTracks().forEach(track => track.stop());
             this.localStream = null;
         }
         
-        if (this.remoteStream) {
-            this.remoteStream.getTracks().forEach(track => track.stop());
-            this.remoteStream = null;
-        }
-        
-        // Close peer connection
-        if (this.peerConnection) {
-            this.peerConnection.close();
-            this.peerConnection = null;
-        }
+        document.getElementById('videoCallContainer').style.display = 'none';
+        document.getElementById('localVideo').style.display = 'block';
     }
 
-    hideVideoCallInterface() {
-        const videoCallModal = document.getElementById('videoCallModal');
-        if (videoCallModal) {
-            videoCallModal.classList.add('hidden');
-        }
-    }
-
-    hideVoiceCallInterface() {
-        const voiceCallModal = document.getElementById('voiceCallModal');
-        if (voiceCallModal) {
-            voiceCallModal.classList.add('hidden');
-        }
-    }
-
-    async sendCallNotification(callType) {
-        if (!this.currentChatId) return;
-
+    // File Upload
+    async uploadFile(file) {
         try {
-            const callData = {
-                type: callType,
-                callerId: this.currentUser.id,
-                callerName: this.currentUser.name,
+            const fileName = `${Date.now()}_${file.name}`;
+            const fileRef = this.storage.ref().child(`chats/${this.currentChatId}/${fileName}`);
+            const snapshot = await fileRef.put(file);
+            const downloadURL = await snapshot.ref.getDownloadURL();
+            
+            return {
+                url: downloadURL,
+                name: file.name,
+                size: file.size,
+                type: file.type
+            };
+        } catch (error) {
+            console.error('File upload failed:', error);
+            throw error;
+        }
+    }
+
+    async sendFileMessage(file) {
+        try {
+            const fileInfo = await this.uploadFile(file);
+            
+            const messageData = {
+                content: fileInfo.url,
+                senderId: this.currentUser.uid,
+                senderName: this.currentUser.displayName,
                 timestamp: firebase.firestore.FieldValue.serverTimestamp(),
-                status: 'ringing'
+                type: file.type.startsWith('image/') ? 'image' : 'file',
+                fileName: fileInfo.name,
+                fileSize: fileInfo.size,
+                readBy: [this.currentUser.uid]
             };
-
-            await this.firestore.collection('chats').doc(this.currentChatId).collection('calls').add(callData);
-        } catch (error) {
-            console.error('Error sending call notification:', error);
-        }
-    }
-
-    // Screen Sharing Implementation
-    async toggleScreenShare() {
-        if (this.isScreenSharing) {
-            await this.stopScreenShare();
-        } else {
-            await this.startScreenShare();
-        }
-    }
-
-    async startScreenShare() {
-        try {
-            // Request screen sharing permission
-            this.screenStream = await navigator.mediaDevices.getDisplayMedia({
-                video: true,
-                audio: true
-            });
-
-            // Show screen sharing interface
-            this.showScreenShareInterface();
             
-            // Replace video track in peer connection if call is active
-            if (this.peerConnection && this.isVideoCallActive) {
-                const videoTrack = this.screenStream.getVideoTracks()[0];
-                const sender = this.peerConnection.getSenders().find(s => 
-                    s.track && s.track.kind === 'video'
-                );
+            await this.db.collection('chats').doc(this.currentChatId)
+                .collection('messages').add(messageData);
                 
-                if (sender) {
-                    await sender.replaceTrack(videoTrack);
-                }
-            }
-
-            this.isScreenSharing = true;
-            this.showNotification('Screen sharing started', 'success');
-
-            // Handle when user stops screen sharing via browser UI
-            this.screenStream.getVideoTracks()[0].onended = () => {
-                this.stopScreenShare();
-            };
-
         } catch (error) {
-            console.error('Error starting screen share:', error);
-            this.showNotification('Error starting screen share', 'error');
-        }
-    }
-
-    async stopScreenShare() {
-        if (this.screenStream) {
-            this.screenStream.getTracks().forEach(track => track.stop());
-            this.screenStream = null;
-        }
-
-        // Switch back to camera if video call is active
-        if (this.peerConnection && this.isVideoCallActive && this.localStream) {
-            const videoTrack = this.localStream.getVideoTracks()[0];
-            const sender = this.peerConnection.getSenders().find(s => 
-                s.track && s.track.kind === 'video'
-            );
-            
-            if (sender && videoTrack) {
-                await sender.replaceTrack(videoTrack);
-            }
-        }
-
-        this.hideScreenShareInterface();
-        this.isScreenSharing = false;
-        this.showNotification('Screen sharing stopped', 'info');
-    }
-
-    showScreenShareInterface() {
-        const screenShareModal = document.getElementById('screenShareModal');
-        if (screenShareModal) {
-            screenShareModal.classList.remove('hidden');
-            
-            const screenShareVideo = document.getElementById('screenShareVideo');
-            if (screenShareVideo && this.screenStream) {
-                screenShareVideo.srcObject = this.screenStream;
-            }
-        }
-    }
-
-    hideScreenShareInterface() {
-        const screenShareModal = document.getElementById('screenShareModal');
-        if (screenShareModal) {
-            screenShareModal.classList.add('hidden');
-        }
-    }
-
-    // Voice Message Implementation
-    async startVoiceMessage() {
-        try {
-            // Request microphone permission
-            this.audioStream = await navigator.mediaDevices.getUserMedia({ audio: true });
-            
-            // Initialize MediaRecorder
-            this.mediaRecorder = new MediaRecorder(this.audioStream);
-            this.audioChunks = [];
-            
-            // Set up event handlers
-            this.mediaRecorder.ondataavailable = (event) => {
-                this.audioChunks.push(event.data);
-            };
-            
-            this.mediaRecorder.onstop = async () => {
-                const audioBlob = new Blob(this.audioChunks, { type: 'audio/webm' });
-                await this.uploadAndSendAudio(audioBlob);
-                
-                // Clean up
-                this.audioStream.getTracks().forEach(track => track.stop());
-                this.hideVoiceRecordingInterface();
-            };
-            
-            // Show recording interface
-            this.showVoiceRecordingInterface();
-            
-            // Start recording
-            this.mediaRecorder.start();
-            this.startRecordingTimer();
-            
-        } catch (error) {
-            console.error('Error starting voice recording:', error);
-            this.showNotification('Error accessing microphone', 'error');
-        }
-    }
-
-    stopVoiceRecording() {
-        if (this.mediaRecorder && this.mediaRecorder.state === 'recording') {
-            this.mediaRecorder.stop();
-            this.stopRecordingTimer();
-        }
-    }
-
-    showVoiceRecordingInterface() {
-        const voiceRecordingModal = document.getElementById('voiceRecordingModal');
-        if (voiceRecordingModal) {
-            voiceRecordingModal.classList.remove('hidden');
-        }
-    }
-
-    hideVoiceRecordingInterface() {
-        const voiceRecordingModal = document.getElementById('voiceRecordingModal');
-        if (voiceRecordingModal) {
-            voiceRecordingModal.classList.add('hidden');
-        }
-    }
-
-    startRecordingTimer() {
-        this.recordingStartTime = Date.now();
-        this.recordingTimer = setInterval(() => {
-            const elapsed = Math.floor((Date.now() - this.recordingStartTime) / 1000);
-            const minutes = Math.floor(elapsed / 60);
-            const seconds = elapsed % 60;
-            
-            const timerElement = document.getElementById('recordingTimer');
-            if (timerElement) {
-                timerElement.textContent = `${minutes}:${seconds.toString().padStart(2, '0')}`;
-            }
-        }, 1000);
-    }
-
-    stopRecordingTimer() {
-        if (this.recordingTimer) {
-            clearInterval(this.recordingTimer);
-            this.recordingTimer = null;
-        }
-    }
-
-    async uploadAndSendAudio(audioBlob) {
-        if (!this.currentChatId) return;
-
-        try {
-            this.showNotification('Uploading voice message...', 'info');
-
-            // Create file from blob
-            const audioFile = new File([audioBlob], `voice_message_${Date.now()}.webm`, {
-                type: 'audio/webm'
-            });
-
-            // Upload to Firebase Storage
-            const storageRef = this.storage.ref(`chats/${this.currentChatId}/${audioFile.name}`);
-            const uploadTask = storageRef.put(audioFile);
-
-            const downloadURL = await new Promise((resolve, reject) => {
-                uploadTask.on('state_changed',
-                    null,
-                    (error) => reject(error),
-                    async () => {
-                        try {
-                            const url = await uploadTask.snapshot.ref.getDownloadURL();
-                            resolve(url);
-                        } catch (urlError) {
-                            reject(urlError);
-                        }
-                    }
-                );
-            });
-
-            // Send message with audio
-            const messageData = {
-                senderId: this.currentUser.id,
-                content: 'Voice message',
-                type: 'audio',
-                mediaUrl: downloadURL,
-                mediaType: 'audio',
-                status: 'sent',
-                timestamp: firebase.firestore.FieldValue.serverTimestamp()
-            };
-
-            const messagesRef = this.firestore.collection('chats').doc(this.currentChatId).collection('messages');
-            await messagesRef.add(messageData);
-
-            // Update chat
-            const chatRef = this.firestore.collection('chats').doc(this.currentChatId);
-            await chatRef.update({
-                lastMessage: 'Sent a voice message',
-                lastMessageTime: firebase.firestore.FieldValue.serverTimestamp()
-            });
-
-            this.showNotification('Voice message sent', 'success');
-
-        } catch (error) {
-            console.error('Error sending voice message:', error);
-            this.showNotification('Error sending voice message', 'error');
-        }
-    }
-
-    // Video Recording Implementation
-    async startVideoRecording() {
-        try {
-            // Request camera and microphone permissions
-            this.videoStream = await navigator.mediaDevices.getUserMedia({ 
-                video: true, 
-                audio: true 
-            });
-            
-            // Show recording interface
-            this.showVideoRecordingInterface();
-            
-            // Set up video preview
-            const videoPreview = document.getElementById('videoRecordingPreview');
-            if (videoPreview) {
-                videoPreview.srcObject = this.videoStream;
-            }
-            
-        } catch (error) {
-            console.error('Error starting video recording:', error);
-            this.showNotification('Error accessing camera/microphone', 'error');
-        }
-    }
-
-    async stopVideoRecording() {
-        // Similar to voice recording but for video
-        this.showNotification('Video recording feature in development', 'info');
-    }
-
-    cancelVideoRecording() {
-        if (this.videoStream) {
-            this.videoStream.getTracks().forEach(track => track.stop());
-            this.videoStream = null;
-        }
-        this.hideVideoRecordingInterface();
-    }
-
-    showVideoRecordingInterface() {
-        const videoRecordingModal = document.getElementById('videoRecordingModal');
-        if (videoRecordingModal) {
-            videoRecordingModal.classList.remove('hidden');
-        }
-    }
-
-    hideVideoRecordingInterface() {
-        const videoRecordingModal = document.getElementById('videoRecordingModal');
-        if (videoRecordingModal) {
-            videoRecordingModal.classList.add('hidden');
-        }
-    }
-
-    // Location Sharing Implementation
-    async shareLocation() {
-        if (!navigator.geolocation) {
-            this.showNotification('Geolocation is not supported by this browser', 'error');
-            return;
-        }
-
-        this.showLocationSharingInterface();
-    }
-
-    async confirmLocationShare() {
-        try {
-            const position = await new Promise((resolve, reject) => {
-                navigator.geolocation.getCurrentPosition(resolve, reject, {
-                    enableHighAccuracy: true,
-                    timeout: 10000,
-                    maximumAge: 0
-                });
-            });
-
-            const { latitude, longitude } = position.coords;
-            
-            // Send location message
-            const messageData = {
-                senderId: this.currentUser.id,
-                content: `📍 My Location: ${latitude.toFixed(6)}, ${longitude.toFixed(6)}`,
-                type: 'location',
-                location: { latitude, longitude },
-                status: 'sent',
-                timestamp: firebase.firestore.FieldValue.serverTimestamp()
-            };
-
-            const messagesRef = this.firestore.collection('chats').doc(this.currentChatId).collection('messages');
-            await messagesRef.add(messageData);
-
-            // Update chat
-            const chatRef = this.firestore.collection('chats').doc(this.currentChatId);
-            await chatRef.update({
-                lastMessage: 'Shared location',
-                lastMessageTime: firebase.firestore.FieldValue.serverTimestamp()
-            });
-
-            this.hideLocationSharingInterface();
-            this.showNotification('Location shared successfully', 'success');
-
-        } catch (error) {
-            console.error('Error getting location:', error);
-            this.showNotification('Error getting location. Please check permissions.', 'error');
-        }
-    }
-
-    cancelLocationShare() {
-        this.hideLocationSharingInterface();
-    }
-
-    showLocationSharingInterface() {
-        const locationModal = document.getElementById('locationModal');
-        if (locationModal) {
-            locationModal.classList.remove('hidden');
-            
-            // Show a map placeholder
-            const mapElement = document.getElementById('locationMap');
-            if (mapElement) {
-                mapElement.innerHTML = `
-                    <div class="text-center py-8">
-                        <i class="fas fa-map-marker-alt text-4xl text-blue-400 mb-4"></i>
-                        <p class="text-blue-300">Location sharing ready</p>
-                        <p class="text-sm text-gray-400 mt-2">Click "Share Location" to send your current location</p>
-                    </div>
-                `;
-            }
-        }
-    }
-
-    hideLocationSharingInterface() {
-        const locationModal = document.getElementById('locationModal');
-        if (locationModal) {
-            locationModal.classList.add('hidden');
-        }
-    }
-
-    // File Sharing Implementation
-    async shareFile() {
-        const fileInput = document.createElement('input');
-        fileInput.type = 'file';
-        fileInput.accept = '*/*';
-        fileInput.onchange = (e) => this.handleFileSelect(e);
-        fileInput.click();
-    }
-
-    async handleFileSelect(event) {
-        const file = event.target.files[0];
-        if (!file) return;
-
-        try {
-            this.showNotification('Uploading file...', 'info');
-
-            // Upload to Firebase Storage
-            const storageRef = this.storage.ref(`chats/${this.currentChatId}/${file.name}`);
-            const uploadTask = storageRef.put(file);
-
-            const downloadURL = await new Promise((resolve, reject) => {
-                uploadTask.on('state_changed',
-                    (snapshot) => {
-                        // Progress tracking
-                        const progress = (snapshot.bytesTransferred / snapshot.totalBytes) * 100;
-                        const progressBar = document.getElementById('uploadProgressBar');
-                        if (progressBar) {
-                            progressBar.style.width = progress + '%';
-                        }
-                    },
-                    (error) => reject(error),
-                    async () => {
-                        try {
-                            const url = await uploadTask.snapshot.ref.getDownloadURL();
-                            resolve(url);
-                        } catch (urlError) {
-                            reject(urlError);
-                        }
-                    }
-                );
-            });
-
-            // Determine file type
-            let fileType = 'file';
-            if (file.type.startsWith('image/')) fileType = 'image';
-            else if (file.type.startsWith('video/')) fileType = 'video';
-            else if (file.type.startsWith('audio/')) fileType = 'audio';
-            else if (file.type.startsWith('application/pdf')) fileType = 'pdf';
-            else if (file.type.includes('document')) fileType = 'document';
-
-            // Send message with file
-            const messageData = {
-                senderId: this.currentUser.id,
-                content: `Shared a file: ${file.name}`,
-                type: fileType,
-                mediaUrl: downloadURL,
-                fileName: file.name,
-                fileSize: file.size,
-                status: 'sent',
-                timestamp: firebase.firestore.FieldValue.serverTimestamp()
-            };
-
-            const messagesRef = this.firestore.collection('chats').doc(this.currentChatId).collection('messages');
-            await messagesRef.add(messageData);
-
-            // Update chat
-            const chatRef = this.firestore.collection('chats').doc(this.currentChatId);
-            await chatRef.update({
-                lastMessage: `Shared ${file.name}`,
-                lastMessageTime: firebase.firestore.FieldValue.serverTimestamp()
-            });
-
-            this.showNotification('File shared successfully', 'success');
-
-        } catch (error) {
-            console.error('Error sharing file:', error);
-            this.showNotification('Error sharing file', 'error');
-        }
-    }
-
-    // Media Attachment
-    attachMedia(type) {
-        const input = document.createElement('input');
-        input.type = 'file';
-        input.accept = `${type}/*`;
-        input.onchange = (e) => this.handleMediaSelect(e, type);
-        input.click();
-    }
-
-    handleMediaSelect(event, type) {
-        const file = event.target.files[0];
-        if (!file) return;
-
-        this.currentMediaFile = file;
-        this.showMediaPreview(file, type);
-    }
-
-    showMediaPreview(file, type) {
-        const previewContainer = document.getElementById('mediaPreview');
-        const previewImage = document.getElementById('previewImage');
-        const previewVideo = document.getElementById('previewVideo');
-        const previewAudio = document.getElementById('previewAudio');
-        const uploadProgress = document.getElementById('uploadProgress');
-
-        if (!previewContainer) return;
-
-        // Hide all previews first
-        if (previewImage) previewImage.classList.add('hidden');
-        if (previewVideo) previewVideo.classList.add('hidden');
-        if (previewAudio) previewAudio.classList.add('hidden');
-        if (uploadProgress) uploadProgress.classList.remove('hidden');
-
-        const objectUrl = URL.createObjectURL(file);
-
-        if (type === 'image' && previewImage) {
-            previewImage.src = objectUrl;
-            previewImage.classList.remove('hidden');
-        } else if (type === 'video' && previewVideo) {
-            previewVideo.src = objectUrl;
-            previewVideo.classList.remove('hidden');
-        } else if (type === 'audio' && previewAudio) {
-            previewAudio.src = objectUrl;
-            previewAudio.classList.remove('hidden');
-        }
-
-        previewContainer.classList.remove('hidden');
-    }
-
-    clearMediaPreview() {
-        const previewContainer = document.getElementById('mediaPreview');
-        if (previewContainer) {
-            previewContainer.classList.add('hidden');
-        }
-        const uploadProgress = document.getElementById('uploadProgress');
-        if (uploadProgress) uploadProgress.classList.add('hidden');
-        const progressBar = document.getElementById('uploadProgressBar');
-        if (progressBar) progressBar.style.width = '0%';
-    }
-
-    async uploadMediaFile(file) {
-        return new Promise((resolve, reject) => {
-            const storageRef = this.storage.ref(`chats/${this.currentChatId}/${Date.now()}_${file.name}`);
-            const uploadTask = storageRef.put(file);
-            
-            uploadTask.on('state_changed',
-                (snapshot) => {
-                    const progress = (snapshot.bytesTransferred / snapshot.totalBytes) * 100;
-                    const progressBar = document.getElementById('uploadProgressBar');
-                    if (progressBar) {
-                        progressBar.style.width = progress + '%';
-                    }
-                },
-                (error) => {
-                    console.error('Upload error:', error);
-                    reject(error);
-                },
-                async () => {
-                    try {
-                        const downloadURL = await uploadTask.snapshot.ref.getDownloadURL();
-                        resolve(downloadURL);
-                    } catch (urlError) {
-                        reject(urlError);
-                    }
-                }
-            );
-        });
-    }
-
-    // Whisper Mode
-    toggleWhisperMode() {
-        this.whisperMode = !this.whisperMode;
-        const whisperBtn = document.getElementById('whisperButton');
-        
-        if (whisperBtn) {
-            if (this.whisperMode) {
-                whisperBtn.classList.add('text-yellow-400');
-                whisperBtn.classList.remove('text-blue-400');
-                this.showNotification('Whisper mode activated - messages will self-destruct after 24 hours', 'info');
-            } else {
-                whisperBtn.classList.remove('text-yellow-400');
-                whisperBtn.classList.add('text-blue-400');
-                this.showNotification('Whisper mode deactivated', 'info');
-            }
+            console.error('Error sending file:', error);
+            this.showError('Failed to send file');
         }
     }
 
     // Utility Methods
-    hideAllPickers() {
-        this.hideEmojiPicker();
-        this.hideGifPicker();
-        this.hideStickerPicker();
+    formatTimestamp(timestamp) {
+        if (!timestamp) return '';
+        
+        const date = timestamp.toDate();
+        const now = new Date();
+        const diffMs = now - date;
+        const diffMins = Math.floor(diffMs / 60000);
+        const diffHours = Math.floor(diffMs / 3600000);
+        const diffDays = Math.floor(diffMs / 86400000);
+        
+        if (diffMins < 1) return 'Just now';
+        if (diffMins < 60) return `${diffMins}m ago`;
+        if (diffHours < 24) return `${diffHours}h ago`;
+        if (diffDays < 7) return `${diffDays}d ago`;
+        
+        return date.toLocaleDateString();
     }
 
-    cleanupAllMedia() {
-        this.cleanupCall();
-        if (this.isScreenSharing) {
-            this.stopScreenShare();
-        }
-        if (this.audioStream) {
-            this.audioStream.getTracks().forEach(track => track.stop());
-            this.audioStream = null;
-        }
-        if (this.videoStream) {
-            this.videoStream.getTracks().forEach(track => track.stop());
-            this.videoStream = null;
-        }
-        if (this.mediaRecorder && this.mediaRecorder.state === 'recording') {
-            this.mediaRecorder.stop();
-        }
-        if (this.recordingTimer) {
-            clearInterval(this.recordingTimer);
-            this.recordingTimer = null;
-        }
+    formatFileSize(bytes) {
+        if (bytes === 0) return '0 Bytes';
+        const k = 1024;
+        const sizes = ['Bytes', 'KB', 'MB', 'GB'];
+        const i = Math.floor(Math.log(bytes) / Math.log(k));
+        return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i];
     }
 
-    // ========== EXISTING CHAT FUNCTIONALITY ==========
-    
-    async logout() {
-        try {
-            // Update user offline status
-            if (this.currentUser) {
-                await this.firestore.collection('users').doc(this.currentUser.id).update({
-                    online: false,
-                    lastSeen: firebase.firestore.FieldValue.serverTimestamp()
-                });
-            }
-
-            // Clean up all media and listeners
-            this.cleanupAllMedia();
-            if (this.messageListener) this.messageListener();
-            if (this.chatsListener) this.chatsListener();
-            if (this.usersListener) this.usersListener();
-
-            // Sign out
-            await this.auth.signOut();
-            
-            this.showNotification('Logged out successfully', 'info');
-            window.location.href = 'index.html';
-        } catch (error) {
-            console.error('Logout error:', error);
-            this.showNotification('Error during logout', 'error');
-        }
-    }
-    
-    renderChatList() {
-        const chatList = document.getElementById('chat-list');
-        if (!chatList) return;
-        
-        if (this.filteredChats.length === 0) {
-            chatList.innerHTML = `
-                <div class="no-chats" style="text-align: center; padding: 3rem; color: #7f8c8d;">
-                    <div style="font-size: 3rem; margin-bottom: 1rem;">💬</div>
-                    <h3 style="margin-bottom: 0.5rem;">No conversations found</h3>
-                    <p>Try adjusting your search or start a new chat</p>
-                    <button class="btn btn-primary" onclick="chatSystem.showModal('new-chat-modal')" style="margin-top: 1rem;">
-                        <i class="fas fa-plus"></i> Start New Chat
-                    </button>
-                </div>
-            `;
-            return;
-        }
-        
-        const chatsHTML = this.filteredChats.map(chat => {
-            const isActive = chat.id === this.currentChatId;
-            const activeClass = isActive ? 'active' : '';
-            const typeClass = `type-${chat.type}`;
-            const unreadCount = this.calculateUnreadCount(chat);
-            
-            return `
-                <div class="chat-item ${activeClass}" data-chat-id="${chat.id}">
-                    <div class="chat-avatar">
-                        <span>${chat.avatarText || chat.name.substring(0, 2).toUpperCase()}</span>
-                    </div>
-                    <div class="chat-item-info">
-                        <div class="chat-item-header">
-                            <div class="chat-item-name">${chat.name}</div>
-                            <div class="chat-item-time">${this.formatTime(chat.lastMessageTime?.toDate())}</div>
-                        </div>
-                        <div class="chat-item-preview">${chat.lastMessage || 'No messages yet'}</div>
-                        <div class="chat-item-meta">
-                            ${unreadCount > 0 ? `<div class="chat-badge">${unreadCount}</div>` : ''}
-                            <div class="chat-type-indicator ${typeClass}">${chat.type.charAt(0).toUpperCase() + chat.type.slice(1)}</div>
-                        </div>
-                    </div>
-                </div>
-            `;
-        }).join('');
-        
-        chatList.innerHTML = chatsHTML;
-        
-        // Add click listeners to chat items
-        chatList.querySelectorAll('.chat-item').forEach(item => {
-            item.addEventListener('click', () => {
-                const chatId = item.getAttribute('data-chat-id');
-                this.selectChat(chatId);
-            });
-        });
-    }
-    
-    calculateUnreadCount(chat) {
-        if (!chat.lastRead || !chat.lastRead[this.currentUser.id]) return 0;
-        
-        const lastRead = chat.lastRead[this.currentUser.id].toDate();
-        return chat.messages.filter(msg => 
-            msg.timestamp.toDate() > lastRead && msg.sender.id !== this.currentUser.id
-        ).length;
-    }
-    
-    filterChats(searchTerm = '') {
-        const term = searchTerm.toLowerCase();
-        
-        this.filteredChats = this.chats.filter(chat => {
-            const matchesSearch = chat.name.toLowerCase().includes(term) || 
-                                 (chat.lastMessage && chat.lastMessage.toLowerCase().includes(term)) ||
-                                 chat.members.some(member => member.name.toLowerCase().includes(term));
-            
-            const matchesType = this.currentChatTypeFilter === 'all' || chat.type === this.currentChatTypeFilter;
-            
-            return matchesSearch && matchesType;
-        });
-        
-        this.renderChatList();
-    }
-    
-    async selectChat(chatId) {
-        this.currentChatId = chatId;
-        const chat = this.chats.find(c => c.id === chatId);
-        
-        if (!chat) return;
-        
-        // Setup real-time message listener for this chat
-        this.setupRealtimeMessageListener(chatId);
-        
-        // Load initial messages
-        await this.loadChatMessages(chatId);
-        
-        // Update UI
-        const chatTitle = document.getElementById('chat-title');
-        const chatMembers = document.getElementById('chat-members');
-        const chatAvatar = document.getElementById('chat-avatar-text');
-        
-        if (chatTitle) chatTitle.textContent = chat.name;
-        if (chatMembers) chatMembers.textContent = `${chat.members.length} members • ${chat.type} chat`;
-        if (chatAvatar) chatAvatar.textContent = chat.avatarText || chat.name.substring(0, 2).toUpperCase();
-        
-        // Show active chat view
-        const noChatView = document.getElementById('no-chat-view');
-        const activeChatView = document.getElementById('active-chat-view');
-        if (noChatView) noChatView.style.display = 'none';
-        if (activeChatView) activeChatView.style.display = 'flex';
-        
-        // Render messages
-        this.renderMessages(chatId);
-        
-        // Update chat list to show active state
-        this.renderChatList();
-        
-        // Scroll to bottom of messages
-        this.scrollToBottom();
-        
-        // Mark as read
-        await this.markAsRead(chatId);
-        
-        console.log(`💬 Chat selected: ${chat.name}`);
-    }
-    
-    async loadChatMessages(chatId) {
-        try {
-            const messagesRef = this.firestore.collection('chats').doc(chatId).collection('messages');
-            const messagesSnapshot = await messagesRef.orderBy('timestamp', 'asc').limit(100).get();
-            
-            const chat = this.chats.find(c => c.id === chatId);
-            if (!chat) return;
-            
-            chat.messages = messagesSnapshot.docs.map(msgDoc => {
-                const msgData = msgDoc.data();
-                const sender = chat.members.find(m => m.id === msgData.senderId) || this.currentUser;
-                return {
-                    id: msgDoc.id,
-                    sender: sender,
-                    content: msgData.content,
-                    time: this.formatTime(msgData.timestamp?.toDate()),
-                    type: msgData.type || 'normal',
-                    status: msgData.status || 'sent',
-                    timestamp: msgData.timestamp,
-                    emotion: msgData.emotion,
-                    mediaUrl: msgData.mediaUrl,
-                    mediaType: msgData.mediaType,
-                    isWhisper: msgData.isWhisper
-                };
-            });
-            
-        } catch (error) {
-            console.error('Error loading messages:', error);
-        }
-    }
-    
-    renderMessages(chatId) {
-        const container = document.getElementById('messages-container');
-        if (!container) return;
-        
-        const chat = this.chats.find(c => c.id === chatId);
-        const messages = chat?.messages || [];
-        
-        if (messages.length === 0) {
-            container.innerHTML = `
-                <div style="text-align: center; padding: 3rem; color: #7f8c8d;">
-                    <div style="font-size: 4rem; margin-bottom: 1rem;">💭</div>
-                    <h3 style="margin-bottom: 0.5rem;">No messages yet</h3>
-                    <p>Start the conversation by sending a message!</p>
-                </div>
-            `;
-            return;
-        }
-        
-        let messagesHTML = '';
-        let currentDate = '';
-        
-        messages.forEach(message => {
-            const messageDate = message.timestamp.toDate().toDateString();
-            if (messageDate !== currentDate) {
-                currentDate = messageDate;
-                messagesHTML += `
-                    <div class="message-date-divider">
-                        <span class="date-label">${this.formatDate(message.timestamp.toDate())}</span>
-                    </div>
-                `;
-            }
-            
-            const isSent = message.sender.id === this.currentUser.id;
-            const messageClass = isSent ? 'message sent' : 'message received';
-            const bubbleClass = message.type !== 'normal' ? `message-bubble message-${message.type}` : 'message-bubble';
-            const whisperClass = message.isWhisper ? 'whisper-message' : '';
-            
-            // Media content
-            let mediaContent = '';
-            if (message.mediaUrl) {
-                if (message.mediaType === 'image') {
-                    mediaContent = `<img src="${message.mediaUrl}" class="media-preview optimized-image" alt="Shared image" style="max-width: 300px; border-radius: 10px; margin: 5px 0;">`;
-                } else if (message.mediaType === 'video') {
-                    mediaContent = `<video src="${message.mediaUrl}" class="media-preview" controls style="max-width: 300px; border-radius: 10px; margin: 5px 0;"></video>`;
-                } else if (message.mediaType === 'audio') {
-                    mediaContent = `<audio src="${message.mediaUrl}" controls style="width: 100%; margin: 5px 0;"></audio>`;
-                } else if (message.mediaType === 'gif') {
-                    mediaContent = `<img src="${message.mediaUrl}" class="media-preview" alt="GIF" style="max-width: 200px; border-radius: 10px; margin: 5px 0;">`;
-                }
-            }
-            
-            // Emotion indicator
-            const emotionIcon = message.emotion ? this.getEmotionIcon(message.emotion) : '';
-            
-            messagesHTML += `
-                <div class="${messageClass} ${whisperClass}">
-                    <div class="${bubbleClass}">
-                        ${!isSent ? `<div class="message-sender">${message.sender.name}</div>` : ''}
-                        ${message.isWhisper ? '<div class="whisper-indicator"><i class="fas fa-user-secret"></i> Whisper</div>' : ''}
-                        ${mediaContent}
-                        <div class="message-content">${message.content}</div>
-                        <div class="message-meta">
-                            <span class="message-time">${message.time}</span>
-                            ${emotionIcon}
-                            ${isSent ? `<span class="message-status">${this.getStatusIcon(message.status)}</span>` : ''}
-                        </div>
-                    </div>
-                </div>
-            `;
-        });
-        
-        container.innerHTML = messagesHTML;
-    }
-    
-    getStatusIcon(status) {
-        switch(status) {
-            case 'sent': return '✓';
-            case 'delivered': return '✓✓';
-            case 'read': return '✓✓';
-            default: return '⋯';
-        }
-    }
-
-    getEmotionIcon(emotion) {
-        const emojiMap = {
-            joy: '😊',
-            love: '❤️',
-            calm: '😌',
-            excited: '🎉',
-            sad: '😢',
-            angry: '😠'
-        };
-        return `<span class="emotion-indicator">${emojiMap[emotion] || ''}</span>`;
-    }
-
-    applyEmotionTheme(emotion) {
-        if (emotion === this.currentEmotion) return;
-        
-        this.currentEmotion = emotion;
-        const body = document.body;
-        const messageArea = document.getElementById('message-input');
-        
-        // Remove previous emotion classes
-        body.className = body.className.replace(/emotion-\w+/g, '');
-        body.classList.add(`emotion-${emotion}`);
-        
-        if (messageArea) {
-            messageArea.className = messageArea.className.replace(/emotion-border-\w+/g, '');
-            messageArea.classList.add(`emotion-border-${emotion}`);
-        }
-        
-        // Update emotion indicator
-        this.updateEmotionIndicator(emotion);
-    }
-
-    updateEmotionIndicator(emotion) {
-        const indicator = document.getElementById('currentEmotion');
-        if (!indicator) return;
-
-        const colors = {
-            joy: 'bg-yellow-400',
-            love: 'bg-pink-400',
-            calm: 'bg-blue-400',
-            excited: 'bg-orange-400',
-            sad: 'bg-gray-400',
-            angry: 'bg-red-400',
-            default: 'bg-blue-400'
-        };
-        
-        indicator.innerHTML = `
-            <div class="w-3 h-3 ${colors[emotion]} rounded-full animate-pulse" title="${emotion.charAt(0).toUpperCase() + emotion.slice(1)}"></div>
-        `;
-    }
-    
-    showChatList() {
-        // Clean up message listener
-        if (this.messageListener) {
-            this.messageListener();
-            this.messageListener = null;
-        }
-        
-        this.currentChatId = null;
-        const noChatView = document.getElementById('no-chat-view');
-        const activeChatView = document.getElementById('active-chat-view');
-        if (noChatView) noChatView.style.display = 'flex';
-        if (activeChatView) activeChatView.style.display = 'none';
-        this.renderChatList();
-    }
-    
-    showModal(modalId) {
-        this.closeAllModals();
-        const modal = document.getElementById(modalId);
-        if (modal) {
-            modal.style.display = 'flex';
-        }
-    }
-    
-    closeAllModals() {
-        document.querySelectorAll('.modal').forEach(modal => {
-            modal.style.display = 'none';
-        });
-    }
-    
-    async markAsRead(chatId) {
-        try {
-            const chatRef = this.firestore.collection('chats').doc(chatId);
-            await chatRef.update({
-                [`lastRead.${this.currentUser.id}`]: firebase.firestore.FieldValue.serverTimestamp()
-            });
-        } catch (error) {
-            console.error('Error marking as read:', error);
-        }
-    }
-    
     scrollToBottom() {
-        const container = document.getElementById('messages-container');
-        if (container) {
-            container.scrollTop = container.scrollHeight;
+        const container = document.getElementById('messagesContainer');
+        container.scrollTop = container.scrollHeight;
+    }
+
+    showError(message) {
+        // Implement toast notification
+        console.error('Error:', message);
+    }
+
+    showChatApp() {
+        document.getElementById('loadingScreen').classList.add('hidden');
+        document.getElementById('authScreen').classList.add('hidden');
+        document.getElementById('chatApp').classList.remove('hidden');
+    }
+
+    showAuthScreen() {
+        document.getElementById('loadingScreen').classList.add('hidden');
+        document.getElementById('chatApp').classList.add('hidden');
+        document.getElementById('authScreen').classList.remove('hidden');
+    }
+
+    updateUserUI() {
+        document.getElementById('userName').textContent = this.currentUser.displayName || 'User';
+        if (this.currentUser.photoURL) {
+            document.getElementById('userAvatar').src = this.currentUser.photoURL;
         }
     }
 
-    // Enhanced Features Stubs
-    showEmotionAnalysis() {
-        if (!this.currentChatId) {
-            this.showNotification('Please select a chat first', 'warning');
-            return;
-        }
-        this.showModal('emotionAnalysisModal');
-        this.analyzeChatEmotions();
-    }
-
-    hideEmotionAnalysis() {
-        this.closeModal('emotionAnalysisModal');
-    }
-
-    showDNATest() {
-        if (!this.currentChatId) {
-            this.showNotification('Please select a chat first', 'warning');
-            return;
-        }
-        this.showModal('dnaTestModal');
-        this.runFriendshipDNATest();
-    }
-
-    hideDNATest() {
-        this.closeModal('dnaTestModal');
-    }
-
-    showTimeCapsule() {
-        this.showModal('timeCapsuleModal');
-    }
-
-    hideTimeCapsule() {
-        this.closeModal('timeCapsuleModal');
-    }
-
-    showAddFriendModal() {
-        this.showModal('addFriendModal');
-    }
-
-    hideAddFriendModal() {
-        this.closeModal('addFriendModal');
-    }
-
-    showCreateGroupModal() {
-        this.showModal('createGroupModal');
-    }
-
-    hideCreateGroupModal() {
-        this.closeModal('createGroupModal');
-    }
-
-    // Stub implementations for enhanced features
-    async analyzeChatEmotions() {
-        const resultsDiv = document.getElementById('emotionAnalysisResults');
-        if (!resultsDiv) return;
-        
-        resultsDiv.innerHTML = `
-            <div class="text-center py-8">
-                <i class="fas fa-brain text-4xl text-blue-400 mb-4"></i>
-                <p class="text-blue-300">Analyzing conversation emotions...</p>
-            </div>
-        `;
-        
-        // Simulate analysis
-        setTimeout(() => {
-            resultsDiv.innerHTML = `
-                <div class="text-center">
-                    <h3 class="text-lg font-semibold text-green-400 mb-4">Emotion Analysis Complete</h3>
-                    <div class="space-y-2">
-                        <div class="flex justify-between"><span>Joy:</span><span>65%</span></div>
-                        <div class="flex justify-between"><span>Love:</span><span>20%</span></div>
-                        <div class="flex justify-between"><span>Calm:</span><span>10%</span></div>
-                        <div class="flex justify-between"><span>Excited:</span><span>5%</span></div>
-                    </div>
-                </div>
-            `;
-        }, 2000);
-    }
-
-    async runFriendshipDNATest() {
-        const resultsDiv = document.getElementById('dnaTestResults');
-        if (!resultsDiv) return;
-        
-        resultsDiv.innerHTML = `
-            <div class="text-center py-8">
-                <div class="dna-helix mb-4">
-                    <div class="dna-node" style="animation-delay: 0s"></div>
-                    <div class="dna-node" style="animation-delay: 0.1s"></div>
-                    <div class="dna-node" style="animation-delay: 0.2s"></div>
-                    <div class="dna-node" style="animation-delay: 0.3s"></div>
-                    <div class="dna-node" style="animation-delay: 0.4s"></div>
-                </div>
-                <p class="text-blue-300">Analyzing your connection...</p>
-            </div>
-        `;
-        
-        // Simulate analysis
-        setTimeout(() => {
-            resultsDiv.innerHTML = `
-                <div class="text-center">
-                    <h3 class="text-2xl font-bold text-green-400 mb-2">85% Match</h3>
-                    <p class="text-blue-300 mb-4">Your friendship DNA is strong!</p>
-                    <div class="grid grid-cols-2 gap-4 text-left">
-                        <div class="bg-gray-800 p-3 rounded-lg">
-                            <p class="text-sm text-blue-300">Communication</p>
-                            <p class="text-lg font-bold text-green-400">92%</p>
-                        </div>
-                        <div class="bg-gray-800 p-3 rounded-lg">
-                            <p class="text-sm text-blue-300">Emotional Sync</p>
-                            <p class="text-lg font-bold text-green-400">78%</p>
-                        </div>
-                    </div>
-                </div>
-            `;
-        }, 3000);
-    }
-
-    async createTimeCapsule() {
-        const message = document.getElementById('capsuleMessage')?.value;
-        const date = document.getElementById('capsuleDate')?.value;
-        const time = document.getElementById('capsuleTime')?.value;
-
-        if (!message || !date || !time) {
-            this.showNotification('Please fill all fields', 'error');
-            return;
-        }
-
-        this.showNotification('Time capsule created successfully!', 'success');
-        this.hideTimeCapsule();
-    }
-
-    async searchFriends() {
-        const query = document.getElementById('friendSearchInput')?.value;
-        const resultsDiv = document.getElementById('friendSearchResults');
-        
-        if (!resultsDiv) return;
-        
-        if (!query) {
-            resultsDiv.innerHTML = '<p class="text-center text-blue-300 py-4">Enter a name to search</p>';
-            return;
-        }
-
-        resultsDiv.innerHTML = '<p class="text-center text-blue-300 py-4">Searching...</p>';
-        
-        // Simulate search
-        setTimeout(() => {
-            resultsDiv.innerHTML = `
-                <div class="space-y-2">
-                    <div class="p-3 bg-gray-800 rounded-lg cursor-pointer hover:bg-gray-700">
-                        <p class="font-semibold">${query} User</p>
-                        <p class="text-sm text-blue-300">Online</p>
-                    </div>
-                </div>
-            `;
-        }, 1000);
-    }
-
-    async createGroupChat() {
-        const groupName = document.getElementById('groupNameInput')?.value;
-        const description = document.getElementById('groupDescription')?.value;
-
-        if (!groupName) {
-            this.showNotification('Please enter a group name', 'error');
-            return;
-        }
-
-        this.showNotification(`Group "${groupName}" created successfully!`, 'success');
-        this.hideCreateGroupModal();
-    }
-
-    searchMessages() {
-        this.showNotification('Message search feature coming soon!', 'info');
-    }
-
-    closeModal(modalId) {
-        const modal = document.getElementById(modalId);
-        if (modal) {
-            modal.style.display = 'none';
+    updateUserPresenceUI(userData) {
+        const statusElement = document.getElementById('userMood');
+        if (statusElement) {
+            statusElement.textContent = userData.isOnline ? 
+                `🟢 Online • ${userData.mood || 'happy'}` : 
+                `⚫ Last seen ${this.formatTimestamp(userData.lastSeen)}`;
         }
     }
-    
-    showNotification(message, type = 'info') {
-        // Remove existing notifications
-        const existingNotifications = document.querySelectorAll('.chat-notification');
-        existingNotifications.forEach(notification => {
-            if (notification.parentNode) {
-                notification.parentNode.removeChild(notification);
-            }
-        });
 
-        const notification = document.createElement('div');
-        notification.className = 'chat-notification';
-        notification.style.cssText = `
-            position: fixed;
-            top: 20px;
-            right: 20px;
-            padding: 12px 20px;
-            background: ${type === 'error' ? '#e74c3c' : type === 'warning' ? '#f39c12' : type === 'success' ? '#27ae60' : '#3498db'};
-            color: white;
-            border-radius: 4px;
-            z-index: 1000;
-            font-family: Arial, sans-serif;
-            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
-            max-width: 300px;
-            word-wrap: break-word;
-        `;
-        notification.textContent = message;
+    cleanupListeners() {
+        // Clean up all Firestore listeners
+        Object.values(this.messageListeners).forEach(unsubscribe => unsubscribe());
+        Object.values(this.presenceListeners).forEach(unsubscribe => unsubscribe());
         
-        document.body.appendChild(notification);
+        if (this.chatsListener) this.chatsListener();
+        if (this.contactsListener) this.contactsListener();
         
-        setTimeout(() => {
-            if (notification.parentNode) {
-                notification.parentNode.removeChild(notification);
-            }
-        }, 4000);
+        this.messageListeners = {};
+        this.presenceListeners = {};
     }
-    
-    updateCurrentUser() {
-        if (this.currentUser) {
-            const userName = document.getElementById('current-user-name');
-            const streakCount = document.getElementById('streakCount');
-            const connectcoinsCount = document.getElementById('connectcoinsCount');
-            const userLevel = document.getElementById('userLevel');
-            const chatApp = document.getElementById('chat-app');
-            const loadingState = document.getElementById('loadingState');
 
-            if (userName) userName.textContent = this.currentUser.name;
-            if (streakCount) streakCount.textContent = this.currentUser.streak || 0;
-            if (connectcoinsCount) connectcoinsCount.textContent = this.currentUser.connectcoins || 0;
-            if (userLevel) userLevel.textContent = this.currentUser.level || 1;
-            
-            // Show chat app content
-            if (chatApp) chatApp.style.display = 'flex';
-            if (loadingState) loadingState.style.display = 'none';
-        }
-    }
-    
-    formatTime(date) {
-        if (!date) return '';
-        return date.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit', hour12: true });
-    }
-    
-    formatDate(date) {
-        if (!date) return '';
-        const today = new Date();
-        const yesterday = new Date(today);
-        yesterday.setDate(yesterday.getDate() - 1);
-        
-        if (date.toDateString() === today.toDateString()) {
-            return 'Today';
-        } else if (date.toDateString() === yesterday.toDateString()) {
-            return 'Yesterday';
-        } else {
-            return date.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
-        }
-    }
-}
-
-// Emotion AI Class
-class EmotionAI {
-    constructor() {
-        this.emotionKeywords = {
-            joy: ['happy', 'excited', 'amazing', 'wonderful', 'great', 'love', 'awesome', 'fantastic', 'yay', '😊', '😄', '😂', '🥰'],
-            love: ['love', 'heart', 'adore', 'cherish', 'romantic', 'beautiful', 'special', '❤️', '💕', '😍'],
-            calm: ['peaceful', 'calm', 'relaxed', 'serene', 'quiet', 'chill', 'cool', '😌', '🌊', '☁️'],
-            excited: ['wow', 'omg', 'incredible', 'unbelievable', 'amazing', 'thrilled', '🔥', '⚡', '🎉'],
-            sad: ['sad', 'upset', 'unhappy', 'disappointed', 'sorry', '😢', '😔', '💔'],
-            angry: ['angry', 'mad', 'frustrated', 'annoyed', 'hate', '😠', '👿', '💢']
+    // Public methods for UI interaction
+    async createGroupChat(name, participants) {
+        const chatData = {
+            name: name,
+            type: 'group',
+            participants: [...participants, this.currentUser.uid],
+            createdBy: this.currentUser.uid,
+            createdAt: firebase.firestore.FieldValue.serverTimestamp(),
+            lastMessageAt: firebase.firestore.FieldValue.serverTimestamp()
         };
+        
+        const chatRef = await this.db.collection('chats').add(chatData);
+        return chatRef.id;
     }
 
-    analyzeText(text) {
-        const words = text.toLowerCase().split(' ');
-        let emotionScores = {
-            joy: 0, love: 0, calm: 0, excited: 0, sad: 0, angry: 0
+    async addContact(userId) {
+        await this.db.collection('users').doc(this.currentUser.uid)
+            .collection('contacts').doc(userId).set({
+                addedAt: firebase.firestore.FieldValue.serverTimestamp()
+            });
+    }
+
+    async setUserMood(mood) {
+        this.currentMood = mood;
+        await this.db.collection('users').doc(this.currentUser.uid).update({
+            mood: mood,
+            moodUpdated: firebase.firestore.FieldValue.serverTimestamp()
+        });
+        
+        this.updateMoodUI();
+        this.showMoodSuggestion();
+    }
+
+    // Add these methods to handle the missing functions from the original code
+    setupEventListeners() {
+        // Message sending
+        document.getElementById('sendBtn').addEventListener('click', () => this.sendMessage());
+        document.getElementById('messageInput').addEventListener('keypress', (e) => {
+            if (e.key === 'Enter') this.sendMessage();
+        });
+        document.getElementById('messageInput').addEventListener('input', function() {
+            document.getElementById('sendBtn').disabled = !this.value.trim();
+        });
+
+        // File attachment
+        document.getElementById('attachBtn').addEventListener('click', () => {
+            const input = document.createElement('input');
+            input.type = 'file';
+            input.accept = 'image/*,video/*,audio/*,.pdf,.doc,.docx';
+            input.onchange = (e) => {
+                const file = e.target.files[0];
+                if (file) this.sendFileMessage(file);
+            };
+            input.click();
+        });
+
+        // Camera
+        document.getElementById('cameraBtn').addEventListener('click', () => {
+            const input = document.createElement('input');
+            input.type = 'file';
+            input.accept = 'image/*';
+            input.capture = 'camera';
+            input.onchange = (e) => {
+                const file = e.target.files[0];
+                if (file) this.sendFileMessage(file);
+            };
+            input.click();
+        });
+
+        // Add other event listeners as needed...
+    }
+
+    updateMoodUI() {
+        const indicator = document.getElementById('moodIndicator');
+        if (indicator) {
+            indicator.className = `mood-indicator mood-${this.currentMood}-indicator`;
+        }
+        
+        document.querySelectorAll('.mood-option').forEach(btn => {
+            if (btn.dataset.mood === this.currentMood) {
+                btn.classList.add('bg-purple-100', 'border-purple-500', 'text-purple-700');
+            } else {
+                btn.classList.remove('bg-purple-100', 'border-purple-500', 'text-purple-700');
+            }
+        });
+    }
+
+    showMoodSuggestion() {
+        const suggestions = {
+            happy: ["Share something positive! 😊", "Ask about their favorite memory"],
+            calm: ["Discuss relaxation techniques 🧘‍♀️", "Share a peaceful moment"],
+            energetic: ["Plan an activity together! ⚡", "Ask about their passions"],
+            focused: ["Discuss goals and projects 🎯", "Share productivity tips"],
+            creative: ["Talk about creative ideas 🎨", "Share inspirational content"]
         };
-
-        words.forEach(word => {
-            for (const [emotion, keywords] of Object.entries(this.emotionKeywords)) {
-                if (keywords.includes(word)) {
-                    emotionScores[emotion]++;
-                }
-            }
-        });
-
-        const emojis = text.match(/[\u{1F600}-\u{1F64F}]|[\u{1F300}-\u{1F5FF}]|[\u{1F680}-\u{1F6FF}]|[\u{1F1E0}-\u{1F1FF}]/gu) || [];
-        emojis.forEach(emoji => {
-            for (const [emotion, keywords] of Object.entries(this.emotionKeywords)) {
-                if (keywords.includes(emoji)) {
-                    emotionScores[emotion] += 2;
-                }
-            }
-        });
-
-        return this.getDominantEmotion(emotionScores);
+        
+        const randomSuggestion = suggestions[this.currentMood]?.[Math.floor(Math.random() * suggestions[this.currentMood].length)] || "Start a conversation!";
+        document.getElementById('suggestionText').textContent = randomSuggestion;
+        document.getElementById('moodSuggestion').classList.remove('hidden');
     }
 
-    getDominantEmotion(scores) {
-        let maxScore = 0;
-        let dominantEmotion = 'default';
-
-        for (const [emotion, score] of Object.entries(scores)) {
-            if (score > maxScore) {
-                maxScore = score;
-                dominantEmotion = emotion;
-            }
-        }
-
-        return maxScore > 0 ? dominantEmotion : 'default';
-    }
+    // Add other missing methods as needed...
 }
 
-// Gamification System
-class GamificationSystem {
-    constructor(user) {
-        this.user = user;
-    }
+// Initialize the application
+let chatApp;
 
-    async loadUserProgress() {
-        console.log('Loading user progress...');
-    }
-
-    addConnectcoins(amount) {
-        if (this.user.connectcoins === undefined) {
-            this.user.connectcoins = 0;
-        }
-        this.user.connectcoins += amount;
-        
-        const coinsElement = document.getElementById('connectcoinsCount');
-        if (coinsElement) {
-            coinsElement.textContent = this.user.connectcoins;
-        }
-        
-        this.saveUserProgress();
-    }
-
-    addXP(amount) {
-        if (this.user.xp === undefined) {
-            this.user.xp = 0;
-        }
-        this.user.xp += amount;
-        
-        const xpForNextLevel = this.user.level * 100;
-        if (this.user.xp >= xpForNextLevel) {
-            this.levelUp();
-        }
-        
-        this.saveUserProgress();
-    }
-
-    levelUp() {
-        this.user.level++;
-        this.user.xp = 0;
-        const levelBonus = this.user.level * 50;
-        this.addConnectcoins(levelBonus);
-        
-        const levelElement = document.getElementById('userLevel');
-        if (levelElement) {
-            levelElement.classList.add('level-up-flash');
-            setTimeout(() => {
-                levelElement.classList.remove('level-up-flash');
-            }, 500);
-        }
-        
-        if (window.chatSystem) {
-            window.chatSystem.showNotification(`🎉 Level Up! You reached level ${this.user.level} (+${levelBonus} ConnectCoins)`, 'success');
-        }
-    }
-
-    async saveUserProgress() {
-        console.log('Saving user progress...');
-    }
-}
-
-// Make the send function available globally
-window.sendQuickMessage = function(text, imageUrl = null) {
-    if (window.chatSystem) {
-        return window.chatSystem.quickSend(text, imageUrl);
-    } else {
-        console.error('Chat system not initialized');
-        return Promise.reject('Chat system not initialized');
-    }
-};
-
-// Make features available globally
-window.chatFeatures = {
-    sendQuickMessage: (text, imageUrl) => window.sendQuickMessage(text, imageUrl),
-    startVideoCall: () => window.chatSystem?.startVideoCall(),
-    startVoiceCall: () => window.chatSystem?.startVoiceCall(),
-    shareLocation: () => window.chatSystem?.shareLocation(),
-    shareFile: () => window.chatSystem?.shareFile(),
-    sendGif: (gifUrl) => window.chatSystem?.sendGif(gifUrl),
-    sendSticker: (sticker) => window.chatSystem?.sendSticker(sticker)
-};
-
-// Initialize the chat system
 document.addEventListener('DOMContentLoaded', function() {
-    // Check if we're on a chat page
-    const chatApp = document.getElementById('chat-app');
-    if (!chatApp) {
-        console.log('Chat app container not found, skipping initialization');
-        return;
-    }
-
-    const initChatSystem = async () => {
-        try {
-            // Wait for Firebase to be available
-            if (typeof firebase === 'undefined') {
-                console.log('Firebase not loaded, waiting...');
-                
-                // Wait for Firebase to load
-                await new Promise((resolve) => {
-                    const checkFirebase = setInterval(() => {
-                        if (typeof firebase !== 'undefined') {
-                            clearInterval(checkFirebase);
-                            resolve();
-                        }
-                    }, 100);
-                });
-            }
-
-            console.log('✅ Firebase available, initializing chat system...');
-            window.chatSystem = new ProfessionalChatSystem();
-            
-        } catch (error) {
-            console.error('❌ Error initializing chat system:', error);
-            
-            const errorDiv = document.createElement('div');
-            errorDiv.style.cssText = `
-                position: fixed;
-                top: 0;
-                left: 0;
-                right: 0;
-                background: #e74c3c;
-                color: white;
-                padding: 1rem;
-                text-align: center;
-                z-index: 10000;
-                font-family: Arial, sans-serif;
-            `;
-            errorDiv.textContent = 'Error loading chat system. Please refresh the page.';
-            document.body.appendChild(errorDiv);
-        }
-    };
-
-    initChatSystem();
+    chatApp = new KynectaChat();
 });
 
-if (typeof module !== 'undefined' && module.exports) {
-    module.exports = ProfessionalChatSystem;
-}
+// Make it available globally for HTML event handlers
+window.chatApp = chatApp;

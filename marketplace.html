@@ -72,6 +72,15 @@
             to { opacity: 1; transform: translateY(0); }
         }
         
+        .slide-in {
+            animation: slideIn 0.3s ease;
+        }
+        
+        @keyframes slideIn {
+            from { opacity: 0; transform: translateX(-20px); }
+            to { opacity: 1; transform: translateX(0); }
+        }
+        
         .notification {
             position: fixed;
             top: 1rem;
@@ -149,13 +158,7 @@
         
         .content-area.active {
             display: block;
-        }
-        
-        .auction-timer {
-            font-family: monospace;
-            font-size: 1.25rem;
-            font-weight: bold;
-            color: #ef4444;
+            animation: fadeIn 0.5s ease;
         }
         
         .hot-deal-badge {
@@ -469,6 +472,142 @@
             100% { transform: rotate(360deg); }
         }
         
+        /* Jumia-inspired styles */
+        .jumia-nav {
+            background: #f68b1e;
+            color: white;
+        }
+        
+        .jumia-search {
+            background: white;
+            border-radius: 4px;
+            padding: 8px 12px;
+        }
+        
+        .jumia-category-grid {
+            display: grid;
+            grid-template-columns: repeat(4, 1fr);
+            gap: 10px;
+            padding: 15px;
+        }
+        
+        .jumia-category-item {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            text-align: center;
+            cursor: pointer;
+            transition: transform 0.2s ease;
+        }
+        
+        .jumia-category-item:hover {
+            transform: translateY(-5px);
+        }
+        
+        .jumia-category-icon {
+            width: 50px;
+            height: 50px;
+            background: #f5f5f5;
+            border-radius: 50%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            margin-bottom: 5px;
+        }
+        
+        .jumia-category-name {
+            font-size: 12px;
+            color: #333;
+        }
+        
+        .jumia-product-card {
+            background: white;
+            border-radius: 8px;
+            padding: 10px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+            cursor: pointer;
+            transition: transform 0.2s ease;
+        }
+        
+        .jumia-product-card:hover {
+            transform: translateY(-5px);
+            box-shadow: 0 4px 8px rgba(0,0,0,0.15);
+        }
+        
+        .jumia-product-image {
+            width: 100%;
+            height: 150px;
+            object-fit: contain;
+            margin-bottom: 10px;
+        }
+        
+        .jumia-product-name {
+            font-size: 14px;
+            font-weight: 500;
+            margin-bottom: 5px;
+            height: 40px;
+            overflow: hidden;
+        }
+        
+        .jumia-product-price {
+            font-size: 16px;
+            font-weight: bold;
+            color: #f68b1e;
+            margin-bottom: 5px;
+        }
+        
+        .jumia-product-original-price {
+            font-size: 12px;
+            color: #999;
+            text-decoration: line-through;
+            margin-bottom: 5px;
+        }
+        
+        .jumia-product-discount {
+            font-size: 12px;
+            color: #f68b1e;
+            font-weight: bold;
+        }
+        
+        .jumia-rating {
+            display: flex;
+            align-items: center;
+            font-size: 12px;
+            color: #999;
+        }
+        
+        .jumia-express-badge {
+            background: #f68b1e;
+            color: white;
+            font-size: 10px;
+            padding: 2px 5px;
+            border-radius: 3px;
+            display: inline-block;
+            margin-bottom: 5px;
+        }
+        
+        /* Dashboard styles */
+        .dashboard-section {
+            display: none;
+        }
+        
+        .dashboard-section.active {
+            display: block;
+            animation: slideIn 0.3s ease;
+        }
+        
+        .seller-card {
+            background: white;
+            border-radius: 12px;
+            padding: 20px;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+            transition: transform 0.2s ease;
+        }
+        
+        .seller-card:hover {
+            transform: translateY(-5px);
+        }
+        
         /* Mobile responsive styles */
         .mobile-menu {
             position: fixed;
@@ -692,6 +831,39 @@
                 font-size: 0.75rem;
                 color: var(--text-secondary);
             }
+            
+            /* Jumia-style mobile improvements */
+            .jumia-category-grid {
+                grid-template-columns: repeat(4, 1fr);
+                gap: 8px;
+                padding: 10px;
+            }
+            
+            .jumia-category-icon {
+                width: 40px;
+                height: 40px;
+            }
+            
+            .jumia-category-name {
+                font-size: 10px;
+            }
+            
+            .jumia-product-card {
+                padding: 8px;
+            }
+            
+            .jumia-product-image {
+                height: 120px;
+            }
+            
+            .jumia-product-name {
+                font-size: 12px;
+                height: 32px;
+            }
+            
+            .jumia-product-price {
+                font-size: 14px;
+            }
         }
         
         /* Responsive text sizes */
@@ -755,6 +927,10 @@
             .stats-grid {
                 grid-template-columns: 1fr;
             }
+            
+            .jumia-category-grid {
+                grid-template-columns: repeat(3, 1fr);
+            }
         }
     </style>
 </head>
@@ -808,10 +984,10 @@
                 </div>
                 
                 <div class="hidden md:flex space-x-6 desktop-nav">
-                    <a href="index.html" class="text-gray-700 hover:text-indigo-600 dark:text-gray-300 dark:hover:text-white font-medium transition">Home</a>
-                    <a href="#" id="discoverLink" class="text-gray-700 hover:text-indigo-600 dark:text-gray-300 dark:hover:text-white font-medium transition">Discover</a>
-                    <a href="#" id="categoriesLink" class="text-gray-700 hover:text-indigo-600 dark:text-gray-300 dark:hover:text-white font-medium transition">Categories</a>
-                    <a href="#" id="sellersLink" class="text-gray-700 hover:text-indigo-600 dark:text-gray-300 dark:hover:text-white font-medium transition">Sellers</a>
+                    <a href="#" class="nav-link active" data-section="home">Home</a>
+                    <a href="#" class="nav-link" data-section="discover">Discover</a>
+                    <a href="#" class="nav-link" data-section="categories">Categories</a>
+                    <a href="#" class="nav-link" data-section="sellers">Sellers</a>
                 </div>
                 
                 <div class="flex items-center space-x-4">
@@ -887,196 +1063,528 @@
     </nav>
 
     <!-- Main Content -->
-    <main class="container mx-auto px-4 py-8">
-        <!-- Hero Section with Carousel -->
-        <section class="mb-8">
-            <div class="carousel rounded-xl overflow-hidden">
-                <div class="carousel-inner">
-                    <div class="carousel-item">
-                        <img src="https://images.unsplash.com/photo-1563013544-824ae1b704d3?ixlib=rb-1.2.1&auto=format&fit=crop&w=1200&q=80" alt="Marketplace Banner" class="w-full h-auto">
-                        <div class="carousel-caption">
-                            <h2 class="responsive-heading font-bold">Welcome to kynecta Marketplace</h2>
-                            <p class="responsive-subheading">Buy and sell within your community</p>
+    <main class="container mx-auto px-4 py-4">
+        <!-- Home Dashboard -->
+        <div id="homeDashboard" class="dashboard-section active">
+            <!-- Hero Section with Carousel -->
+            <section class="mb-6">
+                <div class="carousel rounded-xl overflow-hidden">
+                    <div class="carousel-inner">
+                        <div class="carousel-item">
+                            <img src="https://images.unsplash.com/photo-1563013544-824ae1b704d3?ixlib=rb-1.2.1&auto=format&fit=crop&w=1200&q=80" alt="Marketplace Banner" class="w-full h-auto">
+                            <div class="carousel-caption">
+                                <h2 class="responsive-heading font-bold">Welcome to kynecta Marketplace</h2>
+                                <p class="responsive-subheading">Buy and sell within your community</p>
+                            </div>
+                        </div>
+                        <div class="carousel-item">
+                            <img src="https://images.unsplash.com/photo-1556742049-0cfed4f6a45d?ixlib=rb-1.2.1&auto=format&fit=crop&w=1200&q=80" alt="Hot Deals" class="w-full h-auto">
+                            <div class="carousel-caption">
+                                <h2 class="responsive-heading font-bold">Hot Deals</h2>
+                                <p class="responsive-subheading">Check out our trending items with special discounts</p>
+                            </div>
+                        </div>
+                        <div class="carousel-item">
+                            <img src="https://images.unsplash.com/photo-1560472354-b33ff0c44a43?ixlib=rb-1.2.1&auto=format&fit=crop&w=1200&q=80" alt="Flash Sale" class="w-full h-auto">
+                            <div class="carousel-caption">
+                                <h2 class="responsive-heading font-bold">Flash Sale</h2>
+                                <p class="responsive-subheading">Limited time offers with countdown timer</p>
+                                <div class="countdown-timer mt-2" id="flashSaleTimer">24:00:00</div>
+                            </div>
                         </div>
                     </div>
-                    <div class="carousel-item">
-                        <img src="https://images.unsplash.com/photo-1556742049-0cfed4f6a45d?ixlib=rb-1.2.1&auto=format&fit=crop&w=1200&q=80" alt="Hot Deals" class="w-full h-auto">
-                        <div class="carousel-caption">
-                            <h2 class="responsive-heading font-bold">Hot Deals</h2>
-                            <p class="responsive-subheading">Check out our trending items with special discounts</p>
+                    <button class="carousel-control prev">
+                        <i class="fas fa-chevron-left"></i>
+                    </button>
+                    <button class="carousel-control next">
+                        <i class="fas fa-chevron-right"></i>
+                    </button>
+                </div>
+            </section>
+
+            <!-- Stats Section -->
+            <section class="grid grid-cols-2 md:grid-cols-4 gap-4 mb-6 stats-grid">
+                <div class="glass-card p-4 text-center">
+                    <div class="text-indigo-600 text-xl font-bold mb-1" id="activeListingsCount">0</div>
+                    <div class="text-gray-600 dark:text-gray-400 text-sm">Active Listings</div>
+                </div>
+                <div class="glass-card p-4 text-center">
+                    <div class="text-indigo-600 text-xl font-bold mb-1" id="totalUsersCount">0</div>
+                    <div class="text-gray-600 dark:text-gray-400 text-sm">Users</div>
+                </div>
+                <div class="glass-card p-4 text-center">
+                    <div class="text-indigo-600 text-xl font-bold mb-1" id="successfulSalesCount">0</div>
+                    <div class="text-gray-600 dark:text-gray-400 text-sm">Successful Sales</div>
+                </div>
+                <div class="glass-card p-4 text-center">
+                    <div class="text-indigo-600 text-xl font-bold mb-1" id="averageRatingCount">0.0</div>
+                    <div class="text-gray-600 dark:text-gray-400 text-sm">Avg. Rating</div>
+                </div>
+            </section>
+
+            <!-- Categories Section (Jumia Style) -->
+            <section class="mb-6">
+                <h2 class="text-xl font-bold text-gray-900 dark:text-white mb-4">Categories</h2>
+                <div class="jumia-category-grid">
+                    <div class="jumia-category-item" data-category="phones">
+                        <div class="jumia-category-icon">
+                            <i class="fas fa-mobile-alt text-indigo-600"></i>
+                        </div>
+                        <span class="jumia-category-name">Phones & Tablets</span>
+                    </div>
+                    <div class="jumia-category-item" data-category="tvs">
+                        <div class="jumia-category-icon">
+                            <i class="fas fa-tv text-indigo-600"></i>
+                        </div>
+                        <span class="jumia-category-name">TVs & Audio</span>
+                    </div>
+                    <div class="jumia-category-item" data-category="computing">
+                        <div class="jumia-category-icon">
+                            <i class="fas fa-laptop text-indigo-600"></i>
+                        </div>
+                        <span class="jumia-category-name">Computing</span>
+                    </div>
+                    <div class="jumia-category-item" data-category="fashion">
+                        <div class="jumia-category-icon">
+                            <i class="fas fa-tshirt text-indigo-600"></i>
+                        </div>
+                        <span class="jumia-category-name">Fashion</span>
+                    </div>
+                    <div class="jumia-category-item" data-category="home">
+                        <div class="jumia-category-icon">
+                            <i class="fas fa-home text-indigo-600"></i>
+                        </div>
+                        <span class="jumia-category-name">Home & Office</span>
+                    </div>
+                    <div class="jumia-category-item" data-category="health">
+                        <div class="jumia-category-icon">
+                            <i class="fas fa-heartbeat text-indigo-600"></i>
+                        </div>
+                        <span class="jumia-category-name">Health & Beauty</span>
+                    </div>
+                    <div class="jumia-category-item" data-category="gaming">
+                        <div class="jumia-category-icon">
+                            <i class="fas fa-gamepad text-indigo-600"></i>
+                        </div>
+                        <span class="jumia-category-name">Gaming</span>
+                    </div>
+                    <div class="jumia-category-item" id="moreCategories">
+                        <div class="jumia-category-icon">
+                            <i class="fas fa-ellipsis-h text-indigo-600"></i>
+                        </div>
+                        <span class="jumia-category-name">More</span>
+                    </div>
+                </div>
+            </section>
+
+            <!-- Flash Sales Section (Jumia Style) -->
+            <section class="mb-6">
+                <div class="flex justify-between items-center mb-4">
+                    <h2 class="text-xl font-bold text-gray-900 dark:text-white">Flash Sales</h2>
+                    <a href="#" class="text-indigo-600 hover:text-indigo-800 dark:text-indigo-400 font-medium">See All</a>
+                </div>
+                <div class="flex items-center mb-4">
+                    <span class="text-sm text-gray-600 dark:text-gray-400 mr-2">Ends in:</span>
+                    <div class="countdown-timer" id="flashSaleCountdown">06h : 19m : 55s</div>
+                </div>
+                <div class="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-4 product-grid" id="flashSalesContainer">
+                    <!-- Flash sale items will be loaded here -->
+                    <div class="col-span-full text-center py-4">
+                        <div class="loading-spinner mx-auto mb-2" style="width: 30px; height: 30px;"></div>
+                        <p class="text-gray-500 dark:text-gray-400">Loading flash sales...</p>
+                    </div>
+                </div>
+            </section>
+
+            <!-- Trending Items Section -->
+            <section class="mb-6">
+                <div class="flex justify-between items-center mb-4">
+                    <h2 class="text-xl font-bold text-gray-900 dark:text-white">Trending Items</h2>
+                    <a href="#" class="text-indigo-600 hover:text-indigo-800 dark:text-indigo-400 font-medium">View All</a>
+                </div>
+                <div class="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-4 product-grid" id="trendingItemsContainer">
+                    <div class="col-span-full text-center py-4">
+                        <div class="loading-spinner mx-auto mb-2" style="width: 30px; height: 30px;"></div>
+                        <p class="text-gray-500 dark:text-gray-400">Loading trending items...</p>
+                    </div>
+                </div>
+            </section>
+
+            <!-- Recommended For You -->
+            <section class="mb-6">
+                <h2 class="text-xl font-bold text-gray-900 dark:text-white mb-4">Recommended For You</h2>
+                <div class="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-4 product-grid" id="recommendedContainer">
+                    <div class="col-span-full text-center py-4">
+                        <div class="loading-spinner mx-auto mb-2" style="width: 30px; height: 30px;"></div>
+                        <p class="text-gray-500 dark:text-gray-400">Loading recommendations...</p>
+                    </div>
+                </div>
+            </section>
+
+            <!-- Recently Viewed (Jumia Style) -->
+            <section class="mb-6">
+                <div class="flex justify-between items-center mb-4">
+                    <h2 class="text-xl font-bold text-gray-900 dark:text-white">Recently Viewed</h2>
+                    <button id="clearRecentlyViewed" class="text-indigo-600 hover:text-indigo-800 dark:text-indigo-400 font-medium">Clear All</button>
+                </div>
+                <div class="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-4 product-grid" id="recentlyViewedContainer">
+                    <!-- Recently viewed items will be loaded here -->
+                    <div class="col-span-full text-center py-4">
+                        <p class="text-gray-500 dark:text-gray-400">No recently viewed items</p>
+                    </div>
+                </div>
+            </section>
+
+            <!-- All Listings Section -->
+            <section class="mb-8">
+                <div class="flex flex-wrap justify-between items-center mb-6">
+                    <div class="tab-buttons-container">
+                        <div class="tab-buttons-scroll">
+                            <button class="tab-button active" data-category="all">All Listings</button>
+                            <button class="tab-button" data-category="electronics">Electronics</button>
+                            <button class="tab-button" data-category="textbooks">Textbooks</button>
+                            <button class="tab-button" data-category="furniture">Furniture</button>
+                            <button class="tab-button" data-category="clothing">Clothing</button>
+                            <button class="tab-button" data-category="services">Services</button>
                         </div>
                     </div>
-                    <div class="carousel-item">
-                        <img src="https://images.unsplash.com/photo-1560472354-b33ff0c44a43?ixlib=rb-1.2.1&auto=format&fit=crop&w=1200&q=80" alt="Flash Sale" class="w-full h-auto">
-                        <div class="carousel-caption">
-                            <h2 class="responsive-heading font-bold">Flash Sale</h2>
-                            <p class="responsive-subheading">Limited time offers with countdown timer</p>
-                            <div class="countdown-timer mt-2" id="flashSaleTimer">24:00:00</div>
-                        </div>
-                    </div>
-                </div>
-                <button class="carousel-control prev">
-                    <i class="fas fa-chevron-left"></i>
-                </button>
-                <button class="carousel-control next">
-                    <i class="fas fa-chevron-right"></i>
-                </button>
-            </div>
-        </section>
 
-        <!-- Stats Section -->
-        <section class="grid grid-cols-2 md:grid-cols-4 gap-4 mb-8 stats-grid">
-            <div class="glass-card p-4 text-center">
-                <div class="text-indigo-600 text-xl font-bold mb-1" id="activeListingsCount">0</div>
-                <div class="text-gray-600 dark:text-gray-400 text-sm">Active Listings</div>
-            </div>
-            <div class="glass-card p-4 text-center">
-                <div class="text-indigo-600 text-xl font-bold mb-1" id="totalUsersCount">0</div>
-                <div class="text-gray-600 dark:text-gray-400 text-sm">Users</div>
-            </div>
-            <div class="glass-card p-4 text-center">
-                <div class="text-indigo-600 text-xl font-bold mb-1" id="successfulSalesCount">0</div>
-                <div class="text-gray-600 dark:text-gray-400 text-sm">Successful Sales</div>
-            </div>
-            <div class="glass-card p-4 text-center">
-                <div class="text-indigo-600 text-xl font-bold mb-1" id="averageRatingCount">0.0</div>
-                <div class="text-gray-600 dark:text-gray-400 text-sm">Avg. Rating</div>
-            </div>
-        </section>
-
-        <!-- Trending Items Section -->
-        <section class="mb-8">
-            <div class="flex justify-between items-center mb-4">
-                <h2 class="text-2xl font-bold text-gray-900 dark:text-white">Trending Items</h2>
-                <a href="#" class="text-indigo-600 hover:text-indigo-800 dark:text-indigo-400 font-medium">View All</a>
-            </div>
-            <div class="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4 product-grid" id="trendingItemsContainer">
-                <div class="col-span-full text-center py-12">
-                    <div class="loading-spinner mx-auto mb-4" style="width: 40px; height: 40px;"></div>
-                    <p class="text-gray-500 dark:text-gray-400">Loading trending items...</p>
-                </div>
-            </div>
-        </section>
-
-        <!-- Marketplace Tabs -->
-        <section class="mb-8">
-            <div class="flex flex-wrap justify-between items-center mb-6">
-                <div class="tab-buttons-container">
-                    <div class="tab-buttons-scroll">
-                        <button class="tab-button active" data-category="all">All Listings</button>
-                        <button class="tab-button" data-category="electronics">Electronics</button>
-                        <button class="tab-button" data-category="textbooks">Textbooks</button>
-                        <button class="tab-button" data-category="furniture">Furniture</button>
-                        <button class="tab-button" data-category="clothing">Clothing</button>
-                        <button class="tab-button" data-category="services">Services</button>
-                    </div>
-                </div>
-
-                <div class="flex items-center space-x-4 mt-4 md:mt-0">
-                    <div class="flex items-center space-x-2">
-                        <button id="gridViewBtn" class="p-2 border border-gray-300 dark:border-slate-600 rounded-lg text-gray-600 dark:text-gray-300 hover:text-gray-900 dark:hover:text-white bg-indigo-50 dark:bg-indigo-900/20">
-                            <i class="fas fa-th-large"></i>
-                        </button>
-                        <button id="listViewBtn" class="p-2 border border-gray-300 dark:border-slate-600 rounded-lg text-gray-600 dark:text-gray-300 hover:text-gray-900 dark:hover:text-white">
-                            <i class="fas fa-list"></i>
-                        </button>
-                    </div>
-                    
-                    <select id="sortFilter" class="border border-gray-300 dark:border-slate-600 dark:bg-slate-700 dark:text-white rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent">
-                        <option value="newest">Newest First</option>
-                        <option value="oldest">Oldest First</option>
-                        <option value="price-low">Price: Low to High</option>
-                        <option value="price-high">Price: High to Low</option>
-                        <option value="popular">Most Popular</option>
-                    </select>
-                </div>
-            </div>
-
-            <!-- Filters -->
-            <div class="glass-card p-4 mb-6">
-                <div class="flex flex-col md:flex-row flex-wrap gap-4 items-start md:items-center filter-controls">
-                    <div>
-                        <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Price Range</label>
+                    <div class="flex items-center space-x-4 mt-4 md:mt-0">
                         <div class="flex items-center space-x-2">
-                            <input type="number" id="minPrice" placeholder="Min" class="w-20 border border-gray-300 dark:border-slate-600 dark:bg-slate-700 dark:text-white rounded-lg px-3 py-1 focus:outline-none focus:ring-1 focus:ring-indigo-500">
-                            <span class="text-gray-500">-</span>
-                            <input type="number" id="maxPrice" placeholder="Max" class="w-20 border border-gray-300 dark:border-slate-600 dark:bg-slate-700 dark:text-white rounded-lg px-3 py-1 focus:outline-none focus:ring-1 focus:ring-indigo-500">
+                            <button id="gridViewBtn" class="p-2 border border-gray-300 dark:border-slate-600 rounded-lg text-gray-600 dark:text-gray-300 hover:text-gray-900 dark:hover:text-white bg-indigo-50 dark:bg-indigo-900/20">
+                                <i class="fas fa-th-large"></i>
+                            </button>
+                            <button id="listViewBtn" class="p-2 border border-gray-300 dark:border-slate-600 rounded-lg text-gray-600 dark:text-gray-300 hover:text-gray-900 dark:hover:text-white">
+                                <i class="fas fa-list"></i>
+                            </button>
+                        </div>
+                        
+                        <select id="sortFilter" class="border border-gray-300 dark:border-slate-600 dark:bg-slate-700 dark:text-white rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent">
+                            <option value="newest">Newest First</option>
+                            <option value="oldest">Oldest First</option>
+                            <option value="price-low">Price: Low to High</option>
+                            <option value="price-high">Price: High to Low</option>
+                            <option value="popular">Most Popular</option>
+                        </select>
+                    </div>
+                </div>
+
+                <!-- Filters -->
+                <div class="glass-card p-4 mb-6">
+                    <div class="flex flex-col md:flex-row flex-wrap gap-4 items-start md:items-center filter-controls">
+                        <div>
+                            <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Price Range</label>
+                            <div class="flex items-center space-x-2">
+                                <input type="number" id="minPrice" placeholder="Min" class="w-20 border border-gray-300 dark:border-slate-600 dark:bg-slate-700 dark:text-white rounded-lg px-3 py-1 focus:outline-none focus:ring-1 focus:ring-indigo-500">
+                                <span class="text-gray-500">-</span>
+                                <input type="number" id="maxPrice" placeholder="Max" class="w-20 border border-gray-300 dark:border-slate-600 dark:bg-slate-700 dark:text-white rounded-lg px-3 py-1 focus:outline-none focus:ring-1 focus:ring-indigo-500">
+                            </div>
+                        </div>
+                        
+                        <div>
+                            <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Seller Rating</label>
+                            <select id="sellerRatingFilter" class="border border-gray-300 dark:border-slate-600 dark:bg-slate-700 dark:text-white rounded-lg px-3 py-1 focus:outline-none focus:ring-1 focus:ring-indigo-500">
+                                <option value="any">Any Rating</option>
+                                <option value="4.5">4.5+ Stars</option>
+                                <option value="4.0">4.0+ Stars</option>
+                                <option value="3.5">3.5+ Stars</option>
+                                <option value="3.0">3.0+ Stars</option>
+                            </select>
+                        </div>
+                        
+                        <div>
+                            <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Location</label>
+                            <select id="locationFilter" class="border border-gray-300 dark:border-slate-600 dark:bg-slate-700 dark:text-white rounded-lg px-3 py-1 focus:outline-none focus:ring-1 focus:ring-indigo-500">
+                                <option value="any">Any Location</option>
+                                <option value="campus">On Campus</option>
+                                <option value="downtown">Downtown</option>
+                                <option value="suburbs">Suburbs</option>
+                            </select>
+                        </div>
+                        
+                        <div class="filter-buttons">
+                            <button id="applyFilters" class="bg-indigo-600 text-white px-4 py-2 rounded-lg font-semibold hover:bg-indigo-700 transition">Apply Filters</button>
+                            <button id="clearFilters" class="bg-gray-300 dark:bg-slate-600 text-gray-700 dark:text-gray-300 px-4 py-2 rounded-lg font-semibold hover:bg-gray-400 dark:hover:bg-slate-500 transition">Clear</button>
                         </div>
                     </div>
-                    
-                    <div>
-                        <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Seller Rating</label>
-                        <select id="sellerRatingFilter" class="border border-gray-300 dark:border-slate-600 dark:bg-slate-700 dark:text-white rounded-lg px-3 py-1 focus:outline-none focus:ring-1 focus:ring-indigo-500">
-                            <option value="any">Any Rating</option>
-                            <option value="4.5">4.5+ Stars</option>
-                            <option value="4.0">4.0+ Stars</option>
-                            <option value="3.5">3.5+ Stars</option>
-                            <option value="3.0">3.0+ Stars</option>
-                        </select>
+                </div>
+
+                <!-- Product Grid/List -->
+                <div id="listingsContainer" class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6 product-grid">
+                    <div class="col-span-full text-center py-12">
+                        <div class="loading-spinner mx-auto mb-4" style="width: 40px; height: 40px;"></div>
+                        <p class="text-gray-500 dark:text-gray-400">Loading listings...</p>
+                    </div>
+                </div>
+
+                <!-- Load More Button -->
+                <div class="text-center mt-8">
+                    <button id="loadMoreBtn" class="bg-white dark:bg-slate-800 border border-gray-300 dark:border-slate-600 text-gray-700 dark:text-gray-300 px-6 py-3 rounded-lg font-semibold hover:bg-gray-50 dark:hover:bg-slate-700 transition hidden">
+                        Load More Listings
+                    </button>
+                </div>
+            </section>
+        </div>
+
+        <!-- Discover Dashboard -->
+        <div id="discoverDashboard" class="dashboard-section">
+            <div class="flex justify-between items-center mb-6">
+                <h2 class="text-2xl font-bold text-gray-900 dark:text-white">Discover</h2>
+                <div class="flex space-x-4">
+                    <button id="refreshDiscover" class="bg-indigo-600 text-white px-4 py-2 rounded-lg font-semibold hover:bg-indigo-700 transition">
+                        <i class="fas fa-sync-alt mr-2"></i>Refresh
+                    </button>
+                </div>
+            </div>
+
+            <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6 mb-8">
+                <div class="glass-card p-6 text-center">
+                    <i class="fas fa-fire text-4xl text-red-500 mb-4"></i>
+                    <h3 class="text-xl font-bold text-gray-900 dark:text-white mb-2">Hot Deals</h3>
+                    <p class="text-gray-600 dark:text-gray-400 mb-4">Discover the most popular items with special discounts</p>
+                    <button class="bg-indigo-600 text-white px-4 py-2 rounded-lg font-semibold hover:bg-indigo-700 transition w-full">
+                        Explore Hot Deals
+                    </button>
+                </div>
+                
+                <div class="glass-card p-6 text-center">
+                    <i class="fas fa-star text-4xl text-yellow-500 mb-4"></i>
+                    <h3 class="text-xl font-bold text-gray-900 dark:text-white mb-2">Top Rated</h3>
+                    <p class="text-gray-600 dark:text-gray-400 mb-4">Find items with the highest ratings from our community</p>
+                    <button class="bg-indigo-600 text-white px-4 py-2 rounded-lg font-semibold hover:bg-indigo-700 transition w-full">
+                        View Top Rated
+                    </button>
+                </div>
+                
+                <div class="glass-card p-6 text-center">
+                    <i class="fas fa-bolt text-4xl text-purple-500 mb-4"></i>
+                    <h3 class="text-xl font-bold text-gray-900 dark:text-white mb-2">Just Added</h3>
+                    <p class="text-gray-600 dark:text-gray-400 mb-4">Check out the newest listings in our marketplace</p>
+                    <button class="bg-indigo-600 text-white px-4 py-2 rounded-lg font-semibold hover:bg-indigo-700 transition w-full">
+                        See New Listings
+                    </button>
+                </div>
+            </div>
+
+            <div class="mb-8">
+                <h3 class="text-xl font-bold text-gray-900 dark:text-white mb-4">Featured Collections</h3>
+                <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+                    <div class="glass-card p-4 text-center cursor-pointer hover-lift">
+                        <img src="https://images.unsplash.com/photo-1526170375885-4d8ecf77b99f?ixlib=rb-1.2.1&auto=format&fit=crop&w=500&q=80" alt="Electronics" class="w-full h-32 object-cover rounded-lg mb-3">
+                        <h4 class="font-semibold text-gray-900 dark:text-white">Electronics</h4>
+                        <p class="text-sm text-gray-600 dark:text-gray-400">Latest gadgets and devices</p>
                     </div>
                     
-                    <div>
-                        <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Location</label>
-                        <select id="locationFilter" class="border border-gray-300 dark:border-slate-600 dark:bg-slate-700 dark:text-white rounded-lg px-3 py-1 focus:outline-none focus:ring-1 focus:ring-indigo-500">
-                            <option value="any">Any Location</option>
-                            <option value="campus">On Campus</option>
-                            <option value="downtown">Downtown</option>
-                            <option value="suburbs">Suburbs</option>
-                        </select>
+                    <div class="glass-card p-4 text-center cursor-pointer hover-lift">
+                        <img src="https://images.unsplash.com/photo-1548036328-c9fa89d128fa?ixlib=rb-1.2.1&auto=format&fit=crop&w=500&q=80" alt="Fashion" class="w-full h-32 object-cover rounded-lg mb-3">
+                        <h4 class="font-semibold text-gray-900 dark:text-white">Fashion</h4>
+                        <p class="text-sm text-gray-600 dark:text-gray-400">Trendy clothes and accessories</p>
                     </div>
                     
-                    <div class="filter-buttons">
-                        <button id="applyFilters" class="bg-indigo-600 text-white px-4 py-2 rounded-lg font-semibold hover:bg-indigo-700 transition">Apply Filters</button>
-                        <button id="clearFilters" class="bg-gray-300 dark:bg-slate-600 text-gray-700 dark:text-gray-300 px-4 py-2 rounded-lg font-semibold hover:bg-gray-400 dark:hover:bg-slate-500 transition">Clear</button>
+                    <div class="glass-card p-4 text-center cursor-pointer hover-lift">
+                        <img src="https://images.unsplash.com/photo-1586023492125-27b2c045efd7?ixlib=rb-1.2.1&auto=format&fit=crop&w=500&q=80" alt="Home" class="w-full h-32 object-cover rounded-lg mb-3">
+                        <h4 class="font-semibold text-gray-900 dark:text-white">Home & Living</h4>
+                        <p class="text-sm text-gray-600 dark:text-gray-400">Furniture and home essentials</p>
+                    </div>
+                    
+                    <div class="glass-card p-4 text-center cursor-pointer hover-lift">
+                        <img src="https://images.unsplash.com/photo-1571019613454-1cb2f99b2d8b?ixlib=rb-1.2.1&auto=format&fit=crop&w=500&q=80" alt="Books" class="w-full h-32 object-cover rounded-lg mb-3">
+                        <h4 class="font-semibold text-gray-900 dark:text-white">Books & Media</h4>
+                        <p class="text-sm text-gray-600 dark:text-gray-400">Textbooks and entertainment</p>
                     </div>
                 </div>
             </div>
 
-            <!-- Product Grid/List -->
-            <div id="listingsContainer" class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6 product-grid">
-                <div class="col-span-full text-center py-12">
+            <div>
+                <h3 class="text-xl font-bold text-gray-900 dark:text-white mb-4">Discover New Items</h3>
+                <div class="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-4 product-grid" id="discoverItemsContainer">
+                    <div class="col-span-full text-center py-8">
+                        <div class="loading-spinner mx-auto mb-4" style="width: 40px; height: 40px;"></div>
+                        <p class="text-gray-500 dark:text-gray-400">Loading discovery items...</p>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Categories Dashboard -->
+        <div id="categoriesDashboard" class="dashboard-section">
+            <div class="flex justify-between items-center mb-6">
+                <h2 class="text-2xl font-bold text-gray-900 dark:text-white">All Categories</h2>
+                <div class="relative">
+                    <input type="text" id="categorySearch" placeholder="Search categories..." class="pl-10 pr-4 py-2 border border-gray-300 dark:border-slate-600 dark:bg-slate-700 dark:text-white rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent w-64">
+                    <i class="fas fa-search absolute left-3 top-3 text-gray-400"></i>
+                </div>
+            </div>
+
+            <div class="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6 gap-4 mb-8">
+                <div class="jumia-category-item" data-category="electronics">
+                    <div class="jumia-category-icon">
+                        <i class="fas fa-laptop text-indigo-600"></i>
+                    </div>
+                    <span class="jumia-category-name">Electronics</span>
+                </div>
+                
+                <div class="jumia-category-item" data-category="phones">
+                    <div class="jumia-category-icon">
+                        <i class="fas fa-mobile-alt text-indigo-600"></i>
+                    </div>
+                    <span class="jumia-category-name">Phones</span>
+                </div>
+                
+                <div class="jumia-category-item" data-category="fashion">
+                    <div class="jumia-category-icon">
+                        <i class="fas fa-tshirt text-indigo-600"></i>
+                    </div>
+                    <span class="jumia-category-name">Fashion</span>
+                </div>
+                
+                <div class="jumia-category-item" data-category="home">
+                    <div class="jumia-category-icon">
+                        <i class="fas fa-home text-indigo-600"></i>
+                    </div>
+                    <span class="jumia-category-name">Home</span>
+                </div>
+                
+                <div class="jumia-category-item" data-category="health">
+                    <div class="jumia-category-icon">
+                        <i class="fas fa-heartbeat text-indigo-600"></i>
+                    </div>
+                    <span class="jumia-category-name">Health</span>
+                </div>
+                
+                <div class="jumia-category-item" data-category="sports">
+                    <div class="jumia-category-icon">
+                        <i class="fas fa-basketball-ball text-indigo-600"></i>
+                    </div>
+                    <span class="jumia-category-name">Sports</span>
+                </div>
+                
+                <div class="jumia-category-item" data-category="books">
+                    <div class="jumia-category-icon">
+                        <i class="fas fa-book text-indigo-600"></i>
+                    </div>
+                    <span class="jumia-category-name">Books</span>
+                </div>
+                
+                <div class="jumia-category-item" data-category="toys">
+                    <div class="jumia-category-icon">
+                        <i class="fas fa-gamepad text-indigo-600"></i>
+                    </div>
+                    <span class="jumia-category-name">Toys & Games</span>
+                </div>
+                
+                <div class="jumia-category-item" data-category="automotive">
+                    <div class="jumia-category-icon">
+                        <i class="fas fa-car text-indigo-600"></i>
+                    </div>
+                    <span class="jumia-category-name">Automotive</span>
+                </div>
+                
+                <div class="jumia-category-item" data-category="pets">
+                    <div class="jumia-category-icon">
+                        <i class="fas fa-paw text-indigo-600"></i>
+                    </div>
+                    <span class="jumia-category-name">Pets</span>
+                </div>
+                
+                <div class="jumia-category-item" data-category="baby">
+                    <div class="jumia-category-icon">
+                        <i class="fas fa-baby text-indigo-600"></i>
+                    </div>
+                    <span class="jumia-category-name">Baby</span>
+                </div>
+                
+                <div class="jumia-category-item" data-category="grocery">
+                    <div class="jumia-category-icon">
+                        <i class="fas fa-shopping-basket text-indigo-600"></i>
+                    </div>
+                    <span class="jumia-category-name">Grocery</span>
+                </div>
+            </div>
+
+            <div>
+                <h3 class="text-xl font-bold text-gray-900 dark:text-white mb-4">Popular in Categories</h3>
+                <div class="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-4 product-grid" id="categoryItemsContainer">
+                    <div class="col-span-full text-center py-8">
+                        <div class="loading-spinner mx-auto mb-4" style="width: 40px; height: 40px;"></div>
+                        <p class="text-gray-500 dark:text-gray-400">Select a category to view items</p>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Sellers Dashboard -->
+        <div id="sellersDashboard" class="dashboard-section">
+            <div class="flex justify-between items-center mb-6">
+                <h2 class="text-2xl font-bold text-gray-900 dark:text-white">Top Sellers</h2>
+                <div class="flex space-x-4">
+                    <button id="refreshSellers" class="bg-indigo-600 text-white px-4 py-2 rounded-lg font-semibold hover:bg-indigo-700 transition">
+                        <i class="fas fa-sync-alt mr-2"></i>Refresh
+                    </button>
+                </div>
+            </div>
+
+            <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6 mb-8" id="sellersContainer">
+                <div class="col-span-full text-center py-8">
                     <div class="loading-spinner mx-auto mb-4" style="width: 40px; height: 40px;"></div>
-                    <p class="text-gray-500 dark:text-gray-400">Loading listings...</p>
+                    <p class="text-gray-500 dark:text-gray-400">Loading sellers...</p>
                 </div>
             </div>
 
-            <!-- Load More Button -->
-            <div class="text-center mt-8">
-                <button id="loadMoreBtn" class="bg-white dark:bg-slate-800 border border-gray-300 dark:border-slate-600 text-gray-700 dark:text-gray-300 px-6 py-3 rounded-lg font-semibold hover:bg-gray-50 dark:hover:bg-slate-700 transition hidden">
-                    Load More Listings
-                </button>
-            </div>
-        </section>
-
-        <!-- Recommended For You -->
-        <section class="mb-8">
-            <h2 class="text-2xl font-bold text-gray-900 dark:text-white mb-4">Recommended For You</h2>
-            <div class="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4 product-grid" id="recommendedContainer">
-                <div class="col-span-full text-center py-12">
-                    <div class="loading-spinner mx-auto mb-4" style="width: 40px; height: 40px;"></div>
-                    <p class="text-gray-500 dark:text-gray-400">Loading recommendations...</p>
+            <div>
+                <h3 class="text-xl font-bold text-gray-900 dark:text-white mb-4">Seller Statistics</h3>
+                <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4 mb-8">
+                    <div class="glass-card p-4 text-center">
+                        <div class="text-indigo-600 text-xl font-bold mb-1" id="totalSellersCount">0</div>
+                        <div class="text-gray-600 dark:text-gray-400 text-sm">Total Sellers</div>
+                    </div>
+                    <div class="glass-card p-4 text-center">
+                        <div class="text-indigo-600 text-xl font-bold mb-1" id="verifiedSellersCount">0</div>
+                        <div class="text-gray-600 dark:text-gray-400 text-sm">Verified Sellers</div>
+                    </div>
+                    <div class="glass-card p-4 text-center">
+                        <div class="text-indigo-600 text-xl font-bold mb-1" id="activeSellersCount">0</div>
+                        <div class="text-gray-600 dark:text-gray-400 text-sm">Active Sellers</div>
+                    </div>
+                    <div class="glass-card p-4 text-center">
+                        <div class="text-indigo-600 text-xl font-bold mb-1" id="topRatedSellersCount">0</div>
+                        <div class="text-gray-600 dark:text-gray-400 text-sm">Top Rated Sellers</div>
+                    </div>
                 </div>
             </div>
-        </section>
+
+            <div>
+                <h3 class="text-xl font-bold text-gray-900 dark:text-white mb-4">Recently Joined Sellers</h3>
+                <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6" id="recentSellersContainer">
+                    <div class="col-span-full text-center py-8">
+                        <p class="text-gray-500 dark:text-gray-400">No recent sellers to display</p>
+                    </div>
+                </div>
+            </div>
+        </div>
     </main>
 
-    <!-- Bottom Navigation -->
+    <!-- Bottom Navigation (Jumia Style) -->
     <div class="bottom-nav md:hidden">
-        <a href="index.html" class="bottom-nav-item">
+        <a href="#" class="bottom-nav-item active" data-section="home">
             <i class="fas fa-home"></i>
             <span>Home</span>
         </a>
-        <a href="chat.html" class="bottom-nav-item">
-            <i class="fas fa-comments"></i>
-            <span>Chat</span>
+        <a href="#" class="bottom-nav-item" data-section="categories">
+            <i class="fas fa-th-large"></i>
+            <span>Categories</span>
         </a>
-        <a href="games.html" class="bottom-nav-item">
-            <i class="fas fa-gamepad"></i>
-            <span>Games</span>
+        <a href="#" class="bottom-nav-item" data-section="discover">
+            <i class="fas fa-compass"></i>
+            <span>Discover</span>
         </a>
-        <a href="profile.html" class="bottom-nav-item active">
+        <a href="#" class="bottom-nav-item" data-section="sellers">
+            <i class="fas fa-store"></i>
+            <span>Sellers</span>
+        </a>
+        <a href="profile.html" class="bottom-nav-item">
             <i class="fas fa-user"></i>
-            <span>Profile</span>
+            <span>Account</span>
         </a>
     </div>
 
@@ -1214,6 +1722,21 @@
         </div>
     </div>
 
+    <!-- More Categories Modal -->
+    <div id="moreCategoriesModal" class="modal">
+        <div class="modal-content max-w-2xl">
+            <div class="flex justify-between items-center mb-6">
+                <h2 class="text-2xl font-bold text-gray-900 dark:text-white">All Categories</h2>
+                <button id="closeMoreCategoriesModal" class="text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-300">
+                    <i class="fas fa-times text-xl"></i>
+                </button>
+            </div>
+            <div class="grid grid-cols-2 md:grid-cols-3 gap-4" id="moreCategoriesContent">
+                <!-- More categories will be loaded here -->
+            </div>
+        </div>
+    </div>
+
     <!-- Notification Toast -->
     <div id="notificationToast" class="notification">
         <div class="flex justify-between items-start">
@@ -1237,10 +1760,6 @@
             messagingSenderId: "1003264444309",
             appId: "1:1003264444309:web:9f0307516e44d21e97d89c"
         };
-
-        // Clear cached data
-        localStorage.removeItem('marketplaceListings');
-        sessionStorage.clear();
 
         // Initialize Firebase
         try {
@@ -1268,11 +1787,22 @@
         const listingsPerPage = 12;
         let lastVisible = null;
         let hasMoreListings = true;
+        let currentDashboard = 'home';
 
         // DOM Elements
+        const homeDashboard = document.getElementById('homeDashboard');
+        const discoverDashboard = document.getElementById('discoverDashboard');
+        const categoriesDashboard = document.getElementById('categoriesDashboard');
+        const sellersDashboard = document.getElementById('sellersDashboard');
         const listingsContainer = document.getElementById('listingsContainer');
         const trendingItemsContainer = document.getElementById('trendingItemsContainer');
         const recommendedContainer = document.getElementById('recommendedContainer');
+        const flashSalesContainer = document.getElementById('flashSalesContainer');
+        const recentlyViewedContainer = document.getElementById('recentlyViewedContainer');
+        const discoverItemsContainer = document.getElementById('discoverItemsContainer');
+        const categoryItemsContainer = document.getElementById('categoryItemsContainer');
+        const sellersContainer = document.getElementById('sellersContainer');
+        const recentSellersContainer = document.getElementById('recentSellersContainer');
         const createListingBtn = document.getElementById('createListingBtn');
         const createListingModal = document.getElementById('createListingModal');
         const closeCreateModal = document.getElementById('closeCreateModal');
@@ -1309,7 +1839,12 @@
         const totalUsersCount = document.getElementById('totalUsersCount');
         const successfulSalesCount = document.getElementById('successfulSalesCount');
         const averageRatingCount = document.getElementById('averageRatingCount');
+        const totalSellersCount = document.getElementById('totalSellersCount');
+        const verifiedSellersCount = document.getElementById('verifiedSellersCount');
+        const activeSellersCount = document.getElementById('activeSellersCount');
+        const topRatedSellersCount = document.getElementById('topRatedSellersCount');
         const flashSaleTimer = document.getElementById('flashSaleTimer');
+        const flashSaleCountdown = document.getElementById('flashSaleCountdown');
         const tagSuggestions = document.getElementById('tagSuggestions');
         const listingTitle = document.getElementById('listingTitle');
         const listingTags = document.getElementById('listingTags');
@@ -1329,17 +1864,19 @@
         const notificationToastMessage = document.getElementById('notificationToastMessage');
         const createListingBtnText = document.getElementById('createListingBtnText');
         const createListingSpinner = document.getElementById('createListingSpinner');
-        const discoverLink = document.getElementById('discoverLink');
-        const categoriesLink = document.getElementById('categoriesLink');
-        const sellersLink = document.getElementById('sellersLink');
-        const mobileDiscoverLink = document.getElementById('mobileDiscoverLink');
-        const mobileCategoriesLink = document.getElementById('mobileCategoriesLink');
-        const mobileSellersLink = document.getElementById('mobileSellersLink');
         const hamburgerMenu = document.getElementById('hamburgerMenu');
         const mobileMenu = document.getElementById('mobileMenu');
         const mobileMenuOverlay = document.getElementById('mobileMenuOverlay');
         const closeMobileMenu = document.getElementById('closeMobileMenu');
         const mobileLogoutBtn = document.getElementById('mobileLogoutBtn');
+        const clearRecentlyViewed = document.getElementById('clearRecentlyViewed');
+        const moreCategories = document.getElementById('moreCategories');
+        const moreCategoriesModal = document.getElementById('moreCategoriesModal');
+        const closeMoreCategoriesModal = document.getElementById('closeMoreCategoriesModal');
+        const moreCategoriesContent = document.getElementById('moreCategoriesContent');
+        const refreshDiscover = document.getElementById('refreshDiscover');
+        const refreshSellers = document.getElementById('refreshSellers');
+        const categorySearch = document.getElementById('categorySearch');
 
         // Initialize the application
         document.addEventListener('DOMContentLoaded', function() {
@@ -1359,6 +1896,7 @@
             
             // Start flash sale timer
             startFlashSaleTimer();
+            startFlashSaleCountdown();
         });
 
         // Handle authentication state changes
@@ -1413,6 +1951,11 @@
                 await loadListings();
                 await loadTrendingItems();
                 await loadRecommendedItems();
+                await loadFlashSales();
+                await loadRecentlyViewed();
+                await loadMoreCategories();
+                await loadDiscoverItems();
+                await loadSellers();
             } catch (error) {
                 console.error('❌ Error loading marketplace data:', error);
                 showToast('Error loading marketplace data', 'error');
@@ -1450,6 +1993,28 @@
                 });
                 const avgRating = userCount > 0 ? (totalRating / userCount).toFixed(1) : '0.0';
                 averageRatingCount.textContent = avgRating;
+                
+                // Seller stats
+                const sellersQuery = await db.collection('users')
+                    .where('listings', '>', 0)
+                    .get();
+                
+                totalSellersCount.textContent = sellersQuery.size;
+                
+                let verifiedCount = 0;
+                let activeCount = 0;
+                let topRatedCount = 0;
+                
+                sellersQuery.forEach(doc => {
+                    const seller = doc.data();
+                    if (seller.verified) verifiedCount++;
+                    if (seller.listings > 0) activeCount++;
+                    if (seller.rating >= 4.5) topRatedCount++;
+                });
+                
+                verifiedSellersCount.textContent = verifiedCount;
+                activeSellersCount.textContent = activeCount;
+                topRatedSellersCount.textContent = topRatedCount;
                 
             } catch (error) {
                 console.error('❌ Error loading stats:', error);
@@ -1496,6 +2061,227 @@
                         <i class="fas fa-exclamation-triangle text-4xl text-red-400 mb-4"></i>
                         <h3 class="text-xl font-bold text-gray-700 dark:text-gray-300 mb-2">Error Loading Listings</h3>
                         <p class="text-gray-500 dark:text-gray-400">Please try refreshing the page</p>
+                    </div>
+                `;
+            }
+        }
+
+        // Load flash sales
+        async function loadFlashSales() {
+            try {
+                const querySnapshot = await db.collection('listings')
+                    .where('status', '==', 'active')
+                    .where('isFlashSale', '==', true)
+                    .limit(4)
+                    .get();
+
+                flashSalesContainer.innerHTML = '';
+
+                if (querySnapshot.empty) {
+                    flashSalesContainer.innerHTML = `
+                        <div class="col-span-full text-center py-8">
+                            <i class="fas fa-bolt text-4xl text-gray-400 mb-4"></i>
+                            <p class="text-gray-500 dark:text-gray-400">No flash sales at the moment</p>
+                        </div>
+                    `;
+                    return;
+                }
+
+                querySnapshot.forEach(doc => {
+                    const listing = doc.data();
+                    listing.id = doc.id;
+                    const productCard = createJumiaProductCard(listing);
+                    flashSalesContainer.appendChild(productCard);
+                });
+
+            } catch (error) {
+                console.error('❌ Error loading flash sales:', error);
+                flashSalesContainer.innerHTML = `
+                    <div class="col-span-full text-center py-8">
+                        <i class="fas fa-exclamation-triangle text-4xl text-red-400 mb-4"></i>
+                        <p class="text-gray-500 dark:text-gray-400">Error loading flash sales</p>
+                    </div>
+                `;
+            }
+        }
+
+        // Load recently viewed items
+        async function loadRecentlyViewed() {
+            try {
+                if (!currentUser) return;
+                
+                const querySnapshot = await db.collection('recentlyViewed')
+                    .where('userId', '==', currentUser.uid)
+                    .orderBy('viewedAt', 'desc')
+                    .limit(4)
+                    .get();
+
+                recentlyViewedContainer.innerHTML = '';
+
+                if (querySnapshot.empty) {
+                    recentlyViewedContainer.innerHTML = `
+                        <div class="col-span-full text-center py-8">
+                            <p class="text-gray-500 dark:text-gray-400">No recently viewed items</p>
+                        </div>
+                    `;
+                    return;
+                }
+
+                const listingIds = [];
+                querySnapshot.forEach(doc => {
+                    listingIds.push(doc.data().listingId);
+                });
+
+                // Fetch the actual listings
+                const listingsPromises = listingIds.map(id => 
+                    db.collection('listings').doc(id).get()
+                );
+                
+                const listingsSnapshots = await Promise.all(listingsPromises);
+                
+                listingsSnapshots.forEach(doc => {
+                    if (doc.exists) {
+                        const listing = doc.data();
+                        listing.id = doc.id;
+                        const productCard = createJumiaProductCard(listing);
+                        recentlyViewedContainer.appendChild(productCard);
+                    }
+                });
+
+            } catch (error) {
+                console.error('❌ Error loading recently viewed:', error);
+                recentlyViewedContainer.innerHTML = `
+                    <div class="col-span-full text-center py-8">
+                        <i class="fas fa-exclamation-triangle text-4xl text-red-400 mb-4"></i>
+                        <p class="text-gray-500 dark:text-gray-400">Error loading recently viewed</p>
+                    </div>
+                `;
+            }
+        }
+
+        // Load more categories
+        async function loadMoreCategories() {
+            try {
+                const categories = [
+                    { name: 'Baby Products', icon: 'fas fa-baby', category: 'baby' },
+                    { name: 'Sporting Goods', icon: 'fas fa-basketball-ball', category: 'sports' },
+                    { name: 'Supermarket', icon: 'fas fa-shopping-basket', category: 'supermarket' },
+                    { name: 'Automotive', icon: 'fas fa-car', category: 'automotive' },
+                    { name: 'Books & Media', icon: 'fas fa-book', category: 'books' },
+                    { name: 'Pets', icon: 'fas fa-paw', category: 'pets' }
+                ];
+
+                moreCategoriesContent.innerHTML = '';
+                
+                categories.forEach(cat => {
+                    const categoryItem = document.createElement('div');
+                    categoryItem.className = 'jumia-category-item';
+                    categoryItem.setAttribute('data-category', cat.category);
+                    
+                    categoryItem.innerHTML = `
+                        <div class="jumia-category-icon">
+                            <i class="${cat.icon} text-indigo-600"></i>
+                        </div>
+                        <span class="jumia-category-name">${cat.name}</span>
+                    `;
+                    
+                    categoryItem.addEventListener('click', () => {
+                        filterByCategory(cat.category);
+                        closeMoreCategoriesModalFunc();
+                    });
+                    
+                    moreCategoriesContent.appendChild(categoryItem);
+                });
+            } catch (error) {
+                console.error('❌ Error loading more categories:', error);
+            }
+        }
+
+        // Load discover items
+        async function loadDiscoverItems() {
+            try {
+                // Get random listings for discovery
+                const querySnapshot = await db.collection('listings')
+                    .where('status', '==', 'active')
+                    .limit(8)
+                    .get();
+
+                discoverItemsContainer.innerHTML = '';
+
+                if (querySnapshot.empty) {
+                    discoverItemsContainer.innerHTML = `
+                        <div class="col-span-full text-center py-8">
+                            <i class="fas fa-compass text-4xl text-gray-400 mb-4"></i>
+                            <p class="text-gray-500 dark:text-gray-400">No items to discover yet</p>
+                        </div>
+                    `;
+                    return;
+                }
+
+                const listings = [];
+                querySnapshot.forEach(doc => {
+                    const listing = doc.data();
+                    listing.id = doc.id;
+                    listings.push(listing);
+                });
+
+                // Shuffle array for random discovery
+                const shuffled = listings.sort(() => 0.5 - Math.random());
+                shuffled.forEach(listing => {
+                    const productCard = createJumiaProductCard(listing);
+                    discoverItemsContainer.appendChild(productCard);
+                });
+
+            } catch (error) {
+                console.error('❌ Error loading discover items:', error);
+                discoverItemsContainer.innerHTML = `
+                    <div class="col-span-full text-center py-8">
+                        <i class="fas fa-exclamation-triangle text-4xl text-red-400 mb-4"></i>
+                        <p class="text-gray-500 dark:text-gray-400">Error loading discovery items</p>
+                    </div>
+                `;
+            }
+        }
+
+        // Load sellers
+        async function loadSellers() {
+            try {
+                const querySnapshot = await db.collection('users')
+                    .where('listings', '>', 0)
+                    .orderBy('listings', 'desc')
+                    .limit(6)
+                    .get();
+
+                sellersContainer.innerHTML = '';
+                recentSellersContainer.innerHTML = '';
+
+                if (querySnapshot.empty) {
+                    sellersContainer.innerHTML = `
+                        <div class="col-span-full text-center py-8">
+                            <i class="fas fa-store text-4xl text-gray-400 mb-4"></i>
+                            <p class="text-gray-500 dark:text-gray-400">No sellers found</p>
+                        </div>
+                    `;
+                    return;
+                }
+
+                querySnapshot.forEach(doc => {
+                    const seller = doc.data();
+                    seller.id = doc.id;
+                    const sellerCard = createSellerCard(seller);
+                    sellersContainer.appendChild(sellerCard);
+                    
+                    // Also add to recent sellers (for demo)
+                    const recentSellerCard = createSellerCard(seller);
+                    recentSellersContainer.appendChild(recentSellerCard);
+                });
+
+            } catch (error) {
+                console.error('❌ Error loading sellers:', error);
+                sellersContainer.innerHTML = `
+                    <div class="col-span-full text-center py-8">
+                        <i class="fas fa-exclamation-triangle text-4xl text-red-400 mb-4"></i>
+                        <p class="text-gray-500 dark:text-gray-400">Error loading sellers</p>
                     </div>
                 `;
             }
@@ -1564,7 +2350,7 @@
                 querySnapshot.forEach(doc => {
                     const listing = doc.data();
                     listing.id = doc.id;
-                    const productCard = createProductCard(listing, true);
+                    const productCard = createJumiaProductCard(listing);
                     trendingItemsContainer.appendChild(productCard);
                 });
 
@@ -1610,7 +2396,7 @@
                 // Shuffle array for random recommendations
                 const shuffled = listings.sort(() => 0.5 - Math.random());
                 shuffled.slice(0, 4).forEach(listing => {
-                    const productCard = createProductCard(listing, true);
+                    const productCard = createJumiaProductCard(listing);
                     recommendedContainer.appendChild(productCard);
                 });
 
@@ -1660,7 +2446,47 @@
             }
         }
 
-        // Create product card HTML
+        // Create product card HTML (Jumia style)
+        function createJumiaProductCard(listing) {
+            const imageUrl = listing.images && listing.images.length > 0 
+                ? listing.images[0] 
+                : 'https://images.unsplash.com/photo-1560472354-b33ff0c44a43?ixlib=rb-1.2.1&auto=format&fit=crop&w=500&q=80';
+            
+            // Calculate discount if original price exists
+            const originalPrice = listing.originalPrice || listing.price * 1.5;
+            const discount = Math.round(((originalPrice - listing.price) / originalPrice) * 100);
+            
+            const card = document.createElement('div');
+            card.className = 'jumia-product-card fade-in';
+            card.setAttribute('data-listing-id', listing.id);
+            
+            card.innerHTML = `
+                ${listing.isFlashSale ? '<div class="jumia-express-badge">FLASH SALE</div>' : ''}
+                <img src="${imageUrl}" alt="${listing.title}" class="jumia-product-image">
+                <h3 class="jumia-product-name">${listing.title}</h3>
+                <div class="jumia-product-price">$${listing.price.toFixed(2)}</div>
+                <div class="flex justify-between items-center">
+                    <div class="jumia-product-original-price">$${originalPrice.toFixed(2)}</div>
+                    <div class="jumia-product-discount">-${discount}%</div>
+                </div>
+                <div class="jumia-rating">
+                    <i class="fas fa-star text-yellow-400 mr-1"></i>
+                    <span>${listing.rating || '4.5'}</span>
+                    <span class="mx-1">•</span>
+                    <span>${listing.reviewCount || '0'} reviews</span>
+                </div>
+                ${listing.isExpress ? '<div class="jumia-express-badge mt-2">EXPRESS</div>' : ''}
+            `;
+            
+            // Add click event to view listing
+            card.addEventListener('click', () => {
+                viewListing(listing.id);
+            });
+            
+            return card;
+        }
+
+        // Create product card HTML (original style)
         function createProductCard(listing, isSmall = false) {
             const listingDate = listing.createdAt ? new Date(listing.createdAt.seconds * 1000).toLocaleDateString() : 'Recently';
             const imageUrl = listing.images && listing.images.length > 0 
@@ -1741,8 +2567,65 @@
             return card;
         }
 
+        // Create seller card
+        function createSellerCard(seller) {
+            const card = document.createElement('div');
+            card.className = 'seller-card fade-in';
+            
+            card.innerHTML = `
+                <div class="flex items-center mb-4">
+                    <img src="${seller.avatar || 'https://ui-avatars.com/api/?name=Seller&background=6366f1&color=fff&size=100'}" 
+                         alt="${seller.name}" 
+                         class="w-16 h-16 rounded-full object-cover mr-4">
+                    <div>
+                        <h3 class="font-semibold text-gray-900 dark:text-white">${seller.name}</h3>
+                        <div class="flex items-center mt-1">
+                            <div class="flex items-center">
+                                <i class="fas fa-star text-yellow-400 mr-1"></i>
+                                <span class="text-sm text-gray-600 dark:text-gray-400">${seller.rating || '5.0'}</span>
+                            </div>
+                            <span class="mx-2 text-gray-300">•</span>
+                            <span class="text-sm text-gray-600 dark:text-gray-400">${seller.listings || 0} listings</span>
+                        </div>
+                    </div>
+                </div>
+                <div class="flex justify-between items-center">
+                    <span class="text-sm text-gray-600 dark:text-gray-400">${seller.sales || 0} sales</span>
+                    ${seller.verified ? '<span class="verified-badge"><i class="fas fa-check mr-1"></i>Verified</span>' : ''}
+                </div>
+                <button class="w-full bg-indigo-600 text-white py-2 rounded-lg font-semibold hover:bg-indigo-700 transition mt-4 view-seller-btn" data-seller-id="${seller.id}">
+                    View Store
+                </button>
+            `;
+            
+            // Add event listener for view seller button
+            const viewSellerBtn = card.querySelector('.view-seller-btn');
+            if (viewSellerBtn) {
+                viewSellerBtn.addEventListener('click', () => {
+                    viewSeller(seller.id);
+                });
+            }
+            
+            return card;
+        }
+
         // Setup event listeners
         function setupEventListeners() {
+            // Navigation
+            document.querySelectorAll('.nav-link, .bottom-nav-item[data-section]').forEach(link => {
+                link.addEventListener('click', function(e) {
+                    e.preventDefault();
+                    const section = this.getAttribute('data-section');
+                    switchDashboard(section);
+                    
+                    // Update active states
+                    document.querySelectorAll('.nav-link, .bottom-nav-item[data-section]').forEach(item => {
+                        item.classList.remove('active');
+                    });
+                    this.classList.add('active');
+                });
+            });
+
             // Create listing modal
             createListingBtn.addEventListener('click', openCreateListingModal);
             closeCreateModal.addEventListener('click', closeCreateListingModal);
@@ -1772,6 +2655,7 @@
             // Search
             searchInput.addEventListener('input', debounce(handleSearch, 300));
             mobileSearchInput.addEventListener('input', debounce(handleSearch, 300));
+            categorySearch.addEventListener('input', debounce(handleCategorySearch, 300));
             
             // View toggle
             gridViewBtn.addEventListener('click', () => switchView('grid'));
@@ -1813,53 +2697,123 @@
                 notificationToast.classList.remove('show');
             });
             
-            // Navigation links
-            discoverLink.addEventListener('click', (e) => {
-                e.preventDefault();
-                showToast('Discover feature coming soon!', 'info');
-            });
-            
-            categoriesLink.addEventListener('click', (e) => {
-                e.preventDefault();
-                showToast('Categories feature coming soon!', 'info');
-            });
-            
-            sellersLink.addEventListener('click', (e) => {
-                e.preventDefault();
-                showToast('Sellers directory coming soon!', 'info');
-            });
-            
-            // Mobile navigation links
-            mobileDiscoverLink.addEventListener('click', (e) => {
-                e.preventDefault();
-                closeMobileMenuFunc();
-                showToast('Discover feature coming soon!', 'info');
-            });
-            
-            mobileCategoriesLink.addEventListener('click', (e) => {
-                e.preventDefault();
-                closeMobileMenuFunc();
-                showToast('Categories feature coming soon!', 'info');
-            });
-            
-            mobileSellersLink.addEventListener('click', (e) => {
-                e.preventDefault();
-                closeMobileMenuFunc();
-                showToast('Sellers directory coming soon!', 'info');
-            });
-            
             // Mobile menu
             hamburgerMenu.addEventListener('click', openMobileMenu);
             closeMobileMenu.addEventListener('click', closeMobileMenuFunc);
             mobileMenuOverlay.addEventListener('click', closeMobileMenuFunc);
             mobileLogoutBtn.addEventListener('click', handleLogout);
             
+            // Clear recently viewed
+            clearRecentlyViewed.addEventListener('click', clearRecentlyViewedItems);
+            
+            // Category items
+            document.querySelectorAll('.jumia-category-item[data-category]').forEach(item => {
+                item.addEventListener('click', function() {
+                    const category = this.getAttribute('data-category');
+                    filterByCategory(category);
+                });
+            });
+            
+            // More categories
+            moreCategories.addEventListener('click', openMoreCategoriesModal);
+            closeMoreCategoriesModal.addEventListener('click', closeMoreCategoriesModalFunc);
+            
+            // Refresh buttons
+            refreshDiscover.addEventListener('click', loadDiscoverItems);
+            refreshSellers.addEventListener('click', loadSellers);
+            
             // Close modals when clicking outside
             document.addEventListener('click', function(e) {
                 if (e.target === createListingModal) closeCreateListingModal();
                 if (e.target === cartModal) closeCartModalFunc();
                 if (e.target === notificationsModal) closeNotificationsModalFunc();
+                if (e.target === moreCategoriesModal) closeMoreCategoriesModalFunc();
             });
+        }
+
+        // Switch dashboard
+        function switchDashboard(section) {
+            // Hide all dashboards
+            document.querySelectorAll('.dashboard-section').forEach(dashboard => {
+                dashboard.classList.remove('active');
+            });
+            
+            // Show selected dashboard
+            document.getElementById(`${section}Dashboard`).classList.add('active');
+            currentDashboard = section;
+            
+            // Load specific data if needed
+            if (section === 'discover') {
+                loadDiscoverItems();
+            } else if (section === 'sellers') {
+                loadSellers();
+            }
+        }
+
+        // Handle category search
+        function handleCategorySearch() {
+            const searchTerm = categorySearch.value.toLowerCase().trim();
+            
+            document.querySelectorAll('.jumia-category-item').forEach(item => {
+                const categoryName = item.querySelector('.jumia-category-name').textContent.toLowerCase();
+                if (categoryName.includes(searchTerm)) {
+                    item.style.display = 'flex';
+                } else {
+                    item.style.display = 'none';
+                }
+            });
+        }
+
+        // Filter by category
+        function filterByCategory(category) {
+            // Update active tab
+            document.querySelectorAll('.tab-button').forEach(btn => {
+                btn.classList.remove('active');
+                if (btn.getAttribute('data-category') === category) {
+                    btn.classList.add('active');
+                }
+            });
+            
+            currentCategory = category;
+            filterAndDisplayListings();
+            
+            // Scroll to listings section
+            document.getElementById('listingsContainer').scrollIntoView({ behavior: 'smooth' });
+        }
+
+        // Open more categories modal
+        function openMoreCategoriesModal() {
+            moreCategoriesModal.classList.add('active');
+            document.body.style.overflow = 'hidden';
+        }
+
+        // Close more categories modal
+        function closeMoreCategoriesModalFunc() {
+            moreCategoriesModal.classList.remove('active');
+            document.body.style.overflow = 'auto';
+        }
+
+        // Clear recently viewed items
+        async function clearRecentlyViewedItems() {
+            if (!currentUser) return;
+            
+            try {
+                const querySnapshot = await db.collection('recentlyViewed')
+                    .where('userId', '==', currentUser.uid)
+                    .get();
+                
+                const batch = db.batch();
+                querySnapshot.forEach(doc => {
+                    batch.delete(doc.ref);
+                });
+                
+                await batch.commit();
+                showToast('Recently viewed cleared', 'success');
+                loadRecentlyViewed();
+            } catch (error) {
+                console.error('❌ Error clearing recently viewed:', error);
+                showToast('Error clearing recently viewed', 'error');
+            }
         }
 
         // Mobile menu functions
@@ -2145,14 +3099,113 @@
         }
 
         // View listing details
-        function viewListing(listingId) {
-            // In a real implementation, this would open a detailed view
-            showToast('Listing details feature coming soon!', 'info');
+        async function viewListing(listingId) {
+            try {
+                // Record view in recently viewed
+                if (currentUser) {
+                    await db.collection('recentlyViewed').add({
+                        userId: currentUser.uid,
+                        listingId: listingId,
+                        viewedAt: new Date()
+                    });
+                }
+                
+                // Increment view count
+                await db.collection('listings').doc(listingId).update({
+                    views: firebase.firestore.FieldValue.increment(1)
+                });
+                
+                // Show listing details
+                const listingDoc = await db.collection('listings').doc(listingId).get();
+                if (listingDoc.exists) {
+                    const listing = listingDoc.data();
+                    showListingDetails(listing);
+                }
+                
+            } catch (error) {
+                console.error('❌ Error viewing listing:', error);
+                showToast('Error viewing listing', 'error');
+            }
+        }
+
+        // Show listing details
+        function showListingDetails(listing) {
+            const modal = document.createElement('div');
+            modal.className = 'modal active';
+            modal.innerHTML = `
+                <div class="modal-content max-w-3xl">
+                    <div class="flex justify-between items-center mb-6">
+                        <h2 class="text-2xl font-bold text-gray-900 dark:text-white">${listing.title}</h2>
+                        <button class="close-listing-details text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-300">
+                            <i class="fas fa-times text-xl"></i>
+                        </button>
+                    </div>
+                    <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
+                        <div>
+                            <img src="${listing.images && listing.images.length > 0 ? listing.images[0] : 'https://images.unsplash.com/photo-1560472354-b33ff0c44a43?ixlib=rb-1.2.1&auto=format&fit=crop&w=500&q=80'}" 
+                                 alt="${listing.title}" 
+                                 class="w-full h-64 object-cover rounded-lg">
+                        </div>
+                        <div>
+                            <div class="mb-4">
+                                <h3 class="text-xl font-bold text-gray-900 dark:text-white mb-2">$${listing.price.toFixed(2)}</h3>
+                                <p class="text-gray-600 dark:text-gray-400">${listing.description}</p>
+                            </div>
+                            <div class="mb-4">
+                                <h4 class="font-semibold text-gray-900 dark:text-white mb-2">Seller Information</h4>
+                                <div class="flex items-center">
+                                    <img src="${listing.sellerAvatar || 'https://ui-avatars.com/api/?name=Seller&background=6366f1&color=fff&size=32'}" 
+                                         alt="${listing.sellerName}" 
+                                         class="w-8 h-8 rounded-full object-cover mr-2">
+                                    <span class="text-gray-600 dark:text-gray-400">${listing.sellerName}</span>
+                                    ${listing.sellerVerified ? '<span class="verified-badge ml-2"><i class="fas fa-check mr-1"></i>Verified</span>' : ''}
+                                </div>
+                            </div>
+                            <div class="flex space-x-4">
+                                <button class="bg-indigo-600 text-white px-6 py-3 rounded-lg font-semibold hover:bg-indigo-700 transition flex-1">
+                                    Contact Seller
+                                </button>
+                                <button class="add-to-cart-details bg-gray-200 dark:bg-slate-600 text-gray-700 dark:text-gray-300 px-6 py-3 rounded-lg font-semibold hover:bg-gray-300 dark:hover:bg-slate-500 transition" data-listing-id="${listing.id}">
+                                    <i class="fas fa-shopping-cart mr-2"></i>Add to Cart
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            `;
+            
+            document.body.appendChild(modal);
+            
+            // Add event listeners
+            const closeBtn = modal.querySelector('.close-listing-details');
+            const addToCartBtn = modal.querySelector('.add-to-cart-details');
+            
+            closeBtn.addEventListener('click', () => {
+                document.body.removeChild(modal);
+            });
+            
+            addToCartBtn.addEventListener('click', () => {
+                addToCart(listing.id);
+                document.body.removeChild(modal);
+            });
+            
+            modal.addEventListener('click', (e) => {
+                if (e.target === modal) {
+                    document.body.removeChild(modal);
+                }
+            });
+        }
+
+        // View seller
+        function viewSeller(sellerId) {
+            showToast(`Viewing seller ${sellerId}`, 'info');
+            // In a full implementation, this would show seller details and their listings
         }
 
         // Contact seller
         function contactSeller(listingId) {
-            showToast('Contact feature coming soon!', 'info');
+            showToast('Contacting seller...', 'info');
+            // In a full implementation, this would open a chat with the seller
         }
 
         // Add to cart
@@ -2513,6 +3566,28 @@
             setInterval(updateTimer, 1000);
         }
 
+        // Start flash sale countdown (Jumia style)
+        function startFlashSaleCountdown() {
+            let timeLeft = 6 * 60 * 60 + 19 * 60 + 55; // 6 hours, 19 minutes, 55 seconds
+            
+            function updateCountdown() {
+                const hours = Math.floor(timeLeft / 3600);
+                const minutes = Math.floor((timeLeft % 3600) / 60);
+                const seconds = timeLeft % 60;
+                
+                flashSaleCountdown.textContent = `${hours.toString().padStart(2, '0')}h : ${minutes.toString().padStart(2, '0')}m : ${seconds.toString().padStart(2, '0')}s`;
+                
+                if (timeLeft > 0) {
+                    timeLeft--;
+                } else {
+                    timeLeft = 6 * 60 * 60 + 19 * 60 + 55;
+                }
+            }
+            
+            updateCountdown();
+            setInterval(updateCountdown, 1000);
+        }
+
         // Format time ago
         function formatTimeAgo(timestamp) {
             const now = new Date();
@@ -2540,11 +3615,6 @@
                 clearTimeout(timeout);
                 timeout = setTimeout(later, wait);
             };
-        }
-
-        // Contact information
-        function showContactInfo() {
-            showToast('Contact kynecta: 0746676627 | nchagwadennis45@gmail.com', 'info');
         }
     </script>
 </body>
