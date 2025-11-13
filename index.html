@@ -1754,12 +1754,14 @@
                         displayName: displayName
                     });
                     
-                    // Create user document in Firestore
+                    // Create user document in Firestore - FIXED to match security rules
                     const userDocRef = this.db.collection('users').doc(user.uid);
                     await userDocRef.set({
                         uid: user.uid,
+                        userId: user.uid, // Added to match security rules
                         email: user.email,
                         displayName: displayName,
+                        userName: displayName, // Added to match security rules
                         photoURL: '',
                         bio: 'New kynecta member!',
                         createdAt: firebase.firestore.FieldValue.serverTimestamp(),
@@ -1793,7 +1795,7 @@
                 } catch (error) {
                     console.error('❌ Registration failed:', error);
                     
-                    // Handle specific error cases
+                    // Handle specific error cases with detailed messages
                     let errorMessage = 'Registration failed. Please try again.';
                     
                     switch (error.code) {
@@ -1811,6 +1813,9 @@
                             break;
                         case 'auth/network-request-failed':
                             errorMessage = 'Network error. Please check your internet connection.';
+                            break;
+                        case 'permission-denied':
+                            errorMessage = 'Database permission denied. Please check security rules.';
                             break;
                         default:
                             errorMessage = `Registration failed: ${error.message}`;
@@ -1858,10 +1863,35 @@
                     return userCredential;
                     
                 } catch (error) {
-                    console.error('❌ Login failed:', error);
+                    console.error('❌ Login failed:', error.code, error.message);
                     
-                    // Generic error message for security
-                    throw new Error('Login failed. Please check your credentials and try again.');
+                    // Detailed error handling for debugging
+                    let errorMessage = 'Login failed. Please check your credentials and try again.';
+                    
+                    switch (error.code) {
+                        case 'auth/user-not-found':
+                            errorMessage = 'No account found with this email address.';
+                            break;
+                        case 'auth/wrong-password':
+                            errorMessage = 'Incorrect password. Please try again.';
+                            break;
+                        case 'auth/invalid-email':
+                            errorMessage = 'Invalid email address format.';
+                            break;
+                        case 'auth/too-many-requests':
+                            errorMessage = 'Too many failed attempts. Please try again later.';
+                            break;
+                        case 'auth/network-request-failed':
+                            errorMessage = 'Network error. Please check your internet connection.';
+                            break;
+                        case 'permission-denied':
+                            errorMessage = 'Database access denied. Please try again.';
+                            break;
+                        default:
+                            errorMessage = `Login failed: ${error.message}`;
+                    }
+                    
+                    throw new Error(errorMessage);
                 }
             }
 
@@ -1915,6 +1945,19 @@
                     } else {
                         statusElement.innerHTML = '<i class="fas fa-times-circle mr-2"></i><span id="connectionText">' + message + '</span>';
                     }
+                }
+            }
+
+            // Test function for debugging
+            async testFirestoreWrite() {
+                try {
+                    const testRef = this.db.collection('test').doc('test');
+                    await testRef.set({ test: true, timestamp: new Date() });
+                    console.log('✅ Firestore write test passed');
+                    return true;
+                } catch (error) {
+                    console.error('❌ Firestore write test failed:', error);
+                    return false;
                 }
             }
         }
@@ -2781,8 +2824,8 @@
                         this.redirectToProfile();
                         
                     } catch (error) {
-                        // Handle authentication error with generic message
-                        this.showMessage('Login failed. Please check your credentials and try again.', 'error');
+                        // Handle authentication error with detailed message
+                        this.showMessage(error.message, 'error');
                         this.setLoginLoadingState(false);
                     }
                 }
