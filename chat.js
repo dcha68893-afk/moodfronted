@@ -1,869 +1,1315 @@
+// Firebase Configuration
+const firebaseConfig = {
+    apiKey: "AIzaSyDHHyGgsSV18BcXrGgzi4C8frzDAE1C1zo",
+    authDomain: "uniconnect-ee95c.firebaseapp.com",
+    projectId: "uniconnect-ee95c",
+    storageBucket: "uniconnect-ee95c.firebasestorage.app",
+    messagingSenderId: "1003264444309",
+    appId: "1:1003264444309:web:9f0307516e44d21e97d89c"
+};
 
+// Initialize Firebase
+firebase.initializeApp(firebaseConfig);
+const auth = firebase.auth();
+const db = firebase.firestore();
+const storage = firebase.storage();
+const messaging = firebase.messaging();
 
-        // Firebase Configuration
-        const firebaseConfig = {
-            apiKey: "AIzaSyDHHyGgsSV18BcXrGgzi4C8frzDAE1C1zo",
-            authDomain: "uniconnect-ee95c.firebaseapp.com",
-            projectId: "uniconnect-ee95c",
-            storageBucket: "uniconnect-ee95c.firebasestorage.app",
-            messagingSenderId: "1003264444309",
-            appId: "1:1003264444309:web:9f0307516e44d21e97d89c"
-        };
+// Cloudinary Configuration
+const cloudinaryConfig = {
+    cloudName: 'dhjnxa5rh',
+    apiKey: '817591969559894',
+    uploadPreset: 'kynecta_uploads'
+};
 
-        // Initialize Firebase
-        firebase.initializeApp(firebaseConfig);
-        const auth = firebase.auth();
-        const db = firebase.firestore();
-        const storage = firebase.storage();
-        const messaging = firebase.messaging();
+// Global Variables
+let currentUser = null;
+let currentUserData = null;
+let currentChat = null;
+let isInCall = false;
+let friends = [];
+let allUsers = [];
+let userSettings = {
+    security: {
+        notifications: true,
+        passkeys: false,
+        twoStepVerification: false
+    },
+    privacy: {
+        lastSeen: 'everyone',
+        profilePhoto: 'everyone',
+        about: 'everyone',
+        status: 'everyone',
+        readReceipts: true,
+        disappearingMessages: 'off',
+        groups: 'everyone',
+        avatarStickers: true,
+        calls: 'everyone',
+        contact: 'everyone',
+        appLock: false,
+        cameraEffects: true
+    },
+    notifications: {
+        conversationTones: true,
+        reminders: true,
+        vibrate: true,
+        notificationLight: true,
+        lightColor: '#7C3AED',
+        highPriorityNotifications: true,
+        reactionNotifications: true
+    },
+    storage: {
+        lessDataCalls: false,
+        proxyEnabled: false,
+        mediaUploadQuality: 'auto',
+        autoDownloadQuality: 'standard'
+    },
+    chat: {
+        displayTheme: 'light',
+        defaultChatTheme: 'purple',
+        fontSize: 'medium',
+        enterKeySends: true,
+        mediaVisibility: true
+    },
+    accessibility: {
+        largeText: false,
+        highContrast: false,
+        screenReader: true,
+        reducedMotion: false,
+        voiceControl: false
+    },
+    language: {
+        appLanguage: 'en'
+    },
+    favorites: []
+};
+let userStatuses = [];
+let unsubscribeMessages = null;
+let unsubscribeChats = null;
+let currentEditingFriendId = null;
+let typingTimeout = null;
+let typingListener = null;
 
-        // Cloudinary Configuration
-        const cloudinaryConfig = {
-            cloudName: 'dhjnxa5rh',
-            apiKey: '817591969559894',
-            uploadPreset: 'kynecta_uploads'
-        };
+// WebRTC Variables
+let localStream = null;
+let remoteStream = null;
+let peerConnection = null;
+let isMuted = false;
+let isVideoOff = false;
+// WebRTC Configuration
+const rtcConfig = {
+    iceServers: [
+        { urls: 'stun:stun.l.google.com:19302' },
+        { urls: 'stun:stun1.l.google.com:19302' }
+    ]
+};
 
-        // Global Variables
-        let currentUser = null;
-        let currentUserData = null;
-        let currentChat = null;
-        let isInCall = false;
-        let friends = [];
-        let allUsers = [];
-        let userSettings = {
-            security: {
-                notifications: true,
-                passkeys: false,
-                twoStepVerification: false
-            },
-            privacy: {
-                lastSeen: 'everyone',
-                profilePhoto: 'everyone',
-                about: 'everyone',
-                status: 'everyone',
-                readReceipts: true,
-                disappearingMessages: 'off',
-                groups: 'everyone',
-                avatarStickers: true,
-                calls: 'everyone',
-                contact: 'everyone',
-                appLock: false,
-                cameraEffects: true
-            },
-            notifications: {
-                conversationTones: true,
-                reminders: true,
-                vibrate: true,
-                notificationLight: true,
-                lightColor: '#7C3AED',
-                highPriorityNotifications: true,
-                reactionNotifications: true
-            },
-            storage: {
-                lessDataCalls: false,
-                proxyEnabled: false,
-                mediaUploadQuality: 'auto',
-                autoDownloadQuality: 'standard'
-            },
-            chat: {
-                displayTheme: 'light',
-                defaultChatTheme: 'purple',
-                fontSize: 'medium',
-                enterKeySends: true,
-                mediaVisibility: true
-            },
-            accessibility: {
-                largeText: false,
-                highContrast: false,
-                screenReader: true,
-                reducedMotion: false,
-                voiceControl: false
-            },
-            language: {
-                appLanguage: 'en'
-            },
-            favorites: []
-        };
-        let userStatuses = [];
-        let unsubscribeMessages = null;
-        let unsubscribeChats = null;
-        let currentEditingFriendId = null;
-        let typingTimeout = null;
-        let typingListener = null;
+// Signaling state
+let callState = {
+    isCaller: false,
+    isReceivingCall: false,
+    callType: null, // 'video' or 'voice'
+    remoteUserId: null
+};
 
-        // WebRTC Variables
-        let localStream = null;
-        let remoteStream = null;
-        let peerConnection = null;
-        let isMuted = false;
-        let isVideoOff = false;
+// DOM Elements
+const loadingScreen = document.getElementById('loadingScreen');
+const chatApp = document.getElementById('chatApp');
+const settingsModal = document.getElementById('settingsModal');
+const addFriendModal = document.getElementById('addFriendModal');
+const friendSearchResultsModal = document.getElementById('friendSearchResultsModal');
+const editFriendModal = document.getElementById('editFriendModal');
+const profileSettingsModal = document.getElementById('profileSettingsModal');
+const privacySettingsModal = document.getElementById('privacySettingsModal');
+const accountSettingsModal = document.getElementById('accountSettingsModal');
+const accessibilitySettingsModal = document.getElementById('accessibilitySettingsModal');
+const notificationsSettingsModal = document.getElementById('notificationsSettingsModal');
+const storageSettingsModal = document.getElementById('storageSettingsModal');
+const languageSettingsModal = document.getElementById('languageSettingsModal');
+const chatSettingsModal = document.getElementById('chatSettingsModal');
+const favoritesSettingsModal = document.getElementById('favoritesSettingsModal');
+const helpCenterModal = document.getElementById('helpCenterModal');
+const appInfoModal = document.getElementById('appInfoModal');
+const inviteFriendsModal = document.getElementById('inviteFriendsModal');
+const statusCreation = document.getElementById('statusCreation');
+const videoConferenceModal = document.getElementById('videoConferenceModal');
+const emojiPicker = document.getElementById('emojiPicker');
+const createGroupModal = document.getElementById('createGroupModal');
+const joinGroupModal = document.getElementById('joinGroupModal');
+const allFriendsModal = document.getElementById('allFriendsModal');
 
-        // DOM Elements
-        const loadingScreen = document.getElementById('loadingScreen');
-        const chatApp = document.getElementById('chatApp');
-        const settingsModal = document.getElementById('settingsModal');
-        const addFriendModal = document.getElementById('addFriendModal');
-        const friendSearchResultsModal = document.getElementById('friendSearchResultsModal');
-        const editFriendModal = document.getElementById('editFriendModal');
-        const profileSettingsModal = document.getElementById('profileSettingsModal');
-        const privacySettingsModal = document.getElementById('privacySettingsModal');
-        const accountSettingsModal = document.getElementById('accountSettingsModal');
-        const accessibilitySettingsModal = document.getElementById('accessibilitySettingsModal');
-        const notificationsSettingsModal = document.getElementById('notificationsSettingsModal');
-        const storageSettingsModal = document.getElementById('storageSettingsModal');
-        const languageSettingsModal = document.getElementById('languageSettingsModal');
-        const chatSettingsModal = document.getElementById('chatSettingsModal');
-        const favoritesSettingsModal = document.getElementById('favoritesSettingsModal');
-        const helpCenterModal = document.getElementById('helpCenterModal');
-        const appInfoModal = document.getElementById('appInfoModal');
-        const inviteFriendsModal = document.getElementById('inviteFriendsModal');
-        const statusCreation = document.getElementById('statusCreation');
-        const videoConferenceModal = document.getElementById('videoConferenceModal');
-        const emojiPicker = document.getElementById('emojiPicker');
-        const createGroupModal = document.getElementById('createGroupModal');
-        const joinGroupModal = document.getElementById('joinGroupModal');
-        const allFriendsModal = document.getElementById('allFriendsModal');
+function formatFileSize(bytes) {
+    if (bytes === 0) return '0 Bytes';
+    const k = 1024;
+    const sizes = ['Bytes', 'KB', 'MB', 'GB'];
+    const i = Math.floor(Math.log(bytes) / Math.log(k));
+    return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i];
+}
+// Safety function to check if element exists
+function safeElement(id) {
+    const element = document.getElementById(id);
+    if (!element) {
+        console.warn(`Element with id '${id}' not found`);
+    }
+    return element;
+}
 
-        // Safety function to check if element exists
-        function safeElement(id) {
-            const element = document.getElementById(id);
-            if (!element) {
-                console.warn(`Element with id '${id}' not found`);
-            }
-            return element;
+// Safe version of classList operations
+function safeClassList(id, action, className) {
+    const element = safeElement(id);
+    if (element && element.classList) {
+        element.classList[action](className);
+    }
+}
+
+// Initialize the application
+document.addEventListener('DOMContentLoaded', initApp);
+
+function initApp() {
+    console.log('Initializing app...');
+    // Check if user is logged in
+    auth.onAuthStateChanged(user => {
+        if (user) {
+            console.log('User authenticated:', user.uid);
+            currentUser = user;
+            loadUserData();
+        } else {
+            console.log('No user found, redirecting to login');
+            // Redirect to login if not authenticated
+            window.location.href = 'login.html';
         }
+    });
+}
 
-        // Safe version of classList operations
-        function safeClassList(id, action, className) {
-            const element = safeElement(id);
-            if (element && element.classList) {
-                element.classList[action](className);
-            }
-        }
-
-        // Initialize the application
-        document.addEventListener('DOMContentLoaded', initApp);
-
-        function initApp() {
-            // Check if user is logged in
-            auth.onAuthStateChanged(user => {
-                if (user) {
-                    currentUser = user;
-                    loadUserData();
-                } else {
-                    // Redirect to login if not authenticated
-                    window.location.href = 'login.html';
-                }
-            });
-        }
-
+async function loadUserData() {
+    try {
+        console.log('Loading user data for:', currentUser.uid);
         async function loadUserData() {
-            try {
-                // Get user document from Firestore
-                const userDoc = await db.collection('users').doc(currentUser.uid).get();
-                
-                if (userDoc.exists) {
-                    currentUserData = userDoc.data();
-                    initializeUserData();
-                } else {
-                    // Create user document if it doesn't exist
-                    currentUserData = {
-                        uid: currentUser.uid,
-                        email: currentUser.email,
-                        displayName: currentUser.displayName || currentUser.email.split('@')[0],
-                        photoURL: currentUser.photoURL || `https://ui-avatars.com/api/?name=${encodeURIComponent(currentUser.displayName || currentUser.email)}&background=7C3AED&color=fff`,
-                        coverURL: '',
-                        about: 'Life without Christ is motion without meaning',
-                        phone: '',
-                        createdAt: firebase.firestore.FieldValue.serverTimestamp(),
-                        lastSeen: firebase.firestore.FieldValue.serverTimestamp(),
-                        status: 'online',
-                        mood: 'happy'
-                    };
-                    
-                    await db.collection('users').doc(currentUser.uid).set(currentUserData);
-                    initializeUserData();
-                }
-                
-                showChatApp();
-                setupEventListeners();
-                loadUserSettings();
-                loadStatusUpdates();
-                loadFriends();
-                loadAllUsers();
-                initEmojiPicker();
-                loadChatsTemporary(); // Use the safe version
-                requestNotificationPermission();
-            } catch (error) {
-                console.error('Error loading user data:', error);
-                showToast('Error loading user data', 'error');
+    try {
+        // ... existing code ...
+        
+        showChatApp();
+        setupEventListeners();
+        loadUserSettings();
+        loadStatusUpdates();
+        loadFriends();
+        loadAllUsers();
+        initEmojiPicker();
+        loadChatsTemporary();
+        requestNotificationPermission();
+        
+        // Start listening for friend requests
+        listenForFriendRequests();
+        
+        // NEW: Start listening for incoming calls
+        listenForIncomingCalls();
+        
+    } catch (error) {
+        console.error('Error loading user data:', error);
+        showToast('Error loading user data', 'error');
+    }
+}
+        // Get user document from Firestore
+        const userDoc = await db.collection('users').doc(currentUser.uid).get();
+        
+        if (userDoc.exists) {
+            currentUserData = userDoc.data();
+            console.log('User data loaded:', currentUserData);
+            initializeUserData();
+        } else {
+            console.log('Creating new user document');
+            // Create user document if it doesn't exist
+            currentUserData = {
+                uid: currentUser.uid,
+                email: currentUser.email,
+                displayName: currentUser.displayName || currentUser.email.split('@')[0],
+                photoURL: currentUser.photoURL || `https://ui-avatars.com/api/?name=${encodeURIComponent(currentUser.displayName || currentUser.email)}&background=7C3AED&color=fff`,
+                coverURL: '',
+                about: 'Life without Christ is motion without meaning',
+                phone: '',
+                createdAt: firebase.firestore.FieldValue.serverTimestamp(),
+                lastSeen: firebase.firestore.FieldValue.serverTimestamp(),
+                status: 'online',
+                mood: 'happy'
+            };
+            
+            await db.collection('users').doc(currentUser.uid).set(currentUserData);
+            console.log('New user document created');
+            initializeUserData();
+        }
+        
+        showChatApp();
+        setupEventListeners();
+        loadUserSettings();
+        loadStatusUpdates();
+        loadFriends();
+        loadAllUsers();
+        initEmojiPicker();
+        loadChatsTemporary();
+        requestNotificationPermission();
+        
+        // Start listening for friend requests
+        listenForFriendRequests();
+        
+    } catch (error) {
+        console.error('Error loading user data:', error);
+        showToast('Error loading user data', 'error');
+    }
+}
+
+function initializeUserData() {
+    console.log('Initializing UI with user data');
+    // Set user info in UI
+    const userName = document.getElementById('userName');
+    const userAvatar = document.getElementById('userAvatar');
+    
+    if (userName) userName.textContent = currentUserData.displayName;
+    if (userAvatar) userAvatar.src = currentUserData.photoURL;
+    
+    // Update settings modal with user data
+    const settingsUserName = document.getElementById('settingsUserName');
+    const settingsProfilePic = document.getElementById('settingsProfilePic');
+    
+    if (settingsUserName) settingsUserName.textContent = currentUserData.displayName;
+    if (settingsProfilePic) settingsProfilePic.src = currentUserData.photoURL;
+    
+    // Update profile settings with user data
+    const profileName = document.getElementById('profileName');
+    const profileAbout = document.getElementById('profileAbout');
+    const profileEmail = document.getElementById('profileEmail');
+    const profilePhone = document.getElementById('profilePhone');
+    const profilePicPreview = document.getElementById('profilePicPreview');
+    const profileCoverPreview = document.getElementById('profileCoverPreview');
+    
+    if (profileName) profileName.value = currentUserData.displayName;
+    if (profileAbout) profileAbout.value = currentUserData.about || '';
+    if (profileEmail) profileEmail.value = currentUserData.email;
+    if (profilePhone) profilePhone.value = currentUserData.phone || '';
+    if (profilePicPreview) profilePicPreview.src = currentUserData.photoURL;
+    if (profileCoverPreview) profileCoverPreview.src = currentUserData.coverURL || '';
+    
+    // Load user preferences
+    loadUserPreferences();
+}
+
+function showChatApp() {
+    if (loadingScreen) loadingScreen.classList.add('hidden');
+    if (chatApp) chatApp.classList.remove('hidden');
+    console.log('Chat app UI shown');
+}
+
+function loadUserPreferences() {
+    const theme = localStorage.getItem('kynecta-theme') || 'light';
+    setTheme(theme);
+}
+
+function setTheme(theme) {
+    document.body.setAttribute('data-theme', theme);
+    localStorage.setItem('kynecta-theme', theme);
+    
+    // Update theme icon
+    const themeIcon = document.getElementById('themeIcon');
+    if (themeIcon) {
+        if (theme === 'dark') {
+            themeIcon.className = 'fas fa-sun';
+        } else {
+            themeIcon.className = 'fas fa-moon';
+        }
+    }
+}
+
+function showToast(message, type = 'info') {
+    console.log(`Toast: ${message} (${type})`);
+    const toastContainer = document.getElementById('toastContainer');
+    if (!toastContainer) {
+        console.warn('Toast container not found');
+        return;
+    }
+    
+    const toast = document.createElement('div');
+    toast.className = `toast ${type}`;
+    toast.textContent = message;
+    
+    toastContainer.appendChild(toast);
+    
+    // Trigger animation
+    setTimeout(() => toast.classList.add('show'), 10);
+    
+    // Remove after delay
+    setTimeout(() => {
+        toast.classList.remove('show');
+        setTimeout(() => {
+            if (toast.parentNode) {
+                toast.parentNode.removeChild(toast);
             }
-        }
+        }, 300);
+    }, 3000);
+}
 
-        function initializeUserData() {
-            // Set user info in UI
-            document.getElementById('userName').textContent = currentUserData.displayName;
-            document.getElementById('userAvatar').src = currentUserData.photoURL;
-            
-            // Update settings modal with user data
-            document.getElementById('settingsUserName').textContent = currentUserData.displayName;
-            document.getElementById('settingsProfilePic').src = currentUserData.photoURL;
-            
-            // Update profile settings with user data
-            document.getElementById('profileName').value = currentUserData.displayName;
-            document.getElementById('profileAbout').value = currentUserData.about || '';
-            document.getElementById('profileEmail').value = currentUserData.email;
-            document.getElementById('profilePhone').value = currentUserData.phone || '';
-            document.getElementById('profilePicPreview').src = currentUserData.photoURL;
-            document.getElementById('profileCoverPreview').src = currentUserData.coverURL || '';
-            
-            // Load user preferences
-            loadUserPreferences();
-        }
+function loadUserSettings() {
+    // Load settings from localStorage or use defaults
+    const savedSettings = localStorage.getItem('kynecta-settings');
+    if (savedSettings) {
+        userSettings = JSON.parse(savedSettings);
+    }
+    
+    // Apply settings to UI
+    applyUserSettings();
+}
 
-        function showChatApp() {
-            loadingScreen.classList.add('hidden');
-            chatApp.classList.remove('hidden');
-        }
+function saveUserSettings() {
+    localStorage.setItem('kynecta-settings', JSON.stringify(userSettings));
+}
 
-        function loadUserPreferences() {
-            const theme = localStorage.getItem('kynecta-theme') || 'light';
-            setTheme(theme);
-        }
+function applyUserSettings() {
+    // Apply theme
+    setTheme(userSettings.chat.displayTheme);
+    
+    // Apply accessibility settings
+    applyAccessibilitySettings();
+    
+    // Apply chat settings
+    applyChatSettings();
+}
 
-        function setTheme(theme) {
-            document.body.setAttribute('data-theme', theme);
-            localStorage.setItem('kynecta-theme', theme);
-            
-            // Update theme icon
-            const themeIcon = document.getElementById('themeIcon');
-            if (theme === 'dark') {
-                themeIcon.className = 'fas fa-sun';
-            } else {
-                themeIcon.className = 'fas fa-moon';
-            }
-        }
+function applyAccessibilitySettings() {
+    // Font size
+    document.body.style.fontSize = userSettings.accessibility.largeText ? '18px' : '16px';
+    
+    // High contrast
+    if (userSettings.accessibility.highContrast) {
+        document.body.classList.add('high-contrast');
+    } else {
+        document.body.classList.remove('high-contrast');
+    }
+    
+    // Reduced motion
+    if (userSettings.accessibility.reducedMotion) {
+        document.body.classList.add('reduce-motion');
+    } else {
+        document.body.classList.remove('reduce-motion');
+    }
+}
 
-        function showToast(message, type = 'info') {
-            const toastContainer = document.getElementById('toastContainer');
-            const toast = document.createElement('div');
-            toast.className = `toast ${type}`;
-            toast.textContent = message;
-            
-            toastContainer.appendChild(toast);
-            
-            // Trigger animation
-            setTimeout(() => toast.classList.add('show'), 10);
-            
-            // Remove after delay
-            setTimeout(() => {
-                toast.classList.remove('show');
-                setTimeout(() => {
-                    if (toast.parentNode) {
-                        toast.parentNode.removeChild(toast);
-                    }
-                }, 300);
-            }, 3000);
+function applyChatSettings() {
+    // Enter key sends
+    const messageInput = document.getElementById('messageInput');
+    if (messageInput) {
+        if (userSettings.chat.enterKeySends) {
+            messageInput.setAttribute('data-enter-sends', 'true');
+        } else {
+            messageInput.setAttribute('data-enter-sends', 'false');
         }
+    }
+}
 
-        function loadUserSettings() {
-            // Load settings from localStorage or use defaults
-            const savedSettings = localStorage.getItem('kynecta-settings');
-            if (savedSettings) {
-                userSettings = JSON.parse(savedSettings);
-            }
-            
-            // Apply settings to UI
-            applyUserSettings();
-        }
-
-        function saveUserSettings() {
-            localStorage.setItem('kynecta-settings', JSON.stringify(userSettings));
-        }
-
-        function applyUserSettings() {
-            // Apply theme
-            setTheme(userSettings.chat.displayTheme);
-            
-            // Apply accessibility settings
-            applyAccessibilitySettings();
-            
-            // Apply chat settings
-            applyChatSettings();
-        }
-
-        function applyAccessibilitySettings() {
-            // Font size
-            document.body.style.fontSize = userSettings.accessibility.largeText ? '18px' : '16px';
-            
-            // High contrast
-            if (userSettings.accessibility.highContrast) {
-                document.body.classList.add('high-contrast');
-            } else {
-                document.body.classList.remove('high-contrast');
-            }
-            
-            // Reduced motion
-            if (userSettings.accessibility.reducedMotion) {
-                document.body.classList.add('reduce-motion');
-            } else {
-                document.body.classList.remove('reduce-motion');
-            }
-        }
-
-        function applyChatSettings() {
-            // Enter key sends
-            const messageInput = document.getElementById('messageInput');
-            if (userSettings.chat.enterKeySends) {
-                messageInput.setAttribute('data-enter-sends', 'true');
-            } else {
-                messageInput.setAttribute('data-enter-sends', 'false');
-            }
-        }
-
-        function loadStatusUpdates() {
-            const statusUpdates = document.getElementById('statusUpdates');
-            
-            // Load statuses from Firebase
-            db.collection('statuses')
-                .where('userId', '==', currentUser.uid)
-                .orderBy('timestamp', 'desc')
-                .limit(10)
-                .get()
-                .then(snapshot => {
-                    if (snapshot.empty) {
-                        statusUpdates.innerHTML = `
-                            <div class="text-center text-gray-500 py-8">
-                                <i class="fas fa-images text-4xl mb-3 text-gray-300 block"></i>
-                                <p>No status updates yet</p>
-                                <p class="text-sm mt-1">Share a photo, video, or text update</p>
-                            </div>
-                        `;
-                        return;
-                    }
-                    
-                    statusUpdates.innerHTML = '';
-                    snapshot.forEach(doc => {
-                        const status = doc.data();
-                        const statusElement = document.createElement('div');
-                        statusElement.className = 'flex items-center space-x-3 p-3 rounded-xl hover:bg-gray-50 transition-colors cursor-pointer';
-                        
-                        let statusContent = '';
-                        if (status.type === 'emoji') {
-                            statusContent = `<div class="w-12 h-12 rounded-full bg-gradient-to-r from-purple-500 to-green-500 flex items-center justify-center text-white text-xl">${status.content}</div>`;
-                        } else if (status.type === 'text') {
-                            statusContent = `<div class="w-12 h-12 rounded-full bg-gradient-to-r from-blue-500 to-teal-500 flex items-center justify-center text-white"><i class="fas fa-font"></i></div>`;
-                        } else if (status.type === 'image') {
-                            statusContent = `<div class="w-12 h-12 rounded-full bg-cover bg-center" style="background-image: url('${status.content}')"></div>`;
-                        } else if (status.type === 'video') {
-                            statusContent = `<div class="w-12 h-12 rounded-full bg-gradient-to-r from-red-500 to-pink-500 flex items-center justify-center text-white"><i class="fas fa-video"></i></div>`;
-                        } else if (status.type === 'audio') {
-                            statusContent = `<div class="w-12 h-12 rounded-full bg-gradient-to-r from-orange-500 to-amber-500 flex items-center justify-center text-white"><i class="fas fa-music"></i></div>`;
-                        }
-                        
-                        statusElement.innerHTML = `
-                            ${statusContent}
-                            <div>
-                                <p class="font-medium">${status.userDisplayName}</p>
-                                <p class="text-sm text-gray-500">${formatTimeAgo(status.timestamp)}</p>
-                            </div>
-                        `;
-                        
-                        statusUpdates.appendChild(statusElement);
-                    });
-                })
-                .catch(error => {
-                    console.error('Error loading status updates:', error);
-                    statusUpdates.innerHTML = `
-                        <div class="text-center text-gray-500 py-8">
-                            <i class="fas fa-exclamation-triangle text-4xl mb-3 text-gray-300 block"></i>
-                            <p>Error loading status updates</p>
-                            <p class="text-sm mt-1">Please try again later</p>
-                        </div>
-                    `;
-                });
-        }
-
-        function formatTimeAgo(timestamp) {
-            if (!timestamp) return 'Just now';
-            
-            const now = new Date();
-            const time = timestamp.toDate ? timestamp.toDate() : new Date(timestamp);
-            const diffMs = now - time;
-            const diffMins = Math.floor(diffMs / 60000);
-            const diffHours = Math.floor(diffMs / 3600000);
-            const diffDays = Math.floor(diffMs / 86400000);
-            
-            if (diffMins < 1) return 'Just now';
-            if (diffMins < 60) return `${diffMins}m ago`;
-            if (diffHours < 24) return `${diffHours}h ago`;
-            if (diffDays < 7) return `${diffDays}d ago`;
-            return time.toLocaleDateString();
-        }
-
-        function openStatusCreation() {
-            statusCreation.style.display = 'flex';
-            resetStatusCreation();
-        }
-
-        function resetStatusCreation() {
-            // Reset all previews
-            document.getElementById('emojiPreview').classList.remove('hidden');
-            document.getElementById('textPreview').classList.add('hidden');
-            document.getElementById('imagePreview').classList.add('hidden');
-            document.getElementById('videoPreview').classList.add('hidden');
-            document.getElementById('audioPreview').classList.add('hidden');
-            
-            // Reset active option
-            document.querySelectorAll('.status-option').forEach(option => {
-                option.classList.remove('active');
-            });
-            document.querySelector('.status-option[data-type="emoji"]').classList.add('active');
-            
-            // Reset content
-            document.getElementById('emojiPreview').textContent = '😊';
-            document.getElementById('statusTextInput').value = '';
-            document.getElementById('statusImagePreview').classList.add('hidden');
-            document.getElementById('statusVideoPreview').classList.add('hidden');
-            document.getElementById('statusAudioPreview').classList.add('hidden');
-        }
-
-        async function uploadToCloudinary(file, resourceType = 'image') {
-            return new Promise((resolve, reject) => {
-                const formData = new FormData();
-                formData.append('file', file);
-                formData.append('upload_preset', cloudinaryConfig.uploadPreset);
-                formData.append('cloud_name', cloudinaryConfig.cloudName);
-                
-                fetch(`https://api.cloudinary.com/v1_1/${cloudinaryConfig.cloudName}/${resourceType}/upload`, {
-                    method: 'POST',
-                    body: formData
-                })
-                .then(response => response.json())
-                .then(data => {
-                    if (data.secure_url) {
-                        resolve(data.secure_url);
-                    } else {
-                        reject(new Error('Upload failed'));
-                    }
-                })
-                .catch(error => {
-                    reject(error);
-                });
-            });
-        }
-
-        async function postStatus(type, content) {
-            try {
-                let finalContent = content;
-                
-                // Handle file uploads to Cloudinary
-                if (type === 'image' || type === 'video' || type === 'audio') {
-                    showToast('Uploading media...', 'info');
-                    
-                    // For demo purposes, we'll use a placeholder
-                    // In a real app, you would get the file and upload it
-                    if (type === 'image') {
-                        finalContent = 'https://res.cloudinary.com/dhjnxa5rh/image/upload/v1621234567/placeholder.jpg';
-                    } else if (type === 'video') {
-                        finalContent = 'https://res.cloudinary.com/dhjnxa5rh/video/upload/v1621234567/placeholder.mp4';
-                    } else if (type === 'audio') {
-                        finalContent = 'https://res.cloudinary.com/dhjnxa5rh/audio/upload/v1621234567/placeholder.mp3';
-                    }
-                }
-                
-                const newStatus = {
-                    type: type,
-                    content: finalContent,
-                    timestamp: firebase.firestore.FieldValue.serverTimestamp(),
-                    expiresAt: new Date(Date.now() + 24 * 60 * 60 * 1000), // 24 hours from now
-                    userId: currentUser.uid,
-                    userDisplayName: currentUserData.displayName,
-                    userPhotoURL: currentUserData.photoURL
-                };
-                
-                // Save to Firestore
-                await db.collection('statuses').add(newStatus);
-                
-                // Update UI
-                loadStatusUpdates();
-                showToast('Status posted successfully', 'success');
-            } catch (error) {
-                console.error('Error posting status:', error);
-                showToast('Error posting status', 'error');
-            }
-        }
-
-        function loadFriends() {
-            // Fetch friends from Firebase
-            db.collection('friendships')
-                .where('users', 'array-contains', currentUser.uid)
-                .where('status', '==', 'accepted')
-                .onSnapshot(snapshot => {
-                    friends = [];
-                    const friendPromises = [];
-                    
-                    snapshot.forEach(doc => {
-                        const friendship = doc.data();
-                        const friendId = friendship.users.find(id => id !== currentUser.uid);
-                        
-                        // Get friend details
-                        const friendPromise = db.collection('users').doc(friendId).get().then(friendDoc => {
-                            if (friendDoc.exists) {
-                                const friendData = friendDoc.data();
-                                friends.push({
-                                    id: friendId,
-                                    friendshipId: doc.id,
-                                    ...friendData
-                                });
-                            }
-                        });
-                        
-                        friendPromises.push(friendPromise);
-                    });
-                    
-                    Promise.all(friendPromises).then(() => {
-                        renderFriends(friends);
-                        
-                        if (friends.length === 0) {
-                            document.getElementById('noFriendsMessage').classList.remove('hidden');
-                        } else {
-                            document.getElementById('noFriendsMessage').classList.add('hidden');
-                        }
-                    });
-                }, error => {
-                    console.error('Error loading friends:', error);
-                    showToast('Error loading friends', 'error');
-                });
-        }
-
-        function loadAllUsers() {
-            // Fetch all registered users from Firebase
-            db.collection('users')
-                .where('uid', '!=', currentUser.uid)
-                .onSnapshot(snapshot => {
-                    allUsers = [];
-                    snapshot.forEach(doc => {
-                        allUsers.push({
-                            id: doc.id,
-                            ...doc.data()
-                        });
-                    });
-                }, error => {
-                    console.error('Error loading users:', error);
-                });
-        }
-
-        async function searchUsers(query) {
-            if (!query) return [];
-            
-            // Search by name, email, or phone
-            const nameResults = allUsers.filter(user => 
-                user.displayName && user.displayName.toLowerCase().includes(query.toLowerCase())
-            );
-            
-            const emailResults = allUsers.filter(user => 
-                user.email && user.email.toLowerCase().includes(query.toLowerCase())
-            );
-            
-            const phoneResults = allUsers.filter(user => 
-                user.phone && user.phone.includes(query)
-            );
-            
-            // Combine and remove duplicates
-            const allResults = [...nameResults, ...emailResults, ...phoneResults];
-            const uniqueResults = allResults.filter((user, index, self) => 
-                index === self.findIndex(u => u.id === user.id)
-            );
-            
-            return uniqueResults;
-        }
-
-        async function sendFriendRequest(friendId) {
-            try {
-                // Check if friendship already exists
-                const existingFriendship = await db.collection('friendships')
-                    .where('users', 'array-contains', currentUser.uid)
-                    .where('status', 'in', ['pending', 'accepted'])
-                    .get();
-                
-                const alreadyFriends = existingFriendship.docs.some(doc => {
-                    const data = doc.data();
-                    return data.users.includes(friendId);
-                });
-                
-                if (alreadyFriends) {
-                    showToast('Friend request already sent or user is already your friend', 'error');
-                    return;
-                }
-                
-                // Create friendship document
-                const friendship = {
-                    users: [currentUser.uid, friendId],
-                    status: 'pending',
-                    requestedBy: currentUser.uid,
-                    createdAt: firebase.firestore.FieldValue.serverTimestamp()
-                };
-                
-                await db.collection('friendships').add(friendship);
-                showToast('Friend request sent successfully', 'success');
-            } catch (error) {
-                console.error('Error sending friend request:', error);
-                showToast('Error sending friend request', 'error');
-            }
-        }
-
-        function removeFriend(friendId) {
-            // Find the friendship document
-            db.collection('friendships')
-                .where('users', 'array-contains', currentUser.uid)
-                .where('status', '==', 'accepted')
-                .get()
-                .then(snapshot => {
-                    snapshot.forEach(doc => {
-                        const friendship = doc.data();
-                        if (friendship.users.includes(friendId)) {
-                            // Delete the friendship
-                            db.collection('friendships').doc(doc.id).delete()
-                                .then(() => {
-                                    showToast('Friend removed successfully', 'success');
-                                })
-                                .catch(error => {
-                                    console.error('Error removing friend:', error);
-                                    showToast('Error removing friend', 'error');
-                                });
-                        }
-                    });
-                })
-                .catch(error => {
-                    console.error('Error finding friendship:', error);
-                    showToast('Error removing friend', 'error');
-                });
-        }
-
-        function renderFriends(friendsToRender) {
-            const friendsList = document.getElementById('friendsList');
-            friendsList.innerHTML = '';
-            
-            friendsToRender.forEach(friend => {
-                const friendItem = document.createElement('div');
-                friendItem.className = 'contact-item';
-                friendItem.dataset.friendId = friend.id;
-                friendItem.innerHTML = `
-                    <div class="contact-avatar">
-                        <img class="w-12 h-12 rounded-full object-cover" src="${friend.photoURL || `https://ui-avatars.com/api/?name=${encodeURIComponent(friend.displayName)}&background=7C3AED&color=fff`}" alt="${friend.displayName}">
-                        ${friend.status === 'online' ? '<div class="online-indicator"></div>' : ''}
-                    </div>
-                    <div class="contact-info">
-                        <div class="contact-name">${friend.displayName}</div>
-                        <div class="contact-status">${friend.status || 'offline'}</div>
-                    </div>
-                    <div class="flex space-x-2">
-                        <button class="w-10 h-10 rounded-full bg-purple-100 text-purple-600 flex items-center justify-center hover:bg-purple-200 transition-colors message-friend" data-name="${friend.displayName}" data-id="${friend.id}">
-                            <i class="fas fa-comment"></i>
-                        </button>
-                        <button class="w-10 h-10 rounded-full bg-green-100 text-green-600 flex items-center justify-center hover:bg-green-200 transition-colors call-friend" data-name="${friend.displayName}" data-id="${friend.id}">
-                            <i class="fas fa-phone"></i>
-                        </button>
-                        <button class="w-10 h-10 rounded-full bg-blue-100 text-blue-600 flex items-center justify-center hover:bg-blue-200 transition-colors edit-friend" data-name="${friend.displayName}" data-id="${friend.id}" data-status="${friend.status || 'offline'}">
-                            <i class="fas fa-ellipsis-v"></i>
-                        </button>
+function loadStatusUpdates() {
+    const statusUpdates = document.getElementById('statusUpdates');
+    if (!statusUpdates) return;
+    
+    // Load statuses from Firebase
+    db.collection('statuses')
+        .where('userId', '==', currentUser.uid)
+        .orderBy('timestamp', 'desc')
+        .limit(10)
+        .get()
+        .then(snapshot => {
+            if (snapshot.empty) {
+                statusUpdates.innerHTML = `
+                    <div class="text-center text-gray-500 py-8">
+                        <i class="fas fa-images text-4xl mb-3 text-gray-300 block"></i>
+                        <p>No status updates yet</p>
+                        <p class="text-sm mt-1">Share a photo, video, or text update</p>
                     </div>
                 `;
-                
-                friendsList.appendChild(friendItem);
-            });
-
-            // Add event listeners to message and call buttons
-            document.querySelectorAll('.message-friend').forEach(btn => {
-                btn.addEventListener('click', (e) => {
-                    const friendId = e.currentTarget.dataset.id;
-                    const friendName = e.currentTarget.dataset.name;
-                    startChat(friendId, friendName);
-                });
-            });
-
-            document.querySelectorAll('.call-friend').forEach(btn => {
-                btn.addEventListener('click', (e) => {
-                    const friendId = e.currentTarget.dataset.id;
-                    const friendName = e.currentTarget.dataset.name;
-                    startCall(friendId, friendName);
-                });
-            });
-
-            // Add event listeners to edit buttons
-            document.querySelectorAll('.edit-friend').forEach(btn => {
-                btn.addEventListener('click', (e) => {
-                    const friendId = e.currentTarget.dataset.id;
-                    const friendName = e.currentTarget.dataset.name;
-                    const friendStatus = e.currentTarget.dataset.status;
-                    openEditFriendModal(friendId, friendName, friendStatus);
-                });
-            });
-        }
-
-        function openEditFriendModal(friendId, name, status) {
-            currentEditingFriendId = friendId;
-            document.getElementById('editFriendName').value = name;
-            document.getElementById('editFriendStatus').value = status;
-            editFriendModal.classList.remove('hidden');
-        }
-
-        function searchFriends(query) {
-            if (!query) {
-                renderFriends(friends);
                 return;
             }
             
-            const filteredFriends = friends.filter(friend => 
-                friend.displayName.toLowerCase().includes(query.toLowerCase()) ||
-                (friend.email && friend.email.toLowerCase().includes(query.toLowerCase())) ||
-                (friend.phone && friend.phone.includes(query))
-            );
-            
-            renderFriends(filteredFriends);
-            
-            if (filteredFriends.length === 0) {
-                document.getElementById('noFriendsMessage').classList.remove('hidden');
-                document.getElementById('noFriendsMessage').innerHTML = `
-                    <i class="fas fa-search text-4xl mb-3 text-gray-300 block"></i>
-                    <p>No friends found</p>
-                    <p class="text-sm mt-1">Try a different search term</p>
-                `;
-            } else {
-                document.getElementById('noFriendsMessage').classList.add('hidden');
-            }
-        }
-
-        // 🔧 CORE DATA FLOW LOGIC - Chat Session Management
-        async function startChat(friendId, friendName) {
-            try {
-                // Create or get chat ID
-                const chatId = [currentUser.uid, friendId].sort().join('_');
+            statusUpdates.innerHTML = '';
+            snapshot.forEach(doc => {
+                const status = doc.data();
+                const statusElement = document.createElement('div');
+                statusElement.className = 'flex items-center space-x-3 p-3 rounded-xl hover:bg-gray-50 transition-colors cursor-pointer';
                 
-                // Check if chat document exists
-                const chatDoc = await db.collection('chats').doc(chatId).get();
-                
-                if (!chatDoc.exists) {
-                    // Create new chat document
-                    await db.collection('chats').doc(chatId).set({
-                        participants: [currentUser.uid, friendId],
-                        participantNames: {
-                            [currentUser.uid]: currentUserData.displayName,
-                            [friendId]: friendName
-                        },
-                        lastMessage: '',
-                        lastMessageTime: firebase.firestore.FieldValue.serverTimestamp(),
-                        createdAt: firebase.firestore.FieldValue.serverTimestamp(),
-                        typing: {}
-                    });
+                let statusContent = '';
+                if (status.type === 'emoji') {
+                    statusContent = `<div class="w-12 h-12 rounded-full bg-gradient-to-r from-purple-500 to-green-500 flex items-center justify-center text-white text-xl">${status.content}</div>`;
+                } else if (status.type === 'text') {
+                    statusContent = `<div class="w-12 h-12 rounded-full bg-gradient-to-r from-blue-500 to-teal-500 flex items-center justify-center text-white"><i class="fas fa-font"></i></div>`;
+                } else if (status.type === 'image') {
+                    statusContent = `<div class="w-12 h-12 rounded-full bg-cover bg-center" style="background-image: url('${status.content}')"></div>`;
+                } else if (status.type === 'video') {
+                    statusContent = `<div class="w-12 h-12 rounded-full bg-gradient-to-r from-red-500 to-pink-500 flex items-center justify-center text-white"><i class="fas fa-video"></i></div>`;
+                } else if (status.type === 'audio') {
+                    statusContent = `<div class="w-12 h-12 rounded-full bg-gradient-to-r from-orange-500 to-amber-500 flex items-center justify-center text-white"><i class="fas fa-music"></i></div>`;
                 }
                 
-                // Set current chat
-                currentChat = {
-                    id: chatId,
-                    friendId: friendId,
-                    name: friendName
-                };
+                statusElement.innerHTML = `
+                    ${statusContent}
+                    <div>
+                        <p class="font-medium">${status.userDisplayName}</p>
+                        <p class="text-sm text-gray-500">${formatTimeAgo(status.timestamp)}</p>
+                    </div>
+                `;
                 
-                // Update UI
-                document.getElementById('chatHeader').classList.remove('hidden');
-                document.getElementById('inputArea').classList.remove('hidden');
-                document.getElementById('noMessagesMessage').classList.add('hidden');
-                document.getElementById('chatTitle').textContent = friendName;
-                document.getElementById('chatAvatar').src = `https://ui-avatars.com/api/?name=${encodeURIComponent(friendName)}&background=7C3AED&color=fff`;
+                statusUpdates.appendChild(statusElement);
+            });
+        })
+        .catch(error => {
+            console.error('Error loading status updates:', error);
+            statusUpdates.innerHTML = `
+                <div class="text-center text-gray-500 py-8">
+                    <i class="fas fa-exclamation-triangle text-4xl mb-3 text-gray-300 block"></i>
+                    <p>Error loading status updates</p>
+                    <p class="text-sm mt-1">Please try again later</p>
+                </div>
+            `;
+        });
+}
+
+function formatTimeAgo(timestamp) {
+    if (!timestamp) return 'Just now';
+    
+    const now = new Date();
+    const time = timestamp.toDate ? timestamp.toDate() : new Date(timestamp);
+    const diffMs = now - time;
+    const diffMins = Math.floor(diffMs / 60000);
+    const diffHours = Math.floor(diffMs / 3600000);
+    const diffDays = Math.floor(diffMs / 86400000);
+    
+    if (diffMins < 1) return 'Just now';
+    if (diffMins < 60) return `${diffMins}m ago`;
+    if (diffHours < 24) return `${diffHours}h ago`;
+    if (diffDays < 7) return `${diffDays}d ago`;
+    return time.toLocaleDateString();
+}
+
+function openStatusCreation() {
+    if (statusCreation) statusCreation.style.display = 'flex';
+    resetStatusCreation();
+}
+
+function resetStatusCreation() {
+    // Reset all previews
+    const emojiPreview = document.getElementById('emojiPreview');
+    const textPreview = document.getElementById('textPreview');
+    const imagePreview = document.getElementById('imagePreview');
+    const videoPreview = document.getElementById('videoPreview');
+    const audioPreview = document.getElementById('audioPreview');
+    
+    if (emojiPreview) emojiPreview.classList.remove('hidden');
+    if (textPreview) textPreview.classList.add('hidden');
+    if (imagePreview) imagePreview.classList.add('hidden');
+    if (videoPreview) videoPreview.classList.add('hidden');
+    if (audioPreview) audioPreview.classList.add('hidden');
+    
+    // Reset active option
+    document.querySelectorAll('.status-option').forEach(option => {
+        option.classList.remove('active');
+    });
+    const emojiOption = document.querySelector('.status-option[data-type="emoji"]');
+    if (emojiOption) emojiOption.classList.add('active');
+    
+    // Reset content
+    if (emojiPreview) emojiPreview.textContent = '😊';
+    const statusTextInput = document.getElementById('statusTextInput');
+    if (statusTextInput) statusTextInput.value = '';
+    const statusImagePreview = document.getElementById('statusImagePreview');
+    if (statusImagePreview) statusImagePreview.classList.add('hidden');
+    const statusVideoPreview = document.getElementById('statusVideoPreview');
+    if (statusVideoPreview) statusVideoPreview.classList.add('hidden');
+    const statusAudioPreview = document.getElementById('statusAudioPreview');
+    if (statusAudioPreview) statusAudioPreview.classList.add('hidden');
+}
+
+async function uploadToCloudinary(file, resourceType = 'image') {
+    return new Promise((resolve, reject) => {
+        const formData = new FormData();
+        formData.append('file', file);
+        formData.append('upload_preset', cloudinaryConfig.uploadPreset);
+        formData.append('cloud_name', cloudinaryConfig.cloudName);
+        
+        fetch(`https://api.cloudinary.com/v1_1/${cloudinaryConfig.cloudName}/${resourceType}/upload`, {
+            method: 'POST',
+            body: formData
+        })
+        .then(response => response.json())
+        .then(data => {
+            if (data.secure_url) {
+                resolve(data.secure_url);
+            } else {
+                reject(new Error('Upload failed'));
+            }
+        })
+        .catch(error => {
+            reject(error);
+        });
+    });
+}
+
+async function postStatus(type, content) {
+    try {
+        let finalContent = content;
+        
+        // Handle file uploads to Cloudinary
+        if (type === 'image' || type === 'video' || type === 'audio') {
+            showToast('Uploading media...', 'info');
+            
+            // For demo purposes, we'll use a placeholder
+            // In a real app, you would get the file and upload it
+            if (type === 'image') {
+                finalContent = 'https://res.cloudinary.com/dhjnxa5rh/image/upload/v1621234567/placeholder.jpg';
+            } else if (type === 'video') {
+                finalContent = 'https://res.cloudinary.com/dhjnxa5rh/video/upload/v1621234567/placeholder.mp4';
+            } else if (type === 'audio') {
+                finalContent = 'https://res.cloudinary.com/dhjnxa5rh/audio/upload/v1621234567/placeholder.mp3';
+            }
+        }
+        
+        const newStatus = {
+            type: type,
+            content: finalContent,
+            timestamp: firebase.firestore.FieldValue.serverTimestamp(),
+            expiresAt: new Date(Date.now() + 24 * 60 * 60 * 1000), // 24 hours from now
+            userId: currentUser.uid,
+            userDisplayName: currentUserData.displayName,
+            userPhotoURL: currentUserData.photoURL
+        };
+        
+        // Save to Firestore
+        await db.collection('statuses').add(newStatus);
+        
+        // Update UI
+        loadStatusUpdates();
+        showToast('Status posted successfully', 'success');
+    } catch (error) {
+        console.error('Error posting status:', error);
+        showToast('Error posting status', 'error');
+    }
+}
+
+// FIXED: Real-time friend loading with proper listeners
+function loadFriends() {
+    console.log('Loading friends for user:', currentUser.uid);
+    
+    // Fetch friends from Firebase with real-time listener
+    db.collection('friendships')
+        .where('users', 'array-contains', currentUser.uid)
+        .where('status', '==', 'accepted')
+        .onSnapshot(snapshot => {
+            console.log('Friends snapshot received:', snapshot.size, 'documents');
+            friends = [];
+            const friendPromises = [];
+            
+            snapshot.forEach(doc => {
+                const friendship = doc.data();
+                const friendId = friendship.users.find(id => id !== currentUser.uid);
                 
-                // Enable message input
-                document.getElementById('messageInput').disabled = false;
-                document.getElementById('sendBtn').disabled = false;
+                console.log('Processing friendship with friend:', friendId);
                 
-                // Load messages
-                loadMessages(chatId);
+                // Get friend details
+                const friendPromise = db.collection('users').doc(friendId).get().then(friendDoc => {
+                    if (friendDoc.exists) {
+                        const friendData = friendDoc.data();
+                        console.log('Friend data loaded:', friendData.displayName);
+                        friends.push({
+                            id: friendId,
+                            friendshipId: doc.id,
+                            ...friendData
+                        });
+                    }
+                });
+                
+                friendPromises.push(friendPromise);
+            });
+            
+            Promise.all(friendPromises).then(() => {
+                console.log('All friend data loaded, rendering', friends.length, 'friends');
+                renderFriends(friends);
+                
+                const noFriendsMessage = document.getElementById('noFriendsMessage');
+                if (noFriendsMessage) {
+                    if (friends.length === 0) {
+                        noFriendsMessage.classList.remove('hidden');
+                    } else {
+                        noFriendsMessage.classList.add('hidden');
+                    }
+                }
+            });
+        }, error => {
+            console.error('Error loading friends:', error);
+            showToast('Error loading friends', 'error');
+        });
+}
+
+// NEW: Listen for incoming friend requests
+function listenForFriendRequests() {
+    console.log('Setting up friend request listener for user:', currentUser.uid);
+    
+    db.collection('friendships')
+        .where('users', 'array-contains', currentUser.uid)
+        .where('status', '==', 'pending')
+        .where('requestedBy', '!=', currentUser.uid)
+        .onSnapshot(snapshot => {
+            console.log('Friend requests snapshot:', snapshot.size, 'pending requests');
+            
+            snapshot.docChanges().forEach(change => {
+                if (change.type === 'added') {
+                    const request = change.doc.data();
+                    const requesterId = request.requestedBy;
+                    const friendshipId = change.doc.id;
+                    
+                    console.log('New friend request from:', requesterId);
+                    
+                    // Get requester details
+                    db.collection('users').doc(requesterId).get().then(requesterDoc => {
+                        if (requesterDoc.exists) {
+                            const requesterData = requesterDoc.data();
+                            showFriendRequestNotification(requesterData, friendshipId);
+                        }
+                    });
+                }
+            });
+        }, error => {
+            console.error('Error listening for friend requests:', error);
+        });
+}
+
+// NEW: Show friend request notification
+function showFriendRequestNotification(requesterData, friendshipId) {
+    const notification = document.createElement('div');
+    notification.className = 'friend-request-notification';
+    notification.innerHTML = `
+        <div class="flex items-center space-x-3 p-4 bg-white rounded-lg shadow-lg border border-gray-200">
+            <img class="w-12 h-12 rounded-full" src="${requesterData.photoURL || `https://ui-avatars.com/api/?name=${encodeURIComponent(requesterData.displayName)}&background=7C3AED&color=fff`}" alt="${requesterData.displayName}">
+            <div class="flex-1">
+                <p class="font-semibold">${requesterData.displayName}</p>
+                <p class="text-sm text-gray-600">Sent you a friend request</p>
+            </div>
+            <div class="flex space-x-2">
+                <button class="px-3 py-1 bg-green-500 text-white rounded-lg accept-request" data-friendship-id="${friendshipId}">Accept</button>
+                <button class="px-3 py-1 bg-red-500 text-white rounded-lg decline-request" data-friendship-id="${friendshipId}">Decline</button>
+            </div>
+        </div>
+    `;
+    
+    // Add to notifications container
+    const notificationsContainer = document.getElementById('notificationsContainer') || createNotificationsContainer();
+    notificationsContainer.appendChild(notification);
+    
+    // Auto-remove after 10 seconds
+    setTimeout(() => {
+        if (notification.parentNode) {
+            notification.parentNode.removeChild(notification);
+        }
+    }, 10000);
+    
+    // Add event listeners
+    notification.querySelector('.accept-request').addEventListener('click', function() {
+        acceptFriendRequest(this.dataset.friendshipId);
+        notification.remove();
+    });
+    
+    notification.querySelector('.decline-request').addEventListener('click', function() {
+        declineFriendRequest(this.dataset.friendshipId);
+        notification.remove();
+    });
+}
+
+// NEW: Create notifications container if it doesn't exist
+function createNotificationsContainer() {
+    const container = document.createElement('div');
+    container.id = 'notificationsContainer';
+    container.className = 'fixed top-4 right-4 z-50 space-y-2 max-w-sm';
+    document.body.appendChild(container);
+    return container;
+}
+
+// NEW: Accept friend request
+async function acceptFriendRequest(friendshipId) {
+    try {
+        console.log('Accepting friend request:', friendshipId);
+        await db.collection('friendships').doc(friendshipId).update({
+            status: 'accepted',
+            acceptedAt: firebase.firestore.FieldValue.serverTimestamp()
+        });
+        showToast('Friend request accepted', 'success');
+        // Friends list will automatically update due to real-time listener
+    } catch (error) {
+        console.error('Error accepting friend request:', error);
+        showToast('Error accepting friend request', 'error');
+    }
+}
+
+// NEW: Decline friend request
+async function declineFriendRequest(friendshipId) {
+    try {
+        console.log('Declining friend request:', friendshipId);
+        await db.collection('friendships').doc(friendshipId).delete();
+        showToast('Friend request declined', 'info');
+    } catch (error) {
+        console.error('Error declining friend request:', error);
+        showToast('Error declining friend request', 'error');
+    }
+}
+
+function loadAllUsers() {
+    console.log('Loading all users');
+    // Fetch all registered users from Firebase
+    db.collection('users')
+        .where('uid', '!=', currentUser.uid)
+        .onSnapshot(snapshot => {
+            allUsers = [];
+            snapshot.forEach(doc => {
+                allUsers.push({
+                    id: doc.id,
+                    ...doc.data()
+                });
+            });
+            console.log('Loaded', allUsers.length, 'other users');
+        }, error => {
+            console.error('Error loading users:', error);
+        });
+}
+
+async function searchUsers(query) {
+    if (!query) return [];
+    
+    console.log('Searching users for:', query);
+    // Search by name, email, or phone
+    const nameResults = allUsers.filter(user => 
+        user.displayName && user.displayName.toLowerCase().includes(query.toLowerCase())
+    );
+    
+    const emailResults = allUsers.filter(user => 
+        user.email && user.email.toLowerCase().includes(query.toLowerCase())
+    );
+    
+    const phoneResults = allUsers.filter(user => 
+        user.phone && user.phone.includes(query)
+    );
+    
+    // Combine and remove duplicates
+    const allResults = [...nameResults, ...emailResults, ...phoneResults];
+    const uniqueResults = allResults.filter((user, index, self) => 
+        index === self.findIndex(u => u.id === user.id)
+    );
+    
+    console.log('Search results:', uniqueResults.length, 'users found');
+    return uniqueResults;
+}
+
+async function sendFriendRequest(friendId) {
+    try {
+        console.log('Sending friend request to:', friendId);
+        
+        // Check if friendship already exists
+        const existingFriendship = await db.collection('friendships')
+            .where('users', 'array-contains', currentUser.uid)
+            .where('status', 'in', ['pending', 'accepted'])
+            .get();
+        
+        const alreadyFriends = existingFriendship.docs.some(doc => {
+            const data = doc.data();
+            return data.users.includes(friendId);
+        });
+        
+        if (alreadyFriends) {
+            showToast('Friend request already sent or user is already your friend', 'error');
+            return;
+        }
+        
+        // Create friendship document
+        const friendship = {
+            users: [currentUser.uid, friendId],
+            status: 'pending',
+            requestedBy: currentUser.uid,
+            createdAt: firebase.firestore.FieldValue.serverTimestamp()
+        };
+        
+        await db.collection('friendships').add(friendship);
+        console.log('Friend request sent successfully');
+        showToast('Friend request sent successfully', 'success');
+    } catch (error) {
+        console.error('Error sending friend request:', error);
+        showToast('Error sending friend request', 'error');
+    }
+}
+
+function removeFriend(friendId) {
+    console.log('Removing friend:', friendId);
+    // Find the friendship document
+    db.collection('friendships')
+        .where('users', 'array-contains', currentUser.uid)
+        .where('status', '==', 'accepted')
+        .get()
+        .then(snapshot => {
+            snapshot.forEach(doc => {
+                const friendship = doc.data();
+                if (friendship.users.includes(friendId)) {
+                    // Delete the friendship
+                    db.collection('friendships').doc(doc.id).delete()
+                        .then(() => {
+                            console.log('Friend removed successfully');
+                            showToast('Friend removed successfully', 'success');
+                        })
+                        .catch(error => {
+                            console.error('Error removing friend:', error);
+                            showToast('Error removing friend', 'error');
+                        });
+                }
+            });
+        })
+        .catch(error => {
+            console.error('Error finding friendship:', error);
+            showToast('Error removing friend', 'error');
+        });
+}
+
+function renderFriends(friendsToRender) {
+    const friendsList = document.getElementById('friendsList');
+    if (!friendsList) {
+        console.warn('Friends list element not found');
+        return;
+    }
+    
+    console.log('Rendering', friendsToRender.length, 'friends');
+    friendsList.innerHTML = '';
+    
+    if (friendsToRender.length === 0) {
+        friendsList.innerHTML = `
+            <div class="text-center text-gray-500 py-8">
+                <i class="fas fa-users text-4xl mb-3 text-gray-300 block"></i>
+                <p>No friends yet</p>
+                <p class="text-sm mt-1">Add friends to start chatting</p>
+            </div>
+        `;
+        return;
+    }
+    
+    friendsToRender.forEach(friend => {
+        const friendItem = document.createElement('div');
+        friendItem.className = 'friend-item bg-white rounded-lg p-4 mb-3 shadow-sm border border-gray-200 hover:shadow-md transition-shadow';
+        friendItem.dataset.friendId = friend.id;
+        friendItem.innerHTML = `
+            <div class="flex items-center justify-between">
+                <div class="flex items-center space-x-4 flex-1">
+                    <div class="relative">
+                        <img class="w-14 h-14 rounded-full object-cover border-2 border-purple-200" 
+                             src="${friend.photoURL || `https://ui-avatars.com/api/?name=${encodeURIComponent(friend.displayName)}&background=7C3AED&color=fff`}" 
+                             alt="${friend.displayName}">
+                        <div class="absolute -bottom-1 -right-1 w-4 h-4 rounded-full border-2 border-white ${friend.status === 'online' ? 'bg-green-500' : 'bg-gray-400'}"></div>
+                    </div>
+                    <div class="flex-1">
+                        <div class="flex items-center space-x-2">
+                            <h3 class="font-semibold text-gray-800">${friend.displayName}</h3>
+                            ${friend.status === 'online' ? '<span class="px-2 py-1 bg-green-100 text-green-800 text-xs rounded-full">Online</span>' : ''}
+                        </div>
+                        <p class="text-sm text-gray-500 mt-1">${friend.about || 'Hey there! I am using Kynecta'}</p>
+                        <div class="flex items-center space-x-3 mt-2 text-xs text-gray-400">
+                            ${friend.email ? `<span><i class="fas fa-envelope mr-1"></i>${friend.email}</span>` : ''}
+                            ${friend.phone ? `<span><i class="fas fa-phone mr-1"></i>${friend.phone}</span>` : ''}
+                        </div>
+                    </div>
+                </div>
+                
+                <div class="flex items-center space-x-2 ml-4">
+                    <!-- Chat Button -->
+                    <button class="friend-chat-btn flex items-center space-x-2 bg-purple-600 text-white px-4 py-2 rounded-lg hover:bg-purple-700 transition-colors shadow-sm" 
+                            data-id="${friend.id}" 
+                            data-name="${friend.displayName}">
+                        <i class="fas fa-comment"></i>
+                        <span>Chat</span>
+                    </button>
+                    
+                    <!-- Voice Call Button -->
+                    <button class="friend-call-btn flex items-center space-x-2 bg-green-600 text-white px-4 py-2 rounded-lg hover:bg-green-700 transition-colors shadow-sm" 
+                            data-id="${friend.id}" 
+                            data-name="${friend.displayName}">
+                        <i class="fas fa-phone"></i>
+                        <span>Call</span>
+                    </button>
+                    
+                    <!-- Video Call Button -->
+                    <button class="friend-video-call-btn flex items-center space-x-2 bg-blue-600 text-white px-4 py-2 rounded-lg hover:bg-blue-700 transition-colors shadow-sm" 
+                            data-id="${friend.id}" 
+                            data-name="${friend.displayName}">
+                        <i class="fas fa-video"></i>
+                        <span>Video</span>
+                    </button>
+                    
+                    <!-- More Options Button -->
+                    <div class="relative">
+                        <button class="friend-options-btn w-10 h-10 rounded-full bg-gray-100 text-gray-600 flex items-center justify-center hover:bg-gray-200 transition-colors">
+                            <i class="fas fa-ellipsis-v"></i>
+                        </button>
+                        <div class="friend-options-menu absolute right-0 top-12 bg-white rounded-lg shadow-lg border border-gray-200 py-2 z-10 hidden min-w-32">
+                            <button class="view-profile-btn w-full text-left px-4 py-2 hover:bg-gray-100 text-gray-700" data-id="${friend.id}">
+                                <i class="fas fa-user mr-2"></i>View Profile
+                            </button>
+                            <button class="remove-friend-btn w-full text-left px-4 py-2 hover:bg-gray-100 text-red-600" data-id="${friend.id}" data-name="${friend.displayName}">
+                                <i class="fas fa-user-times mr-2"></i>Remove
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        `;
+        
+        friendsList.appendChild(friendItem);
+    });
+
+    // Add event listeners using event delegation
+    friendsList.addEventListener('click', function(e) {
+        // Chat button
+        if (e.target.closest('.friend-chat-btn')) {
+            const btn = e.target.closest('.friend-chat-btn');
+            const friendId = btn.dataset.id;
+            const friendName = btn.dataset.name;
+            console.log('Starting chat with:', friendName, friendId);
+            startChat(friendId, friendName);
+        }
+        
+        // Voice call button
+        if (e.target.closest('.friend-call-btn')) {
+            const btn = e.target.closest('.friend-call-btn');
+            const friendId = btn.dataset.id;
+            const friendName = btn.dataset.name;
+            console.log('Calling:', friendName, friendId);
+            startVoiceCallWithFriend(friendId, friendName);
+        }
+        
+        // Video call button
+        if (e.target.closest('.friend-video-call-btn')) {
+            const btn = e.target.closest('.friend-video-call-btn');
+            const friendId = btn.dataset.id;
+            const friendName = btn.dataset.name;
+            console.log('Video calling:', friendName, friendId);
+            startVideoCallWithFriend(friendId, friendName);
+        }
+        
+        // Options button toggle
+        if (e.target.closest('.friend-options-btn')) {
+            const btn = e.target.closest('.friend-options-btn');
+            const menu = btn.nextElementSibling;
+            // Close all other menus
+            document.querySelectorAll('.friend-options-menu').forEach(m => {
+                if (m !== menu) m.classList.add('hidden');
+            });
+            menu.classList.toggle('hidden');
+        }
+        
+        // View profile
+        if (e.target.closest('.view-profile-btn')) {
+            const btn = e.target.closest('.view-profile-btn');
+            const friendId = btn.dataset.id;
+            console.log('Viewing profile of:', friendId);
+            viewFriendProfile(friendId);
+            // Close the menu
+            btn.closest('.friend-options-menu').classList.add('hidden');
+        }
+        
+        // Remove friend
+        if (e.target.closest('.remove-friend-btn')) {
+            const btn = e.target.closest('.remove-friend-btn');
+            const friendId = btn.dataset.id;
+            const friendName = btn.dataset.name;
+            console.log('Removing friend:', friendName, friendId);
+            confirmRemoveFriend(friendId, friendName);
+            // Close the menu
+            btn.closest('.friend-options-menu').classList.add('hidden');
+        }
+    });
+
+    // Close dropdown menus when clicking outside
+    document.addEventListener('click', function(e) {
+        if (!e.target.closest('.friend-options-btn')) {
+            document.querySelectorAll('.friend-options-menu').forEach(menu => {
+                menu.classList.add('hidden');
+            });
+        }
+    });
+}
+// Enhanced call functions for friends list
+function startVoiceCallWithFriend(friendId, friendName) {
+    console.log('Starting voice call with friend:', friendName, friendId);
+    
+    // Set current chat for the call
+    const chatId = [currentUser.uid, friendId].sort().join('_');
+    currentChat = {
+        id: chatId,
+        friendId: friendId,
+        name: friendName
+    };
+    
+    showToast(`Calling ${friendName}...`, 'info');
+    startVoiceCall();
+}
+
+function startVideoCallWithFriend(friendId, friendName) {
+    console.log('Starting video call with friend:', friendName, friendId);
+    
+    // Set current chat for the call
+    const chatId = [currentUser.uid, friendId].sort().join('_');
+    currentChat = {
+        id: chatId,
+        friendId: friendId,
+        name: friendName
+    };
+    
+    showToast(`Starting video call with ${friendName}...`, 'info');
+    startVideoCall();
+}
+
+function viewFriendProfile(friendId) {
+    console.log('Viewing friend profile:', friendId);
+    // For now, show a toast. You can implement a proper profile view modal later
+    showToast('Friend profile view - Feature coming soon!', 'info');
+}
+
+function confirmRemoveFriend(friendId, friendName) {
+    if (confirm(`Are you sure you want to remove ${friendName} from your friends?`)) {
+        removeFriend(friendId);
+    }
+}
+
+function openEditFriendModal(friendId, name, status) {
+    currentEditingFriendId = friendId;
+    const editFriendName = document.getElementById('editFriendName');
+    const editFriendStatus = document.getElementById('editFriendStatus');
+    
+    if (editFriendName) editFriendName.value = name;
+    if (editFriendStatus) editFriendStatus.value = status;
+    if (editFriendModal) editFriendModal.classList.remove('hidden');
+}
+
+function searchFriends(query) {
+    console.log('Searching friends for:', query);
+    if (!query) {
+        renderFriends(friends);
+        return;
+    }
+    
+    const filteredFriends = friends.filter(friend => 
+        friend.displayName.toLowerCase().includes(query.toLowerCase()) ||
+        (friend.email && friend.email.toLowerCase().includes(query.toLowerCase())) ||
+        (friend.phone && friend.phone.includes(query))
+    );
+    
+    renderFriends(filteredFriends);
+    
+    const noFriendsMessage = document.getElementById('noFriendsMessage');
+    if (noFriendsMessage) {
+        if (filteredFriends.length === 0) {
+            noFriendsMessage.classList.remove('hidden');
+            noFriendsMessage.innerHTML = `
+                <i class="fas fa-search text-4xl mb-3 text-gray-300 block"></i>
+                <p>No friends found</p>
+                <p class="text-sm mt-1">Try a different search term</p>
+            `;
+        } else {
+            noFriendsMessage.classList.add('hidden');
+        }
+    }
+}
+
+// FIXED: Chat Session Management with proper real-time updates
+async function startChat(friendId, friendName) {
+    try {
+        console.log('Starting chat with:', friendName, friendId);
+        // Create or get chat ID
+        const chatId = [currentUser.uid, friendId].sort().join('_');
+        
+        console.log('Chat ID:', chatId);
+        
+        // Check if chat document exists
+        const chatDoc = await db.collection('chats').doc(chatId).get();
+        
+        if (!chatDoc.exists) {
+            console.log('Creating new chat document');
+            // Create new chat document
+            await db.collection('chats').doc(chatId).set({
+                participants: [currentUser.uid, friendId],
+                participantNames: {
+                    [currentUser.uid]: currentUserData.displayName,
+                    [friendId]: friendName
+                },
+                lastMessage: '',
+                lastMessageTime: firebase.firestore.FieldValue.serverTimestamp(),
+                createdAt: firebase.firestore.FieldValue.serverTimestamp(),
+                typing: {}
+            });
+        }
+        
+        // Set current chat
+        currentChat = {
+            id: chatId,
+            friendId: friendId,
+            name: friendName
+        };
+        
+        console.log('Current chat set:', currentChat);
+        
+        // Update UI
+        const chatHeader = document.getElementById('chatHeader');
+        const inputArea = document.getElementById('inputArea');
+        const noMessagesMessage = document.getElementById('noMessagesMessage');
+        const chatTitle = document.getElementById('chatTitle');
+        const chatAvatar = document.getElementById('chatAvatar');
+        
+        if (chatHeader) chatHeader.classList.remove('hidden');
+        if (inputArea) inputArea.classList.remove('hidden');
+        if (noMessagesMessage) noMessagesMessage.classList.add('hidden');
+        if (chatTitle) chatTitle.textContent = friendName;
+        if (chatAvatar) chatAvatar.src = `https://ui-avatars.com/api/?name=${encodeURIComponent(friendName)}&background=7C3AED&color=fff`;
+        
+        // Enable message input
+        const messageInput = document.getElementById('messageInput');
+        const sendBtn = document.getElementById('sendBtn');
+        
+        if (messageInput) messageInput.disabled = false;
+        if (sendBtn) sendBtn.disabled = false;
+        
+        // Load messages
+        loadMessages(chatId);
+        
+        // Mark messages as read
+        markMessagesAsRead(chatId);
+        
+        // Hide friend list on mobile
+        if (window.innerWidth < 768) {
+            const chatListContainer = document.getElementById('chatListContainer');
+            if (chatListContainer) chatListContainer.classList.add('hidden');
+        }
+    } catch (error) {
+        console.error('Error starting chat:', error);
+        showToast('Error starting chat', 'error');
+    }
+}
+// FIXED: Real-Time Message Loading with proper error handling
+function loadMessages(chatId) {
+    console.log('Loading messages for chat:', chatId);
+    
+    // Unsubscribe from previous listeners
+    if (unsubscribeMessages) {
+        console.log('Unsubscribing from previous message listener');
+        unsubscribeMessages();
+    }
+    if (typingListener) {
+        console.log('Unsubscribing from previous typing listener');
+        typingListener();
+    }
+    
+    const messagesContainer = document.getElementById('messagesContainer');
+    if (!messagesContainer) {
+        console.error('Messages container not found');
+        return;
+    }
+    
+    // Show loading state
+    messagesContainer.innerHTML = `
+        <div class="text-center text-gray-500 py-10">
+            <i class="fas fa-spinner fa-spin text-4xl mb-3 text-gray-300 block"></i>
+            <p>Loading messages...</p>
+        </div>
+    `;
+    
+    // Subscribe to messages for this chat
+    unsubscribeMessages = db.collection('messages')
+        .where('chatId', '==', chatId)
+        .orderBy('timestamp', 'asc')
+        .onSnapshot({
+            next: (snapshot) => {
+                console.log('New messages snapshot:', snapshot.size, 'messages');
+                
+                if (!messagesContainer) return;
+                
+                messagesContainer.innerHTML = '';
+                
+                if (snapshot.empty) {
+                    messagesContainer.innerHTML = `
+                        <div class="text-center text-gray-500 py-10">
+                            <i class="fas fa-comments text-4xl mb-3 text-gray-300 block"></i>
+                            <p>No messages yet</p>
+                            <p class="text-sm mt-1">Send a message to start the conversation</p>
+                        </div>
+                    `;
+                    return;
+                }
+                
+                let lastDate = null;
+                const messages = [];
+                
+                // First, collect all messages
+                snapshot.forEach(doc => {
+                    const message = doc.data();
+                    messages.push({
+                        id: doc.id,
+                        ...message
+                    });
+                });
+                
+                // Sort by timestamp to ensure correct order
+                messages.sort((a, b) => {
+                    const timeA = a.timestamp ? a.timestamp.toDate() : new Date(0);
+                    const timeB = b.timestamp ? b.timestamp.toDate() : new Date(0);
+                    return timeA - timeB;
+                });
+                
+                // Then render them
+                messages.forEach(message => {
+                    // Check if we need to add a date separator
+                    const messageDate = message.timestamp ? message.timestamp.toDate().toDateString() : new Date().toDateString();
+                    if (messageDate !== lastDate) {
+                        addDateSeparator(messageDate);
+                        lastDate = messageDate;
+                    }
+                    
+                    addMessageToUI(message, message.id);
+                });
+                
+                // Scroll to bottom
+                setTimeout(() => {
+                    if (messagesContainer) {
+                        messagesContainer.scrollTop = messagesContainer.scrollHeight;
+                    }
+                }, 100);
                 
                 // Mark messages as read
                 markMessagesAsRead(chatId);
-                
-                // Hide friend list on mobile
-                if (window.innerWidth < 768) {
-                    document.getElementById('chatListContainer').classList.add('hidden');
+            },
+            error: (error) => {
+                console.error('Error loading messages:', error);
+                if (messagesContainer) {
+                    messagesContainer.innerHTML = `
+                        <div class="text-center text-gray-500 py-10">
+                            <i class="fas fa-exclamation-triangle text-4xl mb-3 text-gray-300 block"></i>
+                            <p>Error loading messages</p>
+                            <p class="text-sm mt-1">Please try again later</p>
+                        </div>
+                    `;
                 }
-            } catch (error) {
-                console.error('Error starting chat:', error);
-                showToast('Error starting chat', 'error');
+                showToast('Error loading messages', 'error');
             }
-        }
-
-        // 🔧 CORE DATA FLOW LOGIC - Real-Time Message Loading
-        function loadMessages(chatId) {
-            // Unsubscribe from previous listeners
-            if (unsubscribeMessages) {
-                unsubscribeMessages();
-            }
-            if (typingListener) {
-                typingListener();
-            }
-            
-            const messagesContainer = document.getElementById('messagesContainer');
-            messagesContainer.innerHTML = '';
-            
-            // Subscribe to messages for this chat
-            unsubscribeMessages = db.collection('messages')
-                .where('chatId', '==', chatId)
-                .orderBy('timestamp', 'asc')
-                .onSnapshot(snapshot => {
-                    messagesContainer.innerHTML = '';
+        });
+    
+    // Listen for typing indicators
+    typingListener = db.collection('chats').doc(chatId)
+        .onSnapshot({
+            next: (doc) => {
+                if (doc.exists) {
+                    const chatData = doc.data();
+                    const typing = chatData.typing || {};
                     
-                    if (snapshot.empty) {
-                        messagesContainer.innerHTML = `
-                            <div class="text-center text-gray-500 py-10">
-                                <i class="fas fa-comments text-4xl mb-3 text-gray-300 block"></i>
-                                <p>No messages yet</p>
-                                <p class="text-sm mt-1">Send a message to start the conversation</p>
-                            </div>
-                        `;
-                        return;
-                    }
+                    // Remove current user from typing indicators
+                    delete typing[currentUser.uid];
                     
-                    let lastDate = null;
+                    const typingUsers = Object.keys(typing).filter(userId => typing[userId] === true);
                     
-                    snapshot.forEach(doc => {
-                        const message = doc.data();
-                        
-                        // Check if we need to add a date separator
-                        const messageDate = message.timestamp ? message.timestamp.toDate().toDateString() : new Date().toDateString();
-                        if (messageDate !== lastDate) {
-                            addDateSeparator(messageDate);
-                            lastDate = messageDate;
-                        }
-                        
-                        addMessageToUI(message, doc.id);
-                    });
+                    const typingUsersElement = document.getElementById('typingUsers');
+                    const isTypingElement = document.getElementById('isTyping');
                     
-                    // Scroll to bottom
-                    setTimeout(() => {
-                        messagesContainer.scrollTop = messagesContainer.scrollHeight;
-                    }, 100);
-                    
-                    // Mark messages as read
-                    markMessagesAsRead(chatId);
-                }, error => {
-                    console.error('Error loading messages:', error);
-                    showToast('Error loading messages', 'error');
-                });
-            
-            // Listen for typing indicators
-            typingListener = db.collection('chats').doc(chatId)
-                .onSnapshot(doc => {
-                    if (doc.exists) {
-                        const chatData = doc.data();
-                        const typing = chatData.typing || {};
-                        
-                        // Remove current user from typing indicators
-                        delete typing[currentUser.uid];
-                        
-                        const typingUsers = Object.keys(typing).filter(userId => typing[userId] === true);
-                        
+                    if (typingUsersElement && isTypingElement) {
                         if (typingUsers.length > 0) {
                             // Get names of typing users
                             const typingNames = typingUsers.map(userId => {
@@ -872,2212 +1318,1789 @@
                                     : 'Someone';
                             });
                             
-                            document.getElementById('typingUsers').textContent = typingNames.join(', ');
-                            document.getElementById('isTyping').classList.remove('hidden');
+                            typingUsersElement.textContent = typingNames.join(', ');
+                            isTypingElement.classList.remove('hidden');
                         } else {
-                            document.getElementById('isTyping').classList.add('hidden');
+                            isTypingElement.classList.add('hidden');
                         }
                     }
-                });
-        }
-
-        function addDateSeparator(dateString) {
-            const messagesContainer = document.getElementById('messagesContainer');
-            const dateElement = document.createElement('div');
-            dateElement.className = 'date-separator';
-            
-            const today = new Date().toDateString();
-            const yesterday = new Date(Date.now() - 86400000).toDateString();
-            
-            let displayDate = dateString;
-            if (dateString === today) {
-                displayDate = 'Today';
-            } else if (dateString === yesterday) {
-                displayDate = 'Yesterday';
-            } else {
-                displayDate = new Date(dateString).toLocaleDateString();
+                }
+            },
+            error: (error) => {
+                console.error('Error listening for typing indicators:', error);
             }
-            
-            dateElement.innerHTML = `<span>${displayDate}</span>`;
-            messagesContainer.appendChild(dateElement);
-        }
+        });
+}
 
-        function addMessageToUI(message, messageId) {
-            const messagesContainer = document.getElementById('messagesContainer');
-            const messageElement = document.createElement('div');
-            
-            const isSent = message.senderId === currentUser.uid;
-            const messageTime = message.timestamp ? message.timestamp.toDate().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : 'Just now';
-            
-            let statusIcon = '🕒'; // sent
-            if (message.status === 'delivered') statusIcon = '✓✓';
-            if (message.status === 'read') statusIcon = '✓✓🔵';
-            
-            messageElement.className = `message-container ${isSent ? 'sent' : 'received'}`;
-            messageElement.innerHTML = `
-                <div class="message-bubble ${isSent ? 'message-sent' : 'message-received'}">
-                    <div class="message-text">${message.text}</div>
-                    <div class="message-time">${messageTime} ${isSent ? statusIcon : ''}</div>
+function addDateSeparator(dateString) {
+    const messagesContainer = document.getElementById('messagesContainer');
+    if (!messagesContainer) return;
+    
+    const dateElement = document.createElement('div');
+    dateElement.className = 'date-separator';
+    
+    const today = new Date().toDateString();
+    const yesterday = new Date(Date.now() - 86400000).toDateString();
+    
+    let displayDate = dateString;
+    if (dateString === today) {
+        displayDate = 'Today';
+    } else if (dateString === yesterday) {
+        displayDate = 'Yesterday';
+    } else {
+        displayDate = new Date(dateString).toLocaleDateString();
+    }
+    
+    dateElement.innerHTML = `<span>${displayDate}</span>`;
+    messagesContainer.appendChild(dateElement);
+}
+function addMessageToUI(message, messageId) {
+    const messagesContainer = document.getElementById('messagesContainer');
+    if (!messagesContainer) return;
+    
+    const messageElement = document.createElement('div');
+    
+    const isSent = message.senderId === currentUser.uid;
+    const messageTime = message.timestamp ? message.timestamp.toDate().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : 'Just now';
+    
+    let statusIcon = '🕒'; // sent
+    if (message.status === 'delivered') statusIcon = '✓✓';
+    if (message.status === 'read') statusIcon = '✓✓👁️';
+    
+    messageElement.className = `message-container ${isSent ? 'sent' : 'received'}`;
+    
+    // Check if message has file attachment
+    if (message.file) {
+        messageElement.innerHTML = `
+            <div class="message-bubble ${isSent ? 'message-sent' : 'message-received'}">
+                <div class="file-message">
+                    <div class="file-icon">
+                        <i class="fas ${getFileIcon(message.file.type)}"></i>
+                    </div>
+                    <div class="file-info">
+                        <div class="file-name">${message.file.name}</div>
+                        <div class="file-size">${formatFileSize(message.file.size)}</div>
+                        <a href="${message.file.url}" target="_blank" class="download-link">Download</a>
+                    </div>
                 </div>
-            `;
-            
-            messagesContainer.appendChild(messageElement);
-        }
+                <div class="message-time">${messageTime} ${isSent ? statusIcon : ''}</div>
+            </div>
+        `;
+    } else {
+        messageElement.innerHTML = `
+            <div class="message-bubble ${isSent ? 'message-sent' : 'message-received'}">
+                <div class="message-text">${escapeHtml(message.text)}</div>
+                <div class="message-time">${messageTime} ${isSent ? statusIcon : ''}</div>
+            </div>
+        `;
+    }
+    
+    messagesContainer.appendChild(messageElement);
+}
 
-        // 🔧 CORE DATA FLOW LOGIC - Send Message
-        function sendMessage() {
-            const messageInput = document.getElementById('messageInput');
-            const text = messageInput.value.trim();
-            
-            if (!text || !currentChat) return;
-            
-            const message = {
-                text: text,
-                senderId: currentUser.uid,
-                senderName: currentUserData.displayName,
-                chatId: currentChat.id,
-                timestamp: firebase.firestore.FieldValue.serverTimestamp(),
-                status: 'sent'
-            };
-            
-            // Add message to Firebase
-            db.collection('messages').add(message)
-                .then(() => {
-                    // Clear input
-                    messageInput.value = '';
-                    
-                    // Update chat document with last message
-                    db.collection('chats').doc(currentChat.id).update({
-                        lastMessage: text,
-                        lastMessageTime: firebase.firestore.FieldValue.serverTimestamp()
-                    });
-                    
-                    // Update message status to delivered for all messages in this chat
-                    updateMessageStatus(currentChat.id, 'delivered');
-                    
-                    // Scroll to bottom
-                    const messagesContainer = document.getElementById('messagesContainer');
-                    setTimeout(() => {
-                        messagesContainer.scrollTop = messagesContainer.scrollHeight;
-                    }, 100);
-                    
-                    // Send push notification
-                    sendPushNotification(currentChat.friendId, currentUserData.displayName, text);
-                })
-                .catch(error => {
-                    console.error('Error sending message:', error);
-                    showToast('Error sending message', 'error');
-                });
-        }
+// Helper function to get file icon based on file type
+function getFileIcon(fileType) {
+    if (fileType.startsWith('image/')) return 'fa-image';
+    if (fileType.startsWith('video/')) return 'fa-video';
+    if (fileType.startsWith('audio/')) return 'fa-music';
+    if (fileType.includes('pdf')) return 'fa-file-pdf';
+    if (fileType.includes('word') || fileType.includes('document')) return 'fa-file-word';
+    if (fileType.includes('excel') || fileType.includes('spreadsheet')) return 'fa-file-excel';
+    if (fileType.includes('zip') || fileType.includes('compressed')) return 'fa-file-archive';
+    return 'fa-file';
+}
 
-        function updateMessageStatus(chatId, status) {
-            // Update all messages in this chat that are sent by the current user
-            db.collection('messages')
-                .where('chatId', '==', chatId)
-                .where('senderId', '==', currentUser.uid)
-                .where('status', '==', 'sent')
-                .get()
-                .then(snapshot => {
-                    const batch = db.batch();
-                    
-                    snapshot.forEach(doc => {
-                        batch.update(doc.ref, { status: status });
-                    });
-                    
-                    return batch.commit();
-                })
-                .catch(error => {
-                    console.error('Error updating message status:', error);
-                });
-        }
+// Helper function to escape HTML for security
+function escapeHtml(text) {
+    const div = document.createElement('div');
+    div.textContent = text;
+    return div.innerHTML;
+}
 
-        function markMessagesAsRead(chatId) {
-            // Mark all messages in this chat as read
-            db.collection('messages')
-                .where('chatId', '==', chatId)
-                .where('senderId', '!=', currentUser.uid)
-                .where('status', 'in', ['sent', 'delivered'])
-                .get()
-                .then(snapshot => {
-                    const batch = db.batch();
-                    
-                    snapshot.forEach(doc => {
-                        batch.update(doc.ref, { status: 'read' });
-                    });
-                    
-                    return batch.commit();
-                })
-                .catch(error => {
-                    console.error('Error marking messages as read:', error);
-                });
+// FIXED: Send Message with proper real-time updates
+// FIXED: Send Message with proper real-time updates
+async function sendMessage() {
+    const messageInput = document.getElementById('messageInput');
+    if (!messageInput) return;
+    
+    const text = messageInput.value.trim();
+    
+    if (!text || !currentChat) {
+        console.log('Cannot send message: no text or no current chat');
+        if (!text) {
+            showToast('Please enter a message', 'error');
         }
+        return;
+    }
+    
+    console.log('Sending message:', text, 'to chat:', currentChat.id);
+    
+    try {
+        const message = {
+            text: text,
+            senderId: currentUser.uid,
+            senderName: currentUserData.displayName,
+            chatId: currentChat.id,
+            timestamp: firebase.firestore.FieldValue.serverTimestamp(),
+            status: 'sent'
+        };
+        
+        // Add message to Firebase
+        const docRef = await db.collection('messages').add(message);
+        console.log('Message sent with ID:', docRef.id);
+        
+        // Clear input
+        messageInput.value = '';
+        
+        // Update chat document with last message
+        await db.collection('chats').doc(currentChat.id).update({
+            lastMessage: text.length > 50 ? text.substring(0, 50) + '...' : text,
+            lastMessageTime: firebase.firestore.FieldValue.serverTimestamp(),
+            [`typing.${currentUser.uid}`]: false // Remove typing indicator
+        });
+        
+        console.log('Chat document updated with last message');
+        
+        // Update message status to delivered for all messages in this chat
+        updateMessageStatus(currentChat.id, 'delivered');
+        
+        // Scroll to bottom
+        const messagesContainer = document.getElementById('messagesContainer');
+        if (messagesContainer) {
+            setTimeout(() => {
+                messagesContainer.scrollTop = messagesContainer.scrollHeight;
+            }, 100);
+        }
+        
+        // Send push notification
+        sendPushNotification(currentChat.friendId, currentUserData.displayName, text);
+        
+    } catch (error) {
+        console.error('Error sending message:', error);
+        showToast('Error sending message', 'error');
+    }
+}
+function updateMessageStatus(chatId, status) {
+    console.log('Updating message status to:', status, 'for chat:', chatId);
+    
+    // Update all messages in this chat that are sent by the current user
+    db.collection('messages')
+        .where('chatId', '==', chatId)
+        .where('senderId', '==', currentUser.uid)
+        .where('status', '==', 'sent')
+        .get()
+        .then(snapshot => {
+            const batch = db.batch();
+            
+            snapshot.forEach(doc => {
+                batch.update(doc.ref, { status: status });
+            });
+            
+            return batch.commit();
+        })
+        .then(() => {
+            console.log('Message status updated successfully');
+        })
+        .catch(error => {
+            console.error('Error updating message status:', error);
+        });
+}
 
-        // 🔧 CORE DATA FLOW LOGIC - File/Media Upload
-        async function uploadFile(file) {
-            try {
-                showToast('Uploading file...', 'info');
-                
-                // Upload to Firebase Storage
-                const storageRef = storage.ref();
-                const fileRef = storageRef.child(`chat_files/${currentChat.id}/${Date.now()}_${file.name}`);
-                const uploadTask = fileRef.put(file);
-                
-                // Show upload progress
-                const filePreview = document.getElementById('filePreview');
-                const fileName = document.getElementById('fileName');
-                const fileSize = document.getElementById('fileSize');
-                const uploadProgressBar = document.getElementById('uploadProgressBar');
-                
-                fileName.textContent = file.name;
-                fileSize.textContent = formatFileSize(file.size);
-                filePreview.classList.remove('hidden');
-                
-                uploadTask.on('state_changed', 
-                    (snapshot) => {
-                        // Update progress bar
-                        const progress = (snapshot.bytesTransferred / snapshot.totalBytes) * 100;
-                        uploadProgressBar.style.width = `${progress}%`;
-                    },
-                    (error) => {
-                        console.error('Error uploading file:', error);
-                        showToast('Error uploading file', 'error');
-                        filePreview.classList.add('hidden');
-                    },
-                    async () => {
-                        // Upload completed
-                        const downloadURL = await uploadTask.snapshot.ref.getDownloadURL();
-                        
-                        // Create message with file
-                        const message = {
-                            text: `Shared a file: ${file.name}`,
-                            senderId: currentUser.uid,
-                            senderName: currentUserData.displayName,
-                            chatId: currentChat.id,
-                            timestamp: firebase.firestore.FieldValue.serverTimestamp(),
-                            status: 'sent',
-                            file: {
-                                name: file.name,
-                                url: downloadURL,
-                                type: file.type,
-                                size: file.size
-                            }
-                        };
-                        
-                        // Add message to Firebase
-                        await db.collection('messages').add(message);
-                        
-                        // Update chat document with last message
-                        await db.collection('chats').doc(currentChat.id).update({
-                            lastMessage: `Shared a file: ${file.name}`,
-                            lastMessageTime: firebase.firestore.FieldValue.serverTimestamp()
-                        });
-                        
-                        // Hide file preview
-                        filePreview.classList.add('hidden');
-                        
-                        showToast('File uploaded successfully', 'success');
-                    }
-                );
-            } catch (error) {
+function markMessagesAsRead(chatId) {
+    console.log('Marking messages as read for chat:', chatId);
+    
+    // Mark all messages in this chat as read
+    db.collection('messages')
+        .where('chatId', '==', chatId)
+        .where('senderId', '!=', currentUser.uid)
+        .where('status', 'in', ['sent', 'delivered'])
+        .get()
+        .then(snapshot => {
+            const batch = db.batch();
+            
+            snapshot.forEach(doc => {
+                batch.update(doc.ref, { status: 'read' });
+            });
+            
+            return batch.commit();
+        })
+        .then(() => {
+            console.log('Messages marked as read successfully');
+        })
+        .catch(error => {
+            console.error('Error marking messages as read:', error);
+        });
+}
+
+// FIXED: File/Media Upload with proper error handling
+async function uploadFile(file) {
+    if (!currentChat) {
+        showToast('Please select a chat first', 'error');
+        return;
+    }
+    
+    try {
+        console.log('Uploading file:', file.name, 'to chat:', currentChat.id);
+        showToast('Uploading file...', 'info');
+        
+        // Upload to Firebase Storage
+        const storageRef = storage.ref();
+        const fileRef = storageRef.child(`chat_files/${currentChat.id}/${Date.now()}_${file.name}`);
+        const uploadTask = fileRef.put(file);
+        
+        // Show upload progress
+        const filePreview = document.getElementById('filePreview');
+        const fileName = document.getElementById('fileName');
+        const fileSize = document.getElementById('fileSize');
+        const uploadProgressBar = document.getElementById('uploadProgressBar');
+        
+        if (fileName) fileName.textContent = file.name;
+        if (fileSize) fileSize.textContent = formatFileSize(file.size);
+        if (filePreview) filePreview.classList.remove('hidden');
+        
+        uploadTask.on('state_changed', 
+            (snapshot) => {
+                // Update progress bar
+                const progress = (snapshot.bytesTransferred / snapshot.totalBytes) * 100;
+                console.log('Upload progress:', progress + '%');
+                if (uploadProgressBar) uploadProgressBar.style.width = `${progress}%`;
+            },
+            (error) => {
                 console.error('Error uploading file:', error);
                 showToast('Error uploading file', 'error');
-            }
-        }
-
-        function formatFileSize(bytes) {
-            if (bytes === 0) return '0 Bytes';
-            const k = 1024;
-            const sizes = ['Bytes', 'KB', 'MB', 'GB'];
-            const i = Math.floor(Math.log(bytes) / Math.log(k));
-            return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i];
-        }
-
-        // SAFE VERSION: Load chats with null checks
-        function loadChatsTemporary() {
-            if (unsubscribeChats) {
-                unsubscribeChats();
-            }
-            
-            const chatList = document.getElementById('chatList');
-            const noChatsMessage = document.getElementById('noChatsMessage');
-            
-            // Safety check - if elements don't exist, return early
-            if (!chatList || !noChatsMessage) {
-                console.error('Chat list elements not found');
-                return;
-            }
-            
-            unsubscribeChats = db.collection('chats')
-                .where('participants', 'array-contains', currentUser.uid)
-                .onSnapshot({
-                    next: (snapshot) => {
-                        // Double-check elements still exist
-                        if (!chatList || !noChatsMessage) return;
-                        
-                        chatList.innerHTML = '';
-                        
-                        if (snapshot.empty) {
-                            noChatsMessage.classList.remove('hidden');
-                            return;
-                        }
-                        
-                        noChatsMessage.classList.add('hidden');
-                        
-                        // Sort manually in JavaScript
-                        const chats = [];
-                        snapshot.forEach(doc => {
-                            chats.push({ id: doc.id, ...doc.data() });
-                        });
-                        
-                        // Manual sort by lastMessageTime
-                        chats.sort((a, b) => {
-                            const timeA = a.lastMessageTime ? a.lastMessageTime.toDate() : new Date(0);
-                            const timeB = b.lastMessageTime ? b.lastMessageTime.toDate() : new Date(0);
-                            return timeB - timeA; // Descending order
-                        });
-                        
-                        chats.forEach(chat => {
-                            const otherParticipantId = chat.participants.find(id => id !== currentUser.uid);
-                            const otherParticipantName = chat.participantNames ? chat.participantNames[otherParticipantId] : 'Unknown User';
-                            
-                            const chatItem = document.createElement('div');
-                            chatItem.className = 'contact-item';
-                            chatItem.dataset.chatId = chat.id;
-                            chatItem.dataset.otherUserId = otherParticipantId;
-                            
-                            chatItem.innerHTML = `
-                                <div class="contact-avatar">
-                                    <img class="w-12 h-12 rounded-full object-cover" src="https://ui-avatars.com/api/?name=${encodeURIComponent(otherParticipantName)}&background=7C3AED&color=fff" alt="${otherParticipantName}">
-                                </div>
-                                <div class="contact-info">
-                                    <div class="contact-name">${otherParticipantName}</div>
-                                    <div class="contact-status">${chat.lastMessage || 'No messages yet'}</div>
-                                </div>
-                                <div class="last-seen">
-                                    ${chat.lastMessageTime ? formatTimeAgo(chat.lastMessageTime) : ''}
-                                </div>
-                            `;
-                            
-                            chatItem.addEventListener('click', () => {
-                                startChat(otherParticipantId, otherParticipantName);
-                            });
-                            
-                            chatList.appendChild(chatItem);
-                        });
-                    },
-                    error: (error) => {
-                        console.error('Error loading chats:', error);
-                        // Check if elements exist before showing toast
-                        if (document.getElementById('chatList')) {
-                            showToast('Error loading chats', 'error');
-                        }
-                    }
-                });
-        }
-
-        function startCall(friendId, friendName) {
-            // For now, just show a toast notification
-            showToast(`Calling ${friendName}...`, 'info');
-            
-            // In a real implementation, you would integrate with a WebRTC service
-            // and show the call interface
-        }
-
-        // 👤 USER MANAGEMENT - Update Profile
-        async function updateProfile() {
-            try {
-                const name = document.getElementById('profileName').value.trim();
-                const about = document.getElementById('profileAbout').value.trim();
-                const email = document.getElementById('profileEmail').value.trim();
-                const phone = document.getElementById('profilePhone').value.trim();
+                if (filePreview) filePreview.classList.add('hidden');
+            },
+            async () => {
+                // Upload completed
+                console.log('File upload completed');
+                const downloadURL = await uploadTask.snapshot.ref.getDownloadURL();
                 
-                if (!name) {
-                    showToast('Display name is required', 'error');
-                    return;
-                }
-                
-                const updates = {
-                    displayName: name,
-                    about: about,
-                    email: email,
-                    phone: phone,
-                    updatedAt: firebase.firestore.FieldValue.serverTimestamp()
-                };
-                
-                await db.collection('users').doc(currentUser.uid).update(updates);
-                
-                // Update current user data
-                currentUserData.displayName = name;
-                currentUserData.about = about;
-                currentUserData.email = email;
-                currentUserData.phone = phone;
-                
-                // Update UI
-                document.getElementById('userName').textContent = name;
-                document.getElementById('settingsUserName').textContent = name;
-                
-                showToast('Profile updated successfully', 'success');
-            } catch (error) {
-                console.error('Error updating profile:', error);
-                showToast('Error updating profile', 'error');
-            }
-        }
-
-        // 👤 USER MANAGEMENT - Upload Profile Picture
-        async function uploadProfilePicture(file) {
-            try {
-                showToast('Uploading profile picture...', 'info');
-                
-                // Upload to Firebase Storage
-                const storageRef = storage.ref();
-                const fileRef = storageRef.child(`profile_pictures/${currentUser.uid}/${file.name}`);
-                const snapshot = await fileRef.put(file);
-                const downloadURL = await snapshot.ref.getDownloadURL();
-                
-                // Update user document
-                await db.collection('users').doc(currentUser.uid).update({
-                    photoURL: downloadURL,
-                    updatedAt: firebase.firestore.FieldValue.serverTimestamp()
-                });
-                
-                // Update current user data
-                currentUserData.photoURL = downloadURL;
-                
-                // Update UI
-                document.getElementById('userAvatar').src = downloadURL;
-                document.getElementById('settingsProfilePic').src = downloadURL;
-                document.getElementById('profilePicPreview').src = downloadURL;
-                
-                showToast('Profile picture updated successfully', 'success');
-            } catch (error) {
-                console.error('Error uploading profile picture:', error);
-                showToast('Error uploading profile picture', 'error');
-            }
-        }
-
-        // 👤 USER MANAGEMENT - Upload Cover Picture
-        async function uploadCoverPicture(file) {
-            try {
-                showToast('Uploading cover picture...', 'info');
-                
-                // Upload to Firebase Storage
-                const storageRef = storage.ref();
-                const fileRef = storageRef.child(`cover_pictures/${currentUser.uid}/${file.name}`);
-                const snapshot = await fileRef.put(file);
-                const downloadURL = await snapshot.ref.getDownloadURL();
-                
-                // Update user document
-                await db.collection('users').doc(currentUser.uid).update({
-                    coverURL: downloadURL,
-                    updatedAt: firebase.firestore.FieldValue.serverTimestamp()
-                });
-                
-                // Update current user data
-                currentUserData.coverURL = downloadURL;
-                
-                // Update UI
-                document.getElementById('profileCoverPreview').src = downloadURL;
-                
-                showToast('Cover picture updated successfully', 'success');
-            } catch (error) {
-                console.error('Error uploading cover picture:', error);
-                showToast('Error uploading cover picture', 'error');
-            }
-        }
-
-        // 💡 ADVANCED UX - Typing Indicator
-        function handleTypingIndicator() {
-            if (currentChat) {
-                // Send typing indicator
-                db.collection('chats').doc(currentChat.id).update({
-                    [`typing.${currentUser.uid}`]: true,
-                    lastActivity: firebase.firestore.FieldValue.serverTimestamp()
-                });
-                
-                // Clear previous timeout
-                if (typingTimeout) {
-                    clearTimeout(typingTimeout);
-                }
-                
-                // Set timeout to remove typing indicator
-                typingTimeout = setTimeout(() => {
-                    db.collection('chats').doc(currentChat.id).update({
-                        [`typing.${currentUser.uid}`]: false
-                    });
-                }, 1000);
-            }
-        }
-
-        // 💡 ADVANCED UX - Push Notifications
-        async function requestNotificationPermission() {
-            try {
-                // Check if permission is already denied/blocked
-                if (Notification.permission === 'denied') {
-                    console.log('Notifications blocked by user. User must manually enable in browser settings.');
-                    return;
-                }
-                
-                // Don't ask if already granted
-                if (Notification.permission === 'granted') {
-                    console.log('Notifications already granted');
-                    return;
-                }
-                
-                // Only ask if permission is default
-                if (Notification.permission === 'default') {
-                    const permission = await Notification.requestPermission();
-                    if (permission === 'granted') {
-                        console.log('Notification permission granted');
-                        // Get FCM token here if needed
-                    }
-                }
-            } catch (error) {
-                console.error('Error with notification permission:', error);
-            }
-        }
-
-        async function sendPushNotification(userId, senderName, message) {
-            try {
-                // Get recipient's FCM token
-                const recipientDoc = await db.collection('users').doc(userId).get();
-                if (recipientDoc.exists) {
-                    const recipientData = recipientDoc.data();
-                    const fcmToken = recipientData.fcmToken;
-                    
-                    if (fcmToken) {
-                        // In a real implementation, you would send a push notification
-                        // through Firebase Cloud Messaging or a server
-                        console.log(`Sending push notification to ${userId}: ${senderName}: ${message}`);
-                    }
-                }
-            } catch (error) {
-                console.error('Error sending push notification:', error);
-            }
-        }
-
-        // 💡 ADVANCED UX - Client-Side Caching
-        function cacheMessages(chatId, messages) {
-            try {
-                const cacheKey = `kynecta_messages_${chatId}`;
-                localStorage.setItem(cacheKey, JSON.stringify({
-                    timestamp: Date.now(),
-                    messages: messages
-                }));
-            } catch (error) {
-                console.error('Error caching messages:', error);
-            }
-        }
-
-        function getCachedMessages(chatId) {
-            try {
-                const cacheKey = `kynecta_messages_${chatId}`;
-                const cached = localStorage.getItem(cacheKey);
-                
-                if (cached) {
-                    const data = JSON.parse(cached);
-                    // Return cached messages if they're less than 5 minutes old
-                    if (Date.now() - data.timestamp < 5 * 60 * 1000) {
-                        return data.messages;
-                    }
-                }
-            } catch (error) {
-                console.error('Error getting cached messages:', error);
-            }
-            
-            return null;
-        }
-
-        function initEmojiPicker() {
-            const emojiCategories = [
-                {
-                    title: 'Smileys & People',
-                    emojis: ['😀', '😃', '😄', '😁', '😆', '😅', '😂', '🤣', '😊', '😇', '🙂', '🙃', '😉', '😌', '😍', '🥰', '😘', '😗', '😙', '😚', '😋', '😛', '😝', '😜', '🤪', '🤨', '🧐', '🤓', '😎', '🤩', '🥳', '😏', '😒', '😞', '😔', '😟', '😕', '🙁', '☹️', '😣', '😖', '😫', '😩', '🥺', '😢', '😭', '😤', '😠', '😡', '🤬', '🤯', '😳', '🥵', '🥶', '😱', '😨', '😰', '😥', '😓', '🤗', '🤔', '🤭', '🤫', '🤥', '😶', '😐', '😑', '😬', '🙄', '😯', '😦', '😧', '😮', '😲', '🥱', '😴', '🤤', '😪', '😵', '🤐', '🥴', '🤢', '🤮', '🤧', '😷', '🤒', '🤕', '🤑', '🤠', '😈', '👿', '👹', '👺', '🤡', '💩', '👻', '💀', '☠️', '👽', '👾', '🤖', '🎃', '😺', '😸', '😹', '😻', '😼', '😽', '🙀', '😿', '😾']
-                },
-                {
-                    title: 'Animals & Nature',
-                    emojis: ['🐵', '🐒', '🦍', '🦧', '🐶', '🐕', '🦮', '🐩', '🐺', '🦊', '🦝', '🐱', '🐈', '🦁', '🐯', '🐅', '🐆', '🐴', '🐎', '🦄', '🦓', '🦌', '🐮', '🐂', '🐃', '🐄', '🐷', '🐖', '🐗', '🐽', '🐏', '🐑', '🐐', '🐪', '🐫', '🦙', '🦒', '🐘', '🦏', '🦛', '🐭', '🐁', '🐀', '🐹', '🐰', '🐇', '🐿️', '🦔', '🦇', '🐻', '🐨', '🐼', '🦥', '🦦', '🦨', '🦘', '🦡', '🐾', '🦃', '🐔', '🐓', '🐣', '🐤', '🐥', '🐦', '🐧', '🕊️', '🦅', '🦆', '🦢', '🦉', '🦩', '🦚', '🦜', '🐸', '🐊', '🐢', '🦎', '🐍', '🐲', '🐉', '🦕', '🦖', '🐳', '🐋', '🐬', '🐟', '🐠', '🐡', '🦈', '🐙', '🐚', '🐌', '🦋', '🐛', '🐜', '🐝', '🐞', '🦗', '🕷️', '🕸️', '🦂', '🦟', '🦠', '💐', '🌸', '💮', '🏵️', '🌹', '🥀', '🌺', '🌻', '🌼', '🌷', '🌱', '🌲', '🌳', '🌴', '🌵', '🌾', '🌿', '☘️', '🍀', '🍁', '🍂', '🍃']
-                },
-                {
-                    title: 'Food & Drink',
-                    emojis: ['🍇', '🍈', '🍉', '🍊', '🍋', '🍌', '🍍', '🥭', '🍎', '🍏', '🍐', '🍑', '🍒', '🍓', '🥝', '🍅', '🥥', '🥑', '🍆', '🥔', '🥕', '🌽', '🌶️', '🥒', '🥬', '🥦', '🧄', '🧅', '🍄', '🥜', '🌰', '🍞', '🥐', '🥖', '🥨', '🥯', '🥞', '🧇', '🧀', '🍖', '🍗', '🥩', '🥓', '🍔', '🍟', '🍕', '🌭', '🥪', '🌮', '🌯', '🥙', '🧆', '🥚', '🍳', '🥘', '🍲', '🥣', '🥗', '🍿', '🧈', '🧂', '🥫', '🍱', '🍘', '🍙', '🍚', '🍛', '🍜', '🍝', '🍠', '🍢', '🍣', '🍤', '🍥', '🥮', '🍡', '🥟', '🥠', '🥡', '🦀', '🦞', '🦐', '🦑', '🦪', '🍦', '🍧', '🍨', '🍩', '🍪', '🎂', '🍰', '🧁', '🥧', '🍫', '🍬', '🍭', '🍮', '🍯', '🍼', '🥛', '☕', '🍵', '🍶', '🍾', '🍷', '🍸', '🍹', '🍺', '🍻', '🥂', '🥃', '🥤', '🧃', '🧉', '🧊', '🥢', '🍽️', '🍴', '🥄', '🔪', '🏺']
-                },
-                {
-                    title: 'Activities',
-                    emojis: ['⚽', '🏀', '🏈', '⚾', '🥎', '🎾', '🏐', '🏉', '🥏', '🎱', '🪀', '🏓', '🏸', '🏒', '🏑', '🥍', '🏏', '🪁', '🥅', '⛳', '🪃', '🏹', '🎣', '🤿', '🥊', '🥋', '🎽', '🛹', '🛷', '⛸️', '🥌', '🎿', '⛷️', '🏂', '🪂', '🏋️', '🤼', '🤸', '⛹️', '🤾', '🏌️', '🏇', '🧘', '🏄', '🏊', '🤽', '🚣', '🧗', '🚵', '🚴', '🏆', '🥇', '🥈', '🥉', '🏅', '🎖️', '🏵️', '🎗️', '🎫', '🎟️', '🎪', '🤹', '🎭', '🩰', '🎨', '🎬', '🎤', '🎧', '🎼', '🎹', '🥁', '🪘', '🎷', '🎺', '🎸', '🪕', '🎻', '🎲', '♟️', '🎯', '🎳', '🎮', '🎰', '🧩']
-                },
-                {
-                    title: 'Travel & Places',
-                    emojis: ['🚗', '🚕', '🚙', '🚌', '🚎', '🏎️', '🚓', '🚑', '🚒', '🚐', '🛻', '🚚', '🚛', '🚜', '🦯', '🦽', '🦼', '🛴', '🚲', '🛵', '🏍️', '🛺', '🚨', '🚔', '🚍', '🚘', '🚖', '🚡', '🚠', '🚟', '🚃', '🚋', '🚞', '🚝', '🚄', '🚅', '🚈', '🚂', '🚆', '🚇', '🚊', '🚉', '✈️', '🛫', '🛬', '🛩️', '💺', '🛰️', '🚀', '🛸', '🚁', '🛶', '⛵', '🚤', '🛥️', '🛳️', '⛴️', '🚢', '⚓', '⛽', '🚧', '🚦', '🚥', '🚏', '🗺️', '🗿', '🗽', '🗼', '🏰', '🏯', '🏟️', '🎡', '🎢', '🎠', '⛲', '⛱️', '🏖️', '🏝️', '🏜️', '🌋', '⛰️', '🏔️', '🗻', '🏕️', '🏠', '🏡', '🏘️', '🏚️', '🏗️', '🏭', '🏢', '🏬', '🏣', '🏤', '🏥', '🏦', '🏨', '🏪', '🏫', '🏩', '💒', '🏛️', '⛪', '🕌', '🕍', '🛕', '🕋', '⛩️', '🗾', '🎑', '🏞️', '🌅', '🌄', '🌠', '🎇', '🎆', '🌇', '🌆', '🏙️', '🌃', '🌌', '🌉', '🌁']
-                },
-                {
-                    title: 'Objects',
-                    emojis: ['⌚', '📱', '📲', '💻', '⌨️', '🖥️', '🖨️', '🖱️', '🖲️', '🕹️', '🗜️', '💽', '💾', '💿', '📀', '📼', '📷', '📸', '📹', '🎥', '📽️', '🎞️', '📞', '☎️', '📟', '📠', '📺', '📻', '🎙️', '🎚️', '🎛️', '🧭', '⏱️', '⏲️', '⏰', '🕰️', '⌛', '⏳', '📡', '🔋', '🔌', '💡', '🔦', '🕯️', '🪔', '🧯', '🛢️', '💸', '💵', '💴', '💶', '💷', '💰', '💳', '💎', '⚖️', '🧰', '🔧', '🔨', '⚒️', '🛠️', '⛏️', '🔩', '⚙️', '🧱', '⛓️', '🧲', '🔫', '💣', '🧨', '🪓', '🔪', '🗡️', '⚔️', '🛡️', '🚬', '⚰️', '⚱️', '🏺', '🔮', '📿', '🧿', '💈', '⚗️', '🔭', '🔬', '🕳️', '🩹', '🩺', '💊', '💉', '🩸', '🧬', '🦠', '🧫', '🧪', '🌡️', '🧹', '🧺', '🧻', '🚽', '🚰', '🚿', '🛁', '🛀', '🧼', '🪒', '🧽', '🧴', '🛎️', '🔑', '🗝️', '🚪', '🪑', '🛋️', '🛏️', '🛌', '🧸', '🖼️', '🛍️', '🛒', '🎁', '🎈', '🎏', '🎀', '🎊', '🎉', '🎎', '🏮', '🎐', '✉️', '📩', '📨', '📧', '💌', '📥', '📤', '📦', '🏷️', '📪', '📫', '📬', '📭', '📮', '📯', '📜', '📃', '📄', '📑', '🧾', '📊', '📈', '📉', '🗒️', '🗓️', '📆', '📅', '🗑️', '📇', '🗃️', '🗳️', '🗄️', '📋', '📁', '📂', '🗂️', '🗞️', '📰', '📓', '📔', '📒', '📕', '📗', '📘', '📙', '📚', '📖', '🔖', '🧷', '🔗', '📎', '🖇️', '📐', '📏', '🧮', '📌', '📍', '✂️', '🖊️', '🖋️', '✒️', '🖌️', '🖍️', '📝', '✏️', '🔍', '🔎', '🔏', '🔐', '🔒', '🔓']
-                },
-                {
-                    title: 'Symbols',
-                    emojis: ['❤️', '🧡', '💛', '💚', '💙', '💜', '🖤', '🤍', '🤎', '💔', '❣️', '💕', '💞', '💓', '💗', '💖', '💘', '💝', '💟', '☮️', '✝️', '☪️', '🕉️', '☸️', '✡️', '🔯', '🕎', '☯️', '☦️', '🛐', '⛎', '♈', '♉', '♊', '♋', '♌', '♍', '♎', '♏', '♐', '♑', '♒', '♓', '🆔', '⚛️', '🉑', '☢️', '☣️', '📴', '📳', '🈶', '🈚', '🈸', '🈺', '🈷️', '✴️', '🆚', '💮', '🉐', '㊙️', '㊗️', '🈴', '🈵', '🈹', '🈲', '🅰️', '🅱️', '🆎', '🆑', '🅾️', '🆘', '❌', '⭕', '🛑', '⛔', '📛', '🚫', '💯', '💢', '♨️', '🚷', '🚯', '🚳', '🚱', '🔞', '📵', '🚭', '❗', '❕', '❓', '❔', '‼️', '⁉️', '🔅', '🔆', '〽️', '⚠️', '🚸', '🔱', '⚜️', '🔰', '♻️', '✅', '🈯', '💹', '❇️', '✳️', '❎', '🌐', '💠', 'Ⓜ️', '🌀', '💤', '🏧', '🚾', '♿', '🅿️', '🈳', '🈂️', '🛂', '🛃', '🛄', '🛅', '🚹', '🚺', '🚼', '🚻', '🚮', '🎦', '📶', '🈁', '🔣', 'ℹ️', '🔤', '🔡', '🔠', '🆖', '🆗', '🆙', '🆒', '🆕', '🆓', '0️⃣', '1️⃣', '2️⃣', '3️⃣', '4️⃣', '5️⃣', '6️⃣', '7️⃣', '8️⃣', '9️⃣', '🔟', '🔢', '#️⃣', '*️⃣', '⏏️', '▶️', '⏸️', '⏯️', '⏹️', '⏺️', '⏭️', '⏮️', '⏩', '⏪', '⏫', '⏬', '◀️', '🔼', '🔽', '➡️', '⬅️', '⬆️', '⬇️', '↗️', '↘️', '↙️', '↖️', '↕️', '↔️', '↪️', '↩️', '⤴️', '⤵️', '🔀', '🔁', '🔂', '🔄', '🔃', '🎵', '🎶', '➕', '➖', '➗', '✖️', '♾️', '💲', '💱', '™️', '©️', '®️', '〰️', '➰', '➿', '🔚', '🔙', '🔛', '🔝', '🔜', '✔️', '☑️', '🔘', '🔴', '🟠', '🟡', '🟢', '🔵', '🟣', '⚫', '⚪', '🟤', '🔺', '🔻', '🔸', '🔹', '🔶', '🔷', '🔳', '🔲', '▪️', '▫️', '◾', '◽', '◼️', '◻️', '🟥', '🟧', '🟨', '🟩', '🟦', '🟪', '⬛', '⬜', '🟫', '🔈', '🔇', '🔉', '🔊', '🔔', '🔕', '📣', '📢', '👁️‍🗨️', '💬', '💭', '🗯️', '♠️', '♣️', '♥️', '♦️', '🃏', '🎴', '🀄', '🕐', '🕑', '🕒', '🕓', '🕔', '🕕', '🕖', '🕗', '🕘', '🕙', '🕚', '🕛', '🕜', '🕝', '🕞', '🕟', '🕠', '🕡', '🕢', '🕣', '🕤', '🕥', '🕦', '🕧']
-                }
-            ];
-
-            emojiPicker.innerHTML = '';
-
-            emojiCategories.forEach(category => {
-                const categoryElement = document.createElement('div');
-                categoryElement.className = 'emoji-category';
-                
-                const categoryTitle = document.createElement('div');
-                categoryTitle.className = 'emoji-category-title';
-                categoryTitle.textContent = category.title;
-                
-                const emojiGrid = document.createElement('div');
-                emojiGrid.className = 'emoji-grid';
-                
-                category.emojis.forEach(emoji => {
-                    const emojiOption = document.createElement('div');
-                    emojiOption.className = 'emoji-option';
-                    emojiOption.textContent = emoji;
-                    emojiOption.addEventListener('click', () => {
-                        const messageInput = document.getElementById('messageInput');
-                        messageInput.value += emoji;
-                        emojiPicker.style.display = 'none';
-                        messageInput.focus();
-                    });
-                    
-                    emojiGrid.appendChild(emojiOption);
-                });
-                
-                categoryElement.appendChild(categoryTitle);
-                categoryElement.appendChild(emojiGrid);
-                emojiPicker.appendChild(categoryElement);
-            });
-        }
-
-        // Enhanced Friend Search with Multiple Options
-        async function enhancedFriendSearch(query) {
-            if (!query) return [];
-            
-            const results = await searchUsers(query);
-            return results;
-        }
-
-        function displayEnhancedSearchResults(results) {
-            const enhancedSearchResults = document.getElementById('enhancedSearchResults');
-            enhancedSearchResults.innerHTML = '';
-            
-            if (results.length === 0) {
-                enhancedSearchResults.innerHTML = '<p class="text-center text-gray-500 py-4">No users found</p>';
-                return;
-            }
-            
-            results.forEach(user => {
-                const resultItem = document.createElement('div');
-                resultItem.className = 'flex items-center p-3 border-b border-gray-200 hover:bg-gray-50 cursor-pointer';
-                resultItem.innerHTML = `
-                    <img class="w-10 h-10 rounded-full mr-3" src="${user.photoURL || `https://ui-avatars.com/api/?name=${encodeURIComponent(user.displayName)}&background=7C3AED&color=fff`}" alt="${user.displayName}">
-                    <div class="flex-1">
-                        <p class="font-medium">${user.displayName}</p>
-                        <p class="text-sm text-gray-500">${user.email || user.phone || ''}</p>
-                    </div>
-                    <div class="flex space-x-2">
-                        <button class="bg-purple-600 text-white px-3 py-1 rounded-lg add-friend" data-id="${user.id}" data-name="${user.displayName}">
-                            <i class="fas fa-user-plus"></i>
-                        </button>
-                        <button class="bg-green-600 text-white px-3 py-1 rounded-lg message-user" data-id="${user.id}" data-name="${user.displayName}">
-                            <i class="fas fa-comment"></i>
-                        </button>
-                    </div>
-                `;
-                
-                enhancedSearchResults.appendChild(resultItem);
-            });
-            
-            // Add event listeners to buttons
-            document.querySelectorAll('.add-friend').forEach(btn => {
-                btn.addEventListener('click', (e) => {
-                    const userId = e.currentTarget.dataset.id;
-                    const userName = e.currentTarget.dataset.name;
-                    sendFriendRequest(userId);
-                    friendSearchResultsModal.classList.add('hidden');
-                    showToast(`Friend request sent to ${userName}`, 'success');
-                });
-            });
-
-            document.querySelectorAll('.message-user').forEach(btn => {
-                btn.addEventListener('click', (e) => {
-                    const userId = e.currentTarget.dataset.id;
-                    const userName = e.currentTarget.dataset.name;
-                    startChat(userId, userName);
-                    friendSearchResultsModal.classList.add('hidden');
-                });
-            });
-        }
-
-        // NEW FEATURES IMPLEMENTATION
-
-        // Group Creation and Management
-        function openCreateGroupModal() {
-            createGroupModal.classList.remove('hidden');
-            populateGroupParticipants();
-        }
-
-        function populateGroupParticipants() {
-            const groupParticipants = document.getElementById('groupParticipants');
-            groupParticipants.innerHTML = '';
-            
-            if (friends.length === 0) {
-                groupParticipants.innerHTML = '<div class="text-gray-500 text-center py-4">No friends available to add to group</div>';
-                return;
-            }
-            
-            friends.forEach(friend => {
-                const participantItem = document.createElement('div');
-                participantItem.className = 'flex items-center p-2 border-b border-gray-100';
-                participantItem.innerHTML = `
-                    <div class="flex items-center flex-1">
-                        <img class="w-8 h-8 rounded-full mr-3" src="${friend.photoURL || `https://ui-avatars.com/api/?name=${encodeURIComponent(friend.displayName)}&background=7C3AED&color=fff`}" alt="${friend.displayName}">
-                        <span class="font-medium">${friend.displayName}</span>
-                    </div>
-                    <input type="checkbox" class="group-participant-checkbox" data-id="${friend.id}" data-name="${friend.displayName}">
-                `;
-                
-                groupParticipants.appendChild(participantItem);
-            });
-        }
-
-        async function createGroup() {
-            const groupName = document.getElementById('groupName').value.trim();
-            const groupDescription = document.getElementById('groupDescription').value.trim();
-            const groupPrivacy = document.getElementById('groupPrivacy').value;
-            
-            if (!groupName) {
-                showToast('Group name is required', 'error');
-                return;
-            }
-            
-            // Get selected participants
-            const selectedParticipants = Array.from(document.querySelectorAll('.group-participant-checkbox:checked'))
-                .map(checkbox => ({
-                    id: checkbox.dataset.id,
-                    name: checkbox.dataset.name
-                }));
-            
-            if (selectedParticipants.length === 0) {
-                showToast('Please select at least one participant', 'error');
-                return;
-            }
-            
-            try {
-                // Create group document
-                const groupData = {
-                    name: groupName,
-                    description: groupDescription,
-                    privacy: groupPrivacy,
-                    createdBy: currentUser.uid,
-                    createdAt: firebase.firestore.FieldValue.serverTimestamp(),
-                    participants: [currentUser.uid, ...selectedParticipants.map(p => p.id)],
-                    participantNames: {
-                        [currentUser.uid]: currentUserData.displayName
-                    },
-                    admin: currentUser.uid,
-                    lastMessage: '',
-                    lastMessageTime: firebase.firestore.FieldValue.serverTimestamp()
-                };
-                
-                // Add participant names
-                selectedParticipants.forEach(participant => {
-                    groupData.participantNames[participant.id] = participant.name;
-                });
-                
-                const groupRef = await db.collection('groups').add(groupData);
-                
-                // Create initial group message
-                const welcomeMessage = {
-                    text: `${currentUserData.displayName} created the group "${groupName}"`,
+                // Create message with file
+                const message = {
+                    text: `Shared a file: ${file.name}`,
                     senderId: currentUser.uid,
                     senderName: currentUserData.displayName,
-                    groupId: groupRef.id,
+                    chatId: currentChat.id,
                     timestamp: firebase.firestore.FieldValue.serverTimestamp(),
                     status: 'sent',
-                    type: 'system'
+                    file: {
+                        name: file.name,
+                        url: downloadURL,
+                        type: file.type,
+                        size: file.size
+                    }
                 };
                 
-                await db.collection('groupMessages').add(welcomeMessage);
+                // Add message to Firebase
+                await db.collection('messages').add(message);
                 
-                showToast('Group created successfully', 'success');
-                createGroupModal.classList.add('hidden');
-                
-                // Reset form
-                document.getElementById('groupName').value = '';
-                document.getElementById('groupDescription').value = '';
-                document.getElementById('groupPrivacy').value = 'public';
-                
-            } catch (error) {
-                console.error('Error creating group:', error);
-                showToast('Error creating group', 'error');
-            }
-        }
-
-        function openJoinGroupModal() {
-            joinGroupModal.classList.remove('hidden');
-        }
-
-        async function joinGroup() {
-            const groupCode = document.getElementById('groupCode').value.trim();
-            
-            if (!groupCode) {
-                showToast('Please enter a group code or link', 'error');
-                return;
-            }
-            
-            try {
-                // For demo purposes, we'll simulate joining a group
-                // In a real implementation, you would validate the group code/link
-                // and add the user to the group
-                
-                showToast('Joining group...', 'info');
-                
-                // Simulate API call
-                setTimeout(() => {
-                    showToast('Successfully joined the group', 'success');
-                    joinGroupModal.classList.add('hidden');
-                    document.getElementById('groupCode').value = '';
-                }, 1500);
-                
-            } catch (error) {
-                console.error('Error joining group:', error);
-                showToast('Error joining group', 'error');
-            }
-        }
-
-        // Avatar Settings Implementation
-        function openAvatarSettings() {
-            // For now, redirect to profile settings
-            profileSettingsModal.classList.remove('hidden');
-            settingsModal.classList.add('hidden');
-        }
-
-        // Favorites Management
-        function openFavoritesSettings() {
-            favoritesSettingsModal.classList.remove('hidden');
-            settingsModal.classList.add('hidden');
-            loadFavorites();
-        }
-
-        function loadFavorites() {
-            const favoritesListContent = document.getElementById('favoritesListContent');
-            
-            if (userSettings.favorites.length === 0) {
-                favoritesListContent.innerHTML = `
-                    <div class="text-center text-gray-500 py-8">
-                        <i class="fas fa-star text-4xl mb-3 text-gray-300 block"></i>
-                        <p>No favorites yet</p>
-                        <p class="text-sm mt-1">Add contacts or chats to favorites for quick access</p>
-                    </div>
-                `;
-                return;
-            }
-            
-            favoritesListContent.innerHTML = '';
-            
-            userSettings.favorites.forEach(favorite => {
-                const favoriteItem = document.createElement('div');
-                favoriteItem.className = 'flex items-center justify-between p-3 border-b border-gray-200';
-                
-                favoriteItem.innerHTML = `
-                    <div class="flex items-center">
-                        <div class="w-10 h-10 rounded-full bg-gradient-to-r from-purple-500 to-green-500 flex items-center justify-center text-white mr-3">
-                            <i class="fas fa-user"></i>
-                        </div>
-                        <div>
-                            <p class="font-medium">${favorite.name}</p>
-                            <p class="text-sm text-gray-500">${favorite.type}</p>
-                        </div>
-                    </div>
-                    <button class="text-red-500 hover:text-red-700 remove-favorite" data-id="${favorite.id}">
-                        <i class="fas fa-times"></i>
-                    </button>
-                `;
-                
-                favoritesListContent.appendChild(favoriteItem);
-            });
-            
-            // Add event listeners to remove buttons
-            document.querySelectorAll('.remove-favorite').forEach(btn => {
-                btn.addEventListener('click', (e) => {
-                    const favoriteId = e.currentTarget.dataset.id;
-                    removeFromFavorites(favoriteId);
+                // Update chat document with last message
+                await db.collection('chats').doc(currentChat.id).update({
+                    lastMessage: `Shared a file: ${file.name}`,
+                    lastMessageTime: firebase.firestore.FieldValue.serverTimestamp()
                 });
-            });
-        }
-
-        function removeFromFavorites(favoriteId) {
-            userSettings.favorites = userSettings.favorites.filter(f => f.id !== favoriteId);
-            saveUserSettings();
-            loadFavorites();
-            showToast('Removed from favorites', 'success');
-        }
-
-        // Help Center Implementation
-        function openHelpSection(section) {
-            const sections = {
-                'getting-started': {
-                    title: 'Getting Started',
-                    content: `
-                        <h3 class="text-lg font-semibold mb-4">Welcome to Kynecta!</h3>
-                        <p class="mb-3">Kynecta is an advanced mood-based chat application that helps you connect with friends in a more meaningful way.</p>
-                        
-                        <h4 class="font-semibold mb-2">Basic Features:</h4>
-                        <ul class="list-disc pl-5 mb-4 space-y-1">
-                            <li><strong>Chats:</strong> Start one-on-one conversations with your friends</li>
-                            <li><strong>Groups:</strong> Create or join group conversations</li>
-                            <li><strong>Status Updates:</strong> Share what you're feeling with emojis, text, images, videos, or audio</li>
-                            <li><strong>Mood Settings:</strong> Set your current mood to influence chat suggestions and themes</li>
-                            <li><strong>Calls:</strong> Make voice and video calls to your contacts</li>
-                        </ul>
-                        
-                        <h4 class="font-semibold mb-2">Getting Started Steps:</h4>
-                        <ol class="list-decimal pl-5 space-y-1">
-                            <li>Add friends using their email, phone number, or name</li>
-                            <li>Start a conversation by clicking on a friend's name</li>
-                            <li>Set your mood in the Tools tab to personalize your experience</li>
-                            <li>Share status updates to let friends know what you're up to</li>
-                            <li>Explore the various settings to customize Kynecta to your preferences</li>
-                        </ol>
-                    `
-                },
-                'privacy-security': {
-                    title: 'Privacy & Security',
-                    content: `
-                        <h3 class="text-lg font-semibold mb-4">Your Privacy Matters</h3>
-                        <p class="mb-3">At Kynecta, we take your privacy and security seriously. Here's how we protect your data:</p>
-                        
-                        <h4 class="font-semibold mb-2">Data Protection:</h4>
-                        <ul class="list-disc pl-5 mb-4 space-y-1">
-                            <li><strong>End-to-End Encryption:</strong> Your messages are encrypted so only you and the recipient can read them</li>
-                            <li><strong>Secure Storage:</strong> Your data is stored securely on Firebase servers with multiple layers of protection</li>
-                            <li><strong>Privacy Controls:</strong> You control who can see your profile information, status, and last seen time</li>
-                            <li><strong>No Data Selling:</strong> We never sell your personal information to third parties</li>
-                        </ul>
-                        
-                        <h4 class="font-semibold mb-2">Security Features:</h4>
-                        <ul class="list-disc pl-5 mb-4 space-y-1">
-                            <li><strong>Two-Step Verification:</strong> Add an extra layer of security to your account</li>
-                            <li><strong>Security Notifications:</strong> Get alerts about unusual activity on your account</li>
-                            <li><strong>App Lock:</strong> Protect the app with a passcode or biometric authentication</li>
-                            <li><strong>Disappearing Messages:</strong> Set messages to automatically delete after a certain time</li>
-                        </ul>
-                        
-                        <p class="text-sm text-gray-600">For more details, please review our complete Privacy Policy in the App Information section.</p>
-                    `
-                },
-                'troubleshooting': {
-                    title: 'Troubleshooting',
-                    content: `
-                        <h3 class="text-lg font-semibold mb-4">Common Issues & Solutions</h3>
-                        
-                        <h4 class="font-semibold mb-2">Messages Not Sending:</h4>
-                        <ul class="list-disc pl-5 mb-4 space-y-1">
-                            <li><strong>Check your internet connection</strong> - Make sure you're connected to Wi-Fi or mobile data</li>
-                            <li><strong>Restart the app</strong> - Close and reopen Kynecta</li>
-                            <li><strong>Clear cache</strong> - Go to Settings > Storage & Data > Clear Cache</li>
-                            <li><strong>Update the app</strong> - Make sure you're using the latest version</li>
-                        </ul>
-                        
-                        <h4 class="font-semibold mb-2">Can't Make or Receive Calls:</h4>
-                        <ul class="list-disc pl-5 mb-4 space-y-1">
-                            <li><strong>Check microphone permissions</strong> - Make sure Kynecta has permission to access your microphone</li>
-                            <li><strong>Check camera permissions</strong> - For video calls, ensure camera access is enabled</li>
-                            <li><strong>Strong internet connection</strong> - Calls require a stable internet connection</li>
-                            <li><strong>Restart your device</strong> - Sometimes a simple restart fixes call issues</li>
-                        </ul>
-                        
-                        <h4 class="font-semibold mb-2">App Crashes or Freezes:</h4>
-                        <ul class="list-disc pl-5 mb-4 space-y-1">
-                            <li><strong>Update the app</strong> - Check for updates in your app store</li>
-                            <li><strong>Clear app cache</strong> - Go to Settings > Storage & Data > Clear Cache</li>
-                            <li><strong>Reinstall the app</strong> - As a last resort, uninstall and reinstall Kynecta</li>
-                        </ul>
-                        
-                        <h4 class="font-semibold mb-2">Can't Add Friends:</h4>
-                        <ul class="list-disc pl-5 mb-4 space-y-1">
-                            <li><strong>Check spelling</strong> - Make sure you're entering the correct email, phone number, or name</li>
-                            <li><strong>Friend not on Kynecta</strong> - The person needs to have a Kynecta account</li>
-                            <li><strong>Privacy settings</strong> - The person may have restricted who can add them</li>
-                        </ul>
-                        
-                        <p class="text-sm text-gray-600">If you're still experiencing issues, please contact our support team.</p>
-                    `
-                },
-                'faqs': {
-                    title: 'Frequently Asked Questions',
-                    content: `
-                        <h3 class="text-lg font-semibold mb-4">Frequently Asked Questions</h3>
-                        
-                        <div class="space-y-4">
-                            <div>
-                                <h4 class="font-semibold mb-1">How do I change my profile picture?</h4>
-                                <p class="text-sm text-gray-600">Go to Settings > Profile > Click on your profile picture > Select a new image from your device.</p>
-                            </div>
-                            
-                            <div>
-                                <h4 class="font-semibold mb-1">Can I use Kynecta on multiple devices?</h4>
-                                <p class="text-sm text-gray-600">Yes, you can use Kynecta on multiple devices. Your messages will sync across all devices where you're logged in.</p>
-                            </div>
-                            
-                            <div>
-                                <h4 class="font-semibold mb-1">How do I create a group chat?</h4>
-                                <p class="text-sm text-gray-600">Click on the "New Group" button in the chat list, give your group a name, and add participants from your friends list.</p>
-                            </div>
-                            
-                            <div>
-                                <h4 class="font-semibold mb-1">Can I recover deleted messages?</h4>
-                                <p class="text-sm text-gray-600">Once messages are deleted, they cannot be recovered. We recommend exporting important conversations regularly.</p>
-                            </div>
-                            
-                            <div>
-                                <h4 class="font-semibold mb-1">How does the mood feature work?</h4>
-                                <p class="text-sm text-gray-600">Your mood influences chat suggestions, themes, and AI recommendations. Set your mood in the Tools tab to personalize your experience.</p>
-                            </div>
-                            
-                            <div>
-                                <h4 class="font-semibold mb-1">Is Kynecta free to use?</h4>
-                                <p class="text-sm text-gray-600">Yes, Kynecta is completely free to use with no hidden charges.</p>
-                            </div>
-                            
-                            <div>
-                                <h4 class="font-semibold mb-1">How do I block someone?</h4>
-                                <p class="text-sm text-gray-600">Go to the chat with the person you want to block, click on their name, and select "Block Contact" from the menu.</p>
-                            </div>
-                            
-                            <div>
-                                <h4 class="font-semibold mb-1">Can I customize notification sounds?</h4>
-                                <p class="text-sm text-gray-600">Yes, go to Settings > Notifications to customize notification sounds for different types of alerts.</p>
-                            </div>
-                        </div>
-                    `
-                }
-            };
-            
-            const sectionData = sections[section];
-            if (!sectionData) return;
-            
-            // Create a modal to display the help content
-            const helpContentModal = document.createElement('div');
-            helpContentModal.className = 'fixed inset-0 bg-black bg-opacity-50 z-50 flex items-center justify-center p-4';
-            helpContentModal.innerHTML = `
-                <div class="bg-white rounded-2xl w-full max-w-2xl max-h-[80vh] overflow-hidden">
-                    <div class="kynecta-header p-6">
-                        <div class="flex items-center justify-between">
-                            <h3 class="text-xl font-semibold text-white">${sectionData.title}</h3>
-                            <button class="text-white/80 hover:text-white transition-colors close-help-content">
-                                <i class="fas fa-times text-xl"></i>
-                            </button>
-                        </div>
-                    </div>
-                    <div class="p-6 overflow-y-auto max-h-[60vh] custom-scrollbar">
-                        ${sectionData.content}
-                    </div>
-                    <div class="p-4 border-t border-gray-200">
-                        <button class="w-full py-3 bg-gray-500 text-white rounded-xl font-semibold hover:opacity-90 transition-opacity close-help-content">
-                            Close
-                        </button>
-                    </div>
-                </div>
-            `;
-            
-            document.body.appendChild(helpContentModal);
-            
-            // Add event listeners to close buttons
-            helpContentModal.querySelectorAll('.close-help-content').forEach(btn => {
-                btn.addEventListener('click', () => {
-                    document.body.removeChild(helpContentModal);
-                });
-            });
-        }
-
-        // Contact Support and Send Feedback
-        function contactSupport() {
-            const email = 'nchagwadennis45@gmail.com';
-            const phone = '0746676627';
-            
-            const contactModal = document.createElement('div');
-            contactModal.className = 'fixed inset-0 bg-black bg-opacity-50 z-50 flex items-center justify-center p-4';
-            contactModal.innerHTML = `
-                <div class="bg-white rounded-2xl w-full max-w-md max-h-[80vh] overflow-hidden">
-                    <div class="kynecta-header p-6">
-                        <div class="flex items-center justify-between">
-                            <h3 class="text-xl font-semibold text-white">Contact Support</h3>
-                            <button class="text-white/80 hover:text-white transition-colors close-contact-modal">
-                                <i class="fas fa-times text-xl"></i>
-                            </button>
-                        </div>
-                    </div>
-                    <div class="p-6">
-                        <p class="mb-4">We're here to help! Reach out to us through any of the following channels:</p>
-                        
-                        <div class="space-y-3 mb-6">
-                            <div class="flex items-center p-3 bg-gray-50 rounded-xl">
-                                <i class="fas fa-envelope text-purple-600 mr-3"></i>
-                                <div>
-                                    <p class="font-medium">Email</p>
-                                    <p class="text-sm text-gray-600">${email}</p>
-                                </div>
-                            </div>
-                            
-                            <div class="flex items-center p-3 bg-gray-50 rounded-xl">
-                                <i class="fas fa-phone text-purple-600 mr-3"></i>
-                                <div>
-                                    <p class="font-medium">Phone</p>
-                                    <p class="text-sm text-gray-600">${phone}</p>
-                                </div>
-                            </div>
-                            
-                            <div class="flex items-center p-3 bg-gray-50 rounded-xl">
-                                <i class="fas fa-clock text-purple-600 mr-3"></i>
-                                <div>
-                                    <p class="font-medium">Response Time</p>
-                                    <p class="text-sm text-gray-600">Within 24 hours</p>
-                                </div>
-                            </div>
-                        </div>
-                        
-                        <p class="text-sm text-gray-600">Please include your user ID (${currentUser.uid}) when contacting support for faster assistance.</p>
-                    </div>
-                    <div class="p-4 border-t border-gray-200">
-                        <button class="w-full py-3 bg-gray-500 text-white rounded-xl font-semibold hover:opacity-90 transition-opacity close-contact-modal">
-                            Close
-                        </button>
-                    </div>
-                </div>
-            `;
-            
-            document.body.appendChild(contactModal);
-            
-            // Add event listeners to close buttons
-            contactModal.querySelectorAll('.close-contact-modal').forEach(btn => {
-                btn.addEventListener('click', () => {
-                    document.body.removeChild(contactModal);
-                });
-            });
-        }
-
-        function sendFeedback() {
-            const feedbackModal = document.createElement('div');
-            feedbackModal.className = 'fixed inset-0 bg-black bg-opacity-50 z-50 flex items-center justify-center p-4';
-            feedbackModal.innerHTML = `
-                <div class="bg-white rounded-2xl w-full max-w-md max-h-[80vh] overflow-hidden">
-                    <div class="kynecta-header p-6">
-                        <div class="flex items-center justify-between">
-                            <h3 class="text-xl font-semibold text-white">Send Feedback</h3>
-                            <button class="text-white/80 hover:text-white transition-colors close-feedback-modal">
-                                <i class="fas fa-times text-xl"></i>
-                            </button>
-                        </div>
-                    </div>
-                    <div class="p-6">
-                        <div class="mb-4">
-                            <label class="block text-sm font-medium text-gray-700 mb-2">Feedback Type</label>
-                            <select id="feedbackType" class="w-full p-3 border-2 border-gray-200 rounded-xl focus:outline-none focus:border-purple-500 transition-colors">
-                                <option value="bug">Bug Report</option>
-                                <option value="suggestion">Feature Suggestion</option>
-                                <option value="improvement">Improvement Idea</option>
-                                <option value="other">Other</option>
-                            </select>
-                        </div>
-                        
-                        <div class="mb-4">
-                            <label class="block text-sm font-medium text-gray-700 mb-2">Description</label>
-                            <textarea id="feedbackDescription" class="w-full p-3 border-2 border-gray-200 rounded-xl focus:outline-none focus:border-purple-500 transition-colors" placeholder="Please describe your feedback in detail..." rows="5"></textarea>
-                        </div>
-                        
-                        <div class="mb-4">
-                            <label class="block text-sm font-medium text-gray-700 mb-2">Email (Optional)</label>
-                            <input type="email" id="feedbackEmail" class="w-full p-3 border-2 border-gray-200 rounded-xl focus:outline-none focus:border-purple-500 transition-colors" placeholder="Your email if you'd like a response">
-                        </div>
-                    </div>
-                    <div class="p-4 border-t border-gray-200 flex space-x-3">
-                        <button class="flex-1 py-3 bg-gradient-to-r from-purple-500 to-green-500 text-white rounded-xl font-semibold hover:opacity-90 transition-opacity" id="submitFeedback">
-                            Submit Feedback
-                        </button>
-                        <button class="flex-1 py-3 bg-gray-500 text-white rounded-xl font-semibold hover:opacity-90 transition-opacity close-feedback-modal">
-                            Cancel
-                        </button>
-                    </div>
-                </div>
-            `;
-            
-            document.body.appendChild(feedbackModal);
-            
-            // Add event listeners
-            feedbackModal.querySelector('#submitFeedback').addEventListener('click', () => {
-                const type = feedbackModal.querySelector('#feedbackType').value;
-                const description = feedbackModal.querySelector('#feedbackDescription').value.trim();
-                const email = feedbackModal.querySelector('#feedbackEmail').value.trim();
                 
-                if (!description) {
-                    showToast('Please provide a description', 'error');
+                // Hide file preview
+                if (filePreview) filePreview.classList.add('hidden');
+                
+                console.log('File uploaded successfully');
+                showToast('File uploaded successfully', 'success');
+            }
+        );
+    } catch (error) {
+        console.error('Error uploading file:', error);
+        showToast('Error uploading file', 'error');
+    }
+}
+
+function formatFileSize(bytes) {
+    if (bytes === 0) return '0 Bytes';
+    const k = 1024;
+    const sizes = ['Bytes', 'KB', 'MB', 'GB'];
+    const i = Math.floor(Math.log(bytes) / Math.log(k));
+    return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i];
+}
+
+// FIXED: Load chats with proper real-time updates
+function loadChatsTemporary() {
+    console.log('Loading chats for user:', currentUser.uid);
+    
+    if (unsubscribeChats) {
+        console.log('Unsubscribing from previous chats listener');
+        unsubscribeChats();
+    }
+    
+    const chatList = document.getElementById('chatList');
+    const noChatsMessage = document.getElementById('noChatsMessage');
+    
+    // Safety check - if elements don't exist, return early
+    if (!chatList || !noChatsMessage) {
+        console.error('Chat list elements not found');
+        return;
+    }
+    
+    unsubscribeChats = db.collection('chats')
+        .where('participants', 'array-contains', currentUser.uid)
+        .onSnapshot({
+            next: (snapshot) => {
+                console.log('Chats snapshot received:', snapshot.size, 'chats');
+                // Double-check elements still exist
+                if (!chatList || !noChatsMessage) return;
+                
+                chatList.innerHTML = '';
+                
+                if (snapshot.empty) {
+                    noChatsMessage.classList.remove('hidden');
                     return;
                 }
                 
-                // In a real implementation, you would send this to your backend
-                // For now, we'll just show a success message
-                showToast('Thank you for your feedback!', 'success');
-                document.body.removeChild(feedbackModal);
-            });
-            
-            feedbackModal.querySelectorAll('.close-feedback-modal').forEach(btn => {
-                btn.addEventListener('click', () => {
-                    document.body.removeChild(feedbackModal);
+                noChatsMessage.classList.add('hidden');
+                
+                // Sort manually in JavaScript
+                const chats = [];
+                snapshot.forEach(doc => {
+                    chats.push({ id: doc.id, ...doc.data() });
                 });
-            });
-        }
-
-        // App Info - Legal Links
-        function openLegalDocument(type) {
-            // In a real implementation, you would fetch these from your server
-            // For now, we'll show placeholder content
-            const documents = {
-                'terms': {
-                    title: 'Terms of Service',
-                    content: `
-                        <h3 class="text-lg font-semibold mb-4">Kynecta Terms of Service</h3>
-                        <p class="mb-3">Last Updated: November 2025</p>
-                        
-                        <div class="space-y-4">
-                            <div>
-                                <h4 class="font-semibold mb-2">1. Acceptance of Terms</h4>
-                                <p class="text-sm">By accessing or using Kynecta, you agree to be bound by these Terms of Service and our Privacy Policy.</p>
-                            </div>
-                            
-                            <div>
-                                <h4 class="font-semibold mb-2">2. Description of Service</h4>
-                                <p class="text-sm">Kynecta provides a mood-based chat platform that allows users to communicate through text, voice, video, and share status updates.</p>
-                            </div>
-                            
-                            <div>
-                                <h4 class="font-semibold mb-2">3. User Accounts</h4>
-                                <p class="text-sm">You are responsible for maintaining the confidentiality of your account and password. You agree to accept responsibility for all activities that occur under your account.</p>
-                            </div>
-                            
-                            <div>
-                                <h4 class="font-semibold mb-2">4. User Conduct</h4>
-                                <p class="text-sm">You agree not to use the service to: harass, abuse, or harm others; transmit any content that is unlawful, harmful, or inappropriate; or violate any applicable laws.</p>
-                            </div>
-                            
-                            <div>
-                                <h4 class="font-semibold mb-2">5. Privacy</h4>
-                                <p class="text-sm">Your privacy is important to us. Please review our Privacy Policy to understand how we collect, use, and protect your information.</p>
-                            </div>
-                            
-                            <div>
-                                <h4 class="font-semibold mb-2">6. Termination</h4>
-                                <p class="text-sm">We may terminate or suspend your account at any time without notice for conduct that we believe violates these Terms or is harmful to other users.</p>
-                            </div>
-                            
-                            <div>
-                                <h4 class="font-semibold mb-2">7. Changes to Terms</h4>
-                                <p class="text-sm">We reserve the right to modify these terms at any time. We will notify users of any material changes.</p>
-                            </div>
-                            
-                            <div>
-                                <h4 class="font-semibold mb-2">8. Contact Information</h4>
-                                <p class="text-sm">If you have any questions about these Terms, please contact us at nchagwadennis45@gmail.com</p>
-                            </div>
+                
+                // Manual sort by lastMessageTime
+                chats.sort((a, b) => {
+                    const timeA = a.lastMessageTime ? a.lastMessageTime.toDate() : new Date(0);
+                    const timeB = b.lastMessageTime ? b.lastMessageTime.toDate() : new Date(0);
+                    return timeB - timeA; // Descending order
+                });
+                
+                chats.forEach(chat => {
+                    const otherParticipantId = chat.participants.find(id => id !== currentUser.uid);
+                    const otherParticipantName = chat.participantNames ? chat.participantNames[otherParticipantId] : 'Unknown User';
+                    
+                    console.log('Rendering chat with:', otherParticipantName);
+                    
+                    const chatItem = document.createElement('div');
+                    chatItem.className = 'contact-item';
+                    chatItem.dataset.chatId = chat.id;
+                    chatItem.dataset.otherUserId = otherParticipantId;
+                    
+                    chatItem.innerHTML = `
+                        <div class="contact-avatar">
+                            <img class="w-12 h-12 rounded-full object-cover" src="https://ui-avatars.com/api/?name=${encodeURIComponent(otherParticipantName)}&background=7C3AED&color=fff" alt="${otherParticipantName}">
                         </div>
-                    `
-                },
-                'privacy': {
-                    title: 'Privacy Policy',
-                    content: `
-                        <h3 class="text-lg font-semibold mb-4">Kynecta Privacy Policy</h3>
-                        <p class="mb-3">Last Updated: November 2025</p>
-                        
-                        <div class="space-y-4">
-                            <div>
-                                <h4 class="font-semibold mb-2">1. Information We Collect</h4>
-                                <p class="text-sm">We collect information you provide directly to us, such as when you create an account, use our services, or contact us for support. This may include your name, email address, phone number, profile information, and the content of your messages.</p>
-                            </div>
-                            
-                            <div>
-                                <h4 class="font-semibold mb-2">2. How We Use Your Information</h4>
-                                <p class="text-sm">We use the information we collect to provide, maintain, and improve our services; to communicate with you; to personalize your experience; and to ensure the security of our services.</p>
-                            </div>
-                            
-                            <div>
-                                <h4 class="font-semibold mb-2">3. Information Sharing</h4>
-                                <p class="text-sm">We do not sell your personal information to third parties. We may share your information with service providers who assist us in operating our services, or when required by law.</p>
-                            </div>
-                            
-                            <div>
-                                <h4 class="font-semibold mb-2">4. Data Security</h4>
-                                <p class="text-sm">We implement appropriate technical and organizational measures to protect your personal information against unauthorized access, alteration, or destruction.</p>
-                            </div>
-                            
-                            <div>
-                                <h4 class="font-semibold mb-2">5. Your Rights</h4>
-                                <p class="text-sm">You have the right to access, correct, or delete your personal information. You can also object to or restrict certain processing of your information.</p>
-                            </div>
-                            
-                            <div>
-                                <h4 class="font-semibold mb-2">6. Data Retention</h4>
-                                <p class="text-sm">We retain your personal information for as long as necessary to provide our services and fulfill the purposes outlined in this policy.</p>
-                            </div>
-                            
-                            <div>
-                                <h4 class="font-semibold mb-2">7. Changes to This Policy</h4>
-                                <p class="text-sm">We may update this privacy policy from time to time. We will notify you of any changes by posting the new policy on this page.</p>
-                            </div>
-                            
-                            <div>
-                                <h4 class="font-semibold mb-2">8. Contact Us</h4>
-                                <p class="text-sm">If you have any questions about this Privacy Policy, please contact us at nchagwadennis45@gmail.com</p>
-                            </div>
+                        <div class="contact-info">
+                            <div class="contact-name">${otherParticipantName}</div>
+                            <div class="contact-status">${chat.lastMessage || 'No messages yet'}</div>
                         </div>
-                    `
-                },
-                'opensource': {
-                    title: 'Open Source Licenses',
-                    content: `
-                        <h3 class="text-lg font-semibold mb-4">Open Source Licenses</h3>
-                        <p class="mb-4">Kynecta uses the following open source libraries and frameworks:</p>
-                        
-                        <div class="space-y-3">
-                            <div class="p-3 bg-gray-50 rounded-xl">
-                                <h4 class="font-semibold">Firebase</h4>
-                                <p class="text-sm text-gray-600">Backend-as-a-Service platform provided by Google</p>
-                                <p class="text-xs text-gray-500">License: Apache 2.0</p>
-                            </div>
-                            
-                            <div class="p-3 bg-gray-50 rounded-xl">
-                                <h4 class="font-semibold">Tailwind CSS</h4>
-                                <p class="text-sm text-gray-600">Utility-first CSS framework</p>
-                                <p class="text-xs text-gray-500">License: MIT</p>
-                            </div>
-                            
-                            <div class="p-3 bg-gray-50 rounded-xl">
-                                <h4 class="font-semibold">Font Awesome</h4>
-                                <p class="text-sm text-gray-600">Icon library and toolkit</p>
-                                <p class="text-xs text-gray-500">License: Font Awesome Free License</p>
-                            </div>
-                            
-                            <div class="p-3 bg-gray-50 rounded-xl">
-                                <h4 class="font-semibold">Cloudinary</h4>
-                                <p class="text-sm text-gray-600">Cloud-based image and video management</p>
-                                <p class="text-xs text-gray-500">License: Proprietary</p>
-                            </div>
+                        <div class="last-seen">
+                            ${chat.lastMessageTime ? formatTimeAgo(chat.lastMessageTime) : ''}
                         </div>
-                        
-                        <p class="mt-4 text-sm text-gray-600">For complete license information, please visit the respective project websites.</p>
-                    `
+                    `;
+                    
+                    chatItem.addEventListener('click', () => {
+                        console.log('Opening chat with:', otherParticipantName);
+                        startChat(otherParticipantId, otherParticipantName);
+                    });
+                    
+                    chatList.appendChild(chatItem);
+                });
+            },
+            error: (error) => {
+                console.error('Error loading chats:', error);
+                // Check if elements exist before showing toast
+                if (document.getElementById('chatList')) {
+                    showToast('Error loading chats', 'error');
                 }
-            };
-            
-            const documentData = documents[type];
-            if (!documentData) return;
-            
-            const legalModal = document.createElement('div');
-            legalModal.className = 'fixed inset-0 bg-black bg-opacity-50 z-50 flex items-center justify-center p-4';
-            legalModal.innerHTML = `
-                <div class="bg-white rounded-2xl w-full max-w-2xl max-h-[80vh] overflow-hidden">
-                    <div class="kynecta-header p-6">
-                        <div class="flex items-center justify-between">
-                            <h3 class="text-xl font-semibold text-white">${documentData.title}</h3>
-                            <button class="text-white/80 hover:text-white transition-colors close-legal-modal">
-                                <i class="fas fa-times text-xl"></i>
-                            </button>
-                        </div>
-                    </div>
-                    <div class="p-6 overflow-y-auto max-h-[60vh] custom-scrollbar">
-                        ${documentData.content}
-                    </div>
-                    <div class="p-4 border-t border-gray-200">
-                        <button class="w-full py-3 bg-gray-500 text-white rounded-xl font-semibold hover:opacity-90 transition-opacity close-legal-modal">
-                            Close
-                        </button>
-                    </div>
-                </div>
-            `;
-            
-            document.body.appendChild(legalModal);
-            
-            // Add event listeners to close buttons
-            legalModal.querySelectorAll('.close-legal-modal').forEach(btn => {
-                btn.addEventListener('click', () => {
-                    document.body.removeChild(legalModal);
-                });
-            });
-        }
-
-        // Invite Friends Implementation
-        function shareLink() {
-            const inviteLink = 'https://kynecta.app/invite/KYNECTA2025';
-            
-            // Copy to clipboard
-            navigator.clipboard.writeText(inviteLink).then(() => {
-                showToast('Invite link copied to clipboard!', 'success');
-            }).catch(() => {
-                // Fallback for older browsers
-                const textArea = document.createElement('textarea');
-                textArea.value = inviteLink;
-                document.body.appendChild(textArea);
-                textArea.select();
-                document.execCommand('copy');
-                document.body.removeChild(textArea);
-                showToast('Invite link copied to clipboard!', 'success');
-            });
-        }
-
-        function shareQR() {
-            // In a real implementation, you would generate a QR code
-            // For now, we'll show a placeholder
-            showToast('QR code would be generated here', 'info');
-        }
-
-        function shareWhatsApp() {
-            const message = 'Join me on Kynecta! Download the app at: https://kynecta.app/invite/KYNECTA2025';
-            const url = `https://wa.me/?text=${encodeURIComponent(message)}`;
-            window.open(url, '_blank');
-        }
-
-        function shareSMS() {
-            const message = 'Join me on Kynecta! Download the app at: https://kynecta.app/invite/KYNECTA2025';
-            const url = `sms:?body=${encodeURIComponent(message)}`;
-            window.open(url, '_blank');
-        }
-
-        function copyReferralCode() {
-            const referralCode = 'KYNECTA2025';
-            
-            navigator.clipboard.writeText(referralCode).then(() => {
-                showToast('Referral code copied to clipboard!', 'success');
-            }).catch(() => {
-                // Fallback for older browsers
-                const textArea = document.createElement('textarea');
-                textArea.value = referralCode;
-                document.body.appendChild(textArea);
-                textArea.select();
-                document.execCommand('copy');
-                document.body.removeChild(textArea);
-                showToast('Referral code copied to clipboard!', 'success');
-            });
-        }
-
-        // All Friends Display Implementation
-        function openAllFriendsModal() {
-            allFriendsModal.classList.remove('hidden');
-            renderAllFriends();
-        }
-
-        function renderAllFriends() {
-            const allFriendsList = document.getElementById('allFriendsList');
-            const noAllFriendsMessage = document.getElementById('noAllFriendsMessage');
-            
-            allFriendsList.innerHTML = '';
-            
-            if (friends.length === 0) {
-                noAllFriendsMessage.classList.remove('hidden');
-                return;
             }
-            
-            noAllFriendsMessage.classList.add('hidden');
-            
-            friends.forEach(friend => {
-                const friendItem = document.createElement('div');
-                friendItem.className = 'contact-item';
-                friendItem.dataset.friendId = friend.id;
-                friendItem.innerHTML = `
-                    <div class="contact-avatar">
-                        <img class="w-12 h-12 rounded-full object-cover" src="${friend.photoURL || `https://ui-avatars.com/api/?name=${encodeURIComponent(friend.displayName)}&background=7C3AED&color=fff`}" alt="${friend.displayName}">
-                        ${friend.status === 'online' ? '<div class="online-indicator"></div>' : ''}
-                    </div>
-                    <div class="contact-info">
-                        <div class="contact-name">${friend.displayName}</div>
-                        <div class="contact-status">${friend.status || 'offline'}</div>
-                    </div>
-                    <div class="flex space-x-2">
-                        <button class="w-10 h-10 rounded-full bg-purple-100 text-purple-600 flex items-center justify-center hover:bg-purple-200 transition-colors message-friend-all" data-name="${friend.displayName}" data-id="${friend.id}">
-                            <i class="fas fa-comment"></i>
-                        </button>
-                        <button class="w-10 h-10 rounded-full bg-green-100 text-green-600 flex items-center justify-center hover:bg-green-200 transition-colors call-friend-all" data-name="${friend.displayName}" data-id="${friend.id}">
-                            <i class="fas fa-phone"></i>
-                        </button>
-                    </div>
-                `;
-                
-                allFriendsList.appendChild(friendItem);
-            });
+        });
+}
 
-            // Add event listeners to message and call buttons
-            document.querySelectorAll('.message-friend-all').forEach(btn => {
-                btn.addEventListener('click', (e) => {
-                    const friendId = e.currentTarget.dataset.id;
-                    const friendName = e.currentTarget.dataset.name;
-                    startChat(friendId, friendName);
-                    allFriendsModal.classList.add('hidden');
-                });
-            });
+function startCall(friendId, friendName) {
+    console.log('Starting call with:', friendName, friendId);
+    // For now, just show a toast notification
+    showToast(`Calling ${friendName}...`, 'info');
+    
+    // In a real implementation, you would integrate with a WebRTC service
+    // and show the call interface
+}
 
-            document.querySelectorAll('.call-friend-all').forEach(btn => {
-                btn.addEventListener('click', (e) => {
-                    const friendId = e.currentTarget.dataset.id;
-                    const friendName = e.currentTarget.dataset.name;
-                    startCall(friendId, friendName);
-                });
-            });
+// FIXED: Update Profile with proper error handling
+async function updateProfile() {
+    try {
+        const name = document.getElementById('profileName')?.value.trim();
+        const about = document.getElementById('profileAbout')?.value.trim();
+        const email = document.getElementById('profileEmail')?.value.trim();
+        const phone = document.getElementById('profilePhone')?.value.trim();
+        
+        if (!name) {
+            showToast('Display name is required', 'error');
+            return;
         }
+        
+        console.log('Updating profile for user:', currentUser.uid);
+        
+        const updates = {
+            displayName: name,
+            about: about,
+            email: email,
+            phone: phone,
+            updatedAt: firebase.firestore.FieldValue.serverTimestamp()
+        };
+        
+        await db.collection('users').doc(currentUser.uid).update(updates);
+        
+        // Update current user data
+        currentUserData.displayName = name;
+        currentUserData.about = about;
+        currentUserData.email = email;
+        currentUserData.phone = phone;
+        
+        // Update UI
+        const userName = document.getElementById('userName');
+        const settingsUserName = document.getElementById('settingsUserName');
+        
+        if (userName) userName.textContent = name;
+        if (settingsUserName) settingsUserName.textContent = name;
+        
+        console.log('Profile updated successfully');
+        showToast('Profile updated successfully', 'success');
+    } catch (error) {
+        console.error('Error updating profile:', error);
+        showToast('Error updating profile', 'error');
+    }
+}
 
-        function searchAllFriends(query) {
-            const allFriendsList = document.getElementById('allFriendsList');
-            const noAllFriendsMessage = document.getElementById('noAllFriendsMessage');
-            
-            if (!query) {
-                renderAllFriends();
-                return;
-            }
-            
-            const filteredFriends = friends.filter(friend => 
-                friend.displayName.toLowerCase().includes(query.toLowerCase()) ||
-                (friend.email && friend.email.toLowerCase().includes(query.toLowerCase())) ||
-                (friend.phone && friend.phone.includes(query))
-            );
-            
-            allFriendsList.innerHTML = '';
-            
-            if (filteredFriends.length === 0) {
-                noAllFriendsMessage.classList.remove('hidden');
-                noAllFriendsMessage.innerHTML = `
-                    <i class="fas fa-search text-4xl mb-3 text-gray-300 block"></i>
-                    <p>No friends found</p>
-                    <p class="text-sm mt-1">Try a different search term</p>
-                `;
-                return;
-            }
-            
-            noAllFriendsMessage.classList.add('hidden');
-            
-            filteredFriends.forEach(friend => {
-                const friendItem = document.createElement('div');
-                friendItem.className = 'contact-item';
-                friendItem.dataset.friendId = friend.id;
-                friendItem.innerHTML = `
-                    <div class="contact-avatar">
-                        <img class="w-12 h-12 rounded-full object-cover" src="${friend.photoURL || `https://ui-avatars.com/api/?name=${encodeURIComponent(friend.displayName)}&background=7C3AED&color=fff`}" alt="${friend.displayName}">
-                        ${friend.status === 'online' ? '<div class="online-indicator"></div>' : ''}
-                    </div>
-                    <div class="contact-info">
-                        <div class="contact-name">${friend.displayName}</div>
-                        <div class="contact-status">${friend.status || 'offline'}</div>
-                    </div>
-                    <div class="flex space-x-2">
-                        <button class="w-10 h-10 rounded-full bg-purple-100 text-purple-600 flex items-center justify-center hover:bg-purple-200 transition-colors message-friend-all" data-name="${friend.displayName}" data-id="${friend.id}">
-                            <i class="fas fa-comment"></i>
-                        </button>
-                        <button class="w-10 h-10 rounded-full bg-green-100 text-green-600 flex items-center justify-center hover:bg-green-200 transition-colors call-friend-all" data-name="${friend.displayName}" data-id="${friend.id}">
-                            <i class="fas fa-phone"></i>
-                        </button>
-                    </div>
-                `;
-                
-                allFriendsList.appendChild(friendItem);
-            });
+// FIXED: Upload Profile Picture with proper error handling
+async function uploadProfilePicture(file) {
+    try {
+        console.log('Uploading profile picture');
+        showToast('Uploading profile picture...', 'info');
+        
+        // Upload to Firebase Storage
+        const storageRef = storage.ref();
+        const fileRef = storageRef.child(`profile_pictures/${currentUser.uid}/${file.name}`);
+        const snapshot = await fileRef.put(file);
+        const downloadURL = await snapshot.ref.getDownloadURL();
+        
+        // Update user document
+        await db.collection('users').doc(currentUser.uid).update({
+            photoURL: downloadURL,
+            updatedAt: firebase.firestore.FieldValue.serverTimestamp()
+        });
+        
+        // Update current user data
+        currentUserData.photoURL = downloadURL;
+        
+        // Update UI
+        const userAvatar = document.getElementById('userAvatar');
+        const settingsProfilePic = document.getElementById('settingsProfilePic');
+        const profilePicPreview = document.getElementById('profilePicPreview');
+        
+        if (userAvatar) userAvatar.src = downloadURL;
+        if (settingsProfilePic) settingsProfilePic.src = downloadURL;
+        if (profilePicPreview) profilePicPreview.src = downloadURL;
+        
+        console.log('Profile picture updated successfully');
+        showToast('Profile picture updated successfully', 'success');
+    } catch (error) {
+        console.error('Error uploading profile picture:', error);
+        showToast('Error uploading profile picture', 'error');
+    }
+}
 
-            // Re-add event listeners to message and call buttons
-            document.querySelectorAll('.message-friend-all').forEach(btn => {
-                btn.addEventListener('click', (e) => {
-                    const friendId = e.currentTarget.dataset.id;
-                    const friendName = e.currentTarget.dataset.name;
-                    startChat(friendId, friendName);
-                    allFriendsModal.classList.add('hidden');
-                });
-            });
+// FIXED: Upload Cover Picture with proper error handling
+async function uploadCoverPicture(file) {
+    try {
+        console.log('Uploading cover picture');
+        showToast('Uploading cover picture...', 'info');
+        
+        // Upload to Firebase Storage
+        const storageRef = storage.ref();
+        const fileRef = storageRef.child(`cover_pictures/${currentUser.uid}/${file.name}`);
+        const snapshot = await fileRef.put(file);
+        const downloadURL = await snapshot.ref.getDownloadURL();
+        
+        // Update user document
+        await db.collection('users').doc(currentUser.uid).update({
+            coverURL: downloadURL,
+            updatedAt: firebase.firestore.FieldValue.serverTimestamp()
+        });
+        
+        // Update current user data
+        currentUserData.coverURL = downloadURL;
+        
+        // Update UI
+        const profileCoverPreview = document.getElementById('profileCoverPreview');
+        if (profileCoverPreview) profileCoverPreview.src = downloadURL;
+        
+        console.log('Cover picture updated successfully');
+        showToast('Cover picture updated successfully', 'success');
+    } catch (error) {
+        console.error('Error uploading cover picture:', error);
+        showToast('Error uploading cover picture', 'error');
+    }
+}
 
-            document.querySelectorAll('.call-friend-all').forEach(btn => {
-                btn.addEventListener('click', (e) => {
-                    const friendId = e.currentTarget.dataset.id;
-                    const friendName = e.currentTarget.dataset.name;
-                    startCall(friendId, friendName);
-                });
-            });
+// FIXED: Typing Indicator with proper real-time updates
+function handleTypingIndicator() {
+    if (currentChat) {
+        console.log('Sending typing indicator for chat:', currentChat.id);
+        
+        // Send typing indicator
+        db.collection('chats').doc(currentChat.id).update({
+            [`typing.${currentUser.uid}`]: true,
+            lastActivity: firebase.firestore.FieldValue.serverTimestamp()
+        });
+        
+        // Clear previous timeout
+        if (typingTimeout) {
+            clearTimeout(typingTimeout);
         }
+        
+        // Set timeout to remove typing indicator
+        typingTimeout = setTimeout(() => {
+            db.collection('chats').doc(currentChat.id).update({
+                [`typing.${currentUser.uid}`]: false
+            });
+        }, 1000);
+    }
+}
 
-        // Enhanced Emoji Picker Implementation
-        function toggleEmojiPicker() {
-            const emojiPicker = document.getElementById('emojiPicker');
-            if (emojiPicker.style.display === 'block') {
-                emojiPicker.style.display = 'none';
+// FIXED: Push Notifications with proper permission handling
+async function requestNotificationPermission() {
+    try {
+        // Check if permission is already denied/blocked
+        if (Notification.permission === 'denied') {
+            console.log('Notifications blocked by user. User must manually enable in browser settings.');
+            return;
+        }
+        
+        // Don't ask if already granted
+        if (Notification.permission === 'granted') {
+            console.log('Notifications already granted');
+            return;
+        }
+        
+        // Only ask if permission is default
+        if (Notification.permission === 'default') {
+            const permission = await Notification.requestPermission();
+            if (permission === 'granted') {
+                console.log('Notification permission granted');
+                // Get FCM token here if needed
+            }
+        }
+    } catch (error) {
+        console.error('Error with notification permission:', error);
+    }
+}
+
+async function sendPushNotification(userId, senderName, message) {
+    try {
+        console.log('Sending push notification to:', userId);
+        // Get recipient's FCM token
+        const recipientDoc = await db.collection('users').doc(userId).get();
+        if (recipientDoc.exists) {
+            const recipientData = recipientDoc.data();
+            const fcmToken = recipientData.fcmToken;
+            
+            if (fcmToken) {
+                // In a real implementation, you would send a push notification
+                // through Firebase Cloud Messaging or a server
+                console.log(`Sending push notification to ${userId}: ${senderName}: ${message}`);
+            }
+        }
+    } catch (error) {
+        console.error('Error sending push notification:', error);
+    }
+}
+// FIXED: Add missing toggleMute function
+function toggleMute() {
+    if (!localStream) return;
+    
+    const audioTracks = localStream.getAudioTracks();
+    if (audioTracks.length > 0) {
+        isMuted = !isMuted;
+        audioTracks.forEach(track => {
+            track.enabled = !isMuted;
+        });
+        
+        const muteBtn = document.getElementById('muteBtn');
+        if (muteBtn) {
+            if (isMuted) {
+                muteBtn.innerHTML = '<i class="fas fa-microphone-slash"></i>';
+                muteBtn.classList.add('bg-red-500');
+                muteBtn.classList.remove('bg-gray-600');
             } else {
-                emojiPicker.style.display = 'block';
+                muteBtn.innerHTML = '<i class="fas fa-microphone"></i>';
+                muteBtn.classList.remove('bg-red-500');
+                muteBtn.classList.add('bg-gray-600');
             }
         }
+        
+        showToast(isMuted ? 'Microphone muted' : 'Microphone unmuted', 'info');
+    }
+}
 
-        // WebRTC Call Implementation
-        async function startVideoCall() {
-            if (!currentChat) {
-                showToast('Please select a chat first', 'error');
+// FIXED: Add missing toggleVideo function
+function toggleVideo() {
+    if (!localStream) return;
+    
+    const videoTracks = localStream.getVideoTracks();
+    if (videoTracks.length > 0) {
+        isVideoOff = !isVideoOff;
+        videoTracks.forEach(track => {
+            track.enabled = !isVideoOff;
+        });
+        
+        const videoToggleBtn = document.getElementById('videoToggleBtn');
+        if (videoToggleBtn) {
+            if (isVideoOff) {
+                videoToggleBtn.innerHTML = '<i class="fas fa-video-slash"></i>';
+                videoToggleBtn.classList.add('bg-red-500');
+                videoToggleBtn.classList.remove('bg-gray-600');
+            } else {
+                videoToggleBtn.innerHTML = '<i class="fas fa-video"></i>';
+                videoToggleBtn.classList.remove('bg-red-500');
+                videoToggleBtn.classList.add('bg-gray-600');
+            }
+        }
+        
+        showToast(isVideoOff ? 'Video turned off' : 'Video turned on', 'info');
+    }
+}
+// FIXED: Enhanced Event Listeners with proper mobile support
+function setupEventListeners() {
+    console.log('Setting up event listeners');
+    
+    // Use event delegation for dynamic elements
+    // Use event delegation for dynamic elements
+document.addEventListener('click', function(e) {
+    // Handle message friend buttons (old style - keep for backward compatibility)
+    if (e.target.closest('.message-friend')) {
+        const btn = e.target.closest('.message-friend');
+        const friendId = btn.dataset.id;
+        const friendName = btn.dataset.name;
+        console.log('Message friend clicked:', friendName, friendId);
+        startChat(friendId, friendName);
+    }
+    
+    // Handle call friend buttons (old style - keep for backward compatibility)
+    if (e.target.closest('.call-friend')) {
+        const btn = e.target.closest('.call-friend');
+        const friendId = btn.dataset.id;
+        const friendName = btn.dataset.name;
+        console.log('Call friend clicked:', friendName, friendId);
+        startCall(friendId, friendName);
+    }
+    
+    // Handle edit friend buttons (old style - keep for backward compatibility)
+    if (e.target.closest('.edit-friend')) {
+        const btn = e.target.closest('.edit-friend');
+        const friendId = btn.dataset.id;
+        const friendName = btn.dataset.name;
+        const friendStatus = btn.dataset.status;
+        console.log('Edit friend clicked:', friendName, friendId);
+        openEditFriendModal(friendId, friendName, friendStatus);
+    }
+    
+    // New enhanced friend list buttons are handled in renderFriends function
+});
+    
+    // Theme toggle
+    const themeToggle = document.getElementById('themeToggle');
+    if (themeToggle) {
+        themeToggle.addEventListener('click', () => {
+            const currentTheme = document.body.getAttribute('data-theme');
+            const newTheme = currentTheme === 'light' ? 'dark' : 'light';
+            setTheme(newTheme);
+        });
+    }
+
+    // Tab switching
+    document.querySelectorAll('.tab-btn').forEach(btn => {
+        btn.addEventListener('click', () => {
+            const tab = btn.dataset.tab;
+            console.log('Switching to tab:', tab);
+            
+            // Update active tab
+            document.querySelectorAll('.tab-btn').forEach(b => {
+                b.classList.remove('tab-active');
+                b.classList.add('text-gray-500');
+            });
+            btn.classList.add('tab-active');
+            btn.classList.remove('text-gray-500');
+            
+            // Show active tab content
+            document.querySelectorAll('.tab-panel').forEach(panel => {
+                panel.classList.add('hidden');
+            });
+            const tabPanel = document.getElementById(`${tab}Tab`);
+            if (tabPanel) tabPanel.classList.remove('hidden');
+        });
+    });
+
+    // Settings modal
+    const menuBtn = document.getElementById('menuBtn');
+    if (menuBtn) {
+        menuBtn.addEventListener('click', () => {
+            console.log('Opening settings modal');
+            if (settingsModal) settingsModal.classList.remove('hidden');
+        });
+    }
+
+    const closeSettings = document.getElementById('closeSettings');
+    if (closeSettings) {
+        closeSettings.addEventListener('click', () => {
+            console.log('Closing settings modal');
+            if (settingsModal) settingsModal.classList.add('hidden');
+        });
+    }
+
+    // Add friend modal
+    const addFriendBtn = document.getElementById('addFriendBtn');
+    if (addFriendBtn) {
+        addFriendBtn.addEventListener('click', () => {
+            console.log('Opening add friend modal');
+            if (addFriendModal) addFriendModal.classList.remove('hidden');
+        });
+    }
+
+    const cancelFriend = document.getElementById('cancelFriend');
+    if (cancelFriend) {
+        cancelFriend.addEventListener('click', () => {
+            console.log('Closing add friend modal');
+            if (addFriendModal) addFriendModal.classList.add('hidden');
+        });
+    }
+
+    // Friend search
+    const friendSearch = document.getElementById('friendSearch');
+    if (friendSearch) {
+        friendSearch.addEventListener('input', (e) => {
+            searchFriends(e.target.value);
+        });
+    }
+
+    // Enhanced friend search
+    const searchFriend = document.getElementById('searchFriend');
+    if (searchFriend) {
+        searchFriend.addEventListener('click', async () => {
+            const friendSearchInput = document.getElementById('friendSearchInput');
+            if (!friendSearchInput) return;
+            
+            const query = friendSearchInput.value.trim();
+            if (!query) {
+                showToast('Please enter a search term', 'error');
                 return;
             }
+            
+            console.log('Enhanced friend search for:', query);
+            const results = await enhancedFriendSearch(query);
+            displayEnhancedSearchResults(results);
+            if (friendSearchResultsModal) friendSearchResultsModal.classList.remove('hidden');
+            if (addFriendModal) addFriendModal.classList.add('hidden');
+        });
+    }
 
-            try {
-                showToast('Starting video call...', 'info');
-                
-                // Get user media (camera and microphone)
-                localStream = await navigator.mediaDevices.getUserMedia({ 
-                    video: true, 
-                    audio: true 
-                });
-                
-                // Display local video stream
-                const localVideo = document.getElementById('localVideo');
-                localVideo.srcObject = localStream;
-                
-                // Show call container
-                const videoCallContainer = document.getElementById('videoCallContainer');
-                videoCallContainer.style.display = 'block';
-                
-                // Set call state
-                isInCall = true;
-                isMuted = false;
-                isVideoOff = false;
-                
-                // Show placeholder for signaling (to be replaced with Firebase signaling)
-                showToast('Call started. Waiting for recipient...', 'info');
-                
-            } catch (error) {
-                console.error('Error starting video call:', error);
-                showToast('Error starting video call. Please check camera/microphone permissions.', 'error');
+    const closeEnhancedSearch = document.getElementById('closeEnhancedSearch');
+    if (closeEnhancedSearch) {
+        closeEnhancedSearch.addEventListener('click', () => {
+            console.log('Closing enhanced search');
+            if (friendSearchResultsModal) friendSearchResultsModal.classList.add('hidden');
+        });
+    }
+
+    // Edit friend modal
+    const cancelEditFriend = document.getElementById('cancelEditFriend');
+    if (cancelEditFriend) {
+        cancelEditFriend.addEventListener('click', () => {
+            console.log('Closing edit friend modal');
+            if (editFriendModal) editFriendModal.classList.add('hidden');
+        });
+    }
+
+    const messageFriend = document.getElementById('messageFriend');
+    if (messageFriend) {
+        messageFriend.addEventListener('click', () => {
+            const friendId = currentEditingFriendId;
+            const editFriendName = document.getElementById('editFriendName');
+            const friendName = editFriendName ? editFriendName.value : 'Friend';
+            console.log('Message from edit modal:', friendName, friendId);
+            startChat(friendId, friendName);
+            if (editFriendModal) editFriendModal.classList.add('hidden');
+        });
+    }
+
+    const callFriend = document.getElementById('callFriend');
+    if (callFriend) {
+        callFriend.addEventListener('click', () => {
+            const friendId = currentEditingFriendId;
+            const editFriendName = document.getElementById('editFriendName');
+            const friendName = editFriendName ? editFriendName.value : 'Friend';
+            console.log('Call from edit modal:', friendName, friendId);
+            startCall(friendId, friendName);
+            if (editFriendModal) editFriendModal.classList.add('hidden');
+        });
+    }
+
+    const removeFriend = document.getElementById('removeFriend');
+    if (removeFriend) {
+        removeFriend.addEventListener('click', () => {
+            if (currentEditingFriendId) {
+                console.log('Removing friend:', currentEditingFriendId);
+                removeFriend(currentEditingFriendId);
+                if (editFriendModal) editFriendModal.classList.add('hidden');
             }
-        }
+        });
+    }
 
-        async function startVoiceCall() {
-            if (!currentChat) {
-                showToast('Please select a chat first', 'error');
-                return;
+    // Profile settings
+    const profileSettingsBtn = document.getElementById('profileSettingsBtn');
+    if (profileSettingsBtn) {
+        profileSettingsBtn.addEventListener('click', () => {
+            console.log('Opening profile settings');
+            if (profileSettingsModal) profileSettingsModal.classList.remove('hidden');
+            if (settingsModal) settingsModal.classList.add('hidden');
+        });
+    }
+
+    const closeProfileSettings = document.getElementById('closeProfileSettings');
+    if (closeProfileSettings) {
+        closeProfileSettings.addEventListener('click', () => {
+            console.log('Closing profile settings');
+            if (profileSettingsModal) profileSettingsModal.classList.add('hidden');
+        });
+    }
+
+    const saveProfile = document.getElementById('saveProfile');
+    if (saveProfile) {
+        saveProfile.addEventListener('click', () => {
+            console.log('Saving profile');
+            updateProfile();
+            if (profileSettingsModal) profileSettingsModal.classList.add('hidden');
+        });
+    }
+
+    const cancelProfile = document.getElementById('cancelProfile');
+    if (cancelProfile) {
+        cancelProfile.addEventListener('click', () => {
+            console.log('Canceling profile edit');
+            if (profileSettingsModal) profileSettingsModal.classList.add('hidden');
+        });
+    }
+
+    // Profile picture upload
+    const profilePicUpload = document.getElementById('profilePicUpload');
+    if (profilePicUpload) {
+        profilePicUpload.addEventListener('change', (e) => {
+            if (e.target.files.length > 0) {
+                console.log('Profile picture selected for upload');
+                uploadProfilePicture(e.target.files[0]);
             }
+        });
+    }
 
-            try {
-                showToast('Starting voice call...', 'info');
-                
-                // Get user media (microphone only)
-                localStream = await navigator.mediaDevices.getUserMedia({ 
-                    video: false, 
-                    audio: true 
-                });
-                
-                // Show call container
-                const videoCallContainer = document.getElementById('videoCallContainer');
-                videoCallContainer.style.display = 'block';
-                
-                // Set call state
-                isInCall = true;
-                isMuted = false;
-                isVideoOff = true; // Voice call has no video
-                
-                // Show placeholder for signaling (to be replaced with Firebase signaling)
-                showToast('Call started. Waiting for recipient...', 'info');
-                
-            } catch (error) {
-                console.error('Error starting voice call:', error);
-                showToast('Error starting voice call. Please check microphone permissions.', 'error');
+    const profilePictureUpload = document.getElementById('profilePictureUpload');
+    if (profilePictureUpload) {
+        profilePictureUpload.addEventListener('change', (e) => {
+            if (e.target.files.length > 0) {
+                console.log('Profile picture selected for upload (alternative)');
+                uploadProfilePicture(e.target.files[0]);
             }
-        }
+        });
+    }
 
-        function toggleMute() {
-            if (!localStream) return;
+    // Cover picture upload
+    const coverPicUpload = document.getElementById('coverPicUpload');
+    if (coverPicUpload) {
+        coverPicUpload.addEventListener('change', (e) => {
+            if (e.target.files.length > 0) {
+                console.log('Cover picture selected for upload');
+                uploadCoverPicture(e.target.files[0]);
+            }
+        });
+    }
+
+    // Status creation
+    const myStatus = document.getElementById('myStatus');
+    if (myStatus) {
+        myStatus.addEventListener('click', () => {
+            console.log('Opening status creation');
+            openStatusCreation();
+        });
+    }
+
+    const closeStatusCreation = document.getElementById('closeStatusCreation');
+    if (closeStatusCreation) {
+        closeStatusCreation.addEventListener('click', () => {
+            console.log('Closing status creation');
+            if (statusCreation) statusCreation.style.display = 'none';
+        });
+    }
+
+    // Status type switching
+    document.querySelectorAll('.status-option').forEach(option => {
+        option.addEventListener('click', () => {
+            const type = option.dataset.type;
+            console.log('Status type selected:', type);
             
-            const audioTracks = localStream.getAudioTracks();
-            audioTracks.forEach(track => {
-                track.enabled = !track.enabled;
+            // Update active option
+            document.querySelectorAll('.status-option').forEach(opt => {
+                opt.classList.remove('active');
             });
+            option.classList.add('active');
             
-            isMuted = !isMuted;
-            const muteBtn = document.getElementById('muteBtn');
-            muteBtn.innerHTML = isMuted ? '<i class="fas fa-microphone-slash"></i>' : '<i class="fas fa-microphone"></i>';
+            // Show corresponding preview
+            const emojiPreview = document.getElementById('emojiPreview');
+            const textPreview = document.getElementById('textPreview');
+            const imagePreview = document.getElementById('imagePreview');
+            const videoPreview = document.getElementById('videoPreview');
+            const audioPreview = document.getElementById('audioPreview');
             
-            showToast(isMuted ? 'Microphone muted' : 'Microphone unmuted', 'info');
-        }
+            if (emojiPreview) emojiPreview.classList.add('hidden');
+            if (textPreview) textPreview.classList.add('hidden');
+            if (imagePreview) imagePreview.classList.add('hidden');
+            if (videoPreview) videoPreview.classList.add('hidden');
+            if (audioPreview) audioPreview.classList.add('hidden');
+            
+            const activePreview = document.getElementById(`${type}Preview`);
+            if (activePreview) activePreview.classList.remove('hidden');
+        });
+    });
 
-        function toggleVideo() {
-            if (!localStream) return;
+    // Post status
+    const postStatus = document.getElementById('postStatus');
+    if (postStatus) {
+        postStatus.addEventListener('click', () => {
+            const activeOption = document.querySelector('.status-option.active');
+            if (!activeOption) return;
             
-            const videoTracks = localStream.getVideoTracks();
-            videoTracks.forEach(track => {
-                track.enabled = !track.enabled;
-            });
+            const activeType = activeOption.dataset.type;
+            let content = '';
             
-            isVideoOff = !isVideoOff;
-            const videoToggleBtn = document.getElementById('videoToggleBtn');
-            videoToggleBtn.innerHTML = isVideoOff ? '<i class="fas fa-video-slash"></i>' : '<i class="fas fa-video"></i>';
-            
-            showToast(isVideoOff ? 'Video turned off' : 'Video turned on', 'info');
-        }
-
-        function endCall() {
-            // Stop all media tracks
-            if (localStream) {
-                localStream.getTracks().forEach(track => {
-                    track.stop();
-                });
-                localStream = null;
+            if (activeType === 'emoji') {
+                const emojiPreview = document.getElementById('emojiPreview');
+                content = emojiPreview ? emojiPreview.textContent : '';
+            } else if (activeType === 'text') {
+                const statusTextInput = document.getElementById('statusTextInput');
+                content = statusTextInput ? statusTextInput.value : '';
+            } else if (activeType === 'image') {
+                content = 'Image status'; // In real implementation, this would be the image URL
+            } else if (activeType === 'video') {
+                content = 'Video status'; // In real implementation, this would be the video URL
+            } else if (activeType === 'audio') {
+                content = 'Audio status'; // In real implementation, this would be the audio URL
             }
             
-            // Hide call container
-            const videoCallContainer = document.getElementById('videoCallContainer');
-            videoCallContainer.style.display = 'none';
-            
-            // Reset call state
-            isInCall = false;
-            isMuted = false;
-            isVideoOff = false;
-            
-            // Reset button states
-            const muteBtn = document.getElementById('muteBtn');
-            const videoToggleBtn = document.getElementById('videoToggleBtn');
-            muteBtn.innerHTML = '<i class="fas fa-microphone"></i>';
-            videoToggleBtn.innerHTML = '<i class="fas fa-video"></i>';
-            
-            showToast('Call ended', 'info');
-        }
+            if (content) {
+                console.log('Posting status:', activeType, content);
+                postStatus(activeType, content);
+                if (statusCreation) statusCreation.style.display = 'none';
+            } else {
+                showToast('Please add content to your status', 'error');
+            }
+        });
+    }
 
-        // Setup Event Listeners
-        function setupEventListeners() {
-            // Theme toggle
-            document.getElementById('themeToggle').addEventListener('click', () => {
-                const currentTheme = document.body.getAttribute('data-theme');
-                const newTheme = currentTheme === 'light' ? 'dark' : 'light';
-                setTheme(newTheme);
-            });
+    // Back to chats (mobile)
+    const backToChats = document.getElementById('backToChats');
+    if (backToChats) {
+        backToChats.addEventListener('click', () => {
+            console.log('Back to chats clicked');
+            const chatListContainer = document.getElementById('chatListContainer');
+            if (chatListContainer) chatListContainer.classList.remove('hidden');
+        });
+    }
 
-            // Tab switching
-            document.querySelectorAll('.tab-btn').forEach(btn => {
-                btn.addEventListener('click', () => {
-                    const tab = btn.dataset.tab;
-                    
-                    // Update active tab
-                    document.querySelectorAll('.tab-btn').forEach(b => {
-                        b.classList.remove('tab-active');
-                        b.classList.add('text-gray-500');
-                    });
-                    btn.classList.add('tab-active');
-                    btn.classList.remove('text-gray-500');
-                    
-                    // Show active tab content
-                    document.querySelectorAll('.tab-panel').forEach(panel => {
-                        panel.classList.add('hidden');
-                    });
-                    document.getElementById(`${tab}Tab`).classList.remove('hidden');
-                });
-            });
+    // Message input and sending
+    const messageInput = document.getElementById('messageInput');
+    if (messageInput) {
+        messageInput.addEventListener('input', handleTypingIndicator);
+        
+        messageInput.addEventListener('keypress', (e) => {
+            if (e.key === 'Enter' && userSettings.chat.enterKeySends) {
+                e.preventDefault();
+                sendMessage();
+            }
+        });
+    }
 
-            // Settings modal
-            document.getElementById('menuBtn').addEventListener('click', () => {
-                settingsModal.classList.remove('hidden');
-            });
+    const sendBtn = document.getElementById('sendBtn');
+    if (sendBtn) {
+        sendBtn.addEventListener('click', sendMessage);
+    }
 
-            document.getElementById('closeSettings').addEventListener('click', () => {
-                settingsModal.classList.add('hidden');
-            });
-
-            // Add friend modal
-            document.getElementById('addFriendBtn').addEventListener('click', () => {
-                addFriendModal.classList.remove('hidden');
-            });
-
-            document.getElementById('cancelFriend').addEventListener('click', () => {
-                addFriendModal.classList.add('hidden');
-            });
-
-            // Friend search
-            document.getElementById('friendSearch').addEventListener('input', (e) => {
-                searchFriends(e.target.value);
-            });
-
-            // Enhanced friend search
-            document.getElementById('searchFriend').addEventListener('click', async () => {
-                const query = document.getElementById('friendSearchInput').value.trim();
-                if (!query) {
-                    showToast('Please enter a search term', 'error');
-                    return;
-                }
-                
-                const results = await enhancedFriendSearch(query);
-                displayEnhancedSearchResults(results);
-                friendSearchResultsModal.classList.remove('hidden');
-                addFriendModal.classList.add('hidden');
-            });
-
-            document.getElementById('closeEnhancedSearch').addEventListener('click', () => {
-                friendSearchResultsModal.classList.add('hidden');
-            });
-
-            // Edit friend modal
-            document.getElementById('cancelEditFriend').addEventListener('click', () => {
-                editFriendModal.classList.add('hidden');
-            });
-
-            document.getElementById('messageFriend').addEventListener('click', () => {
-                const friendId = currentEditingFriendId;
-                const friendName = document.getElementById('editFriendName').value;
-                startChat(friendId, friendName);
-                editFriendModal.classList.add('hidden');
-            });
-
-            document.getElementById('callFriend').addEventListener('click', () => {
-                const friendId = currentEditingFriendId;
-                const friendName = document.getElementById('editFriendName').value;
-                startCall(friendId, friendName);
-                editFriendModal.classList.add('hidden');
-            });
-
-            document.getElementById('removeFriend').addEventListener('click', () => {
-                if (currentEditingFriendId) {
-                    removeFriend(currentEditingFriendId);
-                    editFriendModal.classList.add('hidden');
-                }
-            });
-
-            // Profile settings
-            document.getElementById('profileSettingsBtn').addEventListener('click', () => {
-                profileSettingsModal.classList.remove('hidden');
-                settingsModal.classList.add('hidden');
-            });
-
-            document.getElementById('closeProfileSettings').addEventListener('click', () => {
-                profileSettingsModal.classList.add('hidden');
-            });
-
-            document.getElementById('saveProfile').addEventListener('click', () => {
-                updateProfile();
-                profileSettingsModal.classList.add('hidden');
-            });
-
-            document.getElementById('cancelProfile').addEventListener('click', () => {
-                profileSettingsModal.classList.add('hidden');
-            });
-
-            // Profile picture upload
-            document.getElementById('profilePicUpload').addEventListener('change', (e) => {
+    // File attachment
+    const attachBtn = document.getElementById('attachBtn');
+    if (attachBtn) {
+        attachBtn.addEventListener('click', () => {
+            console.log('Attach file clicked');
+            // Create a file input element
+            const fileInput = document.createElement('input');
+            fileInput.type = 'file';
+            fileInput.accept = '*/*';
+            fileInput.addEventListener('change', (e) => {
                 if (e.target.files.length > 0) {
-                    uploadProfilePicture(e.target.files[0]);
+                    console.log('File selected:', e.target.files[0].name);
+                    uploadFile(e.target.files[0]);
                 }
             });
+            fileInput.click();
+        });
+    }
 
-            document.getElementById('profilePictureUpload').addEventListener('change', (e) => {
-                if (e.target.files.length > 0) {
-                    uploadProfilePicture(e.target.files[0]);
-                }
-            });
+    // Remove file preview
+    const removeFile = document.getElementById('removeFile');
+    if (removeFile) {
+        removeFile.addEventListener('click', () => {
+            console.log('Remove file preview clicked');
+            const filePreview = document.getElementById('filePreview');
+            if (filePreview) filePreview.classList.add('hidden');
+        });
+    }
 
-            // Cover picture upload
-            document.getElementById('coverPicUpload').addEventListener('change', (e) => {
-                if (e.target.files.length > 0) {
-                    uploadCoverPicture(e.target.files[0]);
-                }
-            });
+    // Emoji picker
+    const emojiBtn = document.getElementById('emojiBtn');
+    if (emojiBtn) {
+        emojiBtn.addEventListener('click', toggleEmojiPicker);
+    }
 
-            // Status creation
-            document.getElementById('myStatus').addEventListener('click', () => {
-                openStatusCreation();
-            });
+    // Close emoji picker when clicking outside
+    document.addEventListener('click', (e) => {
+        const emojiPicker = document.getElementById('emojiPicker');
+        const emojiBtn = document.getElementById('emojiBtn');
+        
+        if (emojiPicker && emojiPicker.style.display === 'block' && 
+            !emojiPicker.contains(e.target) && 
+            !(emojiBtn && emojiBtn.contains(e.target))) {
+            emojiPicker.style.display = 'none';
+        }
+    });
 
-            document.getElementById('closeStatusCreation').addEventListener('click', () => {
-                statusCreation.style.display = 'none';
-            });
+    // Video call
+    const videoCallBtn = document.getElementById('videoCallBtn');
+    if (videoCallBtn) {
+        videoCallBtn.addEventListener('click', startVideoCall);
+    }
 
-            // Status type switching
-            document.querySelectorAll('.status-option').forEach(option => {
-                option.addEventListener('click', () => {
-                    const type = option.dataset.type;
-                    
-                    // Update active option
-                    document.querySelectorAll('.status-option').forEach(opt => {
-                        opt.classList.remove('active');
-                    });
-                    option.classList.add('active');
-                    
-                    // Show corresponding preview
-                    document.getElementById('emojiPreview').classList.add('hidden');
-                    document.getElementById('textPreview').classList.add('hidden');
-                    document.getElementById('imagePreview').classList.add('hidden');
-                    document.getElementById('videoPreview').classList.add('hidden');
-                    document.getElementById('audioPreview').classList.add('hidden');
-                    
-                    document.getElementById(`${type}Preview`).classList.remove('hidden');
+    // Voice call
+    const voiceCallBtn = document.getElementById('voiceCallBtn');
+    if (voiceCallBtn) {
+        voiceCallBtn.addEventListener('click', startVoiceCall);
+    }
+
+    // Call controls
+    const muteBtn = document.getElementById('muteBtn');
+    if (muteBtn) {
+        muteBtn.addEventListener('click', toggleMute);
+    }
+
+    const videoToggleBtn = document.getElementById('videoToggleBtn');
+    if (videoToggleBtn) {
+        videoToggleBtn.addEventListener('click', toggleVideo);
+    }
+
+    const endCallBtn = document.getElementById('endCallBtn');
+    if (endCallBtn) {
+        endCallBtn.addEventListener('click', endCall);
+    }
+
+    // All Friends Modal
+    const manageFavorites = document.getElementById('manageFavorites');
+    if (manageFavorites) {
+        manageFavorites.addEventListener('click', openAllFriendsModal);
+    }
+
+    const closeAllFriends = document.getElementById('closeAllFriends');
+    if (closeAllFriends) {
+        closeAllFriends.addEventListener('click', () => {
+            console.log('Closing all friends modal');
+            if (allFriendsModal) allFriendsModal.classList.add('hidden');
+        });
+    }
+
+    // All Friends Search
+    const allFriendsSearch = document.getElementById('allFriendsSearch');
+    if (allFriendsSearch) {
+        allFriendsSearch.addEventListener('input', (e) => {
+            searchAllFriends(e.target.value);
+        });
+    }
+
+    // Logout
+    const logoutBtn = document.getElementById('logoutBtn');
+    if (logoutBtn) {
+        logoutBtn.addEventListener('click', () => {
+            if (confirm('Are you sure you want to log out?')) {
+                console.log('Logging out user');
+                auth.signOut().then(() => {
+                    window.location.href = 'login.html';
+                }).catch(error => {
+                    console.error('Error signing out:', error);
+                    showToast('Error signing out', 'error');
                 });
-            });
+            }
+        });
+    }
 
-            // Post status
-            document.getElementById('postStatus').addEventListener('click', () => {
-                const activeType = document.querySelector('.status-option.active').dataset.type;
-                let content = '';
-                
-                if (activeType === 'emoji') {
-                    content = document.getElementById('emojiPreview').textContent;
-                } else if (activeType === 'text') {
-                    content = document.getElementById('statusTextInput').value;
-                } else if (activeType === 'image') {
-                    content = 'Image status'; // In real implementation, this would be the image URL
-                } else if (activeType === 'video') {
-                    content = 'Video status'; // In real implementation, this would be the video URL
-                } else if (activeType === 'audio') {
-                    content = 'Audio status'; // In real implementation, this would be the audio URL
-                }
-                
-                if (content) {
-                    postStatus(activeType, content);
-                    statusCreation.style.display = 'none';
-                } else {
-                    showToast('Please add content to your status', 'error');
-                }
-            });
+    // Add touch event listeners for mobile
+    document.addEventListener('touchstart', function(e) {
+        // Add active state for touch
+        if (e.target.classList.contains('contact-item') || 
+            e.target.closest('.contact-item') ||
+            e.target.classList.contains('btn') ||
+            e.target.closest('.btn')) {
+            e.target.style.opacity = '0.7';
+        }
+    }, { passive: true });
 
-            // Back to chats (mobile)
-            document.getElementById('backToChats').addEventListener('click', () => {
-                document.getElementById('chatListContainer').classList.remove('hidden');
-            });
+    document.addEventListener('touchend', function(e) {
+        // Remove active state
+        if (e.target.classList.contains('contact-item') || 
+            e.target.closest('.contact-item') ||
+            e.target.classList.contains('btn') ||
+            e.target.closest('.btn')) {
+            e.target.style.opacity = '';
+        }
+    }, { passive: true });
 
-            // Message input and sending
-            document.getElementById('messageInput').addEventListener('input', handleTypingIndicator);
-            
-            document.getElementById('messageInput').addEventListener('keypress', (e) => {
-                if (e.key === 'Enter' && userSettings.chat.enterKeySends) {
-                    e.preventDefault();
-                    sendMessage();
-                }
-            });
+    console.log('Event listeners setup completed');
+}
+// Enhanced Friend Search with Multiple Options
+async function enhancedFriendSearch(query) {
+    if (!query) return [];
+    
+    console.log('Enhanced friend search for:', query);
+    const results = await searchUsers(query);
+    return results;
+}
 
-            document.getElementById('sendBtn').addEventListener('click', sendMessage);
+function displayEnhancedSearchResults(results) {
+    const enhancedSearchResults = document.getElementById('enhancedSearchResults');
+    if (!enhancedSearchResults) return;
+    
+    enhancedSearchResults.innerHTML = '';
+    
+    if (results.length === 0) {
+        enhancedSearchResults.innerHTML = '<p class="text-center text-gray-500 py-4">No users found</p>';
+        return;
+    }
+    
+    console.log('Displaying', results.length, 'search results');
+    
+    results.forEach(user => {
+        const resultItem = document.createElement('div');
+        resultItem.className = 'flex items-center p-3 border-b border-gray-200 hover:bg-gray-50 cursor-pointer';
+        resultItem.innerHTML = `
+            <img class="w-10 h-10 rounded-full mr-3" src="${user.photoURL || `https://ui-avatars.com/api/?name=${encodeURIComponent(user.displayName)}&background=7C3AED&color=fff`}" alt="${user.displayName}">
+            <div class="flex-1">
+                <p class="font-medium">${user.displayName}</p>
+                <p class="text-sm text-gray-500">${user.email || user.phone || ''}</p>
+            </div>
+            <div class="flex space-x-2">
+                <button class="bg-purple-600 text-white px-3 py-1 rounded-lg add-friend" data-id="${user.id}" data-name="${user.displayName}">
+                    <i class="fas fa-user-plus"></i>
+                </button>
+                <button class="bg-green-600 text-white px-3 py-1 rounded-lg message-user" data-id="${user.id}" data-name="${user.displayName}">
+                    <i class="fas fa-comment"></i>
+                </button>
+            </div>
+        `;
+        
+        enhancedSearchResults.appendChild(resultItem);
+    });
+    
+    // Add event listeners to buttons using event delegation
+    enhancedSearchResults.addEventListener('click', function(e) {
+        if (e.target.closest('.add-friend')) {
+            const btn = e.target.closest('.add-friend');
+            const userId = btn.dataset.id;
+            const userName = btn.dataset.name;
+            console.log('Add friend from search results:', userName, userId);
+            sendFriendRequest(userId);
+            if (friendSearchResultsModal) friendSearchResultsModal.classList.add('hidden');
+            showToast(`Friend request sent to ${userName}`, 'success');
+        }
+        
+        if (e.target.closest('.message-user')) {
+            const btn = e.target.closest('.message-user');
+            const userId = btn.dataset.id;
+            const userName = btn.dataset.name;
+            console.log('Message user from search results:', userName, userId);
+            startChat(userId, userName);
+            if (friendSearchResultsModal) friendSearchResultsModal.classList.add('hidden');
+        }
+    });
+}
 
-            // File attachment
-            document.getElementById('attachBtn').addEventListener('click', () => {
-                // Create a file input element
-                const fileInput = document.createElement('input');
-                fileInput.type = 'file';
-                fileInput.accept = '*/*';
-                fileInput.addEventListener('change', (e) => {
-                    if (e.target.files.length > 0) {
-                        uploadFile(e.target.files[0]);
-                    }
-                });
-                fileInput.click();
-            });
+// Initialize emoji picker
+function initEmojiPicker() {
+    if (!emojiPicker) return;
+    
+    const emojiCategories = [
+        {
+            title: 'Smileys & People',
+            emojis: ['😀', '😃', '😄', '😁', '😆', '😅', '😂', '🤣', '😊', '😇', '🙂', '🙃', '😉', '😌', '😍', '🥰', '😘', '😗', '😙', '😚', '😋', '😛', '😝', '😜', '🤪', '🤨', '🧐', '🤓', '😎', '🤩', '🥳', '😏', '😒', '😞', '😔', '😟', '😕', '🙁', '☹️', '😣', '😖', '😫', '😩', '🥺', '😢', '😭', '😤', '😠', '😡', '🤬', '🤯', '😳', '🥵', '🥶', '😱', '😨', '😰', '😥', '😓', '🤗', '🤔', '🤭', '🤫', '🤥', '😶', '😐', '😑', '😬', '🙄', '😯', '😦', '😧', '😮', '😲', '🥱', '😴', '🤤', '😪', '😵', '🤐', '🥴', '🤢', '🤮', '🤧', '😷', '🤒', '🤕', '🤑', '🤠', '😈', '👿', '👹', '👺', '🤡', '💩', '👻', '💀', '☠️', '👽', '👾', '🤖', '🎃', '😺', '😸', '😹', '😻', '😼', '😽', '🙀', '😿', '😾']
+        },
+        {
+            title: 'Animals & Nature',
+            emojis: ['🐵', '🐒', '🦍', '🦧', '🐶', '🐕', '🦮', '🐩', '🐺', '🦊', '🦝', '🐱', '🐈', '🦁', '🐯', '🐅', '🐆', '🐴', '🐎', '🦄', '🦓', '🦌', '🐮', '🐂', '🐃', '🐄', '🐷', '🐖', '🐗', '🐽', '🐏', '🐑', '🐐', '🐪', '🐫', '🦙', '🦒', '🐘', '🦏', '🦛', '🐭', '🐁', '🐀', '🐹', '🐰', '🐇', '🐿️', '🦔', '🦇', '🐻', '🐨', '🐼', '🦥', '🦦', '🦨', '🦘', '🦡', '🐾', '🦃', '🐔', '🐓', '🐣', '🐤', '🐥', '🐦', '🐧', '🕊️', '🦅', '🦆', '🦢', '🦉', '🦩', '🦚', '🦜', '🐸', '🐊', '🐢', '🦎', '🐍', '🐲', '🐉', '🦕', '🦖', '🐳', '🐋', '🐬', '🐟', '🐠', '🐡', '🦈', '🐙', '🐚', '🐌', '🦋', '🐛', '🐜', '🐝', '🐞', '🦗', '🕷️', '🕸️', '🦂', '🦟', '🦠', '💐', '🌸', '💮', '🏵️', '🌹', '🥀', '🌺', '🌻', '🌼', '🌷', '🌱', '🌲', '🌳', '🌴', '🌵', '🌾', '🌿', '☘️', '🍀', '🍁', '🍂', '🍃']
+        }
+    ];
 
-            // Remove file preview
-            document.getElementById('removeFile').addEventListener('click', () => {
-                document.getElementById('filePreview').classList.add('hidden');
-            });
+    emojiPicker.innerHTML = '';
 
-            // Emoji picker
-            document.getElementById('emojiBtn').addEventListener('click', toggleEmojiPicker);
-
-            // Close emoji picker when clicking outside
-            document.addEventListener('click', (e) => {
-                const emojiPicker = document.getElementById('emojiPicker');
-                const emojiBtn = document.getElementById('emojiBtn');
-                
-                if (emojiPicker.style.display === 'block' && 
-                    !emojiPicker.contains(e.target) && 
-                    !emojiBtn.contains(e.target)) {
+    emojiCategories.forEach(category => {
+        const categoryElement = document.createElement('div');
+        categoryElement.className = 'emoji-category';
+        
+        const categoryTitle = document.createElement('div');
+        categoryTitle.className = 'emoji-category-title';
+        categoryTitle.textContent = category.title;
+        
+        const emojiGrid = document.createElement('div');
+        emojiGrid.className = 'emoji-grid';
+        
+        category.emojis.forEach(emoji => {
+            const emojiOption = document.createElement('div');
+            emojiOption.className = 'emoji-option';
+            emojiOption.textContent = emoji;
+            emojiOption.addEventListener('click', () => {
+                const messageInput = document.getElementById('messageInput');
+                if (messageInput) {
+                    messageInput.value += emoji;
                     emojiPicker.style.display = 'none';
+                    messageInput.focus();
                 }
             });
+            
+            emojiGrid.appendChild(emojiOption);
+        });
+        
+        categoryElement.appendChild(categoryTitle);
+        categoryElement.appendChild(emojiGrid);
+        emojiPicker.appendChild(categoryElement);
+    });
+}
 
-            // Video call
-            document.getElementById('videoCallBtn').addEventListener('click', startVideoCall);
+function toggleEmojiPicker() {
+    const emojiPicker = document.getElementById('emojiPicker');
+    if (!emojiPicker) return;
+    
+    if (emojiPicker.style.display === 'block') {
+        emojiPicker.style.display = 'none';
+    } else {
+        emojiPicker.style.display = 'block';
+    }
+}
 
-            // Voice call
-            document.getElementById('voiceCallBtn').addEventListener('click', startVoiceCall);
+// WebRTC Call Implementation
+// FIXED: WebRTC Call Implementation with proper permission handling
+async function startVideoCall() {
+    if (!currentChat) {
+        showToast('Please select a chat first', 'error');
+        return;
+    }
 
-            // Call controls
-            document.getElementById('muteBtn').addEventListener('click', toggleMute);
-            document.getElementById('videoToggleBtn').addEventListener('click', toggleVideo);
-            document.getElementById('endCallBtn').addEventListener('click', endCall);
-
-            // All Friends Modal
-            document.getElementById('manageFavorites').addEventListener('click', openAllFriendsModal);
-            document.getElementById('closeAllFriends').addEventListener('click', () => {
-                allFriendsModal.classList.add('hidden');
-            });
-
-            // All Friends Search
-            document.getElementById('allFriendsSearch').addEventListener('input', (e) => {
-                searchAllFriends(e.target.value);
-            });
-
-            // Group creation
-            document.getElementById('newGroupBtn').addEventListener('click', openCreateGroupModal);
-            document.getElementById('closeCreateGroup').addEventListener('click', () => {
-                createGroupModal.classList.add('hidden');
-            });
-            document.getElementById('createGroup').addEventListener('click', createGroup);
-            document.getElementById('cancelCreateGroup').addEventListener('click', () => {
-                createGroupModal.classList.add('hidden');
-            });
-
-            // Group joining
-            document.getElementById('joinGroup').addEventListener('click', joinGroup);
-            document.getElementById('cancelJoinGroup').addEventListener('click', () => {
-                joinGroupModal.classList.add('hidden');
-            });
-
-            // Logout
-            document.getElementById('logoutBtn').addEventListener('click', () => {
-                if (confirm('Are you sure you want to log out?')) {
-                    auth.signOut().then(() => {
-                        window.location.href = 'login.html';
-                    }).catch(error => {
-                        console.error('Error signing out:', error);
-                        showToast('Error signing out', 'error');
-                    });
-                }
-            });
-
-            // Additional settings navigation
-            document.getElementById('privacySettingsBtn').addEventListener('click', () => {
-                privacySettingsModal.classList.remove('hidden');
-                settingsModal.classList.add('hidden');
-            });
-
-            document.getElementById('closePrivacySettings').addEventListener('click', () => {
-                privacySettingsModal.classList.add('hidden');
-            });
-
-            document.getElementById('savePrivacy').addEventListener('click', () => {
-                // Save privacy settings logic would go here
-                showToast('Privacy settings saved', 'success');
-                privacySettingsModal.classList.add('hidden');
-            });
-
-            document.getElementById('cancelPrivacy').addEventListener('click', () => {
-                privacySettingsModal.classList.add('hidden');
-            });
-
-            // Mood settings
-            document.querySelectorAll('.mood-option').forEach(option => {
-                option.addEventListener('click', () => {
-                    const mood = option.dataset.mood;
-                    // Update user mood in Firebase
-                    db.collection('users').doc(currentUser.uid).update({
-                        mood: mood,
-                        updatedAt: firebase.firestore.FieldValue.serverTimestamp()
-                    }).then(() => {
-                        currentUserData.mood = mood;
-                        showToast(`Mood set to ${mood}`, 'success');
-                    }).catch(error => {
-                        console.error('Error updating mood:', error);
-                        showToast('Error updating mood', 'error');
-                    });
-                });
-            });
-
-            // Quick actions
-            document.getElementById('privacyBtn').addEventListener('click', () => {
-                privacySettingsModal.classList.remove('hidden');
-            });
-
-            document.getElementById('settingsBtn').addEventListener('click', () => {
-                settingsModal.classList.remove('hidden');
-            });
-
-            document.getElementById('storageBtn').addEventListener('click', () => {
-                storageSettingsModal.classList.remove('hidden');
-            });
-
-            document.getElementById('inviteBtn').addEventListener('click', () => {
-                inviteFriendsModal.classList.remove('hidden');
-            });
-
-            // Business tools
-            document.getElementById('catalogueBtn').addEventListener('click', () => {
-                showToast('Catalogue feature coming soon', 'info');
-            });
-
-            document.getElementById('advertiseBtn').addEventListener('click', () => {
-                showToast('Advertising feature coming soon', 'info');
-            });
-
-            document.getElementById('labelsBtn').addEventListener('click', () => {
-                showToast('Labels feature coming soon', 'info');
-            });
-
-            document.getElementById('greetingBtn').addEventListener('click', () => {
-                showToast('Greeting messages feature coming soon', 'info');
-            });
-
-            document.getElementById('awayBtn').addEventListener('click', () => {
-                showToast('Away messages feature coming soon', 'info');
-            });
-
-            // AI features
-            document.getElementById('aiSummarize').addEventListener('click', () => {
-                showToast('AI summarization feature coming soon', 'info');
-            });
-
-            document.getElementById('aiReply').addEventListener('click', () => {
-                showToast('AI reply suggestions feature coming soon', 'info');
-            });
-
-            // Help center
-            document.getElementById('helpCenterBtn').addEventListener('click', () => {
-                helpCenterModal.classList.remove('hidden');
-                settingsModal.classList.add('hidden');
-            });
-
-            document.getElementById('closeHelpCenter').addEventListener('click', () => {
-                helpCenterModal.classList.add('hidden');
-            });
-
-            document.querySelectorAll('.help-section').forEach(section => {
-                section.addEventListener('click', () => {
-                    const sectionName = section.dataset.section;
-                    openHelpSection(sectionName);
-                });
-            });
-
-            document.getElementById('contactSupport').addEventListener('click', contactSupport);
-            document.getElementById('sendFeedback').addEventListener('click', sendFeedback);
-
-            // App info
-            document.getElementById('appInfoBtn').addEventListener('click', () => {
-                appInfoModal.classList.remove('hidden');
-                settingsModal.classList.add('hidden');
-            });
-
-            document.getElementById('closeAppInfo').addEventListener('click', () => {
-                appInfoModal.classList.add('hidden');
-            });
-
-            document.getElementById('termsOfServiceBtn').addEventListener('click', () => {
-                openLegalDocument('terms');
-            });
-
-            document.getElementById('privacyPolicyBtn').addEventListener('click', () => {
-                openLegalDocument('privacy');
-            });
-
-            document.getElementById('openSourceBtn').addEventListener('click', () => {
-                openLegalDocument('opensource');
-            });
-
-            // Invite friends
-            document.getElementById('inviteContactBtn').addEventListener('click', () => {
-                inviteFriendsModal.classList.remove('hidden');
-                settingsModal.classList.add('hidden');
-            });
-
-            document.getElementById('closeInviteFriends').addEventListener('click', () => {
-                inviteFriendsModal.classList.add('hidden');
-            });
-
-            document.getElementById('shareLink').addEventListener('click', shareLink);
-            document.getElementById('shareQR').addEventListener('click', shareQR);
-            document.getElementById('shareWhatsApp').addEventListener('click', shareWhatsApp);
-            document.getElementById('shareSMS').addEventListener('click', shareSMS);
-            document.getElementById('copyReferralCode').addEventListener('click', copyReferralCode);
-
-            // Favorites
-            document.getElementById('favoritesSettingsBtn').addEventListener('click', openFavoritesSettings);
-            document.getElementById('closeFavoritesSettings').addEventListener('click', () => {
-                favoritesSettingsModal.classList.add('hidden');
-            });
-
-            document.getElementById('addToFavorites').addEventListener('click', () => {
-                showToast('Add to favorites feature coming soon', 'info');
-            });
-
-            // Accessibility
-            document.getElementById('accessibilityBtn').addEventListener('click', () => {
-                accessibilitySettingsModal.classList.remove('hidden');
-                settingsModal.classList.add('hidden');
-            });
-
-            document.getElementById('closeAccessibilitySettings').addEventListener('click', () => {
-                accessibilitySettingsModal.classList.add('hidden');
-            });
-
-            document.getElementById('saveAccessibility').addEventListener('click', () => {
-                // Save accessibility settings logic would go here
-                showToast('Accessibility settings saved', 'success');
-                accessibilitySettingsModal.classList.add('hidden');
-            });
-
-            // Notifications
-            document.getElementById('notificationsSettingsBtn').addEventListener('click', () => {
-                notificationsSettingsModal.classList.remove('hidden');
-                settingsModal.classList.add('hidden');
-            });
-
-            document.getElementById('closeNotificationsSettings').addEventListener('click', () => {
-                notificationsSettingsModal.classList.add('hidden');
-            });
-
-            document.getElementById('saveNotifications').addEventListener('click', () => {
-                // Save notification settings logic would go here
-                showToast('Notification settings saved', 'success');
-                notificationsSettingsModal.classList.add('hidden');
-            });
-
-            // Storage
-            document.getElementById('storageSettingsBtn').addEventListener('click', () => {
-                storageSettingsModal.classList.remove('hidden');
-                settingsModal.classList.add('hidden');
-            });
-
-            document.getElementById('closeStorageSettings').addEventListener('click', () => {
-                storageSettingsModal.classList.add('hidden');
-            });
-
-            document.getElementById('saveStorage').addEventListener('click', () => {
-                // Save storage settings logic would go here
-                showToast('Storage settings saved', 'success');
-                storageSettingsModal.classList.add('hidden');
-            });
-
-            // Language
-            document.getElementById('languageSettingsBtn').addEventListener('click', () => {
-                languageSettingsModal.classList.remove('hidden');
-                settingsModal.classList.add('hidden');
-            });
-
-            document.getElementById('closeLanguageSettings').addEventListener('click', () => {
-                languageSettingsModal.classList.add('hidden');
-            });
-
-            document.getElementById('saveLanguage').addEventListener('click', () => {
-                // Save language settings logic would go here
-                showToast('Language settings saved', 'success');
-                languageSettingsModal.classList.add('hidden');
-            });
-
-            // Chat settings
-            document.getElementById('chatsSettingsBtn').addEventListener('click', () => {
-                chatSettingsModal.classList.remove('hidden');
-                settingsModal.classList.add('hidden');
-            });
-
-            document.getElementById('closeChatSettings').addEventListener('click', () => {
-                chatSettingsModal.classList.add('hidden');
-            });
-
-            document.getElementById('saveChatSettings').addEventListener('click', () => {
-                // Save chat settings logic would go here
-                showToast('Chat settings saved', 'success');
-                chatSettingsModal.classList.add('hidden');
-            });
-
-            // Account settings
-            document.getElementById('securitySettingsBtn').addEventListener('click', () => {
-                accountSettingsModal.classList.remove('hidden');
-                settingsModal.classList.add('hidden');
-            });
-
-            document.getElementById('closeAccountSettings').addEventListener('click', () => {
-                accountSettingsModal.classList.add('hidden');
-            });
-
-            document.getElementById('cancelAccount').addEventListener('click', () => {
-                accountSettingsModal.classList.add('hidden');
-            });
-
-            // Avatar settings
-            document.getElementById('avatarSettingsBtn').addEventListener('click', openAvatarSettings);
+    try {
+        console.log('Starting video call with:', currentChat.name);
+        showToast('Starting video call...', 'info');
+        
+        // Check if browser supports media devices
+        if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+            throw new Error('Your browser does not support video calling');
         }
+        
+        // Request camera and microphone permissions with better error handling
+        const constraints = {
+            video: {
+                width: { ideal: 1280 },
+                height: { ideal: 720 },
+                frameRate: { ideal: 30 }
+            },
+            audio: {
+                echoCancellation: true,
+                noiseSuppression: true,
+                autoGainControl: true
+            }
+        };
+        
+        console.log('Requesting media permissions with constraints:', constraints);
+        
+        // Get user media with proper error handling
+        localStream = await navigator.mediaDevices.getUserMedia(constraints)
+            .catch(error => {
+                console.error('getUserMedia error:', error);
+                
+                // Handle specific permission errors
+                if (error.name === 'NotAllowedError') {
+                    throw new Error('Camera/microphone access was denied. Please allow permissions in your browser settings and try again.');
+                } else if (error.name === 'NotFoundError') {
+                    throw new Error('No camera found. Please check if your camera is connected properly.');
+                } else if (error.name === 'NotSupportedError') {
+                    throw new Error('Your browser does not support video calling. Please try using Chrome, Firefox, or Edge.');
+                } else if (error.name === 'NotReadableError') {
+                    throw new Error('Camera is already in use by another application. Please close other apps using the camera.');
+                } else {
+                    throw new Error(`Cannot access camera: ${error.message}`);
+                }
+            });
+        
+        console.log('Media permissions granted, stream obtained:', localStream);
+        
+        // Display local video stream
+        const localVideo = document.getElementById('localVideo');
+        if (localVideo) {
+            localVideo.srcObject = localStream;
+            localVideo.muted = true; // Mute local video to avoid echo
+        }
+        
+        // Show call container
+        const videoCallContainer = document.getElementById('videoCallContainer');
+        if (videoCallContainer) {
+            videoCallContainer.style.display = 'block';
+            // Add a small delay to ensure video element is ready
+            setTimeout(() => {
+                if (localVideo) {
+                    localVideo.play().catch(e => console.warn('Video play warning:', e));
+                }
+            }, 100);
+        }
+        
+        // Set call state
+        isInCall = true;
+        isMuted = false;
+        isVideoOff = false;
+        
+        console.log('Video call started successfully');
+        showToast(`Video call started with ${currentChat.name}`, 'success');
+        
+        // In a real app, you would signal the other user here
+        // For demo purposes, we'll simulate the call setup
+        simulateCallSetup();
+        
+    } catch (error) {
+        console.error('Error starting video call:', error);
+        
+        // Show user-friendly error messages
+        let errorMessage = 'Error starting video call. ';
+        
+        if (error.message.includes('denied')) {
+            errorMessage += 'Please allow camera and microphone permissions in your browser settings.';
+            showPermissionInstructions();
+        } else if (error.message.includes('No camera')) {
+            errorMessage += 'No camera detected. Please check your camera connection.';
+        } else if (error.message.includes('already in use')) {
+            errorMessage += 'Camera is busy. Please close other applications using the camera.';
+        } else {
+            errorMessage += error.message;
+        }
+        
+        showToast(errorMessage, 'error');
+    }
+}
+
+async function startVoiceCall() {
+    if (!currentChat) {
+        showToast('Please select a chat first', 'error');
+        return;
+    }
+
+    try {
+        console.log('Starting voice call with:', currentChat.name);
+        showToast('Starting voice call...', 'info');
+        
+        // Check if browser supports media devices
+        if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+            throw new Error('Your browser does not support voice calling');
+        }
+        
+        // Request only microphone permissions
+        const constraints = {
+            video: false,
+            audio: {
+                echoCancellation: true,
+                noiseSuppression: true,
+                autoGainControl: true,
+                sampleRate: 44100,
+                channelCount: 1
+            }
+        };
+        
+        console.log('Requesting audio permissions with constraints:', constraints);
+        
+        // Get user media with proper error handling
+        localStream = await navigator.mediaDevices.getUserMedia(constraints)
+            .catch(error => {
+                console.error('getUserMedia error:', error);
+                
+                // Handle specific permission errors
+                if (error.name === 'NotAllowedError') {
+                    throw new Error('Microphone access was denied. Please allow permissions in your browser settings and try again.');
+                } else if (error.name === 'NotFoundError') {
+                    throw new Error('No microphone found. Please check your audio device.');
+                } else if (error.name === 'NotSupportedError') {
+                    throw new Error('Your browser does not support voice calling.');
+                } else if (error.name === 'NotReadableError') {
+                    throw new Error('Microphone is already in use by another application.');
+                } else {
+                    throw new Error(`Cannot access microphone: ${error.message}`);
+                }
+            });
+        
+        console.log('Audio permissions granted, stream obtained:', localStream);
+        
+        // Show call container (voice call mode)
+        const videoCallContainer = document.getElementById('videoCallContainer');
+        if (videoCallContainer) {
+            videoCallContainer.style.display = 'block';
+            // Update UI for voice call
+            const localVideo = document.getElementById('localVideo');
+            if (localVideo) {
+                localVideo.style.display = 'none'; // Hide video for voice call
+            }
+            
+            // Show voice call indicator
+            const callInfo = document.createElement('div');
+            callInfo.id = 'voiceCallInfo';
+            callInfo.innerHTML = `
+                <div class="text-center text-white p-4">
+                    <i class="fas fa-phone text-4xl mb-2"></i>
+                    <p class="text-lg">Voice Call with ${currentChat.name}</p>
+                    <p class="text-sm opacity-75">Call in progress...</p>
+                </div>
+            `;
+            videoCallContainer.appendChild(callInfo);
+        }
+        
+        // Set call state
+        isInCall = true;
+        isMuted = false;
+        isVideoOff = true; // Voice call has no video
+        
+        console.log('Voice call started successfully');
+        showToast(`Voice call started with ${currentChat.name}`, 'success');
+        
+        // In a real app, you would signal the other user here
+        simulateCallSetup();
+        
+    } catch (error) {
+        console.error('Error starting voice call:', error);
+        
+        // Show user-friendly error messages
+        let errorMessage = 'Error starting voice call. ';
+        
+        if (error.message.includes('denied')) {
+            errorMessage += 'Please allow microphone permissions in your browser settings.';
+            showPermissionInstructions();
+        } else if (error.message.includes('No microphone')) {
+            errorMessage += 'No microphone detected. Please check your audio device.';
+        } else if (error.message.includes('already in use')) {
+            errorMessage += 'Microphone is busy. Please close other applications using the microphone.';
+        } else {
+            errorMessage += error.message;
+        }
+        
+        showToast(errorMessage, 'error');
+    }
+}
+
+// Helper function to show permission instructions
+function showPermissionInstructions() {
+    const instructions = `
+        <div class="bg-yellow-50 border border-yellow-200 rounded-lg p-4 mt-3">
+            <h4 class="font-semibold text-yellow-800 mb-2">How to enable permissions:</h4>
+            <ul class="text-sm text-yellow-700 list-disc list-inside space-y-1">
+                <li>Look for the camera/microphone icon in your browser's address bar</li>
+                <li>Click the icon and select "Allow" for camera and microphone</li>
+                <li>Refresh the page and try again</li>
+                <li>If using HTTPS, ensure the site is trusted</li>
+            </ul>
+        </div>
+    `;
+    
+    // You can show this in a modal or as part of the toast
+    console.log('Permission instructions:', instructions);
+    
+    // Optionally show a modal with instructions
+    showPermissionModal();
+}
+
+// Function to show permission help modal
+function showPermissionModal() {
+    const modal = document.createElement('div');
+    modal.className = 'fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50';
+    modal.innerHTML = `
+        <div class="bg-white rounded-lg p-6 max-w-md mx-4">
+            <h3 class="text-lg font-semibold mb-3">Camera & Microphone Permissions Required</h3>
+            <p class="text-gray-600 mb-4">To make calls, please allow camera and microphone access:</p>
+            <div class="bg-gray-50 p-4 rounded-lg mb-4">
+                <h4 class="font-medium mb-2">Instructions:</h4>
+                <ul class="text-sm text-gray-600 list-disc list-inside space-y-1">
+                    <li>Look for the camera/microphone icon in your browser's address bar</li>
+                    <li>Click the icon and select "Allow"</li>
+                    <li>Refresh the page and try the call again</li>
+                    <li>Ensure you're using HTTPS (required for media permissions)</li>
+                </ul>
+            </div>
+            <div class="flex justify-end space-x-3">
+                <button id="closePermissionHelp" class="px-4 py-2 text-gray-600 hover:text-gray-800">Close</button>
+                <button id="retryCall" class="px-4 py-2 bg-purple-600 text-white rounded-lg hover:bg-purple-700">Retry Call</button>
+            </div>
+        </div>
+    `;
+    
+    document.body.appendChild(modal);
+    
+    // Add event listeners
+    modal.querySelector('#closePermissionHelp').addEventListener('click', () => {
+        document.body.removeChild(modal);
+    });
+    
+    modal.querySelector('#retryCall').addEventListener('click', () => {
+        document.body.removeChild(modal);
+        // Retry the last call (you might want to store the last call type)
+        if (currentChat) {
+            startVideoCall(); // or startVoiceCall() based on context
+        }
+    });
+    
+    // Close modal when clicking outside
+    modal.addEventListener('click', (e) => {
+        if (e.target === modal) {
+            document.body.removeChild(modal);
+        }
+    });
+}
+
+// Simulate call setup for demo purposes
+function simulateCallSetup() {
+    console.log('Simulating call setup...');
+    // In a real implementation, this would set up WebRTC peer connection
+    // and signal the other user through Firebase or a signaling server
+}
+
+// Also update the endCall function to handle voice call cleanup
+function endCall() {
+    console.log('Ending call');
+    
+    // Stop all media tracks
+    if (localStream) {
+        localStream.getTracks().forEach(track => {
+            track.stop();
+        });
+        localStream = null;
+    }
+    
+    // Hide call container
+    const videoCallContainer = document.getElementById('videoCallContainer');
+    if (videoCallContainer) {
+        videoCallContainer.style.display = 'none';
+        
+        // Clean up voice call info if exists
+        const voiceCallInfo = document.getElementById('voiceCallInfo');
+        if (voiceCallInfo) {
+            voiceCallInfo.remove();
+        }
+        
+        // Show local video again if it was hidden
+        const localVideo = document.getElementById('localVideo');
+        if (localVideo) {
+            localVideo.style.display = 'block';
+            localVideo.srcObject = null;
+        }
+    }
+    
+    // Reset call state
+    isInCall = false;
+    isMuted = false;
+    isVideoOff = false;
+    
+    // Reset button states
+    const muteBtn = document.getElementById('muteBtn');
+    const videoToggleBtn = document.getElementById('videoToggleBtn');
+    if (muteBtn) muteBtn.innerHTML = '<i class="fas fa-microphone"></i>';
+    if (videoToggleBtn) videoToggleBtn.innerHTML = '<i class="fas fa-video"></i>';
+    
+    showToast('Call ended', 'info');
+}
+
+// All Friends Display Implementation
+function openAllFriendsModal() {
+    console.log('Opening all friends modal');
+    if (allFriendsModal) allFriendsModal.classList.remove('hidden');
+    renderAllFriends();
+}
+
+function renderAllFriends() {
+    const allFriendsList = document.getElementById('allFriendsList');
+    const noAllFriendsMessage = document.getElementById('noAllFriendsMessage');
+    
+    if (!allFriendsList || !noAllFriendsMessage) return;
+    
+    allFriendsList.innerHTML = '';
+    
+    if (friends.length === 0) {
+        noAllFriendsMessage.classList.remove('hidden');
+        return;
+    }
+    
+    noAllFriendsMessage.classList.add('hidden');
+    
+    console.log('Rendering', friends.length, 'friends in all friends modal');
+    
+    friends.forEach(friend => {
+        const friendItem = document.createElement('div');
+        friendItem.className = 'contact-item';
+        friendItem.dataset.friendId = friend.id;
+        friendItem.innerHTML = `
+            <div class="contact-avatar">
+                <img class="w-12 h-12 rounded-full object-cover" src="${friend.photoURL || `https://ui-avatars.com/api/?name=${encodeURIComponent(friend.displayName)}&background=7C3AED&color=fff`}" alt="${friend.displayName}">
+                ${friend.status === 'online' ? '<div class="online-indicator"></div>' : ''}
+            </div>
+            <div class="contact-info">
+                <div class="contact-name">${friend.displayName}</div>
+                <div class="contact-status">${friend.status || 'offline'}</div>
+            </div>
+            <div class="flex space-x-2">
+                <button class="w-10 h-10 rounded-full bg-purple-100 text-purple-600 flex items-center justify-center hover:bg-purple-200 transition-colors message-friend-all" data-name="${friend.displayName}" data-id="${friend.id}">
+                    <i class="fas fa-comment"></i>
+                </button>
+                <button class="w-10 h-10 rounded-full bg-green-100 text-green-600 flex items-center justify-center hover:bg-green-200 transition-colors call-friend-all" data-name="${friend.displayName}" data-id="${friend.id}">
+                    <i class="fas fa-phone"></i>
+                </button>
+            </div>
+        `;
+        
+        allFriendsList.appendChild(friendItem);
+    });
+
+    // Use event delegation for dynamic buttons
+    allFriendsList.addEventListener('click', function(e) {
+        if (e.target.closest('.message-friend-all')) {
+            const btn = e.target.closest('.message-friend-all');
+            const friendId = btn.dataset.id;
+            const friendName = btn.dataset.name;
+            console.log('Message friend from all friends:', friendName, friendId);
+            startChat(friendId, friendName);
+            if (allFriendsModal) allFriendsModal.classList.add('hidden');
+        }
+        
+        if (e.target.closest('.call-friend-all')) {
+            const btn = e.target.closest('.call-friend-all');
+            const friendId = btn.dataset.id;
+            const friendName = btn.dataset.name;
+            console.log('Call friend from all friends:', friendName, friendId);
+            startCall(friendId, friendName);
+        }
+    });
+}
+
+function searchAllFriends(query) {
+    const allFriendsList = document.getElementById('allFriendsList');
+    const noAllFriendsMessage = document.getElementById('noAllFriendsMessage');
+    
+    if (!allFriendsList || !noAllFriendsMessage) return;
+    
+    if (!query) {
+        renderAllFriends();
+        return;
+    }
+    
+    const filteredFriends = friends.filter(friend => 
+        friend.displayName.toLowerCase().includes(query.toLowerCase()) ||
+        (friend.email && friend.email.toLowerCase().includes(query.toLowerCase())) ||
+        (friend.phone && friend.phone.includes(query))
+    );
+    
+    allFriendsList.innerHTML = '';
+    
+    if (filteredFriends.length === 0) {
+        noAllFriendsMessage.classList.remove('hidden');
+        noAllFriendsMessage.innerHTML = `
+            <i class="fas fa-search text-4xl mb-3 text-gray-300 block"></i>
+            <p>No friends found</p>
+            <p class="text-sm mt-1">Try a different search term</p>
+        `;
+        return;
+    }
+    
+    noAllFriendsMessage.classList.add('hidden');
+    
+    console.log('Displaying', filteredFriends.length, 'filtered friends');
+    
+    filteredFriends.forEach(friend => {
+        const friendItem = document.createElement('div');
+        friendItem.className = 'contact-item';
+        friendItem.dataset.friendId = friend.id;
+        friendItem.innerHTML = `
+            <div class="contact-avatar">
+                <img class="w-12 h-12 rounded-full object-cover" src="${friend.photoURL || `https://ui-avatars.com/api/?name=${encodeURIComponent(friend.displayName)}&background=7C3AED&color=fff`}" alt="${friend.displayName}">
+                ${friend.status === 'online' ? '<div class="online-indicator"></div>' : ''}
+            </div>
+            <div class="contact-info">
+                <div class="contact-name">${friend.displayName}</div>
+                <div class="contact-status">${friend.status || 'offline'}</div>
+            </div>
+            <div class="flex space-x-2">
+                <button class="w-10 h-10 rounded-full bg-purple-100 text-purple-600 flex items-center justify-center hover:bg-purple-200 transition-colors message-friend-all" data-name="${friend.displayName}" data-id="${friend.id}">
+                    <i class="fas fa-comment"></i>
+                </button>
+                <button class="w-10 h-10 rounded-full bg-green-100 text-green-600 flex items-center justify-center hover:bg-green-200 transition-colors call-friend-all" data-name="${friend.displayName}" data-id="${friend.id}">
+                    <i class="fas fa-phone"></i>
+                </button>
+            </div>
+        `;
+        
+        allFriendsList.appendChild(friendItem);
+    });
+
+    // Re-add event listeners using event delegation
+    allFriendsList.addEventListener('click', function(e) {
+        if (e.target.closest('.message-friend-all')) {
+            const btn = e.target.closest('.message-friend-all');
+            const friendId = btn.dataset.id;
+            const friendName = btn.dataset.name;
+            console.log('Message friend from filtered results:', friendName, friendId);
+            startChat(friendId, friendName);
+            if (allFriendsModal) allFriendsModal.classList.add('hidden');
+        }
+        
+        if (e.target.closest('.call-friend-all')) {
+            const btn = e.target.closest('.call-friend-all');
+            const friendId = btn.dataset.id;
+            const friendName = btn.dataset.name;
+            console.log('Call friend from filtered results:', friendName, friendId);
+            startCall(friendId, friendName);
+        }
+    });
+}
+
+// Add mobile-specific optimizations
+function optimizeForMobile() {
+    // Prevent zoom on input focus
+    document.addEventListener('touchstart', function(e) {
+        if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA') {
+            document.body.style.zoom = '100%';
+        }
+    }, { passive: true });
+
+    // Improve touch scrolling
+    document.addEventListener('touchmove', function(e) {
+        // Allow natural scrolling
+    }, { passive: true });
+
+    // Handle viewport height issues on mobile
+    function setViewportHeight() {
+        let vh = window.innerHeight * 0.01;
+        document.documentElement.style.setProperty('--vh', `${vh}px`);
+    }
+
+    setViewportHeight();
+    window.addEventListener('resize', setViewportHeight);
+    window.addEventListener('orientationchange', setViewportHeight);
+}
+
+// Initialize mobile optimizations
+if ('ontouchstart' in window || navigator.maxTouchPoints > 0) {
+    console.log('Mobile device detected, applying optimizations');
+    optimizeForMobile();
+}
+
+console.log('Chat application JavaScript loaded successfully');
