@@ -4,6 +4,8 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Kynecta - Advanced Mood-Based Chat</title>
+    <!-- Add this to your HTML head -->
+<script src="https://cdn.jsdelivr.net/npm/qrcode@1.5.3/build/qrcode.min.js"></script>
     <script src="https://cdn.tailwindcss.com"></script>
     <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css" rel="stylesheet">
     
@@ -2479,7 +2481,273 @@
         </button>
     </div>
 </div>
+<!-- Catalogue Modal -->
+<!-- Updated Catalogue Modal -->
+<div id="catalogueModal" class="hidden fixed inset-0 bg-black bg-opacity-50 z-50 flex items-center justify-center p-4">
+    <div class="bg-white rounded-2xl w-full max-w-md max-h-[90vh] overflow-hidden">
+        <div class="kynecta-header p-6">
+            <div class="flex items-center justify-between">
+                <h3 class="text-xl font-semibold text-white">Add Product</h3>
+                <button id="closeCatalogue" class="text-white/80 hover:text-white transition-colors">
+                    <i class="fas fa-times text-xl"></i>
+                </button>
+            </div>
+        </div>
+        <div class="p-6">
+            <div class="space-y-4">
+                <div>
+                    <label class="block text-sm font-medium text-gray-700 mb-2">Product Name</label>
+                    <input type="text" id="productName" class="w-full p-3 border-2 border-gray-200 rounded-xl focus:border-purple-500" placeholder="Enter product name">
+                </div>
+                <div>
+                    <label class="block text-sm font-medium text-gray-700 mb-2">Price</label>
+                    <input type="number" id="productPrice" class="w-full p-3 border-2 border-gray-200 rounded-xl focus:border-purple-500" placeholder="0.00">
+                </div>
+                <div>
+                    <label class="block text-sm font-medium text-gray-700 mb-2">Description</label>
+                    <textarea id="productDescription" class="w-full p-3 border-2 border-gray-200 rounded-xl focus:border-purple-500" placeholder="Product description" rows="3"></textarea>
+                </div>
+            </div>
+            <button id="saveCatalogue" class="w-full mt-6 bg-purple-600 text-white py-3 rounded-xl font-semibold hover:bg-purple-700 transition-colors">
+                Add to Catalogue
+            </button>
+        </div>
+    </div>
+</div>
 
+<!-- Updated Advertise Modal -->
+<div id="advertiseModal" class="hidden fixed inset-0 bg-black bg-opacity-50 z-50 flex items-center justify-center p-4">
+    <div class="bg-white rounded-2xl w-full max-w-md max-h-[90vh] overflow-hidden">
+        <div class="kynecta-header p-6">
+            <div class="flex items-center justify-between">
+                <h3 class="text-xl font-semibold text-white">Create Advertisement</h3>
+                <button id="closeAdvertise" class="text-white/80 hover:text-white transition-colors">
+                    <i class="fas fa-times text-xl"></i>
+                </button>
+            </div>
+        </div>
+        <div class="p-6">
+            <div class="space-y-4">
+                <div>
+                    <label class="block text-sm font-medium text-gray-700 mb-2">Ad Title</label>
+                    <input type="text" id="adTitle" class="w-full p-3 border-2 border-gray-200 rounded-xl focus:border-purple-500" placeholder="Enter ad title">
+                </div>
+                <div>
+                    <label class="block text-sm font-medium text-gray-700 mb-2">Target Audience</label>
+                    <select id="targetAudience" class="w-full p-3 border-2 border-gray-200 rounded-xl focus:border-purple-500">
+                        <option value="all">All Users</option>
+                        <option value="local">Local Area</option>
+                        <option value="specific">Specific Interests</option>
+                    </select>
+                </div>
+                <div>
+                    <label class="block text-sm font-medium text-gray-700 mb-2">Budget ($)</label>
+                    <input type="number" id="adBudget" class="w-full p-3 border-2 border-gray-200 rounded-xl focus:border-purple-500" placeholder="0.00">
+                </div>
+            </div>
+            <button id="launchCampaign" class="w-full mt-6 bg-green-600 text-white py-3 rounded-xl font-semibold hover:bg-green-700 transition-colors">
+                Launch Campaign
+            </button>
+        </div>
+    </div>
+</div>
+
+<!-- Updated Labels Modal -->
+<div id="labelsModal" class="hidden fixed inset-0 bg-black bg-opacity-50 z-50 flex items-center justify-center p-4">
+    <div class="bg-white rounded-2xl w-full max-w-md max-h-[90vh] overflow-hidden">
+        <div class="kynecta-header p-6">
+            <div class="flex items-center justify-between">
+                <h3 class="text-xl font-semibold text-white">Create Label</h3>
+                <button id="closeLabels" class="text-white/80 hover:text-white transition-colors">
+                    <i class="fas fa-times text-xl"></i>
+                </button>
+            </div>
+        </div>
+        <div class="p-6">
+            <div class="space-y-4">
+                <div>
+                    <label class="block text-sm font-medium text-gray-700 mb-2">Label Name</label>
+                    <input type="text" id="newLabelName" class="w-full p-3 border-2 border-gray-200 rounded-xl focus:border-purple-500" placeholder="Enter label name">
+                </div>
+                <div>
+                    <label class="block text-sm font-medium text-gray-700 mb-2">Color</label>
+                    <select id="labelColor" class="w-full p-3 border-2 border-gray-200 rounded-xl focus:border-purple-500">
+                        <option value="purple">Purple</option>
+                        <option value="blue">Blue</option>
+                        <option value="green">Green</option>
+                        <option value="red">Red</option>
+                        <option value="orange">Orange</option>
+                    </select>
+                </div>
+            </div>
+            <button id="createLabel" class="w-full mt-6 bg-purple-600 text-white py-3 rounded-xl font-semibold hover:bg-purple-700 transition-colors">
+                Create Label
+            </button>
+        </div>
+    </div>
+</div>
+
+<!-- Updated Greeting Modal -->
+<div id="greetingModal" class="hidden fixed inset-0 bg-black bg-opacity-50 z-50 flex items-center justify-center p-4">
+    <div class="bg-white rounded-2xl w-full max-w-md max-h-[90vh] overflow-hidden">
+        <div class="kynecta-header p-6">
+            <div class="flex items-center justify-between">
+                <h3 class="text-xl font-semibold text-white">Greeting Message</h3>
+                <button id="closeGreeting" class="text-white/80 hover:text-white transition-colors">
+                    <i class="fas fa-times text-xl"></i>
+                </button>
+            </div>
+        </div>
+        <div class="p-6">
+            <div class="mb-4">
+                <label class="block text-sm font-medium text-gray-700 mb-2">Welcome Message</label>
+                <textarea id="greetingMessage" class="w-full p-3 border-2 border-gray-200 rounded-xl focus:border-purple-500" rows="4" placeholder="Welcome to our business! How can we help you today?"></textarea>
+            </div>
+            <button id="saveGreeting" class="w-full bg-purple-600 text-white py-3 rounded-xl font-semibold hover:bg-purple-700 transition-colors">
+                Save Greeting
+            </button>
+        </div>
+    </div>
+</div>
+
+<!-- Updated Away Modal -->
+<div id="awayModal" class="hidden fixed inset-0 bg-black bg-opacity-50 z-50 flex items-center justify-center p-4">
+    <div class="bg-white rounded-2xl w-full max-w-md max-h-[90vh] overflow-hidden">
+        <div class="kynecta-header p-6">
+            <div class="flex items-center justify-between">
+                <h3 class="text-xl font-semibold text-white">Away Message</h3>
+                <button id="closeAway" class="text-white/80 hover:text-white transition-colors">
+                    <i class="fas fa-times text-xl"></i>
+                </button>
+            </div>
+        </div>
+        <div class="p-6">
+            <div class="mb-4">
+                <label class="block text-sm font-medium text-gray-700 mb-2">Away Message</label>
+                <textarea id="awayMessage" class="w-full p-3 border-2 border-gray-200 rounded-xl focus:border-purple-500" rows="4" placeholder="We're currently away. We'll get back to you soon!"></textarea>
+            </div>
+            <div class="mb-4">
+                <label class="flex items-center">
+                    <input type="checkbox" id="awayEnabled" class="rounded border-gray-300 text-purple-600 focus:ring-purple-500">
+                    <span class="ml-2 text-sm text-gray-700">Enable away message</span>
+                </label>
+            </div>
+            <button id="saveAway" class="w-full bg-purple-600 text-white py-3 rounded-xl font-semibold hover:bg-purple-700 transition-colors">
+                Save Away Message
+            </button>
+        </div>
+    </div>
+</div>
+<!-- Business Profile Modal -->
+<div id="businessProfileModal" class="hidden fixed inset-0 bg-black bg-opacity-50 z-50 flex items-center justify-center p-4">
+    <div class="bg-white rounded-2xl w-full max-w-md max-h-[90vh] overflow-hidden">
+        <div class="kynecta-header p-6">
+            <div class="flex items-center justify-between">
+                <h3 class="text-xl font-semibold text-white">Business Profile</h3>
+                <button id="closeBusinessProfile" class="text-white/80 hover:text-white transition-colors">
+                    <i class="fas fa-times text-xl"></i>
+                </button>
+            </div>
+        </div>
+        <div class="overflow-y-auto max-h-[60vh] custom-scrollbar p-6">
+            <div class="text-center mb-6">
+                <img id="businessProfileAvatar" src="" alt="Business" class="w-20 h-20 rounded-full mx-auto mb-4 object-cover">
+                <h3 id="businessProfileName" class="text-xl font-semibold mb-2"></h3>
+                <p id="businessProfileType" class="text-gray-500">Business Account</p>
+            </div>
+            
+            <div class="space-y-4">
+                <div id="businessGreetingSection" class="hidden">
+                    <h4 class="font-semibold mb-2 flex items-center">
+                        <i class="fas fa-comment-dots text-purple-500 mr-2"></i>
+                        Greeting Message
+                    </h4>
+                    <p id="businessGreetingMessage" class="text-gray-600 text-sm bg-gray-50 p-3 rounded-lg"></p>
+                </div>
+                
+                <div id="businessAwaySection" class="hidden">
+                    <h4 class="font-semibold mb-2 flex items-center">
+                        <i class="fas fa-clock text-yellow-500 mr-2"></i>
+                        Away Message
+                    </h4>
+                    <p id="businessAwayMessage" class="text-gray-600 text-sm bg-yellow-50 p-3 rounded-lg border-l-4 border-yellow-400"></p>
+                </div>
+                
+                <div id="businessCatalogueSection" class="hidden">
+                    <h4 class="font-semibold mb-2 flex items-center">
+                        <i class="fas fa-shopping-cart text-green-500 mr-2"></i>
+                        Products & Services
+                    </h4>
+                    <div id="businessCatalogueList" class="space-y-2">
+                        <!-- Products will be loaded here -->
+                    </div>
+                </div>
+            </div>
+        </div>
+        <div class="p-4 border-t border-gray-200">
+            <button id="startBusinessChat" class="w-full bg-gradient-to-r from-purple-500 to-green-500 text-white py-3 rounded-xl font-semibold hover:opacity-90 transition-opacity">
+                Start Conversation
+            </button>
+        </div>
+    </div>
+</div>
+<!-- AI Summary Modal -->
+<div id="aiSummaryModal" class="hidden fixed inset-0 bg-black bg-opacity-50 z-50 flex items-center justify-center p-4">
+    <div class="bg-white rounded-2xl w-full max-w-2xl max-h-[90vh] overflow-hidden">
+        <div class="kynecta-header p-6">
+            <div class="flex items-center justify-between">
+                <h3 class="text-xl font-semibold text-white flex items-center">
+                    <i class="fas fa-robot mr-2"></i>
+                    Conversation Summary
+                </h3>
+                <button id="closeAISummary" class="text-white/80 hover:text-white transition-colors">
+                    <i class="fas fa-times text-xl"></i>
+                </button>
+            </div>
+        </div>
+        <div class="overflow-y-auto max-h-[60vh] custom-scrollbar p-6">
+            <div id="aiSummaryContent" class="prose max-w-none">
+                <!-- Summary content will be inserted here -->
+            </div>
+        </div>
+        <div class="p-4 border-t border-gray-200 flex space-x-3">
+            <button id="copyAISummary" class="flex-1 bg-blue-600 text-white py-3 rounded-xl font-semibold hover:bg-blue-700 transition-colors">
+                <i class="fas fa-copy mr-2"></i>Copy Summary
+            </button>
+            <button id="closeAISummaryBtn" class="flex-1 bg-gray-500 text-white py-3 rounded-xl font-semibold hover:bg-gray-600 transition-colors">
+                Close
+            </button>
+        </div>
+    </div>
+</div>
+
+<!-- Smart Replies Modal -->
+<div id="smartRepliesModal" class="hidden fixed inset-0 bg-black bg-opacity-50 z-50 flex items-center justify-center p-4">
+    <div class="bg-white rounded-2xl w-full max-w-md max-h-[90vh] overflow-hidden">
+        <div class="kynecta-header p-6">
+            <div class="flex items-center justify-between">
+                <h3 class="text-xl font-semibold text-white flex items-center">
+                    <i class="fas fa-lightbulb mr-2"></i>
+                    Smart Reply Suggestions
+                </h3>
+                <button id="closeSmartReplies" class="text-white/80 hover:text-white transition-colors">
+                    <i class="fas fa-times text-xl"></i>
+                </button>
+            </div>
+        </div>
+        <div class="overflow-y-auto max-h-[60vh] custom-scrollbar p-6">
+            <p class="text-gray-600 mb-4">Tap any suggestion to use it:</p>
+            <div id="smartRepliesList" class="space-y-2">
+                <!-- Smart replies will be inserted here -->
+            </div>
+        </div>
+        <div class="p-4 border-t border-gray-200">
+            <button id="closeSmartRepliesBtn" class="w-full bg-gray-500 text-white py-3 rounded-xl font-semibold hover:bg-gray-600 transition-colors">
+                Close
+            </button>
+        </div>
+    </div>
+</div>
 <script src="chat.js"></script>
 </body>
 </html>
