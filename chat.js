@@ -15,11 +15,27 @@ const db = firebase.firestore();
 const storage = firebase.storage();
 const messaging = firebase.messaging();
 
-// Cloudinary Configuration
+db.enablePersistence()
+  .catch((err) => {
+    if (err.code == 'failed-precondition') {
+      console.log('Multiple tabs open, persistence can only be enabled in one tab at a time.');
+    } else if (err.code == 'unimplemented') {
+      console.log('The current browser doesn\'t support persistence');
+    }
+  });
+
+// ADD NETWORK STATUS MONITORING - Add this:
+firebase.firestore().enableNetwork()
+  .then(() => {
+    console.log('Firestore online');
+  })
+  .catch((err) => {
+    console.log('Firestore offline:', err);
+  });
 const cloudinaryConfig = {
     cloudName: 'dhjnxa5rh',
     apiKey: '817591969559894',
-    uploadPreset: 'kynecta_uploads'
+    uploadPreset: 'user_uploads'
 };
 
 // Global Variables
@@ -30,6 +46,8 @@ let currentChatId = null;
 let isInCall = false;
 let friends = [];
 let allUsers = [];
+let lastCallTime = 0;
+const CALL_COOLDOWN = 2000;
 let userSettings = {
     security: {
         notifications: true,
@@ -114,6 +132,7 @@ let callState = {
     remoteUserId: null
 };
 
+
 // DOM Elements
 const loadingScreen = document.getElementById('loadingScreen');
 const chatApp = document.getElementById('chatApp');
@@ -155,6 +174,52 @@ function safeElement(id) {
     }
     return element;
 }
+// ADD NETWORK STATUS DETECTION
+function setupNetworkMonitoring() {
+    // Handle online/offline events
+    window.addEventListener('online', () => {
+        console.log('App is online');
+        showToast('Connection restored', 'success');
+        // Try to reconnect Firestore
+        firebase.firestore().enableNetwork().then(() => {
+            console.log('Firestore reconnected');
+            // Reload user data
+            if (currentUser) {
+                loadUserData();
+            }
+        });
+    });
+
+    window.addEventListener('offline', () => {
+        console.log('App is offline');
+        showToast('You are offline', 'warning');
+    });
+
+    // Initial check
+    if (!navigator.onLine) {
+        showToast('You are currently offline', 'warning');
+    }
+}
+
+// Call this in initApp function:
+function initApp() {
+    console.log('Initializing app...');
+    
+    // ADD THIS LINE:
+    setupNetworkMonitoring();
+    
+    // Check if user is logged in
+    auth.onAuthStateChanged(user => {
+        if (user) {
+            console.log('User authenticated:', user.uid);
+            currentUser = user;
+            loadUserData();
+        } else {
+            console.log('No user found, redirecting to login');
+            window.location.href = 'login.html';
+        }
+    });
+}
 
 // Safe version of classList operations
 function safeClassList(id, action, className) {
@@ -183,38 +248,183 @@ function initApp() {
     });
 }
 
-// Add this function before loadUserData
-function listenForIncomingCalls() {
-    if (!currentUser) {
-        console.warn('No current user for call listening');
-        return;
-    }
+// ADD THESE NEW FUNCTIONS FOR CALL SIGNALING:
 
-    console.log('Setting up incoming call listeners for user:', currentUser.uid);
+// Listen for WebRTC offer from caller
+async function listenForCallOffer(callId, callerId) {
+    console.log('Listening for WebRTC offer from caller:', callerId);
+    
+    const unsubscribe = db.collection('calls').doc(callId)
+        .onSnapshot(async (doc) => {
+            if (doc.exists) {
+                const callData = doc.data();
+                
+                // Handle WebRTC offer
+                if (callData.offer && !peerConnection) {
+                    console.log('Received WebRTC offer from caller');
+                    await createAnswer(callId, callData.offer, callerId);
+                }
+                
+                // Handle ICE candidates from caller
+                if (callData.iceCandidates && callData.iceCandidates.length > 0) {
+                    console.log('Processing ICE candidates from caller');
+                    await addIceCandidates(callData.iceCandidates);
+                }
+                
+                // Handle call end
+                if (callData.status === 'ended' || callData.status === 'rejected') {
+                    console.log('Call ended by remote party');
+                    endCall();
+                    unsubscribe();
+                }
+            }
+        }, (error) => {
+            console.error('Error listening for call offer:', error);
+        });
+}
 
+// Create WebRTC answer
+async function createAnswer(callId, offer, callerId) {
     try {
-        const unsubscribe = db.collection('calls')
-            .where('calleeId', '==', currentUser.uid)
-            .where('status', '==', 'ringing')
-            .onSnapshot(snapshot => {
-                snapshot.docChanges().forEach(change => {
-                    if (change.type === 'added') {
-                        const callData = change.doc.data();
-                        console.log('Incoming call detected:', callData);
-                        showIncomingCallNotification(callData);
-                    }
-                });
+        console.log('Creating WebRTC answer');
+        
+        // Create peer connection
+        if (!peerConnection) {
+    peerConnection = new RTCPeerConnection(rtcConfig);
+}
+
+        // Add local stream tracks
+        if (localStream) {
+            localStream.getTracks().forEach(track => {
+                peerConnection.addTrack(track, localStream);
             });
-
-        console.log('Call listeners activated');
-        return unsubscribe;
-
+        }
+        
+        // Handle incoming remote stream
+        peerConnection.ontrack = (event) => {
+            // IN createAnswer FUNCTION, UPDATE THE ontrack handler:
+peerConnection.ontrack = (event) => {
+    console.log('Received remote stream in answer');
+    remoteStream = event.streams[0];
+    
+    // Handle audio for voice calls
+    if (callType === 'voice') {
+        let remoteAudio = document.getElementById('remoteAudio');
+        if (!remoteAudio) {
+            remoteAudio = document.createElement('audio');
+            remoteAudio.id = 'remoteAudio';
+            remoteAudio.autoplay = true;
+            remoteAudio.controls = true;
+            document.body.appendChild(remoteAudio);
+        }
+        remoteAudio.srcObject = remoteStream;
+    }
+    
+    // Handle video for video calls
+    const remoteVideo = document.getElementById('remoteVideo');
+    if (remoteVideo && callType === 'video') {
+        remoteVideo.srcObject = remoteStream;
+        remoteVideo.play().catch(e => console.log('Remote video play error:', e));
+    }
+    
+    showToast('Connected to caller!', 'success');
+}
+};
+        
+        // Handle ICE candidates
+        peerConnection.onicecandidate = (event) => {
+            if (event.candidate) {
+                console.log('Sending ICE candidate');
+                db.collection('calls').doc(callId).update({
+                    answerIceCandidates: firebase.firestore.FieldValue.arrayUnion({
+                        candidate: event.candidate.candidate,
+                        sdpMid: event.candidate.sdpMid,
+                        sdpMLineIndex: event.candidate.sdpMLineIndex
+                    })
+                });
+            }
+        };
+        
+        // Set remote description from offer
+        await peerConnection.setRemoteDescription(offer);
+        
+        // Create and set local answer
+        const answer = await peerConnection.createAnswer();
+        await peerConnection.setLocalDescription(answer);
+        
+        // Send answer back to caller
+        await db.collection('calls').doc(callId).update({
+            answer: {
+                type: answer.type,
+                sdp: answer.sdp
+            },
+            status: 'connected',
+            connectedAt: firebase.firestore.FieldValue.serverTimestamp()
+        });
+        
+        console.log('WebRTC answer sent successfully');
+        
     } catch (error) {
-        console.error('Error setting up call listeners:', error);
+        console.error('Error creating WebRTC answer:', error);
+        showToast('Error establishing call connection', 'error');
+    }
+}
+// FIXED: Listen for WebRTC offer from caller
+async function listenForCallOffer(callId, callerId) {
+    console.log('Listening for WebRTC offer in call:', callId, 'from:', callerId);
+    
+    const unsubscribe = db.collection('calls').doc(callId)
+        .onSnapshot(async (doc) => {
+            if (doc.exists) {
+                const callData = doc.data();
+                console.log('Call data update:', callData);
+                
+                // Handle WebRTC offer
+                if (callData.offer && !peerConnection) {
+                    console.log('Received WebRTC offer from caller');
+                    await createAnswer(callId, callData.offer, callerId);
+                }
+                
+                // Handle ICE candidates from caller
+                if (callData.iceCandidates && callData.iceCandidates.length > 0) {
+                    console.log('Processing ICE candidates from caller');
+                    await addIceCandidates(callData.iceCandidates);
+                }
+                
+                // Handle call end
+                if (callData.status === 'ended' || callData.status === 'rejected') {
+                    console.log('Call ended by remote party');
+                    endCall();
+                    unsubscribe();
+                }
+            }
+        }, (error) => {
+            console.error('Error listening for call offer:', error);
+        });
+}
+
+// Add ICE candidates from remote peer
+async function addIceCandidates(iceCandidates) {
+    if (!peerConnection) return;
+    
+    try {
+        for (const candidateData of iceCandidates) {
+            await peerConnection.addIceCandidate(new RTCIceCandidate({
+                candidate: candidateData.candidate,
+                sdpMid: candidateData.sdpMid,
+                sdpMLineIndex: candidateData.sdpMLineIndex
+            }));
+        }
+        console.log('Added ICE candidates from remote peer');
+    } catch (error) {
+        console.error('Error adding ICE candidates:', error);
     }
 }
 
+// REPLACE THE showIncomingCallNotification FUNCTION:
 function showIncomingCallNotification(callData) {
+    console.log('Showing incoming call notification:', callData);
+    
     // Remove any existing call notifications
     const existingNotification = document.querySelector('.incoming-call-notification');
     if (existingNotification) {
@@ -232,17 +442,19 @@ function showIncomingCallNotification(callData) {
                         <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 5a2 2 0 012-2h3.28a1 1 0 01.948.684l1.498 4.493a1 1 0 01-.502 1.21l-2.257 1.13a11.042 11.042 0 005.516 5.516l1.13-2.257a1 1 0 011.21-.502l4.493 1.498a1 1 0 01.684.949V19a2 2 0 01-2 2h-1C9.716 21 3 14.284 3 6V5z"></path>
                     </svg>
                 </div>
-                <h3 class="text-xl font-bold text-gray-900 mb-2">Incoming Call</h3>
+                <h3 class="text-xl font-bold text-gray-900 mb-2">Incoming ${callData.callType === 'video' ? 'Video' : 'Voice'} Call</h3>
                 <p class="text-gray-600 mb-1">${callData.callerName || 'Unknown Caller'}</p>
                 <p class="text-sm text-gray-500 mb-4">is calling you...</p>
                 <div class="flex gap-3 justify-center">
-                    <button onclick="answerCall('${callData.callId}')" class="bg-green-500 hover:bg-green-600 text-white px-5 py-2 rounded-full flex items-center gap-2 transition-colors">
+                <button onclick="window.answerIncomingCall('${callData.callId}', '${callData.callerId}', '${callData.callType}')"
+                            class="bg-green-500 hover:bg-green-600 text-white px-5 py-2 rounded-full flex items-center gap-2 transition-colors">
                         <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                             <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 5a2 2 0 012-2h3.28a1 1 0 01.948.684l1.498 4.493a1 1 0 01-.502 1.21l-2.257 1.13a11.042 11.042 0 005.516 5.516l1.13-2.257a1 1 0 011.21-.502l4.493 1.498a1 1 0 01.684.949V19a2 2 0 01-2 2h-1C9.716 21 3 14.284 3 6V5z"></path>
                         </svg>
                         Answer
                     </button>
-                    <button onclick="rejectCall('${callData.callId}')" class="bg-red-500 hover:bg-red-600 text-white px-5 py-2 rounded-full flex items-center gap-2 transition-colors">
+                    <button onclick="window.declineIncomingCall('${callData.callId}')"
+                            class="bg-red-500 hover:bg-red-600 text-white px-5 py-2 rounded-full flex items-center gap-2 transition-colors">
                         <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                             <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path>
                         </svg>
@@ -253,52 +465,176 @@ function showIncomingCallNotification(callData) {
         </div>
     `;
     document.body.appendChild(callNotification);
+    
+    // Auto-decline after 30 seconds if no response
+    setTimeout(() => {
+        if (document.body.contains(callNotification)) {
+            console.log('Auto-declining unanswered call');
+            declineIncomingCall(callData.callId);
+        }
+    }, 30000);
 }
 
-// Add answer and reject functions
-function answerCall(callId) {
-    console.log('Answering call:', callId);
-    // Update call status to answered
-    updateDoc(doc(db, 'calls', callId), {
-        status: 'answered',
-        answeredAt: serverTimestamp()
-    });
-    
-    // Remove notification
-    const notification = document.querySelector('.incoming-call-notification');
-    if (notification) {
-        notification.remove();
+// ADD THIS: Global functions for answer/decline that can be called from HTML
+window.answerIncomingCall = async function(callId, callerId, callType) {
+    try {
+        console.log('Answering call:', callId);
+        
+        // Ensure media access
+        if (!localStream) {
+            localStream = await navigator.mediaDevices.getUserMedia({
+                audio: true,
+                video: callType === 'video'
+            });
+        }
+        
+        // Remove notification
+        const notification = document.querySelector('.incoming-call-notification');
+        if (notification) {
+            notification.remove();
+        }
+        
+        // Update call status
+        await db.collection('calls').doc(callId).update({
+            status: 'answered',
+            answeredAt: firebase.firestore.FieldValue.serverTimestamp()
+        });
+        
+        // Set current chat to caller
+        const callerDoc = await db.collection('users').doc(callerId).get();
+        if (callerDoc.exists) {
+            const callerData = callerDoc.data();
+            currentChat = {
+                id: [currentUser.uid, callerId].sort().join('_'),
+                friendId: callerId,
+                name: callerData.displayName || 'Caller'
+            };
+        }
+        
+        showToast('Call answered! Connecting...', 'success');
+        
+        // Start the call
+        if (callType === 'video') {
+            await startVideoCall();
+        } else {
+            await startVoiceCall();
+        }
+        
+        // Listen for WebRTC offer
+        listenForCallOffer(callId, callerId);
+        
+    } catch (error) {
+        console.error('Error answering call:', error);
+        showToast('Error answering call', 'error');
     }
-    
-    // TODO: Initialize WebRTC call here
-    showToast('Call answered!', 'success');
 }
 
-function rejectCall(callId) {
-    console.log('Rejecting call:', callId);
-    // Update call status to rejected
-    updateDoc(doc(db, 'calls', callId), {
-        status: 'rejected',
-        endedAt: serverTimestamp()
-    });
-    
-    // Remove notification
-    const notification = document.querySelector('.incoming-call-notification');
-    if (notification) {
-        notification.remove();
+window.declineIncomingCall = async function(callId) {
+    try {
+        console.log('Declining call:', callId);
+        
+        // Remove notification
+        const notification = document.querySelector('.incoming-call-notification');
+        if (notification) {
+            notification.remove();
+        }
+        
+        // Update call status to rejected
+        await db.collection('calls').doc(callId).update({
+            status: 'rejected',
+            endedAt: firebase.firestore.FieldValue.serverTimestamp(),
+            endedBy: currentUser.uid
+        });
+        
+        showToast('Call declined', 'info');
+        
+    } catch (error) {
+        console.error('Error declining call:', error);
+        showToast('Error declining call', 'error');
     }
-    
-    showToast('Call rejected', 'info');
 }
-// ----------------------
-// CALL / SIGNALING HELPERS
-// Place this directly AFTER `function listenForIncomingCalls() { ... }`
-// ----------------------
 
-/**
- * Create a call document and return the callId.
- * callType: 'voice' or 'video'
- */
+// REPLACE answerCall FUNCTION:
+async function answerIncomingCall(callId, callerId, callType) {
+    try {
+        console.log('Answering incoming call:', callId, 'from:', callerId, 'type:', callType);
+        // Ensure media access before answering
+if (!localStream) {
+    localStream = await navigator.mediaDevices.getUserMedia({
+        audio: true,
+        video: callType === 'video'
+    });
+}
+
+        
+        // Remove notification
+        const notification = document.querySelector('.incoming-call-notification');
+        if (notification) {
+            notification.remove();
+        }
+        
+        // Update call status to answered
+        await db.collection('calls').doc(callId).update({
+            status: 'answered',
+            answeredAt: firebase.firestore.FieldValue.serverTimestamp(),
+            calleeId: currentUser.uid
+        });
+        
+        // Set current chat to the caller
+        const callerDoc = await db.collection('users').doc(callerId).get();
+        if (callerDoc.exists) {
+            const callerData = callerDoc.data();
+            currentChat = {
+                id: [currentUser.uid, callerId].sort().join('_'),
+                friendId: callerId,
+                name: callerData.displayName || 'Caller'
+            };
+        }
+        
+        showToast('Call answered! Starting call...', 'success');
+        
+        // Start the appropriate call type
+        if (callType === 'video') {
+            await startVideoCall();
+        } else {
+            await startVoiceCall();
+        }
+        
+        // Listen for WebRTC offer from caller
+        listenForCallOffer(callId, callerId);
+        
+    } catch (error) {
+        console.error('Error answering call:', error);
+        showToast('Error answering call', 'error');
+    }
+}
+
+// REPLACE rejectCall FUNCTION:
+async function declineIncomingCall(callId) {
+    try {
+        console.log('Declining call:', callId);
+        
+        // Remove notification
+        const notification = document.querySelector('.incoming-call-notification');
+        if (notification) {
+            notification.remove();
+        }
+        
+        // Update call status to rejected
+        await db.collection('calls').doc(callId).update({
+            status: 'rejected',
+            endedAt: firebase.firestore.FieldValue.serverTimestamp(),
+            endedBy: currentUser.uid
+        });
+        
+        showToast('Call declined', 'info');
+        
+    } catch (error) {
+        console.error('Error declining call:', error);
+        showToast('Error declining call', 'error');
+    }
+}
+
 async function createCallDoc(callerId, calleeId, callType = 'voice') {
     try {
         const callRef = db.collection('calls').doc(); // auto id
@@ -336,51 +672,144 @@ async function updateCallStatus(callId, newStatus) {
     }
 }
 
-/**
- * Start a call to a friend (wraps createCallDoc + starts local getUserMedia)
- * Use startCall(friendId, 'voice') or startCall(friendId, 'video')
- */
+
 async function startCall(calleeId, callType = 'voice', calleeName = '') {
+    // Prevent multiple rapid calls
+    const now = Date.now();
+    if (now - lastCallTime < CALL_COOLDOWN) {
+        console.log('Call cooldown active, please wait...');
+        return;
+    }
+    lastCallTime = now;
+    
     try {
         if (!currentUser || !currentUser.uid) {
             showToast('You must be signed in to make calls', 'error');
             return;
         }
 
-        // create call doc so callee sees incoming call (your incoming listener is active). :contentReference[oaicite:4]{index=4}
+        // Create call document
         const callId = await createCallDoc(currentUser.uid, calleeId, callType);
 
-        // store call state locally so answer/reject buttons know which call to act on
+        // Store call state
         callState.isCaller = true;
         callState.callType = callType;
         callState.remoteUserId = calleeId;
         callState.callId = callId;
 
-        // optionally store in Firestore chat record or recentCalls collection
-        await db.collection('recentCalls').add({
-            callId, callerId: currentUser.uid, calleeId, callType, createdAt: firebase.firestore.FieldValue.serverTimestamp()
-        });
-
-        showToast(`Calling ${calleeName || calleeId}...`, 'info');
-
-        // Start local media for caller (permission prompt)
+        // Start local media
         if (callType === 'video') {
-            await startVideoCall(); // existing function in your file handles getUserMedia & UI. :contentReference[oaicite:5]{index=5}
+            await startVideoCall();
         } else {
-            await startVoiceCall(); // existing function handles mic-only. :contentReference[oaicite:6]{index=6}
+            await startVoiceCall();
         }
 
-        // IMPORTANT: signaling exchange (offer/answer/ICE) is not fully implemented in this snippet.
-        // This creates the call doc and starts local media — it plugs into your existing listeners which watch the 'calls' collection. 
+        // CREATE WEBRTC PEER CONNECTION
+        await createPeerConnection(callId, calleeId);
+        
+        showToast(`Calling ${calleeName || calleeId}...`, 'success');
+
     } catch (err) {
         console.error('startCall error', err);
         showToast('Error starting call', 'error');
+        lastCallTime = 0; // Reset cooldown on error
     }
 }
 
+// ADD THIS NEW FUNCTION AFTER startCall function:
+async function createPeerConnection(callId, calleeId) {
+    try {
+        // Create peer connection
+        peerConnection = new RTCPeerConnection(rtcConfig);
+        
+        // Add local stream tracks to connection
+        if (localStream) {
+            localStream.getTracks().forEach(track => {
+                peerConnection.addTrack(track, localStream);
+            });
+        }
+        
+        // Handle incoming remote stream - ADD THIS
+        peerConnection.ontrack = (event) => {
+            console.log('Received remote stream');
+            remoteStream = event.streams[0];
+            const remoteVideo = document.getElementById('remoteVideo');
+            if (remoteVideo) {
+                remoteVideo.srcObject = remoteStream;
+                remoteVideo.play().catch(e => console.log('Remote video play error:', e));
+            }
+        };
+        
+        // Handle ICE candidates - ADD THIS
+        peerConnection.onicecandidate = (event) => {
+            if (event.candidate) {
+                // Send ICE candidate to remote peer
+                db.collection('calls').doc(callId).update({
+                    iceCandidates: firebase.firestore.FieldValue.arrayUnion({
+                        candidate: event.candidate.candidate,
+                        sdpMid: event.candidate.sdpMid,
+                        sdpMLineIndex: event.candidate.sdpMLineIndex
+                    })
+                });
+            }
+        };
+        
+        // Create and send offer - ADD THIS
+        const offer = await peerConnection.createOffer();
+        await peerConnection.setLocalDescription(offer);
+        
+        // Save offer to Firestore for callee
+        await db.collection('calls').doc(callId).update({
+            offer: {
+                type: offer.type,
+                sdp: offer.sdp
+            },
+            callStatus: 'ringing',
+            updatedAt: firebase.firestore.FieldValue.serverTimestamp()
+        });
+        
+        console.log('WebRTC offer created and sent');
+        
+    } catch (error) {
+        console.error('Error creating peer connection:', error);
+        showToast('Error establishing call connection', 'error');
+    }
+}
+// ADD THIS FUNCTION BEFORE loadUserData
+function listenForIncomingCalls() {
+    console.log('Setting up incoming call listener for user:', currentUser.uid);
+    
+    db.collection('calls')
+        .where('calleeId', '==', currentUser.uid)
+        .where('status', '==', 'ringing')
+        .onSnapshot(snapshot => {
+            snapshot.docChanges().forEach(change => {
+                if (change.type === 'added') {
+                    const callData = change.doc.data();
+                    console.log('Incoming call received:', callData);
+                    
+                    // Show incoming call notification
+                    showIncomingCallNotification(callData);
+                }
+            });
+        }, error => {
+            console.error('Error listening for incoming calls:', error);
+        });
+}
+
+// THEN KEEP YOUR EXISTING loadUserData FUNCTION:
 async function loadUserData() {
     try {
         console.log('Loading user data for:', currentUser.uid);
+        
+        // Initialize call state
+        callState = {
+            isCaller: false,
+            isReceivingCall: false,
+            callType: null,
+            remoteUserId: null,
+            callId: null
+        };
         
         // Get user document from Firestore
         const userDoc = await db.collection('users').doc(currentUser.uid).get();
@@ -421,13 +850,10 @@ async function loadUserData() {
         loadChatsTemporary();
         requestNotificationPermission();
         setupToolsListeners();
-       
-        // Start listening for friend requests
+
         listenForFriendRequests();
-        
-        // NEW: Start listening for incoming calls
         listenForIncomingCalls();
-        
+
     } catch (error) {
         console.error('Error loading user data:', error);
         showToast('Error loading user data', 'error');
@@ -775,30 +1201,7 @@ function resetStatusCreation() {
     if (statusAudioPreview) statusAudioPreview.classList.add('hidden');
 }
 
-async function uploadToCloudinary(file, resourceType = 'image') {
-    return new Promise((resolve, reject) => {
-        const formData = new FormData();
-        formData.append('file', file);
-        formData.append('upload_preset', cloudinaryConfig.uploadPreset);
-        formData.append('cloud_name', cloudinaryConfig.cloudName);
-        
-        fetch(`https://api.cloudinary.com/v1_1/${cloudinaryConfig.cloudName}/${resourceType}/upload`, {
-            method: 'POST',
-            body: formData
-        })
-        .then(response => response.json())
-        .then(data => {
-            if (data.secure_url) {
-                resolve(data.secure_url);
-            } else {
-                reject(new Error('Upload failed'));
-            }
-        })
-        .catch(error => {
-            reject(error);
-        });
-    });
-}
+
 
 async function postStatus(type, content) {
     try {
@@ -1321,6 +1724,8 @@ function renderFriends(friendsToRender) {
             </div>
         `;
         
+        const avatar = friendItem.querySelector('.friend-avatar');
+        safeImageLoad(avatar, friend.photoURL, friend.displayName);
         friendsList.appendChild(friendItem);
     });
 
@@ -1395,9 +1800,17 @@ function renderFriends(friendsToRender) {
         }
     });
 }
-// Enhanced call functions for friends list
 function startVoiceCallWithFriend(friendId, friendName) {
+    // Prevent multiple calls
+    if (isInCall) {
+        showToast('You are already in a call', 'warning');
+        return;
+    }
+    
     console.log('Starting voice call with friend:', friendName, friendId);
+    
+    // Disable call buttons temporarily
+    disableCallButtons(true);
     
     // Set current chat for the call
     const chatId = [currentUser.uid, friendId].sort().join('_');
@@ -1409,6 +1822,18 @@ function startVoiceCallWithFriend(friendId, friendName) {
     
     showToast(`Calling ${friendName}...`, 'info');
     startVoiceCall();
+}
+
+function disableCallButtons(disabled) {
+    const callButtons = document.querySelectorAll('.friend-call-btn, .friend-video-call-btn');
+    callButtons.forEach(btn => {
+        btn.disabled = disabled;
+        if (disabled) {
+            btn.classList.add('opacity-50', 'cursor-not-allowed');
+        } else {
+            btn.classList.remove('opacity-50', 'cursor-not-allowed');
+        }
+    });
 }
 
 function startVideoCallWithFriend(friendId, friendName) {
@@ -2076,14 +2501,6 @@ function loadChatsTemporary() {
         });
 }
 
-function startCall(friendId, friendName) {
-    console.log('Starting call with:', friendName, friendId);
-    // For now, just show a toast notification
-    showToast(`Calling ${friendName}...`, 'info');
-    
-    // In a real implementation, you would integrate with a WebRTC service
-    // and show the call interface
-}
 
 // FIXED: Update Profile with proper error handling
 async function updateProfile() {
@@ -2131,74 +2548,194 @@ async function updateProfile() {
     }
 }
 
-// FIXED: Upload Profile Picture with proper error handling
+async function uploadToCloudinary(file, resourceType = 'image') {
+    return new Promise((resolve, reject) => {
+        const formData = new FormData();
+        formData.append('file', file);
+        formData.append('upload_preset', cloudinaryConfig.uploadPreset);
+        formData.append('cloud_name', cloudinaryConfig.cloudName);
+        
+        fetch(`https://api.cloudinary.com/v1_1/${cloudinaryConfig.cloudName}/${resourceType}/upload`, {
+            method: 'POST',
+            body: formData
+        })
+        .then(response => response.json())
+        .then(data => {
+            if (data.secure_url) {
+                resolve(data.secure_url);
+            } else {
+                reject(new Error('Upload failed'));
+            }
+        })
+        .catch(error => {
+            reject(error);
+        });
+    });
+}
+
+// REPLACE THIS:
+async function uploadProfilePicture(file) {
+    showToast("🔄 Uploading profile picture...", "info");
+
+    try {
+        // STEP 1: Upload to Cloudinary using the new function
+        const downloadURL = await uploadToCloudinary(file);
+        
+        console.log('✅ Cloudinary URL:', downloadURL);
+
+        // STEP 2: UPDATE FIREBASE FIRESTORE 
+        // This is how other users (who read your user data) will see the new picture.
+        await db.collection('users').doc(currentUser.uid).update({
+            photoURL: downloadURL
+        });
+        
+        // STEP 3: UPDATE LOCAL UI 
+        // This is how you see the picture change instantly.
+        currentUserData.photoURL = downloadURL; // Update local data
+        
+        // Find all elements that display the user's profile picture and update their source
+        const profilePics = document.querySelectorAll('.user-profile-pic');
+        profilePics.forEach(img => {
+            img.src = downloadURL;
+        });
+        
+        showToast("✅ Profile picture saved successfully!", "success");
+        
+        // Hide the modal/settings screen
+        document.getElementById('settingsModal').classList.add('hidden');
+
+    } catch (error) {
+        console.error("Profile picture upload failed:", error);
+        // Show the user-friendly error message from the catch block
+        showToast(`❌ Upload failed: ${error.message}`, "error");
+    }
+}
+function safeImageLoad(imgElement, src, fallbackText = '') {
+    if (!imgElement) return;
+    
+    imgElement.onerror = function() {
+        console.log('Image failed to load:', src);
+        // Use fallback avatar
+        if (fallbackText) {
+            const initial = fallbackText.charAt(0).toUpperCase();
+            imgElement.src = `https://ui-avatars.com/api/?name=${encodeURIComponent(fallbackText)}&background=7C3AED&color=fff`;
+        } else {
+            imgElement.src = 'https://ui-avatars.com/api/?name=User&background=7C3AED&color=fff';
+        }
+        imgElement.onerror = null; // Prevent infinite loop
+    };
+    
+    imgElement.src = src;
+}
+// WITH THIS:
 async function uploadProfilePicture(file) {
     try {
-        console.log('Uploading profile picture');
-        showToast('Uploading profile picture...', 'info');
+        showToast("🔄 Uploading profile picture...", "info");
         
-        // Upload to Firebase Storage
-        const storageRef = storage.ref();
-        const fileRef = storageRef.child(`profile_pictures/${currentUser.uid}/${file.name}`);
-        const snapshot = await fileRef.put(file);
-        const downloadURL = await snapshot.ref.getDownloadURL();
+        // Validate file
+        if (!file || !file.type.startsWith('image/')) {
+            throw new Error('Please select a valid image file (JPEG, PNG, etc.)');
+        }
         
-        // Update user document
+        if (file.size > 5 * 1024 * 1024) { // 5MB limit
+            throw new Error('Image size should be less than 5MB');
+        }
+
+        console.log('Starting upload for file:', file.name, file.type, file.size);
+        
+        // Upload to Cloudinary
+        const downloadURL = await uploadToCloudinary(file);
+        
+        console.log('✅ Cloudinary URL received:', downloadURL);
+
+        // Update Firebase Firestore
         await db.collection('users').doc(currentUser.uid).update({
             photoURL: downloadURL,
             updatedAt: firebase.firestore.FieldValue.serverTimestamp()
         });
         
-        // Update current user data
+        // Update local data
         currentUserData.photoURL = downloadURL;
         
-        // Update UI
-        const userAvatar = document.getElementById('userAvatar');
-        const settingsProfilePic = document.getElementById('settingsProfilePic');
-        const profilePicPreview = document.getElementById('profilePicPreview');
-        
-        if (userAvatar) userAvatar.src = downloadURL;
-        if (settingsProfilePic) settingsProfilePic.src = downloadURL;
-        if (profilePicPreview) profilePicPreview.src = downloadURL;
-        
-        console.log('Profile picture updated successfully');
-        showToast('Profile picture updated successfully', 'success');
-    } catch (error) {
-        console.error('Error uploading profile picture:', error);
-        showToast('Error uploading profile picture', 'error');
-    }
-}
-
-// FIXED: Upload Cover Picture with proper error handling
-async function uploadCoverPicture(file) {
-    try {
-        console.log('Uploading cover picture');
-        showToast('Uploading cover picture...', 'info');
-        
-        // Upload to Firebase Storage
-        const storageRef = storage.ref();
-        const fileRef = storageRef.child(`cover_pictures/${currentUser.uid}/${file.name}`);
-        const snapshot = await fileRef.put(file);
-        const downloadURL = await snapshot.ref.getDownloadURL();
-        
-        // Update user document
-        await db.collection('users').doc(currentUser.uid).update({
-            coverURL: downloadURL,
-            updatedAt: firebase.firestore.FieldValue.serverTimestamp()
+        // Update ALL profile pictures in UI - FIXED SELECTOR
+        const profilePics = document.querySelectorAll('img[src*="profile"], .user-profile-pic, #userAvatar, #settingsProfilePic, #profilePicPreview');
+        profilePics.forEach(img => {
+            console.log('Updating profile pic:', img);
+            img.src = downloadURL + '?t=' + Date.now(); // Cache bust
         });
         
-        // Update current user data
-        currentUserData.coverURL = downloadURL;
+        showToast("✅ Profile picture saved successfully!", "success");
         
-        // Update UI
-        const profileCoverPreview = document.getElementById('profileCoverPreview');
-        if (profileCoverPreview) profileCoverPreview.src = downloadURL;
+        // Close modal after successful upload
+        setTimeout(() => {
+            const settingsModal = document.getElementById('settingsModal');
+            if (settingsModal) settingsModal.classList.add('hidden');
+        }, 1500);
+
+    } catch (error) {
+        console.error("❌ Profile picture upload failed:", error);
+        showToast(`❌ Upload failed: ${error.message}`, "error");
+    }
+}
+// REPLACE THE uploadCoverPicture FUNCTION (around line 1250):
+async function uploadCoverPicture(file) {
+    try {
+        showToast("🔄 Uploading cover picture...", "info");
         
-        console.log('Cover picture updated successfully');
-        showToast('Cover picture updated successfully', 'success');
+        // Validate file
+        if (!file || !file.type.startsWith('image/')) {
+            throw new Error('Please select a valid image file');
+        }
+        
+        if (file.size > 5 * 1024 * 1024) {
+            throw new Error('Image size should be less than 5MB');
+        }
+
+        console.log('Starting cover upload to Cloudinary:', file.name);
+        
+        // UPLOAD TO CLOUDINARY (SAME AS PROFILE PICTURE)
+        const { cloudName, uploadPreset } = cloudinaryConfig;
+        const url = `https://api.cloudinary.com/v1_1/${cloudName}/image/upload`;
+
+        const formData = new FormData();
+        formData.append('file', file);
+        formData.append('upload_preset', uploadPreset);
+        formData.append('folder', 'USER_UPLOAD_cover_photos'); // Different folder
+        formData.append('timestamp', Date.now().toString());
+
+        const response = await fetch(url, {
+            method: 'POST',
+            body: formData
+        });
+
+        const data = await response.json();
+        
+        if (response.ok && data.secure_url) {
+            console.log('✅ Cover picture uploaded:', data.secure_url);
+            
+            // Update user document in Firestore
+            await db.collection('users').doc(currentUser.uid).update({
+                coverURL: data.secure_url,
+                updatedAt: firebase.firestore.FieldValue.serverTimestamp()
+            });
+            
+            // Update current user data
+            currentUserData.coverURL = data.secure_url;
+            
+            // Update UI
+            const profileCoverPreview = document.getElementById('profileCoverPreview');
+            if (profileCoverPreview) {
+                profileCoverPreview.src = data.secure_url + '?t=' + Date.now();
+            }
+            
+            showToast('✅ Cover picture updated successfully!', 'success');
+        } else {
+            throw new Error(data.error?.message || 'Upload failed');
+        }
+        
     } catch (error) {
         console.error('Error uploading cover picture:', error);
-        showToast('Error uploading cover picture', 'error');
+        showToast(`❌ Error uploading cover picture: ${error.message}`, 'error');
     }
 }
 
@@ -3689,9 +4226,20 @@ document.getElementById("cancelStorage")?.addEventListener("click", () => {
     document.getElementById("storageSettingsModal").classList.add("hidden");
 });
 
-// FIXED: Add missing toggleMute function
+// UPDATE toggleMute FUNCTION:
 function toggleMute() {
-    if (!localStream) return;
+    if (!localStream) {
+        showToast('No active call', 'error');
+        return;
+    }
+    
+    // Prevent rapid toggling
+    if (window.muteCooldown) return;
+    window.muteCooldown = true;
+    
+    setTimeout(() => {
+        window.muteCooldown = false;
+    }, 500);
     
     const audioTracks = localStream.getAudioTracks();
     if (audioTracks.length > 0) {
@@ -3700,26 +4248,19 @@ function toggleMute() {
             track.enabled = !isMuted;
         });
         
-        const muteBtn = document.getElementById('muteBtn');
-        if (muteBtn) {
-            if (isMuted) {
-                muteBtn.innerHTML = '<i class="fas fa-microphone-slash"></i>';
-                muteBtn.classList.add('bg-red-500');
-                muteBtn.classList.remove('bg-gray-600');
-            } else {
-                muteBtn.innerHTML = '<i class="fas fa-microphone"></i>';
-                muteBtn.classList.remove('bg-red-500');
-                muteBtn.classList.add('bg-gray-600');
-            }
-        }
-        
+        updateCallButtons();
         showToast(isMuted ? 'Microphone muted' : 'Microphone unmuted', 'info');
+    } else {
+        showToast('No microphone available', 'error');
     }
 }
 
-// FIXED: Add missing toggleVideo function
+// REPLACE toggleVideo FUNCTION (around line 2920):
 function toggleVideo() {
-    if (!localStream) return;
+    if (!localStream) {
+        showToast('No active call', 'error');
+        return;
+    }
     
     const videoTracks = localStream.getVideoTracks();
     if (videoTracks.length > 0) {
@@ -3728,20 +4269,16 @@ function toggleVideo() {
             track.enabled = !isVideoOff;
         });
         
-        const videoToggleBtn = document.getElementById('videoToggleBtn');
-        if (videoToggleBtn) {
-            if (isVideoOff) {
-                videoToggleBtn.innerHTML = '<i class="fas fa-video-slash"></i>';
-                videoToggleBtn.classList.add('bg-red-500');
-                videoToggleBtn.classList.remove('bg-gray-600');
-            } else {
-                videoToggleBtn.innerHTML = '<i class="fas fa-video"></i>';
-                videoToggleBtn.classList.remove('bg-red-500');
-                videoToggleBtn.classList.add('bg-gray-600');
-            }
+        // Show/hide local video
+        const localVideo = document.getElementById('localVideo');
+        if (localVideo) {
+            localVideo.style.display = isVideoOff ? 'none' : 'block';
         }
         
+        updateCallButtons();
         showToast(isVideoOff ? 'Video turned off' : 'Video turned on', 'info');
+    } else {
+        showToast('No camera available', 'error');
     }
 }
 // Add this to your setupEventListeners function
@@ -3806,7 +4343,6 @@ function openGroupsModal() {
         }
     });
 }
-    // New enhanced friend list buttons are handled in renderFriends function
 // FIXED: Enhanced Event Listeners with proper mobile support
 function setupEventListeners() {
     console.log('Setting up event listeners');
@@ -3957,7 +4493,32 @@ function setupEventListeners() {
             if (friendSearchResultsModal) friendSearchResultsModal.classList.add('hidden');
         });
     }
-
+    
+    // Use event delegation with click prevention
+    document.addEventListener('click', function(e) {
+        // Call buttons
+        if (e.target.closest('.friend-call-btn')) {
+            const btn = e.target.closest('.friend-call-btn');
+            if (btn.disabled || isInCall) return;
+            
+            const friendId = btn.dataset.id;
+            const friendName = btn.dataset.name;
+            console.log('Call friend clicked:', friendName, friendId);
+            startVoiceCallWithFriend(friendId, friendName);
+        }
+        
+        // Video call buttons
+        if (e.target.closest('.friend-video-call-btn')) {
+            const btn = e.target.closest('.friend-video-call-btn');
+            if (btn.disabled || isInCall) return;
+            
+            const friendId = btn.dataset.id;
+            const friendName = btn.dataset.name;
+            console.log('Video call friend clicked:', friendName, friendId);
+            startVideoCallWithFriend(friendId, friendName);
+        }
+    });
+    
     // Edit friend modal
     const cancelEditFriend = document.getElementById('cancelEditFriend');
     if (cancelEditFriend) {
@@ -4001,6 +4562,33 @@ function setupEventListeners() {
             }
         });
     }
+// chat.js
+
+
+
+    // ------------------------------------------------------------------
+    // ✅ LINES TO ADD: Group Creation Listeners
+    // ------------------------------------------------------------------
+    const newGroupBtn = document.getElementById('newGroupBtn'); // ID of the group icon
+    const createGroupModal = document.getElementById('createGroupModal'); // ID of the modal
+
+    if (newGroupBtn && createGroupModal) {
+        newGroupBtn.addEventListener('click', () => {
+            // Action 1: When the group icon is clicked, show the modal
+            createGroupModal.classList.remove('hidden');
+        });
+    }
+
+    // Listener for closing the modal
+    const closeCreateGroupBtn = document.getElementById('closeCreateGroup');
+    if (closeCreateGroupBtn && createGroupModal) {
+        closeCreateGroupBtn.addEventListener('click', () => {
+            // Action 2: When the close button is clicked, hide the modal
+            createGroupModal.classList.add('hidden');
+        renderFriendsForGroupCreation();
+        });
+    }
+    // ------------------------------------------------------------------
 
     // Profile settings
     const profileSettingsBtn = document.getElementById('profileSettingsBtn');
@@ -4452,7 +5040,7 @@ function toggleEmojiPicker() {
 }
 
 // WebRTC Call Implementation
-// FIXED: WebRTC Call Implementation with proper permission handling
+// REPLACE THE startVideoCall FUNCTION (around line 3300):
 async function startVideoCall() {
     if (!currentChat) {
         showToast('Please select a chat first', 'error');
@@ -4463,12 +5051,12 @@ async function startVideoCall() {
         console.log('Starting video call with:', currentChat.name);
         showToast('Starting video call...', 'info');
         
-        // Check if browser supports media devices
+        // Check browser support
         if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
-            throw new Error('Your browser does not support video calling');
+            throw new Error('Your browser does not support video calling. Please use Chrome, Firefox, or Edge.');
         }
-        
-        // Request camera and microphone permissions with better error handling
+
+        // Request camera and microphone permissions
         const constraints = {
             video: {
                 width: { ideal: 1280 },
@@ -4482,46 +5070,32 @@ async function startVideoCall() {
             }
         };
         
-        console.log('Requesting media permissions with constraints:', constraints);
+        console.log('Requesting media permissions...');
         
-        // Get user media with proper error handling
-        localStream = await navigator.mediaDevices.getUserMedia(constraints)
-            .catch(error => {
-                console.error('getUserMedia error:', error);
-                
-                // Handle specific permission errors
-                if (error.name === 'NotAllowedError') {
-                    throw new Error('Camera/microphone access was denied. Please allow permissions in your browser settings and try again.');
-                } else if (error.name === 'NotFoundError') {
-                    throw new Error('No camera found. Please check if your camera is connected properly.');
-                } else if (error.name === 'NotSupportedError') {
-                    throw new Error('Your browser does not support video calling. Please try using Chrome, Firefox, or Edge.');
-                } else if (error.name === 'NotReadableError') {
-                    throw new Error('Camera is already in use by another application. Please close other apps using the camera.');
-                } else {
-                    throw new Error(`Cannot access camera: ${error.message}`);
-                }
-            });
-        
-        console.log('Media permissions granted, stream obtained:', localStream);
+        // Get user media with better error handling
+        localStream = await navigator.mediaDevices.getUserMedia(constraints);
+        console.log('✅ Camera and microphone access granted');
         
         // Display local video stream
         const localVideo = document.getElementById('localVideo');
+        const videoCallContainer = document.getElementById('videoCallContainer');
+        
         if (localVideo) {
             localVideo.srcObject = localStream;
             localVideo.muted = true; // Mute local video to avoid echo
+            
+            // Wait for video to load
+            localVideo.onloadedmetadata = () => {
+                localVideo.play().catch(e => {
+                    console.warn('Video play warning:', e);
+                });
+            };
         }
         
         // Show call container
-        const videoCallContainer = document.getElementById('videoCallContainer');
         if (videoCallContainer) {
             videoCallContainer.style.display = 'block';
-            // Add a small delay to ensure video element is ready
-            setTimeout(() => {
-                if (localVideo) {
-                    localVideo.play().catch(e => console.warn('Video play warning:', e));
-                }
-            }, 100);
+            videoCallContainer.classList.remove('hidden');
         }
         
         // Set call state
@@ -4529,26 +5103,30 @@ async function startVideoCall() {
         isMuted = false;
         isVideoOff = false;
         
+        // Update UI buttons
+        updateCallButtons();
+        
         console.log('Video call started successfully');
         showToast(`Video call started with ${currentChat.name}`, 'success');
         
-        // In a real app, you would signal the other user here
-        // For demo purposes, we'll simulate the call setup
-        simulateCallSetup();
+        // Start WebRTC connection
+        if (currentChat.friendId) {
+            await startCall(currentChat.friendId, 'video', currentChat.name);
+        }
         
     } catch (error) {
         console.error('Error starting video call:', error);
         
-        // Show user-friendly error messages
-        let errorMessage = 'Error starting video call. ';
+        // User-friendly error messages
+        let errorMessage = 'Cannot access camera/microphone. ';
         
-        if (error.message.includes('denied')) {
+        if (error.name === 'NotAllowedError') {
             errorMessage += 'Please allow camera and microphone permissions in your browser settings.';
             showPermissionInstructions();
-        } else if (error.message.includes('No camera')) {
-            errorMessage += 'No camera detected. Please check your camera connection.';
-        } else if (error.message.includes('already in use')) {
-            errorMessage += 'Camera is busy. Please close other applications using the camera.';
+        } else if (error.name === 'NotFoundError') {
+            errorMessage += 'No camera found. Please check if your camera is connected.';
+        } else if (error.name === 'NotReadableError') {
+            errorMessage += 'Camera is already in use by another application.';
         } else {
             errorMessage += error.message;
         }
@@ -4557,9 +5135,11 @@ async function startVideoCall() {
     }
 }
 
+// UPDATE startVoiceCall FUNCTION:
 async function startVoiceCall() {
     if (!currentChat) {
         showToast('Please select a chat first', 'error');
+        disableCallButtons(false); // Re-enable buttons
         return;
     }
 
@@ -4567,14 +5147,14 @@ async function startVoiceCall() {
         console.log('Starting voice call with:', currentChat.name);
         showToast('Starting voice call...', 'info');
         
-        // Check if browser supports media devices
+        // Check browser support
         if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
-            throw new Error('Your browser does not support voice calling');
+            throw new Error('Your browser does not support voice calling.');
         }
-        
-        // Request only microphone permissions
+
+        // Request ONLY microphone permissions - NO CAMERA
         const constraints = {
-            video: false,
+            video: false, // Explicitly false for voice calls
             audio: {
                 echoCancellation: true,
                 noiseSuppression: true,
@@ -4584,50 +5164,39 @@ async function startVoiceCall() {
             }
         };
         
-        console.log('Requesting audio permissions with constraints:', constraints);
+        console.log('Requesting microphone permissions...');
         
-        // Get user media with proper error handling
-        localStream = await navigator.mediaDevices.getUserMedia(constraints)
-            .catch(error => {
-                console.error('getUserMedia error:', error);
-                
-                // Handle specific permission errors
-                if (error.name === 'NotAllowedError') {
-                    throw new Error('Microphone access was denied. Please allow permissions in your browser settings and try again.');
-                } else if (error.name === 'NotFoundError') {
-                    throw new Error('No microphone found. Please check your audio device.');
-                } else if (error.name === 'NotSupportedError') {
-                    throw new Error('Your browser does not support voice calling.');
-                } else if (error.name === 'NotReadableError') {
-                    throw new Error('Microphone is already in use by another application.');
-                } else {
-                    throw new Error(`Cannot access microphone: ${error.message}`);
-                }
-            });
-        
-        console.log('Audio permissions granted, stream obtained:', localStream);
+        // Get user media
+        localStream = await navigator.mediaDevices.getUserMedia(constraints);
+        console.log('✅ Microphone access granted');
         
         // Show call container (voice call mode)
         const videoCallContainer = document.getElementById('videoCallContainer');
         if (videoCallContainer) {
             videoCallContainer.style.display = 'block';
-            // Update UI for voice call
+            videoCallContainer.classList.remove('hidden');
+            
+            // Hide local video for voice call
             const localVideo = document.getElementById('localVideo');
             if (localVideo) {
-                localVideo.style.display = 'none'; // Hide video for voice call
+                localVideo.style.display = 'none';
             }
             
             // Show voice call indicator
-            const callInfo = document.createElement('div');
-            callInfo.id = 'voiceCallInfo';
-            callInfo.innerHTML = `
-                <div class="text-center text-white p-4">
-                    <i class="fas fa-phone text-4xl mb-2"></i>
-                    <p class="text-lg">Voice Call with ${currentChat.name}</p>
-                    <p class="text-sm opacity-75">Call in progress...</p>
-                </div>
-            `;
-            videoCallContainer.appendChild(callInfo);
+            let voiceCallInfo = document.getElementById('voiceCallInfo');
+            if (!voiceCallInfo) {
+                voiceCallInfo = document.createElement('div');
+                voiceCallInfo.id = 'voiceCallInfo';
+                voiceCallInfo.className = 'text-center text-white p-4';
+                voiceCallInfo.innerHTML = `
+                    <div class="bg-purple-600 rounded-lg p-6">
+                        <i class="fas fa-phone text-4xl mb-2"></i>
+                        <p class="text-lg font-semibold">Voice Call with ${currentChat.name}</p>
+                        <p class="text-sm opacity-75">Call in progress...</p>
+                    </div>
+                `;
+                videoCallContainer.appendChild(voiceCallInfo);
+            }
         }
         
         // Set call state
@@ -4635,25 +5204,30 @@ async function startVoiceCall() {
         isMuted = false;
         isVideoOff = true; // Voice call has no video
         
+        // Update UI buttons
+        updateCallButtons();
+        
         console.log('Voice call started successfully');
         showToast(`Voice call started with ${currentChat.name}`, 'success');
         
-        // In a real app, you would signal the other user here
-        simulateCallSetup();
+        // Start WebRTC connection
+        if (currentChat.friendId) {
+            await startCall(currentChat.friendId, 'voice', currentChat.name);
+        }
         
     } catch (error) {
         console.error('Error starting voice call:', error);
+        disableCallButtons(false); // Re-enable buttons on error
         
-        // Show user-friendly error messages
-        let errorMessage = 'Error starting voice call. ';
+        let errorMessage = 'Cannot access microphone. ';
         
-        if (error.message.includes('denied')) {
+        if (error.name === 'NotAllowedError') {
             errorMessage += 'Please allow microphone permissions in your browser settings.';
             showPermissionInstructions();
-        } else if (error.message.includes('No microphone')) {
-            errorMessage += 'No microphone detected. Please check your audio device.';
-        } else if (error.message.includes('already in use')) {
-            errorMessage += 'Microphone is busy. Please close other applications using the microphone.';
+        } else if (error.name === 'NotFoundError') {
+            errorMessage += 'No microphone found. Please check your audio device.';
+        } else if (error.name === 'NotReadableError') {
+            errorMessage += 'Microphone is already in use by another application.';
         } else {
             errorMessage += error.message;
         }
@@ -4662,85 +5236,11 @@ async function startVoiceCall() {
     }
 }
 
-// Helper function to show permission instructions
-function showPermissionInstructions() {
-    const instructions = `
-        <div class="bg-yellow-50 border border-yellow-200 rounded-lg p-4 mt-3">
-            <h4 class="font-semibold text-yellow-800 mb-2">How to enable permissions:</h4>
-            <ul class="text-sm text-yellow-700 list-disc list-inside space-y-1">
-                <li>Look for the camera/microphone icon in your browser's address bar</li>
-                <li>Click the icon and select "Allow" for camera and microphone</li>
-                <li>Refresh the page and try again</li>
-                <li>If using HTTPS, ensure the site is trusted</li>
-            </ul>
-        </div>
-    `;
-    
-    // You can show this in a modal or as part of the toast
-    console.log('Permission instructions:', instructions);
-    
-    // Optionally show a modal with instructions
-    showPermissionModal();
-}
-
-// Function to show permission help modal
-function showPermissionModal() {
-    const modal = document.createElement('div');
-    modal.className = 'fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50';
-    modal.innerHTML = `
-        <div class="bg-white rounded-lg p-6 max-w-md mx-4">
-            <h3 class="text-lg font-semibold mb-3">Camera & Microphone Permissions Required</h3>
-            <p class="text-gray-600 mb-4">To make calls, please allow camera and microphone access:</p>
-            <div class="bg-gray-50 p-4 rounded-lg mb-4">
-                <h4 class="font-medium mb-2">Instructions:</h4>
-                <ul class="text-sm text-gray-600 list-disc list-inside space-y-1">
-                    <li>Look for the camera/microphone icon in your browser's address bar</li>
-                    <li>Click the icon and select "Allow"</li>
-                    <li>Refresh the page and try the call again</li>
-                    <li>Ensure you're using HTTPS (required for media permissions)</li>
-                </ul>
-            </div>
-            <div class="flex justify-end space-x-3">
-                <button id="closePermissionHelp" class="px-4 py-2 text-gray-600 hover:text-gray-800">Close</button>
-                <button id="retryCall" class="px-4 py-2 bg-purple-600 text-white rounded-lg hover:bg-purple-700">Retry Call</button>
-            </div>
-        </div>
-    `;
-    
-    document.body.appendChild(modal);
-    
-    // Add event listeners
-    modal.querySelector('#closePermissionHelp').addEventListener('click', () => {
-        document.body.removeChild(modal);
-    });
-    
-    modal.querySelector('#retryCall').addEventListener('click', () => {
-        document.body.removeChild(modal);
-        // Retry the last call (you might want to store the last call type)
-        if (currentChat) {
-            startVideoCall(); // or startVoiceCall() based on context
-        }
-    });
-    
-    // Close modal when clicking outside
-    modal.addEventListener('click', (e) => {
-        if (e.target === modal) {
-            document.body.removeChild(modal);
-        }
-    });
-}
-
-// Simulate call setup for demo purposes
-function simulateCallSetup() {
-    console.log('Simulating call setup...');
-    // In a real implementation, this would set up WebRTC peer connection
-    // and signal the other user through Firebase or a signaling server
-}
-
-// Also update the endCall function to handle voice call cleanup
+// REPLACE endCall FUNCTION (around line 2950):
 function endCall() {
     console.log('Ending call');
-    
+
+    disableCallButtons(false);
     // Stop all media tracks
     if (localStream) {
         localStream.getTracks().forEach(track => {
@@ -4749,18 +5249,27 @@ function endCall() {
         localStream = null;
     }
     
+    // Stop remote stream if exists
+    if (remoteStream) {
+        remoteStream.getTracks().forEach(track => {
+            track.stop();
+        });
+        remoteStream = null;
+    }
+    
     // Hide call container
     const videoCallContainer = document.getElementById('videoCallContainer');
     if (videoCallContainer) {
         videoCallContainer.style.display = 'none';
+        videoCallContainer.classList.add('hidden');
         
-        // Clean up voice call info if exists
+        // Clean up voice call info
         const voiceCallInfo = document.getElementById('voiceCallInfo');
         if (voiceCallInfo) {
             voiceCallInfo.remove();
         }
         
-        // Show local video again if it was hidden
+        // Reset local video
         const localVideo = document.getElementById('localVideo');
         if (localVideo) {
             localVideo.style.display = 'block';
@@ -4773,13 +5282,81 @@ function endCall() {
     isMuted = false;
     isVideoOff = false;
     
-    // Reset button states
-    const muteBtn = document.getElementById('muteBtn');
-    const videoToggleBtn = document.getElementById('videoToggleBtn');
-    if (muteBtn) muteBtn.innerHTML = '<i class="fas fa-microphone"></i>';
-    if (videoToggleBtn) videoToggleBtn.innerHTML = '<i class="fas fa-video"></i>';
+    // Close peer connection if exists
+    if (peerConnection) {
+        peerConnection.close();
+        peerConnection = null;
+    }
     
     showToast('Call ended', 'info');
+}
+
+// Update call control buttons
+function updateCallButtons() {
+    const muteBtn = document.getElementById('muteBtn');
+    const videoToggleBtn = document.getElementById('videoToggleBtn');
+    
+    if (muteBtn) {
+        if (isMuted) {
+            muteBtn.innerHTML = '<i class="fas fa-microphone-slash"></i>';
+            muteBtn.classList.add('bg-red-500');
+            muteBtn.classList.remove('bg-gray-600');
+        } else {
+            muteBtn.innerHTML = '<i class="fas fa-microphone"></i>';
+            muteBtn.classList.remove('bg-red-500');
+            muteBtn.classList.add('bg-gray-600');
+        }
+    }
+    
+    if (videoToggleBtn) {
+        if (isVideoOff) {
+            videoToggleBtn.innerHTML = '<i class="fas fa-video-slash"></i>';
+            videoToggleBtn.classList.add('bg-red-500');
+            videoToggleBtn.classList.remove('bg-gray-600');
+        } else {
+            videoToggleBtn.innerHTML = '<i class="fas fa-video"></i>';
+            videoToggleBtn.classList.remove('bg-red-500');
+            videoToggleBtn.classList.add('bg-gray-600');
+        }
+    }
+}
+
+// Show permission instructions
+function showPermissionInstructions() {
+    const modal = document.createElement('div');
+    modal.className = 'fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50';
+    modal.innerHTML = `
+        <div class="bg-white rounded-lg p-6 max-w-md mx-4">
+            <h3 class="text-lg font-semibold mb-3">Camera & Microphone Permissions Required</h3>
+            <p class="text-gray-600 mb-4">To make calls, please allow camera and microphone access:</p>
+            <div class="bg-yellow-50 p-4 rounded-lg mb-4">
+                <h4 class="font-medium mb-2">How to enable:</h4>
+                <ul class="text-sm text-yellow-700 list-disc list-inside space-y-1">
+                    <li>Look for the camera/microphone icon in your browser's address bar</li>
+                    <li>Click the icon and select "Allow"</li>
+                    <li>Refresh the page and try again</li>
+                    <li>Make sure you're using HTTPS</li>
+                </ul>
+            </div>
+            <div class="flex justify-end">
+                <button id="closePermissionHelp" class="px-4 py-2 bg-purple-600 text-white rounded-lg hover:bg-purple-700">
+                    OK, I Understand
+                </button>
+            </div>
+        </div>
+    `;
+    
+    document.body.appendChild(modal);
+    
+    modal.querySelector('#closePermissionHelp').addEventListener('click', () => {
+        document.body.removeChild(modal);
+    });
+    
+    modal.addEventListener('click', (e) => {
+        if (e.target === modal) {
+            document.body.removeChild(modal);
+        }
+    });
 }
 
 // All Friends Display Implementation
@@ -5545,8 +6122,7 @@ function downloadQRCode() {
     link.click();
     showToast("QR Code downloaded!", "success");
 }
-// FIXED: Copy Link Function with Better Debugging
-// FIXED: Copy Link with comprehensive error handling
+// REPLACE THIS:
 function setupCopyLink() {
     const copyLinkBtn = document.getElementById("copyInviteLink");
     
@@ -5587,6 +6163,62 @@ function setupCopyLink() {
             showManualCopyOption(inviteLink);
         }
     });
+}
+
+// WITH THIS:
+function setupCopyLink() {
+    const copyLinkBtn = document.getElementById("copyInviteLink");
+    
+    if (!copyLinkBtn) {
+        console.log('Copy link button not found');
+        return;
+    }
+    
+    // Remove any existing event listeners
+    copyLinkBtn.replaceWith(copyLinkBtn.cloneNode(true));
+    const newCopyBtn = document.getElementById("copyInviteLink");
+    
+    newCopyBtn.addEventListener("click", async function() {
+        console.log('Copy link clicked');
+        const inviteLink = `https://kynecta.com/invite/${currentUser?.uid || 'user'}`;
+        
+        try {
+            // Method 1: Modern clipboard API
+            if (navigator.clipboard && window.isSecureContext) {
+                await navigator.clipboard.writeText(inviteLink);
+                showToast("✅ Invite link copied to clipboard!", "success");
+                console.log('Copied via clipboard API');
+                return;
+            }
+            
+            // Method 2: Legacy approach
+            const textArea = document.createElement("textarea");
+            textArea.value = inviteLink;
+            textArea.style.position = "fixed";
+            textArea.style.left = "-999999px";
+            textArea.style.top = "0";
+            textArea.setAttribute('readonly', '');
+            document.body.appendChild(textArea);
+            textArea.select();
+            textArea.setSelectionRange(0, 99999);
+            
+            const successful = document.execCommand('copy');
+            document.body.removeChild(textArea);
+            
+            if (successful) {
+                showToast("✅ Invite link copied to clipboard!", "success");
+                console.log('Copied via execCommand');
+            } else {
+                throw new Error('execCommand failed');
+            }
+            
+        } catch (error) {
+            console.error("Copy failed:", error);
+            showManualCopyOption(inviteLink);
+        }
+    });
+    
+    console.log('Copy link setup complete');
 }
 
 function showManualCopyOption(link) {
@@ -5696,5 +6328,30 @@ function setupSMSShare() {
                 showToast("📱 If messaging app didn't open, please send the message manually", "info");
             }
         }, 2000);
+    });
+}
+// chat.js
+
+function renderFriendsForGroupCreation() {
+    const friendsListContainer = document.getElementById('friendsSelectionList');
+    if (!friendsListContainer) return;
+    
+    // Clear any previous list items
+    friendsListContainer.innerHTML = ''; 
+
+    // The global 'friends' array is assumed to contain all available friend data
+    friends.forEach(friend => {
+        const friendElement = `
+            <div class="flex items-center justify-between p-3 border-b border-gray-100 hover:bg-gray-50 transition duration-150">
+                <div class="flex items-center">
+                    <img src="${friend.photoURL || 'default_avatar.png'}" alt="${friend.name}" 
+                         class="w-10 h-10 rounded-full mr-3 object-cover">
+                    <span class="font-medium text-gray-800">${friend.name}</span>
+                </div>
+                <input type="checkbox" name="groupMember" value="${friend.uid}" 
+                       class="form-checkbox h-5 w-5 text-kynecta-primary rounded focus:ring-kynecta-primary">
+            </div>
+        `;
+        friendsListContainer.insertAdjacentHTML('beforeend', friendElement);
     });
 }
