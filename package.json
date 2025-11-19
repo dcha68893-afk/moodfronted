@@ -1,6 +1,6 @@
 {
   "name": "uniconnectsphere",
-  "version": "1.0.3",
+  "version": "1.0.4",
   "description": "UniConnectSphere — social media and chat app built with Node.js, Express, Firebase, and Cloudinary.",
   "main": "server.js",
   "type": "module",
@@ -21,7 +21,7 @@
     "express-rate-limit": "^8.2.1",
     "helmet": "^8.1.0",
     "multer": "^1.4.5-lts.1",
-    "multer-storage-cloudinary": "^2.2.1",
+    "multer-storage-cloudinary": "^4.0.0",
     "path": "^0.12.7"
   },
   "devDependencies": {
