@@ -15,8 +15,8 @@ import rateLimit from "express-rate-limit";
 import { fileURLToPath } from "url";
 import crypto from "crypto";
 import multer from "multer";
-import { v2 as cloudinary } from 'cloudinary';
-import { CloudinaryStorage } from 'multer-storage-cloudinary';
+import pkg from "multer-storage-cloudinary";
+const CloudinaryStorage = pkg.default;
 
 // Load environment variables
 import 'dotenv/config';
@@ -281,7 +281,7 @@ app.post('/api/cloudinary/verify-upload', apiLimiter, async (req, res) => {
  * Alternative: Direct server-side upload (more secure but less efficient for large files)
  */
 const multerStorage = new CloudinaryStorage({
-  cloudinary: cloudinary,
+ cloudinary,
   params: {
     folder: 'uniconnect/direct',
     resource_type: 'auto',
