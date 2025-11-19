@@ -16,7 +16,8 @@ import { fileURLToPath } from "url";
 import crypto from "crypto";
 import multer from "multer";
 import { v2 as cloudinary } from 'cloudinary';
-import { CloudinaryStorage } from 'multer-storage-cloudinary';
+import pkg from 'multer-storage-cloudinary';
+const { CloudinaryStorage } = pkg;
 
 // Load environment variables
 import 'dotenv/config';
