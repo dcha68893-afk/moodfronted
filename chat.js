@@ -79,8 +79,6 @@ function handleImageError(img) {
     img.onerror = null; // Prevent infinite loop
 }
 
-// Call this immediately
-setupGlobalErrorHandling();
 
 
 // ==================== FIREBASE INITIALIZATION ====================
@@ -131,6 +129,7 @@ let currentUser = null;
 let currentUserData = null;
 let currentChat = null;
 let currentChatId = null;
+let unsubscribeIncomingCalls = null;
 let isInCall = false;
 let friends = [];
 let allUsers = [];
@@ -205,12 +204,21 @@ let isMuted = false;
 let isVideoOff = false;
 
 // WebRTC Configuration
+
 const rtcConfig = {
-    iceServers: [
-        { urls: 'stun:stun.l.google.com:19302' },
-        { urls: 'stun:stun1.l.google.com:19302' }
-    ]
+  iceServers: [
+    // STUN (keeps what you already have)
+    { urls: "stun:stun.l.google.com:19302" },
+
+    // TURN – required for difficult networks
+    {
+      urls: "turn:global.relay.metered.ca:80",
+      username: "openai",
+      credential: "openai"
+    }
+  ]
 };
+
 
 // Signaling state
 let callState = {
@@ -374,127 +382,72 @@ function setupImageErrorHandling() {
     };
 }
 
-// ADD THESE NEW FUNCTIONS FOR CALL SIGNALING:
-
-// Listen for WebRTC offer from caller
-async function listenForCallOffer(callId, callerId) {
-    console.log('Listening for WebRTC offer from caller:', callerId);
-    
-    const unsubscribe = db.collection('calls').doc(callId)
-        .onSnapshot(async (doc) => {
-            if (doc.exists) {
-                const callData = doc.data();
-                
-                // Handle WebRTC offer
-                if (callData.offer && !peerConnection) {
-                    console.log('Received WebRTC offer from caller');
-                    await createAnswer(callId, callData.offer, callerId);
-                }
-                
-                // Handle ICE candidates from caller
-                if (callData.iceCandidates && callData.iceCandidates.length > 0) {
-                    console.log('Processing ICE candidates from caller');
-                    await addIceCandidates(callData.iceCandidates);
-                }
-                
-                // Handle call end
-                if (callData.status === 'ended' || callData.status === 'rejected') {
-                    console.log('Call ended by remote party');
-                    endCall();
-                    unsubscribe();
-                }
-            }
-        }, (error) => {
-            console.error('Error listening for call offer:', error);
-        });
-}
-
 // Create WebRTC answer
+
+// Robust createAnswer: ensure local media + tracks are added before creating answer
 async function createAnswer(callId, offer, callerId) {
-    try {
-        console.log('Creating WebRTC answer');
-        
-        // Create peer connection
-        if (!peerConnection) {
-    peerConnection = new RTCPeerConnection(rtcConfig);
+  try {
+    console.log('Creating WebRTC answer for call:', callId, 'from:', callerId);
+
+    // Ensure peerConnection exists
+    if (!peerConnection) {
+      await createPeerConnection(callId, callerId);
+    }
+
+    // Determine if the offer includes video
+    const needsVideo = offer && offer.sdp && offer.sdp.includes('m=video');
+
+    // Ensure local media BEFORE setting remote description / creating answer
+    if (!localStream) {
+      try {
+        localStream = await navigator.mediaDevices.getUserMedia({
+          audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true },
+          video: needsVideo ? { width: { ideal: 1280 }, height: { ideal: 720 }, frameRate: { ideal: 30 } } : false
+        });
+        // add tracks to peerConnection
+        localStream.getTracks().forEach(track => {
+          try { peerConnection.addTrack(track, localStream); } catch (e) { console.warn('Add local track failed:', e); }
+        });
+
+        // show local preview if video requested
+        if (needsVideo) {
+          const localVideo = document.getElementById('localVideo');
+          if (localVideo) {
+            localVideo.srcObject = localStream;
+            localVideo.muted = true;
+            localVideo.play().catch(e => console.warn('Local video play error:', e));
+          }
+        }
+      } catch (err) {
+        console.error('Media access failed when preparing answer:', err);
+        showToast('Cannot access camera/microphone. Please allow permissions.', 'error');
+        // continue — we still try to answer to receive remote stream
+      }
+    }
+
+    // Now set remote description (offer)
+    await peerConnection.setRemoteDescription(new RTCSessionDescription(offer));
+
+    // Create answer and set local description
+    const answer = await peerConnection.createAnswer();
+    await peerConnection.setLocalDescription(answer);
+
+    // Save answer to Firestore (callee fields)
+    await db.collection('calls').doc(callId).update({
+      answer: { type: answer.type, sdp: answer.sdp },
+      status: 'connected',
+      answeredAt: firebase.firestore.FieldValue.serverTimestamp(),
+      calleeId: currentUser.uid
+    });
+
+    console.log('Answer created and saved to Firestore for call', callId);
+  } catch (error) {
+    console.error('Error in createAnswer:', error);
+    showToast('Error creating answer: ' + (error.message || error), 'error');
+  }
 }
 
-        // Add local stream tracks
-        if (localStream) {
-            localStream.getTracks().forEach(track => {
-                peerConnection.addTrack(track, localStream);
-            });
-        }
-        
-        // Handle incoming remote stream
-        peerConnection.ontrack = (event) => {
-            // IN createAnswer FUNCTION, UPDATE THE ontrack handler:
-peerConnection.ontrack = (event) => {
-    console.log('Received remote stream in answer');
-    remoteStream = event.streams[0];
-    
-    // Handle audio for voice calls
-    if (callType === 'voice') {
-        let remoteAudio = document.getElementById('remoteAudio');
-        if (!remoteAudio) {
-            remoteAudio = document.createElement('audio');
-            remoteAudio.id = 'remoteAudio';
-            remoteAudio.autoplay = true;
-            remoteAudio.controls = true;
-            document.body.appendChild(remoteAudio);
-        }
-        remoteAudio.srcObject = remoteStream;
-    }
-    
-    // Handle video for video calls
-    const remoteVideo = document.getElementById('remoteVideo');
-    if (remoteVideo && callType === 'video') {
-        remoteVideo.srcObject = remoteStream;
-        remoteVideo.play().catch(e => console.log('Remote video play error:', e));
-    }
-    
-    showToast('Connected to caller!', 'success');
-}
-};
-        
-        // Handle ICE candidates
-        peerConnection.onicecandidate = (event) => {
-            if (event.candidate) {
-                console.log('Sending ICE candidate');
-                db.collection('calls').doc(callId).update({
-                    answerIceCandidates: firebase.firestore.FieldValue.arrayUnion({
-                        candidate: event.candidate.candidate,
-                        sdpMid: event.candidate.sdpMid,
-                        sdpMLineIndex: event.candidate.sdpMLineIndex
-                    })
-                });
-            }
-        };
-        
-        // Set remote description from offer
-        await peerConnection.setRemoteDescription(offer);
-        
-        // Create and set local answer
-        const answer = await peerConnection.createAnswer();
-        await peerConnection.setLocalDescription(answer);
-        
-        // Send answer back to caller
-        await db.collection('calls').doc(callId).update({
-            answer: {
-                type: answer.type,
-                sdp: answer.sdp
-            },
-            status: 'connected',
-            connectedAt: firebase.firestore.FieldValue.serverTimestamp()
-        });
-        
-        console.log('WebRTC answer sent successfully');
-        
-    } catch (error) {
-        console.error('Error creating WebRTC answer:', error);
-        showToast('Error establishing call connection', 'error');
-    }
-}
+
 // FIXED: Listen for WebRTC offer from caller
 async function listenForCallOffer(callId, callerId) {
     console.log('Listening for WebRTC offer in call:', callId, 'from:', callerId);
@@ -530,24 +483,30 @@ async function listenForCallOffer(callId, callerId) {
 }
 
 // Add ICE candidates from remote peer
+
+// Add ICE candidates (pass an array). This function only adds candidates to current peerConnection.
 async function addIceCandidates(iceCandidates) {
-    if (!peerConnection) return;
-    
+  if (!peerConnection) {
+    console.warn('No peerConnection to add ICE candidates to');
+    return;
+  }
+  if (!iceCandidates || !Array.isArray(iceCandidates)) return;
+
+  for (const candidateData of iceCandidates) {
     try {
-        for (const candidateData of iceCandidates) {
-            await peerConnection.addIceCandidate(new RTCIceCandidate({
-                candidate: candidateData.candidate,
-                sdpMid: candidateData.sdpMid,
-                sdpMLineIndex: candidateData.sdpMLineIndex
-            }));
-        }
-        console.log('Added ICE candidates from remote peer');
-    } catch (error) {
-        console.error('Error adding ICE candidates:', error);
+      const candidateObj = (candidateData && candidateData.candidate) ? candidateData : { candidate: candidateData };
+      await peerConnection.addIceCandidate(new RTCIceCandidate({
+        candidate: candidateObj.candidate,
+        sdpMid: candidateObj.sdpMid,
+        sdpMLineIndex: candidateObj.sdpMLineIndex
+      }));
+    } catch (err) {
+      console.warn('addIceCandidates: unable to add candidate (may be duplicate or not ready):', err);
     }
+  }
 }
 
-// REPLACE THE showIncomingCallNotification FUNCTION:
+
 // FIXED: Enhanced Incoming Call Notification with better state management
 function showIncomingCallNotification(callData) {
     console.log('Showing incoming call notification:', callData);
@@ -746,87 +705,6 @@ window.declineIncomingCall = async function(callId) {
     }
 }
 
-// REPLACE answerCall FUNCTION:
-async function answerIncomingCall(callId, callerId, callType) {
-    try {
-        console.log('Answering incoming call:', callId, 'from:', callerId, 'type:', callType);
-        // Ensure media access before answering
-if (!localStream) {
-    localStream = await navigator.mediaDevices.getUserMedia({
-        audio: true,
-        video: callType === 'video'
-    });
-}
-
-        
-        // Remove notification
-        const notification = document.querySelector('.incoming-call-notification');
-        if (notification) {
-            notification.remove();
-        }
-        
-        // Update call status to answered
-        await db.collection('calls').doc(callId).update({
-            status: 'answered',
-            answeredAt: firebase.firestore.FieldValue.serverTimestamp(),
-            calleeId: currentUser.uid
-        });
-        
-        // Set current chat to the caller
-        const callerDoc = await db.collection('users').doc(callerId).get();
-        if (callerDoc.exists) {
-            const callerData = callerDoc.data();
-            currentChat = {
-                id: [currentUser.uid, callerId].sort().join('_'),
-                friendId: callerId,
-                name: callerData.displayName || 'Caller'
-            };
-        }
-        
-        showToast('Call answered! Starting call...', 'success');
-        
-        // Start the appropriate call type
-        if (callType === 'video') {
-            await startVideoCall();
-        } else {
-            await startVoiceCall();
-        }
-        
-        // Listen for WebRTC offer from caller
-        listenForCallOffer(callId, callerId);
-        
-    } catch (error) {
-        console.error('Error answering call:', error);
-        showToast('Error answering call', 'error');
-    }
-}
-
-// REPLACE rejectCall FUNCTION:
-async function declineIncomingCall(callId) {
-    try {
-        console.log('Declining call:', callId);
-        
-        // Remove notification
-        const notification = document.querySelector('.incoming-call-notification');
-        if (notification) {
-            notification.remove();
-        }
-        
-        // Update call status to rejected
-        await db.collection('calls').doc(callId).update({
-            status: 'rejected',
-            endedAt: firebase.firestore.FieldValue.serverTimestamp(),
-            endedBy: currentUser.uid
-        });
-        
-        showToast('Call declined', 'info');
-        
-    } catch (error) {
-        console.error('Error declining call:', error);
-        showToast('Error declining call', 'error');
-    }
-}
-
 async function createCallDoc(callerId, calleeId, callType = 'voice') {
     try {
         const callRef = db.collection('calls').doc(); // auto id
@@ -864,41 +742,45 @@ async function updateCallStatus(callId, newStatus) {
     }
 }
 
+// ==========================
+// Global WebRTC Configuration
+// ==========================
+    // Check if already defined to prevent redeclaration errors
+window.rtcConfig = window.rtcConfig || {
+    iceServers: [
+        { urls: 'stun:stun.l.google.com:19302' },
+        { urls: 'stun:stun1.l.google.com:19302' },
+        { urls: 'stun:stun2.l.google.com:19302' }
+    ],
+    iceCandidatePoolSize: 10,
+    bundlePolicy: 'max-bundle',
+    rtcpMuxPolicy: 'require'
+};
 
-async function startCall(calleeId, callType = 'voice', calleeName = '') {
-    // Prevent multiple rapid calls
-    const now = Date.now();
-    if (now - lastCallTime < CALL_COOLDOWN) {
-        console.log('Call cooldown active, please wait...');
-        return;
-    }
-    lastCallTime = now;
-    
+window.enhancedRtcConfig = window.enhancedRtcConfig || window.rtcConfig;
+
+// ==========================
+// Start Call
+// ==========================
+async function startCall(callId, calleeId, calleeName) {
     try {
-        if (!currentUser || !currentUser.uid) {
-            showToast('You must be signed in to make calls', 'error');
-            return;
-        }
-
-        // Create call document
-        const callId = await createCallDoc(currentUser.uid, calleeId, callType);
-
-        // Store call state
-        callState.isCaller = true;
-        callState.callType = callType;
-        callState.remoteUserId = calleeId;
-        callState.callId = callId;
-
-        // Start local media
-        if (callType === 'video') {
-            await startVideoCall();
-        } else {
-            await startVoiceCall();
+        // Close existing connection if any
+        if (peerConnection) {
+            try {
+                peerConnection.close();
+                console.warn('Existing peerConnection closed before starting a new call');
+            } catch (e) {
+                console.error('Error closing existing peerConnection:', e);
+            }
+            peerConnection = null;
         }
 
         // CREATE WEBRTC PEER CONNECTION
         await createPeerConnection(callId, calleeId);
-        
+
+        // Listen for answer and ICE candidates from remote
+        const answerListenerUnsub = listenForAnswerAndRemoteIce(callId);
+
         showToast(`Calling ${calleeName || calleeId}...`, 'success');
 
     } catch (err) {
@@ -908,96 +790,76 @@ async function startCall(calleeId, callType = 'voice', calleeName = '') {
     }
 }
 
-// ADD THIS NEW FUNCTION AFTER startCall function:
-
-// FIXED: Enhanced Peer Connection with better audio/video handling
+// ==========================
+// Create Peer Connection
+// ==========================
 async function createPeerConnection(callId, calleeId) {
     try {
-        // Enhanced RTC configuration
-        const enhancedRtcConfig = {
-            iceServers: [
-                { urls: 'stun:stun.l.google.com:19302' },
-                { urls: 'stun:stun1.l.google.com:19302' },
-                { urls: 'stun:stun2.l.google.com:19302' }
-            ],
-            iceCandidatePoolSize: 10,
-            bundlePolicy: 'max-bundle',
-            rtcpMuxPolicy: 'require'
-        };
-        
-        // Create peer connection
-        peerConnection = new RTCPeerConnection(enhancedRtcConfig);
-        
-        // Add local stream tracks to connection with better quality
+        // Initialize peer connection
+        peerConnection = new RTCPeerConnection(enhancedRtcConfig || rtcConfig);
+
+        // Add local tracks
         if (localStream) {
             localStream.getTracks().forEach(track => {
                 console.log('Adding local track:', track.kind, track.id);
                 peerConnection.addTrack(track, localStream);
             });
         }
-        
-        // Enhanced remote stream handling
+
+        // Handle remote tracks
         peerConnection.ontrack = (event) => {
-            console.log('Received remote stream tracks:', event.streams.length);
-            remoteStream = event.streams[0];
-            
-            if (remoteStream) {
-                console.log('Remote stream available with tracks:', 
-                    remoteStream.getAudioTracks().length + ' audio, ' +
-                    remoteStream.getVideoTracks().length + ' video');
-                
-                // Handle both audio and video streams
+            remoteStream = (event.streams && event.streams[0]) || remoteStream || null;
+            if (!remoteStream) return;
+
+            if (callState?.callType === 'video') {
                 const remoteVideo = document.getElementById('remoteVideo');
-                const remoteAudio = document.getElementById('remoteAudio');
-                
-                // For video calls
-                if (remoteVideo && callState.callType === 'video') {
+                if (remoteVideo) {
                     remoteVideo.srcObject = remoteStream;
-                    remoteVideo.onloadedmetadata = () => {
-                        remoteVideo.play().catch(e => {
-                            console.warn('Remote video play error:', e);
-                        });
-                    };
-                    
-                    // Ensure video is visible
+                    remoteVideo.onloadedmetadata = () => remoteVideo.play().catch(e => console.warn('Remote video play error:', e));
                     remoteVideo.style.display = 'block';
                 }
-                
-                // For voice calls - create hidden audio element
-                if (callState.callType === 'voice') {
-                    if (!remoteAudio) {
-                        const audioElem = document.createElement('audio');
-                        audioElem.id = 'remoteAudio';
-                        audioElem.autoplay = true;
-                        audioElem.controls = false;
-                        audioElem.hidden = true;
-                        document.body.appendChild(audioElem);
-                    }
-                    const audioElem = document.getElementById('remoteAudio');
-                    audioElem.srcObject = remoteStream;
-                    audioElem.play().catch(e => console.log('Audio play error:', e));
+            }
+
+            if (callState?.callType === 'voice') {
+                let audioElem = document.getElementById('remoteAudio');
+                if (!audioElem) {
+                    audioElem = document.createElement('audio');
+                    audioElem.id = 'remoteAudio';
+                    audioElem.autoplay = true;
+                    audioElem.hidden = true;
+                    document.body.appendChild(audioElem);
                 }
-                
-                showToast('Call connected!', 'success');
+                try {
+                    audioElem.srcObject = remoteStream;
+                    audioElem.play().catch(e => console.warn('Remote audio play error:', e));
+                } catch (e) {
+                    console.warn('Error assigning remote audio srcObject:', e);
+                }
             }
         };
-        
-        // Enhanced ICE candidate handling
+
+        // Handle ICE candidates
         peerConnection.onicecandidate = (event) => {
-            if (event.candidate) {
-                console.log('Sending ICE candidate');
-                db.collection('calls').doc(callId).update({
-                    iceCandidates: firebase.firestore.FieldValue.arrayUnion({
-                        candidate: event.candidate.candidate,
-                        sdpMid: event.candidate.sdpMid,
-                        sdpMLineIndex: event.candidate.sdpMLineIndex,
-                        timestamp: Date.now()
-                    })
-                });
-            }
+            if (!event.candidate) return;
+
+            const candidatePayload = {
+                candidate: event.candidate.candidate,
+                sdpMid: event.candidate.sdpMid,
+                sdpMLineIndex: event.candidate.sdpMLineIndex,
+                timestamp: Date.now()
+            };
+
+            const fieldName = callState?.isCaller ? 'callerCandidates' : 'calleeCandidates';
+            const updateObj = {};
+updateObj[fieldName] = firebase.firestore.FieldValue.arrayUnion(candidatePayload);
+
+db.collection('calls').doc(callId).set(updateObj, { merge: true })
+    .catch(err => { console.warn('Failed to store ICE candidate:', err);
+
+            });
         };
-        
-        // Enhanced connection state monitoring
+
+        // Connection state monitoring
         peerConnection.onconnectionstatechange = () => {
             console.log('Connection state:', peerConnection.connectionState);
             switch (peerConnection.connectionState) {
@@ -1016,35 +878,92 @@ async function createPeerConnection(callId, calleeId) {
                     break;
             }
         };
-        
-        // Create and send offer with better quality
+
+        // Create and send offer
         const offerOptions = {
             offerToReceiveAudio: true,
-            offerToReceiveVideo: callState.callType === 'video',
+            offerToReceiveVideo: callState?.callType === 'video',
             voiceActivityDetection: true,
             iceRestart: false
         };
-        
+
         const offer = await peerConnection.createOffer(offerOptions);
         await peerConnection.setLocalDescription(offer);
-        
-        // Save offer to Firestore for callee
-        await db.collection('calls').doc(callId).update({
-            offer: {
-                type: offer.type,
-                sdp: offer.sdp
-            },
-            callStatus: 'ringing',
-            updatedAt: firebase.firestore.FieldValue.serverTimestamp()
-        });
-        
+
+        // Save offer to Firestore
+        await db.collection('calls').doc(callId).set({
+    offer: {
+        type: offer.type,
+        sdp: offer.sdp
+    },
+    callStatus: 'ringing',
+    updatedAt: firebase.firestore.FieldValue.serverTimestamp()
+}, { merge: true });
+
+
         console.log('WebRTC offer created and sent');
-        
+
     } catch (error) {
         console.error('Error creating peer connection:', error);
         showToast('Error establishing call connection: ' + error.message, 'error');
     }
 }
+
+
+// NEW: Listen for callee answer and their ICE candidates (caller side)
+function listenForAnswerAndRemoteIce(callId) {
+    console.log('Caller: listening for answer/remote ICE for call:', callId);
+
+    return db.collection('calls').doc(callId).onSnapshot(async (doc) => {
+        if (!doc.exists) return;
+        const data = doc.data();
+
+        // If callee sent an answer and caller's peerConnection hasn't set remote description, apply it
+        if (data.answer && peerConnection && (!peerConnection.currentRemoteDescription || peerConnection.currentRemoteDescription.type !== 'answer')) {
+            try {
+                console.log('Caller: received answer, applying remote description');
+                await peerConnection.setRemoteDescription(new RTCSessionDescription(data.answer));
+            } catch (err) {
+                console.error('Caller: failed to set remote description from answer', err);
+            }
+        }
+
+        // Add any answerIceCandidates from callee
+        if (data.answerIceCandidates && Array.isArray(data.answerIceCandidates) && peerConnection) {
+            try {
+                for (const c of data.answerIceCandidates) {
+                    // Create RTCIceCandidate object and add if possible
+                    try {
+                        await peerConnection.addIceCandidate(new RTCIceCandidate({
+                            candidate: c.candidate || c,
+                            sdpMid: c.sdpMid,
+                            sdpMLineIndex: c.sdpMLineIndex
+                        }));
+                    } catch (err) {
+                        // ignore add errors if duplicate or not ready
+                        console.warn('Caller: addIceCandidate error (may be benign):', err);
+                    }
+                }
+            } catch (err) {
+                console.error('Caller: error processing answer ICE candidates', err);
+            }
+        }
+
+        // If call ended or rejected on remote side, cleanup
+        if (data.status === 'ended' || data.status === 'rejected') {
+            console.log('Caller: remote ended/rejected call', callId);
+            cleanupCallNotification(callId);
+            if (peerConnection) {
+                peerConnection.close();
+                peerConnection = null;
+            }
+        }
+    }, (err) => {
+        console.error('listenForAnswerAndRemoteIce snapshot error:', err);
+    });
+}
+
+
 // FIXED: Enhanced Media Setup for Calls
 // FIXED: Enhanced Media Setup for Calls
 async function setupMediaForCall(callType) {
@@ -1315,11 +1234,17 @@ async function loadUserData() {
         setupToolsListeners();
         setupStatusFileHandlers();
         listenForFriendRequests();
-        listenForIncomingCalls(); // Enhanced call listener
-        
+         listenForIncomingCalls(); // Enhanced call listener
+        unsubscribeIncomingCalls?.()
+
         // Initialize business document for new users
         initializeBusinessDocument(currentUser.uid);
-        
+        // store unsubscribe so we can remove it later
+if (typeof unsubscribeIncomingCalls === 'function') {
+  unsubscribeIncomingCalls();
+}
+unsubscribeIncomingCalls = listenForIncomingCalls();
+
         console.log('User data loading completed successfully');
         
         // Show welcome message
@@ -2651,8 +2576,12 @@ function startVideoCallWithFriend(friendId, friendName) {
 
 function viewFriendProfile(friendId) {
     console.log('Viewing friend profile:', friendId);
-    // For now, show a toast. You can implement a proper profile view modal later
-    showToast('Friend profile view - Feature coming soon!', 'info');
+   if (friend.features && Object.keys(friend.features).length > 0) {
+    renderFeatures(friend.features); // existing function to show actual features
+} else {
+    // Only show "coming soon" if truly empty
+    document.getElementById('friendFeaturesContainer').innerHTML = '<p>Features coming soon</p>';
+}
 }
 
 function confirmRemoveFriend(friendId, friendName) {
@@ -3593,14 +3522,6 @@ function initializeBusinessDocument(userId) {
     });
 }
 
-function setupImageErrorHandling() {
-    document.addEventListener('error', function(e) {
-        if (e.target.tagName === 'IMG') {
-            console.log('Image failed to load:', e.target.src);
-            e.target.src = 'https://ui-avatars.com/api/?name=User&background=7C3AED&color=fff';
-        }
-    }, true);
-}
 
 // Call this in your initApp function
 // Function to send automatic greeting message
@@ -5178,6 +5099,52 @@ function setupGroupsFunctionality() {
         });
     }
 }
+function addParticipant(groupId, userId) {
+    const groupRef = db.collection('groups').doc(groupId);
+    groupRef.get().then(doc => {
+        if (!doc.exists) return;
+        const groupData = doc.data();
+        if (groupData.adminId !== myUserId) {
+            showToast('Only admin can add participants', 'error');
+            return;
+        }
+
+        groupRef.update({
+            participants: firebase.firestore.FieldValue.arrayUnion(userId)
+        }).then(() => {
+            showToast('Participant added successfully', 'success');
+        }).catch(err => console.error(err));
+    });
+}
+
+function acceptInvite(groupId) {
+    const groupRef = db.collection('groups').doc(groupId);
+    groupRef.update({
+        invites: firebase.firestore.FieldValue.arrayRemove(myUserId),
+        participants: firebase.firestore.FieldValue.arrayUnion(myUserId)
+    }).then(() => {
+        showToast('You joined the group', 'success');
+    }).catch(err => console.error(err));
+}
+
+function rejectInvite(groupId) {
+    const groupRef = db.collection('groups').doc(groupId);
+    groupRef.update({
+        invites: firebase.firestore.FieldValue.arrayRemove(myUserId)
+    }).then(() => {
+        showToast('Invite rejected', 'info');
+    }).catch(err => console.error(err));
+}
+function requestJoin(groupId) {
+    const groupRef = db.collection('groups').doc(groupId);
+    groupRef.update({
+        pendingRequests: firebase.firestore.FieldValue.arrayUnion(myUserId)
+    }).then(() => {
+        showToast('Join request sent', 'info');
+    }).catch(err => console.error(err));
+}
+
+
 
 function openGroupsModal() {
     // Create groups modal
@@ -5579,6 +5546,20 @@ function setupEventListeners() {
             if (statusCreation) statusCreation.style.display = 'none';
         });
     }
+
+    document.addEventListener('DOMContentLoaded', () => {
+    const btn = document.getElementById('addParticipantBtn');
+    const box = document.getElementById('addParticipantBox');
+
+    if (btn && box) {
+        btn.addEventListener('click', () => {
+            box.classList.toggle('hidden'); // show/hide
+        });
+    } else {
+        console.warn('Add Participant button or box not found');
+    }
+});
+
 
     // Status type switching
     // IN setupEventListeners function - REPLACE the status option handlers:

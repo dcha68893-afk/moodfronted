@@ -1,3 +1,4 @@
+@import "tailwindcss";
 /* All your existing CSS styles remain unchanged */
 :root {
     --kynecta-primary: #7C3AED;
@@ -729,6 +730,14 @@ input:checked + .toggle-slider:before {
     background: #333;
     border-radius: 8px;
     position: relative;
+}
+
+.hidden {
+    display: none;
+}
+#addParticipantBox {
+    z-index: 50; /* make sure it’s above other elements */
+    position: absolute; /* or relative depending on layout */
 }
 
 .participant-name {
