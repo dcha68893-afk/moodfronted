@@ -12,11 +12,8 @@ import { fileURLToPath } from "url";
 import crypto from "crypto";
 import multer from "multer";
 
-// 🔥 FIXED: Import cloudinary properly for ES modules
+// 🔥 FIXED: Use the correct import pattern for Cloudinary v1
 import cloudinary from "cloudinary";
-
-// 🔥 FIXED: Import multer-storage-cloudinary correctly
-import { CloudinaryStorage } from "multer-storage-cloudinary";
 
 // Load environment variables
 import "dotenv/config";
@@ -29,8 +26,8 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
 // --- CLOUDINARY CONFIG ---
-// 🔥 FIXED: Configure Cloudinary v2 properly
-cloudinary.v2.config({
+// Configure Cloudinary (v1 API)
+cloudinary.config({
   cloud_name: process.env.CLOUDINARY_CLOUD_NAME,
   api_key: process.env.CLOUDINARY_API_KEY,
   api_secret: process.env.CLOUDINARY_API_SECRET,
@@ -79,9 +76,9 @@ app.use(express.static(__dirname));
 function generateSignature(params) {
   const timestamp = Math.round(Date.now() / 1000);
 
-  const signature = cloudinary.v2.utils.api_sign_request(
+  const signature = cloudinary.utils.api_sign_request(
     { ...params, timestamp },
-    cloudinary.v2.config().api_secret
+    cloudinary.config().api_secret
   );
 
   return { signature, timestamp };
@@ -130,10 +127,10 @@ app.post("/api/cloudinary/sign-upload", uploadLimiter, (req, res) => {
         ...uploadParams,
         signature,
         timestamp,
-        api_key: cloudinary.v2.config().api_key,
+        api_key: cloudinary.config().api_key,
       },
       uploadUrl: `https://api.cloudinary.com/v1_1/${
-        cloudinary.v2.config().cloud_name
+        cloudinary.config().cloud_name
       }/${resourceType}/upload`,
     });
   } catch (err) {
@@ -143,14 +140,8 @@ app.post("/api/cloudinary/sign-upload", uploadLimiter, (req, res) => {
 });
 
 // --- DIRECT UPLOAD USING MULTER ---
-// 🔥 FIXED: Use CloudinaryStorage properly
-const storage = new CloudinaryStorage({
-  cloudinary: cloudinary.v2,
-  params: {
-    folder: "uniconnect/direct",
-    resource_type: "auto",
-  },
-});
+// 🔥 FIXED: Use memory storage instead of CloudinaryStorage to avoid dependency issues
+const storage = multer.memoryStorage();
 
 const upload = multer({
   storage,
@@ -161,24 +152,46 @@ app.post(
   "/api/cloudinary/direct-upload",
   uploadLimiter,
   upload.single("file"),
-  (req, res) => {
-    if (!req.file)
-      return res
-        .status(400)
-        .json({ success: false, error: "No file uploaded" });
+  async (req, res) => {
+    try {
+      if (!req.file) {
+        return res
+          .status(400)
+          .json({ success: false, error: "No file uploaded" });
+      }
 
-    res.json({
-      success: true,
-      file: {
-        originalName: req.file.originalname,
-        size: req.file.size,
-        mimetype: req.file.mimetype,
-      },
-      cloudinary: {
-        url: req.file.path,
-        public_id: req.file.filename,
-      },
-    });
+      // Upload buffer directly to Cloudinary
+      const uploadResult = await new Promise((resolve, reject) => {
+        const uploadStream = cloudinary.uploader.upload_stream(
+          {
+            folder: "uniconnect/direct",
+            resource_type: "auto",
+          },
+          (error, result) => {
+            if (error) reject(error);
+            else resolve(result);
+          }
+        );
+        
+        uploadStream.end(req.file.buffer);
+      });
+
+      res.json({
+        success: true,
+        file: {
+          originalName: req.file.originalname,
+          size: req.file.size,
+          mimetype: req.file.mimetype,
+        },
+        cloudinary: {
+          url: uploadResult.secure_url,
+          public_id: uploadResult.public_id,
+        },
+      });
+    } catch (err) {
+      console.error("❌ Upload error:", err);
+      res.status(500).json({ success: false, error: "Upload failed" });
+    }
   }
 );
 
@@ -193,8 +206,7 @@ app.delete("/api/cloudinary/delete-asset", apiLimiter, async (req, res) => {
         .json({ success: false, error: "publicId required" });
     }
 
-    // 🔥 FIXED: Use cloudinary.v2.uploader.destroy
-    const result = await cloudinary.v2.uploader.destroy(publicId, {
+    const result = await cloudinary.uploader.destroy(publicId, {
       invalidate: true,
     });
 
