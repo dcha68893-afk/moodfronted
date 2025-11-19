@@ -1,3 +1,8 @@
+
+if (!window.activeCallNotifications) {
+    window.activeCallNotifications = new Map();
+}
+
 // FIX: Prevent IMAGE_URL errors completely
 (function() {
     // Override image src setting to catch IMAGE_URL
@@ -25,7 +30,6 @@
 })();
 // ==================== GLOBAL ERROR HANDLING ====================
 
-// IMPROVED: Global Image Error Handling
 function setupGlobalErrorHandling() {
     // Handle all image errors
     document.addEventListener('error', function(e) {
@@ -315,6 +319,8 @@ function initApp() {
     setupGlobalErrorHandling();
     setupNetworkMonitoring();
     setupRingtoneSettings();
+     fixAllBrokenImages();
+
     // Check if user is logged in
     auth.onAuthStateChanged(user => {
         if (user) {
@@ -342,6 +348,7 @@ function getDefaultCover() {
         </svg>
     `);
 }
+// FIXED: Comprehensive Image Error Handling
 
 // FIXED: Comprehensive Image Error Handling
 function setupImageErrorHandling() {
@@ -355,32 +362,32 @@ function setupImageErrorHandling() {
                 return;
             }
             
+            // Skip empty preview images
+            if ((e.target.src === '' || !e.target.src) && 
+                (e.target.alt.includes('preview') || e.target.alt.includes('Preview') || 
+                 e.target.classList.contains('hidden'))) {
+                console.log('Skipping empty preview image error');
+                return;
+            }
+            
             // Set fallback based on context
-            if (e.target.src.includes('IMAGE_URL') || !e.target.src || e.target.src.includes('127.0.0.1')) {
+            if (e.target.src.includes('IMAGE_URL') || 
+                !e.target.src || 
+                e.target.src.includes('127.0.0.1') ||
+                e.target.src.includes('chat.html') ||
+                !e.target.src.startsWith('http') ||
+                e.target.src === 'http://127.0.0.1:5500/IMAGE_URL') {
+                
                 const userName = e.target.alt || 'User';
                 e.target.src = `https://ui-avatars.com/api/?name=${encodeURIComponent(userName)}&background=7C3AED&color=fff`;
+                console.log('Fixed broken image with fallback:', userName);
             }
             
             e.target.classList.add('error-handled');
         }
     }, true);
-    
-    // Also handle programmatic image loading
-    const originalSetAttribute = Image.prototype.setAttribute;
-    Image.prototype.setAttribute = function(name, value) {
-        if (name === 'src') {
-            this.onerror = function() {
-                console.log('Programmatic image load failed:', value);
-                if (!this.classList.contains('error-handled')) {
-                    const userName = this.alt || 'User';
-                    this.src = `https://ui-avatars.com/api/?name=${encodeURIComponent(userName)}&background=7C3AED&color=fff`;
-                    this.classList.add('error-handled');
-                }
-            };
-        }
-        originalSetAttribute.call(this, name, value);
-    };
 }
+
 
 // Create WebRTC answer
 
@@ -506,140 +513,274 @@ async function addIceCandidates(iceCandidates) {
   }
 }
 
-
-// FIXED: Enhanced Incoming Call Notification with better state management
-
-// Map to keep track of active incoming call notifications by callId
-const activeCallNotifications = new Map();
-
 function showIncomingCallNotification({ callId, callerId, callerName, callType, offer }) {
-  console.log("Showing incoming call notification:", callId, callerId, callType);
+  try {
+    console.log('[calls] showIncomingCallNotification', callId, callerId, callType);
 
-  // If a notification for this callId is already shown, skip
-  if (activeCallNotifications.has(callId)) {
-    console.log("Incoming call notification already exists for:", callId);
-    return;
-  }
-
-  // Create container DIV for notification
-  const container = document.createElement("div");
-  container.classList.add("incoming-call-notification");
-  container.setAttribute("data-call-id", callId);
-
-  // Style it (you may want to move styles to your CSS)
-  container.style.position = "fixed";
-  container.style.top = "20px";
-  container.style.right = "20px";
-  container.style.zIndex = "10000";
-  container.style.padding = "16px";
-  container.style.background = "rgba(0,0,0,0.8)";
-  container.style.color = "#fff";
-  container.style.borderRadius = "8px";
-  container.style.boxShadow = "0 4px 10px rgba(0,0,0,0.3)";
-  container.style.maxWidth = "300px";
-  container.style.fontFamily = "sans-serif";
-
-  // Caller name
-  const title = document.createElement("div");
-  title.textContent = callerName;
-  title.style.fontSize = "16px";
-  title.style.fontWeight = "bold";
-  container.appendChild(title);
-
-  // Call type text
-  const typeText = document.createElement("div");
-  typeText.textContent = callType === "video" ? "Video call" : "Audio call";
-  typeText.style.margin = "8px 0";
-  container.appendChild(typeText);
-
-  // Buttons container
-  const btnContainer = document.createElement("div");
-  btnContainer.style.display = "flex";
-  btnContainer.style.justifyContent = "space-between";
-
-  // Answer button
-  const btnAnswer = document.createElement("button");
-  btnAnswer.textContent = "Answer";
-  btnAnswer.style.marginRight = "8px";
-  btnAnswer.style.padding = "8px 12px";
-  btnAnswer.style.background = "#4CAF50";
-  btnAnswer.style.color = "#fff";
-  btnAnswer.style.border = "none";
-  btnAnswer.style.borderRadius = "4px";
-  btnAnswer.style.cursor = "pointer";
-  
-  // Decline button
-  const btnDecline = document.createElement("button");
-  btnDecline.textContent = "Decline";
-  btnDecline.style.padding = "8px 12px";
-  btnDecline.style.background = "#f44336";
-  btnDecline.style.color = "#fff";
-  btnDecline.style.border = "none";
-  btnDecline.style.borderRadius = "4px";
-  btnDecline.style.cursor = "pointer";
-
-  btnContainer.appendChild(btnAnswer);
-  btnContainer.appendChild(btnDecline);
-  container.appendChild(btnContainer);
-
-  // Append to body
-  document.body.appendChild(container);
-
-  // Play ringtone
-  const audio = new Audio("your_ringtone_file_url.mp3"); // <-- replace with your ringtone URL
-  audio.loop = true;
-  audio.play().catch(err => {
-    console.warn("Could not play ringtone:", err);
-  });
-
-  // Setup a timeout to auto-decline if user doesn't answer
-  const AUTO_DECLINE_MS = 30000; // for example, 30 seconds
-  const timeoutId = setTimeout(() => {
-    console.log("Auto-declining call (timeout):", callId);
-    cleanupNotification();
-    declineCall(callId);
-  }, AUTO_DECLINE_MS);
-
-  // Handler to cleanup DOM and sound
-  function cleanupNotification() {
-    console.log("Cleaning up call notification UI:", callId);
-    clearTimeout(timeoutId);
-    audio.pause();
-    audio.currentTime = 0;
-    if (container.parentNode) {
-      container.parentNode.removeChild(container);
+    // If already showing a notification for this callId, bring it to front
+    if (window.activeCallNotifications.has(callId)) {
+      const existing = window.activeCallNotifications.get(callId);
+      if (existing && existing.container) {
+        existing.container.style.zIndex = '10001';
+      }
+      return;
     }
-    activeCallNotifications.delete(callId);
+    // Build container
+    const container = document.createElement('div');
+    container.classList.add('incoming-call-notification');
+    container.setAttribute('data-call-id', callId);
+
+    // Basic styling (move to CSS if you prefer)
+    Object.assign(container.style, {
+      position: 'fixed',
+      top: '20px',
+      right: '20px',
+      zIndex: '10000',
+      padding: '12px',
+      background: 'rgba(0,0,0,0.85)',
+      color: '#fff',
+      borderRadius: '8px',
+      boxShadow: '0 6px 18px rgba(0,0,0,0.35)',
+      maxWidth: '320px',
+      fontFamily: 'sans-serif'
+    });
+
+    // Content
+    const title = document.createElement('div');
+    title.textContent = callerName || 'Unknown Caller';
+    title.style.fontWeight = '600';
+    title.style.marginBottom = '6px';
+    container.appendChild(title);
+
+    const typeText = document.createElement('div');
+    typeText.textContent = callType === 'video' ? 'Video call' : 'Audio call';
+    typeText.style.marginBottom = '10px';
+    container.appendChild(typeText);
+
+    const btnRow = document.createElement('div');
+    btnRow.style.display = 'flex';
+    btnRow.style.gap = '8px';
+
+    const answerBtn = document.createElement('button');
+    answerBtn.textContent = 'Answer';
+    answerBtn.className = 'btn-answer';
+    answerBtn.style.flex = '1';
+    answerBtn.style.padding = '8px 10px';
+    answerBtn.style.border = 'none';
+    answerBtn.style.borderRadius = '6px';
+    answerBtn.style.cursor = 'pointer';
+    answerBtn.style.background = '#16a34a';
+    answerBtn.style.color = '#fff';
+
+    const declineBtn = document.createElement('button');
+    declineBtn.textContent = 'Decline';
+    declineBtn.className = 'btn-decline';
+    declineBtn.style.flex = '1';
+    declineBtn.style.padding = '8px 10px';
+    declineBtn.style.border = 'none';
+    declineBtn.style.borderRadius = '6px';
+    declineBtn.style.cursor = 'pointer';
+    declineBtn.style.background = '#ef4444';
+    declineBtn.style.color = '#fff';
+
+    btnRow.appendChild(answerBtn);
+    btnRow.appendChild(declineBtn);
+    container.appendChild(btnRow);
+
+    document.body.appendChild(container);
+
+    // Play a short ringtone using WebAudio (avoids autoplay problems sometimes)
+    let ringtone = null;
+    try {
+      const audioContext = new (window.AudioContext || window.webkitAudioContext)();
+      const os = audioContext.createOscillator();
+      const gain = audioContext.createGain();
+      os.type = 'sine';
+      os.frequency.setValueAtTime(900, audioContext.currentTime);
+      gain.gain.setValueAtTime(0.03, audioContext.currentTime);
+      os.connect(gain);
+      gain.connect(audioContext.destination);
+      os.start();
+      ringtone = { audioContext, os, gain };
+    } catch (e) {
+      console.warn('[calls] ringtone creation failed', e);
+    }
+
+    // Auto-decline after timeout only if call still exists and user hasn't interacted
+    const AUTO_DECLINE_MS = 30000;
+    const timeoutId = setTimeout(async () => {
+      try {
+        console.log('[calls] auto-decline timeout for', callId);
+        await declineIncomingCall(callId);
+      } catch (err) {
+        console.warn('[calls] auto-decline error', err);
+      }
+      cleanup();
+    }, AUTO_DECLINE_MS);
+
+    function cleanup() {
+      clearTimeout(timeoutId);
+      try {
+        if (ringtone && ringtone.os) {
+          ringtone.os.stop();
+          ringtone.audioContext.close().catch(() => {});
+        }
+      } catch (e) {}
+      if (container.parentNode) container.parentNode.removeChild(container);
+      activeCallNotifications.delete(callId);
+    }
+
+    answerBtn.addEventListener('click', async () => {
+      try {
+        cleanup();
+        // Use the global answer function that exists in your codebase
+        if (typeof window.answerIncomingCall === 'function') {
+          await window.answerIncomingCall(callId, callerId, callType);
+        } else if (typeof answerCall === 'function') {
+          await answerCall(callId, offer);
+        } else {
+          console.warn('[calls] No answer function found');
+        }
+      } catch (err) {
+        console.error('[calls] answerBtn error', err);
+      }
+    });
+
+    declineBtn.addEventListener('click', async () => {
+      try {
+        cleanup();
+        if (typeof window.declineIncomingCall === 'function') {
+          await window.declineIncomingCall(callId);
+        } else if (typeof declineCall === 'function') {
+          await declineCall(callId);
+        }
+      } catch (err) {
+        console.error('[calls] declineBtn error', err);
+      }
+    });
+
+    // Save to map
+    activeCallNotifications.set(callId, { container, timeoutId, cleanup });
+
+    // Make sure we don't leak more than 5 notifications
+    if (activeCallNotifications.size > 5) {
+      const firstKey = activeCallNotifications.keys().next().value;
+      const first = activeCallNotifications.get(firstKey);
+      if (first && typeof first.cleanup === 'function') first.cleanup();
+    }
+
+    return container;
+  } catch (err) {
+    console.error('[calls] showIncomingCallNotification fatal', err);
+  }
+}
+
+
+// ----- FIXED: listenForIncomingCalls -----
+function listenForIncomingCalls() {
+  if (!currentUser || !currentUser.uid) {
+    console.warn('[calls] listenForIncomingCalls called when no currentUser');
+    return () => {};
   }
 
-  // Button event listeners
-  btnAnswer.addEventListener("click", () => {
-    console.log("Answer clicked for call:", callId);
-    cleanupNotification();
-    answerCall(callId, offer); // <-- your existing answerCall logic
-  });
+  console.log('[calls] listenForIncomingCalls initialized for', currentUser.uid);
 
-  btnDecline.addEventListener("click", () => {
-    console.log("Decline clicked for call:", callId);
-    cleanupNotification();
-    declineCall(callId); // <-- your existing declineCall logic
-  });
+  // Accept multiple status values using Firestore 'in' operator
+  const statuses = ['ringing', 'incoming', 'calling'];
 
-  // Save into our map
-  activeCallNotifications.set(callId, {
-    container,
-    cleanup: cleanupNotification
-  });
-}
+  try {
+    const query = db.collection('calls')
+      .where('calleeId', '==', currentUser.uid)
+      .where('status', 'in', statuses)
+      .orderBy('createdAt', 'desc');
 
+    return query.onSnapshot(snapshot => {
+      if (!snapshot) return;
 
-// Helper function to cleanup all notifications
-function cleanupAllCallNotifications() {
-    document.querySelectorAll('.incoming-call-notification').forEach(notification => {
-        const callId = notification.getAttribute('data-call-id');
-        cleanupCallNotification(callId);
+      snapshot.docChanges().forEach(change => {
+        const callId = change.doc.id;
+        const callData = change.doc.data();
+
+        if (!callData || !callData.callerId) return;
+
+        // If we already have a visible notification for this call, ignore 'modified' duplicates
+        if (activeCallNotifications.has(callId)) {
+          console.log('[calls] notification already active for', callId);
+          return;
+        }
+
+        // Only act on added or modified where the status is still considered incoming
+        if (change.type === 'added' || (change.type === 'modified' && statuses.includes(callData.status))) {
+          console.log('[calls] incoming call detected', callId, callData);
+
+          // Create notification
+          showIncomingCallNotification({
+            callId,
+            callerId: callData.callerId,
+            callerName: callData.callerName || callData.callerDisplayName || 'Unknown',
+            callType: callData.callType || 'voice',
+            offer: callData.offer || null
+          });
+        }
+      });
+    }, error => {
+      console.error('[calls] listenForIncomingCalls snapshot error', error);
     });
+  } catch (err) {
+    console.error('[calls] listenForIncomingCalls error', err);
+    return () => {};
+  }
 }
+
+
+// ----- SAFE: non-destructive cleanup for loadUserData -----
+// Replace the block that previously removed all .incoming-call-notification elements with this.
+// This will only remove notifications for calls that are no longer in an incoming state.
+
+async function cleanupStaleCallNotifications() {
+  try {
+    if (window.activeCallNotifications.size === 0) return;
+
+    // Build an array of callIds we currently show
+    const callIds = Array.from(window.activeCallNotifications.keys());
+
+    const chunks = [];
+    for (let i = 0; i < callIds.length; i += 10) chunks.push(callIds.slice(i, i + 10));
+
+    for (const chunk of chunks) {
+      const snapshot = await db.collection('calls').where(firebase.firestore.FieldPath.documentId(), 'in', chunk).get();
+      const validIncoming = new Set();
+      snapshot.forEach(doc => {
+        const d = doc.data();
+        if (d && (d.status === 'ringing' || d.status === 'incoming' || d.status === 'calling')) {
+          validIncoming.add(doc.id);
+        }
+      });
+
+      // Remove notifications that are not in validIncoming
+      chunk.forEach(id => {
+        if (!validIncoming.has(id) && activeCallNotifications.has(id)) {
+          const obj = activeCallNotifications.get(id);
+          if (obj && typeof obj.cleanup === 'function') obj.cleanup();
+        }
+      });
+    }
+  } catch (err) {
+    console.error('[calls] cleanupStaleCallNotifications error', err);
+    // If the cleanup fails, don't throw — leave notifications and they'll auto-expire
+  }
+}
+
+
+// USAGE NOTES (do NOT duplicate in code):
+// 1. In loadUserData(), replace the block that removed all incoming-call-notification elements
+//    with a call to await cleanupStaleCallNotifications();
+// 2. Ensure you initialize the incoming calls listener exactly once and store unsubscribeIncomingCalls
+//    e.g. unsubscribeIncomingCalls = listenForIncomingCalls();
+// 3. Keep the global window.answerIncomingCall/window.declineIncomingCall functions as they are –
+//    showIncomingCallNotification calls them if available.
+// --------------------------
+
 
 // Helper function for timer
 function startCallTimer(callId, notificationElement) {
@@ -1072,64 +1213,7 @@ async function setupMediaForCall(callType) {
 
 // FIXED: Enhanced Incoming Call Listener with No Repeat
 
-// FIXED & STABLE Incoming Call Listener
-function listenForIncomingCalls() {
-    console.log("📡 Incoming call listener initialized for:", currentUser.uid);
 
-    // Track handled call IDs to avoid duplicates
-    const handledCalls = new Set();
-
-    return db.collection("calls")
-        .where("calleeId", "==", currentUser.uid)
-        .where("status", "==", "ringing")
-        .onSnapshot((snapshot) => {
-
-            if (snapshot.empty) {
-                console.log("📭 No incoming calls at the moment.");
-            }
-
-            snapshot.docChanges().forEach((change) => {
-                const callId = change.doc.id;
-                const callData = change.doc.data();
-
-                console.log("📡 Change detected:", {
-                    type: change.type,
-                    callId,
-                    callData
-                });
-
-                // ---- 1. Validate essential data ----
-                if (!callData || !callData.callerId) {
-                    console.warn("⚠️ Skipping invalid call data.");
-                    return;
-                }
-
-                // ---- 2. Prevent duplicates ----
-                if (handledCalls.has(callId)) {
-                    console.log("⛔ Duplicate incoming call ignored:", callId);
-                    return;
-                }
-
-                // ---- 3. Only handle ADDED or first MODIFIED ----
-                if (change.type === "added" || change.type === "modified") {
-                    console.log("📞 Incoming call detected:", callData);
-
-                    handledCalls.add(callId);
-
-                    // ---- 4. Trigger your notification UI ----
-                    showIncomingCallNotification({
-                        callId,
-                        callerId: callData.callerId,
-                        callerName: callData.callerName || "Unknown Caller",
-                        callType: callData.callType || "audio",
-                        offer: callData.offer || null,
-                    });
-                }
-            });
-        }, (error) => {
-            console.error("❌ Incoming call listener error:", error);
-        });
-}
 
 // Add this function to debug call creation
 async function testIncomingCall() {
@@ -1287,6 +1371,7 @@ async function loadUserData() {
         setupToolsListeners();
         setupStatusFileHandlers();
         listenForFriendRequests();
+        await cleanupStaleCallNotifications();
 
         // 🔥 FIXED: SINGLE, STABLE INCOMING CALL LISTENER
         try {
@@ -3144,6 +3229,15 @@ function markMessagesAsRead(chatId) {
         .catch(error => {
             console.error('Error marking messages as read:', error);
         });
+}
+
+function fixAllBrokenImages() {
+    document.querySelectorAll('img').forEach(img => {
+        if (img.src.includes('IMAGE_URL') || img.src.includes('127.0.0.1')) {
+            const altText = img.alt || 'User';
+            img.src = `https://ui-avatars.com/api/?name=${encodeURIComponent(altText)}&background=7C3AED&color=fff`;
+        }
+    });
 }
 
 // FIXED: File/Media Upload with proper error handling
@@ -7544,3 +7638,36 @@ function testStatusButtons() {
 document.addEventListener('DOMContentLoaded', function() {
     setTimeout(testStatusButtons, 1000);
 });
+
+function fixAllImagesOnLoad() {
+    console.log('Scanning for broken images...');
+    document.querySelectorAll('img').forEach(img => {
+        // Skip if already handled or has valid src
+        if (img.classList.contains('error-handled') || 
+            img.src.startsWith('data:') ||
+            (img.src && img.src.startsWith('http') && !img.src.includes('IMAGE_URL') && !img.src.includes('127.0.0.1'))) {
+            return;
+        }
+        
+        // Skip empty preview images (they're meant to be empty)
+        if ((img.src === '' || !img.src) && 
+            (img.alt.includes('preview') || img.alt.includes('Preview') || 
+             img.classList.contains('hidden') || img.id.includes('preview'))) {
+            console.log('Skipping empty preview image:', img.alt || img.id);
+            return;
+        }
+        
+        // Fix problematic images
+        if (!img.src || 
+            img.src.includes('IMAGE_URL') || 
+            img.src.includes('127.0.0.1') ||
+            img.src.includes('chat.html') ||
+            !img.src.startsWith('http')) {
+            
+            const userName = img.alt || 'User';
+            console.log('Fixing image:', img.src, '->', userName);
+            img.src = `https://ui-avatars.com/api/?name=${encodeURIComponent(userName)}&background=7C3AED&color=fff`;
+            img.classList.add('error-handled');
+        }
+    });
+}
