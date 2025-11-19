@@ -6261,7 +6261,6 @@ function setupStatusFileHandlers() {
     }
 }
 // WebRTC Call Implementation
-// REPLACE THE startVideoCall FUNCTION (around line 3300):
 async function startVideoCall() {
     if (!currentChat) {
         showToast('Please select a chat first', 'error');
@@ -6277,31 +6276,87 @@ async function startVideoCall() {
             throw new Error('Your browser does not support video calling. Please use Chrome, Firefox, or Edge.');
         }
 
-        // Request camera and microphone permissions
-        const constraints = {
-            video: {
-                width: { ideal: 1280 },
-                height: { ideal: 720 },
-                frameRate: { ideal: 30 }
-            },
-            audio: {
-                echoCancellation: true,
-                noiseSuppression: true,
-                autoGainControl: true
-            }
+        // First, check if we already have permissions
+        let hasVideoPermission = false;
+        let hasAudioPermission = false;
+        
+        try {
+            const devices = await navigator.mediaDevices.enumerateDevices();
+            hasVideoPermission = devices.some(device => device.kind === 'videoinput' && device.deviceId !== '');
+            hasAudioPermission = devices.some(device => device.kind === 'audioinput' && device.deviceId !== '');
+        } catch (e) {
+            console.log('Could not enumerate devices:', e);
+        }
+
+        // Request camera and microphone permissions with progressive approach
+        let constraints = {
+            video: false,
+            audio: false
         };
+
+        // If we don't have permissions, request them step by step
+        if (!hasVideoPermission || !hasAudioPermission) {
+            console.log('Requesting permissions step by step...');
+            
+            // First request audio only (more likely to be granted)
+            try {
+                const audioStream = await navigator.mediaDevices.getUserMedia({ audio: true });
+                console.log('✅ Audio permission granted');
+                audioStream.getTracks().forEach(track => track.stop()); // Clean up
+                hasAudioPermission = true;
+                constraints.audio = true;
+            } catch (audioError) {
+                console.warn('Audio permission denied:', audioError);
+                showToast('Microphone access is required for video calls', 'error');
+            }
+
+            // Then request video
+            try {
+                const videoStream = await navigator.mediaDevices.getUserMedia({ video: true });
+                console.log('✅ Video permission granted');
+                videoStream.getTracks().forEach(track => track.stop()); // Clean up
+                hasVideoPermission = true;
+                constraints.video = {
+                    width: { ideal: 1280 },
+                    height: { ideal: 720 },
+                    frameRate: { ideal: 30 }
+                };
+            } catch (videoError) {
+                console.warn('Video permission denied:', videoError);
+                showToast('Camera access is required for video calls', 'error');
+            }
+        } else {
+            // We already have permissions, request both
+            constraints = {
+                video: {
+                    width: { ideal: 1280 },
+                    height: { ideal: 720 },
+                    frameRate: { ideal: 30 }
+                },
+                audio: {
+                    echoCancellation: true,
+                    noiseSuppression: true,
+                    autoGainControl: true
+                }
+            };
+        }
+
+        // Check if we have at least audio permission
+        if (!hasAudioPermission && !hasVideoPermission) {
+            throw new Error('Camera and microphone permissions are required for video calls');
+        }
+
+        console.log('Requesting media stream with constraints:', constraints);
         
-        console.log('Requesting media permissions...');
-        
-        // Get user media with better error handling
+        // Get the final media stream
         localStream = await navigator.mediaDevices.getUserMedia(constraints);
-        console.log('✅ Camera and microphone access granted');
+        console.log('✅ Media stream obtained successfully');
         
-        // Display local video stream
+        // Display local video stream if video is available
         const localVideo = document.getElementById('localVideo');
         const videoCallContainer = document.getElementById('videoCallContainer');
         
-        if (localVideo) {
+        if (localVideo && constraints.video) {
             localVideo.srcObject = localStream;
             localVideo.muted = true; // Mute local video to avoid echo
             
@@ -6311,18 +6366,33 @@ async function startVideoCall() {
                     console.warn('Video play warning:', e);
                 });
             };
+            
+            // Handle video loading errors
+            localVideo.onerror = (e) => {
+                console.error('Video loading error:', e);
+                showToast('Error loading video stream', 'error');
+            };
+        } else if (!constraints.video) {
+            // Video permission was denied, show placeholder
+            console.log('Video permission not granted, showing audio-only call');
+            showToast('Video call started (audio only)', 'info');
         }
         
         // Show call container
         if (videoCallContainer) {
             videoCallContainer.style.display = 'block';
             videoCallContainer.classList.remove('hidden');
+            
+            // If no video, show audio-only UI
+            if (!constraints.video) {
+                videoCallContainer.classList.add('audio-only');
+            }
         }
         
         // Set call state
         isInCall = true;
         isMuted = false;
-        isVideoOff = false;
+        isVideoOff = !constraints.video; // Video is off if permission was denied
         
         // Update UI buttons
         updateCallButtons();
@@ -6339,20 +6409,495 @@ async function startVideoCall() {
         console.error('Error starting video call:', error);
         
         // User-friendly error messages
-        let errorMessage = 'Cannot access camera/microphone. ';
+        let errorMessage = 'Cannot start video call. ';
         
         if (error.name === 'NotAllowedError') {
-            errorMessage += 'Please allow camera and microphone permissions in your browser settings.';
+            errorMessage = 'Camera/microphone permission denied. ';
+            errorMessage += 'Please allow permissions in your browser settings and try again.';
             showPermissionInstructions();
         } else if (error.name === 'NotFoundError') {
-            errorMessage += 'No camera found. Please check if your camera is connected.';
+            errorMessage = 'No camera or microphone found. ';
+            errorMessage += 'Please check if your devices are connected properly.';
         } else if (error.name === 'NotReadableError') {
-            errorMessage += 'Camera is already in use by another application.';
+            errorMessage = 'Camera/microphone is already in use by another application.';
+        } else if (error.name === 'OverconstrainedError') {
+            errorMessage = 'Cannot find camera with required specifications. ';
+            errorMessage += 'Trying with default settings...';
+            // Retry with simpler constraints
+            setTimeout(() => startVideoCallWithSimpleConstraints(), 1000);
+            return;
+        } else if (error.name === 'TypeError') {
+            errorMessage = 'Media constraints are not valid.';
         } else {
             errorMessage += error.message;
         }
         
         showToast(errorMessage, 'error');
+        
+        // Reset call state
+        isInCall = false;
+        cleanupMediaStream();
+    }
+}
+
+// ADD THIS NEW FUNCTION FOR SIMPLER CONSTRAINTS RETRY:
+async function startVideoCallWithSimpleConstraints() {
+    try {
+        console.log('Retrying with simpler constraints...');
+        
+        const simpleConstraints = {
+            video: true,
+            audio: true
+        };
+        
+        localStream = await navigator.mediaDevices.getUserMedia(simpleConstraints);
+        console.log('✅ Media stream obtained with simple constraints');
+        
+        // Continue with call setup...
+        const localVideo = document.getElementById('localVideo');
+        const videoCallContainer = document.getElementById('videoCallContainer');
+        
+        if (localVideo) {
+            localVideo.srcObject = localStream;
+            localVideo.muted = true;
+            
+            localVideo.onloadedmetadata = () => {
+                localVideo.play().catch(e => console.warn('Video play warning:', e));
+            };
+        }
+        
+        if (videoCallContainer) {
+            videoCallContainer.style.display = 'block';
+            videoCallContainer.classList.remove('hidden');
+        }
+        
+        isInCall = true;
+        isMuted = false;
+        isVideoOff = false;
+        updateCallButtons();
+        
+        showToast(`Video call started with ${currentChat.name}`, 'success');
+        
+        if (currentChat.friendId) {
+            await startCall(currentChat.friendId, 'video', currentChat.name);
+        }
+        
+    } catch (error) {
+        console.error('Error with simple constraints:', error);
+        showToast('Failed to start video call even with basic settings', 'error');
+        isInCall = false;
+        cleanupMediaStream();
+    }
+}
+
+// ADD PERMISSION INSTRUCTIONS FUNCTION:
+function showPermissionInstructions() {
+    const instructions = `
+        <div class="permission-instructions">
+            <h3>How to Enable Camera/Microphone Permissions</h3>
+            <div class="browser-instructions">
+                <div class="browser-chrome">
+                    <strong>Chrome:</strong>
+                    <ol>
+                        <li>Click the lock/camera icon in the address bar</li>
+                        <li>Change "Camera" and "Microphone" to "Allow"</li>
+                        <li>Refresh the page and try again</li>
+                    </ol>
+                </div>
+                <div class="browser-firefox">
+                    <strong>Firefox:</strong>
+                    <ol>
+                        <li>Click the camera icon in the address bar</li>
+                        <li>Select "Allow" for camera and microphone</li>
+                        <li>Check "Remember this decision"</li>
+                        <li>Refresh the page</li>
+                    </ol>
+                </div>
+                <div class="browser-edge">
+                    <strong>Edge:</strong>
+                    <ol>
+                        <li>Click the camera icon in the address bar</li>
+                        <li>Toggle camera and microphone to "Allow"</li>
+                        <li>Refresh the page</li>
+                    </ol>
+                </div>
+                <div class="browser-safari">
+                    <strong>Safari:</strong>
+                    <ol>
+                        <li>Go to Safari → Preferences → Websites</li>
+                        <li>Find Camera/Microphone and set to "Allow"</li>
+                        <li>Refresh the page</li>
+                    </ol>
+                </div>
+            </div>
+            <button onclick="closePermissionInstructions()" class="btn-primary">Got it</button>
+        </div>
+    `;
+    
+    // Create and show instructions modal
+    const modal = document.createElement('div');
+    modal.className = 'permission-modal';
+    modal.innerHTML = instructions;
+    document.body.appendChild(modal);
+}
+
+// ADD FUNCTION TO CLOSE INSTRUCTIONS:
+function closePermissionInstructions() {
+    const modal = document.querySelector('.permission-modal');
+    if (modal) {
+        modal.remove();
+    }
+}
+
+// UPDATE THE CLEANUP FUNCTION:
+function cleanupMediaStream() {
+    if (localStream) {
+        localStream.getTracks().forEach(track => {
+            track.stop();
+        });
+        localStream = null;
+    }
+    
+    // Hide video call container
+    const videoCallContainer = document.getElementById('videoCallContainer');
+    if (videoCallContainer) {
+        videoCallContainer.style.display = 'none';
+        videoCallContainer.classList.add('hidden');
+        videoCallContainer.classList.remove('audio-only');
+    }
+}
+
+
+// THEN THE REST OF YOUR VIDEO CALL FUNCTIONS:
+
+// REPLACE THE startVideoCall FUNCTION (around line 3300):
+async function startVideoCall() {
+    if (!currentChat) {
+        showToast('Please select a chat first', 'error');
+        return;
+    }
+
+    try {
+        console.log('Starting video call with:', currentChat.name);
+        showToast('Starting video call...', 'info');
+        
+        // Check browser support
+        if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+            throw new Error('Your browser does not support video calling. Please use Chrome, Firefox, or Edge.');
+        }
+
+        // First, check if we already have permissions
+        let hasVideoPermission = false;
+        let hasAudioPermission = false;
+        
+        try {
+            const devices = await navigator.mediaDevices.enumerateDevices();
+            hasVideoPermission = devices.some(device => device.kind === 'videoinput' && device.deviceId !== '');
+            hasAudioPermission = devices.some(device => device.kind === 'audioinput' && device.deviceId !== '');
+        } catch (e) {
+            console.log('Could not enumerate devices:', e);
+        }
+
+        // Request camera and microphone permissions with progressive approach
+        let constraints = {
+            video: false,
+            audio: false
+        };
+
+        // If we don't have permissions, request them step by step
+        if (!hasVideoPermission || !hasAudioPermission) {
+            console.log('Requesting permissions step by step...');
+            
+            // First request audio only (more likely to be granted)
+            try {
+                const audioStream = await navigator.mediaDevices.getUserMedia({ audio: true });
+                console.log('✅ Audio permission granted');
+                audioStream.getTracks().forEach(track => track.stop()); // Clean up
+                hasAudioPermission = true;
+                constraints.audio = true;
+            } catch (audioError) {
+                console.warn('Audio permission denied:', audioError);
+                showToast('Microphone access is required for video calls', 'error');
+            }
+
+            // Then request video
+            try {
+                const videoStream = await navigator.mediaDevices.getUserMedia({ video: true });
+                console.log('✅ Video permission granted');
+                videoStream.getTracks().forEach(track => track.stop()); // Clean up
+                hasVideoPermission = true;
+                constraints.video = {
+                    width: { ideal: 1280 },
+                    height: { ideal: 720 },
+                    frameRate: { ideal: 30 }
+                };
+            } catch (videoError) {
+                console.warn('Video permission denied:', videoError);
+                showToast('Camera access is required for video calls', 'error');
+            }
+        } else {
+            // We already have permissions, request both
+            constraints = {
+                video: {
+                    width: { ideal: 1280 },
+                    height: { ideal: 720 },
+                    frameRate: { ideal: 30 }
+                },
+                audio: {
+                    echoCancellation: true,
+                    noiseSuppression: true,
+                    autoGainControl: true
+                }
+            };
+        }
+
+        // Check if we have at least audio permission
+        if (!hasAudioPermission && !hasVideoPermission) {
+            throw new Error('Camera and microphone permissions are required for video calls');
+        }
+
+        console.log('Requesting media stream with constraints:', constraints);
+        
+        // Get the final media stream
+        localStream = await navigator.mediaDevices.getUserMedia(constraints);
+        console.log('✅ Media stream obtained successfully');
+        
+        // Display local video stream if video is available
+        const localVideo = document.getElementById('localVideo');
+        const videoCallContainer = document.getElementById('videoCallContainer');
+        
+        if (localVideo && constraints.video) {
+            localVideo.srcObject = localStream;
+            localVideo.muted = true; // Mute local video to avoid echo
+            
+            // Wait for video to load
+            localVideo.onloadedmetadata = () => {
+                localVideo.play().catch(e => {
+                    console.warn('Video play warning:', e);
+                });
+            };
+            
+            // Handle video loading errors
+            localVideo.onerror = (e) => {
+                console.error('Video loading error:', e);
+                showToast('Error loading video stream', 'error');
+            };
+        } else if (!constraints.video) {
+            // Video permission was denied, show placeholder
+            console.log('Video permission not granted, showing audio-only call');
+            showToast('Video call started (audio only)', 'info');
+        }
+        
+        // Show call container
+        if (videoCallContainer) {
+            videoCallContainer.style.display = 'block';
+            videoCallContainer.classList.remove('hidden');
+            
+            // If no video, show audio-only UI
+            if (!constraints.video) {
+                videoCallContainer.classList.add('audio-only');
+            }
+        }
+        
+        // Set call state
+        isInCall = true;
+        isMuted = false;
+        isVideoOff = !constraints.video; // Video is off if permission was denied
+        
+        // Update UI buttons
+        updateCallButtons();
+        
+        console.log('Video call started successfully');
+        showToast(`Video call started with ${currentChat.name}`, 'success');
+        
+        // Start WebRTC connection
+        if (currentChat.friendId) {
+            await startCall(currentChat.friendId, 'video', currentChat.name);
+        }
+        
+    } catch (error) {
+        console.error('Error starting video call:', error);
+        
+        // User-friendly error messages
+        let errorMessage = 'Cannot start video call. ';
+        
+        if (error.name === 'NotAllowedError') {
+            errorMessage = 'Camera/microphone permission denied. ';
+            errorMessage += 'Please allow permissions in your browser settings and try again.';
+            showPermissionInstructions();
+        } else if (error.name === 'NotFoundError') {
+            errorMessage = 'No camera or microphone found. ';
+            errorMessage += 'Please check if your devices are connected properly.';
+        } else if (error.name === 'NotReadableError') {
+            errorMessage = 'Camera/microphone is already in use by another application.';
+        } else if (error.name === 'OverconstrainedError') {
+            errorMessage = 'Cannot find camera with required specifications. ';
+            errorMessage += 'Trying with default settings...';
+            // Retry with simpler constraints
+            setTimeout(() => startVideoCallWithSimpleConstraints(), 1000);
+            return;
+        } else if (error.name === 'TypeError') {
+            errorMessage = 'Media constraints are not valid.';
+        } else {
+            errorMessage += error.message;
+        }
+        
+        showToast(errorMessage, 'error');
+        
+        // Reset call state
+        isInCall = false;
+        cleanupMediaStream();
+    }
+}
+
+// ADD THIS NEW FUNCTION FOR SIMPLER CONSTRAINTS RETRY:
+async function startVideoCallWithSimpleConstraints() {
+    try {
+        console.log('Retrying with simpler constraints...');
+        
+        const simpleConstraints = {
+            video: true,
+            audio: true
+        };
+        
+        localStream = await navigator.mediaDevices.getUserMedia(simpleConstraints);
+        console.log('✅ Media stream obtained with simple constraints');
+        
+        // Continue with call setup...
+        const localVideo = document.getElementById('localVideo');
+        const videoCallContainer = document.getElementById('videoCallContainer');
+        
+        if (localVideo) {
+            localVideo.srcObject = localStream;
+            localVideo.muted = true;
+            
+            localVideo.onloadedmetadata = () => {
+                localVideo.play().catch(e => console.warn('Video play warning:', e));
+            };
+        }
+        
+        if (videoCallContainer) {
+            videoCallContainer.style.display = 'block';
+            videoCallContainer.classList.remove('hidden');
+            videoCallContainer.classList.remove('audio-only');
+        }
+        
+        isInCall = true;
+        isMuted = false;
+        isVideoOff = false;
+        updateCallButtons();
+        
+        showToast(`Video call started with ${currentChat.name}`, 'success');
+        
+        if (currentChat.friendId) {
+            await startCall(currentChat.friendId, 'video', currentChat.name);
+        }
+        
+    } catch (error) {
+        console.error('Error with simple constraints:', error);
+        showToast('Failed to start video call even with basic settings', 'error');
+        isInCall = false;
+        cleanupMediaStream();
+    }
+}
+
+// ADD PERMISSION INSTRUCTIONS FUNCTION:
+function showPermissionInstructions() {
+    const instructions = `
+        <div class="permission-instructions">
+            <h3>How to Enable Camera/Microphone Permissions</h3>
+            <div class="browser-instructions">
+                <div class="browser-chrome">
+                    <strong>Chrome:</strong>
+                    <ol>
+                        <li>Click the lock/camera icon in the address bar</li>
+                        <li>Change "Camera" and "Microphone" to "Allow"</li>
+                        <li>Refresh the page and try again</li>
+                    </ol>
+                </div>
+                <div class="browser-firefox">
+                    <strong>Firefox:</strong>
+                    <ol>
+                        <li>Click the camera icon in the address bar</li>
+                        <li>Select "Allow" for camera and microphone</li>
+                        <li>Check "Remember this decision"</li>
+                        <li>Refresh the page</li>
+                    </ol>
+                </div>
+                <div class="browser-edge">
+                    <strong>Edge:</strong>
+                    <ol>
+                        <li>Click the camera icon in the address bar</li>
+                        <li>Toggle camera and microphone to "Allow"</li>
+                        <li>Refresh the page</li>
+                    </ol>
+                </div>
+                <div class="browser-safari">
+                    <strong>Safari:</strong>
+                    <ol>
+                        <li>Go to Safari → Preferences → Websites</li>
+                        <li>Find Camera/Microphone and set to "Allow"</li>
+                        <li>Refresh the page</li>
+                    </ol>
+                </div>
+            </div>
+            <button onclick="closePermissionInstructions()" class="btn-primary">Got it</button>
+        </div>
+    `;
+    
+    // Create and show instructions modal
+    const modal = document.createElement('div');
+    modal.className = 'permission-modal';
+    modal.innerHTML = instructions;
+    document.body.appendChild(modal);
+}
+
+// ADD FUNCTION TO CLOSE INSTRUCTIONS:
+function closePermissionInstructions() {
+    const modal = document.querySelector('.permission-modal');
+    if (modal) {
+        modal.remove();
+    }
+}
+
+// UPDATE THE CLEANUP FUNCTION:
+function cleanupMediaStream() {
+    if (localStream) {
+        localStream.getTracks().forEach(track => {
+            track.stop();
+        });
+        localStream = null;
+    }
+    
+    // Hide video call container
+    const videoCallContainer = document.getElementById('videoCallContainer');
+    if (videoCallContainer) {
+        videoCallContainer.style.display = 'none';
+        videoCallContainer.classList.add('hidden');
+        videoCallContainer.classList.remove('audio-only');
+    }
+}
+
+// UPDATE THE updateCallButtons FUNCTION TO HANDLE AUDIO-ONLY:
+function updateCallButtons() {
+    const muteBtn = document.querySelector('.call-mute');
+    const videoBtn = document.querySelector('.call-video');
+    
+    if (muteBtn) {
+        muteBtn.innerHTML = isMuted ? '🎤' : '🔇';
+        muteBtn.title = isMuted ? 'Unmute' : 'Mute';
+    }
+    
+    if (videoBtn) {
+        if (isVideoOff) {
+            videoBtn.innerHTML = '📹';
+            videoBtn.title = 'Turn video on';
+            videoBtn.style.opacity = '0.5';
+        } else {
+            videoBtn.innerHTML = '📷';
+            videoBtn.title = 'Turn video off';
+            videoBtn.style.opacity = '1';
+        }
     }
 }
 
