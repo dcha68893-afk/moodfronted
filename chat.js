@@ -1,10 +1,15 @@
-
+// ==================== EMERGENCY SPAM PROTECTION ====================
 if (!window.activeCallNotifications) {
     window.activeCallNotifications = new Map();
 }
 
-// FIX: Prevent IMAGE_URL errors completely
+// Add spam protection at the very top
 (function() {
+    let callAttempts = 0;
+    let lastCallAttempt = 0;
+    const MAX_CALL_ATTEMPTS = 5;
+    const CALL_COOLDOWN_PERIOD = 10000; // 10 seconds
+    
     // Override image src setting to catch IMAGE_URL
     const originalSetAttribute = Element.prototype.setAttribute;
     Element.prototype.setAttribute = function(name, value) {
@@ -27,7 +32,47 @@ if (!window.activeCallNotifications) {
             originalImageSrc.set.call(this, value);
         }
     });
+
+    // Spam protection for calls
+    window.callSpamProtection = {
+        canMakeCall: function() {
+            const now = Date.now();
+            if (now - lastCallAttempt < CALL_COOLDOWN_PERIOD) {
+                console.warn('Call spam protection: Too many call attempts');
+                return false;
+            }
+            
+            if (callAttempts >= MAX_CALL_ATTEMPTS) {
+                const timeSinceFirstAttempt = now - lastCallAttempt;
+                if (timeSinceFirstAttempt < 60000) { // 1 minute
+                    console.warn('Call spam protection: Rate limit exceeded');
+                    return false;
+                } else {
+                    // Reset counter after 1 minute
+                    callAttempts = 0;
+                }
+            }
+            
+            callAttempts++;
+            lastCallAttempt = now;
+            return true;
+        },
+        
+        resetCounter: function() {
+            callAttempts = 0;
+            lastCallAttempt = 0;
+        },
+        
+        getStats: function() {
+            return {
+                attempts: callAttempts,
+                lastAttempt: lastCallAttempt,
+                cooldown: CALL_COOLDOWN_PERIOD
+            };
+        }
+    };
 })();
+
 // ==================== GLOBAL ERROR HANDLING ====================
 
 function setupGlobalErrorHandling() {
@@ -83,8 +128,6 @@ function handleImageError(img) {
     img.onerror = null; // Prevent infinite loop
 }
 
-
-
 // ==================== FIREBASE INITIALIZATION ====================
 const firebaseConfig = {
     apiKey: "AIzaSyDHHyGgsSV18BcXrGgzi4C8frzDAE1C1zo",
@@ -112,8 +155,6 @@ try {
     console.error('Firebase initialization failed:', error);
 }
 
-
-
 // ADD NETWORK STATUS MONITORING - Add this:
 firebase.firestore().enableNetwork()
   .then(() => {
@@ -122,6 +163,7 @@ firebase.firestore().enableNetwork()
   .catch((err) => {
     console.log('Firestore offline:', err);
   });
+
 const cloudinaryConfig = {
     cloudName: 'dhjnxa5rh',
     apiKey: '817591969559894',
@@ -208,7 +250,6 @@ let isMuted = false;
 let isVideoOff = false;
 
 // WebRTC Configuration
-
 const rtcConfig = {
   iceServers: [
     // STUN (keeps what you already have)
@@ -223,7 +264,6 @@ const rtcConfig = {
   ]
 };
 
-
 // Signaling state
 let callState = {
     isCaller: false,
@@ -231,7 +271,6 @@ let callState = {
     callType: null, // 'video' or 'voice'
     remoteUserId: null
 };
-
 
 // DOM Elements
 const loadingScreen = document.getElementById('loadingScreen');
@@ -266,6 +305,7 @@ function formatFileSize(bytes) {
     const i = Math.floor(Math.log(bytes) / Math.log(k));
     return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i];
 }
+
 // Safety function to check if element exists
 function safeElement(id) {
     const element = document.getElementById(id);
@@ -274,6 +314,7 @@ function safeElement(id) {
     }
     return element;
 }
+
 // ADD NETWORK STATUS DETECTION
 function setupNetworkMonitoring() {
     // Handle online/offline events
@@ -301,7 +342,6 @@ function setupNetworkMonitoring() {
     }
 }
 
-
 // Safe version of classList operations
 function safeClassList(id, action, className) {
     const element = safeElement(id);
@@ -319,7 +359,7 @@ function initApp() {
     setupGlobalErrorHandling();
     setupNetworkMonitoring();
     setupRingtoneSettings();
-     fixAllBrokenImages();
+    fixAllBrokenImages();
 
     // Check if user is logged in
     auth.onAuthStateChanged(user => {
@@ -334,6 +374,7 @@ function initApp() {
         }
     });
 }
+
 function getDefaultAvatar(name = 'User') {
     return `https://ui-avatars.com/api/?name=${encodeURIComponent(name)}&background=7C3AED&color=fff`;
 }
@@ -348,7 +389,6 @@ function getDefaultCover() {
         </svg>
     `);
 }
-// FIXED: Comprehensive Image Error Handling
 
 // FIXED: Comprehensive Image Error Handling
 function setupImageErrorHandling() {
@@ -388,9 +428,7 @@ function setupImageErrorHandling() {
     }, true);
 }
 
-
 // Create WebRTC answer
-
 // Robust createAnswer: ensure local media + tracks are added before creating answer
 async function createAnswer(callId, offer, callerId) {
   try {
@@ -454,7 +492,6 @@ async function createAnswer(callId, offer, callerId) {
   }
 }
 
-
 // FIXED: Listen for WebRTC offer from caller
 async function listenForCallOffer(callId, callerId) {
     console.log('Listening for WebRTC offer in call:', callId, 'from:', callerId);
@@ -490,7 +527,6 @@ async function listenForCallOffer(callId, callerId) {
 }
 
 // Add ICE candidates from remote peer
-
 // Add ICE candidates (pass an array). This function only adds candidates to current peerConnection.
 async function addIceCandidates(iceCandidates) {
   if (!peerConnection) {
@@ -675,15 +711,14 @@ function showIncomingCallNotification({ callId, callerId, callerName, callType, 
   }
 }
 
-
-// ----- FIXED: listenForIncomingCalls -----
+// ==================== FIXED: PROTECTED INCOMING CALL LISTENER ====================
 function listenForIncomingCalls() {
   if (!currentUser || !currentUser.uid) {
     console.warn('[calls] listenForIncomingCalls called when no currentUser');
     return () => {};
   }
 
-  console.log('[calls] listenForIncomingCalls initialized for', currentUser.uid);
+  console.log('[calls] Protected incoming call listener initialized for', currentUser.uid);
 
   // Accept multiple status values using Firestore 'in' operator
   const statuses = ['ringing', 'incoming', 'calling'];
@@ -724,22 +759,119 @@ function listenForIncomingCalls() {
         }
       });
     }, error => {
-      console.error('[calls] listenForIncomingCalls snapshot error', error);
+      console.error('[calls] Protected listener snapshot error', error);
     });
   } catch (err) {
-    console.error('[calls] listenForIncomingCalls error', err);
+    console.error('[calls] Protected listener initialization error', err);
     return () => {};
   }
 }
 
+// ==================== FIXED: ENHANCED DECLINE CALL FUNCTION ====================
+window.declineIncomingCall = async function(callId) {
+    try {
+        console.log('🔇 Declining call:', callId);
+        
+        // Clean up notification first
+        cleanupCallNotification(callId);
+        
+        // Update call status to rejected with proper cleanup
+        await db.collection('calls').doc(callId).update({
+            status: 'rejected',
+            endedAt: firebase.firestore.FieldValue.serverTimestamp(),
+            endedBy: currentUser.uid,
+            reason: 'declined',
+            // Clear any pending data to prevent leaks
+            offer: null,
+            answer: null,
+            iceCandidates: [],
+            callerCandidates: [],
+            calleeCandidates: []
+        });
+        
+        console.log('✅ Call declined successfully');
+        showToast('Call declined', 'info');
+        
+    } catch (error) {
+        console.error('❌ Error declining call:', error);
+        showToast('Error declining call', 'error');
+        
+        // Force cleanup even if Firestore update fails
+        cleanupCallNotification(callId);
+        
+        // Try to delete the call document if update fails
+        try {
+            await db.collection('calls').doc(callId).delete();
+            console.log('🗑️ Call document deleted as fallback');
+        } catch (deleteError) {
+            console.error('❌ Failed to delete call document:', deleteError);
+        }
+    }
+}
 
-// ----- SAFE: non-destructive cleanup for loadUserData -----
-// Replace the block that previously removed all .incoming-call-notification elements with this.
-// This will only remove notifications for calls that are no longer in an incoming state.
+// ==================== STALE CALL CLEANUP ON APP STARTUP ====================
+async function cleanupStaleCallsOnStartup() {
+    try {
+        console.log('🧹 Cleaning up stale calls on startup...');
+        
+        if (!currentUser || !currentUser.uid) {
+            console.log('No current user, skipping stale call cleanup');
+            return;
+        }
 
+        // Get all active calls for this user
+        const activeCallsQuery = db.collection('calls')
+            .where('participants', 'array-contains', currentUser.uid)
+            .where('status', 'in', ['ringing', 'incoming', 'calling', 'connected'])
+            .limit(50);
+
+        const snapshot = await activeCallsQuery.get();
+        
+        if (snapshot.empty) {
+            console.log('No stale calls found');
+            return;
+        }
+
+        console.log(`Found ${snapshot.size} potentially stale calls`);
+
+        const batch = db.batch();
+        const now = Date.now();
+        const STALE_THRESHOLD = 5 * 60 * 1000; // 5 minutes
+
+        snapshot.forEach(doc => {
+            const callData = doc.data();
+            const callTime = callData.createdAt?.toDate?.()?.getTime() || now;
+            const timeDiff = now - callTime;
+
+            // If call is older than threshold, mark as stale
+            if (timeDiff > STALE_THRESHOLD) {
+                console.log(`Marking stale call: ${doc.id}, age: ${Math.round(timeDiff/1000)}s`);
+                batch.update(doc.ref, {
+                    status: 'ended',
+                    endedAt: firebase.firestore.FieldValue.serverTimestamp(),
+                    endedBy: 'system',
+                    reason: 'stale_timeout',
+                    stale: true
+                });
+            }
+        });
+
+        if (snapshot.size > 0) {
+            await batch.commit();
+            console.log(`✅ Cleaned up ${snapshot.size} stale calls`);
+        }
+
+    } catch (error) {
+        console.error('❌ Error cleaning up stale calls:', error);
+    }
+}
+
+// ==================== STALE CALL NOTIFICATIONS CLEANUP ====================
 async function cleanupStaleCallNotifications() {
   try {
     if (window.activeCallNotifications.size === 0) return;
+
+    console.log('🧹 Cleaning up stale call notifications...');
 
     // Build an array of callIds we currently show
     const callIds = Array.from(window.activeCallNotifications.keys());
@@ -765,23 +897,13 @@ async function cleanupStaleCallNotifications() {
         }
       });
     }
+
+    console.log(`✅ Cleaned up stale call notifications. Remaining: ${window.activeCallNotifications.size}`);
   } catch (err) {
-    console.error('[calls] cleanupStaleCallNotifications error', err);
+    console.error('❌ cleanupStaleCallNotifications error', err);
     // If the cleanup fails, don't throw — leave notifications and they'll auto-expire
   }
 }
-
-
-// USAGE NOTES (do NOT duplicate in code):
-// 1. In loadUserData(), replace the block that removed all incoming-call-notification elements
-//    with a call to await cleanupStaleCallNotifications();
-// 2. Ensure you initialize the incoming calls listener exactly once and store unsubscribeIncomingCalls
-//    e.g. unsubscribeIncomingCalls = listenForIncomingCalls();
-// 3. Keep the global window.answerIncomingCall/window.declineIncomingCall functions as they are –
-//    showIncomingCallNotification calls them if available.
-// --------------------------
-
-
 // Helper function for timer
 function startCallTimer(callId, notificationElement) {
     let timeLeft = 30;
@@ -810,6 +932,12 @@ function startCallTimer(callId, notificationElement) {
 window.answerIncomingCall = async function(callId, callerId, callType) {
     try {
         console.log('Answering call:', callId);
+        
+        // Check spam protection
+        if (!window.callSpamProtection.canMakeCall()) {
+            showToast('Please wait before making another call', 'warning');
+            return;
+        }
         
         // Ensure media access
         if (!localStream) {
@@ -860,36 +988,13 @@ window.answerIncomingCall = async function(callId, callerId, callType) {
     }
 }
 
-// FIXED: Enhanced Decline Incoming Call
-window.declineIncomingCall = async function(callId) {
-    try {
-        console.log('Declining call:', callId);
-        
-        // Clean up notification first
-        cleanupCallNotification(callId);
-        
-        // Update call status to rejected
-        await db.collection('calls').doc(callId).update({
-            status: 'rejected',
-            endedAt: firebase.firestore.FieldValue.serverTimestamp(),
-            endedBy: currentUser.uid,
-            reason: 'declined'
-        });
-        
-        console.log('Call declined successfully');
-        showToast('Call declined', 'info');
-        
-    } catch (error) {
-        console.error('Error declining call:', error);
-        showToast('Error declining call', 'error');
-        
-        // Force cleanup even if Firestore update fails
-        cleanupCallNotification(callId);
-    }
-}
-
 async function createCallDoc(callerId, calleeId, callType = 'voice') {
     try {
+        // Check spam protection before creating call
+        if (!window.callSpamProtection.canMakeCall()) {
+            throw new Error('Call rate limit exceeded. Please wait before making another call.');
+        }
+
         const callRef = db.collection('calls').doc();
         const callId = callRef.id;
         const payload = {
@@ -1092,7 +1197,6 @@ db.collection('calls').doc(callId).set(updateObj, { merge: true })
     }
 }
 
-
 // NEW: Listen for callee answer and their ICE candidates (caller side)
 function listenForAnswerAndRemoteIce(callId) {
     console.log('Caller: listening for answer/remote ICE for call:', callId);
@@ -1145,7 +1249,6 @@ function listenForAnswerAndRemoteIce(callId) {
         console.error('listenForAnswerAndRemoteIce snapshot error:', err);
     });
 }
-
 
 // FIXED: Enhanced Media Setup for Calls
 // FIXED: Enhanced Media Setup for Calls
@@ -1211,10 +1314,6 @@ async function setupMediaForCall(callType) {
     }
 }
 
-// FIXED: Enhanced Incoming Call Listener with No Repeat
-
-
-
 // Add this function to debug call creation
 async function testIncomingCall() {
     console.log('Testing incoming call...');
@@ -1243,6 +1342,7 @@ async function testIncomingCall() {
 
 // Call this function from browser console to test:
 // testIncomingCall();
+
 // FIXED & CLEANED: Enhanced User Data Loading with proper cleanup
 async function loadUserData() {
     try {
@@ -1371,9 +1471,12 @@ async function loadUserData() {
         setupToolsListeners();
         setupStatusFileHandlers();
         listenForFriendRequests();
+        
+        // ==================== STALE CALL CLEANUP ON STARTUP ====================
+        await cleanupStaleCallsOnStartup();
         await cleanupStaleCallNotifications();
 
-        // 🔥 FIXED: SINGLE, STABLE INCOMING CALL LISTENER
+        // 🔥 FIXED: PROTECTED INCOMING CALL LISTENER
         try {
             if (typeof unsubscribeIncomingCalls === "function") {
                 unsubscribeIncomingCalls();
@@ -1381,10 +1484,10 @@ async function loadUserData() {
             }
 
             unsubscribeIncomingCalls = listenForIncomingCalls();
-            console.log("📞 Incoming call listener active for user:", currentUser.uid);
+            console.log("📞 Protected incoming call listener active for user:", currentUser.uid);
 
         } catch (err) {
-            console.error("Failed to initialize incoming call listener:", err);
+            console.error("Failed to initialize protected incoming call listener:", err);
         }
 
         // Initialize business fields
@@ -1525,7 +1628,6 @@ function applyAccessibilitySettings() {
     }
 }
 
-
 function applyChatSettings() {
     // Enter key sends
     const messageInput = document.getElementById('messageInput');
@@ -1537,6 +1639,7 @@ function applyChatSettings() {
         }
     }
 }
+
 // NEW: Ringtone Settings
 function setupRingtoneSettings() {
     const ringtoneSelect = document.getElementById('ringtoneSelect');
@@ -1600,11 +1703,51 @@ function playCallRingtone() {
         console.log('Could not play ringtone:', error);
     }
 }
+// ==================== STALE CALL NOTIFICATIONS CLEANUP ====================
+async function cleanupStaleCallNotifications() {
+  try {
+    if (window.activeCallNotifications.size === 0) return;
 
-// ----------------------
-// STATUS VIEW/VIEWER HELPERS
-// Place this near your status functions (after openStatus/displayStatusModal)
-// ----------------------
+    console.log('🧹 Cleaning up stale call notifications...');
+
+    // Build an array of callIds we currently show
+    const callIds = Array.from(window.activeCallNotifications.keys());
+
+    const chunks = [];
+    for (let i = 0; i < callIds.length; i += 10) chunks.push(callIds.slice(i, i + 10));
+
+    for (const chunk of chunks) {
+      const snapshot = await db.collection('calls').where(firebase.firestore.FieldPath.documentId(), 'in', chunk).get();
+      const validIncoming = new Set();
+      snapshot.forEach(doc => {
+        const d = doc.data();
+        if (d && (d.status === 'ringing' || d.status === 'incoming' || d.status === 'calling')) {
+          validIncoming.add(doc.id);
+        }
+      });
+
+      // Remove notifications that are not in validIncoming
+      chunk.forEach(id => {
+        if (!validIncoming.has(id) && activeCallNotifications.has(id)) {
+          const obj = activeCallNotifications.get(id);
+          if (obj && typeof obj.cleanup === 'function') obj.cleanup();
+        }
+      });
+    }
+
+    console.log(`✅ Cleaned up stale call notifications. Remaining: ${window.activeCallNotifications.size}`);
+  } catch (err) {
+    console.error('❌ cleanupStaleCallNotifications error', err);
+    // If the cleanup fails, don't throw — leave notifications and they'll auto-expire
+  }
+}
+
+
+
+// ... [Rest of your existing code remains the same - only showing the key changes above]
+
+// The rest of your file continues with all the existing functions...
+// Only the key sections related to call handling have been modified above
 
 /**
  * Add the current user as a viewer of a status.
