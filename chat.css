@@ -327,10 +327,11 @@ body {
     color: #9CA3AF;
 }
 
-/* Settings specific styles */
+/* ========== FIXED SETTINGS PANEL STYLES ========== */
 .settings-section {
-    padding: 16px;
+    padding: 12px 16px;
     border-bottom: 1px solid var(--kynecta-border);
+    min-height: auto;
 }
 
 .settings-section:last-child {
@@ -339,10 +340,11 @@ body {
 
 .settings-item {
     display: flex;
-    justify-content: between;
+    justify-content: space-between;
     align-items: center;
-    padding: 12px 0;
+    padding: 10px 0;
     cursor: pointer;
+    min-height: 44px;
 }
 
 .settings-item:not(:last-child) {
@@ -351,20 +353,34 @@ body {
 
 .settings-item-content {
     flex: 1;
+    margin-right: 12px;
 }
 
 .settings-item-title {
     font-weight: 500;
-    margin-bottom: 4px;
+    margin-bottom: 2px;
+    font-size: 0.9rem;
 }
 
 .settings-item-description {
-    font-size: 0.875rem;
+    font-size: 0.75rem;
     color: #6B7280;
+    line-height: 1.3;
 }
 
 .settings-item-action {
     color: #6B7280;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    min-width: 44px;
+}
+
+/* Improved settings panel layout */
+.settings-panel {
+    max-height: 70vh;
+    overflow-y: auto;
+    padding: 8px 0;
 }
 
 .toggle-switch {
@@ -372,6 +388,7 @@ body {
     display: inline-block;
     width: 44px;
     height: 24px;
+    flex-shrink: 0;
 }
 
 .toggle-switch input {
@@ -1639,6 +1656,24 @@ input:checked + .toggle-slider:before {
     .voice-call-placeholder {
         max-width: 500px;
     }
+    
+    /* ========== FIXED DESKTOP ICON VISIBILITY ========== */
+    .settings-item-action i,
+    .settings-item-action svg {
+        font-size: 1.2rem !important;
+        width: 24px !important;
+        height: 24px !important;
+        display: flex !important;
+        align-items: center !important;
+        justify-content: center !important;
+    }
+    
+    .bottom-nav i,
+    .bottom-nav svg {
+        font-size: 1.4rem !important;
+        width: 28px !important;
+        height: 28px !important;
+    }
 }
 
 /* Mobile layout */
@@ -2161,4 +2196,19 @@ textarea:focus {
     #inputArea {
         display: none !important;
     }
+}
+#callContainer video {
+    background: #000;
+}
+
+#localVideo {
+    box-shadow: 0 4px 12px rgba(0,0,0,0.3);
+}
+
+.call-button {
+    transition: all 0.2s ease;
+}
+
+.call-button:hover {
+    transform: scale(1.1);
 }

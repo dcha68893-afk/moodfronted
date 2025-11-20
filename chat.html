@@ -3019,6 +3019,41 @@ document.getElementById('shareQR')?.addEventListener('click', function() {
         </div>
     </div>
 </div>
+<!-- Incoming Call Popup -->
+<div id="incomingCallPopup" class="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 hidden">
+    <div class="bg-white rounded-lg p-6 max-w-sm w-full mx-4">
+        <h3 class="text-lg font-semibold mb-2">Incoming Call</h3>
+        <p>From: <span id="incomingCallerName" class="font-medium"></span></p>
+        <p>Type: <span id="incomingCallType" class="font-medium"></span></p>
+        <div class="flex space-x-3 mt-4">
+            <button id="acceptCallBtn" class="flex-1 bg-green-500 text-white py-2 rounded-lg">Accept</button>
+            <button id="rejectCallBtn" class="flex-1 bg-red-500 text-white py-2 rounded-lg">Reject</button>
+        </div>
+    </div>
+</div>
+
+<!-- Active Call Container -->
+<div id="callContainer" class="fixed inset-0 bg-black z-40 hidden flex-col">
+    <!-- Remote Video -->
+    <video id="remoteVideo" class="w-full h-full object-cover" autoplay playsinline></video>
+    
+    <!-- Local Video (Picture-in-Picture) -->
+    <video id="localVideo" class="absolute bottom-4 right-4 w-32 h-48 object-cover rounded-lg border-2 border-white" autoplay playsinline muted></video>
+    
+    <!-- Call Controls -->
+    <div class="absolute bottom-4 left-1/2 transform -translate-x-1/2 flex space-x-4">
+        <button id="toggleMicBtn" class="w-12 h-12 bg-gray-600 text-white rounded-full">🎤</button>
+        <button id="endCallBtn" class="w-12 h-12 bg-red-600 text-white rounded-full">📞</button>
+        <button id="toggleCameraBtn" class="w-12 h-12 bg-gray-600 text-white rounded-full">📷</button>
+    </div>
+    
+    <!-- Call Info -->
+    <div class="absolute top-4 left-1/2 transform -translate-x-1/2 bg-black bg-opacity-50 text-white px-4 py-2 rounded-lg">
+        <div id="callStatus" class="text-sm">Connecting...</div>
+        <div id="callTimer" class="text-lg font-semibold">00:00</div>
+    </div>
+</div>
+</div>
 <script src="chat.js"></script>
 <script src="call.js"></script>
 
