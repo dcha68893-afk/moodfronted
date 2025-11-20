@@ -80,143 +80,41 @@ if (!window.activeCallNotifications) {
 
 // ==================== INITIALIZATION ====================
 
-function setupCallEventListeners() {
-    console.log('🔧 Setting up call event listeners');
-    
-    // Remove any existing listeners to prevent duplicates
-    document.removeEventListener('click', handleCallClickEvents);
-    
-    // Add the main click event listener
-    document.addEventListener('click', handleCallClickEvents);
-    
-    console.log('✅ Call event listeners setup complete');
-}
+let callSystemInitialized = false;
+let authCheckAttempts = 0;
+const MAX_AUTH_CHECKS = 30; // Increased from 10 to 30
 
-function handleCallClickEvents(e) {
-    try {
-        // Voice call button
-        if (e.target.closest('.friend-call-btn')) {
-            const btn = e.target.closest('.friend-call-btn');
-            if (btn.disabled) return;
-            
-            const friendId = btn.dataset.id;
-            const friendName = btn.dataset.name;
-            
-            if (!friendId || !friendName) {
-                console.error('❌ Missing friend data:', { friendId, friendName });
-                showToast('Error: Missing friend information', 'error');
-                return;
-            }
-            
-            console.log('📞 Voice call clicked:', friendName, friendId);
-            
-            // Check if user is authenticated
-            if (!window.currentUser || !window.currentUser.uid) {
-                console.error('❌ User not authenticated');
-                showToast('Please log in to make calls', 'error');
-                return;
-            }
-            
-            startVoiceCallWithFriend(friendId, friendName);
-            return;
-        }
-        
-        // Video call button
-        if (e.target.closest('.friend-video-call-btn')) {
-            const btn = e.target.closest('.friend-video-call-btn');
-            if (btn.disabled) return;
-            
-            const friendId = btn.dataset.id;
-            const friendName = btn.dataset.name;
-            
-            if (!friendId || !friendName) {
-                console.error('❌ Missing friend data:', { friendId, friendName });
-                showToast('Error: Missing friend information', 'error');
-                return;
-            }
-            
-            console.log('🎥 Video call clicked:', friendName, friendId);
-            
-            // Check if user is authenticated
-            if (!window.currentUser || !window.currentUser.uid) {
-                console.error('❌ User not authenticated');
-                showToast('Please log in to make calls', 'error');
-                return;
-            }
-            
-            startVideoCallWithFriend(friendId, friendName);
-            return;
-        }
-        
-        // Call control buttons - only work when in call
-        if (e.target.closest('#muteBtn')) {
-            if (!isInCall) {
-                showToast('No active call', 'warning');
-                return;
-            }
-            console.log('🔇 Mute button clicked');
-            toggleMute();
-            return;
-        }
-        
-        if (e.target.closest('#videoToggleBtn')) {
-            if (!isInCall) {
-                showToast('No active call', 'warning');
-                return;
-            }
-            console.log('📹 Video toggle button clicked');
-            toggleVideo();
-            return;
-        }
-        
-        if (e.target.closest('#endCallBtn')) {
-            if (!isInCall) {
-                showToast('No active call', 'warning');
-                return;
-            }
-            console.log('📞 End call button clicked');
-            endCall();
-            return;
-        }
-        
-    } catch (error) {
-        console.error('❌ Error in call event handler:', error);
-        showToast('Error handling call action', 'error');
-    }
-}
-
-// Add this helper function to check call system readiness (ONCE, not repeatedly)
-function checkCallSystemReady() {
-    const isReady = window.currentUser && window.currentUser.uid;
+function initializeCallSystemWhenReady() {
+    if (callSystemInitialized) return;
     
-    if (!isReady) {
-        console.log('⏳ Call system waiting for user authentication...');
+    authCheckAttempts++;
+    
+    // Check multiple possible user objects
+    const user = window.currentUser || 
+                 (window.firebase && window.firebase.auth().currentUser) ||
+                 (window.auth && window.auth.currentUser);
+    
+    if (user && user.uid) {
+        console.log('✅ User authenticated, initializing call system...');
+        // Make sure window.currentUser is set for other functions
+        if (!window.currentUser) {
+            window.currentUser = user;
+        }
+        initializeCallSystem();
+        callSystemInitialized = true;
+    } else if (authCheckAttempts < MAX_AUTH_CHECKS) {
+        console.log(`⏳ Waiting for user authentication (attempt ${authCheckAttempts}/${MAX_AUTH_CHECKS})...`);
+        setTimeout(initializeCallSystemWhenReady, 500);
     } else {
-        console.log('✅ Call system ready - User authenticated:', window.currentUser.uid);
+        console.error('❌ Failed to initialize call system: Authentication timeout');
+        console.log('🔍 Debug info:', {
+            windowCurrentUser: window.currentUser,
+            firebaseAuth: window.firebase && window.firebase.auth().currentUser,
+            authObject: window.auth
+        });
     }
-    
-    return isReady;
 }
 
-// Update call buttons state - call this only when needed
-function updateCallButtonsState() {
-    const callButtons = document.querySelectorAll('.friend-call-btn, .friend-video-call-btn');
-    const isSystemReady = checkCallSystemReady();
-    
-    callButtons.forEach(btn => {
-        if (isSystemReady && !isInCall) {
-            btn.disabled = false;
-            btn.classList.remove('opacity-50', 'cursor-not-allowed');
-            btn.classList.add('cursor-pointer', 'hover:opacity-90');
-        } else {
-            btn.disabled = true;
-            btn.classList.add('opacity-50', 'cursor-not-allowed');
-            btn.classList.remove('cursor-pointer', 'hover:opacity-90');
-        }
-    });
-}
-
-// Initialize call system - call this only when user is authenticated
 function initializeCallSystem() {
     console.log('📞 Initializing call system...');
     
@@ -244,25 +142,148 @@ function initializeCallSystem() {
     updateCallButtonsState();
     
     // Initialize incoming call listener
-    listenForIncomingCalls();
+    if (window.db && window.currentUser) {
+        console.log('👂 Setting up incoming call listener for:', window.currentUser.uid);
+        listenForIncomingCalls();
+    } else {
+        console.error('❌ Cannot setup incoming call listener - missing db or user');
+    }
     
     console.log('✅ Call system initialized for user:', window.currentUser.uid);
 }
 
-// Remove the setInterval and replace with this smarter initialization:
-let callSystemInitialized = false;
-
-function initializeCallSystemWhenReady() {
-    if (callSystemInitialized) return;
+function setupCallEventListeners() {
+    console.log('🔧 Setting up call event listeners');
     
-    if (window.currentUser && window.currentUser.uid) {
-        initializeCallSystem();
-        callSystemInitialized = true;
-    } else {
-        console.log('⏳ Waiting for user authentication to initialize call system...');
-        // Try again in 1 second
-        setTimeout(initializeCallSystemWhenReady, 1000);
+    // Remove any existing listeners to prevent duplicates
+    document.removeEventListener('click', handleCallClickEvents);
+    
+    // Add the main click event listener
+    document.addEventListener('click', handleCallClickEvents);
+    
+    console.log('✅ Call event listeners setup complete');
+}
+
+function handleCallClickEvents(e) {
+    try {
+        // Voice call button - more flexible selection
+        const voiceCallBtn = e.target.closest('.friend-call-btn, [class*="call"], .call-btn');
+        if (voiceCallBtn) {
+            e.stopPropagation();
+            
+            let friendId = voiceCallBtn.dataset.id || voiceCallBtn.dataset.userId;
+            let friendName = voiceCallBtn.dataset.name;
+            
+            // If data attributes are missing, try to find from parent
+            if (!friendId || !friendName) {
+                const friendItem = voiceCallBtn.closest('.friend-item, .contact-item, [data-user-id]');
+                if (friendItem) {
+                    friendId = friendId || friendItem.dataset.userId || friendItem.dataset.id;
+                    friendName = friendName || friendItem.dataset.name || 
+                                friendItem.querySelector('.font-semibold, [data-name]')?.textContent?.trim();
+                }
+            }
+            
+            // Use current chat as final fallback
+            if ((!friendId || !friendName) && window.currentChat) {
+                friendId = window.currentChat.friendId;
+                friendName = window.currentChat.name;
+                console.log('📞 Using current chat as fallback:', friendName, friendId);
+            }
+            
+            if (!friendId || !friendName) {
+                console.error('❌ Cannot determine friend information from:', voiceCallBtn);
+                showToast('Please select a friend to call first', 'error');
+                return;
+            }
+            
+            initiateCall(friendId, friendName, 'voice');
+            return;
+        }
+        
+        // Video call button - same logic
+        const videoCallBtn = e.target.closest('.friend-video-call-btn, [class*="video"], .video-call-btn');
+        if (videoCallBtn) {
+            e.stopPropagation();
+            
+            let friendId = videoCallBtn.dataset.id || videoCallBtn.dataset.userId;
+            let friendName = videoCallBtn.dataset.name;
+            
+            // ... same robust logic as above ...
+            
+            if (!friendId || !friendName) {
+                console.error('❌ Cannot determine friend information from:', videoCallBtn);
+                showToast('Please select a friend to call first', 'error');
+                return;
+            }
+            
+            initiateCall(friendId, friendName, 'video');
+            return;
+        }
+        
+    } catch (error) {
+        console.error('❌ Error in call event handler:', error);
+        showToast('Error handling call action', 'error');
     }
+}
+
+// Helper function to initiate calls
+function initiateCall(friendId, friendName, callType) {
+    if (!window.currentUser || !window.currentUser.uid) {
+        showToast('Please log in to make calls', 'error');
+        return;
+    }
+    
+    if (isInCall) {
+        showToast('You are already in a call', 'warning');
+        return;
+    }
+    
+    console.log(`📞 Initiating ${callType} call with:`, friendName, friendId);
+    
+    if (callType === 'voice') {
+        startVoiceCallWithFriend(friendId, friendName);
+    } else {
+        startVideoCallWithFriend(friendId, friendName);
+    }
+}
+
+
+// Add this helper function to check call system readiness (ONCE, not repeatedly)
+function checkCallSystemReady() {
+    const isReady = window.currentUser && window.currentUser.uid;
+    
+    if (!isReady) {
+        console.log('⏳ Call system waiting for user authentication...');
+    } else {
+        console.log('✅ Call system ready - User authenticated:', window.currentUser.uid);
+    }
+    
+    return isReady;
+}
+
+// Update call buttons state - call this only when needed
+function updateCallButtonsState() {
+    // UPDATED SELECTORS for the new class names
+    const callButtons = document.querySelectorAll('.friend-call-btn, .friend-video-call-btn');
+    const isSystemReady = checkCallSystemReady();
+    
+    callButtons.forEach(btn => {
+        if (isSystemReady && !isInCall) {
+            btn.disabled = false;
+            btn.classList.remove('opacity-50', 'cursor-not-allowed');
+            btn.classList.add('cursor-pointer', 'hover:scale-110');
+            // Remove any inline styles that might interfere
+            btn.style.pointerEvents = 'auto';
+            btn.style.opacity = '1';
+        } else {
+            btn.disabled = true;
+            btn.classList.add('opacity-50', 'cursor-not-allowed');
+            btn.classList.remove('cursor-pointer', 'hover:scale-110');
+            // Ensure hover effects are disabled
+            btn.style.pointerEvents = 'none';
+        }
+    });
 }
 
 // Also update button states when authentication state changes
@@ -284,7 +305,7 @@ function setupCallUI() {
         existingContainer.remove();
     }
     
-    // Create new call container
+    // Create new call container with responsive design
     const callContainer = document.createElement('div');
     callContainer.id = 'callContainer';
     callContainer.className = 'fixed inset-0 bg-black z-50 hidden';
@@ -293,27 +314,38 @@ function setupCallUI() {
             <!-- Remote Video -->
             <video id="remoteVideo" autoplay playsinline class="w-full h-full object-cover"></video>
             
-            <!-- Local Video Preview -->
+            <!-- Local Video Preview - Responsive sizing -->
             <video id="localVideo" autoplay playsinline muted 
-                class="absolute bottom-4 right-4 w-48 h-32 object-cover rounded-lg border-2 border-white shadow-lg"></video>
+                class="absolute bottom-4 right-4 w-32 h-24 md:w-48 md:h-32 object-cover rounded-lg border-2 border-white shadow-lg"></video>
             
-            <!-- Call Controls -->
-            <div class="absolute bottom-8 left-1/2 transform -translate-x-1/2 flex space-x-4">
-                <button id="muteBtn" class="w-16 h-16 bg-gray-600 text-white rounded-full flex items-center justify-center hover:bg-gray-700 transition-colors">
-                    <i class="fas fa-microphone"></i>
+            <!-- Call Controls - Responsive layout -->
+            <div class="absolute bottom-4 md:bottom-8 left-1/2 transform -translate-x-1/2 flex space-x-2 md:space-x-4">
+                <button id="muteBtn" class="w-12 h-12 md:w-16 md:h-16 bg-gray-600 text-white rounded-full flex items-center justify-center hover:bg-gray-700 transition-colors">
+                    <i class="fas fa-microphone text-sm md:text-base"></i>
                 </button>
-                <button id="videoToggleBtn" class="w-16 h-16 bg-gray-600 text-white rounded-full flex items-center justify-center hover:bg-gray-700 transition-colors">
-                    <i class="fas fa-video"></i>
+                <button id="videoToggleBtn" class="w-12 h-12 md:w-16 md:h-16 bg-gray-600 text-white rounded-full flex items-center justify-center hover:bg-gray-700 transition-colors">
+                    <i class="fas fa-video text-sm md:text-base"></i>
                 </button>
-                <button id="endCallBtn" class="w-16 h-16 bg-red-600 text-white rounded-full flex items-center justify-center hover:bg-red-700 transition-colors">
-                    <i class="fas fa-phone"></i>
+                <button id="endCallBtn" class="w-12 h-12 md:w-16 md:h-16 bg-red-600 text-white rounded-full flex items-center justify-center hover:bg-red-700 transition-colors">
+                    <i class="fas fa-phone text-sm md:text-base"></i>
                 </button>
             </div>
             
-            <!-- Call Info -->
-            <div class="absolute top-8 left-1/2 transform -translate-x-1/2 bg-black bg-opacity-50 text-white px-4 py-2 rounded-lg">
-                <div id="callStatus" class="text-center">Connecting...</div>
-                <div id="callTimer" class="text-center text-sm">00:00</div>
+            <!-- Call Info - Responsive text sizing -->
+            <div class="absolute top-4 md:top-8 left-1/2 transform -translate-x-1/2 bg-black bg-opacity-50 text-white px-3 py-2 md:px-4 md:py-2 rounded-lg">
+                <div id="callStatus" class="text-center text-sm md:text-base">Connecting...</div>
+                <div id="callTimer" class="text-center text-xs md:text-sm">00:00</div>
+            </div>
+        </div>
+        
+        <!-- Voice Call Placeholder -->
+        <div id="voiceCallPlaceholder" class="absolute inset-0 hidden flex items-center justify-center">
+            <div class="text-center text-white">
+                <div class="w-24 h-24 md:w-32 md:h-32 bg-blue-600 rounded-full flex items-center justify-center mx-auto mb-4">
+                    <i class="fas fa-phone text-2xl md:text-4xl"></i>
+                </div>
+                <div id="voiceCallName" class="text-xl md:text-2xl font-semibold"></div>
+                <div class="text-sm md:text-base mt-2" id="voiceCallStatus">Calling...</div>
             </div>
         </div>
     `;
@@ -738,17 +770,17 @@ function updateCallButtons() {
     const videoToggleBtn = document.getElementById('videoToggleBtn');
     
     if (muteBtn) {
-        muteBtn.innerHTML = isMuted ? '<i class="fas fa-microphone-slash"></i>' : '<i class="fas fa-microphone"></i>';
+        muteBtn.innerHTML = isMuted ? '<i class="fas fa-microphone-slash text-sm md:text-base"></i>' : '<i class="fas fa-microphone text-sm md:text-base"></i>';
         muteBtn.className = isMuted ? 
-            'w-16 h-16 bg-red-600 text-white rounded-full flex items-center justify-center hover:bg-red-700 transition-colors' :
-            'w-16 h-16 bg-gray-600 text-white rounded-full flex items-center justify-center hover:bg-gray-700 transition-colors';
+            'w-12 h-12 md:w-16 md:h-16 bg-red-600 text-white rounded-full flex items-center justify-center hover:bg-red-700 transition-colors' :
+            'w-12 h-12 md:w-16 md:h-16 bg-gray-600 text-white rounded-full flex items-center justify-center hover:bg-gray-700 transition-colors';
     }
     
     if (videoToggleBtn) {
-        videoToggleBtn.innerHTML = isVideoOff ? '<i class="fas fa-video-slash"></i>' : '<i class="fas fa-video"></i>';
+        videoToggleBtn.innerHTML = isVideoOff ? '<i class="fas fa-video-slash text-sm md:text-base"></i>' : '<i class="fas fa-video text-sm md:text-base"></i>';
         videoToggleBtn.className = isVideoOff ?
-            'w-16 h-16 bg-red-600 text-white rounded-full flex items-center justify-center hover:bg-red-700 transition-colors' :
-            'w-16 h-16 bg-gray-600 text-white rounded-full flex items-center justify-center hover:bg-gray-700 transition-colors';
+            'w-12 h-12 md:w-16 md:h-16 bg-red-600 text-white rounded-full flex items-center justify-center hover:bg-red-700 transition-colors' :
+            'w-12 h-12 md:w-16 md:h-16 bg-gray-600 text-white rounded-full flex items-center justify-center hover:bg-gray-700 transition-colors';
     }
 }
 
@@ -757,6 +789,11 @@ function updateCallButtons() {
 function showCallUI(recipientName, callType) {
     const callContainer = document.getElementById('callContainer');
     const callStatus = document.getElementById('callStatus');
+    const voiceCallPlaceholder = document.getElementById('voiceCallPlaceholder');
+    const voiceCallName = document.getElementById('voiceCallName');
+    const voiceCallStatus = document.getElementById('voiceCallStatus');
+    const localVideo = document.getElementById('localVideo');
+    const remoteVideo = document.getElementById('remoteVideo');
     
     if (!callContainer) {
         console.error('❌ Call container not found!');
@@ -773,33 +810,33 @@ function showCallUI(recipientName, callType) {
         callContainer.style.display = 'block';
         
         // Update UI based on call type
-        const localVideo = document.getElementById('localVideo');
-        const remoteVideo = document.getElementById('remoteVideo');
-        
         if (callType === 'voice') {
+            // Show voice call placeholder
+            if (voiceCallPlaceholder) {
+                voiceCallPlaceholder.classList.remove('hidden');
+                voiceCallPlaceholder.style.display = 'flex';
+            }
+            if (voiceCallName) voiceCallName.textContent = recipientName;
+            if (voiceCallStatus) voiceCallStatus.textContent = 'Calling...';
+            
+            // Hide video elements for voice call
+            if (remoteVideo) remoteVideo.style.display = 'none';
+            if (localVideo) localVideo.style.display = 'none';
+            
             callContainer.classList.add('voice-call');
             callContainer.classList.remove('video-call');
             
-            if (localVideo) {
-                localVideo.style.display = 'flex';
-                localVideo.innerHTML = '<div class="voice-avatar"><div class="voice-avatar-placeholder">📞</div></div>';
-            }
-            if (remoteVideo) {
-                remoteVideo.style.display = 'flex';
-                remoteVideo.innerHTML = `<div class="voice-avatar"><div class="voice-avatar-placeholder">${recipientName}</div></div>`;
-            }
         } else {
+            // Show video elements
+            if (voiceCallPlaceholder) {
+                voiceCallPlaceholder.classList.add('hidden');
+                voiceCallPlaceholder.style.display = 'none';
+            }
+            if (remoteVideo) remoteVideo.style.display = 'block';
+            if (localVideo) localVideo.style.display = 'block';
+            
             callContainer.classList.add('video-call');
             callContainer.classList.remove('voice-call');
-            
-            if (localVideo) {
-                localVideo.style.display = 'block';
-                localVideo.innerHTML = ''; // Clear placeholder
-            }
-            if (remoteVideo) {
-                remoteVideo.style.display = 'block';
-                remoteVideo.innerHTML = ''; // Clear placeholder
-            }
         }
         
         console.log('✅ Call UI shown for:', callType, 'call with', recipientName);
@@ -819,8 +856,13 @@ function hideCallUI() {
 
 function updateCallStatus(status) {
     const callStatus = document.getElementById('callStatus');
+    const voiceCallStatus = document.getElementById('voiceCallStatus');
+    
     if (callStatus) {
         callStatus.textContent = status;
+    }
+    if (voiceCallStatus) {
+        voiceCallStatus.textContent = status;
     }
 }
 
@@ -990,19 +1032,21 @@ function showIncomingCallNotification({ callId, callerId, callerName, callType, 
         container.classList.add('incoming-call-notification');
         container.setAttribute('data-call-id', callId);
 
-        // Styling
+        // Responsive styling
         Object.assign(container.style, {
             position: 'fixed',
             top: '20px',
             right: '20px',
             zIndex: '10000',
-            padding: '12px',
-            background: 'rgba(0,0,0,0.85)',
+            padding: '12px 16px',
+            background: 'rgba(0,0,0,0.9)',
             color: '#fff',
-            borderRadius: '8px',
+            borderRadius: '12px',
             boxShadow: '0 6px 18px rgba(0,0,0,0.35)',
             maxWidth: '320px',
-            fontFamily: 'sans-serif'
+            minWidth: '280px',
+            fontFamily: 'sans-serif',
+            border: '2px solid #333'
         });
 
         // Content
@@ -1010,38 +1054,45 @@ function showIncomingCallNotification({ callId, callerId, callerName, callType, 
         title.textContent = callerName || 'Unknown Caller';
         title.style.fontWeight = '600';
         title.style.marginBottom = '6px';
+        title.style.fontSize = '16px';
         container.appendChild(title);
 
         const typeText = document.createElement('div');
-        typeText.textContent = callType === 'video' ? 'Video call' : 'Audio call';
-        typeText.style.marginBottom = '10px';
+        typeText.textContent = callType === 'video' ? '📹 Video call' : '📞 Audio call';
+        typeText.style.marginBottom = '12px';
+        typeText.style.fontSize = '14px';
+        typeText.style.opacity = '0.8';
         container.appendChild(typeText);
 
         const btnRow = document.createElement('div');
         btnRow.style.display = 'flex';
-        btnRow.style.gap = '8px';
+        btnRow.style.gap = '10px';
 
         const answerBtn = document.createElement('button');
         answerBtn.textContent = 'Answer';
         answerBtn.className = 'btn-answer';
         answerBtn.style.flex = '1';
-        answerBtn.style.padding = '8px 10px';
+        answerBtn.style.padding = '10px 12px';
         answerBtn.style.border = 'none';
-        answerBtn.style.borderRadius = '6px';
+        answerBtn.style.borderRadius = '8px';
         answerBtn.style.cursor = 'pointer';
         answerBtn.style.background = '#16a34a';
         answerBtn.style.color = '#fff';
+        answerBtn.style.fontWeight = '600';
+        answerBtn.style.fontSize = '14px';
 
         const declineBtn = document.createElement('button');
         declineBtn.textContent = 'Decline';
         declineBtn.className = 'btn-decline';
         declineBtn.style.flex = '1';
-        declineBtn.style.padding = '8px 10px';
+        declineBtn.style.padding = '10px 12px';
         declineBtn.style.border = 'none';
-        declineBtn.style.borderRadius = '6px';
+        declineBtn.style.borderRadius = '8px';
         declineBtn.style.cursor = 'pointer';
         declineBtn.style.background = '#ef4444';
         declineBtn.style.color = '#fff';
+        declineBtn.style.fontWeight = '600';
+        declineBtn.style.fontSize = '14px';
 
         btnRow.appendChild(answerBtn);
         btnRow.appendChild(declineBtn);
@@ -1242,11 +1293,16 @@ document.addEventListener('DOMContentLoaded', function() {
     
     // Wait for Firebase and user authentication
     const checkReady = setInterval(() => {
-        if (window.db && window.firebase) {
+        if (window.db && window.firebase && window.currentUser) {
             clearInterval(checkReady);
-            console.log('✅ Firebase available, waiting for user authentication...');
+            console.log('✅ Firebase and user available, initializing call system...');
             
             // Start the smart initialization
+            initializeCallSystemWhenReady();
+        } else if (window.db && window.firebase) {
+            console.log('✅ Firebase available, waiting for user...');
+            // Firebase is ready but user isn't - wait for user
+            clearInterval(checkReady);
             initializeCallSystemWhenReady();
         }
     }, 500);

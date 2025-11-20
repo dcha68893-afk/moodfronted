@@ -1633,7 +1633,7 @@ function renderFriends(friendsToRender) {
             <div class="flex items-center justify-between">
                 <div class="flex items-center space-x-4 flex-1">
                     <div class="relative">
-                        <img class="w-14 h-14 rounded-full object-cover border-2 border-purple-200" 
+                        <img class="w-14 h-14 rounded-full object-cover border-2 border-purple-200 friend-avatar" 
                              src="${friend.photoURL || `https://ui-avatars.com/api/?name=${encodeURIComponent(friend.displayName)}&background=7C3AED&color=fff`}" 
                              alt="${friend.displayName}">
                         <div class="absolute -bottom-1 -right-1 w-4 h-4 rounded-full border-2 border-white ${friend.status === 'online' ? 'bg-green-500' : 'bg-gray-400'}"></div>
@@ -1651,22 +1651,29 @@ function renderFriends(friendsToRender) {
                     </div>
                 </div>
                 
-                <div class="flex items-center space-x-2 ml-4">
-                    <!-- Chat Button -->
-                    <button class="friend-chat-btn flex items-center space-x-2 bg-purple-600 text-white px-4 py-2 rounded-lg hover:bg-purple-700 transition-colors shadow-sm" 
-                            data-id="${friend.id}" 
-                            data-name="${friend.displayName}">
-                        <i class="fas fa-comment"></i>
-                        <span>Chat</span>
-                    </button>
+                <div class="flex items-center space-x-3 ml-4">
+                    <!-- Voice Call Button with new HTML structure -->
+                    <i class="fas fa-phone text-xl cursor-pointer hover:scale-110 transition-transform friend-call-btn" 
+                       data-id="${friend.id}" 
+                       data-name="${friend.displayName}"
+                       title="Voice Call"></i>
                     
+                    <!-- Video Call Button with new HTML structure -->
+                    <i class="fas fa-video text-xl cursor-pointer hover:scale-110 transition-transform friend-video-call-btn" 
+                       data-id="${friend.id}" 
+                       data-name="${friend.displayName}"
+                       title="Video Call"></i>
+                    
+                    <!-- Chat Button with new structure -->
+                    <i class="fas fa-comment text-xl cursor-pointer hover:scale-110 transition-transform friend-chat-btn" 
+                       data-id="${friend.id}" 
+                       data-name="${friend.displayName}"
+                       title="Chat"></i>
                     
                     <!-- More Options Button -->
                     <div class="relative">
-                        <button class="friend-options-btn w-10 h-10 rounded-full bg-gray-100 text-gray-600 flex items-center justify-center hover:bg-gray-200 transition-colors">
-                            <i class="fas fa-ellipsis-v"></i>
-                        </button>
-                        <div class="friend-options-menu absolute right-0 top-12 bg-white rounded-lg shadow-lg border border-gray-200 py-2 z-10 hidden min-w-32">
+                        <i class="fas fa-ellipsis-v text-xl cursor-pointer hover:scale-110 transition-transform friend-options-btn"></i>
+                        <div class="friend-options-menu absolute right-0 top-8 bg-white rounded-lg shadow-lg border border-gray-200 py-2 z-10 hidden min-w-32">
                             <button class="view-profile-btn w-full text-left px-4 py-2 hover:bg-gray-100 text-gray-700" data-id="${friend.id}">
                                 <i class="fas fa-user mr-2"></i>View Profile
                             </button>
@@ -1686,19 +1693,50 @@ function renderFriends(friendsToRender) {
 
     // Add event listeners using event delegation
     friendsList.addEventListener('click', function(e) {
+        // Voice Call button
+        if (e.target.classList.contains('friend-call-btn') || e.target.closest('.friend-call-btn')) {
+            const btn = e.target.classList.contains('friend-call-btn') ? e.target : e.target.closest('.friend-call-btn');
+            const friendId = btn.dataset.id;
+            const friendName = btn.dataset.name;
+            console.log('📞 Voice call clicked:', friendName, friendId);
+            
+            // Check if call system is ready
+            if (window.startVoiceCallWithFriend) {
+                window.startVoiceCallWithFriend(friendId, friendName);
+            } else {
+                console.error('❌ Call system not initialized');
+                showToast('Call system not ready. Please refresh the page.', 'error');
+            }
+        }
+        
+        // Video Call button
+        if (e.target.classList.contains('friend-video-call-btn') || e.target.closest('.friend-video-call-btn')) {
+            const btn = e.target.classList.contains('friend-video-call-btn') ? e.target : e.target.closest('.friend-video-call-btn');
+            const friendId = btn.dataset.id;
+            const friendName = btn.dataset.name;
+            console.log('🎥 Video call clicked:', friendName, friendId);
+            
+            // Check if call system is ready
+            if (window.startVideoCallWithFriend) {
+                window.startVideoCallWithFriend(friendId, friendName);
+            } else {
+                console.error('❌ Call system not initialized');
+                showToast('Call system not ready. Please refresh the page.', 'error');
+            }
+        }
+        
         // Chat button
-        if (e.target.closest('.friend-chat-btn')) {
-            const btn = e.target.closest('.friend-chat-btn');
+        if (e.target.classList.contains('friend-chat-btn') || e.target.closest('.friend-chat-btn')) {
+            const btn = e.target.classList.contains('friend-chat-btn') ? e.target : e.target.closest('.friend-chat-btn');
             const friendId = btn.dataset.id;
             const friendName = btn.dataset.name;
             console.log('Starting chat with:', friendName, friendId);
             startChat(friendId, friendName);
         }
         
-        
         // Options button toggle
-        if (e.target.closest('.friend-options-btn')) {
-            const btn = e.target.closest('.friend-options-btn');
+        if (e.target.classList.contains('friend-options-btn') || e.target.closest('.friend-options-btn')) {
+            const btn = e.target.classList.contains('friend-options-btn') ? e.target : e.target.closest('.friend-options-btn');
             const menu = btn.nextElementSibling;
             // Close all other menus
             document.querySelectorAll('.friend-options-menu').forEach(m => {
@@ -1737,6 +1775,8 @@ function renderFriends(friendsToRender) {
             });
         }
     });
+    
+    console.log('✅ Friends rendered with new icon buttons');
 }
 
 
