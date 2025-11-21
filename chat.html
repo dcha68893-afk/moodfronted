@@ -1,37 +1,13 @@
 <!DOCTYPE html>
 <html lang="en" class="h-full">
 <head>
-     <link rel="manifest" href="/manifest.json">
-     <meta name="theme-color" content="#000000">
+    <link rel="manifest" href="/manifest.json">
+    <meta name="theme-color" content="#000000">
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Kynecta - Advanced Mood-Based Chat</title>
-    <!-- Add this to your HTML head -->
-     <link href="https://cdn.jsdelivr.net/npm/tailwindcss@^2/dist/tailwind.min.css" rel="stylesheet">
-     <img src="https://res.cloudinary.com/..." crossorigin="anonymous">
-<!-- In your status creation modal or wherever this preview image is -->
-<img src="" alt="Image preview" class="max-w-full max-h-64 mx-auto rounded-lg mb-4 hidden" data-role="preview">
-
-<script>
-// Simple QR code fallback - no external dependencies
-function generateSimpleQR(text) {
-    showToast('QR code generation would go here', 'info');
-    // For now, just copy the text to clipboard
-    navigator.clipboard.writeText(text).then(() => {
-        showToast('Invite link copied to clipboard!', 'success');
-    });
-}
-
-// Update your shareQR event listener
-document.getElementById('shareQR')?.addEventListener('click', function() {
-    const inviteLink = `https://yourapp.com/invite/${currentUser?.uid || 'user'}`;
-    generateSimpleQR(inviteLink);
-});
-</script>
-
-        
-<!-- FontAwesome Icons -->
-<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <link href="https://cdn.jsdelivr.net/npm/tailwindcss@^2/dist/tailwind.min.css" rel="stylesheet">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
     
     <!-- Firebase SDK -->
     <script src="https://www.gstatic.com/firebasejs/9.22.0/firebase-app-compat.js"></script>
@@ -40,14 +16,11 @@ document.getElementById('shareQR')?.addEventListener('click', function() {
     <script src="https://www.gstatic.com/firebasejs/9.22.0/firebase-storage-compat.js"></script>
     <script src="https://www.gstatic.com/firebasejs/9.22.0/firebase-messaging-compat.js"></script>
     
-    <!-- Add this in head section after tailwind CDN -->
     <meta name="ignore-tailwind-cdn-warning" content="true">
     <script>
-        // Suppress Tailwind CDN warning
         window.tailwindConfig = { ignoreCDNWarning: true };
     </script>
-    <link rel="stylesheet" href= "chat.css">
-    
+    <link rel="stylesheet" href="chat.css">
 </head>
 <body class="h-full overflow-hidden" data-theme="light">
     <!-- Toast Notifications -->
@@ -65,7 +38,7 @@ document.getElementById('shareQR')?.addEventListener('click', function() {
     </div>
 
     <!-- Main Chat App -->
-     <div id="chatApp" class="h-full">
+    <div id="chatApp" class="h-full">
 
         <!-- Bottom Navigation Tabs -->
         <div class="fixed bottom-0 left-0 right-0 bg-white border-t border-gray-200 flex justify-around py-3 z-30 md:hidden shadow-lg">
@@ -146,7 +119,6 @@ document.getElementById('shareQR')?.addEventListener('click', function() {
                     <!-- Chats Tab -->
                     <div id="chatsTab" class="tab-panel active">
                         <div id="chatList" class="space-y-1 p-2">
-                            <!-- Chat items will be populated from Firebase -->
                             <div id="noChatsMessage" class="p-8 text-center text-gray-500">
                                 <i class="fas fa-comments text-4xl mb-3 text-gray-300 block"></i>
                                 <p>No conversations yet</p>
@@ -178,7 +150,6 @@ document.getElementById('shareQR')?.addEventListener('click', function() {
                             <div id="friendRequestsSection" class="mb-4">
                                 <h4 class="font-medium text-gray-700 mb-2">Friend Requests</h4>
                                 <div id="friendRequestsList" class="space-y-2">
-                                    <!-- Friend requests will be populated from Firebase -->
                                 </div>
                                 <div id="noFriendRequests" class="text-center text-gray-500 py-2 text-sm">
                                     No pending friend requests
@@ -186,7 +157,6 @@ document.getElementById('shareQR')?.addEventListener('click', function() {
                             </div>
                             
                             <div id="friendsList" class="space-y-2">
-                                <!-- Friends will be populated from Firebase -->
                             </div>
                             
                             <div id="noFriendsMessage" class="p-8 text-center text-gray-500">
@@ -214,7 +184,6 @@ document.getElementById('shareQR')?.addEventListener('click', function() {
 
                             <h3 class="text-sm font-semibold text-gray-500 mb-3 px-3">Recent Updates</h3>
                             <div id="statusUpdates" class="space-y-3">
-                                <!-- Status updates will be populated from Firebase -->
                             </div>
                         </div>
                     </div>
@@ -229,14 +198,12 @@ document.getElementById('shareQR')?.addEventListener('click', function() {
                                     <button class="text-purple-600 text-sm font-semibold" id="manageFavorites">Manage</button>
                                 </div>
                                 <div id="favoritesList" class="space-y-3">
-                                    <!-- Favorites will be populated from Firebase -->
                                 </div>
                             </div>
 
                             <!-- Recent Calls -->
                             <h3 class="font-semibold mb-3">Recent Calls</h3>
                             <div id="recentCalls" class="space-y-4">
-                                <!-- Recent calls will be populated from Firebase -->
                             </div>
                         </div>
                     </div>
@@ -382,14 +349,8 @@ document.getElementById('shareQR')?.addEventListener('click', function() {
                         </div>
                     </div>
                     <div class="flex space-x-3 text-white">
-                       <i class="fas fa-phone text-xl cursor-pointer hover:scale-110 transition-transform friend-call-btn" 
-   <i class="fas fa-phone text-xl cursor-pointer hover:scale-110 transition-transform friend-call-btn" 
-   data-id="" 
-   data-name=""></i>
-
-<i class="fas fa-video text-xl cursor-pointer hover:scale-110 transition-transform friend-video-call-btn" 
-   data-id="" 
-   data-name=""></i>
+                        <i class="fas fa-phone text-xl cursor-pointer hover:scale-110 transition-transform friend-call-btn" data-id="" data-name=""></i>
+                        <i class="fas fa-video text-xl cursor-pointer hover:scale-110 transition-transform friend-video-call-btn" data-id="" data-name=""></i>
                         <i class="fas fa-ellipsis-v text-xl cursor-pointer hover:scale-110 transition-transform" id="chatMenuBtn"></i>
                     </div>
                 </div>
@@ -410,7 +371,6 @@ document.getElementById('shareQR')?.addEventListener('click', function() {
                             <p>No shared goals yet. Create one to get started!</p>
                         </div>
                         <div id="goalsList" class="space-y-3 hidden">
-                            <!-- Goals will be populated from Firebase -->
                         </div>
                         <button id="createGoalBtn" class="w-full mt-3 py-2 bg-blue-500 text-white rounded-xl font-semibold hover:bg-blue-600 transition-colors flex items-center justify-center">
                             <i class="fas fa-plus mr-2"></i>Create New Goal
@@ -431,7 +391,6 @@ document.getElementById('shareQR')?.addEventListener('click', function() {
                     </div>
                     <div id="highlightsContent" class="hidden mt-2">
                         <div class="flex flex-wrap gap-2" id="hashtagsList">
-                            <!-- Hashtags will be populated from Firebase -->
                         </div>
                         <div id="noHighlightsMessage" class="text-center text-gray-500 py-3">
                             <p>No highlighted messages yet. Use #important or #todo in your messages.</p>
@@ -446,9 +405,7 @@ document.getElementById('shareQR')?.addEventListener('click', function() {
                         <p>No messages yet</p>
                         <p class="text-sm mt-1">Select a chat to start messaging</p>
                     </div>
-                    <!-- Messages will be populated from Firebase -->
                     <div id="messagesList" class="space-y-4">
-                        <!-- Messages will be dynamically added here -->
                     </div>
                     <div id="scrollToBottom" class="scroll-to-bottom hidden">
                         <i class="fas fa-chevron-down"></i>
@@ -464,7 +421,6 @@ document.getElementById('shareQR')?.addEventListener('click', function() {
                                 Poll Results
                             </p>
                             <div id="pollResultsContent" class="mt-2 space-y-2">
-                                <!-- Poll results will be populated from Firebase -->
                             </div>
                         </div>
                         <button id="dismissPollResults" class="text-green-400 hover:text-green-600 transition-colors ml-2">
@@ -512,7 +468,6 @@ document.getElementById('shareQR')?.addEventListener('click', function() {
                             <input type="text" id="messageInput" class="w-full bg-gray-100 py-3 px-4 rounded-2xl focus:outline-none focus:ring-2 focus:ring-purple-500 focus:bg-white transition-all" placeholder="Type a message..." disabled>
                             <!-- Emoji Picker -->
                             <div id="emojiPicker" class="emoji-picker">
-                                <!-- Emoji categories will be populated here -->
                             </div>
                             <!-- Typing Indicator -->
                             <div id="isTyping" class="absolute -top-6 left-0 text-xs text-gray-500 hidden">
@@ -578,7 +533,6 @@ document.getElementById('shareQR')?.addEventListener('click', function() {
     <!-- Video Conference -->
     <div class="video-conference" id="videoConference">
         <div class="conference-grid" id="conferenceGrid">
-            <!-- Participant videos will be added here -->
         </div>
         <div class="call-controls">
             <button class="call-btn call-mute" id="conferenceMuteBtn">
@@ -594,19 +548,65 @@ document.getElementById('shareQR')?.addEventListener('click', function() {
     </div>
 
     <!-- Video Call Container -->
-    <div class="video-call-container" id="videoCallContainer">
-        <video class="remote-video" id="remoteVideo" autoplay></video>
-        <video class="local-video" id="localVideo" autoplay muted></video>
-        <div class="call-controls">
-            <button class="call-btn call-mute" id="muteBtn">
+    <div id="videoCallContainer" class="hidden fixed inset-0 bg-black bg-opacity-80 z-50 flex flex-col items-center justify-center p-4">
+        <video id="remoteVideo" autoplay playsinline class="w-full max-w-md rounded-lg mb-4"></video>
+        <video id="localVideo" autoplay muted playsinline class="absolute bottom-4 right-4 w-32 h-48 object-cover rounded-lg border-2 border-white"></video>
+        
+        <div class="flex space-x-4">
+            <button id="toggleMicBtn" class="bg-gray-600 text-white p-3 rounded-full">
                 <i class="fas fa-microphone"></i>
             </button>
-            <button class="call-btn call-video" id="videoToggleBtn">
+            <button id="toggleCameraBtn" class="bg-gray-600 text-white p-3 rounded-full">
                 <i class="fas fa-video"></i>
             </button>
-            <button class="call-btn call-end" id="endCallBtn">
-                <i class="fas fa-phone"></i>
+            <button id="switchCameraBtn" class="bg-gray-600 text-white p-3 rounded-full">
+                <i class="fas fa-sync-alt"></i>
             </button>
+            <button id="endCallBtn" class="bg-red-600 text-white p-3 rounded-full">
+                <i class="fas fa-phone-slash"></i>
+            </button>
+        </div>
+        
+        <!-- Call Info -->
+        <div class="absolute top-4 left-1/2 transform -translate-x-1/2 bg-black bg-opacity-50 text-white px-4 py-2 rounded-lg">
+            <div id="callStatus" class="text-sm">Connecting...</div>
+            <div id="callTimer" class="text-lg font-semibold">00:00</div>
+        </div>
+    </div>
+
+    <!-- Incoming Call Popup -->
+    <div id="incomingCallPopup" class="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 hidden">
+        <div class="bg-white rounded-lg p-6 max-w-sm w-full mx-4">
+            <h3 class="text-lg font-semibold mb-2">Incoming Call</h3>
+            <p>From: <span id="incomingCallerName" class="font-medium"></span></p>
+            <p>Type: <span id="incomingCallType" class="font-medium"></span></p>
+            <div class="flex space-x-3 mt-4">
+                <button id="acceptCallBtn" class="flex-1 bg-green-500 text-white py-2 rounded-lg">Accept</button>
+                <button id="rejectCallBtn" class="flex-1 bg-red-500 text-white py-2 rounded-lg">Reject</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Active Call Container -->
+    <div id="callContainer" class="fixed inset-0 bg-black z-40 hidden flex-col">
+        <!-- Remote Video -->
+        <video id="remoteVideo" class="w-full h-full object-cover" autoplay playsinline></video>
+        
+        <!-- Local Video (Picture-in-Picture) -->
+        <video id="localVideo" class="absolute bottom-4 right-4 w-32 h-48 object-cover rounded-lg border-2 border-white" autoplay playsinline muted></video>
+        
+        <!-- Call Controls -->
+        <div class="absolute bottom-4 left-1/2 transform -translate-x-1/2 flex space-x-4">
+            <button id="toggleMicBtn" class="w-12 h-12 bg-gray-600 text-white rounded-full">🎤</button>
+            <button id="endCallBtn" class="w-12 h-12 bg-red-600 text-white rounded-full">📞</button>
+            <button id="toggleCameraBtn" class="w-12 h-12 bg-gray-600 text-white rounded-full">📷</button>
+            <button id="switchCameraBtn" class="w-12 h-12 bg-gray-600 text-white rounded-full">🔄</button>
+        </div>
+        
+        <!-- Call Info -->
+        <div class="absolute top-4 left-1/2 transform -translate-x-1/2 bg-black bg-opacity-50 text-white px-4 py-2 rounded-lg">
+            <div id="callStatus" class="text-sm">Connecting...</div>
+            <div id="callTimer" class="text-lg font-semibold">00:00</div>
         </div>
     </div>
 
@@ -658,287 +658,231 @@ document.getElementById('shareQR')?.addEventListener('click', function() {
         </div>
     </div>
 
-    <!-- Status Creation Modal (You already have this) -->
-<div id="statusCreation" class="status-creation">
-    <div class="status-creation-content">
-        <div class="kynecta-header p-4">
-            <div class="flex items-center justify-between">
-                <h3 class="text-xl font-semibold text-white">Create Status Update</h3>
-                <button id="closeStatusCreation" class="text-white/80 hover:text-white transition-colors">
+    <!-- Status Creation Modal -->
+    <div id="statusCreation" class="status-creation">
+        <div class="status-creation-content">
+            <div class="kynecta-header p-4">
+                <div class="flex items-center justify-between">
+                    <h3 class="text-xl font-semibold text-white">Create Status Update</h3>
+                    <button id="closeStatusCreation" class="text-white/80 hover:text-white transition-colors">
+                        <i class="fas fa-times text-xl"></i>
+                    </button>
+                </div>
+            </div>
+            
+            <!-- Hidden file inputs -->
+            <input type="file" id="statusImageInput" accept="image/*" class="hidden">
+            <input type="file" id="statusVideoInput" accept="video/*" class="hidden">
+            <input type="file" id="statusAudioInput" accept="audio/*" class="hidden">
+            
+            <div class="status-options">
+                <div class="status-option active" data-type="emoji">
+                    <i class="fas fa-smile text-xl mb-2"></i>
+                    <p>Emoji</p>
+                </div>
+                <div class="status-option" data-type="text">
+                    <i class="fas fa-font text-xl mb-2"></i>
+                    <p>Text</p>
+                </div>
+                <div class="status-option" data-type="image">
+                    <i class="fas fa-image text-xl mb-2"></i>
+                    <p>Image</p>
+                </div>
+                <div class="status-option" data-type="video">
+                    <i class="fas fa-video text-xl mb-2"></i>
+                    <p>Video</p>
+                </div>
+                <div class="status-option" data-type="audio">
+                    <i class="fas fa-music text-xl mb-2"></i>
+                    <p>Audio</p>
+                </div>
+            </div>
+            
+            <div class="status-previews p-4">
+                <!-- Emoji Preview -->
+                <div id="emojiPreview" class="status-preview">
+                    <div class="text-center">
+                        <div class="text-8xl mb-4" contenteditable="true">😊</div>
+                        <p class="text-gray-500 text-sm">Click to change emoji</p>
+                    </div>
+                </div>
+                
+                <!-- Text Preview -->
+                <div id="textPreview" class="status-preview hidden">
+                    <textarea 
+                        id="statusTextInput" 
+                        class="w-full p-4 border border-gray-300 rounded-xl resize-none focus:border-purple-500 focus:ring-1 focus:ring-purple-500" 
+                        placeholder="What's on your mind?"
+                        rows="4"
+                    ></textarea>
+                </div>
+                
+                <!-- Image Preview -->
+                <div id="imagePreviewContainer" class="status-preview hidden">
+                    <div class="text-center">
+                        <img id="statusImagePreviewImg" class="max-w-full max-h-64 mx-auto rounded-lg mb-4 hidden" alt="Image preview">
+                        <input 
+                            type="text" 
+                            id="statusImageCaption" 
+                            placeholder="Add a caption for your image..." 
+                            class="w-full p-3 border border-gray-300 rounded-lg mb-3 focus:border-purple-500 focus:ring-1 focus:ring-purple-500"
+                        >
+                        <button onclick="document.getElementById('statusImageInput').click()" class="bg-purple-600 text-white px-6 py-3 rounded-xl hover:bg-purple-700 transition-colors font-medium">
+                            <i class="fas fa-upload mr-2"></i>Choose Image
+                        </button>
+                        <p class="text-gray-500 text-sm mt-2">Supported: JPG, PNG, GIF</p>
+                    </div>
+                </div>
+                
+                <!-- Video Preview -->
+                <div id="videoPreviewContainer" class="status-preview hidden">
+                    <div class="text-center">
+                        <video id="statusVideoPreviewVideo" controls class="max-w-full max-h-64 mx-auto rounded-lg mb-4 hidden"></video>
+                        <input 
+                            type="text" 
+                            id="statusVideoCaption" 
+                            placeholder="Add a caption for your video..." 
+                            class="w-full p-3 border border-gray-300 rounded-lg mb-3 focus:border-purple-500 focus:ring-1 focus:ring-purple-500"
+                        >
+                        <button onclick="document.getElementById('statusVideoInput').click()" class="bg-purple-600 text-white px-6 py-3 rounded-xl hover:bg-purple-700 transition-colors font-medium">
+                            <i class="fas fa-upload mr-2"></i>Choose Video
+                        </button>
+                        <p class="text-gray-500 text-sm mt-2">Max duration: 30 seconds</p>
+                    </div>
+                </div>
+                
+                <!-- Audio Preview -->
+                <div id="audioPreviewContainer" class="status-preview hidden">
+                    <div class="text-center">
+                        <audio id="statusAudioPreviewAudio" controls class="w-full mb-4 hidden"></audio>
+                        <input 
+                            type="text" 
+                            id="statusAudioCaption" 
+                            placeholder="Add a caption for your audio..." 
+                            class="w-full p-3 border border-gray-300 rounded-lg mb-3 focus:border-purple-500 focus:ring-1 focus:ring-purple-500"
+                        >
+                        <button onclick="document.getElementById('statusAudioInput').click()" class="bg-purple-600 text-white px-6 py-3 rounded-xl hover:bg-purple-700 transition-colors font-medium">
+                            <i class="fas fa-upload mr-2"></i>Choose Audio
+                        </button>
+                        <p class="text-gray-500 text-sm mt-2">Supported: MP3, WAV, M4A</p>
+                    </div>
+                </div>
+            </div>
+            
+            <div class="p-4 border-t border-gray-200">
+                <button id="postStatus" class="w-full py-3 bg-gradient-to-r from-purple-500 to-green-500 text-white rounded-xl font-semibold hover:opacity-90 transition-opacity">
+                    Post Status
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Enhanced Status Viewing Modal -->
+    <div id="enhancedStatusModal" class="fixed inset-0 bg-black bg-opacity-90 z-50 flex items-center justify-center hidden">
+        <div class="status-modal-container bg-white rounded-lg max-w-2xl w-full mx-4 max-h-[90vh] overflow-hidden">
+            <div class="status-header flex items-center justify-between p-4 border-b">
+                <div class="flex items-center space-x-3">
+                    <img id="statusUserAvatar" class="w-12 h-12 rounded-full" src="" alt="">
+                    <div>
+                        <h3 id="statusUserName" class="font-semibold"></h3>
+                        <p id="statusTime" class="text-sm text-gray-500"></p>
+                    </div>
+                </div>
+                <button id="closeEnhancedStatusModal" class="text-gray-500 hover:text-gray-700">
                     <i class="fas fa-times text-xl"></i>
                 </button>
             </div>
-        </div>
-        
-        <!-- Hidden file inputs -->
-        <input type="file" id="statusImageInput" accept="image/*" class="hidden">
-        <input type="file" id="statusVideoInput" accept="video/*" class="hidden">
-        <input type="file" id="statusAudioInput" accept="audio/*" class="hidden">
-        
-        <div class="status-options">
-            <div class="status-option active" data-type="emoji">
-                <i class="fas fa-smile text-xl mb-2"></i>
-                <p>Emoji</p>
-            </div>
-            <div class="status-option" data-type="text">
-                <i class="fas fa-font text-xl mb-2"></i>
-                <p>Text</p>
-            </div>
-            <div class="status-option" data-type="image">
-                <i class="fas fa-image text-xl mb-2"></i>
-                <p>Image</p>
-            </div>
-            <div class="status-option" data-type="video">
-                <i class="fas fa-video text-xl mb-2"></i>
-                <p>Video</p>
-            </div>
-            <div class="status-option" data-type="audio">
-                <i class="fas fa-music text-xl mb-2"></i>
-                <p>Audio</p>
-            </div>
-        </div>
-        
-        <div class="status-previews p-4">
-            <!-- Emoji Preview -->
-            <div id="emojiPreview" class="status-preview">
-                <div class="text-center">
-                    <div class="text-8xl mb-4" contenteditable="true">😊</div>
-                    <p class="text-gray-500 text-sm">Click to change emoji</p>
+            
+            <div class="status-content p-6">
+                <div id="statusMedia" class="mb-4"></div>
+                <div id="statusText" class="text-gray-800 mb-4"></div>
+                
+                <!-- Stats Bar -->
+                <div class="status-stats flex justify-between items-center text-sm text-gray-600 border-t border-b py-3">
+                    <div class="flex space-x-4">
+                        <span id="viewersCount" class="flex items-center">
+                            <i class="fas fa-eye mr-1"></i>
+                            <span>0 views</span>
+                        </span>
+                        <span id="reactionsCount" class="flex items-center">
+                            <i class="fas fa-heart mr-1"></i>
+                            <span>0 reactions</span>
+                        </span>
+                        <span id="sharesCount" class="flex items-center">
+                            <i class="fas fa-share mr-1"></i>
+                            <span>0 shares</span>
+                        </span>
+                    </div>
                 </div>
-            </div>
-            
-            <!-- Text Preview -->
-            <div id="textPreview" class="status-preview hidden">
-                <textarea 
-                    id="statusTextInput" 
-                    class="w-full p-4 border border-gray-300 rounded-xl resize-none focus:border-purple-500 focus:ring-1 focus:ring-purple-500" 
-                    placeholder="What's on your mind?"
-                    rows="4"
-                ></textarea>
-            </div>
-            
-            <!-- Image Preview -->
-            <div id="imagePreviewContainer" class="status-preview hidden">
-                <div class="text-center">
-                    <img id="statusImagePreviewImg" class="max-w-full max-h-64 mx-auto rounded-lg mb-4 hidden" alt="Image preview">
-                    <input 
-                        type="text" 
-                        id="statusImageCaption" 
-                        placeholder="Add a caption for your image..." 
-                        class="w-full p-3 border border-gray-300 rounded-lg mb-3 focus:border-purple-500 focus:ring-1 focus:ring-purple-500"
-                    >
-                    <button onclick="document.getElementById('statusImageInput').click()" class="bg-purple-600 text-white px-6 py-3 rounded-xl hover:bg-purple-700 transition-colors font-medium">
-                        <i class="fas fa-upload mr-2"></i>Choose Image
+                
+                <!-- Action Buttons -->
+                <div class="status-actions flex justify-around py-4 border-b">
+                    <button id="likeBtn" class="flex items-center space-x-2 text-gray-600 hover:text-red-500 transition-colors">
+                        <i class="far fa-heart text-xl"></i>
+                        <span>Like</span>
                     </button>
-                    <p class="text-gray-500 text-sm mt-2">Supported: JPG, PNG, GIF</p>
-                </div>
-            </div>
-            
-            <!-- Video Preview -->
-            <div id="videoPreviewContainer" class="status-preview hidden">
-                <div class="text-center">
-                    <video id="statusVideoPreviewVideo" controls class="max-w-full max-h-64 mx-auto rounded-lg mb-4 hidden"></video>
-                    <input 
-                        type="text" 
-                        id="statusVideoCaption" 
-                        placeholder="Add a caption for your video..." 
-                        class="w-full p-3 border border-gray-300 rounded-lg mb-3 focus:border-purple-500 focus:ring-1 focus:ring-purple-500"
-                    >
-                    <button onclick="document.getElementById('statusVideoInput').click()" class="bg-purple-600 text-white px-6 py-3 rounded-xl hover:bg-purple-700 transition-colors font-medium">
-                        <i class="fas fa-upload mr-2"></i>Choose Video
+                    <button id="reactionBtn" class="flex items-center space-x-2 text-gray-600 hover:text-yellow-500 transition-colors">
+                        <i class="far fa-smile text-xl"></i>
+                        <span>React</span>
                     </button>
-                    <p class="text-gray-500 text-sm mt-2">Max duration: 30 seconds</p>
-                </div>
-            </div>
-            
-            <!-- Audio Preview -->
-            <div id="audioPreviewContainer" class="status-preview hidden">
-                <div class="text-center">
-                    <audio id="statusAudioPreviewAudio" controls class="w-full mb-4 hidden"></audio>
-                    <input 
-                        type="text" 
-                        id="statusAudioCaption" 
-                        placeholder="Add a caption for your audio..." 
-                        class="w-full p-3 border border-gray-300 rounded-lg mb-3 focus:border-purple-500 focus:ring-1 focus:ring-purple-500"
-                    >
-                    <button onclick="document.getElementById('statusAudioInput').click()" class="bg-purple-600 text-white px-6 py-3 rounded-xl hover:bg-purple-700 transition-colors font-medium">
-                        <i class="fas fa-upload mr-2"></i>Choose Audio
+                    <button id="shareBtn" class="flex items-center space-x-2 text-gray-600 hover:text-green-500 transition-colors">
+                        <i class="far fa-share-square text-xl"></i>
+                        <span>Share</span>
                     </button>
-                    <p class="text-gray-500 text-sm mt-2">Supported: MP3, WAV, M4A</p>
-                </div>
-            </div>
-        </div>
-        
-        <div class="p-4 border-t border-gray-200">
-            <button id="postStatus" class="w-full py-3 bg-gradient-to-r from-purple-500 to-green-500 text-white rounded-xl font-semibold hover:opacity-90 transition-opacity">
-                Post Status
-            </button>
-        </div>
-    </div>
-</div>
-
-<!-- ==================== ENHANCED STATUS VIEWING MODAL ==================== -->
-<!-- Enhanced Status Viewing Modal with Reactions and Sharing -->
-<div id="enhancedStatusModal" class="fixed inset-0 bg-black bg-opacity-90 z-50 flex items-center justify-center hidden">
-    <div class="status-modal-container bg-white rounded-lg max-w-2xl w-full mx-4 max-h-[90vh] overflow-hidden">
-        <div class="status-header flex items-center justify-between p-4 border-b">
-            <div class="flex items-center space-x-3">
-                <img id="statusUserAvatar" class="w-12 h-12 rounded-full" src="" alt="">
-                <div>
-                    <h3 id="statusUserName" class="font-semibold"></h3>
-                    <p id="statusTime" class="text-sm text-gray-500"></p>
-                </div>
-            </div>
-            <button id="closeEnhancedStatusModal" class="text-gray-500 hover:text-gray-700">
-                <i class="fas fa-times text-xl"></i>
-            </button>
-        </div>
-        
-        <div class="status-content p-6">
-            <div id="statusMedia" class="mb-4"></div>
-            <div id="statusText" class="text-gray-800 mb-4"></div>
-            
-            <!-- Stats Bar -->
-            <div class="status-stats flex justify-between items-center text-sm text-gray-600 border-t border-b py-3">
-                <div class="flex space-x-4">
-                    <span id="viewersCount" class="flex items-center">
-                        <i class="fas fa-eye mr-1"></i>
-                        <span>0 views</span>
-                    </span>
-                    <span id="reactionsCount" class="flex items-center">
-                        <i class="fas fa-heart mr-1"></i>
-                        <span>0 reactions</span>
-                    </span>
-                    <span id="sharesCount" class="flex items-center">
-                        <i class="fas fa-share mr-1"></i>
-                        <span>0 shares</span>
-                    </span>
-                </div>
-            </div>
-            
-            <!-- Action Buttons -->
-            <div class="status-actions flex justify-around py-4 border-b">
-                <button id="likeBtn" class="flex items-center space-x-2 text-gray-600 hover:text-red-500 transition-colors">
-                    <i class="far fa-heart text-xl"></i>
-                    <span>Like</span>
-                </button>
-                <button id="reactionBtn" class="flex items-center space-x-2 text-gray-600 hover:text-yellow-500 transition-colors">
-                    <i class="far fa-smile text-xl"></i>
-                    <span>React</span>
-                </button>
-                <button id="shareBtn" class="flex items-center space-x-2 text-gray-600 hover:text-green-500 transition-colors">
-                    <i class="far fa-share-square text-xl"></i>
-                    <span>Share</span>
-                </button>
-                <button id="viewReactionsBtn" class="flex items-center space-x-2 text-gray-600 hover:text-purple-500 transition-colors">
-                    <i class="far fa-thumbs-up text-xl"></i>
-                    <span>Reactions</span>
-                </button>
-            </div>
-            
-            <!-- Quick Reactions -->
-            <div id="quickReactions" class="flex justify-center space-x-4 py-3 hidden">
-                <button class="quick-reaction text-2xl hover:scale-125 transition-transform" data-emoji="👍">👍</button>
-                <button class="quick-reaction text-2xl hover:scale-125 transition-transform" data-emoji="❤️">❤️</button>
-                <button class="quick-reaction text-2xl hover:scale-125 transition-transform" data-emoji="😂">😂</button>
-                <button class="quick-reaction text-2xl hover:scale-125 transition-transform" data-emoji="😮">😮</button>
-                <button class="quick-reaction text-2xl hover:scale-125 transition-transform" data-emoji="😢">😢</button>
-                <button class="quick-reaction text-2xl hover:scale-125 transition-transform" data-emoji="🎉">🎉</button>
-            </div>
-        </div>
-        
-        <div class="status-footer p-4 border-t">
-            <button id="viewViewersBtn" class="w-full text-center text-purple-600 hover:text-purple-800 py-2">
-                <i class="fas fa-users mr-2"></i>View All Viewers and Reactions
-            </button>
-        </div>
-    </div>
-</div>
-
-<!-- Enhanced Viewers & Reactions Modal -->
-<div id="enhancedViewersModal" class="fixed inset-0 bg-black bg-opacity-90 z-60 flex items-center justify-center hidden">
-    <div class="bg-white rounded-lg max-w-2xl w-full mx-4 max-h-[80vh] overflow-hidden">
-        <div class="p-4 border-b flex justify-between items-center">
-            <h3 class="font-semibold text-lg">Viewers & Reactions</h3>
-            <button id="closeEnhancedViewersModal" class="text-gray-500 hover:text-gray-700">
-                <i class="fas fa-times"></i>
-            </button>
-        </div>
-        
-        <div class="flex border-b">
-            <button class="tab-button active w-1/2 py-3 text-center border-b-2 border-purple-600 text-purple-600" data-tab="viewers">
-                <i class="fas fa-eye mr-2"></i>Viewers (<span id="viewersTabCount">0</span>)
-            </button>
-            <button class="tab-button w-1/2 py-3 text-center text-gray-600" data-tab="reactions">
-                <i class="fas fa-heart mr-2"></i>Reactions (<span id="reactionsTabCount">0</span>)
-            </button>
-        </div>
-        
-        <div class="p-4 max-h-96 overflow-y-auto">
-            <div id="enhancedViewersList" class="tab-content active">
-                <div class="text-center text-gray-500 py-4">Loading viewers...</div>
-            </div>
-            <div id="enhancedReactionsList" class="tab-content hidden">
-                <div class="text-center text-gray-500 py-4">Loading reactions...</div>
-            </div>
-        </div>
-    </div>
-</div>
-
-<!-- Simple Status Modal (Fallback - keep for compatibility) -->
-<div id="statusModal" class="fixed inset-0 bg-black bg-opacity-90 z-50 flex items-center justify-center hidden">
-    <div class="status-modal-container bg-white rounded-lg max-w-md w-full mx-4 max-h-[90vh] overflow-hidden">
-        <div class="status-header flex items-center justify-between p-4 border-b">
-            <div class="flex items-center space-x-3">
-                <img id="simpleStatusUserAvatar" class="w-10 h-10 rounded-full" src="" alt="">
-                <div>
-                    <h3 id="simpleStatusUserName" class="font-semibold"></h3>
-                    <p id="simpleStatusTime" class="text-sm text-gray-500"></p>
-                </div>
-            </div>
-            <button id="closeStatusModal" class="text-gray-500 hover:text-gray-700">
-                <i class="fas fa-times text-xl"></i>
-            </button>
-        </div>
-        
-        <div class="status-content p-4">
-            <div id="simpleStatusMedia" class="mb-4"></div>
-            <div id="simpleStatusText" class="text-gray-800"></div>
-        </div>
-        
-        <div class="status-footer p-4 border-t">
-            <div class="flex items-center justify-between text-sm text-gray-600">
-                <div class="flex items-center space-x-4">
-                    <span id="simpleViewersCount">
-                        <i class="fas fa-eye mr-1"></i>
-                        <span>0 viewers</span>
-                    </span>
-                    <button id="simpleViewViewersBtn" class="text-purple-600 hover:text-purple-800">
-                        View all
+                    <button id="viewReactionsBtn" class="flex items-center space-x-2 text-gray-600 hover:text-purple-500 transition-colors">
+                        <i class="far fa-thumbs-up text-xl"></i>
+                        <span>Reactions</span>
                     </button>
                 </div>
-                <button id="simpleDeleteStatusBtn" class="text-red-600 hover:text-red-800 hidden">
-                    <i class="fas fa-trash"></i>
+                
+                <!-- Quick Reactions -->
+                <div id="quickReactions" class="flex justify-center space-x-4 py-3 hidden">
+                    <button class="quick-reaction text-2xl hover:scale-125 transition-transform" data-emoji="👍">👍</button>
+                    <button class="quick-reaction text-2xl hover:scale-125 transition-transform" data-emoji="❤️">❤️</button>
+                    <button class="quick-reaction text-2xl hover:scale-125 transition-transform" data-emoji="😂">😂</button>
+                    <button class="quick-reaction text-2xl hover:scale-125 transition-transform" data-emoji="😮">😮</button>
+                    <button class="quick-reaction text-2xl hover:scale-125 transition-transform" data-emoji="😢">😢</button>
+                    <button class="quick-reaction text-2xl hover:scale-125 transition-transform" data-emoji="🎉">🎉</button>
+                </div>
+            </div>
+            
+            <div class="status-footer p-4 border-t">
+                <button id="viewViewersBtn" class="w-full text-center text-purple-600 hover:text-purple-800 py-2">
+                    <i class="fas fa-users mr-2"></i>View All Viewers and Reactions
                 </button>
             </div>
         </div>
     </div>
-</div>
 
-<!-- Simple Viewers List Modal (Fallback) -->
-<div id="viewersModal" class="fixed inset-0 bg-black bg-opacity-90 z-60 flex items-center justify-center hidden">
-    <div class="bg-white rounded-lg max-w-md w-full mx-4 max-h-[70vh] overflow-hidden">
-        <div class="p-4 border-b flex justify-between items-center">
-            <h3 class="font-semibold">Viewers</h3>
-            <button id="closeViewersModal" class="text-gray-500 hover:text-gray-700">
-                <i class="fas fa-times"></i>
-            </button>
-        </div>
-        <div id="viewersList" class="p-4 overflow-y-auto max-h-96">
-            <!-- Viewers will be listed here -->
+    <!-- Enhanced Viewers & Reactions Modal -->
+    <div id="enhancedViewersModal" class="fixed inset-0 bg-black bg-opacity-90 z-60 flex items-center justify-center hidden">
+        <div class="bg-white rounded-lg max-w-2xl w-full mx-4 max-h-[80vh] overflow-hidden">
+            <div class="p-4 border-b flex justify-between items-center">
+                <h3 class="font-semibold text-lg">Viewers & Reactions</h3>
+                <button id="closeEnhancedViewersModal" class="text-gray-500 hover:text-gray-700">
+                    <i class="fas fa-times"></i>
+                </button>
+            </div>
+            
+            <div class="flex border-b">
+                <button class="tab-button active w-1/2 py-3 text-center border-b-2 border-purple-600 text-purple-600" data-tab="viewers">
+                    <i class="fas fa-eye mr-2"></i>Viewers (<span id="viewersTabCount">0</span>)
+                </button>
+                <button class="tab-button w-1/2 py-3 text-center text-gray-600" data-tab="reactions">
+                    <i class="fas fa-heart mr-2"></i>Reactions (<span id="reactionsTabCount">0</span>)
+                </button>
+            </div>
+            
+            <div class="p-4 max-h-96 overflow-y-auto">
+                <div id="enhancedViewersList" class="tab-content active">
+                    <div class="text-center text-gray-500 py-4">Loading viewers...</div>
+                </div>
+                <div id="enhancedReactionsList" class="tab-content hidden">
+                    <div class="text-center text-gray-500 py-4">Loading reactions...</div>
+                </div>
+            </div>
         </div>
     </div>
-</div>
 
     <!-- Settings Modal -->
     <div id="settingsModal" class="hidden fixed inset-0 bg-black bg-opacity-50 z-50 flex items-center justify-center p-4">
@@ -951,7 +895,6 @@ document.getElementById('shareQR')?.addEventListener('click', function() {
                     </button>
                 </div>
             </div>
-            
             
             <div class="overflow-y-auto max-h-[60vh] custom-scrollbar">
                 <!-- Profile Section -->
@@ -982,26 +925,6 @@ document.getElementById('shareQR')?.addEventListener('click', function() {
                         </div>
                     </div>
                 </div>
-
-                <!-- Add to settings modal -->
-<div class="setting-item">
-    <label>Call Ringtone</label>
-    <select id="ringtoneSelect" class="setting-select">
-        <!-- Options will be populated by JavaScript -->
-    </select>
-</div>
-
-<!-- Add to status modal for reactions -->
-<div class="status-reactions mt-4">
-    <div id="statusReactions" class="mb-2"></div>
-    <div class="reaction-buttons flex space-x-2">
-        <button onclick="addReactionToStatus(currentStatusId, '👍')" class="p-2 hover:bg-gray-100 rounded">👍</button>
-        <button onclick="addReactionToStatus(currentStatusId, '❤️')" class="p-2 hover:bg-gray-100 rounded">❤️</button>
-        <button onclick="addReactionToStatus(currentStatusId, '😂')" class="p-2 hover:bg-gray-100 rounded">😂</button>
-        <button onclick="addReactionToStatus(currentStatusId, '😮')" class="p-2 hover:bg-gray-100 rounded">😮</button>
-        <button onclick="addReactionToStatus(currentStatusId, '😢')" class="p-2 hover:bg-gray-100 rounded">😢</button>
-    </div>
-</div>
 
                 <!-- Account Section -->
                 <div class="settings-section">
@@ -1199,7 +1122,6 @@ document.getElementById('shareQR')?.addEventListener('click', function() {
                 </div>
                 
                 <div id="searchResults" class="mb-4 max-h-40 overflow-y-auto hidden">
-                    <!-- Search results will appear here -->
                 </div>
                 
                 <div class="flex space-x-3">
@@ -1223,7 +1145,6 @@ document.getElementById('shareQR')?.addEventListener('click', function() {
             
             <div class="p-6">
                 <div id="enhancedSearchResults" class="space-y-3 max-h-60 overflow-y-auto">
-                    <!-- Enhanced search results will appear here -->
                 </div>
                 
                 <div class="mt-4">
@@ -1326,13 +1247,13 @@ document.getElementById('shareQR')?.addEventListener('click', function() {
                     <input type="tel" id="profilePhone" class="w-full p-3 border-2 border-gray-200 rounded-xl focus:outline-none focus:border-purple-500 transition-colors" placeholder="Enter your phone number">
                 </div>
                 <div class="p-4 border-t border-gray-200 flex justify-end space-x-3">
-    <button id="saveProfileChangesBtn" class="bg-purple-600 text-white px-6 py-2 rounded-xl font-semibold hover:bg-purple-700 transition-colors">
-        Save Changes
-    </button>
-    <button id="closeProfileSettingsModal" class="bg-gray-200 text-gray-700 px-6 py-2 rounded-xl font-semibold hover:opacity-90 transition-opacity">
-        Cancel
-    </button>
-</div>
+                    <button id="saveProfileChangesBtn" class="bg-purple-600 text-white px-6 py-2 rounded-xl font-semibold hover:bg-purple-700 transition-colors">
+                        Save Changes
+                    </button>
+                    <button id="closeProfileSettingsModal" class="bg-gray-200 text-gray-700 px-6 py-2 rounded-xl font-semibold hover:opacity-90 transition-opacity">
+                        Cancel
+                    </button>
+                </div>
                 <div class="flex space-x-3">
                     <button id="saveProfile" class="flex-1 py-3 bg-gradient-to-r from-purple-500 to-green-500 text-white rounded-xl font-semibold hover:opacity-90 transition-opacity">
                         Save Profile
@@ -2012,7 +1933,6 @@ document.getElementById('shareQR')?.addEventListener('click', function() {
             
             <div class="overflow-y-auto max-h-[60vh] custom-scrollbar p-6">
                 <div id="favoritesListContent" class="space-y-3">
-                    <!-- Favorites will be populated from Firebase -->
                     <div class="text-center text-gray-500 py-8">
                         <i class="fas fa-star text-4xl mb-3 text-gray-300 block"></i>
                         <p>No favorites yet</p>
@@ -2318,7 +2238,6 @@ document.getElementById('shareQR')?.addEventListener('click', function() {
                 </div>
                 
                 <div id="allFriendsList" class="space-y-3">
-                    <!-- All friends will be populated from Firebase -->
                 </div>
                 
                 <div id="noAllFriendsMessage" class="p-8 text-center text-gray-500">
@@ -2329,735 +2248,360 @@ document.getElementById('shareQR')?.addEventListener('click', function() {
             </div>
         </div>
     </div>
-<!-- Status Viewer Modal -->
-<div id="statusViewerModal" class="hidden fixed inset-0 bg-black bg-opacity-90 z-50 flex items-center justify-center p-4">
-    <div class="bg-white rounded-2xl w-full max-w-md max-h-[90vh] overflow-hidden">
-        <div class="kynecta-header p-6">
-            <div class="flex items-center justify-between">
-                <h3 class="text-xl font-semibold text-white">Status Updates</h3>
-                <button id="closeStatusViewer" class="text-white/80 hover:text-white transition-colors">
-                    <i class="fas fa-times text-xl"></i>
-                </button>
+
+    <!-- Status Viewer Modal -->
+    <div id="statusViewerModal" class="hidden fixed inset-0 bg-black bg-opacity-90 z-50 flex items-center justify-center p-4">
+        <div class="bg-white rounded-2xl w-full max-w-md max-h-[90vh] overflow-hidden">
+            <div class="kynecta-header p-6">
+                <div class="flex items-center justify-between">
+                    <h3 class="text-xl font-semibold text-white">Status Updates</h3>
+                    <button id="closeStatusViewer" class="text-white/80 hover:text-white transition-colors">
+                        <i class="fas fa-times text-xl"></i>
+                    </button>
+                </div>
             </div>
-        </div>
-        
-        <div class="overflow-y-auto max-h-[60vh] custom-scrollbar p-6">
-            <div id="statusViewerContent" class="space-y-4">
-                <!-- Status updates will be populated from Firebase -->
-                <div class="text-center text-gray-500 py-8">
-                    <i class="fas fa-eye-slash text-4xl mb-3 text-gray-300 block"></i>
-                    <p>No status updates to view</p>
-                    <p class="text-sm mt-1">When friends post status updates, they'll appear here</p>
+            
+            <div class="overflow-y-auto max-h-[60vh] custom-scrollbar p-6">
+                <div id="statusViewerContent" class="space-y-4">
+                    <div class="text-center text-gray-500 py-8">
+                        <i class="fas fa-eye-slash text-4xl mb-3 text-gray-300 block"></i>
+                        <p>No status updates to view</p>
+                        <p class="text-sm mt-1">When friends post status updates, they'll appear here</p>
+                    </div>
                 </div>
             </div>
         </div>
     </div>
-</div>
-<div id="statusList">
-    <!-- Example status -->
-    <div class="status-item" data-status-id="STATUS_ID_HERE">
-        <img src="https://ui-avatars.com/api/?name=User&background=7C3AED&color=fff" alt="...">
 
-        <div class="ml-3">
-            <p class="font-semibold">User Name</p>
-            <p class="text-sm text-gray-500">Just now</p>
-        </div>
-    </div>
-</div>
-<div id="featuresModal" class="fixed inset-0 bg-black bg-opacity-50 hidden items-center justify-center z-50">
-    <div class="bg-white w-11/12 max-w-md rounded-2xl p-6 shadow-lg">
-        <h2 class="text-xl font-bold mb-4">Available Features</h2>
-
-        <ul class="space-y-3 text-gray-700">
-            <li>• Voice & Video Calling</li>
-            <li>• Status Updates (Photo, Text, Audio)</li>
-            <li>• Mood System</li>
-            <li>• Quick Actions</li>
-            <li>• Cloud Chat Backup</li>
-            <li>• Real-time Typing Indicator</li>
-        </ul>
-
-        <button class="w-full mt-6 bg-purple-600 text-white p-3 rounded-xl" id="closeFeatures">
-            Close
-        </button>
-    </div>
-</div>
-<div id="moodModal" class="fixed inset-0 bg-black bg-opacity-50 hidden items-center justify-center z-50">
-    <div class="bg-white w-11/12 max-w-md rounded-2xl p-6 shadow-lg">
-        <h2 class="text-xl font-bold mb-4">Select Your Mood</h2>
-
-        <div class="grid grid-cols-3 gap-4 text-center">
-            <div class="p-4 rounded-xl bg-yellow-100 cursor-pointer mood-option" data-mood="happy">😊 Happy</div>
-            <div class="p-4 rounded-xl bg-blue-100 cursor-pointer mood-option" data-mood="calm">😌 Calm</div>
-            <div class="p-4 rounded-xl bg-red-100 cursor-pointer mood-option" data-mood="energetic">🔥 Energetic</div>
-            <div class="p-4 rounded-xl bg-green-100 cursor-pointer mood-option" data-mood="focused">🎯 Focused</div>
-            <div class="p-4 rounded-xl bg-purple-100 cursor-pointer mood-option" data-mood="creative">🎨 Creative</div>
-        </div>
-
-        <button class="w-full mt-6 bg-purple-600 text-white p-3 rounded-xl" id="closeMood">
-            Close
-        </button>
-    </div>
-</div>
-<div id="quickActionsModal" class="fixed inset-0 bg-black bg-opacity-50 hidden items-center justify-center z-50">
-    <div class="bg-white w-11/12 max-w-md rounded-2xl p-6 shadow-lg">
-        <h2 class="text-xl font-bold mb-4">Quick Actions</h2>
-
-        <div class="grid grid-cols-2 gap-4">
-            <button class="p-4 bg-purple-500 text-white rounded-xl">📸 Post Status</button>
-            <button class="p-4 bg-blue-500 text-white rounded-xl">📁 Share File</button>
-            <button class="p-4 bg-green-500 text-white rounded-xl">🗣 Voice Note</button>
-            <button class="p-4 bg-red-500 text-white rounded-xl">📞 Quick Call</button>
-        </div>
-
-        <button class="w-full mt-6 bg-gray-700 text-white p-3 rounded-xl" id="closeQuickActions">
-            Close
-        </button>
-    </div>
-</div>
-
-<!-- Settings Modal -->
-<div id="settingsModal" class="hidden fixed inset-0 bg-black bg-opacity-50 z-50 flex items-center justify-center p-4">
-    <div class="bg-white rounded-2xl w-full max-w-md max-h-[90vh] overflow-hidden">
-        <div class="kynecta-header p-6">
-            <div class="flex items-center justify-between">
-                <h3 class="text-xl font-semibold text-white">Settings</h3>
-                <button id="closeSettings" class="text-white/80 hover:text-white transition-colors">
-                    <i class="fas fa-times text-xl"></i>
-                </button>
+    <!-- Status List -->
+    <div id="statusList">
+        <div class="status-item" data-status-id="STATUS_ID_HERE">
+            <img src="https://ui-avatars.com/api/?name=User&background=7C3AED&color=fff" alt="...">
+            <div class="ml-3">
+                <p class="font-semibold">User Name</p>
+                <p class="text-sm text-gray-500">Just now</p>
             </div>
         </div>
-        <!-- FEATURES -->
-<div id="featuresBtn" class="settings-item">
-    <div class="settings-item-content">
-        <div class="settings-item-title">Features</div>
-        <div class="settings-item-description">View available tools and upcoming updates</div>
     </div>
-    <span class="settings-item-action">➜</span>
-</div>
 
-<!-- CURRENT MOOD -->
-<div id="currentMoodBtn" class="settings-item">
-    <div class="settings-item-content">
-        <div class="settings-item-title">Current Mood</div>
-        <div class="settings-item-description">Update your profile mood</div>
+    <!-- Features Modal -->
+    <div id="featuresModal" class="fixed inset-0 bg-black bg-opacity-50 hidden items-center justify-center z-50">
+        <div class="bg-white w-11/12 max-w-md rounded-2xl p-6 shadow-lg">
+            <h2 class="text-xl font-bold mb-4">Available Features</h2>
+            <ul class="space-y-3 text-gray-700">
+                <li>• Voice & Video Calling</li>
+                <li>• Status Updates (Photo, Text, Audio)</li>
+                <li>• Mood System</li>
+                <li>• Quick Actions</li>
+                <li>• Cloud Chat Backup</li>
+                <li>• Real-time Typing Indicator</li>
+            </ul>
+            <button class="w-full mt-6 bg-purple-600 text-white p-3 rounded-xl" id="closeFeatures">
+                Close
+            </button>
+        </div>
     </div>
-    <span class="settings-item-action">😊</span>
-</div>
 
-<!-- QUICK ACTIONS -->
-<div id="quickActionsBtn" class="settings-item">
-    <div class="settings-item-content">
-        <div class="settings-item-title">Quick Actions</div>
-        <div class="settings-item-description">Shortcuts for fast tasks</div>
+    <!-- Mood Modal -->
+    <div id="moodModal" class="fixed inset-0 bg-black bg-opacity-50 hidden items-center justify-center z-50">
+        <div class="bg-white w-11/12 max-w-md rounded-2xl p-6 shadow-lg">
+            <h2 class="text-xl font-bold mb-4">Select Your Mood</h2>
+            <div class="grid grid-cols-3 gap-4 text-center">
+                <div class="p-4 rounded-xl bg-yellow-100 cursor-pointer mood-option" data-mood="happy">😊 Happy</div>
+                <div class="p-4 rounded-xl bg-blue-100 cursor-pointer mood-option" data-mood="calm">😌 Calm</div>
+                <div class="p-4 rounded-xl bg-red-100 cursor-pointer mood-option" data-mood="energetic">🔥 Energetic</div>
+                <div class="p-4 rounded-xl bg-green-100 cursor-pointer mood-option" data-mood="focused">🎯 Focused</div>
+                <div class="p-4 rounded-xl bg-purple-100 cursor-pointer mood-option" data-mood="creative">🎨 Creative</div>
+            </div>
+            <button class="w-full mt-6 bg-purple-600 text-white p-3 rounded-xl" id="closeMood">
+                Close
+            </button>
+        </div>
     </div>
-    <span class="settings-item-action">⚡</span>
-</div>
 
-        <div class="overflow-y-auto max-h-[60vh] custom-scrollbar">
-            <!-- Profile Section -->
-            <div class="p-6 border-b border-gray-200">
-                <div class="flex items-center space-x-4 mb-4">
-                    <div class="profile-upload">
-                        <div class="w-16 h-16 rounded-full bg-gradient-to-r from-purple-500 to-green-500 flex items-center justify-center text-white text-xl font-bold">
-                            <img id="settingsProfilePic" class="w-full h-full rounded-full object-cover" src="" alt="Profile">
-                        </div>
-                        <input type="file" id="profilePicUpload" accept="image/*">
-                        <div class="profile-photo-edit">
-                            <i class="fas fa-camera"></i>
-                        </div>
+    <!-- Quick Actions Modal -->
+    <div id="quickActionsModal" class="fixed inset-0 bg-black bg-opacity-50 hidden items-center justify-center z-50">
+        <div class="bg-white w-11/12 max-w-md rounded-2xl p-6 shadow-lg">
+            <h2 class="text-xl font-bold mb-4">Quick Actions</h2>
+            <div class="grid grid-cols-2 gap-4">
+                <button class="p-4 bg-purple-500 text-white rounded-xl">📸 Post Status</button>
+                <button class="p-4 bg-blue-500 text-white rounded-xl">📁 Share File</button>
+                <button class="p-4 bg-green-500 text-white rounded-xl">🗣 Voice Note</button>
+                <button class="p-4 bg-red-500 text-white rounded-xl">📞 Quick Call</button>
+            </div>
+            <button class="w-full mt-6 bg-gray-700 text-white p-3 rounded-xl" id="closeQuickActions">
+                Close
+            </button>
+        </div>
+    </div>
+
+    <!-- Catalogue Modal -->
+    <div id="catalogueModal" class="hidden fixed inset-0 bg-black bg-opacity-50 z-50 flex items-center justify-center p-4">
+        <div class="bg-white rounded-2xl w-full max-w-md max-h-[90vh] overflow-hidden">
+            <div class="kynecta-header p-6">
+                <div class="flex items-center justify-between">
+                    <h3 class="text-xl font-semibold text-white">Add Product</h3>
+                    <button id="closeCatalogue" class="text-white/80 hover:text-white transition-colors">
+                        <i class="fas fa-times text-xl"></i>
+                    </button>
+                </div>
+            </div>
+            <div class="p-6">
+                <div class="space-y-4">
+                    <div>
+                        <label class="block text-sm font-medium text-gray-700 mb-2">Product Name</label>
+                        <input type="text" id="productName" class="w-full p-3 border-2 border-gray-200 rounded-xl focus:border-purple-500" placeholder="Enter product name">
                     </div>
                     <div>
-                        <h4 class="font-semibold text-lg" id="settingsUserName">Loading...</h4>
-                        <p class="text-gray-500 text-sm" id="settingsUserBio">Loading...</p>
+                        <label class="block text-sm font-medium text-gray-700 mb-2">Price</label>
+                        <input type="number" id="productPrice" class="w-full p-3 border-2 border-gray-200 rounded-xl focus:border-purple-500" placeholder="0.00">
                     </div>
+                    <div>
+                        <label class="block text-sm font-medium text-gray-700 mb-2">Description</label>
+                        <textarea id="productDescription" class="w-full p-3 border-2 border-gray-200 rounded-xl focus:border-purple-500" placeholder="Product description" rows="3"></textarea>
+                    </div>
+                </div>
+                <button id="saveCatalogue" class="w-full mt-6 bg-purple-600 text-white py-3 rounded-xl font-semibold hover:bg-purple-700 transition-colors">
+                    Add to Catalogue
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Advertise Modal -->
+    <div id="advertiseModal" class="hidden fixed inset-0 bg-black bg-opacity-50 z-50 flex items-center justify-center p-4">
+        <div class="bg-white rounded-2xl w-full max-w-md max-h-[90vh] overflow-hidden">
+            <div class="kynecta-header p-6">
+                <div class="flex items-center justify-between">
+                    <h3 class="text-xl font-semibold text-white">Create Advertisement</h3>
+                    <button id="closeAdvertise" class="text-white/80 hover:text-white transition-colors">
+                        <i class="fas fa-times text-xl"></i>
+                    </button>
+                </div>
+            </div>
+            <div class="p-6">
+                <div class="space-y-4">
+                    <div>
+                        <label class="block text-sm font-medium text-gray-700 mb-2">Ad Title</label>
+                        <input type="text" id="adTitle" class="w-full p-3 border-2 border-gray-200 rounded-xl focus:border-purple-500" placeholder="Enter ad title">
+                    </div>
+                    <div>
+                        <label class="block text-sm font-medium text-gray-700 mb-2">Target Audience</label>
+                        <select id="targetAudience" class="w-full p-3 border-2 border-gray-200 rounded-xl focus:border-purple-500">
+                            <option value="all">All Users</option>
+                            <option value="local">Local Area</option>
+                            <option value="specific">Specific Interests</option>
+                        </select>
+                    </div>
+                    <div>
+                        <label class="block text-sm font-medium text-gray-700 mb-2">Budget ($)</label>
+                        <input type="number" id="adBudget" class="w-full p-3 border-2 border-gray-200 rounded-xl focus:border-purple-500" placeholder="0.00">
+                    </div>
+                </div>
+                <button id="launchCampaign" class="w-full mt-6 bg-green-600 text-white py-3 rounded-xl font-semibold hover:bg-green-700 transition-colors">
+                    Launch Campaign
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Labels Modal -->
+    <div id="labelsModal" class="hidden fixed inset-0 bg-black bg-opacity-50 z-50 flex items-center justify-center p-4">
+        <div class="bg-white rounded-2xl w-full max-w-md max-h-[90vh] overflow-hidden">
+            <div class="kynecta-header p-6">
+                <div class="flex items-center justify-between">
+                    <h3 class="text-xl font-semibold text-white">Create Label</h3>
+                    <button id="closeLabels" class="text-white/80 hover:text-white transition-colors">
+                        <i class="fas fa-times text-xl"></i>
+                    </button>
+                </div>
+            </div>
+            <div class="p-6">
+                <div class="space-y-4">
+                    <div>
+                        <label class="block text-sm font-medium text-gray-700 mb-2">Label Name</label>
+                        <input type="text" id="newLabelName" class="w-full p-3 border-2 border-gray-200 rounded-xl focus:border-purple-500" placeholder="Enter label name">
+                    </div>
+                    <div>
+                        <label class="block text-sm font-medium text-gray-700 mb-2">Color</label>
+                        <select id="labelColor" class="w-full p-3 border-2 border-gray-200 rounded-xl focus:border-purple-500">
+                            <option value="purple">Purple</option>
+                            <option value="blue">Blue</option>
+                            <option value="green">Green</option>
+                            <option value="red">Red</option>
+                            <option value="orange">Orange</option>
+                        </select>
+                    </div>
+                </div>
+                <button id="createLabel" class="w-full mt-6 bg-purple-600 text-white py-3 rounded-xl font-semibold hover:bg-purple-700 transition-colors">
+                    Create Label
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Greeting Modal -->
+    <div id="greetingModal" class="hidden fixed inset-0 bg-black bg-opacity-50 z-50 flex items-center justify-center p-4">
+        <div class="bg-white rounded-2xl w-full max-w-md max-h-[90vh] overflow-hidden">
+            <div class="kynecta-header p-6">
+                <div class="flex items-center justify-between">
+                    <h3 class="text-xl font-semibold text-white">Greeting Message</h3>
+                    <button id="closeGreeting" class="text-white/80 hover:text-white transition-colors">
+                        <i class="fas fa-times text-xl"></i>
+                    </button>
+                </div>
+            </div>
+            <div class="p-6">
+                <div class="mb-4">
+                    <label class="block text-sm font-medium text-gray-700 mb-2">Welcome Message</label>
+                    <textarea id="greetingMessage" class="w-full p-3 border-2 border-gray-200 rounded-xl focus:border-purple-500" rows="4" placeholder="Welcome to our business! How can we help you today?"></textarea>
+                </div>
+                <button id="saveGreeting" class="w-full bg-purple-600 text-white py-3 rounded-xl font-semibold hover:bg-purple-700 transition-colors">
+                    Save Greeting
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Away Modal -->
+    <div id="awayModal" class="hidden fixed inset-0 bg-black bg-opacity-50 z-50 flex items-center justify-center p-4">
+        <div class="bg-white rounded-2xl w-full max-w-md max-h-[90vh] overflow-hidden">
+            <div class="kynecta-header p-6">
+                <div class="flex items-center justify-between">
+                    <h3 class="text-xl font-semibold text-white">Away Message</h3>
+                    <button id="closeAway" class="text-white/80 hover:text-white transition-colors">
+                        <i class="fas fa-times text-xl"></i>
+                    </button>
+                </div>
+            </div>
+            <div class="p-6">
+                <div class="mb-4">
+                    <label class="block text-sm font-medium text-gray-700 mb-2">Away Message</label>
+                    <textarea id="awayMessage" class="w-full p-3 border-2 border-gray-200 rounded-xl focus:border-purple-500" rows="4" placeholder="We're currently away. We'll get back to you soon!"></textarea>
+                </div>
+                <div class="mb-4">
+                    <label class="flex items-center">
+                        <input type="checkbox" id="awayEnabled" class="rounded border-gray-300 text-purple-600 focus:ring-purple-500">
+                        <span class="ml-2 text-sm text-gray-700">Enable away message</span>
+                    </label>
+                </div>
+                <button id="saveAway" class="w-full bg-purple-600 text-white py-3 rounded-xl font-semibold hover:bg-purple-700 transition-colors">
+                    Save Away Message
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Business Profile Modal -->
+    <div id="businessProfileModal" class="hidden fixed inset-0 bg-black bg-opacity-50 z-50 flex items-center justify-center p-4">
+        <div class="bg-white rounded-2xl w-full max-w-md max-h-[90vh] overflow-hidden">
+            <div class="kynecta-header p-6">
+                <div class="flex items-center justify-between">
+                    <h3 class="text-xl font-semibold text-white">Business Profile</h3>
+                    <button id="closeBusinessProfile" class="text-white/80 hover:text-white transition-colors">
+                        <i class="fas fa-times text-xl"></i>
+                    </button>
+                </div>
+            </div>
+            <div class="overflow-y-auto max-h-[60vh] custom-scrollbar p-6">
+                <div class="text-center mb-6">
+                    <img id="businessProfileAvatar" src="" alt="Business" class="w-20 h-20 rounded-full mx-auto mb-4 object-cover">
+                    <h3 id="businessProfileName" class="text-xl font-semibold mb-2"></h3>
+                    <p id="businessProfileType" class="text-gray-500">Business Account</p>
                 </div>
                 
-                <div class="settings-item" id="profileSettingsBtn">
-                    <div class="settings-item-content">
-                        <div class="settings-item-title">Profile</div>
-                        <div class="settings-item-description">Edit your profile information</div>
-                    </div>
-                    <div class="settings-item-action">
-                        <i class="fas fa-chevron-right text-gray-400"></i>
-                    </div>
-                </div>
-            </div>
-
-            <!-- Account Section -->
-            <div class="settings-section">
-                <h4 class="font-semibold mb-4 text-lg text-gray-800">Account</h4>
-                <div class="space-y-1">
-                    <div class="settings-item" id="securitySettingsBtn">
-                        <div class="settings-item-content">
-                            <div class="settings-item-title">Security notifications</div>
-                            <div class="settings-item-description">Passkeys, two-step verification</div>
-                        </div>
-                        <div class="settings-item-action">
-                            <i class="fas fa-chevron-right text-gray-400"></i>
-                        </div>
+                <div class="space-y-4">
+                    <div id="businessGreetingSection" class="hidden">
+                        <h4 class="font-semibold mb-2 flex items-center">
+                            <i class="fas fa-comment-dots text-purple-500 mr-2"></i>
+                            Greeting Message
+                        </h4>
+                        <p id="businessGreetingMessage" class="text-gray-600 text-sm bg-gray-50 p-3 rounded-lg"></p>
                     </div>
                     
-                    <div class="settings-item" id="privacySettingsBtn">
-                        <div class="settings-item-content">
-                            <div class="settings-item-title">Privacy</div>
-                            <div class="settings-item-description">Block contacts, disappearing messages</div>
-                        </div>
-                        <div class="settings-item-action">
-                            <i class="fas fa-chevron-right text-gray-400"></i>
-                        </div>
+                    <div id="businessAwaySection" class="hidden">
+                        <h4 class="font-semibold mb-2 flex items-center">
+                            <i class="fas fa-clock text-yellow-500 mr-2"></i>
+                            Away Message
+                        </h4>
+                        <p id="businessAwayMessage" class="text-gray-600 text-sm bg-yellow-50 p-3 rounded-lg border-l-4 border-yellow-400"></p>
                     </div>
                     
-                    <div class="settings-item" id="avatarSettingsBtn">
-                        <div class="settings-item-content">
-                            <div class="settings-item-title">Avatar</div>
-                            <div class="settings-item-description">Create, edit, profile photo</div>
-                        </div>
-                        <div class="settings-item-action">
-                            <i class="fas fa-chevron-right text-gray-400"></i>
-                        </div>
-                    </div>
-                    
-                    <div class="settings-item" id="favoritesSettingsBtn">
-                        <div class="settings-item-content">
-                            <div class="settings-item-title">Favorites</div>
-                            <div class="settings-item-description">Add, reorder, remove</div>
-                        </div>
-                        <div class="settings-item-action">
-                            <i class="fas fa-chevron-right text-gray-400"></i>
-                        </div>
-                    </div>
-                    
-                    <div class="settings-item" id="accessibilityBtn">
-                        <div class="settings-item-content">
-                            <div class="settings-item-title">Accessibility</div>
-                            <div class="settings-item-description">Customize for your needs</div>
-                        </div>
-                        <div class="settings-item-action">
-                            <i class="fas fa-chevron-right text-gray-400"></i>
+                    <div id="businessCatalogueSection" class="hidden">
+                        <h4 class="font-semibold mb-2 flex items-center">
+                            <i class="fas fa-shopping-cart text-green-500 mr-2"></i>
+                            Products & Services
+                        </h4>
+                        <div id="businessCatalogueList" class="space-y-2">
                         </div>
                     </div>
                 </div>
             </div>
-
-            <!-- Notifications Section -->
-            <div class="settings-section">
-                <h4 class="font-semibold mb-4 text-lg text-gray-800">Notifications</h4>
-                <div class="space-y-1">
-                    <div class="settings-item" id="notificationsSettingsBtn">
-                        <div class="settings-item-content">
-                            <div class="settings-item-title">Notification Settings</div>
-                            <div class="settings-item-description">Customize message, group & call notifications</div>
-                        </div>
-                        <div class="settings-item-action">
-                            <i class="fas fa-chevron-right text-gray-400"></i>
-                        </div>
-                    </div>
-                </div>
-            </div>
-
-            <!-- Storage & Data Section -->
-            <div class="settings-section">
-                <h4 class="font-semibold mb-4 text-lg text-gray-800">Storage & Data</h4>
-                <div class="space-y-1">
-                    <div class="settings-item" id="storageSettingsBtn">
-                        <div class="settings-item-content">
-                            <div class="settings-item-title">Storage and data</div>
-                            <div class="settings-item-description">Network usage, auto-download</div>
-                        </div>
-                        <div class="settings-item-action">
-                            <i class="fas fa-chevron-right text-gray-400"></i>
-                        </div>
-                    </div>
-                </div>
-            </div>
-
-            <!-- App Language Section -->
-            <div class="settings-section">
-                <h4 class="font-semibold mb-4 text-lg text-gray-800">App Language</h4>
-                <div class="space-y-1">
-                    <div class="settings-item" id="languageSettingsBtn">
-                        <div class="settings-item-content">
-                            <div class="settings-item-title">Language</div>
-                            <div class="settings-item-description">Choose your preferred language</div>
-                        </div>
-                        <div class="settings-item-action">
-                            <i class="fas fa-chevron-right text-gray-400"></i>
-                        </div>
-                    </div>
-                </div>
-            </div>
-
-            <!-- Chats Section -->
-            <div class="settings-section">
-                <h4 class="font-semibold mb-4 text-lg text-gray-800">Chats</h4>
-                <div class="space-y-1">
-                    <div class="settings-item" id="chatsSettingsBtn">
-                        <div class="settings-item-content">
-                            <div class="settings-item-title">Chat settings</div>
-                            <div class="settings-item-description">Theme, wallpapers, chat history</div>
-                        </div>
-                        <div class="settings-item-action">
-                            <i class="fas fa-chevron-right text-gray-400"></i>
-                        </div>
-                    </div>
-                </div>
-            </div>
-
-            <!-- Help Section -->
-            <div class="settings-section">
-                <h4 class="font-semibold mb-4 text-lg text-gray-800">Help & Support</h4>
-                <div class="space-y-1">
-                    <div class="settings-item" id="helpCenterBtn">
-                        <div class="settings-item-content">
-                            <div class="settings-item-title">Help Center</div>
-                            <div class="settings-item-description">Get help and tutorials</div>
-                        </div>
-                        <div class="settings-item-action">
-                            <i class="fas fa-chevron-right text-gray-400"></i>
-                        </div>
-                    </div>
-                    
-                    <div class="settings-item" id="contactUsBtn">
-                        <div class="settings-item-content">
-                            <div class="settings-item-title">Contact Us</div>
-                            <div class="settings-item-description">Reach out for support</div>
-                        </div>
-                        <div class="settings-item-action">
-                            <i class="fas fa-chevron-right text-gray-400"></i>
-                        </div>
-                    </div>
-                    
-                    <div class="settings-item" id="appInfoBtn">
-                        <div class="settings-item-content">
-                            <div class="settings-item-title">App Info</div>
-                            <div class="settings-item-description">Version and about</div>
-                        </div>
-                        <div class="settings-item-action">
-                            <i class="fas fa-chevron-right text-gray-400"></i>
-                        </div>
-                    </div>
-                </div>
-            </div>
-
-            <!-- Invite Section -->
-            <div class="settings-section">
-                <h4 class="font-semibold mb-4 text-lg text-gray-800">Invite</h4>
-                <div class="space-y-1">
-                    <div class="settings-item" id="inviteContactBtn">
-                        <div class="settings-item-content">
-                            <div class="settings-item-title">Invite a Contact</div>
-                            <div class="settings-item-description">Share Kynecta with friends</div>
-                        </div>
-                        <div class="settings-item-action">
-                            <i class="fas fa-chevron-right text-gray-400"></i>
-                        </div>
-                    </div>
-                </div>
-            </div>
-        </div>
-
-        <!-- Logout -->
-        <div class="p-6 border-t border-gray-200">
-            <button id="logoutBtn" class="w-full py-4 bg-gradient-to-r from-red-500 to-red-600 text-white rounded-xl font-semibold hover:opacity-90 transition-opacity">
-                Log Out
-            </button>
-        </div>
-    </div>
-</div>
-
-<!-- Incoming Call UI -->
-<div id="incomingCallUI" class="hidden fixed inset-0 bg-black bg-opacity-90 z-50 flex items-center justify-center p-4">
-    <div class="bg-white rounded-2xl w-full max-w-md overflow-hidden">
-        <div class="kynecta-header p-6">
-            <div class="flex items-center justify-center">
-                <div class="text-center">
-                    <div class="w-20 h-20 rounded-full bg-gradient-to-r from-purple-500 to-green-500 flex items-center justify-center text-white text-2xl font-bold mx-auto mb-4">
-                        <img id="incomingCallAvatar" class="w-full h-full rounded-full object-cover" src="" alt="Caller">
-                    </div>
-                    <h3 id="incomingCallName" class="text-xl font-semibold text-white">Incoming Call</h3>
-                    <p id="incomingCallType" class="text-white/80">Voice Call</p>
-                </div>
-            </div>
-        </div>
-        
-        <div class="p-6">
-            <div class="flex justify-center space-x-6">
-                <button id="declineCall" class="w-16 h-16 bg-red-500 text-white rounded-full flex items-center justify-center hover:bg-red-600 transition-colors">
-                    <i class="fas fa-phone-slash text-xl"></i>
-                </button>
-                <button id="acceptCall" class="w-16 h-16 bg-green-500 text-white rounded-full flex items-center justify-center hover:bg-green-600 transition-colors">
-                    <i class="fas fa-phone text-xl"></i>
+            <div class="p-4 border-t border-gray-200">
+                <button id="startBusinessChat" class="w-full bg-gradient-to-r from-purple-500 to-green-500 text-white py-3 rounded-xl font-semibold hover:opacity-90 transition-opacity">
+                    Start Conversation
                 </button>
             </div>
         </div>
     </div>
-</div>
 
-<!-- Video Call UI -->
-<div id="videoCallUI" class="hidden fixed inset-0 bg-black z-50">
-    <div class="flex flex-col h-full">
-        <!-- Remote Video -->
-        <div class="flex-1 relative">
-            <video id="remoteVideo" class="w-full h-full object-cover" autoplay></video>
-            
-            <!-- Local Video (Picture-in-Picture) -->
-            <div class="absolute bottom-4 right-4 w-32 h-48 bg-gray-900 rounded-lg overflow-hidden">
-                <video id="localVideo" class="w-full h-full object-cover" autoplay muted></video>
-            </div>
-            
-            <!-- Call Info -->
-            <div class="absolute top-4 left-4 bg-black/50 text-white p-3 rounded-lg">
-                <h3 id="videoCallName" class="font-semibold">Calling...</h3>
-                <p id="videoCallDuration" class="text-sm">00:00</p>
-            </div>
-        </div>
-        
-        <!-- Call Controls -->
-        <div class="bg-black/80 p-6">
-            <div class="flex justify-center space-x-6">
-                <button id="videoCallMute" class="w-14 h-14 bg-gray-700 text-white rounded-full flex items-center justify-center hover:bg-gray-600 transition-colors">
-                    <i class="fas fa-microphone text-xl"></i>
-                </button>
-                <button id="videoCallVideoToggle" class="w-14 h-14 bg-gray-700 text-white rounded-full flex items-center justify-center hover:bg-gray-600 transition-colors">
-                    <i class="fas fa-video text-xl"></i>
-                </button>
-                <button id="videoCallEnd" class="w-14 h-14 bg-red-500 text-white rounded-full flex items-center justify-center hover:bg-red-600 transition-colors">
-                    <i class="fas fa-phone-slash text-xl"></i>
-                </button>
-                <button id="videoCallSpeaker" class="w-14 h-14 bg-gray-700 text-white rounded-full flex items-center justify-center hover:bg-gray-600 transition-colors">
-                    <i class="fas fa-volume-up text-xl"></i>
-                </button>
-                <button id="videoCallMore" class="w-14 h-14 bg-gray-700 text-white rounded-full flex items-center justify-center hover:bg-gray-600 transition-colors">
-                    <i class="fas fa-ellipsis-h text-xl"></i>
-                </button>
-            </div>
-        </div>
-    </div>
-</div>
-
-<!-- Video/Voice Call UI -->
-<div id="videoCallContainer" class="hidden fixed inset-0 bg-black bg-opacity-80 z-50 flex flex-col items-center justify-center p-4">
-    <video id="localVideo" autoplay muted playsinline class="w-full max-w-md rounded-lg mb-4"></video>
-
-    <div class="flex space-x-4">
-        <button id="muteBtn" class="bg-gray-600 text-white p-3 rounded-full">
-            <i class="fas fa-microphone"></i>
-        </button>
-
-        <button id="videoToggleBtn" class="bg-gray-600 text-white p-3 rounded-full">
-            <i class="fas fa-video"></i>
-        </button>
-
-        <button onclick="endCall()" class="bg-red-600 text-white p-3 rounded-full">
-            <i class="fas fa-phone-slash"></i>
-        </button>
-    </div>
-</div>
-<!-- Catalogue Modal -->
-<!-- Updated Catalogue Modal -->
-<div id="catalogueModal" class="hidden fixed inset-0 bg-black bg-opacity-50 z-50 flex items-center justify-center p-4">
-    <div class="bg-white rounded-2xl w-full max-w-md max-h-[90vh] overflow-hidden">
-        <div class="kynecta-header p-6">
-            <div class="flex items-center justify-between">
-                <h3 class="text-xl font-semibold text-white">Add Product</h3>
-                <button id="closeCatalogue" class="text-white/80 hover:text-white transition-colors">
-                    <i class="fas fa-times text-xl"></i>
-                </button>
-            </div>
-        </div>
-        <div class="p-6">
-            <div class="space-y-4">
-                <div>
-                    <label class="block text-sm font-medium text-gray-700 mb-2">Product Name</label>
-                    <input type="text" id="productName" class="w-full p-3 border-2 border-gray-200 rounded-xl focus:border-purple-500" placeholder="Enter product name">
-                </div>
-                <div>
-                    <label class="block text-sm font-medium text-gray-700 mb-2">Price</label>
-                    <input type="number" id="productPrice" class="w-full p-3 border-2 border-gray-200 rounded-xl focus:border-purple-500" placeholder="0.00">
-                </div>
-                <div>
-                    <label class="block text-sm font-medium text-gray-700 mb-2">Description</label>
-                    <textarea id="productDescription" class="w-full p-3 border-2 border-gray-200 rounded-xl focus:border-purple-500" placeholder="Product description" rows="3"></textarea>
+    <!-- AI Summary Modal -->
+    <div id="aiSummaryModal" class="hidden fixed inset-0 bg-black bg-opacity-50 z-50 flex items-center justify-center p-4">
+        <div class="bg-white rounded-2xl w-full max-w-2xl max-h-[90vh] overflow-hidden">
+            <div class="kynecta-header p-6">
+                <div class="flex items-center justify-between">
+                    <h3 class="text-xl font-semibold text-white flex items-center">
+                        <i class="fas fa-robot mr-2"></i>
+                        Conversation Summary
+                    </h3>
+                    <button id="closeAISummary" class="text-white/80 hover:text-white transition-colors">
+                        <i class="fas fa-times text-xl"></i>
+                    </button>
                 </div>
             </div>
-            <button id="saveCatalogue" class="w-full mt-6 bg-purple-600 text-white py-3 rounded-xl font-semibold hover:bg-purple-700 transition-colors">
-                Add to Catalogue
-            </button>
-        </div>
-    </div>
-</div>
-
-<!-- Updated Advertise Modal -->
-<div id="advertiseModal" class="hidden fixed inset-0 bg-black bg-opacity-50 z-50 flex items-center justify-center p-4">
-    <div class="bg-white rounded-2xl w-full max-w-md max-h-[90vh] overflow-hidden">
-        <div class="kynecta-header p-6">
-            <div class="flex items-center justify-between">
-                <h3 class="text-xl font-semibold text-white">Create Advertisement</h3>
-                <button id="closeAdvertise" class="text-white/80 hover:text-white transition-colors">
-                    <i class="fas fa-times text-xl"></i>
+            <div class="overflow-y-auto max-h-[60vh] custom-scrollbar p-6">
+                <div id="aiSummaryContent" class="prose max-w-none">
+                </div>
+            </div>
+            <div class="p-4 border-t border-gray-200 flex space-x-3">
+                <button id="copyAISummary" class="flex-1 bg-blue-600 text-white py-3 rounded-xl font-semibold hover:bg-blue-700 transition-colors">
+                    <i class="fas fa-copy mr-2"></i>Copy Summary
+                </button>
+                <button id="closeAISummaryBtn" class="flex-1 bg-gray-500 text-white py-3 rounded-xl font-semibold hover:bg-gray-600 transition-colors">
+                    Close
                 </button>
             </div>
         </div>
-        <div class="p-6">
-            <div class="space-y-4">
-                <div>
-                    <label class="block text-sm font-medium text-gray-700 mb-2">Ad Title</label>
-                    <input type="text" id="adTitle" class="w-full p-3 border-2 border-gray-200 rounded-xl focus:border-purple-500" placeholder="Enter ad title">
-                </div>
-                <div>
-                    <label class="block text-sm font-medium text-gray-700 mb-2">Target Audience</label>
-                    <select id="targetAudience" class="w-full p-3 border-2 border-gray-200 rounded-xl focus:border-purple-500">
-                        <option value="all">All Users</option>
-                        <option value="local">Local Area</option>
-                        <option value="specific">Specific Interests</option>
-                    </select>
-                </div>
-                <div>
-                    <label class="block text-sm font-medium text-gray-700 mb-2">Budget ($)</label>
-                    <input type="number" id="adBudget" class="w-full p-3 border-2 border-gray-200 rounded-xl focus:border-purple-500" placeholder="0.00">
+    </div>
+
+    <!-- Smart Replies Modal -->
+    <div id="smartRepliesModal" class="hidden fixed inset-0 bg-black bg-opacity-50 z-50 flex items-center justify-center p-4">
+        <div class="bg-white rounded-2xl w-full max-w-md max-h-[90vh] overflow-hidden">
+            <div class="kynecta-header p-6">
+                <div class="flex items-center justify-between">
+                    <h3 class="text-xl font-semibold text-white flex items-center">
+                        <i class="fas fa-lightbulb mr-2"></i>
+                        Smart Reply Suggestions
+                    </h3>
+                    <button id="closeSmartReplies" class="text-white/80 hover:text-white transition-colors">
+                        <i class="fas fa-times text-xl"></i>
+                    </button>
                 </div>
             </div>
-            <button id="launchCampaign" class="w-full mt-6 bg-green-600 text-white py-3 rounded-xl font-semibold hover:bg-green-700 transition-colors">
-                Launch Campaign
-            </button>
-        </div>
-    </div>
-</div>
-
-<!-- Updated Labels Modal -->
-<div id="labelsModal" class="hidden fixed inset-0 bg-black bg-opacity-50 z-50 flex items-center justify-center p-4">
-    <div class="bg-white rounded-2xl w-full max-w-md max-h-[90vh] overflow-hidden">
-        <div class="kynecta-header p-6">
-            <div class="flex items-center justify-between">
-                <h3 class="text-xl font-semibold text-white">Create Label</h3>
-                <button id="closeLabels" class="text-white/80 hover:text-white transition-colors">
-                    <i class="fas fa-times text-xl"></i>
+            <div class="overflow-y-auto max-h-[60vh] custom-scrollbar p-6">
+                <p class="text-gray-600 mb-4">Tap any suggestion to use it:</p>
+                <div id="smartRepliesList" class="space-y-2">
+                </div>
+            </div>
+            <div class="p-4 border-t border-gray-200">
+                <button id="closeSmartRepliesBtn" class="w-full bg-gray-500 text-white py-3 rounded-xl font-semibold hover:bg-gray-600 transition-colors">
+                    Close
                 </button>
             </div>
         </div>
-        <div class="p-6">
-            <div class="space-y-4">
-                <div>
-                    <label class="block text-sm font-medium text-gray-700 mb-2">Label Name</label>
-                    <input type="text" id="newLabelName" class="w-full p-3 border-2 border-gray-200 rounded-xl focus:border-purple-500" placeholder="Enter label name">
-                </div>
-                <div>
-                    <label class="block text-sm font-medium text-gray-700 mb-2">Color</label>
-                    <select id="labelColor" class="w-full p-3 border-2 border-gray-200 rounded-xl focus:border-purple-500">
-                        <option value="purple">Purple</option>
-                        <option value="blue">Blue</option>
-                        <option value="green">Green</option>
-                        <option value="red">Red</option>
-                        <option value="orange">Orange</option>
-                    </select>
-                </div>
-            </div>
-            <button id="createLabel" class="w-full mt-6 bg-purple-600 text-white py-3 rounded-xl font-semibold hover:bg-purple-700 transition-colors">
-                Create Label
-            </button>
-        </div>
     </div>
-</div>
 
-<!-- Updated Greeting Modal -->
-<div id="greetingModal" class="hidden fixed inset-0 bg-black bg-opacity-50 z-50 flex items-center justify-center p-4">
-    <div class="bg-white rounded-2xl w-full max-w-md max-h-[90vh] overflow-hidden">
-        <div class="kynecta-header p-6">
-            <div class="flex items-center justify-between">
-                <h3 class="text-xl font-semibold text-white">Greeting Message</h3>
-                <button id="closeGreeting" class="text-white/80 hover:text-white transition-colors">
-                    <i class="fas fa-times text-xl"></i>
-                </button>
-            </div>
-        </div>
-        <div class="p-6">
-            <div class="mb-4">
-                <label class="block text-sm font-medium text-gray-700 mb-2">Welcome Message</label>
-                <textarea id="greetingMessage" class="w-full p-3 border-2 border-gray-200 rounded-xl focus:border-purple-500" rows="4" placeholder="Welcome to our business! How can we help you today?"></textarea>
-            </div>
-            <button id="saveGreeting" class="w-full bg-purple-600 text-white py-3 rounded-xl font-semibold hover:bg-purple-700 transition-colors">
-                Save Greeting
-            </button>
-        </div>
-    </div>
-</div>
-
-<!-- Updated Away Modal -->
-<div id="awayModal" class="hidden fixed inset-0 bg-black bg-opacity-50 z-50 flex items-center justify-center p-4">
-    <div class="bg-white rounded-2xl w-full max-w-md max-h-[90vh] overflow-hidden">
-        <div class="kynecta-header p-6">
-            <div class="flex items-center justify-between">
-                <h3 class="text-xl font-semibold text-white">Away Message</h3>
-                <button id="closeAway" class="text-white/80 hover:text-white transition-colors">
-                    <i class="fas fa-times text-xl"></i>
-                </button>
-            </div>
-        </div>
-        <div class="p-6">
-            <div class="mb-4">
-                <label class="block text-sm font-medium text-gray-700 mb-2">Away Message</label>
-                <textarea id="awayMessage" class="w-full p-3 border-2 border-gray-200 rounded-xl focus:border-purple-500" rows="4" placeholder="We're currently away. We'll get back to you soon!"></textarea>
-            </div>
-            <div class="mb-4">
-                <label class="flex items-center">
-                    <input type="checkbox" id="awayEnabled" class="rounded border-gray-300 text-purple-600 focus:ring-purple-500">
-                    <span class="ml-2 text-sm text-gray-700">Enable away message</span>
-                </label>
-            </div>
-            <button id="saveAway" class="w-full bg-purple-600 text-white py-3 rounded-xl font-semibold hover:bg-purple-700 transition-colors">
-                Save Away Message
-            </button>
-        </div>
-    </div>
-</div>
-<!-- Business Profile Modal -->
-<div id="businessProfileModal" class="hidden fixed inset-0 bg-black bg-opacity-50 z-50 flex items-center justify-center p-4">
-    <div class="bg-white rounded-2xl w-full max-w-md max-h-[90vh] overflow-hidden">
-        <div class="kynecta-header p-6">
-            <div class="flex items-center justify-between">
-                <h3 class="text-xl font-semibold text-white">Business Profile</h3>
-                <button id="closeBusinessProfile" class="text-white/80 hover:text-white transition-colors">
-                    <i class="fas fa-times text-xl"></i>
-                </button>
-            </div>
-        </div>
-        <div class="overflow-y-auto max-h-[60vh] custom-scrollbar p-6">
-            <div class="text-center mb-6">
-                <img id="businessProfileAvatar" src="" alt="Business" class="w-20 h-20 rounded-full mx-auto mb-4 object-cover">
-                <h3 id="businessProfileName" class="text-xl font-semibold mb-2"></h3>
-                <p id="businessProfileType" class="text-gray-500">Business Account</p>
-            </div>
-            
-            <div class="space-y-4">
-                <div id="businessGreetingSection" class="hidden">
-                    <h4 class="font-semibold mb-2 flex items-center">
-                        <i class="fas fa-comment-dots text-purple-500 mr-2"></i>
-                        Greeting Message
-                    </h4>
-                    <p id="businessGreetingMessage" class="text-gray-600 text-sm bg-gray-50 p-3 rounded-lg"></p>
-                </div>
-                
-                <div id="businessAwaySection" class="hidden">
-                    <h4 class="font-semibold mb-2 flex items-center">
-                        <i class="fas fa-clock text-yellow-500 mr-2"></i>
-                        Away Message
-                    </h4>
-                    <p id="businessAwayMessage" class="text-gray-600 text-sm bg-yellow-50 p-3 rounded-lg border-l-4 border-yellow-400"></p>
-                </div>
-                
-                <div id="businessCatalogueSection" class="hidden">
-                    <h4 class="font-semibold mb-2 flex items-center">
-                        <i class="fas fa-shopping-cart text-green-500 mr-2"></i>
-                        Products & Services
-                    </h4>
-                    <div id="businessCatalogueList" class="space-y-2">
-                        <!-- Products will be loaded here -->
-                    </div>
-                </div>
-            </div>
-        </div>
-        <div class="p-4 border-t border-gray-200">
-            <button id="startBusinessChat" class="w-full bg-gradient-to-r from-purple-500 to-green-500 text-white py-3 rounded-xl font-semibold hover:opacity-90 transition-opacity">
-                Start Conversation
-            </button>
-        </div>
-    </div>
-</div>
-<!-- AI Summary Modal -->
-<div id="aiSummaryModal" class="hidden fixed inset-0 bg-black bg-opacity-50 z-50 flex items-center justify-center p-4">
-    <div class="bg-white rounded-2xl w-full max-w-2xl max-h-[90vh] overflow-hidden">
-        <div class="kynecta-header p-6">
-            <div class="flex items-center justify-between">
-                <h3 class="text-xl font-semibold text-white flex items-center">
-                    <i class="fas fa-robot mr-2"></i>
-                    Conversation Summary
-                </h3>
-                <button id="closeAISummary" class="text-white/80 hover:text-white transition-colors">
-                    <i class="fas fa-times text-xl"></i>
-                </button>
-            </div>
-        </div>
-        <div class="overflow-y-auto max-h-[60vh] custom-scrollbar p-6">
-            <div id="aiSummaryContent" class="prose max-w-none">
-                <!-- Summary content will be inserted here -->
-            </div>
-        </div>
-        <div class="p-4 border-t border-gray-200 flex space-x-3">
-            <button id="copyAISummary" class="flex-1 bg-blue-600 text-white py-3 rounded-xl font-semibold hover:bg-blue-700 transition-colors">
-                <i class="fas fa-copy mr-2"></i>Copy Summary
-            </button>
-            <button id="closeAISummaryBtn" class="flex-1 bg-gray-500 text-white py-3 rounded-xl font-semibold hover:bg-gray-600 transition-colors">
-                Close
-            </button>
-        </div>
-    </div>
-</div>
-
-<!-- Smart Replies Modal -->
-<div id="smartRepliesModal" class="hidden fixed inset-0 bg-black bg-opacity-50 z-50 flex items-center justify-center p-4">
-    <div class="bg-white rounded-2xl w-full max-w-md max-h-[90vh] overflow-hidden">
-        <div class="kynecta-header p-6">
-            <div class="flex items-center justify-between">
-                <h3 class="text-xl font-semibold text-white flex items-center">
-                    <i class="fas fa-lightbulb mr-2"></i>
-                    Smart Reply Suggestions
-                </h3>
-                <button id="closeSmartReplies" class="text-white/80 hover:text-white transition-colors">
-                    <i class="fas fa-times text-xl"></i>
-                </button>
-            </div>
-        </div>
-        <div class="overflow-y-auto max-h-[60vh] custom-scrollbar p-6">
-            <p class="text-gray-600 mb-4">Tap any suggestion to use it:</p>
-            <div id="smartRepliesList" class="space-y-2">
-                <!-- Smart replies will be inserted here -->
-            </div>
-        </div>
-        <div class="p-4 border-t border-gray-200">
-            <button id="closeSmartRepliesBtn" class="w-full bg-gray-500 text-white py-3 rounded-xl font-semibold hover:bg-gray-600 transition-colors">
-                Close
-            </button>
-        </div>
-    </div>
-</div>
-<!-- Incoming Call Popup -->
-<div id="incomingCallPopup" class="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 hidden">
-    <div class="bg-white rounded-lg p-6 max-w-sm w-full mx-4">
-        <h3 class="text-lg font-semibold mb-2">Incoming Call</h3>
-        <p>From: <span id="incomingCallerName" class="font-medium"></span></p>
-        <p>Type: <span id="incomingCallType" class="font-medium"></span></p>
-        <div class="flex space-x-3 mt-4">
-            <button id="acceptCallBtn" class="flex-1 bg-green-500 text-white py-2 rounded-lg">Accept</button>
-            <button id="rejectCallBtn" class="flex-1 bg-red-500 text-white py-2 rounded-lg">Reject</button>
-        </div>
-    </div>
-</div>
-
-<!-- Active Call Container -->
-<div id="callContainer" class="fixed inset-0 bg-black z-40 hidden flex-col">
-    <!-- Remote Video -->
-    <video id="remoteVideo" class="w-full h-full object-cover" autoplay playsinline></video>
-    
-    <!-- Local Video (Picture-in-Picture) -->
-    <video id="localVideo" class="absolute bottom-4 right-4 w-32 h-48 object-cover rounded-lg border-2 border-white" autoplay playsinline muted></video>
-    
-    <!-- Call Controls -->
-    <div class="absolute bottom-4 left-1/2 transform -translate-x-1/2 flex space-x-4">
-        <button id="toggleMicBtn" class="w-12 h-12 bg-gray-600 text-white rounded-full">🎤</button>
-        <button id="endCallBtn" class="w-12 h-12 bg-red-600 text-white rounded-full">📞</button>
-        <button id="toggleCameraBtn" class="w-12 h-12 bg-gray-600 text-white rounded-full">📷</button>
-    </div>
-    
-    <!-- Call Info -->
-    <div class="absolute top-4 left-1/2 transform -translate-x-1/2 bg-black bg-opacity-50 text-white px-4 py-2 rounded-lg">
-        <div id="callStatus" class="text-sm">Connecting...</div>
-        <div id="callTimer" class="text-lg font-semibold">00:00</div>
-    </div>
-</div>
-</div>
-<script src="chat.js"></script>
-<script src="call.js"></script>
-
+    <script src="chat.js"></script>
+    <script src="call.js"></script>
 </body>
-</html> 
+</html>
