@@ -823,6 +823,20 @@
                     <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">Product Title *</label>
                     <input type="text" id="listingTitle" class="w-full border border-gray-300 dark:border-slate-600 dark:bg-slate-700 dark:text-white rounded-lg px-4 py-3 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent" placeholder="e.g. Calculus Textbook 8th Edition" required>
                 </div>
+                <!-- Add this after the category field in the create listing form -->
+<div class="mb-4">
+    <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">Location *</label>
+    <select id="listingLocation" class="w-full border border-gray-300 dark:border-slate-600 dark:bg-slate-700 dark:text-white rounded-lg px-4 py-3 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent" required>
+        <option value="">Select your location</option>
+        <option value="campus">On Campus</option>
+        <option value="downtown">Downtown</option>
+        <option value="suburbs">Suburbs</option>
+        <option value="north">North Area</option>
+        <option value="south">South Area</option>
+        <option value="east">East Area</option>
+        <option value="west">West Area</option>
+    </select>
+</div>
                 
                 <div class="mb-4">
                     <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">Description *</label>

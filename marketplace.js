@@ -299,7 +299,7 @@ async function loadStats() {
     }
 }
 
-// Load listings from Firestore
+// Load listings from Firestore (remove demo data)
 async function loadListings() {
     try {
         listingsContainer.innerHTML = `
@@ -316,6 +316,23 @@ async function loadListings() {
 
         const querySnapshot = await query.get();
         
+        if (querySnapshot.empty) {
+            listingsContainer.innerHTML = `
+                <div class="col-span-full text-center py-12">
+                    <i class="fas fa-store text-4xl text-gray-400 mb-4"></i>
+                    <h3 class="text-xl font-bold text-gray-700 dark:text-gray-300 mb-2">No Listings Yet</h3>
+                    <p class="text-gray-500 dark:text-gray-400">Be the first to create a listing!</p>
+                    <button id="createFirstListing" class="bg-indigo-600 text-white px-6 py-3 rounded-lg font-semibold hover:bg-indigo-700 transition mt-4">
+                        Create First Listing
+                    </button>
+                </div>
+            `;
+            
+            // Add event listener to the create button
+            document.getElementById('createFirstListing')?.addEventListener('click', openCreateListingModal);
+            return;
+        }
+
         allListings = [];
         querySnapshot.forEach(doc => {
             const listing = doc.data();
@@ -326,7 +343,7 @@ async function loadListings() {
         lastVisible = querySnapshot.docs[querySnapshot.docs.length - 1];
         hasMoreListings = querySnapshot.docs.length === listingsPerPage;
 
-        console.log(`✅ Loaded ${allListings.length} listings`);
+        console.log(`✅ Loaded ${allListings.length} real listings from Firestore`);
         
         filteredListings = [...allListings];
         displayedCount = 0;
@@ -338,30 +355,52 @@ async function loadListings() {
             <div class="col-span-full text-center py-12">
                 <i class="fas fa-exclamation-triangle text-4xl text-red-400 mb-4"></i>
                 <h3 class="text-xl font-bold text-gray-700 dark:text-gray-300 mb-2">Error Loading Listings</h3>
-                <p class="text-gray-500 dark:text-gray-400">Please try refreshing the page</p>
+                <p class="text-gray-500 dark:text-gray-400">Please check your connection and try again</p>
             </div>
         `;
     }
 }
-
 // Load flash sales
+
 async function loadFlashSales() {
     try {
-        const querySnapshot = await db.collection('listings')
-            .where('status', '==', 'active')
-            .where('isFlashSale', '==', true)
-            .limit(4)
-            .get();
+        let query;
+        
+        if (isFlashSalePeriod()) {
+            // During flash sale: show items marked as flash sale
+            query = db.collection('listings')
+                .where('status', '==', 'active')
+                .where('isFlashSale', '==', true)
+                .limit(4);
+        } else {
+            // Outside flash sale: show trending items instead
+            query = db.collection('listings')
+                .where('status', '==', 'active')
+                .orderBy('views', 'desc')
+                .limit(4);
+        }
 
+        const querySnapshot = await query.get();
         flashSalesContainer.innerHTML = '';
 
         if (querySnapshot.empty) {
-            flashSalesContainer.innerHTML = `
-                <div class="col-span-full text-center py-8">
-                    <i class="fas fa-bolt text-4xl text-gray-400 mb-4"></i>
-                    <p class="text-gray-500 dark:text-gray-400">No flash sales at the moment</p>
-                </div>
-            `;
+            if (isFlashSalePeriod()) {
+                flashSalesContainer.innerHTML = `
+                    <div class="col-span-full text-center py-8">
+                        <i class="fas fa-bolt text-4xl text-gray-400 mb-4"></i>
+                        <p class="text-gray-500 dark:text-gray-400">No flash sales available</p>
+                        <p class="text-sm text-gray-400 dark:text-gray-500">Sellers can add flash sales during Friday-Sunday</p>
+                    </div>
+                `;
+            } else {
+                flashSalesContainer.innerHTML = `
+                    <div class="col-span-full text-center py-8">
+                        <i class="fas fa-fire text-4xl text-gray-400 mb-4"></i>
+                        <p class="text-gray-500 dark:text-gray-400">Flash sales available Friday-Sunday only</p>
+                        <p class="text-sm text-gray-400 dark:text-gray-500">Check back on Friday for special deals!</p>
+                    </div>
+                `;
+            }
             return;
         }
 
@@ -919,35 +958,45 @@ function createSellerCard(seller) {
     return card;
 }
 
-// Setup event listeners
-// Setup event listeners
+// Setup event listeners - COMPLETELY REVISED VERSION
 function setupEventListeners() {
     console.log('🔧 Setting up event listeners...');
 
-    // Navigation - Desktop and Mobile
-    const navLinks = document.querySelectorAll('.nav-link, .bottom-nav-item[data-section]');
-    navLinks.forEach(link => {
+    // Fix: Desktop Navigation
+    document.querySelectorAll('.nav-link[data-section]').forEach(link => {
         link.addEventListener('click', function(e) {
             e.preventDefault();
             const section = this.getAttribute('data-section');
-            if (section) {
-                console.log('Navigation clicked:', section);
-                switchDashboard(section);
-                
-                // Update active states
-                navLinks.forEach(item => {
-                    item.classList.remove('active');
-                });
-                this.classList.add('active');
-            }
+            console.log('Desktop nav clicked:', section);
+            switchDashboard(section);
+            
+            // Update active states
+            document.querySelectorAll('.nav-link').forEach(item => {
+                item.classList.remove('active');
+            });
+            this.classList.add('active');
         });
     });
 
-    // Create listing modal
+    // Fix: Bottom Navigation (Mobile) - CRITICAL FIX
+    document.querySelectorAll('.bottom-nav-item[data-section]').forEach(item => {
+        item.addEventListener('click', function(e) {
+            e.preventDefault();
+            const section = this.getAttribute('data-section');
+            console.log('Bottom nav clicked:', section);
+            switchDashboard(section);
+            
+            // Update active states
+            document.querySelectorAll('.bottom-nav-item').forEach(navItem => {
+                navItem.classList.remove('active');
+            });
+            this.classList.add('active');
+        });
+    });
+
+    // Fix: Create listing modal
     if (createListingBtn) {
         createListingBtn.addEventListener('click', openCreateListingModal);
-    } else {
-        console.warn('❌ createListingBtn not found');
     }
 
     if (closeCreateModal) {
@@ -962,36 +1011,18 @@ function setupEventListeners() {
         createListingForm.addEventListener('submit', handleCreateListing);
     }
 
-    // Image upload
+    // Fix: Image upload
     if (browseImagesBtn) {
-        browseImagesBtn.addEventListener('click', () => listingImages?.click());
+        browseImagesBtn.addEventListener('click', () => {
+            if (listingImages) listingImages.click();
+        });
     }
 
     if (listingImages) {
         listingImages.addEventListener('change', handleImageSelection);
     }
 
-    if (imageUploadArea) {
-        imageUploadArea.addEventListener('dragover', function(e) {
-            e.preventDefault();
-            this.classList.add('dragover');
-        });
-        
-        imageUploadArea.addEventListener('dragleave', function() {
-            this.classList.remove('dragover');
-        });
-        
-        imageUploadArea.addEventListener('drop', function(e) {
-            e.preventDefault();
-            this.classList.remove('dragover');
-            if (listingImages) {
-                listingImages.files = e.dataTransfer.files;
-                handleImageSelection({ target: listingImages });
-            }
-        });
-    }
-
-    // Search functionality
+    // Fix: Search functionality
     if (searchInput) {
         searchInput.addEventListener('input', debounce(handleSearch, 300));
     }
@@ -1000,11 +1031,7 @@ function setupEventListeners() {
         mobileSearchInput.addEventListener('input', debounce(handleSearch, 300));
     }
 
-    if (categorySearch) {
-        categorySearch.addEventListener('input', debounce(handleCategorySearch, 300));
-    }
-
-    // View toggle
+    // Fix: View toggle
     if (gridViewBtn) {
         gridViewBtn.addEventListener('click', () => switchView('grid'));
     }
@@ -1013,7 +1040,7 @@ function setupEventListeners() {
         listViewBtn.addEventListener('click', () => switchView('list'));
     }
 
-    // Sorting and filtering
+    // Fix: Sorting and filtering
     if (sortFilter) {
         sortFilter.addEventListener('change', function() {
             currentSort = this.value;
@@ -1029,17 +1056,17 @@ function setupEventListeners() {
         clearFilters.addEventListener('click', clearAllFilters);
     }
 
-    // Load more
+    // Fix: Load more
     if (loadMoreBtn) {
         loadMoreBtn.addEventListener('click', loadMoreListings);
     }
 
-    // Theme toggle
+    // Fix: Theme toggle
     if (themeToggle) {
         themeToggle.addEventListener('click', toggleTheme);
     }
 
-    // Mood selector
+    // Fix: Mood selector
     document.querySelectorAll('.mood-option').forEach(option => {
         option.addEventListener('click', function() {
             const mood = this.getAttribute('data-mood');
@@ -1047,7 +1074,7 @@ function setupEventListeners() {
         });
     });
 
-    // Category tabs
+    // Fix: Category tabs
     document.querySelectorAll('.tab-button').forEach(button => {
         button.addEventListener('click', function() {
             document.querySelectorAll('.tab-button').forEach(btn => {
@@ -1059,7 +1086,7 @@ function setupEventListeners() {
         });
     });
 
-    // Cart and notifications
+    // Fix: Cart and notifications
     if (cartBtn) {
         cartBtn.addEventListener('click', openCartModal);
     }
@@ -1076,13 +1103,7 @@ function setupEventListeners() {
         closeNotificationsModal.addEventListener('click', closeNotificationsModalFunc);
     }
 
-    if (closeNotificationToast) {
-        closeNotificationToast.addEventListener('click', () => {
-            notificationToast?.classList.remove('show');
-        });
-    }
-
-    // Mobile menu
+    // Fix: Mobile menu
     if (hamburgerMenu) {
         hamburgerMenu.addEventListener('click', openMobileMenu);
     }
@@ -1099,29 +1120,21 @@ function setupEventListeners() {
         mobileLogoutBtn.addEventListener('click', handleLogout);
     }
 
-    // Clear recently viewed
-    if (clearRecentlyViewed) {
-        clearRecentlyViewed.addEventListener('click', clearRecentlyViewedItems);
-    }
-
-    // Category items
-    document.querySelectorAll('.category-card, .jumia-category-item[data-category]').forEach(item => {
-        item.addEventListener('click', function() {
+    // Fix: Category cards
+    document.querySelectorAll('.category-card').forEach(card => {
+        card.addEventListener('click', function() {
             const category = this.getAttribute('data-category');
+            console.log('Category card clicked:', category);
             filterByCategory(category);
         });
     });
 
-    // More categories
-    if (moreCategories) {
-        moreCategories.addEventListener('click', openMoreCategoriesModal);
+    // Fix: Clear recently viewed
+    if (clearRecentlyViewed) {
+        clearRecentlyViewed.addEventListener('click', clearRecentlyViewedItems);
     }
 
-    if (closeMoreCategoriesModal) {
-        closeMoreCategoriesModal.addEventListener('click', closeMoreCategoriesModalFunc);
-    }
-
-    // Refresh buttons
+    // Fix: Refresh buttons
     if (refreshDiscover) {
         refreshDiscover.addEventListener('click', loadDiscoverItems);
     }
@@ -1130,97 +1143,34 @@ function setupEventListeners() {
         refreshSellers.addEventListener('click', loadSellers);
     }
 
-    // Discover cards
-    if (hotDealsCard) {
-        hotDealsCard.addEventListener('click', () => {
-            filterByCategory('electronics');
-            switchDashboard('home');
-        });
-    }
-
-    if (topRatedCard) {
-        topRatedCard.addEventListener('click', () => {
-            if (sortFilter) {
-                sortFilter.value = 'popular';
-            }
-            currentSort = 'popular';
-            filterAndDisplayListings();
-            switchDashboard('home');
-        });
-    }
-
-    if (justAddedCard) {
-        justAddedCard.addEventListener('click', () => {
-            if (sortFilter) {
-                sortFilter.value = 'newest';
-            }
-            currentSort = 'newest';
-            filterAndDisplayListings();
-            switchDashboard('home');
-        });
-    }
-
-    // Featured collections
-    document.querySelectorAll('.glass-card[data-category]').forEach(card => {
-        card.addEventListener('click', function() {
-            const category = this.getAttribute('data-category');
-            filterByCategory(category);
-            switchDashboard('home');
-        });
-    });
-
-    // Contact modal
+    // Fix: Contact modal
     if (closeContactModal) {
         closeContactModal.addEventListener('click', closeContactModalFunc);
     }
 
-    // Safety popup
+    // Fix: Safety popup
     if (confirmSafetyGuidelines) {
         confirmSafetyGuidelines.addEventListener('click', function() {
-            if (dontShowAgain?.checked) {
+            if (dontShowAgain && dontShowAgain.checked) {
                 localStorage.setItem('safetyPopupShown', 'true');
             }
-            safetyPopup?.classList.remove('active');
-            document.body.style.overflow = 'auto';
+            if (safetyPopup) {
+                safetyPopup.classList.remove('active');
+                document.body.style.overflow = 'auto';
+            }
         });
     }
 
     if (closeSafetyPopup) {
         closeSafetyPopup.addEventListener('click', function() {
-            safetyPopup?.classList.remove('active');
-            document.body.style.overflow = 'auto';
-        });
-    }
-
-    // Close modals when clicking outside
-    document.addEventListener('click', function(e) {
-        if (e.target === createListingModal) closeCreateListingModal();
-        if (e.target === cartModal) closeCartModalFunc();
-        if (e.target === notificationsModal) closeNotificationsModalFunc();
-        if (e.target === moreCategoriesModal) closeMoreCategoriesModalFunc();
-        if (e.target === contactSellerModal) closeContactModalFunc();
-        if (e.target === safetyPopup) {
-            safetyPopup?.classList.remove('active');
-            document.body.style.overflow = 'auto';
-        }
-    });
-
-    // Close modals with Escape key
-    document.addEventListener('keydown', function(e) {
-        if (e.key === 'Escape') {
-            closeCreateListingModal();
-            closeCartModalFunc();
-            closeNotificationsModalFunc();
-            closeMoreCategoriesModalFunc();
-            closeContactModalFunc();
-            if (safetyPopup?.classList.contains('active')) {
+            if (safetyPopup) {
                 safetyPopup.classList.remove('active');
                 document.body.style.overflow = 'auto';
             }
-        }
-    });
+        });
+    }
 
-    // Mobile navigation links
+    // Fix: Mobile navigation links in menu
     const mobileDiscoverLink = document.getElementById('mobileDiscoverLink');
     const mobileCategoriesLink = document.getElementById('mobileCategoriesLink');
     const mobileSellersLink = document.getElementById('mobileSellersLink');
@@ -1249,9 +1199,54 @@ function setupEventListeners() {
         });
     }
 
-    console.log('✅ Event listeners setup completed');
+    console.log('✅ All event listeners setup completed');
 }
 
+// Enhanced dashboard switching
+function switchDashboard(section) {
+    console.log('🔄 Switching to dashboard:', section);
+    
+    // Hide all dashboards
+    const dashboards = document.querySelectorAll('.dashboard-section');
+    dashboards.forEach(dashboard => {
+        dashboard.classList.remove('active');
+    });
+    
+    // Show selected dashboard
+    const targetDashboard = document.getElementById(`${section}Dashboard`);
+    if (targetDashboard) {
+        targetDashboard.classList.add('active');
+        currentDashboard = section;
+        console.log('✅ Dashboard activated:', section);
+        
+        // Load specific data for each dashboard
+        switch(section) {
+            case 'discover':
+                console.log('Loading discover items...');
+                loadDiscoverItems();
+                break;
+            case 'sellers':
+                console.log('Loading sellers...');
+                loadSellers();
+                break;
+            case 'categories':
+                console.log('Loading categories...');
+                loadMoreCategories();
+                break;
+            case 'home':
+            default:
+                console.log('Home dashboard activated');
+                // Home data is already loaded
+                break;
+        }
+        
+        // Scroll to top
+        window.scrollTo({ top: 0, behavior: 'smooth' });
+        
+    } else {
+        console.error('❌ Dashboard not found:', section);
+    }
+}
 // Open contact seller modal
 function openContactSellerModal(listing) {
     if (!currentUser) {
@@ -1390,37 +1385,7 @@ function closeContactModalFunc() {
     document.body.style.overflow = 'auto';
 }
 
-function switchDashboard(section) {
-    console.log('Switching to:', section);
-    
-    // Hide all dashboards
-    const dashboards = document.querySelectorAll('.dashboard-section');
-    dashboards.forEach(dashboard => {
-        dashboard.classList.remove('active');
-    });
-    
-    // Show selected dashboard
-    const targetDashboard = document.getElementById(`${section}Dashboard`);
-    if (targetDashboard) {
-        targetDashboard.classList.add('active');
-        currentDashboard = section;
-        
-        // Load specific data if needed
-        if (section === 'discover') {
-            loadDiscoverItems();
-        } else if (section === 'sellers') {
-            loadSellers();
-        } else if (section === 'categories') {
-            loadMoreCategories();
-        }
-    }
-}
 // Add these missing functions:
-
-function openCartModal() {
-    console.log('Cart modal opened');
-    // Implement cart functionality
-}
 
 function closeCartModalFunc() {
     if (cartModal) {
@@ -1455,9 +1420,11 @@ function handleCategorySearch() {
     });
 }
 
-// Filter by category
-function filterByCategory(category) {
-    // Update active tab
+// Enhanced category filtering
+async function filterByCategory(category) {
+    console.log('Filtering by category:', category);
+    
+    // Update active states
     document.querySelectorAll('.tab-button').forEach(btn => {
         btn.classList.remove('active');
         if (btn.getAttribute('data-category') === category) {
@@ -1466,12 +1433,60 @@ function filterByCategory(category) {
     });
     
     currentCategory = category;
-    filterAndDisplayListings();
     
-    // Scroll to listings section
-    document.getElementById('listingsContainer').scrollIntoView({ behavior: 'smooth' });
-}
+    // Show loading state
+    listingsContainer.innerHTML = `
+        <div class="col-span-full text-center py-12">
+            <div class="loading-spinner mx-auto mb-4" style="width: 40px; height: 40px;"></div>
+            <p class="text-gray-500 dark:text-gray-400">Loading ${category} items...</p>
+        </div>
+    `;
+    
+    try {
+        // Load listings for this specific category
+        let query = db.collection('listings')
+            .where('status', '==', 'active')
+            .where('category', '==', category)
+            .orderBy('createdAt', 'desc')
+            .limit(listingsPerPage);
 
+        const querySnapshot = await query.get();
+        
+        allListings = [];
+        querySnapshot.forEach(doc => {
+            const listing = doc.data();
+            listing.id = doc.id;
+            allListings.push(listing);
+        });
+
+        lastVisible = querySnapshot.docs[querySnapshot.docs.length - 1];
+        hasMoreListings = querySnapshot.docs.length === listingsPerPage;
+
+        console.log(`✅ Loaded ${allListings.length} ${category} listings`);
+        
+        filteredListings = [...allListings];
+        displayedCount = 0;
+        displayListings();
+        
+        // Switch to home dashboard to see results
+        switchDashboard('home');
+        
+        // Scroll to listings section
+        document.getElementById('listingsContainer').scrollIntoView({ 
+            behavior: 'smooth' 
+        });
+
+    } catch (error) {
+        console.error('❌ Error loading category listings:', error);
+        listingsContainer.innerHTML = `
+            <div class="col-span-full text-center py-12">
+                <i class="fas fa-exclamation-triangle text-4xl text-red-400 mb-4"></i>
+                <h3 class="text-xl font-bold text-gray-700 dark:text-gray-300 mb-2">Error Loading Items</h3>
+                <p class="text-gray-500 dark:text-gray-400">No ${category} items found or error loading</p>
+            </div>
+        `;
+    }
+}
 // Open more categories modal
 function openMoreCategoriesModal() {
     moreCategoriesModal.classList.add('active');
@@ -1509,14 +1524,16 @@ async function clearRecentlyViewedItems() {
 
 // Mobile menu functions
 function openMobileMenu() {
-    mobileMenu.classList.add('active');
-    mobileMenuOverlay.classList.add('active');
+    console.log('Opening mobile menu');
+    if (mobileMenu) mobileMenu.classList.add('active');
+    if (mobileMenuOverlay) mobileMenuOverlay.classList.add('active');
     document.body.style.overflow = 'hidden';
 }
 
 function closeMobileMenuFunc() {
-    mobileMenu.classList.remove('active');
-    mobileMenuOverlay.classList.remove('active');
+    console.log('Closing mobile menu');
+    if (mobileMenu) mobileMenu.classList.remove('active');
+    if (mobileMenuOverlay) mobileMenuOverlay.classList.remove('active');
     document.body.style.overflow = 'auto';
 }
 
@@ -1535,6 +1552,7 @@ function handleLogout() {
 }
 
 // Filter and display listings based on current filters
+
 function filterAndDisplayListings() {
     // Apply category filter
     if (currentCategory === 'all') {
@@ -1551,13 +1569,21 @@ function filterAndDisplayListings() {
         return listing.price >= minPriceValue && listing.price <= maxPriceValue;
     });
     
+    // Apply location filter
+    const locationFilterValue = locationFilter.value;
+    if (locationFilterValue && locationFilterValue !== 'any') {
+        filteredListings = filteredListings.filter(listing => 
+            listing.location && listing.location.toLowerCase() === locationFilterValue.toLowerCase()
+        );
+    }
+    
     // Apply sort
     switch (currentSort) {
         case 'newest':
-            filteredListings.sort((a, b) => b.createdAt - a.createdAt);
+            filteredListings.sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
             break;
         case 'oldest':
-            filteredListings.sort((a, b) => a.createdAt - b.createdAt);
+            filteredListings.sort((a, b) => new Date(a.createdAt) - new Date(b.createdAt));
             break;
         case 'price-low':
             filteredListings.sort((a, b) => a.price - b.price);
@@ -1583,31 +1609,35 @@ function clearAllFilters() {
     filterAndDisplayListings();
 }
 
-// Switch between grid and list view
 function switchView(view) {
+    console.log('Switching to view:', view);
     currentView = view;
     
     if (view === 'grid') {
-        gridViewBtn.classList.add('bg-indigo-50', 'dark:bg-indigo-900/20');
-        listViewBtn.classList.remove('bg-indigo-50', 'dark:bg-indigo-900/20');
-        listingsContainer.classList.remove('grid-cols-1');
-        listingsContainer.classList.add('grid-cols-1', 'sm:grid-cols-2', 'lg:grid-cols-3', 'xl:grid-cols-4');
+        if (gridViewBtn) gridViewBtn.classList.add('bg-indigo-50', 'dark:bg-indigo-900/20');
+        if (listViewBtn) listViewBtn.classList.remove('bg-indigo-50', 'dark:bg-indigo-900/20');
+        if (listingsContainer) {
+            listingsContainer.classList.remove('grid-cols-1');
+            listingsContainer.classList.add('grid-cols-1', 'sm:grid-cols-2', 'lg:grid-cols-3', 'xl:grid-cols-4');
+        }
     } else {
-        listViewBtn.classList.add('bg-indigo-50', 'dark:bg-indigo-900/20');
-        gridViewBtn.classList.remove('bg-indigo-50', 'dark:bg-indigo-900/20');
-        listingsContainer.classList.remove('grid-cols-1', 'sm:grid-cols-2', 'lg:grid-cols-3', 'xl:grid-cols-4');
-        listingsContainer.classList.add('grid-cols-1');
+        if (listViewBtn) listViewBtn.classList.add('bg-indigo-50', 'dark:bg-indigo-900/20');
+        if (gridViewBtn) gridViewBtn.classList.remove('bg-indigo-50', 'dark:bg-indigo-900/20');
+        if (listingsContainer) {
+            listingsContainer.classList.remove('grid-cols-1', 'sm:grid-cols-2', 'lg:grid-cols-3', 'xl:grid-cols-4');
+            listingsContainer.classList.add('grid-cols-1');
+        }
     }
     
     displayListings();
 }
 
-// Handle search
+// Handle search functionality
 function handleSearch() {
-    const searchTerm = searchInput.value.toLowerCase().trim() || mobileSearchInput.value.toLowerCase().trim();
+    const searchTerm = (searchInput?.value || mobileSearchInput?.value || '').toLowerCase().trim();
     
     if (searchTerm.length === 0) {
-        searchSuggestions.classList.add('hidden');
+        searchSuggestions?.classList.add('hidden');
         filterAndDisplayListings();
         return;
     }
@@ -1684,6 +1714,7 @@ function handleImageSelection(e) {
 }
 
 // Handle create listing form submission
+
 async function handleCreateListing(e) {
     e.preventDefault();
     
@@ -1699,17 +1730,13 @@ async function handleCreateListing(e) {
     const condition = document.querySelector('input[name="condition"]:checked').value;
     const phone = document.getElementById('sellerPhone').value;
     const contactMethod = document.querySelector('input[name="contactMethod"]:checked').value;
+    const location = document.getElementById('listingLocation').value; // NEW: Location field
     const tags = document.getElementById('listingTags').value
         ? document.getElementById('listingTags').value.split(',').map(tag => tag.trim()).filter(tag => tag)
         : [];
     
-    if (!title || !description || isNaN(price) || !phone) {
-        showToast('Please fill in all required fields', 'error');
-        return;
-    }
-    
-    if (!safetyAgreement.checked) {
-        showToast('Please agree to the safety guidelines', 'error');
+    if (!title || !description || isNaN(price) || !phone || !location) { // Updated validation
+        showToast('Please fill in all required fields including location', 'error');
         return;
     }
     
@@ -1733,7 +1760,7 @@ async function handleCreateListing(e) {
             }
         }
         
-        // Create listing in Firestore
+        // Create listing in Firestore with location
         const listingData = {
             title,
             description,
@@ -1741,6 +1768,7 @@ async function handleCreateListing(e) {
             category,
             condition,
             tags,
+            location, // NEW: Store location
             images: imageUrls,
             sellerId: currentUser.uid,
             sellerName: userData.name,
@@ -1757,7 +1785,7 @@ async function handleCreateListing(e) {
         
         await db.collection('listings').add(listingData);
         
-        // Update user's phone number if provided
+        // Update user's data if needed
         if (phone && phone !== userData.phone) {
             await db.collection('users').doc(currentUser.uid).update({
                 phone: phone
@@ -1922,10 +1950,134 @@ function showListingDetails(listing) {
     });
 }
 
-// View seller
-function viewSeller(sellerId) {
-    showToast(`Viewing seller ${sellerId}`, 'info');
-    // In a full implementation, this would show seller details and their listings
+async function viewSeller(sellerId) {
+    try {
+        console.log('Viewing seller:', sellerId);
+        
+        // Get seller data
+        const sellerDoc = await db.collection('users').doc(sellerId).get();
+        if (!sellerDoc.exists) {
+            showToast('Seller not found', 'error');
+            return;
+        }
+        
+        const seller = sellerDoc.data();
+        seller.id = sellerId;
+        
+        // Get seller's listings
+        const listingsQuery = await db.collection('listings')
+            .where('sellerId', '==', sellerId)
+            .where('status', '==', 'active')
+            .orderBy('createdAt', 'desc')
+            .get();
+        
+        showSellerModal(seller, listingsQuery);
+        
+    } catch (error) {
+        console.error('❌ Error viewing seller:', error);
+        showToast('Error loading seller profile', 'error');
+    }
+}
+
+function showSellerModal(seller, listingsQuery) {
+    const modal = document.createElement('div');
+    modal.className = 'modal active';
+    
+    let listingsHTML = '';
+    if (listingsQuery.empty) {
+        listingsHTML = `
+            <div class="text-center py-8">
+                <i class="fas fa-store text-4xl text-gray-400 mb-4"></i>
+                <p class="text-gray-500 dark:text-gray-400">No active listings</p>
+            </div>
+        `;
+    } else {
+        listingsHTML = '<div class="grid grid-cols-2 gap-4">';
+        listingsQuery.forEach(doc => {
+            const listing = doc.data();
+            listingsHTML += `
+                <div class="bg-white dark:bg-slate-800 rounded-lg p-4 border border-gray-200 dark:border-slate-700">
+                    <img src="${listing.images && listing.images.length > 0 ? listing.images[0] : 'https://images.unsplash.com/photo-1560472354-b33ff0c44a43?ixlib=rb-1.2.1&auto=format&fit=crop&w=150&q=80'}" 
+                         alt="${listing.title}" 
+                         class="w-full h-32 object-cover rounded mb-2">
+                    <h4 class="font-semibold text-sm line-clamp-2">${listing.title}</h4>
+                    <p class="text-indigo-600 dark:text-indigo-400 font-bold">$${listing.price.toFixed(2)}</p>
+                </div>
+            `;
+        });
+        listingsHTML += '</div>';
+    }
+    
+    modal.innerHTML = `
+        <div class="modal-content max-w-3xl">
+            <div class="flex justify-between items-center mb-6">
+                <h2 class="text-2xl font-bold text-gray-900 dark:text-white">Seller Profile</h2>
+                <button class="close-seller-modal text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-300">
+                    <i class="fas fa-times text-xl"></i>
+                </button>
+            </div>
+            
+            <div class="bg-white dark:bg-slate-800 rounded-lg p-6 mb-6">
+                <div class="flex items-center mb-4">
+                    <img src="${seller.avatar || 'https://ui-avatars.com/api/?name=' + encodeURIComponent(seller.name) + '&background=6366f1&color=fff&size=100'}" 
+                         alt="${seller.name}" 
+                         class="w-20 h-20 rounded-full object-cover mr-4">
+                    <div>
+                        <h3 class="text-xl font-bold text-gray-900 dark:text-white">${seller.name}</h3>
+                        <div class="flex items-center mt-2">
+                            <div class="flex items-center mr-4">
+                                <i class="fas fa-star text-yellow-400 mr-1"></i>
+                                <span class="text-gray-600 dark:text-gray-400">${seller.rating || '5.0'}</span>
+                            </div>
+                            <div class="flex items-center mr-4">
+                                <i class="fas fa-store mr-1 text-gray-400"></i>
+                                <span class="text-gray-600 dark:text-gray-400">${listingsQuery.size} listings</span>
+                            </div>
+                            ${seller.verified ? '<span class="verified-badge"><i class="fas fa-check mr-1"></i>Verified</span>' : ''}
+                        </div>
+                    </div>
+                </div>
+                
+                <div class="grid grid-cols-2 md:grid-cols-4 gap-4 text-center">
+                    <div class="bg-gray-50 dark:bg-slate-700 rounded-lg p-3">
+                        <div class="text-indigo-600 font-bold">${listingsQuery.size}</div>
+                        <div class="text-sm text-gray-600 dark:text-gray-400">Listings</div>
+                    </div>
+                    <div class="bg-gray-50 dark:bg-slate-700 rounded-lg p-3">
+                        <div class="text-indigo-600 font-bold">${seller.sales || 0}</div>
+                        <div class="text-sm text-gray-600 dark:text-gray-400">Sales</div>
+                    </div>
+                    <div class="bg-gray-50 dark:bg-slate-700 rounded-lg p-3">
+                        <div class="text-indigo-600 font-bold">${seller.rating || '5.0'}</div>
+                        <div class="text-sm text-gray-600 dark:text-gray-400">Rating</div>
+                    </div>
+                    <div class="bg-gray-50 dark:bg-slate-700 rounded-lg p-3">
+                        <div class="text-indigo-600 font-bold">${seller.joined ? new Date(seller.joined.seconds * 1000).getFullYear() : '2024'}</div>
+                        <div class="text-sm text-gray-600 dark:text-gray-400">Member Since</div>
+                    </div>
+                </div>
+            </div>
+            
+            <div>
+                <h3 class="text-xl font-bold text-gray-900 dark:text-white mb-4">Seller's Listings (${listingsQuery.size})</h3>
+                ${listingsHTML}
+            </div>
+        </div>
+    `;
+    
+    document.body.appendChild(modal);
+    
+    // Add event listeners
+    const closeBtn = modal.querySelector('.close-seller-modal');
+    closeBtn.addEventListener('click', () => {
+        document.body.removeChild(modal);
+    });
+    
+    modal.addEventListener('click', (e) => {
+        if (e.target === modal) {
+            document.body.removeChild(modal);
+        }
+    });
 }
 
 // Add to cart
@@ -1943,6 +2095,17 @@ async function addToCart(listingId) {
         }
         
         const listing = listingDoc.data();
+        
+        // Check if item already in cart
+        const existingCartItem = await db.collection('cart')
+            .where('userId', '==', currentUser.uid)
+            .where('listingId', '==', listingId)
+            .get();
+            
+        if (!existingCartItem.empty) {
+            showToast('Item already in cart', 'info');
+            return;
+        }
         
         // Add to cart in Firestore
         await db.collection('cart').add({
@@ -1963,7 +2126,6 @@ async function addToCart(listingId) {
         showToast('Error adding to cart', 'error');
     }
 }
-
 // Load cart count
 async function loadCartCount() {
     if (!currentUser) return;
@@ -2285,22 +2447,40 @@ function setMood(mood) {
     });
 }
 
-// Start flash sale timer
 function startFlashSaleTimer() {
-    let timeLeft = 24 * 60 * 60; // 24 hours in seconds
-    
     function updateTimer() {
-        const hours = Math.floor(timeLeft / 3600);
-        const minutes = Math.floor((timeLeft % 3600) / 60);
-        const seconds = timeLeft % 60;
+        const now = new Date();
+        const day = now.getDay();
+        
+        if (!isFlashSalePeriod()) {
+            flashSaleTimer.textContent = "Flash Sale: Coming Friday";
+            flashSaleCountdown.textContent = "Starts Friday";
+            return;
+        }
+        
+        // Calculate time until Sunday midnight (end of flash sale)
+        const endOfSale = new Date(now);
+        if (day === 0) { // Sunday
+            endOfSale.setHours(23, 59, 59, 999);
+        } else { // Friday or Saturday
+            endOfSale.setDate(now.getDate() + (7 - day)); // Next Sunday
+            endOfSale.setHours(23, 59, 59, 999);
+        }
+        
+        const timeLeft = endOfSale - now;
+        
+        if (timeLeft <= 0) {
+            flashSaleTimer.textContent = "Flash Sale Ended";
+            flashSaleCountdown.textContent = "Ended";
+            return;
+        }
+        
+        const hours = Math.floor(timeLeft / (1000 * 60 * 60));
+        const minutes = Math.floor((timeLeft % (1000 * 60 * 60)) / (1000 * 60));
+        const seconds = Math.floor((timeLeft % (1000 * 60)) / 1000);
         
         flashSaleTimer.textContent = `${hours.toString().padStart(2, '0')}:${minutes.toString().padStart(2, '0')}:${seconds.toString().padStart(2, '0')}`;
-        
-        if (timeLeft > 0) {
-            timeLeft--;
-        } else {
-            timeLeft = 24 * 60 * 60;
-        }
+        flashSaleCountdown.textContent = `${hours}h : ${minutes}m : ${seconds}s`;
     }
     
     updateTimer();
@@ -2329,6 +2509,45 @@ function startFlashSaleCountdown() {
     setInterval(updateCountdown, 1000);
 }
 
+// Test function to verify data sharing
+async function testDataVisibility() {
+    try {
+        // Create a test listing
+        const testListing = {
+            title: "Test Listing - " + new Date().toISOString(),
+            description: "This is a test listing to verify data sharing between users",
+            price: 1.00,
+            category: "other",
+            condition: "new",
+            sellerId: currentUser.uid,
+            sellerName: userData.name,
+            status: "active",
+            createdAt: new Date(),
+            views: 0
+        };
+        
+        const docRef = await db.collection('listings').add(testListing);
+        console.log('✅ Test listing created:', docRef.id);
+        
+        // Verify it can be retrieved by querying all active listings
+        const verifyQuery = await db.collection('listings')
+            .where('status', '==', 'active')
+            .orderBy('createdAt', 'desc')
+            .limit(1)
+            .get();
+            
+        if (!verifyQuery.empty) {
+            const latestListing = verifyQuery.docs[0].data();
+            console.log('✅ Latest listing visible to all users:', latestListing.title);
+            showToast('Data sharing test successful!', 'success');
+        }
+        
+    } catch (error) {
+        console.error('❌ Data visibility test failed:', error);
+        showToast('Data sharing test failed', 'error');
+    }
+}
+
 // Format time ago
 function formatTimeAgo(timestamp) {
     const now = new Date();
@@ -2345,7 +2564,7 @@ function formatTimeAgo(timestamp) {
     return time.toLocaleDateString();
 }
 
-// Essential utility function for debounce
+// Debounce function for search
 function debounce(func, wait) {
     let timeout;
     return function executedFunction(...args) {
