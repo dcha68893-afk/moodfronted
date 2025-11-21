@@ -1,26 +1,3 @@
-// market.js - kynecta Marketplace JavaScript Logic
-
-// Firebase Configuration
-const firebaseConfig = {
-    apiKey: "AIzaSyDHHyGgsSV18BcXrGgzi4C8frzDAE1C1zo",
-    authDomain: "uniconnect-ee95c.firebaseapp.com",
-    projectId: "uniconnect-ee95c",
-    storageBucket: "uniconnect-ee95c.firebasestorage.app",
-    messagingSenderId: "1003264444309",
-    appId: "1:1003264444309:web:9f0307516e44d21e97d89c"
-};
-
-// Clear cached data
-localStorage.removeItem('marketplaceListings');
-sessionStorage.clear();
-
-// Initialize Firebase
-try {
-    firebase.initializeApp(firebaseConfig);
-    console.log("✅ Firebase initialized successfully");
-} catch (error) {
-    console.error("❌ Firebase initialization error:", error);
-}
 
 // Firebase services
 const auth = firebase.auth();
@@ -40,11 +17,24 @@ let displayedCount = 0;
 const listingsPerPage = 12;
 let lastVisible = null;
 let hasMoreListings = true;
+let currentDashboard = 'home';
+let currentMood = 'happy';
+let safetyPopupShown = false;
 
 // DOM Elements
+const homeDashboard = document.getElementById('homeDashboard');
+const discoverDashboard = document.getElementById('discoverDashboard');
+const categoriesDashboard = document.getElementById('categoriesDashboard');
+const sellersDashboard = document.getElementById('sellersDashboard');
 const listingsContainer = document.getElementById('listingsContainer');
 const trendingItemsContainer = document.getElementById('trendingItemsContainer');
 const recommendedContainer = document.getElementById('recommendedContainer');
+const flashSalesContainer = document.getElementById('flashSalesContainer');
+const recentlyViewedContainer = document.getElementById('recentlyViewedContainer');
+const discoverItemsContainer = document.getElementById('discoverItemsContainer');
+const categoryItemsContainer = document.getElementById('categoryItemsContainer');
+const sellersContainer = document.getElementById('sellersContainer');
+const recentSellersContainer = document.getElementById('recentSellersContainer');
 const createListingBtn = document.getElementById('createListingBtn');
 const createListingModal = document.getElementById('createListingModal');
 const closeCreateModal = document.getElementById('closeCreateModal');
@@ -70,15 +60,23 @@ const loadMoreBtn = document.getElementById('loadMoreBtn');
 const themeToggle = document.getElementById('themeToggle');
 const userAvatar = document.getElementById('userAvatar');
 const mobileUserAvatar = document.getElementById('mobileUserAvatar');
+const mobileNavUserAvatar = document.getElementById('mobileNavUserAvatar');
 const userName = document.getElementById('userName');
 const mobileUserName = document.getElementById('mobileUserName');
+const mobileNavUserName = document.getElementById('mobileNavUserName');
 const userStatus = document.getElementById('userStatus');
 const mobileUserStatus = document.getElementById('mobileUserStatus');
+const mobileNavUserStatus = document.getElementById('mobileNavUserStatus');
 const activeListingsCount = document.getElementById('activeListingsCount');
 const totalUsersCount = document.getElementById('totalUsersCount');
 const successfulSalesCount = document.getElementById('successfulSalesCount');
 const averageRatingCount = document.getElementById('averageRatingCount');
+const totalSellersCount = document.getElementById('totalSellersCount');
+const verifiedSellersCount = document.getElementById('verifiedSellersCount');
+const activeSellersCount = document.getElementById('activeSellersCount');
+const topRatedSellersCount = document.getElementById('topRatedSellersCount');
 const flashSaleTimer = document.getElementById('flashSaleTimer');
+const flashSaleCountdown = document.getElementById('flashSaleCountdown');
 const tagSuggestions = document.getElementById('tagSuggestions');
 const listingTitle = document.getElementById('listingTitle');
 const listingTags = document.getElementById('listingTags');
@@ -98,17 +96,33 @@ const notificationToastTitle = document.getElementById('notificationToastTitle')
 const notificationToastMessage = document.getElementById('notificationToastMessage');
 const createListingBtnText = document.getElementById('createListingBtnText');
 const createListingSpinner = document.getElementById('createListingSpinner');
-const discoverLink = document.getElementById('discoverLink');
-const categoriesLink = document.getElementById('categoriesLink');
-const sellersLink = document.getElementById('sellersLink');
-const mobileDiscoverLink = document.getElementById('mobileDiscoverLink');
-const mobileCategoriesLink = document.getElementById('mobileCategoriesLink');
-const mobileSellersLink = document.getElementById('mobileSellersLink');
 const hamburgerMenu = document.getElementById('hamburgerMenu');
 const mobileMenu = document.getElementById('mobileMenu');
 const mobileMenuOverlay = document.getElementById('mobileMenuOverlay');
 const closeMobileMenu = document.getElementById('closeMobileMenu');
 const mobileLogoutBtn = document.getElementById('mobileLogoutBtn');
+const clearRecentlyViewed = document.getElementById('clearRecentlyViewed');
+const moreCategories = document.getElementById('moreCategories');
+const moreCategoriesModal = document.getElementById('moreCategoriesModal');
+const closeMoreCategoriesModal = document.getElementById('closeMoreCategoriesModal');
+const moreCategoriesContent = document.getElementById('moreCategoriesContent');
+const refreshDiscover = document.getElementById('refreshDiscover');
+const refreshSellers = document.getElementById('refreshSellers');
+const categorySearch = document.getElementById('categorySearch');
+const hotDealsCard = document.getElementById('hotDealsCard');
+const topRatedCard = document.getElementById('topRatedCard');
+const justAddedCard = document.getElementById('justAddedCard');
+
+// New DOM Elements for Contact System
+const safetyPopup = document.getElementById('safetyPopup');
+const closeSafetyPopup = document.getElementById('closeSafetyPopup');
+const confirmSafetyGuidelines = document.getElementById('confirmSafetyGuidelines');
+const dontShowAgain = document.getElementById('dontShowAgain');
+const contactSellerModal = document.getElementById('contactSellerModal');
+const closeContactModal = document.getElementById('closeContactModal');
+const contactSellerContent = document.getElementById('contactSellerContent');
+const sellerPhone = document.getElementById('sellerPhone');
+const safetyAgreement = document.getElementById('safetyAgreement');
 
 // Initialize the application
 document.addEventListener('DOMContentLoaded', function() {
@@ -126,8 +140,40 @@ document.addEventListener('DOMContentLoaded', function() {
     // Initialize theme
     initTheme();
     
+    // Initialize mood
+    initMood();
+    
     // Start flash sale timer
     startFlashSaleTimer();
+    startFlashSaleCountdown();
+    
+    // Check if safety popup should be shown
+    checkSafetyPopup();
+});
+
+// Check and show safety popup
+function checkSafetyPopup() {
+    const safetyShown = localStorage.getItem('safetyPopupShown');
+    if (!safetyShown) {
+        setTimeout(() => {
+            safetyPopup.classList.add('active');
+            document.body.style.overflow = 'hidden';
+        }, 1000);
+    }
+}
+
+// Handle safety popup confirmation
+confirmSafetyGuidelines.addEventListener('click', function() {
+    if (dontShowAgain.checked) {
+        localStorage.setItem('safetyPopupShown', 'true');
+    }
+    safetyPopup.classList.remove('active');
+    document.body.style.overflow = 'auto';
+});
+
+closeSafetyPopup.addEventListener('click', function() {
+    safetyPopup.classList.remove('active');
+    document.body.style.overflow = 'auto';
 });
 
 // Handle authentication state changes
@@ -165,7 +211,8 @@ async function loadUserData(uid) {
                 rating: 5.0,
                 listings: 0,
                 sales: 0,
-                verified: false
+                verified: false,
+                phone: ''
             };
             await db.collection('users').doc(uid).set(userData);
         }
@@ -182,6 +229,11 @@ async function loadMarketplaceData() {
         await loadListings();
         await loadTrendingItems();
         await loadRecommendedItems();
+        await loadFlashSales();
+        await loadRecentlyViewed();
+        await loadMoreCategories();
+        await loadDiscoverItems();
+        await loadSellers();
     } catch (error) {
         console.error('❌ Error loading marketplace data:', error);
         showToast('Error loading marketplace data', 'error');
@@ -219,6 +271,28 @@ async function loadStats() {
         });
         const avgRating = userCount > 0 ? (totalRating / userCount).toFixed(1) : '0.0';
         averageRatingCount.textContent = avgRating;
+        
+        // Seller stats
+        const sellersQuery = await db.collection('users')
+            .where('listings', '>', 0)
+            .get();
+        
+        totalSellersCount.textContent = sellersQuery.size;
+        
+        let verifiedCount = 0;
+        let activeCount = 0;
+        let topRatedCount = 0;
+        
+        sellersQuery.forEach(doc => {
+            const seller = doc.data();
+            if (seller.verified) verifiedCount++;
+            if (seller.listings > 0) activeCount++;
+            if (seller.rating >= 4.5) topRatedCount++;
+        });
+        
+        verifiedSellersCount.textContent = verifiedCount;
+        activeSellersCount.textContent = activeCount;
+        topRatedSellersCount.textContent = topRatedCount;
         
     } catch (error) {
         console.error('❌ Error loading stats:', error);
@@ -265,6 +339,227 @@ async function loadListings() {
                 <i class="fas fa-exclamation-triangle text-4xl text-red-400 mb-4"></i>
                 <h3 class="text-xl font-bold text-gray-700 dark:text-gray-300 mb-2">Error Loading Listings</h3>
                 <p class="text-gray-500 dark:text-gray-400">Please try refreshing the page</p>
+            </div>
+        `;
+    }
+}
+
+// Load flash sales
+async function loadFlashSales() {
+    try {
+        const querySnapshot = await db.collection('listings')
+            .where('status', '==', 'active')
+            .where('isFlashSale', '==', true)
+            .limit(4)
+            .get();
+
+        flashSalesContainer.innerHTML = '';
+
+        if (querySnapshot.empty) {
+            flashSalesContainer.innerHTML = `
+                <div class="col-span-full text-center py-8">
+                    <i class="fas fa-bolt text-4xl text-gray-400 mb-4"></i>
+                    <p class="text-gray-500 dark:text-gray-400">No flash sales at the moment</p>
+                </div>
+            `;
+            return;
+        }
+
+        querySnapshot.forEach(doc => {
+            const listing = doc.data();
+            listing.id = doc.id;
+            const productCard = createJumiaProductCard(listing);
+            flashSalesContainer.appendChild(productCard);
+        });
+
+    } catch (error) {
+        console.error('❌ Error loading flash sales:', error);
+        flashSalesContainer.innerHTML = `
+            <div class="col-span-full text-center py-8">
+                <i class="fas fa-exclamation-triangle text-4xl text-red-400 mb-4"></i>
+                <p class="text-gray-500 dark:text-gray-400">Error loading flash sales</p>
+            </div>
+        `;
+    }
+}
+
+// Load recently viewed items
+async function loadRecentlyViewed() {
+    try {
+        if (!currentUser) return;
+        
+        const querySnapshot = await db.collection('recentlyViewed')
+            .where('userId', '==', currentUser.uid)
+            .orderBy('viewedAt', 'desc')
+            .limit(4)
+            .get();
+
+        recentlyViewedContainer.innerHTML = '';
+
+        if (querySnapshot.empty) {
+            recentlyViewedContainer.innerHTML = `
+                <div class="col-span-full text-center py-8">
+                    <p class="text-gray-500 dark:text-gray-400">No recently viewed items</p>
+                </div>
+            `;
+            return;
+        }
+
+        const listingIds = [];
+        querySnapshot.forEach(doc => {
+            listingIds.push(doc.data().listingId);
+        });
+
+        // Fetch the actual listings
+        const listingsPromises = listingIds.map(id => 
+            db.collection('listings').doc(id).get()
+        );
+        
+        const listingsSnapshots = await Promise.all(listingsPromises);
+        
+        listingsSnapshots.forEach(doc => {
+            if (doc.exists) {
+                const listing = doc.data();
+                listing.id = doc.id;
+                const productCard = createJumiaProductCard(listing);
+                recentlyViewedContainer.appendChild(productCard);
+            }
+        });
+
+    } catch (error) {
+        console.error('❌ Error loading recently viewed:', error);
+        recentlyViewedContainer.innerHTML = `
+            <div class="col-span-full text-center py-8">
+                <i class="fas fa-exclamation-triangle text-4xl text-red-400 mb-4"></i>
+                <p class="text-gray-500 dark:text-gray-400">Error loading recently viewed</p>
+            </div>
+        `;
+    }
+}
+
+// Load more categories
+async function loadMoreCategories() {
+    try {
+        const categories = [
+            { name: 'Baby Products', icon: 'fas fa-baby', category: 'baby' },
+            { name: 'Sporting Goods', icon: 'fas fa-basketball-ball', category: 'sports' },
+            { name: 'Supermarket', icon: 'fas fa-shopping-basket', category: 'supermarket' },
+            { name: 'Automotive', icon: 'fas fa-car', category: 'automotive' },
+            { name: 'Books & Media', icon: 'fas fa-book', category: 'books' },
+            { name: 'Pets', icon: 'fas fa-paw', category: 'pets' }
+        ];
+
+        moreCategoriesContent.innerHTML = '';
+        
+        categories.forEach(cat => {
+            const categoryItem = document.createElement('div');
+            categoryItem.className = 'jumia-category-item';
+            categoryItem.setAttribute('data-category', cat.category);
+            
+            categoryItem.innerHTML = `
+                <div class="jumia-category-icon">
+                    <i class="${cat.icon} text-indigo-600"></i>
+                </div>
+                <span class="jumia-category-name">${cat.name}</span>
+            `;
+            
+            categoryItem.addEventListener('click', () => {
+                filterByCategory(cat.category);
+                closeMoreCategoriesModalFunc();
+            });
+            
+            moreCategoriesContent.appendChild(categoryItem);
+        });
+    } catch (error) {
+        console.error('❌ Error loading more categories:', error);
+    }
+}
+
+// Load discover items
+async function loadDiscoverItems() {
+    try {
+        // Get random listings for discovery
+        const querySnapshot = await db.collection('listings')
+            .where('status', '==', 'active')
+            .limit(8)
+            .get();
+
+        discoverItemsContainer.innerHTML = '';
+
+        if (querySnapshot.empty) {
+            discoverItemsContainer.innerHTML = `
+                <div class="col-span-full text-center py-8">
+                    <i class="fas fa-compass text-4xl text-gray-400 mb-4"></i>
+                    <p class="text-gray-500 dark:text-gray-400">No items to discover yet</p>
+                </div>
+            `;
+            return;
+        }
+
+        const listings = [];
+        querySnapshot.forEach(doc => {
+            const listing = doc.data();
+            listing.id = doc.id;
+            listings.push(listing);
+        });
+
+        // Shuffle array for random discovery
+        const shuffled = listings.sort(() => 0.5 - Math.random());
+        shuffled.forEach(listing => {
+            const productCard = createJumiaProductCard(listing);
+            discoverItemsContainer.appendChild(productCard);
+        });
+
+    } catch (error) {
+        console.error('❌ Error loading discover items:', error);
+        discoverItemsContainer.innerHTML = `
+            <div class="col-span-full text-center py-8">
+                <i class="fas fa-exclamation-triangle text-4xl text-red-400 mb-4"></i>
+                <p class="text-gray-500 dark:text-gray-400">Error loading discovery items</p>
+            </div>
+        `;
+    }
+}
+
+// Load sellers
+async function loadSellers() {
+    try {
+        const querySnapshot = await db.collection('users')
+            .where('listings', '>', 0)
+            .orderBy('listings', 'desc')
+            .limit(6)
+            .get();
+
+        sellersContainer.innerHTML = '';
+        recentSellersContainer.innerHTML = '';
+
+        if (querySnapshot.empty) {
+            sellersContainer.innerHTML = `
+                <div class="col-span-full text-center py-8">
+                    <i class="fas fa-store text-4xl text-gray-400 mb-4"></i>
+                    <p class="text-gray-500 dark:text-gray-400">No sellers found</p>
+                </div>
+            `;
+            return;
+        }
+
+        querySnapshot.forEach(doc => {
+            const seller = doc.data();
+            seller.id = doc.id;
+            const sellerCard = createSellerCard(seller);
+            sellersContainer.appendChild(sellerCard);
+            
+            // Also add to recent sellers (for demo)
+            const recentSellerCard = createSellerCard(seller);
+            recentSellersContainer.appendChild(recentSellerCard);
+        });
+
+    } catch (error) {
+        console.error('❌ Error loading sellers:', error);
+        sellersContainer.innerHTML = `
+            <div class="col-span-full text-center py-8">
+                <i class="fas fa-exclamation-triangle text-4xl text-red-400 mb-4"></i>
+                <p class="text-gray-500 dark:text-gray-400">Error loading sellers</p>
             </div>
         `;
     }
@@ -333,7 +628,7 @@ async function loadTrendingItems() {
         querySnapshot.forEach(doc => {
             const listing = doc.data();
             listing.id = doc.id;
-            const productCard = createProductCard(listing, true);
+            const productCard = createJumiaProductCard(listing);
             trendingItemsContainer.appendChild(productCard);
         });
 
@@ -379,7 +674,7 @@ async function loadRecommendedItems() {
         // Shuffle array for random recommendations
         const shuffled = listings.sort(() => 0.5 - Math.random());
         shuffled.slice(0, 4).forEach(listing => {
-            const productCard = createProductCard(listing, true);
+            const productCard = createJumiaProductCard(listing);
             recommendedContainer.appendChild(productCard);
         });
 
@@ -429,7 +724,56 @@ function displayListings(append = false) {
     }
 }
 
-// Create product card HTML
+// Create product card HTML (Jumia style)
+function createJumiaProductCard(listing) {
+    const imageUrl = listing.images && listing.images.length > 0 
+        ? listing.images[0] 
+        : 'https://images.unsplash.com/photo-1560472354-b33ff0c44a43?ixlib=rb-1.2.1&auto=format&fit=crop&w=500&q=80';
+    
+    // Calculate discount if original price exists
+    const originalPrice = listing.originalPrice || listing.price * 1.5;
+    const discount = Math.round(((originalPrice - listing.price) / originalPrice) * 100);
+    
+    const card = document.createElement('div');
+    card.className = 'jumia-product-card fade-in';
+    card.setAttribute('data-listing-id', listing.id);
+    
+    card.innerHTML = `
+        ${listing.isFlashSale ? '<div class="jumia-express-badge">FLASH SALE</div>' : ''}
+        <div class="pay-on-delivery-badge">PAY ON DELIVERY</div>
+        <img src="${imageUrl}" alt="${listing.title}" class="jumia-product-image">
+        <h3 class="jumia-product-name">${listing.title}</h3>
+        <div class="jumia-product-price">$${listing.price.toFixed(2)}</div>
+        <div class="flex justify-between items-center">
+            <div class="jumia-product-original-price">$${originalPrice.toFixed(2)}</div>
+            <div class="jumia-product-discount">-${discount}%</div>
+        </div>
+        <div class="flex items-center justify-between mt-2">
+            <div class="jumia-rating">
+                <i class="fas fa-star text-yellow-400 mr-1"></i>
+                <span>${listing.rating || '4.5'}</span>
+                <span class="mx-1">•</span>
+                <span>${listing.reviewCount || '0'} reviews</span>
+            </div>
+            <div class="contact-icons">
+                ${listing.contactMethod === 'whatsapp' ? '<i class="fab fa-whatsapp text-green-500 mr-1" title="WhatsApp"></i>' : ''}
+                ${listing.contactMethod === 'phone' ? '<i class="fas fa-phone text-blue-500 mr-1" title="Phone"></i>' : ''}
+                ${listing.contactMethod === 'message' ? '<i class="fas fa-comment text-purple-500" title="Message"></i>' : ''}
+            </div>
+        </div>
+        ${listing.isExpress ? '<div class="jumia-express-badge mt-2">EXPRESS</div>' : ''}
+        ${listing.sellerVerified ? '<div class="verified-seller-badge mt-1"><i class="fas fa-shield-alt mr-1"></i>Verified Seller</div>' : ''}
+    `;
+    
+    // Add click event to view listing
+    card.addEventListener('click', () => {
+        viewListing(listing.id);
+    });
+    
+    return card;
+}
+
+// Create product card HTML (original style)
 function createProductCard(listing, isSmall = false) {
     const listingDate = listing.createdAt ? new Date(listing.createdAt.seconds * 1000).toLocaleDateString() : 'Recently';
     const imageUrl = listing.images && listing.images.length > 0 
@@ -445,6 +789,7 @@ function createProductCard(listing, isSmall = false) {
             <img src="${imageUrl}" alt="${listing.title}" class="w-full h-full object-cover primary-image">
             
             ${listing.isHotDeal ? `<div class="hot-deal-badge">HOT DEAL</div>` : ''}
+            <div class="pay-on-delivery-badge">PAY ON DELIVERY</div>
             
             <div class="quick-actions">
                 <button class="quick-action-btn favorite-btn" data-listing-id="${listing.id}">
@@ -459,10 +804,10 @@ function createProductCard(listing, isSmall = false) {
         <div class="p-4 product-details">
             <div class="flex justify-between items-start mb-2">
                 <h3 class="font-semibold text-gray-900 dark:text-white line-clamp-2 flex-1">${listing.title}</h3>
-                <span class="text-indigo-600 dark:text-indigo-400 font-bold ml-2">$${listing.price.toFixed(2)}</span>
+                <span class="text-indigo-600 dark:text-indigo-400 font-bold ml-2 price">$${listing.price.toFixed(2)}</span>
             </div>
             
-            <div class="flex items-center mb-2">
+            <div class="flex items-center mb-2 seller-info">
                 <img src="${listing.sellerAvatar || 'https://ui-avatars.com/api/?name=Seller&background=6366f1&color=fff&size=32'}" 
                      alt="${listing.sellerName}" 
                      class="w-6 h-6 rounded-full object-cover mr-2">
@@ -470,21 +815,33 @@ function createProductCard(listing, isSmall = false) {
                 ${listing.sellerVerified ? '<span class="verified-badge"><i class="fas fa-check mr-1"></i>Verified</span>' : ''}
             </div>
             
-            <p class="text-gray-600 dark:text-gray-400 text-sm mb-4 line-clamp-2">${listing.description || 'No description available'}</p>
+            <div class="flex items-center justify-between mb-2">
+                <div class="contact-method-indicator">
+                    ${listing.contactMethod === 'whatsapp' ? '<i class="fab fa-whatsapp text-green-500 text-sm mr-1" title="Contact via WhatsApp"></i>' : ''}
+                    ${listing.contactMethod === 'phone' ? '<i class="fas fa-phone text-blue-500 text-sm mr-1" title="Contact via Phone"></i>' : ''}
+                    ${listing.contactMethod === 'message' ? '<i class="fas fa-comment text-purple-500 text-sm" title="Contact via Message"></i>' : ''}
+                    <span class="text-xs text-gray-500">${getContactMethodText(listing.contactMethod)}</span>
+                </div>
+                <div class="safety-indicator">
+                    ${listing.sellerVerified ? '<i class="fas fa-shield-alt text-green-500 text-sm" title="Verified Seller"></i>' : '<i class="fas fa-exclamation-triangle text-yellow-500 text-sm" title="Unverified Seller"></i>'}
+                </div>
+            </div>
+            
+            <p class="text-gray-600 dark:text-gray-400 text-sm mb-4 line-clamp-2 description">${listing.description || 'No description available'}</p>
             
             <div class="flex justify-between items-center">
-                <div class="flex items-center space-x-1">
+                <div class="flex items-center space-x-1 rating">
                     <i class="fas fa-star text-yellow-400 text-sm"></i>
                     <span class="text-sm text-gray-600 dark:text-gray-400">${listing.rating || '4.5'}</span>
                     <span class="text-sm text-gray-400 dark:text-gray-500">(${listing.reviewCount || '0'})</span>
                 </div>
-                <span class="text-xs text-gray-500 dark:text-gray-400">${listingDate}</span>
+                <span class="text-xs text-gray-500 dark:text-gray-400 date">${listingDate}</span>
             </div>
             
             ${!isSmall ? `
-                <div class="flex justify-between mt-4">
+                <div class="flex justify-between mt-4 product-actions">
                     <button class="bg-indigo-600 text-white px-4 py-2 rounded-lg font-semibold hover:bg-indigo-700 transition flex-1 mr-2 contact-seller-btn" data-listing-id="${listing.id}">
-                        Contact
+                        Contact Seller
                     </button>
                     <button class="bg-gray-200 dark:bg-slate-600 text-gray-700 dark:text-gray-300 px-4 py-2 rounded-lg font-semibold hover:bg-gray-300 dark:hover:bg-slate-500 transition add-to-cart-btn" data-listing-id="${listing.id}">
                         <i class="fas fa-shopping-cart"></i>
@@ -503,64 +860,193 @@ function createProductCard(listing, isSmall = false) {
         
         if (favoriteBtn) favoriteBtn.addEventListener('click', () => toggleFavorite(listing.id));
         if (viewBtn) viewBtn.addEventListener('click', () => viewListing(listing.id));
-        if (contactBtn) contactBtn.addEventListener('click', () => contactSeller(listing.id));
+        if (contactBtn) contactBtn.addEventListener('click', () => openContactSellerModal(listing));
         if (cartBtn) cartBtn.addEventListener('click', () => addToCart(listing.id));
     }, 100);
     
     return card;
 }
 
+// Get contact method text
+function getContactMethodText(method) {
+    switch(method) {
+        case 'whatsapp': return 'WhatsApp';
+        case 'phone': return 'Phone';
+        case 'message': return 'Message';
+        default: return 'Contact';
+    }
+}
+
+// Create seller card
+function createSellerCard(seller) {
+    const card = document.createElement('div');
+    card.className = 'seller-card fade-in';
+    
+    card.innerHTML = `
+        <div class="flex items-center mb-4">
+            <img src="${seller.avatar || 'https://ui-avatars.com/api/?name=Seller&background=6366f1&color=fff&size=100'}" 
+                 alt="${seller.name}" 
+                 class="w-16 h-16 rounded-full object-cover mr-4">
+            <div>
+                <h3 class="font-semibold text-gray-900 dark:text-white">${seller.name}</h3>
+                <div class="flex items-center mt-1">
+                    <div class="flex items-center">
+                        <i class="fas fa-star text-yellow-400 mr-1"></i>
+                        <span class="text-sm text-gray-600 dark:text-gray-400">${seller.rating || '5.0'}</span>
+                    </div>
+                    <span class="mx-2 text-gray-300">•</span>
+                    <span class="text-sm text-gray-600 dark:text-gray-400">${seller.listings || 0} listings</span>
+                </div>
+            </div>
+        </div>
+        <div class="flex justify-between items-center">
+            <span class="text-sm text-gray-600 dark:text-gray-400">${seller.sales || 0} sales</span>
+            ${seller.verified ? '<span class="verified-badge"><i class="fas fa-check mr-1"></i>Verified</span>' : ''}
+        </div>
+        <button class="w-full bg-indigo-600 text-white py-2 rounded-lg font-semibold hover:bg-indigo-700 transition mt-4 view-seller-btn" data-seller-id="${seller.id}">
+            View Store
+        </button>
+    `;
+    
+    // Add event listener for view seller button
+    const viewSellerBtn = card.querySelector('.view-seller-btn');
+    if (viewSellerBtn) {
+        viewSellerBtn.addEventListener('click', () => {
+            viewSeller(seller.id);
+        });
+    }
+    
+    return card;
+}
+
+// Setup event listeners
 // Setup event listeners
 function setupEventListeners() {
+    console.log('🔧 Setting up event listeners...');
+
+    // Navigation - Desktop and Mobile
+    const navLinks = document.querySelectorAll('.nav-link, .bottom-nav-item[data-section]');
+    navLinks.forEach(link => {
+        link.addEventListener('click', function(e) {
+            e.preventDefault();
+            const section = this.getAttribute('data-section');
+            if (section) {
+                console.log('Navigation clicked:', section);
+                switchDashboard(section);
+                
+                // Update active states
+                navLinks.forEach(item => {
+                    item.classList.remove('active');
+                });
+                this.classList.add('active');
+            }
+        });
+    });
+
     // Create listing modal
-    createListingBtn.addEventListener('click', openCreateListingModal);
-    closeCreateModal.addEventListener('click', closeCreateListingModal);
-    cancelCreateListing.addEventListener('click', closeCreateListingModal);
-    createListingForm.addEventListener('submit', handleCreateListing);
-    
+    if (createListingBtn) {
+        createListingBtn.addEventListener('click', openCreateListingModal);
+    } else {
+        console.warn('❌ createListingBtn not found');
+    }
+
+    if (closeCreateModal) {
+        closeCreateModal.addEventListener('click', closeCreateListingModal);
+    }
+
+    if (cancelCreateListing) {
+        cancelCreateListing.addEventListener('click', closeCreateListingModal);
+    }
+
+    if (createListingForm) {
+        createListingForm.addEventListener('submit', handleCreateListing);
+    }
+
     // Image upload
-    browseImagesBtn.addEventListener('click', () => listingImages.click());
-    listingImages.addEventListener('change', handleImageSelection);
-    
-    imageUploadArea.addEventListener('dragover', function(e) {
-        e.preventDefault();
-        this.classList.add('dragover');
-    });
-    
-    imageUploadArea.addEventListener('dragleave', function() {
-        this.classList.remove('dragover');
-    });
-    
-    imageUploadArea.addEventListener('drop', function(e) {
-        e.preventDefault();
-        this.classList.remove('dragover');
-        listingImages.files = e.dataTransfer.files;
-        handleImageSelection({ target: listingImages });
-    });
-    
-    // Search
-    searchInput.addEventListener('input', debounce(handleSearch, 300));
-    mobileSearchInput.addEventListener('input', debounce(handleSearch, 300));
-    
+    if (browseImagesBtn) {
+        browseImagesBtn.addEventListener('click', () => listingImages?.click());
+    }
+
+    if (listingImages) {
+        listingImages.addEventListener('change', handleImageSelection);
+    }
+
+    if (imageUploadArea) {
+        imageUploadArea.addEventListener('dragover', function(e) {
+            e.preventDefault();
+            this.classList.add('dragover');
+        });
+        
+        imageUploadArea.addEventListener('dragleave', function() {
+            this.classList.remove('dragover');
+        });
+        
+        imageUploadArea.addEventListener('drop', function(e) {
+            e.preventDefault();
+            this.classList.remove('dragover');
+            if (listingImages) {
+                listingImages.files = e.dataTransfer.files;
+                handleImageSelection({ target: listingImages });
+            }
+        });
+    }
+
+    // Search functionality
+    if (searchInput) {
+        searchInput.addEventListener('input', debounce(handleSearch, 300));
+    }
+
+    if (mobileSearchInput) {
+        mobileSearchInput.addEventListener('input', debounce(handleSearch, 300));
+    }
+
+    if (categorySearch) {
+        categorySearch.addEventListener('input', debounce(handleCategorySearch, 300));
+    }
+
     // View toggle
-    gridViewBtn.addEventListener('click', () => switchView('grid'));
-    listViewBtn.addEventListener('click', () => switchView('list'));
-    
+    if (gridViewBtn) {
+        gridViewBtn.addEventListener('click', () => switchView('grid'));
+    }
+
+    if (listViewBtn) {
+        listViewBtn.addEventListener('click', () => switchView('list'));
+    }
+
     // Sorting and filtering
-    sortFilter.addEventListener('change', function() {
-        currentSort = this.value;
-        filterAndDisplayListings();
-    });
-    
-    applyFilters.addEventListener('click', filterAndDisplayListings);
-    clearFilters.addEventListener('click', clearAllFilters);
-    
+    if (sortFilter) {
+        sortFilter.addEventListener('change', function() {
+            currentSort = this.value;
+            filterAndDisplayListings();
+        });
+    }
+
+    if (applyFilters) {
+        applyFilters.addEventListener('click', filterAndDisplayListings);
+    }
+
+    if (clearFilters) {
+        clearFilters.addEventListener('click', clearAllFilters);
+    }
+
     // Load more
-    loadMoreBtn.addEventListener('click', loadMoreListings);
-    
+    if (loadMoreBtn) {
+        loadMoreBtn.addEventListener('click', loadMoreListings);
+    }
+
     // Theme toggle
-    themeToggle.addEventListener('click', toggleTheme);
-    
+    if (themeToggle) {
+        themeToggle.addEventListener('click', toggleTheme);
+    }
+
+    // Mood selector
+    document.querySelectorAll('.mood-option').forEach(option => {
+        option.addEventListener('click', function() {
+            const mood = this.getAttribute('data-mood');
+            setMood(mood);
+        });
+    });
+
     // Category tabs
     document.querySelectorAll('.tab-button').forEach(button => {
         button.addEventListener('click', function() {
@@ -572,63 +1058,453 @@ function setupEventListeners() {
             filterAndDisplayListings();
         });
     });
-    
+
     // Cart and notifications
-    cartBtn.addEventListener('click', openCartModal);
-    closeCartModal.addEventListener('click', closeCartModalFunc);
-    notificationBtn.addEventListener('click', openNotificationsModal);
-    closeNotificationsModal.addEventListener('click', closeNotificationsModalFunc);
-    closeNotificationToast.addEventListener('click', () => {
-        notificationToast.classList.remove('show');
-    });
-    
-    // Navigation links
-    discoverLink.addEventListener('click', (e) => {
-        e.preventDefault();
-        showToast('Discover feature coming soon!', 'info');
-    });
-    
-    categoriesLink.addEventListener('click', (e) => {
-        e.preventDefault();
-        showToast('Categories feature coming soon!', 'info');
-    });
-    
-    sellersLink.addEventListener('click', (e) => {
-        e.preventDefault();
-        showToast('Sellers directory coming soon!', 'info');
-    });
-    
-    // Mobile navigation links
-    mobileDiscoverLink.addEventListener('click', (e) => {
-        e.preventDefault();
-        closeMobileMenuFunc();
-        showToast('Discover feature coming soon!', 'info');
-    });
-    
-    mobileCategoriesLink.addEventListener('click', (e) => {
-        e.preventDefault();
-        closeMobileMenuFunc();
-        showToast('Categories feature coming soon!', 'info');
-    });
-    
-    mobileSellersLink.addEventListener('click', (e) => {
-        e.preventDefault();
-        closeMobileMenuFunc();
-        showToast('Sellers directory coming soon!', 'info');
-    });
-    
+    if (cartBtn) {
+        cartBtn.addEventListener('click', openCartModal);
+    }
+
+    if (closeCartModal) {
+        closeCartModal.addEventListener('click', closeCartModalFunc);
+    }
+
+    if (notificationBtn) {
+        notificationBtn.addEventListener('click', openNotificationsModal);
+    }
+
+    if (closeNotificationsModal) {
+        closeNotificationsModal.addEventListener('click', closeNotificationsModalFunc);
+    }
+
+    if (closeNotificationToast) {
+        closeNotificationToast.addEventListener('click', () => {
+            notificationToast?.classList.remove('show');
+        });
+    }
+
     // Mobile menu
-    hamburgerMenu.addEventListener('click', openMobileMenu);
-    closeMobileMenu.addEventListener('click', closeMobileMenuFunc);
-    mobileMenuOverlay.addEventListener('click', closeMobileMenuFunc);
-    mobileLogoutBtn.addEventListener('click', handleLogout);
-    
+    if (hamburgerMenu) {
+        hamburgerMenu.addEventListener('click', openMobileMenu);
+    }
+
+    if (closeMobileMenu) {
+        closeMobileMenu.addEventListener('click', closeMobileMenuFunc);
+    }
+
+    if (mobileMenuOverlay) {
+        mobileMenuOverlay.addEventListener('click', closeMobileMenuFunc);
+    }
+
+    if (mobileLogoutBtn) {
+        mobileLogoutBtn.addEventListener('click', handleLogout);
+    }
+
+    // Clear recently viewed
+    if (clearRecentlyViewed) {
+        clearRecentlyViewed.addEventListener('click', clearRecentlyViewedItems);
+    }
+
+    // Category items
+    document.querySelectorAll('.category-card, .jumia-category-item[data-category]').forEach(item => {
+        item.addEventListener('click', function() {
+            const category = this.getAttribute('data-category');
+            filterByCategory(category);
+        });
+    });
+
+    // More categories
+    if (moreCategories) {
+        moreCategories.addEventListener('click', openMoreCategoriesModal);
+    }
+
+    if (closeMoreCategoriesModal) {
+        closeMoreCategoriesModal.addEventListener('click', closeMoreCategoriesModalFunc);
+    }
+
+    // Refresh buttons
+    if (refreshDiscover) {
+        refreshDiscover.addEventListener('click', loadDiscoverItems);
+    }
+
+    if (refreshSellers) {
+        refreshSellers.addEventListener('click', loadSellers);
+    }
+
+    // Discover cards
+    if (hotDealsCard) {
+        hotDealsCard.addEventListener('click', () => {
+            filterByCategory('electronics');
+            switchDashboard('home');
+        });
+    }
+
+    if (topRatedCard) {
+        topRatedCard.addEventListener('click', () => {
+            if (sortFilter) {
+                sortFilter.value = 'popular';
+            }
+            currentSort = 'popular';
+            filterAndDisplayListings();
+            switchDashboard('home');
+        });
+    }
+
+    if (justAddedCard) {
+        justAddedCard.addEventListener('click', () => {
+            if (sortFilter) {
+                sortFilter.value = 'newest';
+            }
+            currentSort = 'newest';
+            filterAndDisplayListings();
+            switchDashboard('home');
+        });
+    }
+
+    // Featured collections
+    document.querySelectorAll('.glass-card[data-category]').forEach(card => {
+        card.addEventListener('click', function() {
+            const category = this.getAttribute('data-category');
+            filterByCategory(category);
+            switchDashboard('home');
+        });
+    });
+
+    // Contact modal
+    if (closeContactModal) {
+        closeContactModal.addEventListener('click', closeContactModalFunc);
+    }
+
+    // Safety popup
+    if (confirmSafetyGuidelines) {
+        confirmSafetyGuidelines.addEventListener('click', function() {
+            if (dontShowAgain?.checked) {
+                localStorage.setItem('safetyPopupShown', 'true');
+            }
+            safetyPopup?.classList.remove('active');
+            document.body.style.overflow = 'auto';
+        });
+    }
+
+    if (closeSafetyPopup) {
+        closeSafetyPopup.addEventListener('click', function() {
+            safetyPopup?.classList.remove('active');
+            document.body.style.overflow = 'auto';
+        });
+    }
+
     // Close modals when clicking outside
     document.addEventListener('click', function(e) {
         if (e.target === createListingModal) closeCreateListingModal();
         if (e.target === cartModal) closeCartModalFunc();
         if (e.target === notificationsModal) closeNotificationsModalFunc();
+        if (e.target === moreCategoriesModal) closeMoreCategoriesModalFunc();
+        if (e.target === contactSellerModal) closeContactModalFunc();
+        if (e.target === safetyPopup) {
+            safetyPopup?.classList.remove('active');
+            document.body.style.overflow = 'auto';
+        }
     });
+
+    // Close modals with Escape key
+    document.addEventListener('keydown', function(e) {
+        if (e.key === 'Escape') {
+            closeCreateListingModal();
+            closeCartModalFunc();
+            closeNotificationsModalFunc();
+            closeMoreCategoriesModalFunc();
+            closeContactModalFunc();
+            if (safetyPopup?.classList.contains('active')) {
+                safetyPopup.classList.remove('active');
+                document.body.style.overflow = 'auto';
+            }
+        }
+    });
+
+    // Mobile navigation links
+    const mobileDiscoverLink = document.getElementById('mobileDiscoverLink');
+    const mobileCategoriesLink = document.getElementById('mobileCategoriesLink');
+    const mobileSellersLink = document.getElementById('mobileSellersLink');
+
+    if (mobileDiscoverLink) {
+        mobileDiscoverLink.addEventListener('click', function(e) {
+            e.preventDefault();
+            switchDashboard('discover');
+            closeMobileMenuFunc();
+        });
+    }
+
+    if (mobileCategoriesLink) {
+        mobileCategoriesLink.addEventListener('click', function(e) {
+            e.preventDefault();
+            switchDashboard('categories');
+            closeMobileMenuFunc();
+        });
+    }
+
+    if (mobileSellersLink) {
+        mobileSellersLink.addEventListener('click', function(e) {
+            e.preventDefault();
+            switchDashboard('sellers');
+            closeMobileMenuFunc();
+        });
+    }
+
+    console.log('✅ Event listeners setup completed');
+}
+
+// Open contact seller modal
+function openContactSellerModal(listing) {
+    if (!currentUser) {
+        showToast('Please log in to contact sellers', 'warning');
+        return;
+    }
+    
+    const contactMethod = listing.contactMethod || 'phone';
+    const phoneNumber = listing.sellerPhone || 'Not provided';
+    
+    contactSellerContent.innerHTML = `
+        <div class="space-y-6">
+            <div class="text-center">
+                <img src="${listing.images && listing.images.length > 0 ? listing.images[0] : 'https://images.unsplash.com/photo-1560472354-b33ff0c44a43?ixlib=rb-1.2.1&auto=format&fit=crop&w=500&q=80'}" 
+                     alt="${listing.title}" 
+                     class="w-32 h-32 object-cover rounded-lg mx-auto mb-4">
+                <h3 class="text-xl font-bold text-gray-900 dark:text-white">${listing.title}</h3>
+                <p class="text-indigo-600 dark:text-indigo-400 font-bold text-lg">$${listing.price.toFixed(2)}</p>
+            </div>
+            
+            <div class="bg-gray-50 dark:bg-gray-800 rounded-lg p-4">
+                <h4 class="font-semibold text-gray-900 dark:text-white mb-2">Seller Information</h4>
+                <div class="flex items-center mb-3">
+                    <img src="${listing.sellerAvatar || 'https://ui-avatars.com/api/?name=Seller&background=6366f1&color=fff&size=32'}" 
+                         alt="${listing.sellerName}" 
+                         class="w-10 h-10 rounded-full object-cover mr-3">
+                    <div>
+                        <p class="font-medium text-gray-900 dark:text-white">${listing.sellerName}</p>
+                        <div class="flex items-center">
+                            <i class="fas fa-star text-yellow-400 text-sm mr-1"></i>
+                            <span class="text-sm text-gray-600 dark:text-gray-400">${listing.rating || '4.5'}</span>
+                            ${listing.sellerVerified ? '<span class="verified-badge ml-2"><i class="fas fa-check mr-1"></i>Verified</span>' : ''}
+                        </div>
+                    </div>
+                </div>
+                
+                <div class="space-y-2">
+                    <div class="flex justify-between">
+                        <span class="text-gray-600 dark:text-gray-400">Phone:</span>
+                        <span class="font-medium">${phoneNumber}</span>
+                    </div>
+                    <div class="flex justify-between">
+                        <span class="text-gray-600 dark:text-gray-400">Preferred Contact:</span>
+                        <span class="font-medium capitalize">${contactMethod}</span>
+                    </div>
+                </div>
+            </div>
+            
+            <div class="grid grid-cols-1 gap-3">
+                <button class="contact-action-btn bg-green-600 text-white py-3 rounded-lg font-semibold hover:bg-green-700 transition flex items-center justify-center space-x-2" data-action="whatsapp" data-phone="${phoneNumber}" data-listing="${listing.title}">
+                    <i class="fab fa-whatsapp text-xl"></i>
+                    <span>Contact via WhatsApp</span>
+                </button>
+                
+                <button class="contact-action-btn bg-blue-600 text-white py-3 rounded-lg font-semibold hover:bg-blue-700 transition flex items-center justify-center space-x-2" data-action="call" data-phone="${phoneNumber}">
+                    <i class="fas fa-phone text-xl"></i>
+                    <span>Call Seller</span>
+                </button>
+                
+                <button class="contact-action-btn bg-purple-600 text-white py-3 rounded-lg font-semibold hover:bg-purple-700 transition flex items-center justify-center space-x-2" data-action="message" data-phone="${phoneNumber}" data-listing="${listing.title}">
+                    <i class="fas fa-comment text-xl"></i>
+                    <span>Send Message</span>
+                </button>
+            </div>
+            
+            <div class="bg-yellow-50 dark:bg-yellow-900/20 border border-yellow-200 dark:border-yellow-800 rounded-lg p-4">
+                <h4 class="font-semibold text-yellow-800 dark:text-yellow-200 mb-2">Safety Reminders</h4>
+                <ul class="text-yellow-700 dark:text-yellow-300 text-sm space-y-1">
+                    <li>• Meet in public places during daylight hours</li>
+                    <li>• Inspect the item thoroughly before payment</li>
+                    <li>• Never send money in advance</li>
+                    <li>• Bring a friend if possible</li>
+                    <li>• Trust your instincts - if something feels wrong, walk away</li>
+                </ul>
+            </div>
+        </div>
+    `;
+    
+    // Add event listeners to contact buttons
+    contactSellerContent.querySelectorAll('.contact-action-btn').forEach(btn => {
+        btn.addEventListener('click', function() {
+            const action = this.getAttribute('data-action');
+            const phone = this.getAttribute('data-phone');
+            const listingTitle = this.getAttribute('data-listing');
+            handleContactAction(action, phone, listingTitle);
+        });
+    });
+    
+    contactSellerModal.classList.add('active');
+    document.body.style.overflow = 'hidden';
+}
+
+// Handle contact actions
+function handleContactAction(action, phone, listingTitle) {
+    switch(action) {
+        case 'whatsapp':
+            const whatsappMessage = `Hi! I'm interested in your listing "${listingTitle}" on kynecta Marketplace. Is it still available?`;
+            const whatsappUrl = `https://wa.me/${phone.replace(/\D/g, '')}?text=${encodeURIComponent(whatsappMessage)}`;
+            window.open(whatsappUrl, '_blank');
+            break;
+            
+        case 'call':
+            window.open(`tel:${phone}`);
+            break;
+            
+        case 'message':
+            const smsMessage = `Hi! I'm interested in your listing "${listingTitle}" on kynecta Marketplace. Is it still available?`;
+            window.open(`sms:${phone}?body=${encodeURIComponent(smsMessage)}`);
+            break;
+    }
+    
+    // Record contact attempt
+    recordContactAttempt(action);
+    closeContactModalFunc();
+    showToast(`Contacting seller via ${action}`, 'success');
+}
+
+// Record contact attempt
+async function recordContactAttempt(method) {
+    if (!currentUser) return;
+    
+    try {
+        await db.collection('contactAttempts').add({
+            userId: currentUser.uid,
+            contactMethod: method,
+            timestamp: new Date()
+        });
+    } catch (error) {
+        console.error('❌ Error recording contact attempt:', error);
+    }
+}
+
+// Close contact modal
+function closeContactModalFunc() {
+    contactSellerModal.classList.remove('active');
+    document.body.style.overflow = 'auto';
+}
+
+function switchDashboard(section) {
+    console.log('Switching to:', section);
+    
+    // Hide all dashboards
+    const dashboards = document.querySelectorAll('.dashboard-section');
+    dashboards.forEach(dashboard => {
+        dashboard.classList.remove('active');
+    });
+    
+    // Show selected dashboard
+    const targetDashboard = document.getElementById(`${section}Dashboard`);
+    if (targetDashboard) {
+        targetDashboard.classList.add('active');
+        currentDashboard = section;
+        
+        // Load specific data if needed
+        if (section === 'discover') {
+            loadDiscoverItems();
+        } else if (section === 'sellers') {
+            loadSellers();
+        } else if (section === 'categories') {
+            loadMoreCategories();
+        }
+    }
+}
+// Add these missing functions:
+
+function openCartModal() {
+    console.log('Cart modal opened');
+    // Implement cart functionality
+}
+
+function closeCartModalFunc() {
+    if (cartModal) {
+        cartModal.classList.remove('active');
+        document.body.style.overflow = 'auto';
+    }
+}
+
+function openNotificationsModal() {
+    console.log('Notifications modal opened');
+    // Implement notifications functionality
+}
+
+function closeNotificationsModalFunc() {
+    if (notificationsModal) {
+        notificationsModal.classList.remove('active');
+        document.body.style.overflow = 'auto';
+    }
+}
+
+// Handle category search
+function handleCategorySearch() {
+    const searchTerm = categorySearch.value.toLowerCase().trim();
+    
+    document.querySelectorAll('.category-card, .jumia-category-item').forEach(item => {
+        const categoryName = item.querySelector('.category-name, .jumia-category-name').textContent.toLowerCase();
+        if (categoryName.includes(searchTerm)) {
+            item.style.display = 'flex';
+        } else {
+            item.style.display = 'none';
+        }
+    });
+}
+
+// Filter by category
+function filterByCategory(category) {
+    // Update active tab
+    document.querySelectorAll('.tab-button').forEach(btn => {
+        btn.classList.remove('active');
+        if (btn.getAttribute('data-category') === category) {
+            btn.classList.add('active');
+        }
+    });
+    
+    currentCategory = category;
+    filterAndDisplayListings();
+    
+    // Scroll to listings section
+    document.getElementById('listingsContainer').scrollIntoView({ behavior: 'smooth' });
+}
+
+// Open more categories modal
+function openMoreCategoriesModal() {
+    moreCategoriesModal.classList.add('active');
+    document.body.style.overflow = 'hidden';
+}
+
+// Close more categories modal
+function closeMoreCategoriesModalFunc() {
+    moreCategoriesModal.classList.remove('active');
+    document.body.style.overflow = 'auto';
+}
+
+// Clear recently viewed items
+async function clearRecentlyViewedItems() {
+    if (!currentUser) return;
+    
+    try {
+        const querySnapshot = await db.collection('recentlyViewed')
+            .where('userId', '==', currentUser.uid)
+            .get();
+        
+        const batch = db.batch();
+        querySnapshot.forEach(doc => {
+            batch.delete(doc.ref);
+        });
+        
+        await batch.commit();
+        showToast('Recently viewed cleared', 'success');
+        loadRecentlyViewed();
+    } catch (error) {
+        console.error('❌ Error clearing recently viewed:', error);
+        showToast('Error clearing recently viewed', 'error');
+    }
 }
 
 // Mobile menu functions
@@ -755,6 +1631,11 @@ function openCreateListingModal() {
         return;
     }
     
+    // Pre-fill phone number if available
+    if (userData && userData.phone) {
+        sellerPhone.value = userData.phone;
+    }
+    
     createListingModal.classList.add('active');
     document.body.style.overflow = 'hidden';
 }
@@ -816,12 +1697,19 @@ async function handleCreateListing(e) {
     const price = parseFloat(document.getElementById('listingPrice').value);
     const category = document.getElementById('listingCategory').value;
     const condition = document.querySelector('input[name="condition"]:checked').value;
+    const phone = document.getElementById('sellerPhone').value;
+    const contactMethod = document.querySelector('input[name="contactMethod"]:checked').value;
     const tags = document.getElementById('listingTags').value
         ? document.getElementById('listingTags').value.split(',').map(tag => tag.trim()).filter(tag => tag)
         : [];
     
-    if (!title || !description || isNaN(price)) {
+    if (!title || !description || isNaN(price) || !phone) {
         showToast('Please fill in all required fields', 'error');
+        return;
+    }
+    
+    if (!safetyAgreement.checked) {
+        showToast('Please agree to the safety guidelines', 'error');
         return;
     }
     
@@ -858,6 +1746,9 @@ async function handleCreateListing(e) {
             sellerName: userData.name,
             sellerAvatar: userData.avatar,
             sellerVerified: userData.verified || false,
+            sellerPhone: phone,
+            contactMethod: contactMethod,
+            paymentMethod: 'pay_on_delivery',
             status: 'active',
             views: 0,
             createdAt: new Date(),
@@ -865,6 +1756,14 @@ async function handleCreateListing(e) {
         };
         
         await db.collection('listings').add(listingData);
+        
+        // Update user's phone number if provided
+        if (phone && phone !== userData.phone) {
+            await db.collection('users').doc(currentUser.uid).update({
+                phone: phone
+            });
+            userData.phone = phone;
+        }
         
         showToast('Listing created successfully!', 'success');
         closeCreateListingModal();
@@ -914,14 +1813,119 @@ async function toggleFavorite(listingId) {
 }
 
 // View listing details
-function viewListing(listingId) {
-    // In a real implementation, this would open a detailed view
-    showToast('Listing details feature coming soon!', 'info');
+async function viewListing(listingId) {
+    try {
+        // Record view in recently viewed
+        if (currentUser) {
+            await db.collection('recentlyViewed').add({
+                userId: currentUser.uid,
+                listingId: listingId,
+                viewedAt: new Date()
+            });
+        }
+        
+        // Increment view count
+        await db.collection('listings').doc(listingId).update({
+            views: firebase.firestore.FieldValue.increment(1)
+        });
+        
+        // Show listing details
+        const listingDoc = await db.collection('listings').doc(listingId).get();
+        if (listingDoc.exists) {
+            const listing = listingDoc.data();
+            showListingDetails(listing);
+        }
+        
+    } catch (error) {
+        console.error('❌ Error viewing listing:', error);
+        showToast('Error viewing listing', 'error');
+    }
 }
 
-// Contact seller
-function contactSeller(listingId) {
-    showToast('Contact feature coming soon!', 'info');
+// Show listing details
+function showListingDetails(listing) {
+    const modal = document.createElement('div');
+    modal.className = 'modal active';
+    modal.innerHTML = `
+        <div class="modal-content max-w-3xl">
+            <div class="flex justify-between items-center mb-6">
+                <h2 class="text-2xl font-bold text-gray-900 dark:text-white">${listing.title}</h2>
+                <button class="close-listing-details text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-300">
+                    <i class="fas fa-times text-xl"></i>
+                </button>
+            </div>
+            <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
+                <div>
+                    <img src="${listing.images && listing.images.length > 0 ? listing.images[0] : 'https://images.unsplash.com/photo-1560472354-b33ff0c44a43?ixlib=rb-1.2.1&auto=format&fit=crop&w=500&q=80'}" 
+                         alt="${listing.title}" 
+                         class="w-full h-64 object-cover rounded-lg">
+                </div>
+                <div>
+                    <div class="mb-4">
+                        <h3 class="text-xl font-bold text-gray-900 dark:text-white mb-2">$${listing.price.toFixed(2)}</h3>
+                        <div class="pay-on-delivery-badge inline-block mb-2">PAY ON DELIVERY</div>
+                        <p class="text-gray-600 dark:text-gray-400">${listing.description}</p>
+                    </div>
+                    <div class="mb-4">
+                        <h4 class="font-semibold text-gray-900 dark:text-white mb-2">Seller Information</h4>
+                        <div class="flex items-center">
+                            <img src="${listing.sellerAvatar || 'https://ui-avatars.com/api/?name=Seller&background=6366f1&color=fff&size=32'}" 
+                                 alt="${listing.sellerName}" 
+                                 class="w-8 h-8 rounded-full object-cover mr-2">
+                            <span class="text-gray-600 dark:text-gray-400">${listing.sellerName}</span>
+                            ${listing.sellerVerified ? '<span class="verified-badge ml-2"><i class="fas fa-check mr-1"></i>Verified</span>' : ''}
+                        </div>
+                        <div class="mt-2 text-sm text-gray-600 dark:text-gray-400">
+                            <p><strong>Contact:</strong> ${listing.sellerPhone || 'Not provided'}</p>
+                            <p><strong>Preferred Method:</strong> <span class="capitalize">${listing.contactMethod || 'phone'}</span></p>
+                        </div>
+                    </div>
+                    <div class="flex space-x-4">
+                        <button class="contact-seller-details bg-indigo-600 text-white px-6 py-3 rounded-lg font-semibold hover:bg-indigo-700 transition flex-1" data-listing='${JSON.stringify(listing).replace(/'/g, "\\'")}'>
+                            Contact Seller
+                        </button>
+                        <button class="add-to-cart-details bg-gray-200 dark:bg-slate-600 text-gray-700 dark:text-gray-300 px-6 py-3 rounded-lg font-semibold hover:bg-gray-300 dark:hover:bg-slate-500 transition" data-listing-id="${listing.id}">
+                            <i class="fas fa-shopping-cart mr-2"></i>Add to Cart
+                        </button>
+                    </div>
+                </div>
+            </div>
+        </div>
+    `;
+    
+    document.body.appendChild(modal);
+    
+    // Add event listeners
+    const closeBtn = modal.querySelector('.close-listing-details');
+    const contactBtn = modal.querySelector('.contact-seller-details');
+    const addToCartBtn = modal.querySelector('.add-to-cart-details');
+    
+    closeBtn.addEventListener('click', () => {
+        document.body.removeChild(modal);
+    });
+    
+    contactBtn.addEventListener('click', () => {
+        const listingData = JSON.parse(contactBtn.getAttribute('data-listing'));
+        openContactSellerModal(listingData);
+        document.body.removeChild(modal);
+    });
+    
+    addToCartBtn.addEventListener('click', () => {
+        addToCart(listing.id);
+        document.body.removeChild(modal);
+    });
+    
+    modal.addEventListener('click', (e) => {
+        if (e.target === modal) {
+            document.body.removeChild(modal);
+        }
+    });
+}
+
+// View seller
+function viewSeller(sellerId) {
+    showToast(`Viewing seller ${sellerId}`, 'info');
+    // In a full implementation, this would show seller details and their listings
 }
 
 // Add to cart
@@ -1166,10 +2170,13 @@ function updateUserUI() {
     if (userData) {
         userAvatar.src = userData.avatar || `https://ui-avatars.com/api/?name=${encodeURIComponent(userData.name || 'User')}&background=6366f1&color=fff&size=40`;
         mobileUserAvatar.src = userData.avatar || `https://ui-avatars.com/api/?name=${encodeURIComponent(userData.name || 'User')}&background=6366f1&color=fff&size=40`;
+        mobileNavUserAvatar.src = userData.avatar || `https://ui-avatars.com/api/?name=${encodeURIComponent(userData.name || 'User')}&background=6366f1&color=fff&size=32`;
         userName.textContent = userData.name || 'User';
         mobileUserName.textContent = userData.name || 'User';
+        mobileNavUserName.textContent = userData.name || 'User';
         userStatus.textContent = userData.status || 'Student';
         mobileUserStatus.textContent = userData.status || 'Student';
+        mobileNavUserStatus.textContent = userData.status || 'Student';
     }
 }
 
@@ -1257,6 +2264,27 @@ function setTheme(theme) {
     }
 }
 
+// Initialize mood
+function initMood() {
+    const savedMood = localStorage.getItem('mood') || 'happy';
+    setMood(savedMood);
+}
+
+// Set mood
+function setMood(mood) {
+    currentMood = mood;
+    document.documentElement.setAttribute('data-mood', mood);
+    localStorage.setItem('mood', mood);
+    
+    // Update active state
+    document.querySelectorAll('.mood-option').forEach(option => {
+        option.classList.remove('active');
+        if (option.getAttribute('data-mood') === mood) {
+            option.classList.add('active');
+        }
+    });
+}
+
 // Start flash sale timer
 function startFlashSaleTimer() {
     let timeLeft = 24 * 60 * 60; // 24 hours in seconds
@@ -1279,6 +2307,28 @@ function startFlashSaleTimer() {
     setInterval(updateTimer, 1000);
 }
 
+// Start flash sale countdown (Jumia style)
+function startFlashSaleCountdown() {
+    let timeLeft = 6 * 60 * 60 + 19 * 60 + 55; // 6 hours, 19 minutes, 55 seconds
+    
+    function updateCountdown() {
+        const hours = Math.floor(timeLeft / 3600);
+        const minutes = Math.floor((timeLeft % 3600) / 60);
+        const seconds = timeLeft % 60;
+        
+        flashSaleCountdown.textContent = `${hours.toString().padStart(2, '0')}h : ${minutes.toString().padStart(2, '0')}m : ${seconds.toString().padStart(2, '0')}s`;
+        
+        if (timeLeft > 0) {
+            timeLeft--;
+        } else {
+            timeLeft = 6 * 60 * 60 + 19 * 60 + 55;
+        }
+    }
+    
+    updateCountdown();
+    setInterval(updateCountdown, 1000);
+}
+
 // Format time ago
 function formatTimeAgo(timestamp) {
     const now = new Date();
@@ -1295,7 +2345,7 @@ function formatTimeAgo(timestamp) {
     return time.toLocaleDateString();
 }
 
-// Debounce function for search
+// Essential utility function for debounce
 function debounce(func, wait) {
     let timeout;
     return function executedFunction(...args) {
@@ -1307,19 +2357,3 @@ function debounce(func, wait) {
         timeout = setTimeout(later, wait);
     };
 }
-
-// Contact information
-function showContactInfo() {
-    showToast('Contact kynecta: 0746676627 | nchagwadennis45@gmail.com', 'info');
-}
-
-// Export functions for global access if needed
-window.marketplace = {
-    loadMarketplaceData,
-    loadListings,
-    loadTrendingItems,
-    loadRecommendedItems,
-    openCreateListingModal,
-    showToast,
-    toggleTheme
-};
