@@ -1,7 +1,10 @@
 <!DOCTYPE html>
 <html lang="en" class="h-full">
 <head>
-    <link rel="manifest" href="/manifest.json">
+    <!-- Add these lines to your existing head section -->
+<link rel="manifest" href="manifest.json">
+<meta name="theme-color" content="#4F46E5">
+<link rel="icon" href="icons/icon-192x192.png">
     <meta name="theme-color" content="#000000">
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=5.0, user-scalable=yes">
@@ -13,12 +16,6 @@
     <script src="https://www.gstatic.com/firebasejs/9.22.1/firebase-auth-compat.js"></script>
     <script src="https://www.gstatic.com/firebasejs/9.22.1/firebase-firestore-compat.js"></script>
     <script src="https://www.gstatic.com/firebasejs/9.22.1/firebase-storage-compat.js"></script>
-    
-    <!-- Firebase Configuration Module -->
-    <script type="module" src="./firebase-config.js"></script>
-    
-    <!-- Auth Listener Module -->
-    <script type="module" src="./auth-listener.js"></script>
     
     <!-- External CSS -->
     <link rel="stylesheet" href="marketplace.css">
@@ -213,6 +210,40 @@
                             <div class="theme-toggle-handle"></div>
                         </div>
                         
+                        <!-- Enhanced Feature Buttons -->
+                        <div class="hidden md:flex items-center space-x-2">
+                            <!-- Wishlist Button -->
+                            <div class="relative">
+                                <button id="wishlistBtn" class="p-2 text-gray-600 dark:text-gray-300 hover:text-gray-900 dark:hover:text-white rounded-full hover:bg-gray-100 dark:hover:bg-slate-700 transition">
+                                    <i class="far fa-heart"></i>
+                                </button>
+                                <span id="wishlistCount" class="absolute -top-1 -right-1 bg-indigo-600 text-white text-xs rounded-full w-5 h-5 flex items-center justify-center hidden">0</span>
+                            </div>
+                            
+                            <!-- Orders Button -->
+                            <button id="ordersBtn" class="p-2 text-gray-600 dark:text-gray-300 hover:text-gray-900 dark:hover:text-white rounded-full hover:bg-gray-100 dark:hover:bg-slate-700 transition">
+                                <i class="fas fa-shopping-bag"></i>
+                            </button>
+                            
+                            <!-- Messages Button -->
+                            <div class="relative">
+                                <button id="messagesBtn" class="p-2 text-gray-600 dark:text-gray-300 hover:text-gray-900 dark:hover:text-white rounded-full hover:bg-gray-100 dark:hover:bg-slate-700 transition">
+                                    <i class="far fa-comments"></i>
+                                </button>
+                                <span id="messageCount" class="absolute -top-1 -right-1 bg-indigo-600 text-white text-xs rounded-full w-5 h-5 flex items-center justify-center hidden">0</span>
+                            </div>
+                            
+                            <!-- Seller Dashboard Button -->
+                            <button id="sellerDashboardBtn" class="p-2 text-gray-600 dark:text-gray-300 hover:text-gray-900 dark:hover:text-white rounded-full hover:bg-gray-100 dark:hover:bg-slate-700 transition hidden">
+                                <i class="fas fa-store-alt"></i>
+                            </button>
+                            
+                            <!-- Admin Button -->
+                            <button id="adminBtn" class="p-2 text-gray-600 dark:text-gray-300 hover:text-gray-900 dark:hover:text-white rounded-full hover:bg-gray-100 dark:hover:bg-slate-700 transition hidden">
+                                <i class="fas fa-cog"></i>
+                            </button>
+                        </div>
+                        
                         <button id="createListingBtn" class="bg-indigo-600 text-white px-4 py-2 rounded-lg font-semibold hover:bg-indigo-700 transition flex items-center space-x-2">
                             <i class="fas fa-plus"></i>
                             <span class="hidden sm:inline">List Item</span>
@@ -385,7 +416,7 @@
                 </div>
             </section>
 
-            <!-- Flash Sales Section (Jumia Style) -->
+            <!-- Flash Sales Section (kynecta Style) -->
             <section class="mb-6">
                 <div class="flex justify-between items-center mb-4">
                     <h2 class="text-xl font-bold text-gray-900 dark:text-white">Flash Sales</h2>
@@ -429,7 +460,7 @@
                 </div>
             </section>
 
-            <!-- Recently Viewed (Jumia Style) -->
+            <!-- Recently Viewed (kynecta Style) -->
             <section class="mb-6">
                 <div class="flex justify-between items-center mb-4">
                     <h2 class="text-xl font-bold text-gray-900 dark:text-white">Recently Viewed</h2>
@@ -782,9 +813,405 @@
                 </div>
             </div>
         </div>
+
+        <!-- Seller Dashboard -->
+        <div id="sellerDashboard" class="dashboard-section">
+            <!-- Content will be populated dynamically by JavaScript -->
+            <div class="text-center py-12">
+                <div class="loading-spinner mx-auto mb-4" style="width: 40px; height: 40px;"></div>
+                <p class="text-gray-500 dark:text-gray-400">Loading seller dashboard...</p>
+            </div>
+        </div>
+
+        <!-- Admin Dashboard -->
+        <div id="adminDashboard" class="dashboard-section">
+            <div class="flex justify-between items-center mb-6">
+                <h2 class="text-2xl font-bold text-gray-900 dark:text-white">Admin Dashboard</h2>
+                <div class="flex space-x-4">
+                    <button id="refreshAdmin" class="bg-indigo-600 text-white px-4 py-2 rounded-lg font-semibold hover:bg-indigo-700 transition">
+                        <i class="fas fa-sync-alt mr-2"></i>Refresh
+                    </button>
+                </div>
+            </div>
+
+            <!-- Admin Stats -->
+            <div class="grid grid-cols-2 md:grid-cols-4 gap-4 mb-6 stats-grid">
+                <div class="glass-card p-4 text-center">
+                    <div class="text-indigo-600 text-xl font-bold mb-1" id="adminTotalUsers">0</div>
+                    <div class="text-gray-600 dark:text-gray-400 text-sm">Total Users</div>
+                </div>
+                <div class="glass-card p-4 text-center">
+                    <div class="text-indigo-600 text-xl font-bold mb-1" id="adminTotalListings">0</div>
+                    <div class="text-gray-600 dark:text-gray-400 text-sm">Total Listings</div>
+                </div>
+                <div class="glass-card p-4 text-center">
+                    <div class="text-indigo-600 text-xl font-bold mb-1" id="adminFlaggedContent">0</div>
+                    <div class="text-gray-600 dark:text-gray-400 text-sm">Flagged Content</div>
+                </div>
+                <div class="glass-card p-4 text-center">
+                    <div class="text-indigo-600 text-xl font-bold mb-1" id="adminSalesToday">$0</div>
+                    <div class="text-gray-600 dark:text-gray-400 text-sm">Sales Today</div>
+                </div>
+            </div>
+
+            <!-- Admin Tabs -->
+            <div class="mb-6">
+                <div class="tab-buttons-container">
+                    <div class="tab-buttons-scroll">
+                        <button class="tab-button active" data-admin-tab="analytics">Analytics</button>
+                        <button class="tab-button" data-admin-tab="users">User Management</button>
+                        <button class="tab-button" data-admin-tab="listings">Listing Management</button>
+                        <button class="tab-button" data-admin-tab="moderation">Content Moderation</button>
+                        <button class="tab-button" data-admin-tab="messaging">User Messaging</button>
+                        <button class="tab-button" data-admin-tab="backup">Backup & Restore</button>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Analytics Tab -->
+            <div id="analyticsTab" class="admin-tab active">
+                <div class="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-6">
+                    <div class="glass-card p-6">
+                        <h3 class="text-xl font-bold text-gray-900 dark:text-white mb-4">Sales Analytics</h3>
+                        <div class="h-64 flex items-center justify-center bg-gray-100 dark:bg-slate-700 rounded-lg">
+                            <p class="text-gray-500 dark:text-gray-400">Sales chart will be displayed here</p>
+                        </div>
+                    </div>
+                    <div class="glass-card p-6">
+                        <h3 class="text-xl font-bold text-gray-900 dark:text-white mb-4">User Growth</h3>
+                        <div class="h-64 flex items-center justify-center bg-gray-100 dark:bg-slate-700 rounded-lg">
+                            <p class="text-gray-500 dark:text-gray-400">User growth chart will be displayed here</p>
+                        </div>
+                    </div>
+                </div>
+                
+                <div class="glass-card p-6">
+                    <h3 class="text-xl font-bold text-gray-900 dark:text-white mb-4">Platform Statistics</h3>
+                    <div class="grid grid-cols-2 md:grid-cols-4 gap-4">
+                        <div class="text-center">
+                            <div class="text-indigo-600 text-2xl font-bold mb-1" id="analyticsActiveUsers">0</div>
+                            <div class="text-gray-600 dark:text-gray-400 text-sm">Active Users (30d)</div>
+                        </div>
+                        <div class="text-center">
+                            <div class="text-indigo-600 text-2xl font-bold mb-1" id="analyticsNewListings">0</div>
+                            <div class="text-gray-600 dark:text-gray-400 text-sm">New Listings (7d)</div>
+                        </div>
+                        <div class="text-center">
+                            <div class="text-indigo-600 text-2xl font-bold mb-1" id="analyticsCompletedSales">0</div>
+                            <div class="text-gray-600 dark:text-gray-400 text-sm">Completed Sales (7d)</div>
+                        </div>
+                        <div class="text-center">
+                            <div class="text-indigo-600 text-2xl font-bold mb-1" id="analyticsRevenue">$0</div>
+                            <div class="text-gray-600 dark:text-gray-400 text-sm">Revenue (30d)</div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- User Management Tab -->
+            <div id="usersTab" class="admin-tab">
+                <div class="glass-card p-6">
+                    <div class="flex justify-between items-center mb-4">
+                        <h3 class="text-xl font-bold text-gray-900 dark:text-white">User Management</h3>
+                        <div class="flex space-x-2">
+                            <button id="bulkDeleteUsers" class="bg-red-600 text-white px-4 py-2 rounded-lg font-semibold hover:bg-red-700 transition">
+                                <i class="fas fa-trash mr-2"></i>Delete Selected
+                            </button>
+                            <button id="exportUsers" class="bg-green-600 text-white px-4 py-2 rounded-lg font-semibold hover:bg-green-700 transition">
+                                <i class="fas fa-download mr-2"></i>Export
+                            </button>
+                        </div>
+                    </div>
+                    
+                    <div class="overflow-x-auto">
+                        <table class="w-full">
+                            <thead>
+                                <tr class="border-b border-gray-200 dark:border-slate-600">
+                                    <th class="py-3 px-4 text-left">
+                                        <input type="checkbox" id="selectAllUsers" class="h-4 w-4 text-indigo-600 focus:ring-indigo-500 border-gray-300 rounded">
+                                    </th>
+                                    <th class="py-3 px-4 text-left">User</th>
+                                    <th class="py-3 px-4 text-left">Email</th>
+                                    <th class="py-3 px-4 text-left">Role</th>
+                                    <th class="py-3 px-4 text-left">Status</th>
+                                    <th class="py-3 px-4 text-left">Joined</th>
+                                    <th class="py-3 px-4 text-left">Actions</th>
+                                </tr>
+                            </thead>
+                            <tbody id="usersTableBody">
+                                <!-- Users will be populated here -->
+                            </tbody>
+                        </table>
+                    </div>
+                    
+                    <div class="flex justify-between items-center mt-4">
+                        <div class="text-sm text-gray-600 dark:text-gray-400">
+                            Showing <span id="usersShowing">0</span> of <span id="usersTotal">0</span> users
+                        </div>
+                        <div class="flex space-x-2">
+                            <button id="usersPrevPage" class="bg-gray-200 dark:bg-slate-700 text-gray-700 dark:text-gray-300 px-3 py-1 rounded disabled:opacity-50">Previous</button>
+                            <button id="usersNextPage" class="bg-gray-200 dark:bg-slate-700 text-gray-700 dark:text-gray-300 px-3 py-1 rounded disabled:opacity-50">Next</button>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Listing Management Tab -->
+            <div id="listingsTab" class="admin-tab">
+                <div class="glass-card p-6">
+                    <div class="flex justify-between items-center mb-4">
+                        <h3 class="text-xl font-bold text-gray-900 dark:text-white">Listing Management</h3>
+                        <div class="flex space-x-2">
+                            <button id="bulkDeleteListings" class="bg-red-600 text-white px-4 py-2 rounded-lg font-semibold hover:bg-red-700 transition">
+                                <i class="fas fa-trash mr-2"></i>Delete Selected
+                            </button>
+                            <button id="exportListings" class="bg-green-600 text-white px-4 py-2 rounded-lg font-semibold hover:bg-green-700 transition">
+                                <i class="fas fa-download mr-2"></i>Export
+                            </button>
+                        </div>
+                    </div>
+                    
+                    <div class="overflow-x-auto">
+                        <table class="w-full">
+                            <thead>
+                                <tr class="border-b border-gray-200 dark:border-slate-600">
+                                    <th class="py-3 px-4 text-left">
+                                        <input type="checkbox" id="selectAllListings" class="h-4 w-4 text-indigo-600 focus:ring-indigo-500 border-gray-300 rounded">
+                                    </th>
+                                    <th class="py-3 px-4 text-left">Listing</th>
+                                    <th class="py-3 px-4 text-left">Seller</th>
+                                    <th class="py-3 px-4 text-left">Price</th>
+                                    <th class="py-3 px-4 text-left">Category</th>
+                                    <th class="py-3 px-4 text-left">Status</th>
+                                    <th class="py-3 px-4 text-left">Created</th>
+                                    <th class="py-3 px-4 text-left">Actions</th>
+                                </tr>
+                            </thead>
+                            <tbody id="listingsTableBody">
+                                <!-- Listings will be populated here -->
+                            </tbody>
+                        </table>
+                    </div>
+                    
+                    <div class="flex justify-between items-center mt-4">
+                        <div class="text-sm text-gray-600 dark:text-gray-400">
+                            Showing <span id="listingsShowing">0</span> of <span id="listingsTotal">0</span> listings
+                        </div>
+                        <div class="flex space-x-2">
+                            <button id="listingsPrevPage" class="bg-gray-200 dark:bg-slate-700 text-gray-700 dark:text-gray-300 px-3 py-1 rounded disabled:opacity-50">Previous</button>
+                            <button id="listingsNextPage" class="bg-gray-200 dark:bg-slate-700 text-gray-700 dark:text-gray-300 px-3 py-1 rounded disabled:opacity-50">Next</button>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Content Moderation Tab -->
+            <div id="moderationTab" class="admin-tab">
+                <div class="glass-card p-6">
+                    <h3 class="text-xl font-bold text-gray-900 dark:text-white mb-4">Content Moderation</h3>
+                    
+                    <div class="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6">
+                        <div class="bg-yellow-50 dark:bg-yellow-900/20 border border-yellow-200 dark:border-yellow-800 rounded-lg p-4">
+                            <div class="flex justify-between items-center mb-2">
+                                <h4 class="font-semibold text-yellow-800 dark:text-yellow-200">Flagged Listings</h4>
+                                <span class="bg-yellow-500 text-white text-xs px-2 py-1 rounded-full" id="flaggedListingsCount">0</span>
+                            </div>
+                            <p class="text-yellow-700 dark:text-yellow-300 text-sm">Listings reported by users</p>
+                            <button id="reviewFlaggedListings" class="mt-2 bg-yellow-500 text-white px-3 py-1 rounded text-sm hover:bg-yellow-600 transition">Review</button>
+                        </div>
+                        
+                        <div class="bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 rounded-lg p-4">
+                            <div class="flex justify-between items-center mb-2">
+                                <h4 class="font-semibold text-red-800 dark:text-red-200">Suspicious Users</h4>
+                                <span class="bg-red-500 text-white text-xs px-2 py-1 rounded-full" id="suspiciousUsersCount">0</span>
+                            </div>
+                            <p class="text-red-700 dark:text-red-300 text-sm">Users with multiple flags</p>
+                            <button id="reviewSuspiciousUsers" class="mt-2 bg-red-500 text-white px-3 py-1 rounded text-sm hover:bg-red-600 transition">Review</button>
+                        </div>
+                        
+                        <div class="bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-800 rounded-lg p-4">
+                            <div class="flex justify-between items-center mb-2">
+                                <h4 class="font-semibold text-blue-800 dark:text-blue-200">Auto-Flagged Content</h4>
+                                <span class="bg-blue-500 text-white text-xs px-2 py-1 rounded-full" id="autoFlaggedCount">0</span>
+                            </div>
+                            <p class="text-blue-700 dark:text-blue-300 text-sm">Content flagged by AI system</p>
+                            <button id="reviewAutoFlagged" class="mt-2 bg-blue-500 text-white px-3 py-1 rounded text-sm hover:bg-blue-600 transition">Review</button>
+                        </div>
+                    </div>
+                    
+                    <div class="mb-4">
+                        <h4 class="font-semibold text-gray-900 dark:text-white mb-2">Moderation Settings</h4>
+                        <div class="flex flex-wrap gap-4">
+                            <label class="flex items-center">
+                                <input type="checkbox" id="autoFlagSuspicious" class="h-4 w-4 text-indigo-600 focus:ring-indigo-500 border-gray-300 rounded" checked>
+                                <span class="ml-2 text-gray-700 dark:text-gray-300">Auto-flag suspicious content</span>
+                            </label>
+                            <label class="flex items-center">
+                                <input type="checkbox" id="notifyOnFlag" class="h-4 w-4 text-indigo-600 focus:ring-indigo-500 border-gray-300 rounded" checked>
+                                <span class="ml-2 text-gray-700 dark:text-gray-300">Notify on new flags</span>
+                            </label>
+                            <label class="flex items-center">
+                                <input type="checkbox" id="autoSuspendUsers" class="h-4 w-4 text-indigo-600 focus:ring-indigo-500 border-gray-300 rounded">
+                                <span class="ml-2 text-gray-700 dark:text-gray-300">Auto-suspend repeat offenders</span>
+                            </label>
+                        </div>
+                    </div>
+                    
+                    <div class="overflow-x-auto">
+                        <table class="w-full">
+                            <thead>
+                                <tr class="border-b border-gray-200 dark:border-slate-600">
+                                    <th class="py-3 px-4 text-left">Content</th>
+                                    <th class="py-3 px-4 text-left">Type</th>
+                                    <th class="py-3 px-4 text-left">Flags</th>
+                                    <th class="py-3 px-4 text-left">Reason</th>
+                                    <th class="py-3 px-4 text-left">Status</th>
+                                    <th class="py-3 px-4 text-left">Actions</th>
+                                </tr>
+                            </thead>
+                            <tbody id="moderationTableBody">
+                                <!-- Flagged content will be populated here -->
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+            </div>
+
+            <!-- User Messaging Tab -->
+            <div id="messagingTab" class="admin-tab">
+                <div class="glass-card p-6">
+                    <h3 class="text-xl font-bold text-gray-900 dark:text-white mb-4">User Messaging</h3>
+                    
+                    <div class="mb-6">
+                        <h4 class="font-semibold text-gray-900 dark:text-white mb-2">Send Announcement</h4>
+                        <div class="space-y-4">
+                            <div>
+                                <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Recipients</label>
+                                <div class="flex flex-wrap gap-4">
+                                    <label class="flex items-center">
+                                        <input type="radio" name="recipients" value="all" class="h-4 w-4 text-indigo-600 focus:ring-indigo-500" checked>
+                                        <span class="ml-2 text-gray-700 dark:text-gray-300">All Users</span>
+                                    </label>
+                                    <label class="flex items-center">
+                                        <input type="radio" name="recipients" value="sellers" class="h-4 w-4 text-indigo-600 focus:ring-indigo-500">
+                                        <span class="ml-2 text-gray-700 dark:text-gray-300">Sellers Only</span>
+                                    </label>
+                                    <label class="flex items-center">
+                                        <input type="radio" name="recipients" value="buyers" class="h-4 w-4 text-indigo-600 focus:ring-indigo-500">
+                                        <span class="ml-2 text-gray-700 dark:text-gray-300">Buyers Only</span>
+                                    </label>
+                                </div>
+                            </div>
+                            
+                            <div>
+                                <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Subject</label>
+                                <input type="text" id="announcementSubject" class="w-full border border-gray-300 dark:border-slate-600 dark:bg-slate-700 dark:text-white rounded-lg px-4 py-2 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent" placeholder="Announcement subject">
+                            </div>
+                            
+                            <div>
+                                <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Message</label>
+                                <textarea rows="5" id="announcementMessage" class="w-full border border-gray-300 dark:border-slate-600 dark:bg-slate-700 dark:text-white rounded-lg px-4 py-2 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent" placeholder="Type your announcement message here..."></textarea>
+                            </div>
+                            
+                            <div class="flex justify-end">
+                                <button id="sendAnnouncement" class="bg-indigo-600 text-white px-6 py-2 rounded-lg font-semibold hover:bg-indigo-700 transition">
+                                    <i class="fas fa-paper-plane mr-2"></i>Send Announcement
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+                    
+                    <div>
+                        <h4 class="font-semibold text-gray-900 dark:text-white mb-2">Recent Announcements</h4>
+                        <div class="space-y-4" id="recentAnnouncements">
+                            <!-- Recent announcements will be populated here -->
+                            <div class="text-center py-4">
+                                <p class="text-gray-500 dark:text-gray-400">No announcements sent yet</p>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Backup & Restore Tab -->
+            <div id="backupTab" class="admin-tab">
+                <div class="glass-card p-6">
+                    <h3 class="text-xl font-bold text-gray-900 dark:text-white mb-4">Backup & Restore</h3>
+                    
+                    <div class="grid grid-cols-1 md:grid-cols-2 gap-6 mb-6">
+                        <div class="bg-green-50 dark:bg-green-900/20 border border-green-200 dark:border-green-800 rounded-lg p-4">
+                            <div class="flex items-center mb-2">
+                                <i class="fas fa-download text-green-500 mr-2"></i>
+                                <h4 class="font-semibold text-green-800 dark:text-green-200">Create Backup</h4>
+                            </div>
+                            <p class="text-green-700 dark:text-green-300 text-sm mb-4">
+                                Create a complete backup of all marketplace data including users, listings, and transactions.
+                            </p>
+                            <div class="space-y-2">
+                                <label class="flex items-center">
+                                    <input type="checkbox" id="backupUsers" class="h-4 w-4 text-indigo-600 focus:ring-indigo-500 border-gray-300 rounded" checked>
+                                    <span class="ml-2 text-green-700 dark:text-green-300 text-sm">Include user data</span>
+                                </label>
+                                <label class="flex items-center">
+                                    <input type="checkbox" id="backupListings" class="h-4 w-4 text-indigo-600 focus:ring-indigo-500 border-gray-300 rounded" checked>
+                                    <span class="ml-2 text-green-700 dark:text-green-300 text-sm">Include listing data</span>
+                                </label>
+                                <label class="flex items-center">
+                                    <input type="checkbox" id="backupTransactions" class="h-4 w-4 text-indigo-600 focus:ring-indigo-500 border-gray-300 rounded" checked>
+                                    <span class="ml-2 text-green-700 dark:text-green-300 text-sm">Include transaction data</span>
+                                </label>
+                            </div>
+                            <button id="createBackup" class="mt-4 bg-green-600 text-white px-4 py-2 rounded-lg font-semibold hover:bg-green-700 transition w-full">
+                                <i class="fas fa-database mr-2"></i>Create Backup
+                            </button>
+                        </div>
+                        
+                        <div class="bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-800 rounded-lg p-4">
+                            <div class="flex items-center mb-2">
+                                <i class="fas fa-upload text-blue-500 mr-2"></i>
+                                <h4 class="font-semibold text-blue-800 dark:text-blue-200">Restore Data</h4>
+                            </div>
+                            <p class="text-blue-700 dark:text-blue-300 text-sm mb-4">
+                                Restore marketplace data from a previous backup file.
+                            </p>
+                            <div class="space-y-2">
+                                <label class="block text-sm font-medium text-blue-700 dark:text-blue-300 mb-1">Select Backup File</label>
+                                <input type="file" id="restoreFile" class="w-full border border-blue-200 dark:border-blue-800 rounded-lg px-3 py-2 text-sm">
+                            </div>
+                            <button id="restoreBackup" class="mt-4 bg-blue-600 text-white px-4 py-2 rounded-lg font-semibold hover:bg-blue-700 transition w-full">
+                                <i class="fas fa-history mr-2"></i>Restore Backup
+                            </button>
+                        </div>
+                    </div>
+                    
+                    <div>
+                        <h4 class="font-semibold text-gray-900 dark:text-white mb-2">Recent Backups</h4>
+                        <div class="overflow-x-auto">
+                            <table class="w-full">
+                                <thead>
+                                    <tr class="border-b border-gray-200 dark:border-slate-600">
+                                        <th class="py-3 px-4 text-left">Backup Name</th>
+                                        <th class="py-3 px-4 text-left">Date</th>
+                                        <th class="py-3 px-4 text-left">Size</th>
+                                        <th class="py-3 px-4 text-left">Contents</th>
+                                        <th class="py-3 px-4 text-left">Actions</th>
+                                    </tr>
+                                </thead>
+                                <tbody id="backupsTableBody">
+                                    <!-- Backup files will be populated here -->
+                                    <tr>
+                                        <td colspan="5" class="py-4 text-center text-gray-500 dark:text-gray-400">No backups available</td>
+                                    </tr>
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
     </main>
 
-    <!-- Bottom Navigation (Jumia Style) -->
+    <!-- Bottom Navigation (kynecta Style) -->
     <div class="bottom-nav md:hidden">
         <a href="home.html" class="bottom-nav-item">
             <i class="fas fa-home"></i>
@@ -823,20 +1250,20 @@
                     <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">Product Title *</label>
                     <input type="text" id="listingTitle" class="w-full border border-gray-300 dark:border-slate-600 dark:bg-slate-700 dark:text-white rounded-lg px-4 py-3 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent" placeholder="e.g. Calculus Textbook 8th Edition" required>
                 </div>
-                <!-- Add this after the category field in the create listing form -->
-<div class="mb-4">
-    <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">Location *</label>
-    <select id="listingLocation" class="w-full border border-gray-300 dark:border-slate-600 dark:bg-slate-700 dark:text-white rounded-lg px-4 py-3 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent" required>
-        <option value="">Select your location</option>
-        <option value="campus">On Campus</option>
-        <option value="downtown">Downtown</option>
-        <option value="suburbs">Suburbs</option>
-        <option value="north">North Area</option>
-        <option value="south">South Area</option>
-        <option value="east">East Area</option>
-        <option value="west">West Area</option>
-    </select>
-</div>
+                
+                <div class="mb-4">
+                    <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">Location *</label>
+                    <select id="listingLocation" class="w-full border border-gray-300 dark:border-slate-600 dark:bg-slate-700 dark:text-white rounded-lg px-4 py-3 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent" required>
+                        <option value="">Select your location</option>
+                        <option value="campus">On Campus</option>
+                        <option value="downtown">Downtown</option>
+                        <option value="suburbs">Suburbs</option>
+                        <option value="north">North Area</option>
+                        <option value="south">South Area</option>
+                        <option value="east">East Area</option>
+                        <option value="west">West Area</option>
+                    </select>
+                </div>
                 
                 <div class="mb-4">
                     <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">Description *</label>
@@ -1015,6 +1442,63 @@
         </div>
     </div>
 
+    <!-- Wishlist Modal -->
+    <div id="wishlistModal" class="modal">
+        <div class="modal-content max-w-2xl">
+            <div class="flex justify-between items-center mb-6">
+                <h2 class="text-2xl font-bold text-gray-900 dark:text-white">Your Wishlist</h2>
+                <button id="closeWishlistModal" class="text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-300">
+                    <i class="fas fa-times text-xl"></i>
+                </button>
+            </div>
+            <div id="wishlistContent">
+                <div class="text-center py-12">
+                    <i class="far fa-heart text-4xl text-gray-400 mb-4"></i>
+                    <h3 class="text-xl font-bold text-gray-700 dark:text-gray-300 mb-2">Your wishlist is empty</h3>
+                    <p class="text-gray-500 dark:text-gray-400">Add some items to your wishlist</p>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Orders Modal -->
+    <div id="ordersModal" class="modal">
+        <div class="modal-content max-w-2xl">
+            <div class="flex justify-between items-center mb-6">
+                <h2 class="text-2xl font-bold text-gray-900 dark:text-white">Your Orders</h2>
+                <button id="closeOrdersModal" class="text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-300">
+                    <i class="fas fa-times text-xl"></i>
+                </button>
+            </div>
+            <div id="ordersContent">
+                <div class="text-center py-12">
+                    <i class="fas fa-shopping-bag text-4xl text-gray-400 mb-4"></i>
+                    <h3 class="text-xl font-bold text-gray-700 dark:text-gray-300 mb-2">No orders yet</h3>
+                    <p class="text-gray-500 dark:text-gray-400">Your orders will appear here</p>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Messages Modal -->
+    <div id="messagesModal" class="modal">
+        <div class="modal-content max-w-2xl">
+            <div class="flex justify-between items-center mb-6">
+                <h2 class="text-2xl font-bold text-gray-900 dark:text-white">Messages</h2>
+                <button id="closeMessagesModal" class="text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-300">
+                    <i class="fas fa-times text-xl"></i>
+                </button>
+            </div>
+            <div id="messagesContent">
+                <div class="text-center py-12">
+                    <i class="far fa-comments text-4xl text-gray-400 mb-4"></i>
+                    <h3 class="text-xl font-bold text-gray-700 dark:text-gray-300 mb-2">No messages</h3>
+                    <p class="text-gray-500 dark:text-gray-400">Your messages will appear here</p>
+                </div>
+            </div>
+        </div>
+    </div>
+
     <!-- More Categories Modal -->
     <div id="moreCategoriesModal" class="modal">
         <div class="modal-content max-w-2xl">
@@ -1043,7 +1527,35 @@
         </div>
     </div>
 
+    <!-- Footer with Legal Links -->
+    <footer class="bg-white dark:bg-slate-800 border-t border-gray-200 dark:border-slate-700 py-8 mt-12">
+        <div class="container mx-auto px-4">
+            <div class="flex flex-col md:flex-row justify-between items-center">
+                <div class="mb-4 md:mb-0">
+                    <div class="flex items-center space-x-2">
+                        <div class="bg-indigo-600 p-2 rounded-lg">
+                            <i class="fas fa-store text-white text-xl"></i>
+                        </div>
+                        <h2 class="text-xl font-bold text-gray-900 dark:text-white">kynecta Marketplace</h2>
+                    </div>
+                    <p class="text-gray-600 dark:text-gray-400 mt-2">Buy and sell within your campus community</p>
+                </div>
+                
+                <div class="flex flex-wrap justify-center space-x-6 text-sm text-gray-600 dark:text-gray-400">
+                    <a href="#" class="hover:text-gray-700 dark:hover:text-gray-300 terms-link">Terms of Service</a>
+                    <a href="#" class="hover:text-gray-700 dark:hover:text-gray-300 privacy-link">Privacy Policy</a>
+                    <a href="#" class="hover:text-gray-700 dark:hover:text-gray-300 safety-link">Safety Guidelines</a>
+                    <a href="#" class="hover:text-gray-700 dark:hover:text-gray-300">Contact Support</a>
+                </div>
+            </div>
+            
+            <div class="border-t border-gray-200 dark:border-slate-700 mt-6 pt-6 text-center">
+                <p class="text-gray-500 dark:text-gray-400 text-sm">© 2024 kynecta Marketplace. All rights reserved.</p>
+            </div>
+        </div>
+    </footer>
+
     <!-- External JavaScript -->
-    <script src="marketplace.js"></script>
+    <script src="marketplace.js" defer></script>
 </body>
 </html>

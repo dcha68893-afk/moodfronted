@@ -1,71 +1,21 @@
 {
-  "name": "kynecta communication platform",
-  "short_name": "kyPlatform",
-  "description": "Connect with uusers, share resources, and trade items",
+  "name": "Kynecta Marketplace",
+  "short_name": "Kynecta",
+  "description": "AI-powered marketplace platform",
   "start_url": "/",
   "display": "standalone",
+  "background_color": "#ffffff",
   "theme_color": "#4F46E5",
-  "background_color": "#FFFFFF",
-  "orientation": "portrait-primary",
-  "scope": "/",
-  "lang": "en-US",
-  "categories": ["communication", "social", "shopping"],
   "icons": [
     {
-      "src": "/icons/icon-192x192.png",
+      "src": "icons/icon-192x192.png",
       "sizes": "192x192",
-      "type": "image/png",
-      "purpose": "any maskable"
+      "type": "image/png"
     },
     {
-      "src": "/icons/icon-512x512.png",
+      "src": "icons/icon-512x512.png",
       "sizes": "512x512",
-      "type": "image/png",
-      "purpose": "any maskable"
-    }
-  ],
-  "screenshots": [
-    {
-      "src": "/screenshots/dashboard-wide.png",
-      "sizes": "640x320",
-      "type": "image/png",
-      "form_factor": "wide",
-      "label": "Dashboard View"
-    },
-    {
-      "src": "/screenshots/dashboard-narrow.png",
-      "sizes": "320x640",
-      "type": "image/png",
-      "form_factor": "narrow",
-      "label": "Dashboard Mobile View"
-    }
-  ],
-  "shortcuts": [
-    {
-      "name": "kynecta chat",
-      "short_name": "Chat",
-      "description": "Connect with other students",
-      "url": "/chat",
-      "icons": [
-        {
-          "src": "/icons/chat-96x96.png",
-          "sizes": "96x96",
-          "type": "image/png"
-        }
-      ]
-    },
-    {
-      "name": " Marketplace",
-      "short_name": "Market",
-      "description": "Buy and sell items",
-      "url": "/marketplace",
-      "icons": [
-        {
-          "src": "/icons/market-96x96.png",
-          "sizes": "96x96",
-          "type": "image/png"
-        }
-      ]
+      "type": "image/png"
     }
   ]
 }
