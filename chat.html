@@ -398,6 +398,44 @@
                     </div>
                 </div>
 
+                <!-- Message Selection Toolbar -->
+                <div id="messageSelectionToolbar" class="hidden bg-purple-600 text-white p-3 flex items-center justify-between">
+                    <div class="flex items-center">
+                        <i class="fas fa-check-circle mr-2"></i>
+                        <span id="selectedMessagesCount">0</span> messages selected
+                    </div>
+                    <div class="flex space-x-2">
+                        <button id="forwardSelected" class="p-2 hover:bg-purple-700 rounded-lg" title="Forward">
+                            <i class="fas fa-share"></i>
+                        </button>
+                        <button id="starSelected" class="p-2 hover:bg-purple-700 rounded-lg" title="Star">
+                            <i class="far fa-star"></i>
+                        </button>
+                        <button id="deleteSelected" class="p-2 hover:bg-red-600 rounded-lg" title="Delete">
+                            <i class="fas fa-trash"></i>
+                        </button>
+                        <button id="cancelSelection" class="p-2 hover:bg-purple-700 rounded-lg" title="Cancel">
+                            <i class="fas fa-times"></i>
+                        </button>
+                    </div>
+                </div>
+
+                <!-- Reply Preview Bar -->
+                <div id="replyPreviewBar" class="hidden bg-gray-100 border-l-4 border-purple-500 p-3 mx-4 mt-2 rounded-lg">
+                    <div class="flex justify-between items-start">
+                        <div class="flex-1">
+                            <div class="text-sm text-gray-500 flex items-center">
+                                <i class="fas fa-reply mr-1"></i>
+                                Replying to <span id="replyToName" class="font-medium ml-1"></span>
+                            </div>
+                            <div id="replyPreviewContent" class="text-sm truncate"></div>
+                        </div>
+                        <button id="cancelReply" class="text-gray-500 hover:text-gray-700">
+                            <i class="fas fa-times"></i>
+                        </button>
+                    </div>
+                </div>
+
                 <!-- Messages Area -->
                 <div id="messagesContainer" class="flex-1 overflow-y-auto p-4 custom-scrollbar relative">
                     <div id="noMessagesMessage" class="text-center text-gray-500 py-10">
@@ -467,7 +505,7 @@
                         <div class="flex-1 relative">
                             <input type="text" id="messageInput" class="w-full bg-gray-100 py-3 px-4 rounded-2xl focus:outline-none focus:ring-2 focus:ring-purple-500 focus:bg-white transition-all" placeholder="Type a message..." disabled>
                             <!-- Emoji Picker -->
-                            <div id="emojiPicker" class="emoji-picker">
+                            <div id="emojiPicker" class="emoji-picker hidden absolute bottom-full mb-2 bg-white border border-gray-300 rounded-lg shadow-lg p-2 grid grid-cols-8 gap-1 max-h-48 overflow-y-auto">
                             </div>
                             <!-- Typing Indicator -->
                             <div id="isTyping" class="absolute -top-6 left-0 text-xs text-gray-500 hidden">
@@ -696,6 +734,18 @@
                 <i class="fas fa-music text-xl mb-2"></i>
                 <p>Audio</p>
             </div>
+            <div class="status-option" data-type="gif">
+                <i class="fas fa-film text-xl mb-2"></i>
+                <p>GIF</p>
+            </div>
+            <div class="status-option" data-type="sticker">
+                <i class="fas fa-sticky-note text-xl mb-2"></i>
+                <p>Sticker</p>
+            </div>
+            <div class="status-option" data-type="location">
+                <i class="fas fa-map-marker-alt text-xl mb-2"></i>
+                <p>Location</p>
+            </div>
         </div>
         
         <div class="status-previews p-4">
@@ -709,9 +759,33 @@
             
             <!-- Text Preview -->
             <div id="textPreview" class="status-preview hidden">
+                <div class="mb-4">
+                    <label class="block text-sm font-medium text-gray-700 mb-2">Background Color</label>
+                    <div class="flex flex-wrap gap-2">
+                        <div class="w-8 h-8 rounded-full bg-gradient-to-r from-purple-400 to-purple-600 cursor-pointer" data-color="purple"></div>
+                        <div class="w-8 h-8 rounded-full bg-gradient-to-r from-blue-400 to-blue-600 cursor-pointer" data-color="blue"></div>
+                        <div class="w-8 h-8 rounded-full bg-gradient-to-r from-green-400 to-green-600 cursor-pointer" data-color="green"></div>
+                        <div class="w-8 h-8 rounded-full bg-gradient-to-r from-red-400 to-red-600 cursor-pointer" data-color="red"></div>
+                        <div class="w-8 h-8 rounded-full bg-gradient-to-r from-yellow-400 to-yellow-600 cursor-pointer" data-color="yellow"></div>
+                        <div class="w-8 h-8 rounded-full bg-gradient-to-r from-pink-400 to-pink-600 cursor-pointer" data-color="pink"></div>
+                        <input type="color" id="customColor" class="w-8 h-8 cursor-pointer">
+                    </div>
+                </div>
+                <div class="mb-4">
+                    <label class="block text-sm font-medium text-gray-700 mb-2">Text Style</label>
+                    <div class="flex space-x-3">
+                        <select id="textFont" class="flex-1 p-2 border rounded-lg">
+                            <option value="Arial">Arial</option>
+                            <option value="Helvetica">Helvetica</option>
+                            <option value="Courier New">Courier New</option>
+                            <option value="Georgia">Georgia</option>
+                        </select>
+                        <input type="range" id="textSize" min="16" max="72" value="24" class="flex-1">
+                    </div>
+                </div>
                 <textarea 
                     id="statusTextInput" 
-                    class="w-full p-4 border border-gray-300 rounded-xl resize-none focus:border-purple-500 focus:ring-1 focus:ring-purple-500" 
+                    class="w-full p-4 border border-gray-300 rounded-xl resize-none focus:border-purple-500 focus:ring-1 focus:ring-purple-500 text-center text-2xl" 
                     placeholder="What's on your mind?"
                     rows="4"
                 ></textarea>
@@ -837,50 +911,6 @@
     </div>
 </div>
                 
-                <!-- Action Buttons -->
-                <div class="status-actions flex justify-around py-4 border-b">
-                    <button id="likeBtn" class="flex items-center space-x-2 text-gray-600 hover:text-red-500 transition-colors">
-                        <i class="far fa-heart text-xl"></i>
-                        <span>Like</span>
-                    </button>
-                    <button id="reactionBtn" class="flex items-center space-x-2 text-gray-600 hover:text-yellow-500 transition-colors">
-                        <i class="far fa-smile text-xl"></i>
-                        <span>React</span>
-                    </button>
-                    <button id="shareBtn" class="flex items-center space-x-2 text-gray-600 hover:text-green-500 transition-colors">
-                        <i class="far fa-share-square text-xl"></i>
-                        <span>Share</span>
-                    </button>
-                    <button id="viewReactionsBtn" class="flex items-center space-x-2 text-gray-600 hover:text-purple-500 transition-colors">
-                        <i class="far fa-thumbs-up text-xl"></i>
-                        <span>Reactions</span>
-                    </button>
-                    
-                    <!-- Mute Status Button - Added here -->
-                    <button id="muteStatusBtn" class="flex items-center space-x-2 text-gray-600 hover:text-yellow-500 transition-colors">
-                        <i class="fas fa-volume-mute text-xl"></i>
-                        <span>Mute</span>
-                    </button>
-                </div>
-                
-                <!-- Quick Reactions -->
-                <div id="quickReactions" class="flex justify-center space-x-4 py-3 hidden">
-                    <button class="quick-reaction text-2xl hover:scale-125 transition-transform" data-emoji="👍">👍</button>
-                    <button class="quick-reaction text-2xl hover:scale-125 transition-transform" data-emoji="❤️">❤️</button>
-                    <button class="quick-reaction text-2xl hover:scale-125 transition-transform" data-emoji="😂">😂</button>
-                    <button class="quick-reaction text-2xl hover:scale-125 transition-transform" data-emoji="😮">😮</button>
-                    <button class="quick-reaction text-2xl hover:scale-125 transition-transform" data-emoji="😢">😢</button>
-                    <button class="quick-reaction text-2xl hover:scale-125 transition-transform" data-emoji="🎉">🎉</button>
-                </div>
-            </div>
-            
-            <div class="status-footer p-4 border-t">
-                <button id="viewViewersBtn" class="w-full text-center text-purple-600 hover:text-purple-800 py-2">
-                    <i class="fas fa-users mr-2"></i>View All Viewers and Reactions
-                </button>
-            </div>
-        </div>
-    </div>
 
     <!-- Enhanced Viewers & Reactions Modal -->
     <div id="enhancedViewersModal" class="fixed inset-0 bg-black bg-opacity-90 z-60 flex items-center justify-center hidden">
@@ -2139,17 +2169,78 @@
         </div>
     </div>
 
-    <!-- Reaction Picker (Dynamic) -->
-    <div id="reactionPicker" class="reaction-picker hidden">
-        <div class="reaction-option" data-reaction="👍">👍</div>
-        <div class="reaction-option" data-reaction="❤️">❤️</div>
-        <div class="reaction-option" data-reaction="😂">😂</div>
-        <div class="reaction-option" data-reaction="😮">😮</div>
-        <div class="reaction-option" data-reaction="😢">😢</div>
-        <div class="reaction-option" data-reaction="🎉">🎉</div>
+    <!-- Enhanced Group Info Modal -->
+    <div id="enhancedGroupInfoModal" class="hidden fixed inset-0 bg-black bg-opacity-50 z-50 flex items-center justify-center p-4">
+        <div class="bg-white rounded-2xl w-full max-w-md max-h-[90vh] overflow-hidden">
+            <div class="kynecta-header p-6">
+                <div class="flex items-center justify-between">
+                    <h3 class="text-xl font-semibold text-white">Group Info</h3>
+                    <button id="closeEnhancedGroupInfo" class="text-white/80 hover:text-white transition-colors">
+                        <i class="fas fa-times text-xl"></i>
+                    </button>
+                </div>
+            </div>
+            
+            <div class="overflow-y-auto max-h-[60vh] custom-scrollbar p-6">
+                <div class="text-center mb-6">
+                    <div class="w-20 h-20 rounded-full bg-gradient-to-r from-purple-500 to-green-500 flex items-center justify-center text-white text-2xl font-bold mx-auto mb-4">
+                        <i class="fas fa-users"></i>
+                    </div>
+                    <h3 id="enhancedGroupName" class="text-xl font-semibold mb-2"></h3>
+                    <div class="flex items-center justify-center space-x-2">
+                        <span class="text-sm text-gray-500" id="enhancedGroupMembersCount">0 members</span>
+                        <span class="text-xs bg-purple-100 text-purple-800 px-2 py-1 rounded-full flex items-center">
+                            <i class="fas fa-lock mr-1"></i> End-to-end encrypted
+                        </span>
+                    </div>
+                </div>
+                
+                <div class="space-y-4">
+                    <div>
+                        <h4 class="font-semibold mb-3 text-gray-800">Group Settings</h4>
+                        <div class="space-y-3">
+                            <div class="flex justify-between items-center">
+                                <div>
+                                    <p class="font-medium">Send Messages</p>
+                                    <p class="text-sm text-gray-500">Who can send messages</p>
+                                </div>
+                                <select id="groupSendMessages" class="p-2 border border-gray-300 rounded-lg">
+                                    <option value="all">All participants</option>
+                                    <option value="admins">Admins only</option>
+                                </select>
+                            </div>
+                            
+                            <div class="flex justify-between items-center">
+                                <div>
+                                    <p class="font-medium">Edit Group Info</p>
+                                    <p class="text-sm text-gray-500">Who can edit group info</p>
+                                </div>
+                                <select id="groupEditInfo" class="p-2 border border-gray-300 rounded-lg">
+                                    <option value="all">All participants</option>
+                                    <option value="admins">Admins only</option>
+                                </select>
+                            </div>
+                        </div>
+                    </div>
+                    
+                    <div>
+                        <h4 class="font-semibold mb-3 text-gray-800">Invite Link</h4>
+                        <div class="flex items-center space-x-2">
+                            <input type="text" id="groupInviteLink" class="flex-1 p-2 border border-gray-300 rounded-lg" readonly>
+                            <button id="copyInviteLink" class="p-2 bg-purple-600 text-white rounded-lg hover:bg-purple-700">
+                                <i class="fas fa-copy"></i>
+                            </button>
+                            <button id="refreshInviteLink" class="p-2 bg-gray-200 text-gray-700 rounded-lg hover:bg-gray-300">
+                                <i class="fas fa-redo"></i>
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
     </div>
 
-    <!-- Group Creation Modal -->
+    <!-- Group Creation Modal with Enhanced Settings -->
     <div id="createGroupModal" class="hidden fixed inset-0 bg-black bg-opacity-50 z-50 flex items-center justify-center p-4">
         <div class="bg-white rounded-2xl w-full max-w-md max-h-[90vh] overflow-hidden">
             <div class="kynecta-header p-6">
@@ -2179,12 +2270,21 @@
                     </div>
                 </div>
                 
-                <div class="mb-6">
-                    <label class="block text-sm font-medium text-gray-700 mb-2">Group Privacy</label>
-                    <select id="groupPrivacy" class="w-full p-3 border-2 border-gray-200 rounded-xl focus:outline-none focus:border-purple-500 transition-colors">
-                        <option value="public">Public - Anyone can join</option>
-                        <option value="private">Private - Invite only</option>
-                    </select>
+                <div class="mb-6 space-y-3">
+                    <label class="flex items-center">
+                        <input type="checkbox" id="groupAdminsOnlySend" class="rounded border-gray-300 text-purple-600 focus:ring-purple-500">
+                        <span class="ml-2 text-sm text-gray-700">Only admins can send messages</span>
+                    </label>
+                    
+                    <label class="flex items-center">
+                        <input type="checkbox" id="groupAdminsOnlyEdit" class="rounded border-gray-300 text-purple-600 focus:ring-purple-500">
+                        <span class="ml-2 text-sm text-gray-700">Only admins can edit group info</span>
+                    </label>
+                    
+                    <label class="flex items-center">
+                        <input type="checkbox" id="groupEnableEncryption" class="rounded border-gray-300 text-purple-600 focus:ring-purple-500" checked>
+                        <span class="ml-2 text-sm text-gray-700">Enable end-to-end encryption</span>
+                    </label>
                 </div>
                 
                 <div class="flex space-x-3">
@@ -2197,6 +2297,246 @@
                 </div>
             </div>
         </div>
+    </div>
+
+    <!-- Group Media Gallery Modal -->
+    <div id="groupMediaGalleryModal" class="hidden fixed inset-0 bg-black bg-opacity-50 z-50 flex items-center justify-center p-4">
+        <div class="bg-white rounded-2xl w-full max-w-4xl max-h-[90vh] overflow-hidden">
+            <div class="kynecta-header p-6">
+                <div class="flex items-center justify-between">
+                    <h3 class="text-xl font-semibold text-white">Group Media Gallery</h3>
+                    <button id="closeGroupMediaGallery" class="text-white/80 hover:text-white transition-colors">
+                        <i class="fas fa-times text-xl"></i>
+                    </button>
+                </div>
+            </div>
+            
+            <div class="p-4 border-b">
+                <div class="flex space-x-2">
+                    <button class="filter-btn active px-4 py-2 bg-purple-600 text-white rounded-lg" data-filter="all">All Media</button>
+                    <button class="filter-btn px-4 py-2 bg-gray-200 text-gray-700 rounded-lg hover:bg-gray-300" data-filter="images">Images</button>
+                    <button class="filter-btn px-4 py-2 bg-gray-200 text-gray-700 rounded-lg hover:bg-gray-300" data-filter="videos">Videos</button>
+                    <button class="filter-btn px-4 py-2 bg-gray-200 text-gray-700 rounded-lg hover:bg-gray-300" data-filter="documents">Documents</button>
+                </div>
+            </div>
+            
+            <div class="overflow-y-auto max-h-[60vh] custom-scrollbar p-6">
+                <div id="mediaGalleryGrid" class="grid grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-4">
+                    <!-- Media items will be populated here -->
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Starred Messages Modal -->
+    <div id="starredMessagesModal" class="hidden fixed inset-0 bg-black bg-opacity-50 z-50 flex items-center justify-center p-4">
+        <div class="bg-white rounded-2xl w-full max-w-2xl max-h-[90vh] overflow-hidden">
+            <div class="kynecta-header p-6">
+                <div class="flex items-center justify-between">
+                    <h3 class="text-xl font-semibold text-white">Starred Messages</h3>
+                    <button id="closeStarredMessages" class="text-white/80 hover:text-white transition-colors">
+                        <i class="fas fa-times text-xl"></i>
+                    </button>
+                </div>
+            </div>
+            
+            <div class="overflow-y-auto max-h-[60vh] custom-scrollbar p-6">
+                <div id="starredMessagesList" class="space-y-4">
+                    <!-- Starred messages will be listed here -->
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Search in Group Modal -->
+    <div id="searchGroupModal" class="hidden fixed inset-0 bg-black bg-opacity-50 z-50 flex items-center justify-center p-4">
+        <div class="bg-white rounded-2xl w-full max-w-md max-h-[90vh] overflow-hidden">
+            <div class="kynecta-header p-6">
+                <div class="flex items-center justify-between">
+                    <h3 class="text-xl font-semibold text-white">Search in Group</h3>
+                    <button id="closeSearchGroup" class="text-white/80 hover:text-white transition-colors">
+                        <i class="fas fa-times text-xl"></i>
+                    </button>
+                </div>
+            </div>
+            
+            <div class="p-6">
+                <div class="mb-4">
+                    <div class="relative">
+                        <div class="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
+                            <i class="fas fa-search text-gray-400"></i>
+                        </div>
+                        <input type="text" id="groupSearchInput" class="w-full bg-gray-100 rounded-xl py-3 pl-10 pr-4 focus:outline-none focus:ring-2 focus:ring-purple-500 focus:bg-white transition-all" placeholder="Search messages...">
+                    </div>
+                </div>
+                
+                <div id="groupSearchResults" class="max-h-80 overflow-y-auto">
+                    <!-- Search results will be listed here -->
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Forward Message Modal -->
+    <div id="forwardMessageModal" class="hidden fixed inset-0 bg-black bg-opacity-50 z-50 flex items-center justify-center p-4">
+        <div class="bg-white rounded-2xl w-full max-w-md max-h-[90vh] overflow-hidden">
+            <div class="kynecta-header p-6">
+                <div class="flex items-center justify-between">
+                    <h3 class="text-xl font-semibold text-white">Forward Message</h3>
+                    <button id="closeForwardMessage" class="text-white/80 hover:text-white transition-colors">
+                        <i class="fas fa-times text-xl"></i>
+                    </button>
+                </div>
+            </div>
+            
+            <div class="p-6">
+                <div class="mb-4">
+                    <div class="relative">
+                        <div class="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
+                            <i class="fas fa-search text-gray-400"></i>
+                        </div>
+                        <input type="text" id="forwardSearchInput" class="w-full bg-gray-100 rounded-xl py-3 pl-10 pr-4 focus:outline-none focus:ring-2 focus:ring-purple-500 focus:bg-white transition-all" placeholder="Search chats or groups...">
+                    </div>
+                </div>
+                
+                <div id="forwardTargetsList" class="max-h-80 overflow-y-auto">
+                    <!-- Forward targets will be listed here -->
+                </div>
+                
+                <div class="mt-4">
+                    <button id="forwardSelectedBtn" class="w-full py-3 bg-gradient-to-r from-purple-500 to-green-500 text-white rounded-xl font-semibold hover:opacity-90 transition-opacity">
+                        Forward (<span id="forwardCount">0</span>)
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Manage Admins Modal -->
+    <div id="manageAdminsModal" class="hidden fixed inset-0 bg-black bg-opacity-50 z-50 flex items-center justify-center p-4">
+        <div class="bg-white rounded-2xl w-full max-w-md max-h-[90vh] overflow-hidden">
+            <div class="kynecta-header p-6">
+                <div class="flex items-center justify-between">
+                    <h3 class="text-xl font-semibold text-white">Manage Admins</h3>
+                    <button id="closeManageAdmins" class="text-white/80 hover:text-white transition-colors">
+                        <i class="fas fa-times text-xl"></i>
+                    </button>
+                </div>
+            </div>
+            
+            <div class="p-6">
+                <div class="mb-4">
+                    <div class="relative">
+                        <div class="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
+                            <i class="fas fa-search text-gray-400"></i>
+                        </div>
+                        <input type="text" id="adminSearchInput" class="w-full bg-gray-100 rounded-xl py-3 pl-10 pr-4 focus:outline-none focus:ring-2 focus:ring-purple-500 focus:bg-white transition-all" placeholder="Search participants...">
+                    </div>
+                </div>
+                
+                <div id="adminList" class="max-h-80 overflow-y-auto">
+                    <!-- Admin list will be populated here -->
+                </div>
+                
+                <div class="mt-4">
+                    <button id="saveAdmins" class="w-full py-3 bg-gradient-to-r from-purple-500 to-green-500 text-white rounded-xl font-semibold hover:opacity-90 transition-opacity">
+                        Save Changes
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Context Menu (Message) -->
+    <div id="messageContextMenu" class="hidden fixed bg-white rounded-lg shadow-lg border border-gray-200 z-50 py-2 min-w-48">
+        <div class="context-menu-item" data-action="reply">
+            <i class="fas fa-reply mr-2 text-gray-500"></i>
+            <span>Reply</span>
+        </div>
+        <div class="context-menu-item" data-action="forward">
+            <i class="fas fa-share mr-2 text-gray-500"></i>
+            <span>Forward</span>
+        </div>
+        <div class="context-menu-item" data-action="star">
+            <i class="far fa-star mr-2 text-gray-500"></i>
+            <span>Star</span>
+        </div>
+        <div class="context-menu-item" data-action="copy">
+            <i class="fas fa-copy mr-2 text-gray-500"></i>
+            <span>Copy</span>
+        </div>
+        <div class="context-menu-item" data-action="select">
+            <i class="fas fa-check-square mr-2 text-gray-500"></i>
+            <span>Select</span>
+        </div>
+        <div class="border-t border-gray-200 my-1"></div>
+        <div class="context-menu-item" data-action="delete-for-me">
+            <i class="fas fa-trash mr-2 text-gray-500"></i>
+            <span>Delete for me</span>
+        </div>
+        <div class="context-menu-item" data-action="delete-for-everyone">
+            <i class="fas fa-trash-alt mr-2 text-gray-500"></i>
+            <span>Delete for everyone</span>
+        </div>
+        <div class="context-menu-item" data-action="report">
+            <i class="fas fa-flag mr-2 text-gray-500"></i>
+            <span>Report</span>
+        </div>
+    </div>
+
+    <!-- Context Menu (Group List) -->
+    <div id="groupListContextMenu" class="hidden fixed bg-white rounded-lg shadow-lg border border-gray-200 z-50 py-2 min-w-48">
+        <div class="context-menu-item" data-action="open-group">
+            <i class="fas fa-comments mr-2 text-gray-500"></i>
+            <span>Open group</span>
+        </div>
+        <div class="context-menu-item" data-action="mute-group">
+            <i class="fas fa-bell-slash mr-2 text-gray-500"></i>
+            <span>Mute group</span>
+        </div>
+        <div class="context-menu-item" data-action="mark-as-read">
+            <i class="fas fa-check-double mr-2 text-gray-500"></i>
+            <span>Mark as read</span>
+        </div>
+        <div class="border-t border-gray-200 my-1"></div>
+        <div class="context-menu-item text-red-600" data-action="leave-group">
+            <i class="fas fa-sign-out-alt mr-2"></i>
+            <span>Leave group</span>
+        </div>
+    </div>
+
+    <!-- Enhanced File Upload Preview -->
+    <div id="enhancedFilePreview" class="hidden fixed inset-0 bg-black bg-opacity-75 z-50 flex items-center justify-center p-4">
+        <div class="bg-white rounded-2xl w-full max-w-2xl max-h-[90vh] overflow-hidden">
+            <div class="kynecta-header p-6 flex justify-between items-center">
+                <h3 class="text-xl font-semibold text-white">File Preview</h3>
+                <button id="closeEnhancedFilePreview" class="text-white/80 hover:text-white">
+                    <i class="fas fa-times text-xl"></i>
+                </button>
+            </div>
+            
+            <div class="p-6">
+                <div id="filePreviewContent" class="flex items-center justify-center min-h-64">
+                    <!-- Content will be dynamically loaded -->
+                </div>
+                
+                <div class="mt-4">
+                    <button id="downloadFileBtn" class="w-full py-3 bg-gradient-to-r from-purple-500 to-green-500 text-white rounded-xl font-semibold hover:opacity-90 transition-opacity">
+                        <i class="fas fa-download mr-2"></i>Download File
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Reaction Picker (Dynamic) -->
+    <div id="reactionPicker" class="reaction-picker hidden">
+        <div class="reaction-option" data-reaction="👍">👍</div>
+        <div class="reaction-option" data-reaction="❤️">❤️</div>
+        <div class="reaction-option" data-reaction="😂">😂</div>
+        <div class="reaction-option" data-reaction="😮">😮</div>
+        <div class="reaction-option" data-reaction="😢">😢</div>
+        <div class="reaction-option" data-reaction="🎉">🎉</div>
     </div>
 
     <!-- Group Join Modal -->
@@ -2326,6 +2666,12 @@
                 <li>• Quick Actions</li>
                 <li>• Cloud Chat Backup</li>
                 <li>• Real-time Typing Indicator</li>
+                <li>• Enhanced Group Features</li>
+                <li>• Advanced Status Features</li>
+                <li>• End-to-End Encryption</li>
+                <li>• Media Gallery</li>
+                <li>• Starred Messages</li>
+                <li>• Message Forwarding</li>
             </ul>
             <button class="w-full mt-6 bg-purple-600 text-white p-3 rounded-xl" id="closeFeatures">
                 Close

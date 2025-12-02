@@ -302,7 +302,7 @@ function initApp() {
             loadUserData();
         } else {
             // User signed out
-            window.location.href = 'login.html';
+            window.location.href = 'index.html';
         }
     });
 }
@@ -3968,7 +3968,7 @@ if (groupsBtn) {
             if (confirm('Are you sure you want to log out?')) {
                 console.log('Logging out user');
                 auth.signOut().then(() => {
-                    window.location.href = 'login.html';
+                    window.location.href = 'index.html';
                 }).catch(error => {
                     console.error('Error signing out:', error);
                     showToast('Error signing out', 'error');
@@ -5446,7 +5446,7 @@ async function deleteAccount() {
         await currentUser.delete();
         
         showToast("Account deleted successfully", "success");
-        window.location.href = 'login.html';
+        window.location.href = 'index.html';
         
     } catch (error) {
         console.error("Error deleting account:", error);
@@ -5579,48 +5579,6 @@ function downloadQRCode() {
     link.href = canvas.toDataURL('image/png');
     link.click();
     showToast("QR Code downloaded!", "success");
-}
-// REPLACE THIS:
-function setupCopyLink() {
-    const copyLinkBtn = document.getElementById("copyInviteLink");
-    
-    if (!copyLinkBtn) return;
-    
-    copyLinkBtn.addEventListener("click", async function() {
-        const inviteLink = `https://kynecta.com/invite/${currentUser?.uid || 'user'}`;
-        
-        try {
-            // Method 1: Modern clipboard API (preferred)
-            if (navigator.clipboard && window.isSecureContext) {
-                await navigator.clipboard.writeText(inviteLink);
-                showToast("✅ Invite link copied to clipboard!", "success");
-                return;
-            }
-            
-            // Method 2: Legacy execCommand approach
-            const textArea = document.createElement("textarea");
-            textArea.value = inviteLink;
-            textArea.style.position = "fixed";
-            textArea.style.opacity = "0";
-            document.body.appendChild(textArea);
-            textArea.focus();
-            textArea.select();
-            
-            const successful = document.execCommand('copy');
-            document.body.removeChild(textArea);
-            
-            if (successful) {
-                showToast("✅ Invite link copied to clipboard!", "success");
-            } else {
-                throw new Error('execCommand failed');
-            }
-            
-        } catch (error) {
-            console.error("Copy failed:", error);
-            // Show manual copy option
-            showManualCopyOption(inviteLink);
-        }
-    });
 }
 
 // WITH THIS:

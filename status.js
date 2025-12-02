@@ -11,13 +11,49 @@ let statusProgressInterval = null;
 let currentStatusIndex = 0;
 let statusViewerTimeout = null;
 let emojiPickerOpen = false;
+let statusDrafts = [];
+let statusHighlights = [];
+let statusArchive = [];
 
 // User Status Preferences
 window.statusPreferences = {
-    privacy: 'myContacts', // myContacts, selectedContacts, everyone
+    privacy: 'myContacts', // myContacts, selectedContacts, everyone, contactsExcept, hideFrom
     mutedUsers: [],
     recentViews: [],
-    blockedFromViewing: []
+    blockedFromViewing: [],
+    hideFromUsers: [],
+    contactsExcept: [],
+    readReceipts: true,
+    allowReplies: true,
+    autoDownload: true,
+    screenshotAlerts: true,
+    contentBlur: false,
+    saveToGallery: false,
+    showMusicInfo: true,
+    awayMessage: ''
+};
+
+// Status creation draft
+window.statusDraft = {
+    type: 'text',
+    content: '',
+    caption: '',
+    background: 'default',
+    font: 'default',
+    color: '#000000',
+    stickers: [],
+    gifs: [],
+    drawings: [],
+    overlays: [],
+    mentions: [],
+    location: null,
+    music: null,
+    linkPreview: null,
+    scheduleTime: null,
+    privacy: 'myContacts',
+    selectedContacts: [],
+    hideFrom: [],
+    exceptContacts: []
 };
 
 // Initialize Status System
@@ -42,6 +78,13 @@ function initStatusSystem() {
     // Start status expiration checker
     startStatusExpirationChecker();
     
+    // Load drafts and highlights
+    loadStatusDrafts();
+    loadStatusHighlights();
+    
+    // Start background processing
+    startBackgroundProcessing();
+    
     console.log('✅ Status system initialized successfully');
 }
 
@@ -57,9 +100,19 @@ async function loadStatusPreferences() {
                 mutedUsers: userData.mutedStatusUsers || [],
                 recentViews: userData.recentStatusViews || [],
                 blockedFromViewing: userData.blockedFromStatus || [],
+                hideFromUsers: userData.hideStatusFrom || [],
+                contactsExcept: userData.contactsExcept || [],
                 readReceipts: userData.statusReadReceipts !== false,
                 allowReplies: userData.allowStatusReplies !== false,
-                autoDownload: userData.autoDownloadStatus !== false
+                autoDownload: userData.autoDownloadStatus !== false,
+                screenshotAlerts: userData.screenshotAlerts !== false,
+                contentBlur: userData.contentBlur || false,
+                saveToGallery: userData.saveStatusToGallery || false,
+                showMusicInfo: userData.showMusicInfo !== false,
+                awayMessage: userData.statusAwayMessage || '',
+                businessCTAs: userData.businessCTAs || [],
+                linkInBio: userData.linkInBio || '',
+                quickReplies: userData.quickReplies || []
             };
         }
     } catch (error) {
@@ -67,7 +120,7 @@ async function loadStatusPreferences() {
     }
 }
 
-async function updateStatusPrivacy(privacy, selectedContacts = []) {
+async function updateStatusPrivacy(privacy, selectedContacts = [], hideFrom = [], exceptContacts = []) {
     try {
         const updates = {
             statusPrivacy: privacy,
@@ -76,6 +129,10 @@ async function updateStatusPrivacy(privacy, selectedContacts = []) {
         
         if (privacy === 'selectedContacts') {
             updates.statusSelectedContacts = selectedContacts;
+        } else if (privacy === 'contactsExcept') {
+            updates.contactsExcept = exceptContacts;
+        } else if (privacy === 'hideFrom') {
+            updates.hideStatusFrom = hideFrom;
         }
         
         await db.collection('users').doc(currentUser.uid).update(updates);
@@ -83,6 +140,10 @@ async function updateStatusPrivacy(privacy, selectedContacts = []) {
         window.statusPreferences.privacy = privacy;
         if (privacy === 'selectedContacts') {
             window.statusPreferences.selectedContacts = selectedContacts;
+        } else if (privacy === 'contactsExcept') {
+            window.statusPreferences.contactsExcept = exceptContacts;
+        } else if (privacy === 'hideFrom') {
+            window.statusPreferences.hideFromUsers = hideFrom;
         }
         
         showToast(`Status privacy updated to ${getPrivacyLabel(privacy)}`, 'success');
@@ -96,7 +157,9 @@ function getPrivacyLabel(privacy) {
     const labels = {
         'myContacts': 'My contacts',
         'selectedContacts': 'Selected contacts',
-        'everyone': 'Everyone'
+        'everyone': 'Everyone',
+        'contactsExcept': 'Contacts except...',
+        'hideFrom': 'Hide from...'
     };
     return labels[privacy] || privacy;
 }
@@ -139,6 +202,27 @@ async function removeExpiredStatuses() {
         }
     } catch (error) {
         console.error('Error removing expired statuses:', error);
+    }
+}
+
+async function updateStatusRemainingTimes() {
+    try {
+        // This function updates UI with remaining time for statuses
+        const statusItems = document.querySelectorAll('.status-item');
+        
+        statusItems.forEach(item => {
+            const timeElement = item.querySelector('.status-time');
+            const statusId = item.dataset.statusId;
+            
+            if (timeElement && statusId) {
+                // For demo purposes, we'll just update the text
+                // In a real implementation, you would fetch the status data
+                // and calculate remaining time
+                timeElement.textContent = 'Active';
+            }
+        });
+    } catch (error) {
+        console.error('Error updating remaining times:', error);
     }
 }
 
@@ -194,7 +278,7 @@ function startRealTimeStatusUpdates() {
         db.collection('statuses')
             .where('userId', 'in', contactIds)
             .where('expiresAt', '>', new Date())
-            .orderBy('expiresAt', 'desc')
+            .orderBy('expiresAt', 'desc')  // Already correct
             .limit(20)
             .onSnapshot(snapshot => {
                 snapshot.docChanges().forEach(change => {
@@ -309,7 +393,7 @@ async function loadMyStatuses() {
         const snapshot = await db.collection('statuses')
             .where('userId', '==', currentUser.uid)
             .where('expiresAt', '>', new Date())
-            .orderBy('timestamp', 'desc')
+            .orderBy('expiresAt')  // Changed from 'timestamp' to 'expiresAt'
             .limit(10)
             .get();
         
@@ -323,7 +407,6 @@ async function loadMyStatuses() {
         return [];
     }
 }
-
 async function loadRecentStatuses() {
     const contactIds = getContactIds();
     if (contactIds.length === 0) return [];
@@ -341,7 +424,7 @@ async function loadRecentStatuses() {
             const snapshot = await db.collection('statuses')
                 .where('userId', 'in', batch)
                 .where('expiresAt', '>', now)
-                .orderBy('timestamp', 'desc')
+                .orderBy('expiresAt')  // Changed from 'timestamp' to 'expiresAt'
                 .limit(5)
                 .get();
             
@@ -354,7 +437,7 @@ async function loadRecentStatuses() {
                 
                 // Check if already viewed
                 db.collection('statusViews')
-                    .where('statusId', '==', doc.id)
+                    .where('statusId', '==', doc.id) 
                     .where('userId', '==', currentUser.uid)
                     .limit(1)
                     .get()
@@ -518,6 +601,8 @@ function createStatusItem(userData) {
     const statusItem = document.createElement('div');
     statusItem.className = 'status-item';
     statusItem.dataset.userId = userData.user.id;
+        statusItem.dataset.statusId = userData.statuses[0]?.id || '';
+
     
     const latestStatus = userData.statuses[0];
     const statusCount = userData.statuses.length;
@@ -678,6 +763,22 @@ function showStatusAtIndex(index) {
                 <button class="nav-btn next-btn" onclick="showNextStatus()">
                     <i class="fas fa-chevron-right"></i>
                 </button>
+                
+                <!-- Playback controls for media -->
+                ${status.type === 'video' || status.type === 'audio' ? `
+                    <div class="media-controls">
+                        <button class="play-pause-btn" onclick="toggleMediaPlayback()">
+                            <i class="fas fa-play"></i>
+                        </button>
+                        <div class="progress-slider">
+                            <input type="range" min="0" max="100" value="0" class="media-progress">
+                        </div>
+                        <button class="volume-btn" onclick="toggleVolume()">
+                            <i class="fas fa-volume-up"></i>
+                        </button>
+                        <input type="range" min="0" max="100" value="100" class="volume-slider">
+                    </div>
+                ` : ''}
             </div>
             
             <!-- Footer -->
@@ -699,6 +800,9 @@ function showStatusAtIndex(index) {
                            placeholder="Reply..." 
                            id="statusReplyInput"
                            onkeypress="handleReplyKeypress(event, '${status.id}')">
+                    <button class="btn-attach" onclick="openMediaReply('${status.id}')">
+                        <i class="fas fa-paperclip"></i>
+                    </button>
                     <button class="btn-send-reply" onclick="sendStatusReply('${status.id}')">
                         <i class="fas fa-paper-plane"></i>
                     </button>
@@ -718,6 +822,9 @@ function showStatusAtIndex(index) {
                     <button class="btn-action" onclick="showStatusReactions('${status.id}')" title="Reactions">
                         <i class="far fa-smile"></i>
                     </button>
+                    <button class="btn-action" onclick="saveStatus('${status.id}')" title="Save">
+                        <i class="far fa-bookmark"></i>
+                    </button>
                     <button class="btn-action" onclick="showViewersList('${status.id}')" title="Viewers">
                         <i class="far fa-eye"></i>
                         <span id="viewCount-${status.id}" class="view-count">${status.viewCount || 0}</span>
@@ -736,8 +843,20 @@ function showStatusAtIndex(index) {
                         <button class="btn-action" onclick="messageUser('${status.userId}')" title="Message">
                             <i class="fas fa-comment"></i>
                         </button>
+                        <button class="btn-action" onclick="reportStatus('${status.id}')" title="Report">
+                            <i class="fas fa-flag"></i>
+                        </button>
                     `}
                 </div>
+                
+                <!-- Business CTA -->
+                ${status.businessCTA ? `
+                    <div class="business-cta">
+                        <button class="btn-cta" onclick="${status.businessCTA.action}">
+                            ${status.businessCTA.text}
+                        </button>
+                    </div>
+                ` : ''}
             </div>
         </div>
         
@@ -749,6 +868,8 @@ function showStatusAtIndex(index) {
                     <button class="emoji-category" data-category="smileys">😀</button>
                     <button class="emoji-category" data-category="hearts">❤️</button>
                     <button class="emoji-category" data-category="hands">👏</button>
+                    <button class="emoji-category" data-category="animals">🐶</button>
+                    <button class="emoji-category" data-category="food">🍕</button>
                 </div>
                 <div class="emoji-grid" id="emojiGrid">
                     <!-- Emojis will be populated here -->
@@ -765,6 +886,11 @@ function showStatusAtIndex(index) {
     
     // Load real-time updates
     setupStatusRealtimeUpdates(status.id);
+    
+    // Setup media playback if needed
+    if (status.type === 'video' || status.type === 'audio') {
+        setupMediaPlayback(status);
+    }
 }
 
 function startStatusProgressTimer(status) {
@@ -869,7 +995,8 @@ async function markStatusAsViewed(statusId) {
             userId: currentUser.uid,
             userDisplayName: currentUserData?.displayName,
             userPhotoURL: currentUserData?.photoURL,
-            viewedAt: firebase.firestore.FieldValue.serverTimestamp()
+            viewedAt: firebase.firestore.FieldValue.serverTimestamp(),
+            screenshot: false // Will be updated if screenshot detected
         });
         
         // Update view count
@@ -937,11 +1064,11 @@ async function likeStatus(statusId) {
     }
 }
 
-async function sendStatusReply(statusId, replyText = null) {
+async function sendStatusReply(statusId, replyText = null, mediaReply = null) {
     const input = document.getElementById('statusReplyInput');
     const text = replyText || (input ? input.value.trim() : '');
     
-    if (!text) return;
+    if (!text && !mediaReply) return;
     
     try {
         // Get status info
@@ -955,8 +1082,8 @@ async function sendStatusReply(statusId, replyText = null) {
         
         // Create reply
         const replyData = {
-            type: 'text',
-            content: text,
+            type: mediaReply ? mediaReply.type : 'text',
+            content: mediaReply ? mediaReply.content : text,
             senderId: currentUser.uid,
             senderName: currentUserData?.displayName,
             senderPhoto: currentUserData?.photoURL,
@@ -966,7 +1093,9 @@ async function sendStatusReply(statusId, replyText = null) {
             originalStatusId: statusId,
             statusType: status.type,
             statusPreview: status.type === 'text' ? status.content.substring(0, 50) + '...' : 
-                          status.type === 'emoji' ? status.content : '📸 Status'
+                          status.type === 'emoji' ? status.content : '📸 Status',
+            mediaUrl: mediaReply ? mediaReply.url : null,
+            thumbnail: mediaReply ? mediaReply.thumbnail : null
         };
         
         // Save to messages collection
@@ -1033,6 +1162,10 @@ async function shareStatus(statusId) {
                         <i class="fas fa-external-link-alt"></i>
                         <span>Share to other app</span>
                     </button>
+                    <button class="share-option" onclick="forwardStatus('${statusId}')">
+                        <i class="fas fa-forward"></i>
+                        <span>Forward</span>
+                    </button>
                 </div>
                 <button class="btn-cancel" onclick="this.parentElement.parentElement.remove()">Cancel</button>
             </div>
@@ -1084,12 +1217,14 @@ async function shareAsMyStatus(statusId) {
 
 function setupEmojiPicker() {
     // Common emojis for quick access
-    window.commonEmojis = [
-        '😀', '😂', '🥰', '😍', '🤩', '😎', '🥳', '😇', '🤗', '👍',
-        '❤️', '🔥', '⭐', '🎉', '🙏', '👏', '💯', '🤔', '😮', '😢',
-        '😡', '🤮', '💩', '🤡', '👻', '💀', '🤖', '🎃', '🦄', '🐶',
-        '🐱', '🐼', '🦁', '🐯', '🦊', '🐰', '🐨', '🐵', '🦉', '🐣'
-    ];
+    window.commonEmojis = {
+        recent: [],
+        smileys: ['😀', '😂', '🥰', '😍', '🤩', '😎', '🥳', '😇', '🤗', '😊', '😉', '😋', '😜', '🤪', '😝', '🤑', '🤠', '😏', '😒', '😞', '😔', '😟', '😕', '🙁', '☹️', '😣', '😖', '😫', '😩', '😢', '😭', '😤', '😡', '😠', '🤬', '😈', '👿', '💀', '☠️'],
+        hearts: ['❤️', '🧡', '💛', '💚', '💙', '💜', '🖤', '💔', '❣️', '💕', '💞', '💓', '💗', '💖', '💘', '💝', '💟'],
+        hands: ['👍', '👎', '👏', '🙌', '👐', '🤲', '🤝', '🙏', '✌️', '🤞', '🤟', '🤘', '👌', '🤌', '🤏', '✊', '👊', '🤛', '🤜', '👈', '👉', '👆', '👇', '☝️', '✋', '🤚', '🖐️', '🖖', '👋', '🤙'],
+        animals: ['🐶', '🐱', '🐭', '🐹', '🐰', '🦊', '🐻', '🐼', '🐨', '🐯', '🦁', '🐮', '🐷', '🐸', '🐵', '🐔', '🐧', '🐦', '🐤', '🦆', '🦅', '🦉', '🦇', '🐺', '🐗', '🐴', '🦄'],
+        food: ['🍕', '🍔', '🍟', '🌭', '🥪', '🌮', '🌯', '🥗', '🍿', '🧂', '🥫', '🍝', '🍜', '🍲', '🍛', '🍣', '🍱', '🥟', '🍤', '🍙', '🍚', '🍘', '🍥', '🥠', '🥮', '🍢', '🍡']
+    };
 }
 
 function toggleEmojiPicker() {
@@ -1105,13 +1240,22 @@ function toggleEmojiPicker() {
     }
 }
 
-function loadEmojis() {
+function loadEmojis(category = 'smileys') {
     const emojiGrid = document.getElementById('emojiGrid');
     if (!emojiGrid) return;
     
-    emojiGrid.innerHTML = window.commonEmojis.map(emoji => `
+    const emojis = window.commonEmojis[category] || window.commonEmojis.smileys;
+    emojiGrid.innerHTML = emojis.map(emoji => `
         <button class="emoji-btn" onclick="insertEmoji('${emoji}')">${emoji}</button>
     `).join('');
+    
+    // Update active category
+    document.querySelectorAll('.emoji-category').forEach(btn => {
+        btn.classList.remove('active');
+        if (btn.dataset.category === category) {
+            btn.classList.add('active');
+        }
+    });
 }
 
 function insertEmoji(emoji) {
@@ -1132,6 +1276,7 @@ function openStatusCreation() {
         updatePrivacyIndicator();
     }
 }
+
 
 function resetStatusCreation() {
     // Reset all previews
@@ -1167,7 +1312,8 @@ function resetStatusCreation() {
     // Clear media
     window.currentStatusMedia = null;
 }
-// Add these function definitions somewhere in status.js:
+
+// ==================== MISSING FUNCTION IMPLEMENTATIONS ====================
 
 // Function 1: deleteStatus
 async function deleteStatus(statusId) {
@@ -1206,7 +1352,102 @@ function setupStatusEventListeners() {
         closeStatusBtn.addEventListener('click', closeStatusViewer);
     }
     
-    // Add other event listeners as needed...
+    // Post status button
+    const postStatusBtn = document.getElementById('postStatusBtn');
+    if (postStatusBtn) {
+        postStatusBtn.addEventListener('click', postStatus);
+    }
+    
+    // Save draft button
+    const saveDraftBtn = document.getElementById('saveDraftBtn');
+    if (saveDraftBtn) {
+        saveDraftBtn.addEventListener('click', saveStatusDraft);
+    }
+    
+    // Privacy settings button
+    const privacySettingsBtn = document.getElementById('privacySettingsBtn');
+    if (privacySettingsBtn) {
+        privacySettingsBtn.addEventListener('click', showStatusPrivacySettings);
+    }
+    
+    // Status text input real-time updates
+    const statusTextInput = document.getElementById('statusTextInput');
+    if (statusTextInput) {
+        statusTextInput.addEventListener('input', updateTextStatusPreview);
+    }
+    
+    // Status caption input
+    const statusCaption = document.getElementById('statusCaption');
+    if (statusCaption) {
+        statusCaption.addEventListener('input', updateStatusCaption);
+    }
+    
+    // Media upload button
+    const uploadMediaBtn = document.getElementById('uploadMediaBtn');
+    if (uploadMediaBtn) {
+        uploadMediaBtn.addEventListener('click', () => {
+            document.getElementById('statusMediaInput').click();
+        });
+    }
+    
+    // Background color picker
+    const bgColorPicker = document.getElementById('bgColorPicker');
+    if (bgColorPicker) {
+        bgColorPicker.addEventListener('input', updateBackgroundColor);
+    }
+    
+    // Font selector
+    const fontSelector = document.getElementById('fontSelector');
+    if (fontSelector) {
+        fontSelector.addEventListener('change', updateFontStyle);
+    }
+    
+    // Text color picker
+    const textColorPicker = document.getElementById('textColorPicker');
+    if (textColorPicker) {
+        textColorPicker.addEventListener('input', updateTextColor);
+    }
+    
+    // Add emoji button
+    const addEmojiBtn = document.getElementById('addEmojiBtn');
+    if (addEmojiBtn) {
+        addEmojiBtn.addEventListener('click', openStatusEmojiPicker);
+    }
+    
+    // Schedule button
+    const scheduleBtn = document.getElementById('scheduleBtn');
+    if (scheduleBtn) {
+        scheduleBtn.addEventListener('click', openScheduleModal);
+    }
+    
+    // Keyboard shortcuts
+    document.addEventListener('keydown', (e) => {
+        if (e.key === 'Escape' && document.getElementById('statusViewer')) {
+            closeStatusViewer();
+        }
+        if (e.key === 'ArrowRight' && currentStatusViewing) {
+            showNextStatus();
+        }
+        if (e.key === 'ArrowLeft' && currentStatusViewing) {
+            showPrevStatus();
+        }
+        // Ctrl/Cmd + Enter to post status
+        if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') {
+            const statusCreation = document.getElementById('statusCreation');
+            if (statusCreation && statusCreation.style.display !== 'none') {
+                postStatus();
+            }
+        }
+    });
+    
+    // Setup screenshot detection
+    setupScreenshotDetection();
+    
+    // Setup visibility change for background processing
+    document.addEventListener('visibilitychange', handleVisibilityChange);
+    
+    // Swipe gestures for mobile
+    setupSwipeGestures();
 }
 
 // Function 3: setupStatusFileHandlers
@@ -1225,9 +1466,1483 @@ function setupStatusFileHandlers() {
         dropZone.addEventListener('dragover', handleDragOver);
         dropZone.addEventListener('drop', handleStatusFileDrop);
     }
+    
+    // Setup drawing canvas
+    const drawCanvas = document.getElementById('drawCanvas');
+    if (drawCanvas) {
+        setupDrawingCanvas(drawCanvas);
+    }
 }
 
-// Also add these supporting functions:
+// Function 4: loadNextUserStatuses
+async function loadNextUserStatuses() {
+    if (!currentStatusViewing) return;
+    
+    try {
+        // Get all users with statuses
+        const allUsersSnapshot = await db.collection('statuses')
+            .where('expiresAt', '>', new Date())
+            .orderBy('userId')
+            .get();
+        
+        const usersWithStatuses = [...new Set(allUsersSnapshot.docs.map(doc => doc.data().userId))];
+        const currentIndex = usersWithStatuses.indexOf(currentStatusViewing.userId);
+        
+        if (currentIndex !== -1 && currentIndex < usersWithStatuses.length - 1) {
+            const nextUserId = usersWithStatuses[currentIndex + 1];
+            await loadUserStatuses(nextUserId);
+        } else {
+            closeStatusViewer();
+            showToast('No more statuses to view', 'info');
+        }
+    } catch (error) {
+        console.error('Error loading next user statuses:', error);
+        closeStatusViewer();
+    }
+}
+
+// Function 5: showViewersList
+async function showViewersList(statusId) {
+    try {
+        const viewersSnapshot = await db.collection('statusViews')
+            .where('statusId', '==', statusId)
+            .orderBy('viewedAt', 'desc')
+            .get();
+        
+        const viewersModal = document.createElement('div');
+        viewersModal.className = 'viewers-modal';
+        viewersModal.innerHTML = `
+            <div class="viewers-content">
+                <div class="viewers-header">
+                    <h3>Viewers</h3>
+                    <button class="btn-close" onclick="this.parentElement.parentElement.parentElement.remove()">
+                        <i class="fas fa-times"></i>
+                    </button>
+                </div>
+                <div class="viewers-list">
+                    ${viewersSnapshot.docs.map(doc => {
+                        const viewer = doc.data();
+                        return `
+                            <div class="viewer-item">
+                                <img src="${viewer.userPhotoURL || `https://ui-avatars.com/api/?name=${encodeURIComponent(viewer.userDisplayName)}&background=7C3AED&color=fff`}" 
+                                     class="viewer-avatar">
+                                <div class="viewer-info">
+                                    <p class="viewer-name">${viewer.userDisplayName}</p>
+                                    <p class="viewer-time">${formatTimeAgo(viewer.viewedAt)}</p>
+                                    ${viewer.screenshot ? '<span class="screenshot-indicator" title="Took screenshot"><i class="fas fa-camera"></i></span>' : ''}
+                                </div>
+                                <button class="btn-action" onclick="messageUser('${viewer.userId}')">
+                                    <i class="fas fa-comment"></i>
+                                </button>
+                            </div>
+                        `;
+                    }).join('')}
+                </div>
+            </div>
+        `;
+        
+        document.body.appendChild(viewersModal);
+    } catch (error) {
+        console.error('Error showing viewers list:', error);
+        showToast('Error loading viewers', 'error');
+    }
+}
+
+// Function 6: showReplyOptions
+function showReplyOptions(statusId) {
+    const options = document.createElement('div');
+    options.className = 'reply-options-menu';
+    options.innerHTML = `
+        <div class="reply-options">
+            <button class="reply-option" onclick="copyReplyText('${statusId}')">
+                <i class="fas fa-copy"></i>
+                <span>Copy text</span>
+            </button>
+            <button class="reply-option" onclick="saveMediaReply('${statusId}')">
+                <i class="fas fa-download"></i>
+                <span>Save media</span>
+            </button>
+            <button class="reply-option" onclick="forwardReply('${statusId}')">
+                <i class="fas fa-forward"></i>
+                <span>Forward</span>
+            </button>
+            <button class="reply-option text-danger" onclick="deleteReply('${statusId}')">
+                <i class="fas fa-trash"></i>
+                <span>Delete</span>
+            </button>
+        </div>
+    `;
+    
+    document.body.appendChild(options);
+    
+    // Position near input
+    const input = document.getElementById('statusReplyInput');
+    if (input) {
+        const rect = input.getBoundingClientRect();
+        options.style.top = `${rect.top - options.offsetHeight}px`;
+        options.style.left = `${rect.left}px`;
+    }
+    
+    // Close on outside click
+    setTimeout(() => {
+        const closeHandler = (e) => {
+            if (!options.contains(e.target) && e.target !== document.querySelector('.btn-action-reply')) {
+                options.remove();
+                document.removeEventListener('click', closeHandler);
+            }
+        };
+        document.addEventListener('click', closeHandler);
+    }, 10);
+}
+
+// Function 7: showStatusReactions
+async function showStatusReactions(statusId) {
+    const reactionPicker = document.createElement('div');
+    reactionPicker.className = 'reaction-picker';
+    reactionPicker.innerHTML = `
+        <div class="reactions-grid">
+            <button class="reaction-btn" onclick="addReaction('${statusId}', '❤️')">❤️</button>
+            <button class="reaction-btn" onclick="addReaction('${statusId}', '😂')">😂</button>
+            <button class="reaction-btn" onclick="addReaction('${statusId}', '😮')">😮</button>
+            <button class="reaction-btn" onclick="addReaction('${statusId}', '😢')">😢</button>
+            <button class="reaction-btn" onclick="addReaction('${statusId}', '😡')">😡</button>
+            <button class="reaction-btn" onclick="addReaction('${statusId}', '👍')">👍</button>
+            <button class="reaction-btn" onclick="addReaction('${statusId}', '👎')">👎</button>
+            <button class="reaction-btn" onclick="addReaction('${statusId}', '🔥')">🔥</button>
+        </div>
+    `;
+    
+    document.body.appendChild(reactionPicker);
+    
+    // Position near reaction button
+    setTimeout(() => {
+        const closeHandler = (e) => {
+            if (!reactionPicker.contains(e.target) && !e.target.closest('.btn-action[title="Reactions"]')) {
+                reactionPicker.remove();
+                document.removeEventListener('click', closeHandler);
+            }
+        };
+        document.addEventListener('click', closeHandler);
+    }, 10);
+}
+
+// Function 8: addReaction
+async function addReaction(statusId, reaction) {
+    try {
+        const reactionRef = db.collection('statusReactions').doc(`${statusId}_${currentUser.uid}`);
+        
+        await reactionRef.set({
+            statusId: statusId,
+            userId: currentUser.uid,
+            reaction: reaction,
+            timestamp: firebase.firestore.FieldValue.serverTimestamp()
+        });
+        
+        showToast(`Reacted with ${reaction}`, 'success');
+        updateReactionCount(statusId);
+        
+    } catch (error) {
+        console.error('Error adding reaction:', error);
+        showToast('Error adding reaction', 'error');
+    }
+}
+
+// Function 9: showContactSelector
+async function showContactSelector() {
+    try {
+        const contactsSnapshot = await db.collection('users')
+            .where('friends', 'array-contains', currentUser.uid)
+            .limit(50)
+            .get();
+        
+        const modal = document.createElement('div');
+        modal.className = 'contact-selector-modal';
+        modal.innerHTML = `
+            <div class="contact-selector-content">
+                <div class="selector-header">
+                    <h3>Select Contacts</h3>
+                    <input type="text" class="search-contacts" placeholder="Search contacts..." onkeyup="searchContacts(event)">
+                </div>
+                <div class="contacts-list" id="contactsList">
+                    ${contactsSnapshot.docs.map(doc => {
+                        const contact = doc.data();
+                        return `
+                            <label class="contact-item">
+                                <input type="checkbox" value="${doc.id}" 
+                                       ${window.statusPreferences.selectedContacts?.includes(doc.id) ? 'checked' : ''}>
+                                <img src="${contact.photoURL || `https://ui-avatars.com/api/?name=${encodeURIComponent(contact.displayName)}&background=7C3AED&color=fff`}" 
+                                     class="contact-avatar">
+                                <div class="contact-info">
+                                    <p class="contact-name">${contact.displayName}</p>
+                                    <p class="contact-status">${contact.status || 'Online'}</p>
+                                </div>
+                            </label>
+                        `;
+                    }).join('')}
+                </div>
+                <div class="selector-actions">
+                    <button class="btn-secondary" onclick="this.parentElement.parentElement.parentElement.remove()">Cancel</button>
+                    <button class="btn-primary" onclick="saveSelectedContacts()">Save</button>
+                </div>
+            </div>
+        `;
+        
+        document.body.appendChild(modal);
+    } catch (error) {
+        console.error('Error showing contact selector:', error);
+        showToast('Error loading contacts', 'error');
+    }
+}
+
+// Function 10: saveSelectedContacts
+async function saveSelectedContacts() {
+    const selected = Array.from(document.querySelectorAll('.contact-item input:checked'))
+        .map(input => input.value);
+    
+    await updateStatusPrivacy('selectedContacts', selected);
+    
+    // Close modal
+    document.querySelector('.contact-selector-modal')?.remove();
+}
+
+// Function 11: blockStatusUser
+async function blockStatusUser(userId) {
+    if (!confirm(`Block ${userId} from viewing your status updates?`)) return;
+    
+    try {
+        await db.collection('users').doc(currentUser.uid).update({
+            blockedFromStatus: firebase.firestore.FieldValue.arrayUnion(userId)
+        });
+        
+        window.statusPreferences.blockedFromViewing.push(userId);
+        showToast('User blocked from viewing your status', 'success');
+        
+    } catch (error) {
+        console.error('Error blocking user:', error);
+        showToast('Error blocking user', 'error');
+    }
+}
+
+// Function 12: messageUser
+function messageUser(userId) {
+    // Navigate to chat with user
+    if (window.openChat) {
+        window.openChat(userId);
+    } else {
+        console.log('Navigate to chat with user:', userId);
+        // Implement your chat navigation logic here
+    }
+}
+
+// Function 13: callUser
+function callUser(userId) {
+    console.log('Calling user:', userId);
+    // Implement call functionality
+    showToast('Call feature not implemented in demo', 'info');
+}
+
+// Function 14: viewContact
+async function viewContact(userId) {
+    try {
+        const userDoc = await db.collection('users').doc(userId).get();
+        if (!userDoc.exists) return;
+        
+        const userData = userDoc.data();
+        const modal = document.createElement('div');
+        modal.className = 'contact-view-modal';
+        modal.innerHTML = `
+            <div class="contact-view-content">
+                <div class="contact-header">
+                    <img src="${userData.photoURL || `https://ui-avatars.com/api/?name=${encodeURIComponent(userData.displayName)}&background=7C3AED&color=fff`}" 
+                         class="contact-large-avatar">
+                    <h3>${userData.displayName}</h3>
+                    <p class="contact-status">${userData.status || 'Hey there! I am using WhatsApp'}</p>
+                </div>
+                <div class="contact-actions">
+                    <button class="contact-action" onclick="messageUser('${userId}')">
+                        <i class="fas fa-comment"></i>
+                        <span>Message</span>
+                    </button>
+                    <button class="contact-action" onclick="callUser('${userId}')">
+                        <i class="fas fa-phone"></i>
+                        <span>Call</span>
+                    </button>
+                    <button class="contact-action" onclick="toggleMuteUser('${userId}')">
+                        <i class="fas fa-volume-mute"></i>
+                        <span>Mute</span>
+                    </button>
+                </div>
+                <div class="contact-info">
+                    <div class="info-item">
+                        <span class="info-label">Phone</span>
+                        <span class="info-value">${userData.phone || 'Not available'}</span>
+                    </div>
+                    <div class="info-item">
+                        <span class="info-label">Joined</span>
+                        <span class="info-value">${formatTimeAgo(userData.createdAt)}</span>
+                    </div>
+                </div>
+                <button class="btn-close" onclick="this.parentElement.parentElement.remove()">Close</button>
+            </div>
+        `;
+        
+        document.body.appendChild(modal);
+    } catch (error) {
+        console.error('Error viewing contact:', error);
+    }
+}
+
+// Function 15: copyStatusLink
+async function copyStatusLink(statusId) {
+    const link = `${window.location.origin}/status/${statusId}`;
+    
+    try {
+        await navigator.clipboard.writeText(link);
+        showToast('Link copied to clipboard', 'success');
+    } catch (error) {
+        console.error('Error copying link:', error);
+        // Fallback for older browsers
+        const textArea = document.createElement('textarea');
+        textArea.value = link;
+        document.body.appendChild(textArea);
+        textArea.select();
+        document.execCommand('copy');
+        document.body.removeChild(textArea);
+        showToast('Link copied', 'success');
+    }
+}
+
+// Function 16: shareToContact
+async function shareToContact(statusId) {
+    try {
+        const contactsSnapshot = await db.collection('users')
+            .where('friends', 'array-contains', currentUser.uid)
+            .limit(20)
+            .get();
+        
+        const modal = document.createElement('div');
+        modal.className = 'share-contacts-modal';
+        modal.innerHTML = `
+            <div class="share-contacts-content">
+                <h3>Share to Contact</h3>
+                <div class="contacts-list-share">
+                    ${contactsSnapshot.docs.map(doc => {
+                        const contact = doc.data();
+                        return `
+                            <div class="contact-share-item" onclick="sendStatusToContact('${statusId}', '${doc.id}')">
+                                <img src="${contact.photoURL || `https://ui-avatars.com/api/?name=${encodeURIComponent(contact.displayName)}&background=7C3AED&color=fff`}" 
+                                     class="contact-avatar">
+                                <div class="contact-info">
+                                    <p class="contact-name">${contact.displayName}</p>
+                                    <p class="contact-status">${contact.status || 'Online'}</p>
+                                </div>
+                            </div>
+                        `;
+                    }).join('')}
+                </div>
+                <button class="btn-cancel" onclick="this.parentElement.parentElement.remove()">Cancel</button>
+            </div>
+        `;
+        
+        document.body.appendChild(modal);
+    } catch (error) {
+        console.error('Error sharing to contact:', error);
+        showToast('Error sharing', 'error');
+    }
+}
+
+// Function 17: sendStatusToContact
+async function sendStatusToContact(statusId, contactId) {
+    try {
+        const statusDoc = await db.collection('statuses').doc(statusId).get();
+        if (!statusDoc.exists) return;
+        
+        const status = statusDoc.data();
+        
+        // Create message with status preview
+        const messageData = {
+            type: 'status_share',
+            content: 'Shared a status with you',
+            senderId: currentUser.uid,
+            senderName: currentUserData?.displayName,
+            receiverId: contactId,
+            timestamp: firebase.firestore.FieldValue.serverTimestamp(),
+            statusId: statusId,
+            statusPreview: status.content?.substring(0, 50) || '📸 Status',
+            statusType: status.type
+        };
+        
+        await db.collection('messages').add(messageData);
+        showToast('Status shared', 'success');
+        
+        // Close modal
+        document.querySelector('.share-contacts-modal')?.remove();
+    } catch (error) {
+        console.error('Error sending status to contact:', error);
+        showToast('Error sharing', 'error');
+    }
+}
+
+// Function 18: shareToOtherApp
+async function shareToOtherApp(statusId) {
+    try {
+        const statusDoc = await db.collection('statuses').doc(statusId).get();
+        if (!statusDoc.exists) return;
+        
+        const status = statusDoc.data();
+        const text = status.caption || status.content || 'Check out this status';
+        const url = `${window.location.origin}/status/${statusId}`;
+        
+        if (navigator.share) {
+            await navigator.share({
+                title: `Status from ${status.userDisplayName}`,
+                text: text,
+                url: url
+            });
+        } else {
+            // Fallback: copy to clipboard
+            await copyStatusLink(statusId);
+        }
+    } catch (error) {
+        console.error('Error sharing to other app:', error);
+        // Fallback
+        await copyStatusLink(statusId);
+    }
+}
+
+// Function 19: updateReactionCount
+async function updateReactionCount(statusId) {
+    try {
+        const reactionsSnapshot = await db.collection('statusReactions')
+            .where('statusId', '==', statusId)
+            .get();
+        
+        const count = reactionsSnapshot.size;
+        
+        // Update in database
+        await db.collection('statuses').doc(statusId).update({
+            reactionCount: count
+        });
+        
+        // Update in UI if viewer is open
+        const reactionBtn = document.querySelector(`[onclick*="${statusId}"] .reaction-count`);
+        if (reactionBtn) {
+            reactionBtn.textContent = count;
+        }
+    } catch (error) {
+        console.error('Error updating reaction count:', error);
+    }
+}
+
+// Function 20: setupStatusRealtimeUpdates
+function setupStatusRealtimeUpdates(statusId) {
+    if (statusViewerListener) {
+        statusViewerListener();
+    }
+    
+    // Listen for view count updates
+    statusViewerListener = db.collection('statuses').doc(statusId)
+        .onSnapshot((doc) => {
+            if (doc.exists) {
+                const status = doc.data();
+                const viewCountElement = document.getElementById(`viewCount-${statusId}`);
+                if (viewCountElement) {
+                    viewCountElement.textContent = status.viewCount || 0;
+                }
+            }
+        });
+    
+    // Listen for new reactions
+    statusReactionListener = db.collection('statusReactions')
+        .where('statusId', '==', statusId)
+        .onSnapshot((snapshot) => {
+            updateReactionCount(statusId);
+        });
+}
+
+// Function 21: updateStatusInUI
+function updateStatusInUI(statusId, statusData) {
+    // Update view count in status list
+    const statusItem = document.querySelector(`.status-item[data-status-id="${statusId}"]`);
+    if (statusItem) {
+        const viewCountElement = statusItem.querySelector('.view-count');
+        if (viewCountElement && statusData.viewCount) {
+            viewCountElement.textContent = statusData.viewCount;
+        }
+    }
+    
+    // Update in viewer if currently viewing
+    if (currentStatusViewing && currentStatusViewing.statuses.some(s => s.id === statusId)) {
+        const index = currentStatusViewing.statuses.findIndex(s => s.id === statusId);
+        currentStatusViewing.statuses[index] = { ...currentStatusViewing.statuses[index], ...statusData };
+    }
+}
+
+// Function 22: removeStatusFromUI
+function removeStatusFromUI(statusId) {
+    // Remove from status list
+    const statusItem = document.querySelector(`.status-item[data-status-id="${statusId}"]`);
+    if (statusItem) {
+        statusItem.remove();
+    }
+    
+    // Remove from current viewing if applicable
+    if (currentStatusViewing) {
+        const index = currentStatusViewing.statuses.findIndex(s => s.id === statusId);
+        if (index !== -1) {
+            currentStatusViewing.statuses.splice(index, 1);
+            if (currentStatusViewing.statuses.length === 0) {
+                closeStatusViewer();
+            } else if (currentStatusIndex >= currentStatusViewing.statuses.length) {
+                showStatusAtIndex(currentStatusViewing.statuses.length - 1);
+            }
+        }
+    }
+}
+
+// Function 23: showMyStatusOptions
+function showMyStatusOptions(event) {
+    event.stopPropagation();
+    
+    const options = document.createElement('div');
+    options.className = 'my-status-options-menu';
+    options.style.position = 'absolute';
+    options.style.top = `${event.clientY}px`;
+    options.style.left = `${event.clientX}px`;
+    
+    options.innerHTML = `
+        <div class="my-status-options">
+            <button class="my-status-option" onclick="openStatusCreation()">
+                <i class="fas fa-plus"></i>
+                <span>New status</span>
+            </button>
+            <button class="my-status-option" onclick="showStatusArchive()">
+                <i class="fas fa-archive"></i>
+                <span>Archive</span>
+            </button>
+            <button class="my-status-option" onclick="showStatusHighlightsUI()">
+                <i class="fas fa-star"></i>
+                <span>Highlights</span>
+            </button>
+            <button class="my-status-option" onclick="showStatusDraftsUI()">
+                <i class="fas fa-file-alt"></i>
+                <span>Drafts</span>
+            </button>
+            <button class="my-status-option" onclick="showStatusSettings()">
+                <i class="fas fa-cog"></i>
+                <span>Settings</span>
+            </button>
+            <button class="my-status-option" onclick="showStatusPrivacySettings()">
+                <i class="fas fa-user-shield"></i>
+                <span>Privacy</span>
+            </button>
+        </div>
+    `;
+    
+    document.body.appendChild(options);
+    
+    // Close on outside click
+    setTimeout(() => {
+        const closeHandler = (e) => {
+            if (!options.contains(e.target)) {
+                options.remove();
+                document.removeEventListener('click', closeHandler);
+            }
+        };
+        document.addEventListener('click', closeHandler);
+    }, 10);
+}
+
+// ==================== ADDITIONAL FEATURES ====================
+
+// Function 24: loadUserStatuses
+async function loadUserStatuses(userId) {
+    try {
+        const snapshot = await db.collection('statuses')
+            .where('userId', '==', userId)
+            .where('expiresAt', '>', new Date())
+            .orderBy('timestamp', 'desc')
+            .get();
+        
+        if (!snapshot.empty) {
+            const statuses = snapshot.docs.map(doc => ({
+                id: doc.id,
+                ...doc.data()
+            }));
+            openStatusViewer(userId, statuses);
+        } else {
+            showToast('No active statuses from this user', 'info');
+        }
+    } catch (error) {
+        console.error('Error loading user statuses:', error);
+        showToast('Error loading statuses', 'error');
+    }
+}
+
+// Function 25: saveStatus
+async function saveStatus(statusId) {
+    try {
+        const statusDoc = await db.collection('statuses').doc(statusId).get();
+        if (!statusDoc.exists) return;
+        
+        const status = statusDoc.data();
+        
+        // Save to user's saved statuses
+        await db.collection('users').doc(currentUser.uid).update({
+            savedStatuses: firebase.firestore.FieldValue.arrayUnion({
+                statusId: statusId,
+                savedAt: new Date(),
+                originalUserId: status.userId,
+                type: status.type,
+                content: status.content,
+                caption: status.caption
+            })
+        });
+        
+        showToast('Status saved', 'success');
+        
+        // Download media if enabled
+        if (window.statusPreferences.saveToGallery && (status.type === 'image' || status.type === 'video')) {
+            downloadMedia(status.content);
+        }
+    } catch (error) {
+        console.error('Error saving status:', error);
+        showToast('Error saving status', 'error');
+    }
+}
+
+// Function 26: reportStatus
+async function reportStatus(statusId) {
+    const reason = prompt('Please enter reason for reporting this status:');
+    if (!reason) return;
+    
+    try {
+        await db.collection('reports').add({
+            statusId: statusId,
+            reporterId: currentUser.uid,
+            reason: reason,
+            timestamp: firebase.firestore.FieldValue.serverTimestamp(),
+            reviewed: false
+        });
+        
+        showToast('Status reported. Thank you for your feedback.', 'success');
+    } catch (error) {
+        console.error('Error reporting status:', error);
+        showToast('Error reporting status', 'error');
+    }
+}
+
+// Function 27: forwardStatus
+async function forwardStatus(statusId) {
+    const statusDoc = await db.collection('statuses').doc(statusId).get();
+    if (!statusDoc.exists) return;
+    
+    const status = statusDoc.data();
+    
+    // Show contact selector for forwarding
+    const contactsSnapshot = await db.collection('users')
+        .where('friends', 'array-contains', currentUser.uid)
+        .limit(20)
+        .get();
+    
+    const modal = document.createElement('div');
+    modal.className = 'forward-modal';
+    modal.innerHTML = `
+        <div class="forward-content">
+            <h3>Forward Status</h3>
+            <div class="forward-preview">
+                ${getStatusContentHTML(status)}
+                ${status.caption ? `<p class="forward-caption">${status.caption}</p>` : ''}
+            </div>
+            <div class="contacts-list-forward">
+                ${contactsSnapshot.docs.map(doc => {
+                    const contact = doc.data();
+                    return `
+                        <label class="forward-contact-item">
+                            <input type="checkbox" value="${doc.id}">
+                            <img src="${contact.photoURL || `https://ui-avatars.com/api/?name=${encodeURIComponent(contact.displayName)}&background=7C3AED&color=fff`}" 
+                                 class="contact-avatar">
+                            <div class="contact-info">
+                                <p class="contact-name">${contact.displayName}</p>
+                            </div>
+                        </label>
+                    `;
+                }).join('')}
+            </div>
+            <div class="forward-actions">
+                <button class="btn-secondary" onclick="this.parentElement.parentElement.parentElement.remove()">Cancel</button>
+                <button class="btn-primary" onclick="sendForwardedStatus('${statusId}')">Forward</button>
+            </div>
+        </div>
+    `;
+    
+    document.body.appendChild(modal);
+}
+
+// Function 28: sendForwardedStatus
+async function sendForwardedStatus(statusId) {
+    const selectedContacts = Array.from(document.querySelectorAll('.forward-contact-item input:checked'))
+        .map(input => input.value);
+    
+    if (selectedContacts.length === 0) {
+        showToast('Please select at least one contact', 'error');
+        return;
+    }
+    
+    try {
+        const statusDoc = await db.collection('statuses').doc(statusId).get();
+        if (!statusDoc.exists) return;
+        
+        const status = statusDoc.data();
+        
+        // Send to each selected contact
+        const batch = db.batch();
+        
+        selectedContacts.forEach(contactId => {
+            const messageRef = db.collection('messages').doc();
+            batch.set(messageRef, {
+                type: 'status_forward',
+                content: 'Forwarded a status',
+                senderId: currentUser.uid,
+                receiverId: contactId,
+                timestamp: firebase.firestore.FieldValue.serverTimestamp(),
+                originalStatusId: statusId,
+                originalUserId: status.userId,
+                statusType: status.type,
+                statusPreview: status.content?.substring(0, 50) || '📸 Status'
+            });
+        });
+        
+        await batch.commit();
+        showToast(`Forwarded to ${selectedContacts.length} contact(s)`, 'success');
+        
+        // Close modal
+        document.querySelector('.forward-modal')?.remove();
+    } catch (error) {
+        console.error('Error forwarding status:', error);
+        showToast('Error forwarding status', 'error');
+    }
+}
+
+// Function 29: setupMediaPlayback
+function setupMediaPlayback(status) {
+    const video = document.querySelector('.status-media');
+    if (!video) return;
+    
+    const playPauseBtn = document.querySelector('.play-pause-btn');
+    const progressSlider = document.querySelector('.media-progress');
+    const volumeBtn = document.querySelector('.volume-btn');
+    const volumeSlider = document.querySelector('.volume-slider');
+    
+    if (video.tagName === 'VIDEO' || video.tagName === 'AUDIO') {
+        // Play/Pause
+        playPauseBtn.addEventListener('click', () => {
+            if (video.paused) {
+                video.play();
+                playPauseBtn.innerHTML = '<i class="fas fa-pause"></i>';
+            } else {
+                video.pause();
+                playPauseBtn.innerHTML = '<i class="fas fa-play"></i>';
+            }
+        });
+        
+        // Progress
+        video.addEventListener('timeupdate', () => {
+            const percent = (video.currentTime / video.duration) * 100;
+            progressSlider.value = percent;
+        });
+        
+        progressSlider.addEventListener('input', () => {
+            const time = (progressSlider.value / 100) * video.duration;
+            video.currentTime = time;
+        });
+        
+        // Volume
+        volumeBtn.addEventListener('click', () => {
+            if (video.volume > 0) {
+                video.volume = 0;
+                volumeBtn.innerHTML = '<i class="fas fa-volume-mute"></i>';
+            } else {
+                video.volume = 1;
+                volumeBtn.innerHTML = '<i class="fas fa-volume-up"></i>';
+            }
+        });
+        
+        volumeSlider.addEventListener('input', () => {
+            video.volume = volumeSlider.value / 100;
+        });
+    }
+}
+
+// Function 30: toggleMediaPlayback
+function toggleMediaPlayback() {
+    const media = document.querySelector('.status-media');
+    const btn = document.querySelector('.play-pause-btn');
+    
+    if (!media) return;
+    
+    if (media.paused) {
+        media.play();
+        btn.innerHTML = '<i class="fas fa-pause"></i>';
+    } else {
+        media.pause();
+        btn.innerHTML = '<i class="fas fa-play"></i>';
+    }
+}
+
+// Function 31: toggleVolume
+function toggleVolume() {
+    const media = document.querySelector('.status-media');
+    const btn = document.querySelector('.volume-btn');
+    const slider = document.querySelector('.volume-slider');
+    
+    if (!media) return;
+    
+    if (media.volume > 0) {
+        media.volume = 0;
+        btn.innerHTML = '<i class="fas fa-volume-mute"></i>';
+        slider.value = 0;
+    } else {
+        media.volume = 1;
+        btn.innerHTML = '<i class="fas fa-volume-up"></i>';
+        slider.value = 100;
+    }
+}
+
+// Function 32: setupScreenshotDetection
+function setupScreenshotDetection() {
+    // Basic screenshot detection (limited in web browsers)
+    document.addEventListener('keydown', (e) => {
+        // Detect common screenshot shortcuts
+        if ((e.ctrlKey && e.key === 'PrintScreen') || 
+            (e.metaKey && e.shiftKey && e.key === '3') ||
+            (e.metaKey && e.shiftKey && e.key === '4')) {
+            
+            if (currentStatusViewing && window.statusPreferences.screenshotAlerts) {
+                reportScreenshot(currentStatusViewing.statuses[currentStatusIndex].id);
+            }
+        }
+    });
+    
+    // Visibility change (may indicate screenshot)
+    document.addEventListener('visibilitychange', () => {
+        if (document.hidden && currentStatusViewing) {
+            setTimeout(() => {
+                if (!document.hidden) {
+                    // User may have taken a screenshot
+                    if (window.statusPreferences.screenshotAlerts) {
+                        reportScreenshot(currentStatusViewing.statuses[currentStatusIndex].id);
+                    }
+                }
+            }, 1000);
+        }
+    });
+}
+
+// Function 33: reportScreenshot
+async function reportScreenshot(statusId) {
+    try {
+        // Update view to mark as screenshot
+        const viewQuery = await db.collection('statusViews')
+            .where('statusId', '==', statusId)
+            .where('userId', '==', currentUser.uid)
+            .limit(1)
+            .get();
+        
+        if (!viewQuery.empty) {
+            const viewDoc = viewQuery.docs[0];
+            await viewDoc.ref.update({
+                screenshot: true,
+                screenshotAt: firebase.firestore.FieldValue.serverTimestamp()
+            });
+            
+            // Notify status owner
+            const statusDoc = await db.collection('statuses').doc(statusId).get();
+            if (statusDoc.exists) {
+                const status = statusDoc.data();
+                if (status.userId !== currentUser.uid) {
+                    // Send notification to owner
+                    await db.collection('notifications').add({
+                        type: 'screenshot',
+                        userId: status.userId,
+                        fromUserId: currentUser.uid,
+                        fromUserName: currentUserData?.displayName,
+                        statusId: statusId,
+                        timestamp: firebase.firestore.FieldValue.serverTimestamp(),
+                        read: false
+                    });
+                }
+            }
+        }
+    } catch (error) {
+        console.error('Error reporting screenshot:', error);
+    }
+}
+
+// Function 34: openMediaReply
+function openMediaReply(statusId) {
+    const input = document.createElement('input');
+    input.type = 'file';
+    input.accept = 'image/*,video/*,audio/*';
+    input.style.display = 'none';
+    
+    input.onchange = (e) => {
+        const file = e.target.files[0];
+        if (file) {
+            uploadMediaReply(file, statusId);
+        }
+    };
+    
+    document.body.appendChild(input);
+    input.click();
+    document.body.removeChild(input);
+}
+
+// Function 35: uploadMediaReply
+async function uploadMediaReply(file, statusId) {
+    try {
+        showToast('Uploading media...', 'info');
+        
+        // Upload to Firebase Storage
+        const storageRef = firebase.storage().ref();
+        const fileRef = storageRef.child(`status_replies/${currentUser.uid}/${Date.now()}_${file.name}`);
+        const uploadTask = fileRef.put(file);
+        
+        uploadTask.on('state_changed',
+            (snapshot) => {
+                // Progress tracking
+                const progress = (snapshot.bytesTransferred / snapshot.totalBytes) * 100;
+                console.log('Upload progress:', progress);
+            },
+            (error) => {
+                console.error('Upload error:', error);
+                showToast('Error uploading media', 'error');
+            },
+            async () => {
+                // Upload complete
+                const downloadURL = await uploadTask.snapshot.ref.getDownloadURL();
+                
+                // Create thumbnail for images/videos
+                let thumbnail = null;
+                if (file.type.startsWith('image/')) {
+                    thumbnail = await createImageThumbnail(file);
+                }
+                
+                const mediaReply = {
+                    type: file.type.startsWith('image/') ? 'image' : 
+                           file.type.startsWith('video/') ? 'video' : 'audio',
+                    content: file.type.startsWith('image/') ? '📷 Image' : 
+                            file.type.startsWith('video/') ? '🎥 Video' : '🎵 Audio',
+                    url: downloadURL,
+                    thumbnail: thumbnail,
+                    fileName: file.name,
+                    fileSize: file.size
+                };
+                
+                await sendStatusReply(statusId, null, mediaReply);
+                showToast('Media reply sent', 'success');
+            }
+        );
+    } catch (error) {
+        console.error('Error uploading media reply:', error);
+        showToast('Error uploading media', 'error');
+    }
+}
+
+// Function 36: createImageThumbnail
+function createImageThumbnail(file) {
+    return new Promise((resolve) => {
+        const reader = new FileReader();
+        reader.onload = (e) => {
+            const img = new Image();
+            img.onload = () => {
+                const canvas = document.createElement('canvas');
+                const ctx = canvas.getContext('2d');
+                
+                // Create thumbnail (max 200x200)
+                const maxSize = 200;
+                let width = img.width;
+                let height = img.height;
+                
+                if (width > height) {
+                    if (width > maxSize) {
+                        height *= maxSize / width;
+                        width = maxSize;
+                    }
+                } else {
+                    if (height > maxSize) {
+                        width *= maxSize / height;
+                        height = maxSize;
+                    }
+                }
+                
+                canvas.width = width;
+                canvas.height = height;
+                ctx.drawImage(img, 0, 0, width, height);
+                
+                resolve(canvas.toDataURL('image/jpeg', 0.7));
+            };
+            img.src = e.target.result;
+        };
+        reader.readAsDataURL(file);
+    });
+}
+
+// Function 37: downloadMedia
+function downloadMedia(url) {
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = `status_${Date.now()}.${url.split('.').pop()}`;
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+}
+
+// Function 38: loadStatusDrafts
+async function loadStatusDrafts() {
+    try {
+        const userDoc = await db.collection('users').doc(currentUser.uid).get();
+        if (userDoc.exists) {
+            const userData = userDoc.data();
+            statusDrafts = userData.statusDrafts || [];
+        }
+    } catch (error) {
+        console.error('Error loading drafts:', error);
+    }
+}
+
+// Function 39: saveStatusDraft
+async function saveStatusDraft() {
+    try {
+        await db.collection('users').doc(currentUser.uid).update({
+            statusDrafts: firebase.firestore.FieldValue.arrayUnion(window.statusDraft)
+        });
+        
+        statusDrafts.push({...window.statusDraft});
+        showToast('Draft saved', 'success');
+    } catch (error) {
+        console.error('Error saving draft:', error);
+        showToast('Error saving draft', 'error');
+    }
+}
+
+// Function 40: loadStatusHighlights
+async function loadStatusHighlights() {
+    try {
+        const userDoc = await db.collection('users').doc(currentUser.uid).get();
+        if (userDoc.exists) {
+            const userData = userDoc.data();
+            statusHighlights = userData.statusHighlights || [];
+            statusArchive = userData.statusArchive || [];
+        }
+    } catch (error) {
+        console.error('Error loading highlights:', error);
+    }
+}
+
+// Function 41: showStatusArchive
+function showStatusArchive() {
+    const modal = document.createElement('div');
+    modal.className = 'archive-modal';
+    modal.innerHTML = `
+        <div class="archive-content">
+            <div class="archive-header">
+                <h3>Archived Statuses</h3>
+                <button class="btn-close" onclick="this.parentElement.parentElement.parentElement.remove()">
+                    <i class="fas fa-times"></i>
+                </button>
+            </div>
+            <div class="archive-list">
+                ${statusArchive.length > 0 ? 
+                    statusArchive.map(item => `
+                        <div class="archive-item">
+                            <div class="archive-preview">
+                                ${getStatusContentHTML(item)}
+                            </div>
+                            <div class="archive-info">
+                                <p>${formatTimeAgo(item.timestamp)}</p>
+                                <p>${item.viewCount || 0} views</p>
+                            </div>
+                            <div class="archive-actions">
+                                <button class="btn-action" onclick="restoreFromArchive('${item.id}')">
+                                    <i class="fas fa-undo"></i>
+                                </button>
+                                <button class="btn-action" onclick="deletePermanently('${item.id}')">
+                                    <i class="fas fa-trash"></i>
+                                </button>
+                            </div>
+                        </div>
+                    `).join('') :
+                    '<p class="empty-archive">No archived statuses</p>'
+                }
+            </div>
+        </div>
+    `;
+    
+    document.body.appendChild(modal);
+}
+
+// Function 42: archiveStatus
+async function archiveStatus(statusId) {
+    try {
+        const statusDoc = await db.collection('statuses').doc(statusId).get();
+        if (!statusDoc.exists) return;
+        
+        const status = statusDoc.data();
+        
+        // Add to archive
+        await db.collection('users').doc(currentUser.uid).update({
+            statusArchive: firebase.firestore.FieldValue.arrayUnion({
+                id: statusId,
+                ...status,
+                archivedAt: new Date()
+            })
+        });
+        
+        // Delete from active statuses
+        await db.collection('statuses').doc(statusId).delete();
+        
+        showToast('Status archived', 'success');
+        loadStatusUpdates();
+    } catch (error) {
+        console.error('Error archiving status:', error);
+        showToast('Error archiving status', 'error');
+    }
+}
+
+// Function 43: showStatusHighlightsUI
+function showStatusHighlightsUI() {
+    const modal = document.createElement('div');
+    modal.className = 'highlights-modal';
+    modal.innerHTML = `
+        <div class="highlights-content">
+            <div class="highlights-header">
+                <h3>Status Highlights</h3>
+                <button class="btn-add" onclick="addToHighlights()">
+                    <i class="fas fa-plus"></i> Add
+                </button>
+            </div>
+            <div class="highlights-list">
+                ${statusHighlights.length > 0 ? 
+                    statusHighlights.map(highlight => `
+                        <div class="highlight-item">
+                            <div class="highlight-circle">
+                                ${highlight.emoji || '⭐'}
+                            </div>
+                            <div class="highlight-info">
+                                <h4>${highlight.title || 'Highlight'}</h4>
+                                <p>${highlight.count || 0} statuses</p>
+                            </div>
+                            <div class="highlight-actions">
+                                <button class="btn-action" onclick="viewHighlight('${highlight.id}')">
+                                    <i class="fas fa-eye"></i>
+                                </button>
+                                <button class="btn-action" onclick="editHighlight('${highlight.id}')">
+                                    <i class="fas fa-edit"></i>
+                                </button>
+                            </div>
+                        </div>
+                    `).join('') :
+                    '<p class="empty-highlights">No highlights yet</p>'
+                }
+            </div>
+        </div>
+    `;
+    
+    document.body.appendChild(modal);
+}
+
+// Function 44: addToHighlights
+async function addToHighlights() {
+    const title = prompt('Enter highlight title:');
+    if (!title) return;
+    
+    const emoji = prompt('Enter emoji for highlight:', '⭐');
+    
+    const highlight = {
+        id: `highlight_${Date.now()}`,
+        title: title,
+        emoji: emoji || '⭐',
+        statusIds: [],
+        createdAt: new Date(),
+        coverImage: null
+    };
+    
+    try {
+        await db.collection('users').doc(currentUser.uid).update({
+            statusHighlights: firebase.firestore.FieldValue.arrayUnion(highlight)
+        });
+        
+        statusHighlights.push(highlight);
+        showToast('Highlight created', 'success');
+    } catch (error) {
+        console.error('Error creating highlight:', error);
+        showToast('Error creating highlight', 'error');
+    }
+}
+
+// Function 45: searchStatuses
+async function searchStatuses(query) {
+    try {
+        // Search in captions and text content
+        const textQuery = query.toLowerCase();
+        const myStatuses = await loadMyStatuses();
+        const recentStatuses = await loadRecentStatuses();
+        
+        const allStatuses = [...myStatuses, ...recentStatuses];
+        const results = allStatuses.filter(status => 
+            (status.caption && status.caption.toLowerCase().includes(textQuery)) ||
+            (status.content && status.content.toLowerCase().includes(textQuery)) ||
+            (status.userDisplayName && status.userDisplayName.toLowerCase().includes(textQuery))
+        );
+        
+        // Display results
+        const searchResults = document.createElement('div');
+        searchResults.className = 'search-results-modal';
+        searchResults.innerHTML = `
+            <div class="search-results-content">
+                <div class="search-header">
+                    <h3>Search Results for "${query}"</h3>
+                    <button class="btn-close" onclick="this.parentElement.parentElement.parentElement.remove()">
+                        <i class="fas fa-times"></i>
+                    </button>
+                </div>
+                <div class="results-list">
+                    ${results.length > 0 ? 
+                        results.map(status => `
+                            <div class="result-item" onclick="openStatusViewer('${status.userId}', [${JSON.stringify(status)}])">
+                                <img src="${status.userPhotoURL || `https://ui-avatars.com/api/?name=${encodeURIComponent(status.userDisplayName)}&background=7C3AED&color=fff`}" 
+                                     class="result-avatar">
+                                <div class="result-info">
+                                    <h4>${status.userDisplayName}</h4>
+                                    <p class="result-preview">
+                                        ${status.caption || status.content || ''}
+                                    </p>
+                                    <p class="result-time">${formatTimeAgo(status.timestamp)}</p>
+                                </div>
+                            </div>
+                        `).join('') :
+                        '<p class="no-results">No statuses found</p>'
+                    }
+                </div>
+            </div>
+        `;
+        
+        document.body.appendChild(searchResults);
+    } catch (error) {
+        console.error('Error searching statuses:', error);
+        showToast('Error searching', 'error');
+    }
+}
+
+// Function 46: startBackgroundProcessing
+function startBackgroundProcessing() {
+    // Preload next status in viewer
+    if (currentStatusViewing && currentStatusViewing.statuses.length > currentStatusIndex + 1) {
+        const nextStatus = currentStatusViewing.statuses[currentStatusIndex + 1];
+        if (nextStatus.type === 'image' || nextStatus.type === 'video') {
+            preloadMedia(nextStatus.content);
+        }
+    }
+    
+    // Cache frequently viewed statuses
+    cacheRecentStatuses();
+    
+    // Process low-quality previews
+    generateLowQualityPreviews();
+}
+
+// Function 47: preloadMedia
+function preloadMedia(url) {
+    const link = document.createElement('link');
+    link.rel = 'preload';
+    link.as = url.includes('.mp4') || url.includes('.webm') ? 'video' : 'image';
+    link.href = url;
+    document.head.appendChild(link);
+}
+
+// Function 48: cacheRecentStatuses
+async function cacheRecentStatuses() {
+    try {
+        const recentViews = await db.collection('statusViews')
+            .where('userId', '==', currentUser.uid)
+            .orderBy('viewedAt', 'desc')
+            .limit(10)
+            .get();
+        
+        const statusIds = recentViews.docs.map(doc => doc.data().statusId);
+        
+        // Fetch and cache these statuses
+        statusIds.forEach(async statusId => {
+            const statusDoc = await db.collection('statuses').doc(statusId).get();
+            if (statusDoc.exists) {
+                const status = statusDoc.data();
+                localStorage.setItem(`status_cache_${statusId}`, JSON.stringify({
+                    ...status,
+                    cachedAt: new Date()
+                }));
+            }
+        });
+        
+        // Clean old cache (older than 7 days)
+        Object.keys(localStorage).forEach(key => {
+            if (key.startsWith('status_cache_')) {
+                const cached = JSON.parse(localStorage.getItem(key));
+                if (cached && cached.cachedAt) {
+                    const cacheAge = new Date() - new Date(cached.cachedAt);
+                    if (cacheAge > 7 * 24 * 60 * 60 * 1000) {
+                        localStorage.removeItem(key);
+                    }
+                }
+            }
+        });
+    } catch (error) {
+        console.error('Error caching statuses:', error);
+    }
+}
+
+// Function 49: generateLowQualityPreviews
+function generateLowQualityPreviews() {
+    // This would generate low-quality previews for images
+    // In a real app, you might use service workers or server-side processing
+    console.log('Generating low-quality previews...');
+}
+
+// Function 50: handleVisibilityChange
+function handleVisibilityChange() {
+    if (document.hidden) {
+        // App is in background
+        if (statusProgressInterval) {
+            clearInterval(statusProgressInterval);
+        }
+        if (statusViewerTimeout) {
+            clearTimeout(statusViewerTimeout);
+        }
+    } else {
+        // App is in foreground
+        if (currentStatusViewing) {
+            startStatusProgressTimer(currentStatusViewing.statuses[currentStatusIndex]);
+        }
+    }
+}
+
+// Function 51: postStatus
+async function postStatus() {
+    try {
+        const statusData = {
+            type: window.statusDraft.type,
+            content: window.statusDraft.content,
+            caption: window.statusDraft.caption,
+            background: window.statusDraft.background,
+            font: window.statusDraft.font,
+            color: window.statusDraft.color,
+            stickers: window.statusDraft.stickers,
+            gifs: window.statusDraft.gifs,
+            drawings: window.statusDraft.drawings,
+            overlays: window.statusDraft.overlays,
+            mentions: window.statusDraft.mentions,
+            location: window.statusDraft.location,
+            music: window.statusDraft.music,
+            linkPreview: window.statusDraft.linkPreview,
+            timestamp: firebase.firestore.FieldValue.serverTimestamp(),
+            expiresAt: window.statusDraft.scheduleTime || new Date(Date.now() + 24 * 60 * 60 * 1000),
+            userId: currentUser.uid,
+            userDisplayName: currentUserData?.displayName,
+            userPhotoURL: currentUserData?.photoURL,
+            privacy: window.statusDraft.privacy,
+            selectedContacts: window.statusDraft.selectedContacts,
+            hideFrom: window.statusDraft.hideFrom,
+            exceptContacts: window.statusDraft.exceptContacts,
+            viewCount: 0,
+            reactionCount: 0,
+            replyCount: 0,
+            shareCount: 0,
+            isScheduled: !!window.statusDraft.scheduleTime
+        };
+        
+        await db.collection('statuses').add(statusData);
+        
+        showToast('Status posted successfully', 'success');
+        
+        // Close creation modal
+        const statusCreation = document.getElementById('statusCreation');
+        if (statusCreation) {
+            statusCreation.style.display = 'none';
+        }
+        
+        // Reset draft
+        window.statusDraft = {
+            type: 'text',
+            content: '',
+            caption: '',
+            background: 'default',
+            font: 'default',
+            color: '#000000',
+            stickers: [],
+            gifs: [],
+            drawings: [],
+            overlays: [],
+            mentions: [],
+            location: null,
+            music: null,
+            linkPreview: null,
+            scheduleTime: null,
+            privacy: 'myContacts',
+            selectedContacts: [],
+            hideFrom: [],
+            exceptContacts: []
+        };
+        
+        // Reload statuses
+        loadStatusUpdates();
+        
+    } catch (error) {
+        console.error('Error posting status:', error);
+        showToast('Error posting status', 'error');
+    }
+}
+
+// Function 52: setupDrawingCanvas
+function setupDrawingCanvas(canvas) {
+    const ctx = canvas.getContext('2d');
+    let drawing = false;
+    let lastX = 0;
+    let lastY = 0;
+    
+    canvas.width = canvas.offsetWidth;
+    canvas.height = canvas.offsetHeight;
+    
+    canvas.addEventListener('mousedown', (e) => {
+        drawing = true;
+        [lastX, lastY] = [e.offsetX, e.offsetY];
+    });
+    
+    canvas.addEventListener('mousemove', (e) => {
+        if (!drawing) return;
+        
+        ctx.beginPath();
+        ctx.moveTo(lastX, lastY);
+        ctx.lineTo(e.offsetX, e.offsetY);
+        ctx.strokeStyle = '#000000';
+        ctx.lineWidth = 2;
+        ctx.stroke();
+        
+        [lastX, lastY] = [e.offsetX, e.offsetY];
+        
+        // Save drawing to draft
+        window.statusDraft.drawings.push({
+            x: e.offsetX,
+            y: e.offsetY,
+            color: '#000000',
+            width: 2
+        });
+    });
+    
+    canvas.addEventListener('mouseup', () => drawing = false);
+    canvas.addEventListener('mouseout', () => drawing = false);
+}
+
+// Function 53: handleStatusFileSelect
 function handleStatusFileSelect(event) {
     const file = event.target.files[0];
     if (file) {
@@ -1235,12 +2950,14 @@ function handleStatusFileSelect(event) {
     }
 }
 
+// Function 54: handleDragOver
 function handleDragOver(event) {
     event.preventDefault();
     event.stopPropagation();
     event.dataTransfer.dropEffect = 'copy';
 }
 
+// Function 55: handleStatusFileDrop
 function handleStatusFileDrop(event) {
     event.preventDefault();
     event.stopPropagation();
@@ -1251,215 +2968,107 @@ function handleStatusFileDrop(event) {
     }
 }
 
+// Function 56: handleStatusMediaUpload
 async function handleStatusMediaUpload(file) {
-    // Implementation for uploading status media
-    console.log('Uploading status media:', file);
-    // Add your upload logic here
-}
-
-function updatePrivacyIndicator() {
-    const privacyIndicator = document.getElementById('privacyIndicator');
-    if (!privacyIndicator) return;
-    
-    const privacyText = getPrivacyLabel(window.statusPreferences.privacy);
-    privacyIndicator.innerHTML = `
-        <i class="fas fa-user-friends"></i>
-        <span>${privacyText}</span>
-        <i class="fas fa-chevron-down"></i>
-    `;
-    
-    // Update click handler
-    privacyIndicator.onclick = showPrivacyOptions;
-}
-
-function showPrivacyOptions() {
-    const options = document.createElement('div');
-    options.className = 'privacy-options-modal';
-    options.innerHTML = `
-        <div class="privacy-options-content">
-            <h3>Status Privacy</h3>
-            <div class="privacy-options">
-                <label class="privacy-option">
-                    <input type="radio" name="privacy" value="myContacts" 
-                           ${window.statusPreferences.privacy === 'myContacts' ? 'checked' : ''}
-                           onchange="updateStatusPrivacy('myContacts')">
-                    <div class="option-content">
-                        <i class="fas fa-user-friends"></i>
-                        <div>
-                            <strong>My contacts</strong>
-                            <p>All your contacts can see your status</p>
-                        </div>
-                    </div>
-                </label>
-                <label class="privacy-option">
-                    <input type="radio" name="privacy" value="selectedContacts"
-                           ${window.statusPreferences.privacy === 'selectedContacts' ? 'checked' : ''}
-                           onchange="showContactSelector()">
-                    <div class="option-content">
-                        <i class="fas fa-user-check"></i>
-                        <div>
-                            <strong>Selected contacts</strong>
-                            <p>Only selected contacts can see your status</p>
-                        </div>
-                    </div>
-                </label>
-                <label class="privacy-option">
-                    <input type="radio" name="privacy" value="everyone"
-                           ${window.statusPreferences.privacy === 'everyone' ? 'checked' : ''}
-                           onchange="updateStatusPrivacy('everyone')">
-                    <div class="option-content">
-                        <i class="fas fa-globe"></i>
-                        <div>
-                            <strong>Everyone</strong>
-                            <p>Anyone can see your status</p>
-                        </div>
-                    </div>
-                </label>
-            </div>
-            <button class="btn-cancel" onclick="this.parentElement.parentElement.remove()">Done</button>
-        </div>
-    `;
-    
-    document.body.appendChild(options);
-}
-
-// ==================== STATUS ANALYTICS ====================
-
-async function showStatusAnalytics(statusId) {
     try {
-        const [statusDoc, viewsSnapshot, reactionsSnapshot, repliesSnapshot] = await Promise.all([
-            db.collection('statuses').doc(statusId).get(),
-            db.collection('statusViews').where('statusId', '==', statusId).get(),
-            db.collection('statusReactions').where('statusId', '==', statusId).get(),
-            db.collection('messages')
-                .where('isStatusReply', '==', true)
-                .where('originalStatusId', '==', statusId)
-                .get()
-        ]);
+        showToast('Uploading media...', 'info');
         
-        if (!statusDoc.exists) return;
+        // Upload to Firebase Storage
+        const storageRef = firebase.storage().ref();
+        const fileRef = storageRef.child(`statuses/${currentUser.uid}/${Date.now()}_${file.name}`);
+        const uploadTask = fileRef.put(file);
         
-        const status = statusDoc.data();
-        
-        const analyticsModal = document.createElement('div');
-        analyticsModal.className = 'analytics-modal';
-        analyticsModal.innerHTML = `
-            <div class="analytics-content">
-                <div class="analytics-header">
-                    <h3>Status Analytics</h3>
-                    <button class="btn-close" onclick="this.parentElement.parentElement.parentElement.remove()">
-                        <i class="fas fa-times"></i>
-                    </button>
-                </div>
+        uploadTask.on('state_changed',
+            (snapshot) => {
+                const progress = (snapshot.bytesTransferred / snapshot.totalBytes) * 100;
+                console.log('Upload progress:', progress);
+                // Update progress UI if needed
+            },
+            (error) => {
+                console.error('Upload error:', error);
+                showToast('Error uploading media', 'error');
+            },
+            async () => {
+                const downloadURL = await uploadTask.snapshot.ref.getDownloadURL();
                 
-                <div class="analytics-stats">
-                    <div class="stat-card">
-                        <div class="stat-icon views">
-                            <i class="fas fa-eye"></i>
-                        </div>
-                        <div class="stat-info">
-                            <h4>${viewsSnapshot.size}</h4>
-                            <p>Views</p>
-                        </div>
-                    </div>
-                    <div class="stat-card">
-                        <div class="stat-icon reactions">
-                            <i class="fas fa-heart"></i>
-                        </div>
-                        <div class="stat-info">
-                            <h4>${reactionsSnapshot.size}</h4>
-                            <p>Reactions</p>
-                        </div>
-                    </div>
-                    <div class="stat-card">
-                        <div class="stat-icon replies">
-                            <i class="fas fa-reply"></i>
-                        </div>
-                        <div class="stat-info">
-                            <h4>${repliesSnapshot.size}</h4>
-                            <p>Replies</p>
-                        </div>
-                    </div>
-                    <div class="stat-card">
-                        <div class="stat-icon shares">
-                            <i class="fas fa-share"></i>
-                        </div>
-                        <div class="stat-info">
-                            <h4>${status.shareCount || 0}</h4>
-                            <p>Shares</p>
-                        </div>
-                    </div>
-                </div>
+                // Update status draft with media
+                if (file.type.startsWith('image/')) {
+                    window.statusDraft.type = 'image';
+                    window.statusDraft.content = downloadURL;
+                } else if (file.type.startsWith('video/')) {
+                    window.statusDraft.type = 'video';
+                    window.statusDraft.content = downloadURL;
+                } else if (file.type.startsWith('audio/')) {
+                    window.statusDraft.type = 'audio';
+                    window.statusDraft.content = downloadURL;
+                }
                 
-                <div class="analytics-details">
-                    <h4>Recent Viewers</h4>
-                    <div class="viewers-list">
-                        ${viewsSnapshot.docs.slice(0, 10).map(doc => {
-                            const view = doc.data();
-                            return `
-                                <div class="viewer-item">
-                                    <img src="${view.userPhotoURL || `https://ui-avatars.com/api/?name=${encodeURIComponent(view.userDisplayName)}&background=7C3AED&color=fff`}" 
-                                         class="viewer-avatar">
-                                    <div class="viewer-info">
-                                        <p class="viewer-name">${view.userDisplayName}</p>
-                                        <p class="viewer-time">${formatTimeAgo(view.viewedAt)}</p>
-                                    </div>
-                                </div>
-                            `;
-                        }).join('')}
-                    </div>
-                    
-                    ${viewsSnapshot.size > 10 ? `
-                        <button class="btn-view-all" onclick="showViewersList('${statusId}')">
-                            View all ${viewsSnapshot.size} viewers
-                        </button>
-                    ` : ''}
-                </div>
-            </div>
-        `;
-        
-        document.body.appendChild(analyticsModal);
-        
+                // Show preview
+                showMediaPreview(downloadURL, file.type);
+                showToast('Media uploaded successfully', 'success');
+            }
+        );
     } catch (error) {
-        console.error('Error showing analytics:', error);
-        showToast('Error loading analytics', 'error');
+        console.error('Error uploading media:', error);
+        showToast('Error uploading media', 'error');
     }
 }
 
-// ==================== USER OPTIONS ====================
+// Function 57: showMediaPreview
+function showMediaPreview(url, type) {
+    // Hide all previews
+    document.querySelectorAll('.status-preview').forEach(preview => {
+        preview.classList.add('hidden');
+    });
+    
+    // Show appropriate preview
+    if (type.startsWith('image/')) {
+        const preview = document.getElementById('imagePreview');
+        if (preview) {
+            preview.querySelector('img').src = url;
+            preview.classList.remove('hidden');
+        }
+    } else if (type.startsWith('video/')) {
+        const preview = document.getElementById('videoPreview');
+        if (preview) {
+            preview.querySelector('video').src = url;
+            preview.classList.remove('hidden');
+        }
+    } else if (type.startsWith('audio/')) {
+        const preview = document.getElementById('audioPreview');
+        if (preview) {
+            preview.querySelector('audio').src = url;
+            preview.classList.remove('hidden');
+        }
+    }
+}
 
 function showStatusUserOptions(event, userId) {
     event.stopPropagation();
     
     const options = document.createElement('div');
-    options.className = 'user-options-menu';
+    options.className = 'status-user-options-menu';
     options.style.position = 'absolute';
     options.style.top = `${event.clientY}px`;
     options.style.left = `${event.clientX}px`;
     
-    const isMuted = window.statusPreferences.mutedUsers.includes(userId);
-    
     options.innerHTML = `
-        <div class="user-options">
-            <button class="user-option" onclick="messageUser('${userId}')">
-                <i class="fas fa-comment"></i>
-                <span>Message</span>
+        <div class="status-user-options">
+            <button class="status-user-option" onclick="toggleMuteUser('${userId}')">
+                <i class="fas fa-volume-mute"></i>
+                <span>Mute</span>
             </button>
-            <button class="user-option" onclick="callUser('${userId}')">
-                <i class="fas fa-phone"></i>
-                <span>Call</span>
-            </button>
-            <button class="user-option" onclick="viewContact('${userId}')">
+            <button class="status-user-option" onclick="viewContact('${userId}')">
                 <i class="fas fa-user"></i>
                 <span>View contact</span>
             </button>
-            <button class="user-option" onclick="toggleMuteUser('${userId}')">
-                <i class="fas fa-volume-${isMuted ? 'up' : 'mute'}"></i>
-                <span>${isMuted ? 'Unmute' : 'Mute'} status</span>
-            </button>
-            <button class="user-option text-danger" onclick="blockStatusUser('${userId}')">
+            <button class="status-user-option" onclick="blockStatusUser('${userId}')">
                 <i class="fas fa-ban"></i>
-                <span>Block status</span>
+                <span>Block from viewing my status</span>
+            </button>
+            <button class="status-user-option" onclick="reportUserStatuses('${userId}')">
+                <i class="fas fa-flag"></i>
+                <span>Report statuses</span>
             </button>
         </div>
     `;
@@ -1483,22 +3092,20 @@ async function toggleMuteUser(userId) {
         const isMuted = window.statusPreferences.mutedUsers.includes(userId);
         
         if (isMuted) {
-            // Unmute
             await db.collection('users').doc(currentUser.uid).update({
                 mutedStatusUsers: firebase.firestore.FieldValue.arrayRemove(userId)
             });
             window.statusPreferences.mutedUsers = window.statusPreferences.mutedUsers.filter(id => id !== userId);
-            showToast('Status updates unmuted', 'success');
+            showToast('Unmuted statuses from this user', 'success');
         } else {
-            // Mute
             await db.collection('users').doc(currentUser.uid).update({
                 mutedStatusUsers: firebase.firestore.FieldValue.arrayUnion(userId)
             });
             window.statusPreferences.mutedUsers.push(userId);
-            showToast('Status updates muted', 'success');
+            showToast('Muted statuses from this user', 'success');
         }
         
-        // Reload status list
+        // Update status list
         loadStatusUpdates();
         
     } catch (error) {
@@ -1506,57 +3113,232 @@ async function toggleMuteUser(userId) {
         showToast('Error updating mute settings', 'error');
     }
 }
-
-// ==================== CLEANUP ====================
-
-window.addEventListener('beforeunload', () => {
-    closeStatusViewer();
+function searchContacts(event) {
+    const searchTerm = event.target.value.toLowerCase();
+    const contactItems = document.querySelectorAll('.contact-item');
     
-    if (statusUpdateInterval) {
-        clearInterval(statusUpdateInterval);
-    }
-    
-    // Clean up blob URLs
-    if (window.currentStatusMedia?.previewUrl?.startsWith?.('blob:')) {
-        URL.revokeObjectURL(window.currentStatusMedia.previewUrl);
-    }
-});
-
-// ==================== INITIALIZATION ====================
-
-document.addEventListener('DOMContentLoaded', function() {
-    if (!document.getElementById('statusUpdates')) {
-        console.log('Not on chat page, skipping status initialization');
-        return;
-    }
-    
-    const checkFirebase = setInterval(() => {
-        if (typeof firebase !== 'undefined' && firebase.apps.length > 0 && currentUser) {
-            clearInterval(checkFirebase);
-            console.log('🚀 Initializing WhatsApp Status system...');
-            initStatusSystem();
+    contactItems.forEach(item => {
+        const contactName = item.querySelector('.contact-name').textContent.toLowerCase();
+        if (contactName.includes(searchTerm)) {
+            item.style.display = 'flex';
+        } else {
+            item.style.display = 'none';
         }
-    }, 500);
-});
-// Add these function stubs at the end of your file (before the exports):
-
-// Missing function stubs
-function setupStatusModalListeners() {
-    console.log('Setting up status modal listeners...');
-    // Implementation here
+    });
 }
 
+function showHideFromSelector() {
+    showContactSelector('hideFrom', 'Select contacts to hide from');
+}
+
+function showContactsExceptSelector() {
+    showContactSelector('contactsExcept', 'Select contacts to exclude');
+}
+
+async function showContactSelector(type = 'selectedContacts', title = 'Select Contacts') {
+    try {
+        const contactsSnapshot = await db.collection('users')
+            .where('friends', 'array-contains', currentUser.uid)
+            .limit(50)
+            .get();
+        
+        const modal = document.createElement('div');
+        modal.className = 'contact-selector-modal';
+        modal.innerHTML = `
+            <div class="contact-selector-content">
+                <div class="selector-header">
+                    <h3>${title}</h3>
+                    <input type="text" class="search-contacts" placeholder="Search contacts..." onkeyup="searchContacts(event)">
+                </div>
+                <div class="contacts-list" id="contactsList">
+                    ${contactsSnapshot.docs.map(doc => {
+                        const contact = doc.data();
+                        const isSelected = window.statusPreferences[type]?.includes(doc.id) || false;
+                        return `
+                            <label class="contact-item">
+                                <input type="checkbox" value="${doc.id}" ${isSelected ? 'checked' : ''}>
+                                <img src="${contact.photoURL || `https://ui-avatars.com/api/?name=${encodeURIComponent(contact.displayName)}&background=7C3AED&color=fff`}" 
+                                     class="contact-avatar">
+                                <div class="contact-info">
+                                    <p class="contact-name">${contact.displayName}</p>
+                                    <p class="contact-status">${contact.status || 'Online'}</p>
+                                </div>
+                            </label>
+                        `;
+                    }).join('')}
+                </div>
+                <div class="selector-actions">
+                    <button class="btn-secondary" onclick="closeContactSelector()">Cancel</button>
+                    <button class="btn-primary" onclick="save${type.charAt(0).toUpperCase() + type.slice(1)}Selection()">Save</button>
+                </div>
+            </div>
+        `;
+        
+        modal.dataset.selectorType = type;
+        document.body.appendChild(modal);
+    } catch (error) {
+        console.error('Error showing contact selector:', error);
+        showToast('Error loading contacts', 'error');
+    }
+}
+
+function closeContactSelector() {
+    document.querySelector('.contact-selector-modal')?.remove();
+}
+
+async function saveSelectedContacts() {
+    await saveContactSelection('selectedContacts');
+}
+
+async function saveHideFromSelection() {
+    await saveContactSelection('hideFrom');
+}
+
+async function saveContactsExceptSelection() {
+    await saveContactSelection('contactsExcept');
+}
+
+async function saveContactSelection(type) {
+    const selected = Array.from(document.querySelectorAll('.contact-item input:checked'))
+        .map(input => input.value);
+    
+    // Update privacy with the selected contacts
+    if (type === 'selectedContacts') {
+        await updateStatusPrivacy('selectedContacts', selected, [], []);
+    } else if (type === 'hideFrom') {
+        await updateStatusPrivacy('hideFrom', [], selected, []);
+    } else if (type === 'contactsExcept') {
+        await updateStatusPrivacy('contactsExcept', [], [], selected);
+    }
+    
+    closeContactSelector();
+}
+// ==================== HELPER FUNCTIONS ====================
+
 function getStatusContentHTML(status) {
-    // Implementation for rendering status content
     if (status.type === 'text') {
-        return `<div class="status-text">${escapeHtml(status.content)}</div>`;
+        return `<div class="status-text" style="background: ${status.background || '#7C3AED'}; color: ${status.color || '#ffffff'}; font-family: ${status.font || 'Arial'}">${escapeHtml(status.content)}</div>`;
     } else if (status.type === 'image') {
-        return `<img src="${status.content}" class="status-media" alt="Status image">`;
+        return `<img src="${status.content}" class="status-media" alt="Status image" ${window.statusPreferences.contentBlur ? 'style="filter: blur(5px)"' : ''}>`;
+    } else if (status.type === 'video') {
+        return `<video src="${status.content}" class="status-media" controls ${window.statusPreferences.contentBlur ? 'style="filter: blur(5px)"' : ''}></video>`;
+    } else if (status.type === 'audio') {
+        return `<audio src="${status.content}" class="status-media" controls></audio>`;
+    } else if (status.type === 'emoji') {
+        return `<div class="status-emoji">${status.content}</div>`;
+    } else if (status.type === 'gif') {
+        return `<img src="${status.content}" class="status-gif" alt="GIF">`;
+    } else if (status.type === 'share') {
+        return `<div class="status-share">Shared: ${escapeHtml(status.content)}</div>`;
     }
     return '<div>Status content</div>';
 }
+function updateTextStatusPreview() {
+    const textInput = document.getElementById('statusTextInput');
+    const preview = document.querySelector('.status-text');
+    
+    if (textInput && preview) {
+        window.statusDraft.content = textInput.value;
+        preview.textContent = textInput.value;
+    }
+}
+
+function updateStatusCaption() {
+    const captionInput = document.getElementById('statusCaption');
+    if (captionInput) {
+        window.statusDraft.caption = captionInput.value;
+    }
+}
+
+function updateBackgroundColor(event) {
+    const color = event.target.value;
+    const preview = document.querySelector('.status-text');
+    
+    if (preview) {
+        preview.style.backgroundColor = color;
+        window.statusDraft.background = color;
+    }
+}
+
+function updateTextColor(event) {
+    const color = event.target.value;
+    const preview = document.querySelector('.status-text');
+    
+    if (preview) {
+        preview.style.color = color;
+        window.statusDraft.color = color;
+    }
+}
+
+function updateFontStyle(event) {
+    const font = event.target.value;
+    const preview = document.querySelector('.status-text');
+    
+    if (preview) {
+        preview.style.fontFamily = font;
+        window.statusDraft.font = font;
+    }
+}
+
+function openStatusEmojiPicker() {
+    const emojiPicker = document.createElement('div');
+    emojiPicker.className = 'status-emoji-picker';
+    emojiPicker.innerHTML = `
+        <div class="emoji-picker-grid">
+            ${['😀', '😂', '🥰', '😍', '🤩', '😎', '🥳', '😊', '😢', '😡', '❤️', '👍', '👏', '🎉', '🔥', '💯'].map(emoji => `
+                <button class="emoji-pick-btn" onclick="addEmojiToStatus('${emoji}')">${emoji}</button>
+            `).join('')}
+        </div>
+    `;
+    
+    document.body.appendChild(emojiPicker);
+    
+    // Position it
+    const textInput = document.getElementById('statusTextInput');
+    if (textInput) {
+        const rect = textInput.getBoundingClientRect();
+        emojiPicker.style.top = `${rect.bottom + 10}px`;
+        emojiPicker.style.left = `${rect.left}px`;
+    }
+    
+    // Close on outside click
+    setTimeout(() => {
+        const closeHandler = (e) => {
+            if (!emojiPicker.contains(e.target) && !e.target.closest('#addEmojiBtn')) {
+                emojiPicker.remove();
+                document.removeEventListener('click', closeHandler);
+            }
+        };
+        document.addEventListener('click', closeHandler);
+    }, 10);
+}
+
+function addEmojiToStatus(emoji) {
+    const textInput = document.getElementById('statusTextInput');
+    if (textInput) {
+        textInput.value += emoji;
+        textInput.focus();
+        updateTextStatusPreview();
+    }
+}
+
+function updatePrivacyIndicator() {
+    const privacyIndicator = document.getElementById('privacyIndicator');
+    if (privacyIndicator) {
+        const privacy = window.statusPreferences.privacy;
+        const labels = {
+            'myContacts': 'My contacts',
+            'selectedContacts': 'Selected contacts',
+            'everyone': 'Everyone',
+            'contactsExcept': 'Contacts except...',
+            'hideFrom': 'Hide from...'
+        };
+        privacyIndicator.textContent = labels[privacy] || privacy;
+    }
+}
 
 function escapeHtml(text) {
+    if (!text) return '';
     const div = document.createElement('div');
     div.textContent = text;
     return div.innerHTML;
@@ -1586,7 +3368,357 @@ function showErrorState() {
     }
 }
 
-// Export functions
+function setupStatusModalListeners() {
+    console.log('Setting up status modal listeners...');
+    
+    // Close modal on outside click
+    document.addEventListener('click', (e) => {
+        const statusCreation = document.getElementById('statusCreation');
+        if (statusCreation && e.target === statusCreation) {
+            statusCreation.style.display = 'none';
+        }
+    });
+    
+    // Handle status type selection
+    document.querySelectorAll('.status-option').forEach(option => {
+        option.addEventListener('click', () => {
+            const type = option.dataset.type;
+            selectStatusType(type);
+        });
+    });
+}
+
+function showStatusPrivacySettings() {
+    const modal = document.createElement('div');
+    modal.className = 'privacy-settings-modal';
+    modal.innerHTML = `
+        <div class="privacy-settings-content">
+            <h3>Status Privacy</h3>
+            <div class="privacy-options">
+                <label class="privacy-option">
+                    <input type="radio" name="statusPrivacy" value="myContacts" 
+                           ${window.statusPreferences.privacy === 'myContacts' ? 'checked' : ''}>
+                    <div class="privacy-option-info">
+                        <h4>My contacts</h4>
+                        <p>All your contacts</p>
+                    </div>
+                </label>
+                <label class="privacy-option">
+                    <input type="radio" name="statusPrivacy" value="selectedContacts" 
+                           ${window.statusPreferences.privacy === 'selectedContacts' ? 'checked' : ''}>
+                    <div class="privacy-option-info">
+                        <h4>Selected contacts</h4>
+                        <p>Only share with selected contacts</p>
+                    </div>
+                </label>
+                <label class="privacy-option">
+                    <input type="radio" name="statusPrivacy" value="contactsExcept" 
+                           ${window.statusPreferences.privacy === 'contactsExcept' ? 'checked' : ''}>
+                    <div class="privacy-option-info">
+                        <h4>Contacts except...</h4>
+                        <p>All contacts except those you exclude</p>
+                    </div>
+                </label>
+                <label class="privacy-option">
+                    <input type="radio" name="statusPrivacy" value="hideFrom" 
+                           ${window.statusPreferences.privacy === 'hideFrom' ? 'checked' : ''}>
+                    <div class="privacy-option-info">
+                        <h4>Hide from...</h4>
+                        <p>Hide from specific contacts</p>
+                    </div>
+                </label>
+                <label class="privacy-option">
+                    <input type="radio" name="statusPrivacy" value="everyone" 
+                           ${window.statusPreferences.privacy === 'everyone' ? 'checked' : ''}>
+                    <div class="privacy-option-info">
+                        <h4>Everyone</h4>
+                        <p>Anyone with your number</p>
+                    </div>
+                </label>
+            </div>
+            <div class="privacy-actions">
+                <button class="btn-secondary" onclick="this.parentElement.parentElement.parentElement.remove()">Cancel</button>
+                <button class="btn-primary" onclick="savePrivacySettings()">Save</button>
+            </div>
+        </div>
+    `;
+    
+    document.body.appendChild(modal);
+}
+
+async function savePrivacySettings() {
+    const selectedPrivacy = document.querySelector('input[name="statusPrivacy"]:checked').value;
+    
+    let selectedContacts = [];
+    let hideFrom = [];
+    let exceptContacts = [];
+    
+    if (selectedPrivacy === 'selectedContacts') {
+        // Show contact selector
+        await showContactSelector();
+        return;
+    } else if (selectedPrivacy === 'hideFrom') {
+        // Show hide from selector
+        await showHideFromSelector();
+        return;
+    } else if (selectedPrivacy === 'contactsExcept') {
+        // Show contacts except selector
+        await showContactsExceptSelector();
+        return;
+    }
+    
+    await updateStatusPrivacy(selectedPrivacy, selectedContacts, hideFrom, exceptContacts);
+    
+    // Close modal
+    document.querySelector('.privacy-settings-modal')?.remove();
+}
+
+function showStatusSettings() {
+    const modal = document.createElement('div');
+    modal.className = 'status-settings-modal';
+    modal.innerHTML = `
+        <div class="status-settings-content">
+            <h3>Status Settings</h3>
+            <div class="settings-options">
+                <label class="settings-option">
+                    <input type="checkbox" id="readReceipts" 
+                           ${window.statusPreferences.readReceipts ? 'checked' : ''}>
+                    <div class="settings-option-info">
+                        <h4>Read receipts</h4>
+                        <p>Show when you view others' statuses</p>
+                    </div>
+                </label>
+                <label class="settings-option">
+                    <input type="checkbox" id="allowReplies" 
+                           ${window.statusPreferences.allowReplies ? 'checked' : ''}>
+                    <div class="settings-option-info">
+                        <h4>Allow replies</h4>
+                        <p>Allow others to reply to your statuses</p>
+                    </div>
+                </label>
+                <label class="settings-option">
+                    <input type="checkbox" id="autoDownload" 
+                           ${window.statusPreferences.autoDownload ? 'checked' : ''}>
+                    <div class="settings-option-info">
+                        <h4>Auto-download</h4>
+                        <p>Automatically download media</p>
+                    </div>
+                </label>
+                <label class="settings-option">
+                    <input type="checkbox" id="screenshotAlerts" 
+                           ${window.statusPreferences.screenshotAlerts ? 'checked' : ''}>
+                    <div class="settings-option-info">
+                        <h4>Screenshot alerts</h4>
+                        <p>Notify when someone takes a screenshot</p>
+                    </div>
+                </label>
+                <label class="settings-option">
+                    <input type="checkbox" id="saveToGallery" 
+                           ${window.statusPreferences.saveToGallery ? 'checked' : ''}>
+                    <div class="settings-option-info">
+                        <h4>Save to gallery</h4>
+                        <p>Automatically save status media to gallery</p>
+                    </div>
+                </label>
+                <label class="settings-option">
+                    <input type="checkbox" id="contentBlur" 
+                           ${window.statusPreferences.contentBlur ? 'checked' : ''}>
+                    <div class="settings-option-info">
+                        <h4>Blur sensitive content</h4>
+                        <p>Blur media marked as sensitive</p>
+                    </div>
+                </label>
+            </div>
+            <div class="settings-actions">
+                <button class="btn-secondary" onclick="this.parentElement.parentElement.parentElement.remove()">Cancel</button>
+                <button class="btn-primary" onclick="saveStatusSettings()">Save</button>
+            </div>
+        </div>
+    `;
+    
+    document.body.appendChild(modal);
+}
+
+async function saveStatusSettings() {
+    try {
+        const updates = {
+            statusReadReceipts: document.getElementById('readReceipts').checked,
+            allowStatusReplies: document.getElementById('allowReplies').checked,
+            autoDownloadStatus: document.getElementById('autoDownload').checked,
+            screenshotAlerts: document.getElementById('screenshotAlerts').checked,
+            saveStatusToGallery: document.getElementById('saveToGallery').checked,
+            contentBlur: document.getElementById('contentBlur').checked
+        };
+        
+        await db.collection('users').doc(currentUser.uid).update(updates);
+        
+        // Update local preferences
+        window.statusPreferences.readReceipts = updates.statusReadReceipts;
+        window.statusPreferences.allowReplies = updates.allowStatusReplies;
+        window.statusPreferences.autoDownload = updates.autoDownloadStatus;
+        window.statusPreferences.screenshotAlerts = updates.screenshotAlerts;
+        window.statusPreferences.saveToGallery = updates.saveStatusToGallery;
+        window.statusPreferences.contentBlur = updates.contentBlur;
+        
+        showToast('Settings saved', 'success');
+        
+        // Close modal
+        document.querySelector('.status-settings-modal')?.remove();
+        
+    } catch (error) {
+        console.error('Error saving settings:', error);
+        showToast('Error saving settings', 'error');
+    }
+}
+
+function setupSwipeGestures() {
+    let startX, startY, endX, endY;
+    const threshold = 50; // Minimum swipe distance
+    
+    document.addEventListener('touchstart', (e) => {
+        startX = e.touches[0].clientX;
+        startY = e.touches[0].clientY;
+    });
+    
+    document.addEventListener('touchend', (e) => {
+        if (!startX || !startY) return;
+        
+        endX = e.changedTouches[0].clientX;
+        endY = e.changedTouches[0].clientY;
+        
+        const diffX = startX - endX;
+        const diffY = startY - endY;
+        
+        // Check if swipe is mostly horizontal
+        if (Math.abs(diffX) > Math.abs(diffY)) {
+            // Check if we're in status viewer
+            if (document.getElementById('statusViewer') && currentStatusViewing) {
+                if (diffX > threshold) {
+                    // Swipe left - next status
+                    showNextStatus();
+                } else if (diffX < -threshold) {
+                    // Swipe right - previous status
+                    showPrevStatus();
+                }
+            }
+        }
+        
+        // Reset
+        startX = null;
+        startY = null;
+    });
+}
+
+async function showStatusAnalytics(statusId) {
+    try {
+        const [statusDoc, viewsSnapshot, reactionsSnapshot] = await Promise.all([
+            db.collection('statuses').doc(statusId).get(),
+            db.collection('statusViews').where('statusId', '==', statusId).get(),
+            db.collection('statusReactions').where('statusId', '==', statusId).get()
+        ]);
+        
+        if (!statusDoc.exists) {
+            showToast('Status not found', 'error');
+            return;
+        }
+        
+        const status = statusDoc.data();
+        const views = viewsSnapshot.docs.map(doc => doc.data());
+        const reactions = reactionsSnapshot.docs.map(doc => doc.data());
+        
+        const modal = document.createElement('div');
+        modal.className = 'analytics-modal';
+        modal.innerHTML = `
+            <div class="analytics-content">
+                <div class="analytics-header">
+                    <h3>Status Analytics</h3>
+                    <button class="btn-close" onclick="this.parentElement.parentElement.parentElement.remove()">
+                        <i class="fas fa-times"></i>
+                    </button>
+                </div>
+                <div class="analytics-stats">
+                    <div class="stat-item">
+                        <h4>${status.viewCount || 0}</h4>
+                        <p>Views</p>
+                    </div>
+                    <div class="stat-item">
+                        <h4>${status.reactionCount || 0}</h4>
+                        <p>Reactions</p>
+                    </div>
+                    <div class="stat-item">
+                        <h4>${status.replyCount || 0}</h4>
+                        <p>Replies</p>
+                    </div>
+                    <div class="stat-item">
+                        <h4>${status.shareCount || 0}</h4>
+                        <p>Shares</p>
+                    </div>
+                </div>
+                <div class="analytics-charts">
+                    <div class="chart-container">
+                        <h4>Views Over Time</h4>
+                        <div class="chart-placeholder">Chart would appear here</div>
+                    </div>
+                    <div class="analytics-details">
+                        <h4>Top Viewers</h4>
+                        <div class="top-viewers">
+                            ${views.slice(0, 5).map(view => `
+                                <div class="viewer-detail">
+                                    <img src="${view.userPhotoURL || `https://ui-avatars.com/api/?name=${encodeURIComponent(view.userDisplayName)}&background=7C3AED&color=fff`}" 
+                                         class="viewer-avatar">
+                                    <span>${view.userDisplayName}</span>
+                                    <span class="view-time">${formatTimeAgo(view.viewedAt)}</span>
+                                </div>
+                            `).join('')}
+                        </div>
+                        <h4>Popular Reactions</h4>
+                        <div class="top-reactions">
+                            ${getReactionCounts(reactions).slice(0, 3).map(([reaction, count]) => `
+                                <div class="reaction-detail">
+                                    <span class="reaction-emoji">${reaction}</span>
+                                    <span class="reaction-count">${count}</span>
+                                </div>
+                            `).join('')}
+                        </div>
+                    </div>
+                </div>
+            </div>
+        `;
+        
+        document.body.appendChild(modal);
+        
+    } catch (error) {
+        console.error('Error showing analytics:', error);
+        showToast('Error loading analytics', 'error');
+    }
+}
+
+function getReactionCounts(reactions) {
+    const counts = {};
+    reactions.forEach(reaction => {
+        counts[reaction.reaction] = (counts[reaction.reaction] || 0) + 1;
+    });
+    return Object.entries(counts).sort((a, b) => b[1] - a[1]);
+}
+
+function selectStatusType(type) {
+    window.statusDraft.type = type;
+    
+    // Update UI
+    document.querySelectorAll('.status-option').forEach(opt => {
+        opt.classList.remove('active');
+    });
+    document.querySelector(`.status-option[data-type="${type}"]`).classList.add('active');
+    
+    // Show appropriate preview
+    document.querySelectorAll('.status-preview').forEach(preview => {
+        preview.classList.add('hidden');
+    });
+    document.getElementById(`${type}Preview`)?.classList.remove('hidden');
+}
+
+// ==================== EXPORTS ====================
+
 window.initStatusSystem = initStatusSystem;
 window.loadStatusUpdates = loadStatusUpdates;
 window.openStatusCreation = openStatusCreation;
@@ -1600,5 +3732,56 @@ window.sendStatusReply = sendStatusReply;
 window.showStatusAnalytics = showStatusAnalytics;
 window.updateStatusPrivacy = updateStatusPrivacy;
 window.toggleMuteUser = toggleMuteUser;
+window.loadNextUserStatuses = loadNextUserStatuses;
+window.showViewersList = showViewersList;
+window.showReplyOptions = showReplyOptions;
+window.showStatusReactions = showStatusReactions;
+window.showContactSelector = showContactSelector;
+window.blockStatusUser = blockStatusUser;
+window.messageUser = messageUser;
+window.callUser = callUser;
+window.viewContact = viewContact;
+window.copyStatusLink = copyStatusLink;
+window.shareToContact = shareToContact;
+window.shareToOtherApp = shareToOtherApp;
+window.updateReactionCount = updateReactionCount;
+window.setupStatusRealtimeUpdates = setupStatusRealtimeUpdates;
+window.updateStatusInUI = updateStatusInUI;
+window.removeStatusFromUI = removeStatusFromUI;
+window.showMyStatusOptions = showMyStatusOptions;
+window.saveStatus = saveStatus;
+window.reportStatus = reportStatus;
+window.forwardStatus = forwardStatus;
+window.archiveStatus = archiveStatus;
+window.searchStatuses = searchStatuses;
+window.showStatusUserOptions = showStatusUserOptions;
+window.showStatusSettings = showStatusSettings;
+window.showStatusPrivacySettings = showStatusPrivacySettings;
+window.saveStatusDraft = saveStatusDraft;
+window.openStatusEmojiPicker = openStatusEmojiPicker;
+window.updateTextStatusPreview = updateTextStatusPreview;
+window.updateBackgroundColor = updateBackgroundColor;
+window.updateTextColor = updateTextColor;
+window.updateFontStyle = updateFontStyle;
+window.addEmojiToStatus = addEmojiToStatus;
+window.savePrivacySettings = savePrivacySettings;
+window.saveStatusSettings = saveStatusSettings;
+
+// ==================== INITIALIZATION ====================
+
+document.addEventListener('DOMContentLoaded', function() {
+    if (!document.getElementById('statusUpdates')) {
+        console.log('Not on chat page, skipping status initialization');
+        return;
+    }
+    
+    const checkFirebase = setInterval(() => {
+        if (typeof firebase !== 'undefined' && firebase.apps.length > 0 && currentUser) {
+            clearInterval(checkFirebase);
+            console.log('🚀 Initializing WhatsApp Status system...');
+            initStatusSystem();
+        }
+    }, 500);
+});
 
 console.log('✅ status.js loaded - Complete WhatsApp Status System Ready');
