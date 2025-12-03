@@ -4,10 +4,12 @@
 // Firebase: 9.22.1 (Compact)
 
 const APP_VERSION = '1.2.0';
+const CACHE_NAME = 'kynecta-app-cache-v1';
 const CACHE_NAMES = {
   static: `kynecta-static-v${APP_VERSION}`,
   dynamic: `kynecta-dynamic-v${APP_VERSION}`,
-  firebase: `kynecta-firebase-v${APP_VERSION}`
+  firebase: `kynecta-firebase-v${APP_VERSION}`,
+  app: 'kynecta-app-cache-v1'
 };
 
 // Core assets to cache immediately
@@ -39,6 +41,41 @@ const STATIC_ASSETS = [
   '/icons/icon-512x512.png'
 ];
 
+// Add all HTML routes to cache
+const ALL_HTML_ROUTES = [
+  '/',
+  '/index.html',
+  '/login.html',
+  '/register.html',
+  '/forgot-password.html',
+  '/profile.html',
+  '/settings.html',
+  '/notifications.html',
+  '/marketplace.html',
+  '/games.html',
+  '/payment.html',
+  '/chat.html',
+  '/404.html'
+];
+
+// Add all static assets to cache
+const ALL_STATIC_ASSETS = [
+  '/manifest.json',
+  '/firebase-config.js',
+  '/app.js',
+  '/auth.js',
+  '/firestore.js',
+  '/storage.js',
+  '/chat.js',
+  '/main.js',
+  '/styles/main.css',
+  '/styles/chat.css',
+  '/styles/',
+  '/icons/icon-192x192.png',
+  '/icons/icon-512x512.png',
+  '/icons/'
+];
+
 // Firebase SDK 9.22.1 - Compact Version (Modular)
 const FIREBASE_ASSETS = [
   'https://www.gstatic.com/firebasejs/9.22.1/firebase-app-compat.js',
@@ -63,6 +100,22 @@ self.addEventListener('install', (event) => {
   
   event.waitUntil(
     Promise.all([
+      // Cache ALL HTML routes for offline use
+      caches.open(CACHE_NAME)
+        .then(cache => {
+          console.log('[kynecta Service Worker] Caching ALL HTML routes for offline');
+          return cache.addAll(ALL_HTML_ROUTES);
+        }),
+      // Cache ALL static assets
+      caches.open(CACHE_NAME)
+        .then(cache => {
+          console.log('[kynecta Service Worker] Caching ALL static assets');
+          return Promise.all(ALL_STATIC_ASSETS.map(asset => {
+            return cache.add(asset).catch(err => {
+              console.log(`Failed to cache ${asset}:`, err);
+            });
+          }));
+        }),
       // Cache core static assets
       caches.open(CACHE_NAMES.static)
         .then(cache => {
@@ -97,7 +150,9 @@ self.addEventListener('activate', (event) => {
     caches.keys().then(cacheNames => {
       const deletions = cacheNames.map(cacheName => {
         // Delete old caches that don't match current version
-        if (cacheName.startsWith('uniconnect-') && !Object.values(CACHE_NAMES).includes(cacheName)) {
+        if ((cacheName.startsWith('uniconnect-') || cacheName.startsWith('kynecta-')) && 
+            !Object.values(CACHE_NAMES).includes(cacheName) && 
+            cacheName !== CACHE_NAME) {
           console.log('[kynecta Service Worker] Deleting old cache:', cacheName);
           return caches.delete(cacheName);
         }
@@ -111,7 +166,7 @@ self.addEventListener('activate', (event) => {
   );
 });
 
-// Fetch Event - Advanced caching strategy with Firebase optimization
+// Enhanced Fetch Event - Serve cached files first when offline
 self.addEventListener('fetch', (event) => {
   const { request } = event;
   
@@ -121,6 +176,33 @@ self.addEventListener('fetch', (event) => {
   }
 
   const url = new URL(request.url);
+
+  // HTML pages - Cache First for offline, update when online
+  if (request.destination === 'document' || url.pathname.endsWith('.html') || 
+      ALL_HTML_ROUTES.includes(url.pathname) || 
+      (url.pathname === '/' && request.destination !== 'image')) {
+    event.respondWith(handleHtmlWithCacheFirst(request));
+    return;
+  }
+
+  // CSS and JS - Cache First for offline
+  if (request.destination === 'style' || request.destination === 'script' ||
+      url.pathname.endsWith('.css') || url.pathname.endsWith('.js')) {
+    event.respondWith(handleStaticWithCacheFirst(request));
+    return;
+  }
+
+  // Images and icons - Cache First for offline
+  if (request.destination === 'image' || url.pathname.includes('/icons/')) {
+    event.respondWith(handleImageWithCacheFirst(request));
+    return;
+  }
+
+  // Manifest file
+  if (url.pathname.endsWith('manifest.json')) {
+    event.respondWith(handleManifestWithCacheFirst(request));
+    return;
+  }
 
   // Firebase services - Network First with aggressive caching
   if (url.hostname.includes('firebase') || 
@@ -134,27 +216,196 @@ self.addEventListener('fetch', (event) => {
   else if (url.pathname.includes('/api/')) {
     event.respondWith(handleApiRequest(request));
   }
-  // HTML pages - Network First with cache fallback
-  else if (request.destination === 'document' || url.pathname.endsWith('.html')) {
-    event.respondWith(handleHtmlRequest(request));
-  }
   // Firebase SDK files - Cache First (versioned URLs)
   else if (url.hostname === 'www.gstatic.com' && url.pathname.includes('/firebasejs/')) {
     event.respondWith(handleFirebaseSdkRequest(request));
   }
-  // Images - Cache First strategy
-  else if (request.destination === 'image') {
-    event.respondWith(handleImageRequest(request));
-  }
-  // CSS and JS - Cache First strategy
-  else if (request.destination === 'style' || request.destination === 'script') {
-    event.respondWith(handleStaticRequest(request));
-  }
   else {
-    // Default strategy
-    event.respondWith(handleDefaultRequest(request));
+    // Default strategy - Cache First for offline
+    event.respondWith(handleDefaultWithCacheFirst(request));
   }
 });
+
+// Enhanced HTML handler - Cache First with network update
+async function handleHtmlWithCacheFirst(request) {
+  // Try cache first
+  const cachedResponse = await caches.match(request);
+  if (cachedResponse) {
+    // Update cache in background if online
+    updateCacheInBackground(request);
+    return cachedResponse;
+  }
+
+  // If not in cache, try network
+  try {
+    const networkResponse = await fetch(request);
+    
+    // Cache the response for future offline use
+    if (networkResponse.ok) {
+      const cache = await caches.open(CACHE_NAME);
+      await cache.put(request, networkResponse.clone());
+    }
+    
+    return networkResponse;
+  } catch (error) {
+    // If network fails and not in cache, return 404 page
+    const offlineResponse = await caches.match('/404.html');
+    if (offlineResponse) {
+      return offlineResponse;
+    }
+    
+    // Fallback to index.html
+    const indexResponse = await caches.match('/index.html');
+    if (indexResponse) {
+      return indexResponse;
+    }
+    
+    return new Response('Offline - No cached page available', {
+      status: 408,
+      headers: { 'Content-Type': 'text/html' }
+    });
+  }
+}
+
+// Enhanced Static assets handler - Cache First with network update
+async function handleStaticWithCacheFirst(request) {
+  // Try cache first
+  const cachedResponse = await caches.match(request);
+  if (cachedResponse) {
+    // Update cache in background if online
+    updateCacheInBackground(request);
+    return cachedResponse;
+  }
+
+  // If not in cache, try network
+  try {
+    const networkResponse = await fetch(request);
+    
+    // Cache the response for future offline use
+    if (networkResponse.ok) {
+      const cache = await caches.open(CACHE_NAME);
+      await cache.put(request, networkResponse.clone());
+    }
+    
+    return networkResponse;
+  } catch (error) {
+    return new Response('// Offline - Static resource not available', {
+      status: 408,
+      headers: { 'Content-Type': 'application/javascript' }
+    });
+  }
+}
+
+// Enhanced Image handler - Cache First with network update
+async function handleImageWithCacheFirst(request) {
+  // Try cache first
+  const cachedResponse = await caches.match(request);
+  if (cachedResponse) {
+    // Update cache in background if online
+    updateCacheInBackground(request);
+    return cachedResponse;
+  }
+
+  // If not in cache, try network
+  try {
+    const networkResponse = await fetch(request);
+    
+    // Cache the response for future offline use
+    if (networkResponse.ok) {
+      const cache = await caches.open(CACHE_NAME);
+      await cache.put(request, networkResponse.clone());
+    }
+    
+    return networkResponse;
+  } catch (error) {
+    return new Response('', { status: 408 });
+  }
+}
+
+// Manifest handler - Cache First with network update
+async function handleManifestWithCacheFirst(request) {
+  // Try cache first
+  const cachedResponse = await caches.match(request);
+  if (cachedResponse) {
+    // Update cache in background if online
+    updateCacheInBackground(request);
+    return cachedResponse;
+  }
+
+  // If not in cache, try network
+  try {
+    const networkResponse = await fetch(request);
+    
+    // Cache the response for future offline use
+    if (networkResponse.ok) {
+      const cache = await caches.open(CACHE_NAME);
+      await cache.put(request, networkResponse.clone());
+    }
+    
+    return networkResponse;
+  } catch (error) {
+    // Return basic manifest from cache
+    const basicManifest = {
+      "name": "kynecta",
+      "short_name": "kynecta",
+      "start_url": "/",
+      "display": "standalone",
+      "background_color": "#ffffff",
+      "theme_color": "#000000",
+      "icons": [
+        {
+          "src": "/icons/icon-192x192.png",
+          "sizes": "192x192",
+          "type": "image/png"
+        },
+        {
+          "src": "/icons/icon-512x512.png",
+          "sizes": "512x512",
+          "type": "image/png"
+        }
+      ]
+    };
+    
+    return new Response(JSON.stringify(basicManifest), {
+      status: 200,
+      headers: { 'Content-Type': 'application/json' }
+    });
+  }
+}
+
+// Default handler - Cache First with network update
+async function handleDefaultWithCacheFirst(request) {
+  // Try cache first
+  const cachedResponse = await caches.match(request);
+  if (cachedResponse) {
+    // Update cache in background if online
+    updateCacheInBackground(request);
+    return cachedResponse;
+  }
+
+  // If not in cache, try network
+  try {
+    return await fetch(request);
+  } catch (error) {
+    return new Response('Offline', { status: 408 });
+  }
+}
+
+// Helper function to update cache in background
+async function updateCacheInBackground(request) {
+  // Only update if we're online
+  if (navigator.onLine === false) return;
+  
+  try {
+    const networkResponse = await fetch(request);
+    if (networkResponse.ok) {
+      const cache = await caches.open(CACHE_NAME);
+      await cache.put(request, networkResponse.clone());
+    }
+  } catch (error) {
+    // Silently fail - we already served from cache
+  }
+}
 
 // Strategy for Firebase services - Network First with offline queue
 async function handleFirebaseRequest(request) {
@@ -247,7 +498,7 @@ async function handleApiRequest(request) {
   }
 }
 
-// Strategy: Network First for HTML pages
+// Strategy: Network First for HTML pages (legacy)
 async function handleHtmlRequest(request) {
   try {
     const networkResponse = await fetch(request);
@@ -273,7 +524,7 @@ async function handleHtmlRequest(request) {
   }
 }
 
-// Strategy: Cache First for images
+// Strategy: Cache First for images (legacy)
 async function handleImageRequest(request) {
   const cachedResponse = await caches.match(request);
   if (cachedResponse) {
@@ -292,7 +543,7 @@ async function handleImageRequest(request) {
   }
 }
 
-// Strategy: Cache First for static assets
+// Strategy: Cache First for static assets (legacy)
 async function handleStaticRequest(request) {
   const cachedResponse = await caches.match(request);
   if (cachedResponse) {
@@ -314,7 +565,7 @@ async function handleStaticRequest(request) {
   }
 }
 
-// Default strategy
+// Default strategy (legacy)
 async function handleDefaultRequest(request) {
   try {
     return await fetch(request);
@@ -503,7 +754,8 @@ self.addEventListener('message', (event) => {
     case 'GET_VERSION':
       event.ports[0]?.postMessage({ 
         version: APP_VERSION,
-        firebase: '9.22.1-compat'
+        firebase: '9.22.1-compat',
+        cache: CACHE_NAME
       });
       break;
       
@@ -515,9 +767,21 @@ self.addEventListener('message', (event) => {
     case 'CLEAR_CACHE':
       caches.keys().then(cacheNames => {
         cacheNames.forEach(cacheName => {
-          if (cacheName.startsWith('uniconnect-')) {
+          if (cacheName.startsWith('uniconnect-') || cacheName.startsWith('kynecta-')) {
             caches.delete(cacheName);
           }
+        });
+      });
+      break;
+      
+    case 'CHECK_OFFLINE_CACHE':
+      caches.open(CACHE_NAME).then(cache => {
+        cache.keys().then(keys => {
+          event.ports[0]?.postMessage({
+            cachedItems: keys.length,
+            cacheName: CACHE_NAME,
+            offlineReady: keys.length > 0
+          });
         });
       });
       break;

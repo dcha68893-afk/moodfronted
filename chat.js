@@ -573,7 +573,6 @@ async function loadUserData() {
         loadChatsTemporary();
         requestNotificationPermission();
         setupToolsListeners();
-        setupStatusFileHandlers();
         listenForFriendRequests();
         
         // ==================== STALE CALL CLEANUP ON STARTUP ====================
@@ -850,7 +849,6 @@ function saveSettings() {
                 status: document.getElementById('statusPrivacy')?.value || 'everyone',
                 readReceipts: document.getElementById('readReceiptsPrivacy')?.checked ?? true,
                 disappearingMessages: document.getElementById('disappearingMessagesPrivacy')?.value || 'off',
-                groups: document.getElementById('groupsPrivacy')?.value || 'everyone',
                 calls: document.getElementById('callsPrivacy')?.value || 'everyone'
             },
             chat: {
@@ -969,48 +967,6 @@ function applyChatSettings() {
 }
 
 
-
-async function addViewerToStatus(statusId, viewerId) {
-    try {
-        if (!statusId || !viewerId) return;
-        const viewRef = db.collection('statusViews').doc(`${statusId}_${viewerId}`);
-        const viewDoc = await viewRef.get();
-        if (viewDoc.exists) {
-            // already recorded
-            return;
-        }
-        await viewRef.set({
-            statusId,
-            userId: viewerId,
-            userDisplayName: currentUserData?.displayName || '',
-            userPhotoURL: currentUserData?.photoURL || '',
-            viewedAt: firebase.firestore.FieldValue.serverTimestamp()
-        });
-        console.log('Viewer recorded for status', statusId, viewerId);
-    } catch (err) {
-        console.error('addViewerToStatus error', err);
-    }
-}
-
-
-
-
-function formatTimeAgo(timestamp) {
-    if (!timestamp) return 'Just now';
-    
-    const now = new Date();
-    const time = timestamp.toDate ? timestamp.toDate() : new Date(timestamp);
-    const diffMs = now - time;
-    const diffMins = Math.floor(diffMs / 60000);
-    const diffHours = Math.floor(diffMs / 3600000);
-    const diffDays = Math.floor(diffMs / 86400000);
-    
-    if (diffMins < 1) return 'Just now';
-    if (diffMins < 60) return `${diffMins}m ago`;
-    if (diffHours < 24) return `${diffHours}h ago`;
-    if (diffDays < 7) return `${diffDays}d ago`;
-    return time.toLocaleDateString();
-}
 
 
 
@@ -1263,6 +1219,23 @@ async function sendAudioMessage(audioBlob) {
     }
 }
 
+// ADD THIS near top of file after variable declarations
+function formatTimeAgo(timestamp) {
+    if (!timestamp) return 'Just now';
+    
+    const now = new Date();
+    const time = timestamp.toDate ? timestamp.toDate() : new Date(timestamp);
+    const diffMs = now - time;
+    const diffMins = Math.floor(diffMs / 60000);
+    const diffHours = Math.floor(diffMs / 3600000);
+    const diffDays = Math.floor(diffMs / 86400000);
+    
+    if (diffMins < 1) return 'Just now';
+    if (diffMins < 60) return `${diffMins}m ago`;
+    if (diffHours < 24) return `${diffHours}h ago`;
+    if (diffDays < 7) return `${diffDays}d ago`;
+    return time.toLocaleDateString();
+}
 // NEW: Accept friend request
 async function acceptFriendRequest(friendshipId) {
     try {
@@ -3377,7 +3350,6 @@ document.getElementById("savePrivacy")?.addEventListener("click", () => {
         status: document.getElementById("statusPrivacy").value,
         readReceipts: document.getElementById("readReceiptsPrivacy").checked,
         disappearingMessages: document.getElementById("disappearingMessagesPrivacy").value,
-        groups: document.getElementById("groupsPrivacy").value,
         calls: document.getElementById("callsPrivacy").value
     };
 
@@ -3640,15 +3612,6 @@ function setupEventListeners() {
             panel.classList.add('hidden');
         });
         
-        // NEW CODE: For groups tab, check if group.js is loaded
-        if (tab === 'groups') {
-            const tabPanel = document.getElementById('groupsTab');
-            if (tabPanel) tabPanel.classList.remove('hidden');
-        } else {
-            // For other tabs (chats, friends, updates, calls)
-            const tabPanel = document.getElementById(`${tab}Tab`);
-            if (tabPanel) tabPanel.classList.remove('hidden');
-        }
     });
 });
 
@@ -3837,30 +3800,6 @@ function setupEventListeners() {
     }
 
     
-    document.addEventListener('DOMContentLoaded', () => {
-    const btn = document.getElementById('addParticipantBtn');
-    const box = document.getElementById('addParticipantBox');
-
-    if (btn && box) {
-        btn.addEventListener('click', () => {
-            box.classList.toggle('hidden'); // show/hide
-        });
-    } else {
-        console.warn('Add Participant button or box not found');
-    }
-});
-
-
-const groupsBtn = document.getElementById('groupsBtn');
-
-if (groupsBtn) {
-    groupsBtn.addEventListener('click', function() {
-        // NEW: Switch to groups tab using group.js function
-        if (window.switchToTab) {
-            switchToTab('groups'); // This function is in group.js
-        }
-    });
-}
 
     // Back to chats (mobile)
     const backToChats = document.getElementById('backToChats');
@@ -5293,7 +5232,6 @@ function loadPrivacySettings() {
     const statusPrivacy = document.getElementById("statusPrivacy");
     const readReceiptsPrivacy = document.getElementById("readReceiptsPrivacy");
     const disappearingMessagesPrivacy = document.getElementById("disappearingMessagesPrivacy");
-    const groupsPrivacy = document.getElementById("groupsPrivacy");
     const callsPrivacy = document.getElementById("callsPrivacy");
     
     if (lastSeenPrivacy) lastSeenPrivacy.value = privacySettings.lastSeen || 'everyone';
@@ -5302,7 +5240,6 @@ function loadPrivacySettings() {
     if (statusPrivacy) statusPrivacy.value = privacySettings.status || 'everyone';
     if (readReceiptsPrivacy) readReceiptsPrivacy.checked = privacySettings.readReceipts !== false;
     if (disappearingMessagesPrivacy) disappearingMessagesPrivacy.value = privacySettings.disappearingMessages || 'off';
-    if (groupsPrivacy) groupsPrivacy.value = privacySettings.groups || 'everyone';
     if (callsPrivacy) callsPrivacy.value = privacySettings.calls || 'everyone';
 }
 
