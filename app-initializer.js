@@ -4,7 +4,216 @@ class AppInitializer {
         this.isInitialized = false;
         this.components = new Map();
         this.loadingStates = new Map();
+        
+        // NEW: Initialize UserData before app loads
+        this.initializeUserData();
+        
         this.init();
+    }
+
+    // NEW: Initialize UserData method
+    initializeUserData() {
+        console.log('👤 Initializing UserData before app loads');
+        
+        // Check if UserData exists, create if not
+        if (!window.UserData) {
+            window.UserData = {
+                theme: 'light',
+                colors: {
+                    primary: '#007bff',
+                    secondary: '#6c757d',
+                    accent: '#28a745'
+                },
+                preferences: {},
+                selectionCompleted: false,
+                // Add other user properties as needed
+            };
+            
+            // Try to load from localStorage
+            try {
+                const savedUserData = localStorage.getItem('kynecta-user-data');
+                if (savedUserData) {
+                    const parsedData = JSON.parse(savedUserData);
+                    Object.assign(window.UserData, parsedData);
+                    console.log('📁 UserData loaded from localStorage');
+                }
+            } catch (error) {
+                console.warn('⚠️ Could not load UserData from localStorage:', error);
+            }
+        }
+        
+        // NEW: Apply theme colors from UserData
+        this.applyThemeColors();
+        
+        // NEW: Check selection completion state
+        this.checkSelectionCompletion();
+    }
+
+    // NEW: Apply theme colors method
+    applyThemeColors() {
+        if (!window.UserData || !window.UserData.colors) {
+            return;
+        }
+        
+        console.log('🎨 Applying theme colors from UserData');
+        
+        // Create CSS variables from UserData colors
+        const style = document.createElement('style');
+        style.id = 'user-theme-colors';
+        
+        const colors = window.UserData.colors;
+        let cssVariables = ':root {\n';
+        
+        Object.entries(colors).forEach(([key, value]) => {
+            cssVariables += `  --color-${key}: ${value};\n`;
+            
+            // Also create RGB versions for opacity support
+            if (value.startsWith('#')) {
+                const r = parseInt(value.slice(1, 3), 16);
+                const g = parseInt(value.slice(3, 5), 16);
+                const b = parseInt(value.slice(5, 7), 16);
+                cssVariables += `  --color-${key}-rgb: ${r}, ${g}, ${b};\n`;
+            }
+        });
+        
+        cssVariables += '}';
+        style.textContent = cssVariables;
+        
+        // Remove existing theme if present
+        const existingTheme = document.getElementById('user-theme-colors');
+        if (existingTheme) {
+            existingTheme.remove();
+        }
+        
+        document.head.appendChild(style);
+        
+        // Apply theme class to document
+        const theme = window.UserData.theme || 'light';
+        document.documentElement.setAttribute('data-theme', theme);
+        document.documentElement.classList.add(`theme-${theme}`);
+        
+        console.log(`✅ Applied ${theme} theme with custom colors`);
+    }
+
+    // NEW: Check selection completion method
+    checkSelectionCompletion() {
+        if (!window.UserData) {
+            return;
+        }
+        
+        const isSelectionComplete = window.UserData.selectionCompleted === true;
+        
+        // Add completion state to body for CSS targeting
+        document.body.classList.toggle('selection-complete', isSelectionComplete);
+        document.body.classList.toggle('selection-incomplete', !isSelectionComplete);
+        
+        // Dispatch event for other components
+        document.dispatchEvent(new CustomEvent('selection:statechange', {
+            detail: { completed: isSelectionComplete }
+        }));
+        
+        console.log(`📋 Selection completion state: ${isSelectionComplete ? 'Complete ✓' : 'Incomplete ⏳'}`);
+        
+        // If selection is incomplete, show guidance
+        if (!isSelectionComplete) {
+            this.showSelectionGuidance();
+        }
+    }
+
+    // NEW: Show selection guidance method
+    showSelectionGuidance() {
+        // Check if guidance element already exists
+        if (document.querySelector('.selection-guidance')) {
+            return;
+        }
+        
+        // Create guidance overlay
+        const guidanceOverlay = document.createElement('div');
+        guidanceOverlay.className = 'selection-guidance';
+        guidanceOverlay.innerHTML = `
+            <div class="guidance-content">
+                <h3>Welcome to Kynecta Chat! 🎯</h3>
+                <p>Complete your setup to get started:</p>
+                <ol>
+                    <li>Select your preferred theme</li>
+                    <li>Choose your contact preferences</li>
+                    <li>Set up notification settings</li>
+                </ol>
+                <button class="start-setup-btn">Start Setup</button>
+                <button class="skip-setup-btn">Skip for Now</button>
+            </div>
+        `;
+        
+        document.body.appendChild(guidanceOverlay);
+        
+        // Add event listeners
+        guidanceOverlay.querySelector('.start-setup-btn').addEventListener('click', () => {
+            this.startSetupFlow();
+        });
+        
+        guidanceOverlay.querySelector('.skip-setup-btn').addEventListener('click', () => {
+            guidanceOverlay.remove();
+            document.body.classList.add('setup-skipped');
+        });
+    }
+
+    // NEW: Start setup flow method
+    startSetupFlow() {
+        console.log('🚀 Starting setup flow');
+        
+        // Remove guidance overlay
+        const guidanceOverlay = document.querySelector('.selection-guidance');
+        if (guidanceOverlay) {
+            guidanceOverlay.remove();
+        }
+        
+        // Dispatch event to trigger setup UI
+        document.dispatchEvent(new CustomEvent('setup:start'));
+        
+        // In a real app, this would open a setup wizard
+        // For now, we'll simulate completion after 2 seconds
+        setTimeout(() => {
+            this.completeSetup();
+        }, 2000);
+    }
+
+    // NEW: Complete setup method
+    completeSetup() {
+        window.UserData.selectionCompleted = true;
+        window.UserData.setupCompletedAt = new Date().toISOString();
+        
+        // Save to localStorage
+        try {
+            localStorage.setItem('kynecta-user-data', JSON.stringify(window.UserData));
+        } catch (error) {
+            console.warn('⚠️ Could not save UserData to localStorage:', error);
+        }
+        
+        // Update UI
+        this.checkSelectionCompletion();
+        
+        // Show completion message
+        this.showCompletionMessage();
+    }
+
+    // NEW: Show completion message method
+    showCompletionMessage() {
+        const message = document.createElement('div');
+        message.className = 'setup-complete-message';
+        message.innerHTML = `
+            <div class="message-content">
+                <span class="checkmark">✓</span>
+                <span>Setup completed successfully!</span>
+            </div>
+        `;
+        
+        document.body.appendChild(message);
+        
+        // Remove message after 3 seconds
+        setTimeout(() => {
+            message.classList.add('fade-out');
+            setTimeout(() => message.remove(), 500);
+        }, 3000);
     }
 
     init() {

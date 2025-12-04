@@ -322,6 +322,44 @@
             </div>
         </div>
         
+        <!-- Interest Filter Sidebar -->
+        <div class="interest-filters hidden lg:block fixed left-4 top-1/2 transform -translate-y-1/2 w-64 bg-white dark:bg-slate-800 rounded-xl shadow-lg p-4 z-40 border border-gray-200 dark:border-slate-700">
+            <div class="flex justify-between items-center mb-4">
+                <h3 class="font-bold text-gray-900 dark:text-white">Interest Filters</h3>
+                <button id="toggleInterestSidebar" class="text-gray-500 hover:text-gray-700 dark:hover:text-gray-300">
+                    <i class="fas fa-times"></i>
+                </button>
+            </div>
+            
+            <div class="space-y-3 mb-6">
+                <h4 class="font-semibold text-gray-700 dark:text-gray-300 text-sm mb-2">Your Interests</h4>
+                <div id="userInterestFilters" class="flex flex-wrap gap-2">
+                    <!-- User interests will be loaded here -->
+                </div>
+            </div>
+            
+            <div class="space-y-3">
+                <h4 class="font-semibold text-gray-700 dark:text-gray-300 text-sm mb-2">Discover New Interests</h4>
+                <div id="suggestedInterestFilters" class="flex flex-wrap gap-2">
+                    <!-- Suggested interests will be loaded here -->
+                </div>
+            </div>
+            
+            <div class="mt-6 pt-4 border-t border-gray-200 dark:border-slate-700">
+                <button id="clearInterestFilters" class="w-full bg-gray-100 dark:bg-slate-700 text-gray-700 dark:text-gray-300 px-3 py-2 rounded-lg text-sm hover:bg-gray-200 dark:hover:bg-slate-600 transition">
+                    Clear All Filters
+                </button>
+            </div>
+        </div>
+        
+        <!-- Mobile Interest Filter Toggle -->
+        <div class="lg:hidden mb-4">
+            <button id="mobileToggleInterestSidebar" class="bg-indigo-600 text-white px-4 py-2 rounded-lg font-semibold hover:bg-indigo-700 transition flex items-center space-x-2">
+                <i class="fas fa-filter"></i>
+                <span>Filter by Interests</span>
+            </button>
+        </div>
+
         <!-- Home Dashboard -->
         <div id="homeDashboard" class="dashboard-section active">
             <!-- Hero Section with Carousel -->
@@ -1370,10 +1408,20 @@
                 </div>
                 
                 <div class="mb-4">
-                    <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">Tags</label>
-                    <input type="text" id="listingTags" class="w-full border border-gray-300 dark:border-slate-600 dark:bg-slate-700 dark:text-white rounded-lg px-4 py-3 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent" placeholder="Add tags (comma separated)">
-                    <div id="tagSuggestions" class="mt-2">
-                        <!-- Tag suggestions will appear here -->
+                    <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">Interest Tags</label>
+                    <input type="text" id="listingInterestTags" class="w-full border border-gray-300 dark:border-slate-600 dark:bg-slate-700 dark:text-white rounded-lg px-4 py-3 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent" placeholder="Add interest tags (comma separated)">
+                    <div id="interestTagSuggestions" class="mt-2">
+                        <!-- Interest tag suggestions will appear here -->
+                        <div class="flex flex-wrap gap-2">
+                            <span class="product-interest-tag cursor-pointer hover:bg-indigo-600 hover:text-white" data-tag="technology">technology</span>
+                            <span class="product-interest-tag cursor-pointer hover:bg-indigo-600 hover:text-white" data-tag="fashion">fashion</span>
+                            <span class="product-interest-tag cursor-pointer hover:bg-indigo-600 hover:text-white" data-tag="education">education</span>
+                            <span class="product-interest-tag cursor-pointer hover:bg-indigo-600 hover:text-white" data-tag="home">home</span>
+                            <span class="product-interest-tag cursor-pointer hover:bg-indigo-600 hover:text-white" data-tag="sports">sports</span>
+                            <span class="product-interest-tag cursor-pointer hover:bg-indigo-600 hover:text-white" data-tag="art">art</span>
+                            <span class="product-interest-tag cursor-pointer hover:bg-indigo-600 hover:text-white" data-tag="music">music</span>
+                            <span class="product-interest-tag cursor-pointer hover:bg-indigo-600 hover:text-white" data-tag="gaming">gaming</span>
+                        </div>
                     </div>
                 </div>
                 
@@ -1528,6 +1576,40 @@
             </div>
             <div class="grid grid-cols-2 md:grid-cols-3 gap-4" id="moreCategoriesContent">
                 <!-- More categories will be loaded here -->
+            </div>
+        </div>
+    </div>
+
+    <!-- Mobile Interest Filters Modal -->
+    <div id="mobileInterestFiltersModal" class="modal">
+        <div class="modal-content max-w-md">
+            <div class="flex justify-between items-center mb-6">
+                <h2 class="text-2xl font-bold text-gray-900 dark:text-white">Filter by Interests</h2>
+                <button id="closeMobileInterestFilters" class="text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-300">
+                    <i class="fas fa-times text-xl"></i>
+                </button>
+            </div>
+            
+            <div class="space-y-4">
+                <div>
+                    <h4 class="font-semibold text-gray-700 dark:text-gray-300 text-sm mb-2">Your Interests</h4>
+                    <div id="mobileUserInterestFilters" class="flex flex-wrap gap-2">
+                        <!-- User interests will be loaded here -->
+                    </div>
+                </div>
+                
+                <div>
+                    <h4 class="font-semibold text-gray-700 dark:text-gray-300 text-sm mb-2">Discover New Interests</h4>
+                    <div id="mobileSuggestedInterestFilters" class="flex flex-wrap gap-2">
+                        <!-- Suggested interests will be loaded here -->
+                    </div>
+                </div>
+            </div>
+            
+            <div class="mt-6 pt-4 border-t border-gray-200 dark:border-slate-700">
+                <button id="mobileClearInterestFilters" class="w-full bg-gray-100 dark:bg-slate-700 text-gray-700 dark:text-gray-300 px-3 py-2 rounded-lg text-sm hover:bg-gray-200 dark:hover:bg-slate-600 transition">
+                    Clear All Filters
+                </button>
             </div>
         </div>
     </div>

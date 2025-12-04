@@ -15,6 +15,10 @@
     <!-- Cloudinary Upload Widget -->
     <script src="https://upload-widget.cloudinary.com/global/all.js" type="text/javascript"></script>
     
+    <!-- Custom Scripts -->
+    <script src="user-data.js"></script>
+    <script src="display-user-selections.js"></script>
+    
     <style>
         /* All existing CSS styles remain exactly the same */
         /* Glass effect and gradients */
@@ -64,6 +68,184 @@
             border-color: rgba(239, 68, 68, 0.4);
         }
 
+        /* NEW: Mood Filter Dropdown */
+        .mood-filter-dropdown {
+            position: relative;
+            display: inline-block;
+        }
+        
+        .mood-filter-btn {
+            background: rgba(255, 255, 255, 0.1);
+            border: 1px solid rgba(255, 255, 255, 0.2);
+            border-radius: 12px;
+            padding: 8px 16px;
+            color: white;
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            transition: all 0.3s ease;
+        }
+        
+        .mood-filter-btn:hover {
+            background: rgba(255, 255, 255, 0.15);
+            transform: translateY(-2px);
+        }
+        
+        .mood-filter-content {
+            display: none;
+            position: absolute;
+            top: 100%;
+            left: 0;
+            min-width: 200px;
+            background: rgba(30, 30, 40, 0.95);
+            backdrop-filter: blur(20px);
+            border: 1px solid rgba(102, 126, 234, 0.3);
+            border-radius: 12px;
+            padding: 10px;
+            z-index: 1000;
+            margin-top: 8px;
+            box-shadow: 0 10px 40px rgba(0, 0, 0, 0.4);
+        }
+        
+        .mood-filter-content.show {
+            display: block;
+            animation: slideDown 0.3s ease;
+        }
+        
+        @keyframes slideDown {
+            from {
+                opacity: 0;
+                transform: translateY(-10px);
+            }
+            to {
+                opacity: 1;
+                transform: translateY(0);
+            }
+        }
+        
+        .mood-filter-option {
+            padding: 10px 14px;
+            border-radius: 8px;
+            cursor: pointer;
+            transition: all 0.3s ease;
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            margin: 4px 0;
+        }
+        
+        .mood-filter-option:hover {
+            background: rgba(102, 126, 234, 0.15);
+        }
+        
+        .mood-filter-option.active {
+            background: rgba(102, 126, 234, 0.25);
+            border-left: 3px solid #667eea;
+        }
+        
+        .mood-icon {
+            font-size: 18px;
+            width: 24px;
+            text-align: center;
+        }
+        
+        /* NEW: Interest Tabs */
+        .interest-tabs {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 8px;
+            margin-bottom: 20px;
+        }
+        
+        .interest-tab {
+            padding: 8px 16px;
+            background: rgba(255, 255, 255, 0.05);
+            border: 1px solid rgba(255, 255, 255, 0.1);
+            border-radius: 20px;
+            cursor: pointer;
+            transition: all 0.3s ease;
+            font-size: 0.9rem;
+            color: #93C5FD;
+        }
+        
+        .interest-tab:hover {
+            background: rgba(102, 126, 234, 0.15);
+            transform: translateY(-2px);
+        }
+        
+        .interest-tab.active {
+            background: rgba(102, 126, 234, 0.25);
+            border-color: #667eea;
+            color: white;
+        }
+        
+        /* NEW: Mood Badge */
+        .mood-badge {
+            position: fixed;
+            top: 20px;
+            right: 200px;
+            z-index: 999;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            background: rgba(255, 255, 255, 0.1);
+            backdrop-filter: blur(10px);
+            border-radius: 20px;
+            padding: 8px 16px;
+            border: 1px solid rgba(255, 255, 255, 0.2);
+            box-shadow: 0 4px 20px rgba(0, 0, 0, 0.2);
+        }
+        
+        .mood-badge-content {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+        
+        .mood-badge-text {
+            font-size: 0.85rem;
+            color: white;
+        }
+        
+        .mood-badge-emoji {
+            font-size: 1.2rem;
+        }
+        
+        /* NEW: Mood-based Recommendations */
+        .mood-recommendations {
+            background: linear-gradient(135deg, rgba(102, 126, 234, 0.1), rgba(118, 75, 162, 0.1));
+            border-radius: 16px;
+            padding: 20px;
+            margin: 20px 0;
+            border: 1px solid rgba(102, 126, 234, 0.3);
+        }
+        
+        .recommendation-card {
+            background: rgba(255, 255, 255, 0.05);
+            border-radius: 12px;
+            padding: 16px;
+            margin-bottom: 12px;
+            transition: all 0.3s ease;
+            border: 1px solid rgba(255, 255, 255, 0.1);
+        }
+        
+        .recommendation-card:hover {
+            transform: translateY(-4px);
+            border-color: rgba(102, 126, 234, 0.5);
+            box-shadow: 0 8px 25px rgba(102, 126, 234, 0.2);
+        }
+        
+        .recommendation-category {
+            display: inline-block;
+            background: rgba(102, 126, 234, 0.2);
+            color: #93C5FD;
+            padding: 4px 10px;
+            border-radius: 12px;
+            font-size: 0.8rem;
+            margin-bottom: 8px;
+        }
+        
         /* Profile Components */
         .profile-cover {
             height: 200px;
@@ -1280,6 +1462,14 @@
     <!-- Floating Particles -->
     <div class="particles" id="particles"></div>
 
+    <!-- NEW: Mood Badge in Top Right -->
+    <div class="mood-badge" id="currentMoodBadge">
+        <div class="mood-badge-content">
+            <span class="mood-badge-emoji" id="moodEmoji">😊</span>
+            <span class="mood-badge-text" id="moodStatus">Feeling Happy</span>
+        </div>
+    </div>
+
     <!-- Connection Status -->
     <div class="connection-status connecting" id="connectionStatus">
         <i class="fas fa-check mr-2"></i>
@@ -1581,6 +1771,42 @@
                 </a>
             </div>
 
+            <!-- NEW: Mood Filter Dropdown in Sidebar -->
+            <div class="px-4 py-3">
+                <div class="mood-filter-dropdown">
+                    <button class="mood-filter-btn w-full justify-center">
+                        <i class="fas fa-filter"></i>
+                        <span class="hidden xl:inline">Filter by Mood</span>
+                    </button>
+                    <div class="mood-filter-content">
+                        <div class="mood-filter-option" data-mood="all">
+                            <span class="mood-icon">🌐</span>
+                            <span>All Moods</span>
+                        </div>
+                        <div class="mood-filter-option" data-mood="happy">
+                            <span class="mood-icon">😊</span>
+                            <span>Happy</span>
+                        </div>
+                        <div class="mood-filter-option" data-mood="productive">
+                            <span class="mood-icon">🚀</span>
+                            <span>Productive</span>
+                        </div>
+                        <div class="mood-filter-option" data-mood="creative">
+                            <span class="mood-icon">🎨</span>
+                            <span>Creative</span>
+                        </div>
+                        <div class="mood-filter-option" data-mood="focused">
+                            <span class="mood-icon">🎯</span>
+                            <span>Focused</span>
+                        </div>
+                        <div class="mood-filter-option" data-mood="relaxed">
+                            <span class="mood-icon">😌</span>
+                            <span>Relaxed</span>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
             <nav class="flex-1 px-2 xl:px-4 space-y-2">
                 <a href="home.html" class="flex items-center space-x-3 p-3 rounded-xl text-blue-300 hover:bg-blue-900/30 hover:text-cyan-400 transition">
                     <i class="fas fa-home w-6"></i>
@@ -1648,6 +1874,40 @@
                             <span></span>
                         </div>
                         <h1 class="text-xl md:text-2xl font-bold text-blue-300">My Profile</h1>
+                        
+                        <!-- NEW: Mood Filter Dropdown for Mobile -->
+                        <div class="mood-filter-dropdown ml-4">
+                            <button class="mood-filter-btn">
+                                <i class="fas fa-filter mr-2"></i>
+                                Filter Mood
+                            </button>
+                            <div class="mood-filter-content">
+                                <div class="mood-filter-option" data-mood="all">
+                                    <span class="mood-icon">🌐</span>
+                                    <span>All Moods</span>
+                                </div>
+                                <div class="mood-filter-option" data-mood="happy">
+                                    <span class="mood-icon">😊</span>
+                                    <span>Happy</span>
+                                </div>
+                                <div class="mood-filter-option" data-mood="productive">
+                                    <span class="mood-icon">🚀</span>
+                                    <span>Productive</span>
+                                </div>
+                                <div class="mood-filter-option" data-mood="creative">
+                                    <span class="mood-icon">🎨</span>
+                                    <span>Creative</span>
+                                </div>
+                                <div class="mood-filter-option" data-mood="focused">
+                                    <span class="mood-icon">🎯</span>
+                                    <span>Focused</span>
+                                </div>
+                                <div class="mood-filter-option" data-mood="relaxed">
+                                    <span class="mood-icon">😌</span>
+                                    <span>Relaxed</span>
+                                </div>
+                            </div>
+                        </div>
                     </div>
                     <div class="flex items-center space-x-2 md:space-x-4">
                         <a href="notifications.html" class="px-3 py-2 md:px-4 md:py-2 glass-effect text-blue-400 rounded-2xl hover:bg-blue-800/30 border border-blue-700 transition relative">
@@ -1729,6 +1989,13 @@
                                     <p class="text-blue-200 mt-2 leading-relaxed" id="profileBio">Your bio will appear here</p>
                                 </div>
                                 
+                                <!-- NEW: Interest Tabs -->
+                                <div class="mt-4 fade-in" style="animation-delay: 0.6s;">
+                                    <div class="interest-tabs" id="interestTabs">
+                                        <!-- Interest tabs will be dynamically populated -->
+                                    </div>
+                                </div>
+                                
                                 <!-- Skills & Interests -->
                                 <div class="mt-4 fade-in" style="animation-delay: 0.6s;" id="skillsInterests">
                                     <div class="flex flex-wrap gap-2 mb-3" id="skillsContainer"></div>
@@ -1787,6 +2054,22 @@
                                 <div class="stat-label">Reputation</div>
                             </div>
                         </div>
+                    </div>
+                </div>
+                
+                <!-- NEW: Mood-based Recommendations -->
+                <div class="mood-recommendations" id="moodRecommendations" style="display: none;">
+                    <div class="flex items-center justify-between mb-4">
+                        <h3 class="text-xl font-bold text-white">
+                            <i class="fas fa-lightbulb mr-2"></i>
+                            Recommendations for your mood
+                        </h3>
+                        <button id="refreshRecommendations" class="text-blue-400 hover:text-cyan-400 transition">
+                            <i class="fas fa-redo"></i>
+                        </button>
+                    </div>
+                    <div id="recommendationsContent">
+                        <!-- Recommendations will be dynamically loaded here -->
                     </div>
                 </div>
                 
@@ -2044,6 +2327,12 @@
                 this.peopleSuggestions = [];
                 this.isDarkMode = true;
                 
+                // NEW: Mood and interest filtering properties
+                this.selectedMood = 'all';
+                this.selectedInterest = 'all';
+                this.currentMoodData = null;
+                this.recommendations = [];
+                
                 // Chat properties
                 this.activeChat = null;
                 this.activeFriend = null;
@@ -2167,6 +2456,9 @@
                                 this.updateSidebar(this.userProfile);
                                 this.calculateProfileCompletion(this.userProfile);
                                 
+                                // NEW: Update mood badge
+                                this.updateMoodBadge(this.userProfile.mood || 'happy');
+                                
                                 // Load additional data (don't wait for all to complete)
                                 this.loadUserPosts(uid);
                                 this.loadUserMedia(uid);
@@ -2176,6 +2468,9 @@
                                 this.loadFriendRequests(uid);
                                 this.loadSentRequests(uid);
                                 this.loadPeopleSuggestions(uid);
+                                
+                                // NEW: Load recommendations
+                                this.loadMoodBasedRecommendations(this.userProfile.mood || 'happy');
                                 
                                 this.showLoading(false);
                                 this.showProfileLayout();
@@ -2206,6 +2501,213 @@
                     console.error('💥 Error setting up real-time listener:', error);
                     this.showLoading(false);
                     this.createFallbackProfile();
+                }
+            }
+
+            // NEW: Update mood badge
+            updateMoodBadge(mood) {
+                const moodData = {
+                    happy: { emoji: '😊', text: 'Feeling Happy', color: 'text-yellow-400' },
+                    productive: { emoji: '🚀', text: 'Being Productive', color: 'text-green-400' },
+                    creative: { emoji: '🎨', text: 'Feeling Creative', color: 'text-purple-400' },
+                    focused: { emoji: '🎯', text: 'Staying Focused', color: 'text-blue-400' },
+                    relaxed: { emoji: '😌', text: 'Feeling Relaxed', color: 'text-indigo-400' }
+                };
+                
+                const currentMood = moodData[mood] || moodData.happy;
+                document.getElementById('moodEmoji').textContent = currentMood.emoji;
+                document.getElementById('moodStatus').textContent = currentMood.text;
+                
+                // Store current mood data
+                this.currentMoodData = currentMood;
+            }
+
+            // NEW: Create interest tabs
+            createInterestTabs(interests) {
+                const container = document.getElementById('interestTabs');
+                if (!interests || interests.length === 0) {
+                    container.style.display = 'none';
+                    return;
+                }
+                
+                let tabsHTML = '<div class="interest-tab active" data-interest="all">All</div>';
+                
+                // Limit to top 5 interests for better UX
+                const topInterests = interests.slice(0, 5);
+                topInterests.forEach(interest => {
+                    tabsHTML += `<div class="interest-tab" data-interest="${interest.toLowerCase()}">${interest}</div>`;
+                });
+                
+                container.innerHTML = tabsHTML;
+                
+                // Add click event listeners
+                container.querySelectorAll('.interest-tab').forEach(tab => {
+                    tab.addEventListener('click', () => {
+                        container.querySelectorAll('.interest-tab').forEach(t => t.classList.remove('active'));
+                        tab.classList.add('active');
+                        this.selectedInterest = tab.getAttribute('data-interest');
+                        this.filterContentByInterest(this.selectedInterest);
+                    });
+                });
+            }
+
+            // NEW: Filter content by interest
+            filterContentByInterest(interest) {
+                const allPosts = document.querySelectorAll('.post-item');
+                
+                allPosts.forEach(post => {
+                    if (interest === 'all' || post.getAttribute('data-interests')?.includes(interest)) {
+                        post.style.display = 'block';
+                    } else {
+                        post.style.display = 'none';
+                    }
+                });
+            }
+
+            // NEW: Load mood-based recommendations
+            async loadMoodBasedRecommendations(mood) {
+                try {
+                    const recommendationsContainer = document.getElementById('recommendationsContent');
+                    const moodRecSection = document.getElementById('moodRecommendations');
+                    
+                    // Show recommendations section
+                    moodRecSection.style.display = 'block';
+                    
+                    // Define recommendations based on mood
+                    const recommendationData = {
+                        happy: [
+                            { title: "Share your joy", description: "Post about what's making you happy today!", category: "Social" },
+                            { title: "Watch comedy videos", description: "Check out trending funny videos in the community", category: "Entertainment" },
+                            { title: "Connect with friends", description: "Send messages to 3 friends you haven't talked to recently", category: "Social" }
+                        ],
+                        productive: [
+                            { title: "Set daily goals", description: "Use the planner feature to organize your tasks", category: "Productivity" },
+                            { title: "Join study groups", description: "Find like-minded people working on similar projects", category: "Learning" },
+                            { title: "Track your progress", description: "Update your achievement badges for completed tasks", category: "Progress" }
+                        ],
+                        creative: [
+                            { title: "Start a creative project", description: "Use the media upload feature to share your artwork", category: "Creative" },
+                            { title: "Join art communities", description: "Connect with other creative people in the network", category: "Community" },
+                            { title: "Try daily creative prompts", description: "Check out the daily creativity challenges", category: "Challenge" }
+                        ],
+                        focused: [
+                            { title: "Enable focus mode", description: "Minimize distractions with our focus features", category: "Focus" },
+                            { title: "Time blocking", description: "Schedule uninterrupted work sessions in your calendar", category: "Productivity" },
+                            { title: "Deep work playlist", description: "Listen to curated focus-enhancing music", category: "Audio" }
+                        ],
+                        relaxed: [
+                            { title: "Meditation sessions", description: "Join guided meditation groups in the community", category: "Wellness" },
+                            { title: "Nature content", description: "Explore calming nature photography and videos", category: "Content" },
+                            { title: "Slow-paced activities", description: "Find relaxing games and activities to unwind", category: "Entertainment" }
+                        ]
+                    };
+                    
+                    const recs = recommendationData[mood] || recommendationData.happy;
+                    
+                    let recHTML = '';
+                    recs.forEach(rec => {
+                        recHTML += `
+                            <div class="recommendation-card">
+                                <span class="recommendation-category">${rec.category}</span>
+                                <h4 class="text-white font-semibold mb-2">${rec.title}</h4>
+                                <p class="text-blue-300 text-sm">${rec.description}</p>
+                            </div>
+                        `;
+                    });
+                    
+                    recommendationsContainer.innerHTML = recHTML;
+                    
+                } catch (error) {
+                    console.error('Error loading recommendations:', error);
+                }
+            }
+
+            // NEW: Setup mood filter dropdown
+            setupMoodFilterDropdown() {
+                const moodFilterButtons = document.querySelectorAll('.mood-filter-btn');
+                const moodFilterContents = document.querySelectorAll('.mood-filter-content');
+                const moodOptions = document.querySelectorAll('.mood-filter-option');
+                
+                // Toggle dropdown
+                moodFilterButtons.forEach(btn => {
+                    btn.addEventListener('click', (e) => {
+                        e.stopPropagation();
+                        const content = btn.nextElementSibling;
+                        content.classList.toggle('show');
+                    });
+                });
+                
+                // Close dropdown when clicking outside
+                document.addEventListener('click', () => {
+                    moodFilterContents.forEach(content => {
+                        content.classList.remove('show');
+                    });
+                });
+                
+                // Handle mood selection
+                moodOptions.forEach(option => {
+                    option.addEventListener('click', (e) => {
+                        e.stopPropagation();
+                        const mood = option.getAttribute('data-mood');
+                        this.selectedMood = mood;
+                        
+                        // Update active state
+                        moodOptions.forEach(opt => opt.classList.remove('active'));
+                        option.classList.add('active');
+                        
+                        // Close dropdown
+                        moodFilterContents.forEach(content => {
+                            content.classList.remove('show');
+                        });
+                        
+                        // Filter content
+                        this.filterContentByMood(mood);
+                        
+                        // Show notification
+                        if (mood !== 'all') {
+                            this.showNotification(`Filtering content for ${mood} mood`, 'info');
+                        }
+                    });
+                });
+            }
+
+            // NEW: Filter content by mood
+            filterContentByMood(mood) {
+                if (mood === 'all') {
+                    // Show all content
+                    document.querySelectorAll('.post-item, .diary-entry, .media-item').forEach(item => {
+                        item.style.display = 'block';
+                    });
+                } else {
+                    // Filter by mood
+                    document.querySelectorAll('.post-item, .diary-entry').forEach(item => {
+                        const itemMood = item.getAttribute('data-mood');
+                        if (itemMood === mood) {
+                            item.style.display = 'block';
+                        } else {
+                            item.style.display = 'none';
+                        }
+                    });
+                    
+                    // For media, show mood-appropriate content
+                    if (mood === 'happy') {
+                        // Show bright, colorful media
+                        document.querySelectorAll('.media-item').forEach(item => {
+                            item.style.display = 'block';
+                        });
+                    } else if (mood === 'relaxed') {
+                        // Show calming media
+                        document.querySelectorAll('.media-item').forEach(item => {
+                            item.style.display = 'block';
+                        });
+                    }
+                }
+                
+                // Update current tab to reflect filtered content
+                const activeTab = document.querySelector('.profile-tab.active');
+                if (activeTab) {
+                    const tabName = activeTab.getAttribute('data-tab');
+                    this.loadTabContent(tabName);
                 }
             }
 
@@ -3053,6 +3555,11 @@
                 // Update skills and interests
                 this.updateSkillsAndInterests(profile);
                 
+                // NEW: Create interest tabs
+                if (profile.interests && profile.interests.length > 0) {
+                    this.createInterestTabs(profile.interests);
+                }
+                
                 // Update mood
                 this.updateMoodIndicator(profile.mood || 'happy');
                 
@@ -3222,6 +3729,14 @@
                     onlineBadge.innerHTML = '<i class="fas fa-circle mr-1" style="color: #10B981; font-size: 8px;"></i> Online';
                     badgesContainer.appendChild(onlineBadge);
                 }
+                
+                // NEW: Current mood badge
+                if (profile.mood) {
+                    const moodBadge = document.createElement('div');
+                    moodBadge.className = 'badge';
+                    moodBadge.innerHTML = `<i class="fas ${this.getMoodIcon(profile.mood)} mr-1"></i> ${profile.mood.charAt(0).toUpperCase() + profile.mood.slice(1)}`;
+                    badgesContainer.appendChild(moodBadge);
+                }
             }
 
             updateSidebar(profile) {
@@ -3275,9 +3790,15 @@
                 
                 if (this.userPosts.length > 0) {
                     let postsHTML = '<div class="space-y-6">';
-                    this.userPosts.forEach(post => {
+                    
+                    // Apply mood filter
+                    const filteredPosts = this.selectedMood === 'all' 
+                        ? this.userPosts 
+                        : this.userPosts.filter(post => post.mood === this.selectedMood);
+                    
+                    filteredPosts.forEach(post => {
                         postsHTML += `
-                            <div class="feature-card">
+                            <div class="feature-card post-item" data-mood="${post.mood || 'happy'}" data-interests="${post.interests ? post.interests.join(' ').toLowerCase() : ''}">
                                 <div class="flex items-center justify-between mb-4">
                                     <div class="flex items-center space-x-3">
                                         <div class="w-10 h-10 rounded-full bg-gradient-to-r from-blue-500 to-purple-500 flex items-center justify-center text-white font-bold">
@@ -3288,6 +3809,12 @@
                                             <p class="text-blue-300 text-sm">${post.createdAt?.toDate?.().toLocaleDateString() || 'Recently'}</p>
                                         </div>
                                     </div>
+                                    ${post.mood ? `
+                                        <div class="flex items-center text-sm">
+                                            <i class="${this.getMoodIcon(post.mood)} ${this.getMoodColor(post.mood)} mr-1"></i>
+                                            <span class="text-blue-300 capitalize">${post.mood}</span>
+                                        </div>
+                                    ` : ''}
                                 </div>
                                 <p class="text-blue-200 mb-4">${post.content}</p>
                                 ${post.image ? `<img src="${post.image}" class="w-full rounded-xl mb-4" alt="Post image">` : ''}
@@ -3299,7 +3826,23 @@
                             </div>
                         `;
                     });
+                    
                     postsHTML += '</div>';
+                    
+                    if (filteredPosts.length === 0) {
+                        postsHTML = `
+                            <div class="text-center py-8">
+                                <i class="fas fa-newspaper text-4xl text-blue-400 mb-4"></i>
+                                <h3 class="text-xl font-bold text-white mb-2">No Posts Found</h3>
+                                <p class="text-blue-300 mb-6">No posts match your current mood filter</p>
+                                <button class="px-6 py-3 glass-effect text-blue-400 rounded-xl hover:bg-blue-800/30 border border-blue-700 transition" onclick="profileApp.selectedMood = 'all'; profileApp.loadTabContent('posts');">
+                                    <i class="fas fa-times mr-2"></i>
+                                    Clear Filter
+                                </button>
+                            </div>
+                        `;
+                    }
+                    
                     content.innerHTML = postsHTML;
                 } else {
                     content.innerHTML = `
@@ -3351,6 +3894,13 @@
                                 <div class="flex justify-between">
                                     <span class="text-blue-300">Privacy</span>
                                     <span class="text-white capitalize">${profile.privacy || 'public'}</span>
+                                </div>
+                                <div class="flex justify-between">
+                                    <span class="text-blue-300">Current Mood</span>
+                                    <span class="text-white capitalize flex items-center">
+                                        <i class="${this.getMoodIcon(profile.mood)} ${this.getMoodColor(profile.mood)} mr-1"></i>
+                                        ${profile.mood || 'happy'}
+                                    </span>
                                 </div>
                             </div>
                         </div>
@@ -3457,7 +4007,12 @@
                             <div class="media-grid">
                     `;
                     
-                    this.userMedia.forEach(media => {
+                    // Apply mood filter for media (show all for now, could be enhanced)
+                    const filteredMedia = this.selectedMood === 'all' 
+                        ? this.userMedia 
+                        : this.userMedia; // Add mood filtering logic for media if needed
+                    
+                    filteredMedia.forEach(media => {
                         if (media.type === 'image') {
                             mediaHTML += `<div class="media-item" style="background-image: url('${media.url}')"></div>`;
                         }
@@ -3607,6 +4162,7 @@
                             <div class="flex-1">
                                 <p class="text-white text-sm">You posted: "${post.content.substring(0, 50)}..."</p>
                                 <p class="text-blue-400 text-xs">${post.createdAt?.toDate?.().toLocaleDateString() || 'Recently'}</p>
+                                ${post.mood ? `<p class="text-blue-300 text-xs"><i class="${this.getMoodIcon(post.mood)} mr-1"></i> Feeling ${post.mood}</p>` : ''}
                             </div>
                         </div>
                     `;
@@ -3624,7 +4180,8 @@
                     { id: 3, name: 'Active Commenter', icon: 'fa-comment', color: 'from-green-500 to-teal-500', progress: 40, target: 25, current: 10, description: 'Leave 25 comments' },
                     { id: 4, name: 'Popular User', icon: 'fa-fire', color: 'from-red-500 to-pink-500', progress: 28, target: 7, current: 2, description: 'Post for 7 consecutive days' },
                     { id: 5, name: 'Photographer', icon: 'fa-camera', color: 'from-purple-500 to-indigo-500', progress: 30, target: 10, current: 3, description: 'Upload 10 photos' },
-                    { id: 6, name: 'Top Contributor', icon: 'fa-trophy', color: 'from-indigo-500 to-blue-500', progress: 65, target: 100, current: 65, description: 'Receive 100 likes' }
+                    { id: 6, name: 'Top Contributor', icon: 'fa-trophy', color: 'from-indigo-500 to-blue-500', progress: 65, target: 100, current: 65, description: 'Receive 100 likes' },
+                    { id: 7, name: 'Mood Master', icon: 'fa-smile', color: 'from-yellow-400 to-orange-400', progress: 80, target: 5, current: 4, description: 'Use all 5 different moods' }
                 ];
                 
                 let achievementsHTML = '<div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">';
@@ -3653,12 +4210,17 @@
             loadDiaryTab() {
                 const content = document.getElementById('diaryEntriesContent');
                 
-                if (this.diaryEntries.length > 0) {
+                // Apply mood filter
+                const filteredEntries = this.selectedMood === 'all' 
+                    ? this.diaryEntries 
+                    : this.diaryEntries.filter(entry => entry.mood === this.selectedMood);
+                
+                if (filteredEntries.length > 0) {
                     let diaryHTML = '<div class="space-y-4">';
                     
-                    this.diaryEntries.forEach(entry => {
+                    filteredEntries.forEach(entry => {
                         diaryHTML += `
-                            <div class="diary-entry">
+                            <div class="diary-entry" data-mood="${entry.mood || 'happy'}">
                                 <div class="flex justify-between items-start mb-2">
                                     <h4 class="text-lg font-bold text-white">${entry.title}</h4>
                                     <span class="text-blue-300 text-sm">${entry.createdAt?.toDate?.().toLocaleDateString() || 'Recently'}</span>
@@ -3676,6 +4238,21 @@
                     });
                     
                     diaryHTML += '</div>';
+                    
+                    if (filteredEntries.length === 0 && this.selectedMood !== 'all') {
+                        diaryHTML = `
+                            <div class="text-center py-8">
+                                <i class="fas fa-book-open text-4xl text-blue-400 mb-4"></i>
+                                <h3 class="text-xl font-bold text-white mb-2">No Diary Entries Found</h3>
+                                <p class="text-blue-300 mb-6">No diary entries match your current mood filter</p>
+                                <button class="px-6 py-3 glass-effect text-blue-400 rounded-xl hover:bg-blue-800/30 border border-blue-700 transition" onclick="profileApp.selectedMood = 'all'; profileApp.loadTabContent('diary');">
+                                    <i class="fas fa-times mr-2"></i>
+                                    Clear Filter
+                                </button>
+                            </div>
+                        `;
+                    }
+                    
                     content.innerHTML = diaryHTML;
                 } else {
                     content.innerHTML = `
@@ -3878,6 +4455,15 @@
                         this.sendMessage();
                     }
                 });
+
+                // NEW: Refresh recommendations button
+                document.getElementById('refreshRecommendations').addEventListener('click', () => {
+                    this.loadMoodBasedRecommendations(this.userProfile.mood || 'happy');
+                    this.showNotification('Recommendations refreshed!', 'success');
+                });
+
+                // NEW: Setup mood filter dropdown
+                this.setupMoodFilterDropdown();
             }
 
             toggleFriendRequests() {
@@ -4075,6 +4661,10 @@
                         this.updateProfileUI(this.userProfile);
                         this.updateSidebar(this.userProfile);
                         this.calculateProfileCompletion(this.userProfile);
+                        
+                        // NEW: Update mood badge
+                        this.updateMoodBadge(this.userProfile.mood || 'happy');
+                        
                         this.showLoading(false);
                         this.showProfileLayout();
                     } else {
@@ -4129,6 +4719,10 @@
                     this.updateProfileUI(newProfile);
                     this.updateSidebar(newProfile);
                     this.calculateProfileCompletion(newProfile);
+                    
+                    // NEW: Update mood badge
+                    this.updateMoodBadge(newProfile.mood);
+                    
                     this.showLoading(false);
                     this.showProfileLayout();
                     
@@ -4170,6 +4764,10 @@
                 this.updateProfileUI(fallbackProfile);
                 this.updateSidebar(fallbackProfile);
                 this.calculateProfileCompletion(fallbackProfile);
+                
+                // NEW: Update mood badge
+                this.updateMoodBadge(fallbackProfile.mood);
+                
                 this.showLoading(false);
                 this.showProfileLayout();
                 this.showNotification('Using fallback profile - some features may be limited', 'info');
@@ -4423,6 +5021,10 @@
                         mood: mood,
                         lastActive: firebase.firestore.FieldValue.serverTimestamp()
                     });
+                    
+                    // NEW: Update mood badge and recommendations
+                    this.updateMoodBadge(mood);
+                    this.loadMoodBasedRecommendations(mood);
                     
                     this.showNotification(`Mood updated to ${mood}`, 'success');
                 } catch (error) {

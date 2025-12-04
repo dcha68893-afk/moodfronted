@@ -104,6 +104,15 @@ class AuthStateListener {
             localStorage.setItem('uniconnect-user', JSON.stringify(this.currentUser));
             localStorage.setItem('uniconnect-last-auth', new Date().toISOString());
 
+            // 🔄 NEW: Load user selections after auth
+            await this.loadUserSelections();
+
+            // 🔄 NEW: Sync with UserData manager
+            await this.syncWithUserDataManager();
+
+            // 🔄 NEW: Apply theme colors on login
+            this.applyThemeColors();
+
             // Update UI
             this.updateUILoggedIn(this.currentUser);
             
@@ -113,6 +122,217 @@ class AuthStateListener {
             console.error('❌ Error handling user sign-in:', error);
             throw error;
         }
+    }
+
+    /**
+     * 🔄 NEW: Load user selections after authentication
+     */
+    async loadUserSelections() {
+        try {
+            if (!this.currentUser || !this.currentUser.uid) return;
+
+            console.log('📥 Loading user selections...');
+            
+            // Load user preferences from Firestore
+            const preferencesRef = doc(db, 'userPreferences', this.currentUser.uid);
+            const preferencesDoc = await getDoc(preferencesRef);
+            
+            if (preferencesDoc.exists()) {
+                const preferences = preferencesDoc.data();
+                
+                // Apply user selections to UI
+                this.applyUserSelections(preferences);
+                
+                // Store in local storage for quick access
+                localStorage.setItem('uniconnect-preferences', JSON.stringify(preferences));
+                
+                console.log('✅ User selections loaded:', Object.keys(preferences).length, 'preferences');
+            } else {
+                console.log('ℹ️ No saved preferences found for user');
+            }
+            
+        } catch (error) {
+            console.error('❌ Error loading user selections:', error);
+        }
+    }
+
+    /**
+     * 🔄 NEW: Apply user selections to UI elements
+     */
+    applyUserSelections(preferences) {
+        try {
+            // Apply theme selection if exists
+            if (preferences.theme) {
+                document.documentElement.setAttribute('data-theme', preferences.theme);
+            }
+
+            // Apply language selection if exists
+            if (preferences.language && window.i18n) {
+                window.i18n.changeLanguage(preferences.language);
+            }
+
+            // Apply notification preferences
+            if (preferences.notifications) {
+                if (window.notificationManager) {
+                    window.notificationManager.setPreferences(preferences.notifications);
+                }
+            }
+
+            // Apply UI density preference
+            if (preferences.uiDensity) {
+                document.body.classList.add(`density-${preferences.uiDensity}`);
+            }
+
+            // Apply specific component preferences
+            if (preferences.components) {
+                Object.keys(preferences.components).forEach(componentId => {
+                    const componentPrefs = preferences.components[componentId];
+                    this.applyComponentPreferences(componentId, componentPrefs);
+                });
+            }
+
+            console.log('✅ User selections applied to UI');
+            
+        } catch (error) {
+            console.error('❌ Error applying user selections:', error);
+        }
+    }
+
+    /**
+     * 🔄 NEW: Apply preferences to specific components
+     */
+    applyComponentPreferences(componentId, preferences) {
+        const component = document.getElementById(componentId);
+        if (!component) return;
+
+        // Apply visibility preferences
+        if (preferences.visible !== undefined) {
+            component.style.display = preferences.visible ? 'block' : 'none';
+        }
+
+        // Apply collapsed state
+        if (preferences.collapsed !== undefined && component.classList) {
+            if (preferences.collapsed) {
+                component.classList.add('collapsed');
+            } else {
+                component.classList.remove('collapsed');
+            }
+        }
+
+        // Apply order/index if applicable
+        if (preferences.order !== undefined && component.style) {
+            component.style.order = preferences.order;
+        }
+    }
+
+    /**
+     * 🔄 NEW: Sync with UserData manager
+     */
+    async syncWithUserDataManager() {
+        try {
+            if (!this.currentUser || !this.currentUser.uid) return;
+
+            console.log('🔄 Syncing with UserData manager...');
+            
+            // Check if UserData manager exists
+            if (window.userDataManager && typeof window.userDataManager.sync === 'function') {
+                await window.userDataManager.sync(this.currentUser.uid);
+                console.log('✅ Synced with UserData manager');
+            } else if (window.UserDataManager) {
+                // Initialize UserData manager if not already initialized
+                window.userDataManager = new window.UserDataManager(this.currentUser.uid);
+                await window.userDataManager.loadData();
+                console.log('✅ UserData manager initialized and synced');
+            } else {
+                console.log('ℹ️ UserData manager not available, skipping sync');
+            }
+            
+        } catch (error) {
+            console.error('❌ Error syncing with UserData manager:', error);
+        }
+    }
+
+    /**
+     * 🔄 NEW: Apply theme colors on login
+     */
+    applyThemeColors() {
+        try {
+            // Get theme from preferences or localStorage
+            const storedPreferences = localStorage.getItem('uniconnect-preferences');
+            let theme = 'light'; // default
+            
+            if (storedPreferences) {
+                const preferences = JSON.parse(storedPreferences);
+                if (preferences.theme) {
+                    theme = preferences.theme;
+                }
+            }
+            
+            // Apply theme to document
+            document.documentElement.setAttribute('data-theme', theme);
+            
+            // Apply theme-specific colors
+            this.applyThemeSpecificColors(theme);
+            
+            // Trigger theme change event for other components
+            this.dispatchThemeChangeEvent(theme);
+            
+            console.log(`🎨 Applied ${theme} theme colors`);
+            
+        } catch (error) {
+            console.error('❌ Error applying theme colors:', error);
+        }
+    }
+
+    /**
+     * 🔄 NEW: Apply theme-specific color styles
+     */
+    applyThemeSpecificColors(theme) {
+        const themes = {
+            light: {
+                '--primary-color': '#6366f1',
+                '--secondary-color': '#8b5cf6',
+                '--background-color': '#ffffff',
+                '--surface-color': '#f8fafc',
+                '--text-color': '#1e293b',
+                '--text-secondary': '#64748b'
+            },
+            dark: {
+                '--primary-color': '#818cf8',
+                '--secondary-color': '#a78bfa',
+                '--background-color': '#0f172a',
+                '--surface-color': '#1e293b',
+                '--text-color': '#f1f5f9',
+                '--text-secondary': '#94a3b8'
+            },
+            blue: {
+                '--primary-color': '#3b82f6',
+                '--secondary-color': '#60a5fa',
+                '--background-color': '#eff6ff',
+                '--surface-color': '#dbeafe',
+                '--text-color': '#1e40af',
+                '--text-secondary': '#3b82f6'
+            }
+        };
+
+        const colors = themes[theme] || themes.light;
+        
+        // Apply colors to root element
+        const root = document.documentElement;
+        Object.entries(colors).forEach(([property, value]) => {
+            root.style.setProperty(property, value);
+        });
+    }
+
+    /**
+     * 🔄 NEW: Dispatch theme change event
+     */
+    dispatchThemeChangeEvent(theme) {
+        const event = new CustomEvent('themechange', {
+            detail: { theme },
+            bubbles: true
+        });
+        document.dispatchEvent(event);
     }
 
     /**
@@ -149,6 +369,9 @@ class AuthStateListener {
             
             localStorage.setItem('uniconnect-last-auth', new Date().toISOString());
 
+            // 🔄 NEW: Reset theme to default on logout
+            this.resetThemeToDefault();
+
             // Update UI
             this.updateUILoggedOut();
             
@@ -158,6 +381,15 @@ class AuthStateListener {
             console.error('❌ Error handling user sign-out:', error);
             throw error;
         }
+    }
+
+    /**
+     * 🔄 NEW: Reset theme to default on logout
+     */
+    resetThemeToDefault() {
+        document.documentElement.setAttribute('data-theme', 'light');
+        this.applyThemeSpecificColors('light');
+        this.dispatchThemeChangeEvent('light');
     }
 
     /**
@@ -291,6 +523,9 @@ class AuthStateListener {
                 
                 // Update localStorage
                 localStorage.setItem('uniconnect-user', JSON.stringify(this.currentUser));
+                
+                // 🔄 NEW: Reload user selections after refresh
+                await this.loadUserSelections();
                 
                 // Notify subscribers
                 this.notifySubscribers(this.currentUser);

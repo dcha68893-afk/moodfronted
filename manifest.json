@@ -17,5 +17,30 @@
       "sizes": "512x512",
       "type": "image/png"
     }
-  ]
+  ],
+  "categories": ["shopping", "marketplace", "e-commerce"],
+  "keywords": [
+    "marketplace",
+    "AI",
+    "personalized",
+    "shopping",
+    "e-commerce",
+    "mood-based",
+    "interest-based"
+  ],
+  "related_applications": [],
+  "prefer_related_applications": false,
+  "screenshots": [],
+  "features": [
+    "Personalized recommendations",
+    "Mood-based discovery",
+    "Interest filtering",
+    "AI-powered matching"
+  ],
+  "custom_data": {
+    "mood_support": true,
+    "interest_profiles": true,
+    "dynamic_theme": true,
+    "personalization_level": "adaptive"
+  }
 }

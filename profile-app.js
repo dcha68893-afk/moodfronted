@@ -4,6 +4,7 @@
   - Real-time user profile, posts, friends, friend requests
   - Avatar & cover upload (Cropper.js)
   - Theme persistence
+  - Load and edit moods/interests
   - Basic AI hooks (server-side required)
 ****************************/
 
@@ -19,7 +20,7 @@ const firebaseConfig = {
 /* -------------------------------------------------------------- */
 
 /* Initialize Firebase */
-firebase.initializeApp(FIREBASE_CONFIG);
+firebase.initializeApp(firebaseConfig); // Changed from FIREBASE_CONFIG to firebaseConfig
 const auth = firebase.auth();
 const db = firebase.firestore();
 const storage = firebase.storage();
@@ -40,6 +41,8 @@ const avatarInitials = document.getElementById('avatarInitials');
 const postsCountEl = document.getElementById('postsCount');
 const followersCountEl = document.getElementById('followersCount');
 const followingCountEl = document.getElementById('followingCount');
+const profileCompletenessEl = document.getElementById('profileCompleteness');
+const completenessBar = document.getElementById('completenessBar');
 
 const editProfileBtn = document.getElementById('editProfileBtn');
 const editProfileModal = document.getElementById('editProfileModal');
@@ -49,6 +52,20 @@ const editDisplayName = document.getElementById('editDisplayName');
 const editUsername = document.getElementById('editUsername');
 const editBio = document.getElementById('editBio');
 const editLocation = document.getElementById('editLocation');
+
+/* Moods and Interests Elements */
+const currentMoodsEl = document.getElementById('currentMoods');
+const currentInterestsEl = document.getElementById('currentInterests');
+const editMoodsBtn = document.getElementById('editMoodsBtn');
+const editInterestsBtn = document.getElementById('editInterestsBtn');
+const editMoodsModal = document.getElementById('editMoodsModal');
+const editInterestsModal = document.getElementById('editInterestsModal');
+const cancelMoodsEdit = document.getElementById('cancelMoodsEdit');
+const cancelInterestsEdit = document.getElementById('cancelInterestsEdit');
+const saveMoodsBtn = document.getElementById('saveMoodsBtn');
+const saveInterestsBtn = document.getElementById('saveInterestsBtn');
+const moodsContainer = document.getElementById('moodsContainer');
+const interestsContainer = document.getElementById('interestsContainer');
 
 const avatarInput = document.getElementById('avatarInput');
 const editAvatarBtn = document.getElementById('editAvatarBtn');
@@ -74,6 +91,20 @@ const logoutBtn = document.getElementById('logoutBtn');
 const themeToggle = document.getElementById('themeToggle');
 const connectionSpinnerTimeout = 4000;
 
+/* Available options for moods and interests */
+const AVAILABLE_MOODS = [
+  'Happy', 'Creative', 'Adventurous', 'Focused', 'Relaxed', 
+  'Motivated', 'Chill', 'Energetic', 'Thoughtful', 'Playful',
+  'Serious', 'Optimistic', 'Curious', 'Confident', 'Peaceful'
+];
+
+const AVAILABLE_INTERESTS = [
+  'Music', 'Art', 'Technology', 'Sports', 'Reading',
+  'Gaming', 'Travel', 'Photography', 'Cooking', 'Fitness',
+  'Movies', 'Science', 'Fashion', 'Nature', 'Writing',
+  'Dancing', 'Languages', 'Meditation', 'Business', 'History'
+];
+
 let currentUser = null;
 let userDocUnsubscribe = null;
 let postsUnsubscribe = null;
@@ -95,6 +126,229 @@ function initialsFromName(name){
   let parts = name.trim().split(' ');
   return (parts[0][0] || '') + (parts[1] ? parts[1][0] : '');
 }
+
+/* -------- Profile Completeness Calculation -------- */
+function calculateProfileCompleteness(userData) {
+  let score = 0;
+  let totalFields = 7; // Adjust based on what you consider important
+  
+  // Basic info (1 point each if not empty)
+  if (userData.displayName && userData.displayName.trim()) score += 1;
+  if (userData.username && userData.username.trim()) score += 1;
+  if (userData.bio && userData.bio.trim()) score += 1;
+  if (userData.location && userData.location.trim()) score += 1;
+  if (userData.photoURL) score += 1;
+  if (userData.coverURL) score += 1;
+  
+  // Moods and interests (1 point if at least one selected)
+  if (userData.moods && userData.moods.length > 0) score += 0.5;
+  if (userData.interests && userData.interests.length > 0) score += 0.5;
+  
+  // Calculate percentage
+  const percentage = Math.round((score / totalFields) * 100);
+  return Math.min(percentage, 100);
+}
+
+function updateProfileCompletenessUI(userData) {
+  const percentage = calculateProfileCompleteness(userData);
+  
+  if (profileCompletenessEl) {
+    profileCompletenessEl.textContent = `${percentage}%`;
+  }
+  
+  if (completenessBar) {
+    completenessBar.style.width = `${percentage}%`;
+    // Optional: Add color coding
+    if (percentage < 30) {
+      completenessBar.style.backgroundColor = '#ef4444'; // red
+    } else if (percentage < 70) {
+      completenessBar.style.backgroundColor = '#f59e0b'; // amber
+    } else {
+      completenessBar.style.backgroundColor = '#10b981'; // emerald
+    }
+  }
+}
+
+/* -------- Load and Display User Selections -------- */
+function loadUserMoodsAndInterests(userData) {
+  // Display current moods
+  if (currentMoodsEl && userData.moods) {
+    if (userData.moods.length > 0) {
+      currentMoodsEl.innerHTML = userData.moods
+        .map(mood => `<span class="mood-tag">${mood}</span>`)
+        .join('');
+    } else {
+      currentMoodsEl.innerHTML = '<span class="text-gray-400">No moods selected yet</span>';
+    }
+  }
+  
+  // Display current interests
+  if (currentInterestsEl && userData.interests) {
+    if (userData.interests.length > 0) {
+      currentInterestsEl.innerHTML = userData.interests
+        .map(interest => `<span class="interest-tag">${interest}</span>`)
+        .join('');
+    } else {
+      currentInterestsEl.innerHTML = '<span class="text-gray-400">No interests selected yet</span>';
+    }
+  }
+}
+
+/* -------- Edit Functionality for Moods/Interests -------- */
+function initializeMoodsEditor(userMoods = []) {
+  if (!moodsContainer) return;
+  
+  moodsContainer.innerHTML = '';
+  
+  AVAILABLE_MOODS.forEach(mood => {
+    const isSelected = userMoods.includes(mood);
+    const moodElement = document.createElement('div');
+    moodElement.className = `mood-option ${isSelected ? 'selected' : ''}`;
+    moodElement.innerHTML = `
+      <input type="checkbox" id="mood-${mood.toLowerCase()}" ${isSelected ? 'checked' : ''} value="${mood}">
+      <label for="mood-${mood.toLowerCase()}">${mood}</label>
+    `;
+    
+    moodElement.addEventListener('click', (e) => {
+      if (e.target.tagName !== 'INPUT') {
+        const checkbox = moodElement.querySelector('input[type="checkbox"]');
+        checkbox.checked = !checkbox.checked;
+        moodElement.classList.toggle('selected');
+      }
+    });
+    
+    moodsContainer.appendChild(moodElement);
+  });
+}
+
+function initializeInterestsEditor(userInterests = []) {
+  if (!interestsContainer) return;
+  
+  interestsContainer.innerHTML = '';
+  
+  AVAILABLE_INTERESTS.forEach(interest => {
+    const isSelected = userInterests.includes(interest);
+    const interestElement = document.createElement('div');
+    interestElement.className = `interest-option ${isSelected ? 'selected' : ''}`;
+    interestElement.innerHTML = `
+      <input type="checkbox" id="interest-${interest.toLowerCase()}" ${isSelected ? 'checked' : ''} value="${interest}">
+      <label for="interest-${interest.toLowerCase()}">${interest}</label>
+    `;
+    
+    interestElement.addEventListener('click', (e) => {
+      if (e.target.tagName !== 'INPUT') {
+        const checkbox = interestElement.querySelector('input[type="checkbox"]');
+        checkbox.checked = !checkbox.checked;
+        interestElement.classList.toggle('selected');
+      }
+    });
+    
+    interestsContainer.appendChild(interestElement);
+  });
+}
+
+/* -------- Save Updates to UserData and Firebase -------- */
+async function saveMoods() {
+  if (!uid()) return;
+  
+  const selectedMoods = Array.from(moodsContainer.querySelectorAll('input[type="checkbox"]:checked'))
+    .map(checkbox => checkbox.value);
+  
+  // Limit selections (optional)
+  if (selectedMoods.length > 5) {
+    alert('Please select up to 5 moods only');
+    return;
+  }
+  
+  try {
+    await db.collection('users').doc(uid()).set({
+      moods: selectedMoods,
+      updatedAt: firebase.firestore.FieldValue.serverTimestamp()
+    }, { merge: true });
+    
+    editMoodsModal.classList.add('hidden');
+    showConnection('connected', 'Moods updated successfully');
+    
+    // Update UI immediately
+    loadUserMoodsAndInterests({ moods: selectedMoods });
+  } catch (error) {
+    console.error('Error saving moods:', error);
+    alert('Failed to save moods');
+  }
+}
+
+async function saveInterests() {
+  if (!uid()) return;
+  
+  const selectedInterests = Array.from(interestsContainer.querySelectorAll('input[type="checkbox"]:checked'))
+    .map(checkbox => checkbox.value);
+  
+  // Limit selections (optional)
+  if (selectedInterests.length > 8) {
+    alert('Please select up to 8 interests only');
+    return;
+  }
+  
+  try {
+    await db.collection('users').doc(uid()).set({
+      interests: selectedInterests,
+      updatedAt: firebase.firestore.FieldValue.serverTimestamp()
+    }, { merge: true });
+    
+    editInterestsModal.classList.add('hidden');
+    showConnection('connected', 'Interests updated successfully');
+    
+    // Update UI immediately
+    loadUserMoodsAndInterests({ interests: selectedInterests });
+  } catch (error) {
+    console.error('Error saving interests:', error);
+    alert('Failed to save interests');
+  }
+}
+
+/* -------- Event Listeners for Moods/Interests -------- */
+editMoodsBtn?.addEventListener('click', async () => {
+  if (!uid()) return;
+  
+  try {
+    const userDoc = await db.collection('users').doc(uid()).get();
+    const userData = userDoc.exists ? userDoc.data() : {};
+    const currentMoods = userData.moods || [];
+    
+    initializeMoodsEditor(currentMoods);
+    editMoodsModal.classList.remove('hidden');
+  } catch (error) {
+    console.error('Error loading moods:', error);
+    alert('Failed to load moods');
+  }
+});
+
+editInterestsBtn?.addEventListener('click', async () => {
+  if (!uid()) return;
+  
+  try {
+    const userDoc = await db.collection('users').doc(uid()).get();
+    const userData = userDoc.exists ? userDoc.data() : {};
+    const currentInterests = userData.interests || [];
+    
+    initializeInterestsEditor(currentInterests);
+    editInterestsModal.classList.remove('hidden');
+  } catch (error) {
+    console.error('Error loading interests:', error);
+    alert('Failed to load interests');
+  }
+});
+
+cancelMoodsEdit?.addEventListener('click', () => {
+  editMoodsModal.classList.add('hidden');
+});
+
+cancelInterestsEdit?.addEventListener('click', () => {
+  editInterestsModal.classList.add('hidden');
+});
+
+saveMoodsBtn?.addEventListener('click', saveMoods);
+saveInterestsBtn?.addEventListener('click', saveInterests);
 
 /* -------- Presence (basic) --------
    Writes a simple presence field in users/{uid}/presence with lastSeen timestamp.
@@ -154,6 +408,8 @@ function attachUserProfileListener(uid){
   userDocUnsubscribe = userRef.onSnapshot(doc=>{
     if(!doc.exists) return;
     const data = doc.data();
+    
+    // Update basic profile info
     profileNameEl.textContent = data.displayName || data.name || 'Unnamed';
     profileUsernameEl.textContent = data.username ? ('@' + data.username) : '@' + (data.email || '').split('@')[0];
     profileLocationEl.textContent = data.location || 'Location not set';
@@ -179,6 +435,12 @@ function attachUserProfileListener(uid){
       profileCoverEl.style.backgroundSize = 'cover';
       profileCoverEl.style.backgroundPosition = 'center';
     }
+
+    // Load and display moods & interests
+    loadUserMoodsAndInterests(data);
+    
+    // Update profile completeness
+    updateProfileCompletenessUI(data);
 
     // Theme (persisted)
     if(data.theme) document.documentElement.setAttribute('data-theme', data.theme);
@@ -495,6 +757,35 @@ async function generateBioDraft() {
   }catch(e){
     console.warn('AI bio error', e);
     return null;
+  }
+}
+
+/* -------- AI helper for suggesting moods/interests -------- */
+async function suggestMoodsAndInterests() {
+  try {
+    const resp = await fetch('/api/suggest-profile-info', {
+      method: 'POST',
+      headers: {'Content-Type':'application/json'},
+      body: JSON.stringify({ 
+        userId: uid(), 
+        userData: await getUserDataForAI() 
+      })
+    });
+    const data = await resp.json();
+    return data; // Should return { moods: [...], interests: [...] }
+  } catch(e) {
+    console.warn('AI suggestion error', e);
+    return null;
+  }
+}
+
+async function getUserDataForAI() {
+  try {
+    const doc = await db.collection('users').doc(uid()).get();
+    return doc.exists ? doc.data() : {};
+  } catch(e) {
+    console.warn('Error fetching user data for AI:', e);
+    return {};
   }
 }
 

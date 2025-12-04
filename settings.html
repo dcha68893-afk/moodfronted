@@ -16,6 +16,10 @@
     <script src="https://www.gstatic.com/firebasejs/9.22.1/firebase-firestore-compat.js"></script>
     <script src="https://www.gstatic.com/firebasejs/9.22.1/firebase-storage-compat.js"></script>
     
+    <!-- Custom Scripts -->
+    <script src="user-data.js"></script>
+    <script src="display-user-selections.js"></script>
+    
     <style>
         .glass-effect {
             background: rgba(255, 255, 255, 0.1);
@@ -192,6 +196,175 @@
             opacity: 1;
             visibility: visible;
         }
+        
+        /* Mood & Interests Styles */
+        .mood-chip {
+            display: inline-flex;
+            align-items: center;
+            padding: 8px 16px;
+            margin: 4px;
+            border-radius: 20px;
+            font-size: 0.9rem;
+            transition: all 0.2s;
+            cursor: pointer;
+            user-select: none;
+        }
+        .mood-chip:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 5px 15px rgba(0, 0, 0, 0.2);
+        }
+        .mood-chip.selected {
+            border: 2px solid white;
+        }
+        .mood-chip .remove-btn {
+            margin-left: 8px;
+            opacity: 0.7;
+            transition: opacity 0.2s;
+        }
+        .mood-chip .remove-btn:hover {
+            opacity: 1;
+        }
+        .mood-category {
+            margin-bottom: 20px;
+        }
+        .mood-emoji {
+            font-size: 1.2rem;
+            margin-right: 8px;
+        }
+        .interest-tag {
+            display: inline-flex;
+            align-items: center;
+            padding: 6px 12px;
+            margin: 3px;
+            border-radius: 16px;
+            font-size: 0.85rem;
+            transition: all 0.2s;
+            cursor: pointer;
+            user-select: none;
+        }
+        .interest-tag:hover {
+            transform: scale(1.05);
+        }
+        .interest-tag.selected {
+            border: 2px solid white;
+        }
+        .color-preview {
+            width: 30px;
+            height: 30px;
+            border-radius: 6px;
+            cursor: pointer;
+            border: 2px solid transparent;
+            transition: all 0.2s;
+        }
+        .color-preview:hover {
+            transform: scale(1.1);
+        }
+        .color-preview.selected {
+            border-color: white;
+            box-shadow: 0 0 10px rgba(255, 255, 255, 0.5);
+        }
+        .mood-theme-preview {
+            width: 100%;
+            height: 80px;
+            border-radius: 10px;
+            margin-top: 10px;
+            overflow: hidden;
+            position: relative;
+        }
+        .mood-theme-preview::before {
+            content: '';
+            position: absolute;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            background: linear-gradient(45deg, var(--color-1), var(--color-2), var(--color-3));
+        }
+        .custom-color-input {
+            width: 100%;
+            height: 40px;
+            border-radius: 8px;
+            border: none;
+            cursor: pointer;
+        }
+        .gradient-slider {
+            width: 100%;
+            height: 8px;
+            border-radius: 4px;
+            background: linear-gradient(to right, var(--gradient-start), var(--gradient-end));
+            margin: 10px 0;
+            position: relative;
+        }
+        .gradient-slider-thumb {
+            position: absolute;
+            top: -6px;
+            width: 20px;
+            height: 20px;
+            background: white;
+            border-radius: 50%;
+            cursor: pointer;
+            box-shadow: 0 2px 8px rgba(0, 0, 0, 0.3);
+        }
+        .mood-privacy-option {
+            padding: 12px 16px;
+            border-radius: 10px;
+            margin-bottom: 8px;
+            cursor: pointer;
+            transition: all 0.2s;
+            border: 2px solid transparent;
+        }
+        .mood-privacy-option:hover {
+            background: rgba(59, 130, 246, 0.1);
+        }
+        .mood-privacy-option.selected {
+            border-color: #3B82F6;
+            background: rgba(59, 130, 246, 0.15);
+        }
+        .mood-privacy-option .privacy-icon {
+            width: 40px;
+            height: 40px;
+            border-radius: 50%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            margin-right: 12px;
+        }
+        .preset-theme {
+            width: 80px;
+            height: 60px;
+            border-radius: 8px;
+            cursor: pointer;
+            border: 3px solid transparent;
+            transition: all 0.2s;
+            overflow: hidden;
+            position: relative;
+        }
+        .preset-theme:hover {
+            transform: scale(1.05);
+        }
+        .preset-theme.selected {
+            border-color: white;
+            box-shadow: 0 0 15px rgba(255, 255, 255, 0.5);
+        }
+        .preset-theme .theme-colors {
+            display: flex;
+            width: 100%;
+            height: 100%;
+        }
+        .preset-theme .theme-color {
+            flex: 1;
+            height: 100%;
+        }
+        .selection-counter {
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            width: 24px;
+            height: 24px;
+            border-radius: 50%;
+            font-size: 0.8rem;
+            margin-left: 8px;
+        }
     </style>
 </head>
 <body class="h-full bg-gradient-to-br from-gray-900 via-blue-900 to-gray-900 text-white overflow-x-hidden">
@@ -321,11 +494,269 @@
                     </div>
                 </div>
 
+                <!-- Mood & Interests Settings -->
+                <div class="settings-card p-4 md:p-6">
+                    <h2 class="text-xl font-bold mb-4 text-blue-300">Mood & Interests</h2>
+                    
+                    <div class="space-y-6">
+                        <!-- Current Moods Display -->
+                        <div>
+                            <div class="flex justify-between items-center mb-3">
+                                <h3 class="font-semibold">Current Moods</h3>
+                                <span class="text-sm text-blue-300">Selected: <span id="moodCount">0</span>/5</span>
+                            </div>
+                            <div id="selectedMoodsContainer" class="flex flex-wrap gap-2 p-3 glass-effect rounded-lg min-h-[60px]">
+                                <div class="text-blue-300 text-sm italic">No moods selected yet</div>
+                            </div>
+                        </div>
+                        
+                        <!-- Mood Selection -->
+                        <div class="mood-category">
+                            <h3 class="font-semibold mb-3">Select Your Moods</h3>
+                            <div class="flex flex-wrap gap-2">
+                                <div class="mood-chip" data-mood="happy" data-color="#FFD700" style="background: linear-gradient(135deg, #FFD700, #FFA500);">
+                                    <span class="mood-emoji">😊</span> Happy
+                                </div>
+                                <div class="mood-chip" data-mood="energetic" data-color="#FF6B6B" style="background: linear-gradient(135deg, #FF6B6B, #FF8E53);">
+                                    <span class="mood-emoji">⚡</span> Energetic
+                                </div>
+                                <div class="mood-chip" data-mood="calm" data-color="#4ECDC4" style="background: linear-gradient(135deg, #4ECDC4, #44A08D);">
+                                    <span class="mood-emoji">🧘</span> Calm
+                                </div>
+                                <div class="mood-chip" data-mood="creative" data-color="#A78BFA" style="background: linear-gradient(135deg, #A78BFA, #7C3AED);">
+                                    <span class="mood-emoji">🎨</span> Creative
+                                </div>
+                                <div class="mood-chip" data-mood="focused" data-color="#10B981" style="background: linear-gradient(135deg, #10B981, #059669);">
+                                    <span class="mood-emoji">🎯</span> Focused
+                                </div>
+                                <div class="mood-chip" data-mood="relaxed" data-color="#60A5FA" style="background: linear-gradient(135deg, #60A5FA, #3B82F6);">
+                                    <span class="mood-emoji">🌴</span> Relaxed
+                                </div>
+                                <div class="mood-chip" data-mood="adventurous" data-color="#F97316" style="background: linear-gradient(135deg, #F97316, #EA580C);">
+                                    <span class="mood-emoji">🏔️</span> Adventurous
+                                </div>
+                                <div class="mood-chip" data-mood="romantic" data-color="#EC4899" style="background: linear-gradient(135deg, #EC4899, #BE185D);">
+                                    <span class="mood-emoji">💖</span> Romantic
+                                </div>
+                                <div class="mood-chip" data-mood="nostalgic" data-color="#8B5CF6" style="background: linear-gradient(135deg, #8B5CF6, #7C3AED);">
+                                    <span class="mood-emoji">📻</span> Nostalgic
+                                </div>
+                                <div class="mood-chip" data-mood="mysterious" data-color="#6B7280" style="background: linear-gradient(135deg, #6B7280, #4B5563);">
+                                    <span class="mood-emoji">🔮</span> Mysterious
+                                </div>
+                            </div>
+                        </div>
+                        
+                        <!-- Interests Selection -->
+                        <div class="mood-category">
+                            <div class="flex justify-between items-center mb-3">
+                                <h3 class="font-semibold">Your Interests</h3>
+                                <span class="text-sm text-blue-300">Selected: <span id="interestCount">0</span>/10</span>
+                            </div>
+                            <div class="flex flex-wrap gap-2">
+                                <div class="interest-tag" data-interest="music" style="background: rgba(59, 130, 246, 0.3);">
+                                    🎵 Music
+                                </div>
+                                <div class="interest-tag" data-interest="gaming" style="background: rgba(139, 92, 246, 0.3);">
+                                    🎮 Gaming
+                                </div>
+                                <div class="interest-tag" data-interest="sports" style="background: rgba(34, 197, 94, 0.3);">
+                                    ⚽ Sports
+                                </div>
+                                <div class="interest-tag" data-interest="art" style="background: rgba(245, 158, 11, 0.3);">
+                                    🎨 Art
+                                </div>
+                                <div class="interest-tag" data-interest="technology" style="background: rgba(59, 130, 246, 0.3);">
+                                    💻 Technology
+                                </div>
+                                <div class="interest-tag" data-interest="travel" style="background: rgba(16, 185, 129, 0.3);">
+                                    ✈️ Travel
+                                </div>
+                                <div class="interest-tag" data-interest="food" style="background: rgba(239, 68, 68, 0.3);">
+                                    🍔 Food
+                                </div>
+                                <div class="interest-tag" data-interest="fitness" style="background: rgba(168, 85, 247, 0.3);">
+                                    💪 Fitness
+                                </div>
+                                <div class="interest-tag" data-interest="books" style="background: rgba(6, 182, 212, 0.3);">
+                                    📚 Books
+                                </div>
+                                <div class="interest-tag" data-interest="movies" style="background: rgba(249, 115, 22, 0.3);">
+                                    🎬 Movies
+                                </div>
+                                <div class="interest-tag" data-interest="photography" style="background: rgba(99, 102, 241, 0.3);">
+                                    📸 Photography
+                                </div>
+                                <div class="interest-tag" data-interest="fashion" style="background: rgba(236, 72, 153, 0.3);">
+                                    👗 Fashion
+                                </div>
+                                <div class="interest-tag" data-interest="science" style="background: rgba(20, 184, 166, 0.3);">
+                                    🔬 Science
+                                </div>
+                                <div class="interest-tag" data-interest="nature" style="background: rgba(5, 150, 105, 0.3);">
+                                    🌿 Nature
+                                </div>
+                                <div class="interest-tag" data-interest="business" style="background: rgba(139, 92, 246, 0.3);">
+                                    💼 Business
+                                </div>
+                            </div>
+                        </div>
+                        
+                        <!-- Reset Button -->
+                        <div class="flex justify-end">
+                            <button id="resetSelectionsBtn" class="px-4 py-2 glass-effect rounded-lg hover:bg-red-900/30 transition text-red-400">
+                                <i class="fas fa-redo-alt mr-2"></i>Reset All Selections
+                            </button>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Mood Theme Customizer -->
+                <div class="settings-card p-4 md:p-6">
+                    <h2 class="text-xl font-bold mb-4 text-blue-300">Mood Theme Customizer</h2>
+                    
+                    <div class="space-y-6">
+                        <!-- Theme Preview -->
+                        <div>
+                            <h3 class="font-semibold mb-3">Theme Preview</h3>
+                            <div id="moodThemePreview" class="mood-theme-preview" style="--color-1: #3B82F6; --color-2: #8B5CF6; --color-3: #EC4899;">
+                                <!-- Gradient preview will be generated by JavaScript -->
+                            </div>
+                        </div>
+                        
+                        <!-- Preset Themes -->
+                        <div>
+                            <h3 class="font-semibold mb-3">Preset Themes</h3>
+                            <div class="grid grid-cols-3 md:grid-cols-6 gap-3">
+                                <div class="preset-theme" data-theme="ocean">
+                                    <div class="theme-colors">
+                                        <div class="theme-color" style="background: #3B82F6;"></div>
+                                        <div class="theme-color" style="background: #60A5FA;"></div>
+                                        <div class="theme-color" style="background: #93C5FD;"></div>
+                                    </div>
+                                </div>
+                                <div class="preset-theme" data-theme="sunset">
+                                    <div class="theme-colors">
+                                        <div class="theme-color" style="background: #F97316;"></div>
+                                        <div class="theme-color" style="background: #FB923C;"></div>
+                                        <div class="theme-color" style="background: #FDBA74;"></div>
+                                    </div>
+                                </div>
+                                <div class="preset-theme" data-theme="forest">
+                                    <div class="theme-colors">
+                                        <div class="theme-color" style="background: #10B981;"></div>
+                                        <div class="theme-color" style="background: #34D399;"></div>
+                                        <div class="theme-color" style="background: #6EE7B7;"></div>
+                                    </div>
+                                </div>
+                                <div class="preset-theme" data-theme="royal">
+                                    <div class="theme-colors">
+                                        <div class="theme-color" style="background: #8B5CF6;"></div>
+                                        <div class="theme-color" style="background: #A78BFA;"></div>
+                                        <div class="theme-color" style="background: #C4B5FD;"></div>
+                                    </div>
+                                </div>
+                                <div class="preset-theme" data-theme="candy">
+                                    <div class="theme-colors">
+                                        <div class="theme-color" style="background: #EC4899;"></div>
+                                        <div class="theme-color" style="background: #F472B6;"></div>
+                                        <div class="theme-color" style="background: #F9A8D4;"></div>
+                                    </div>
+                                </div>
+                                <div class="preset-theme" data-theme="midnight">
+                                    <div class="theme-colors">
+                                        <div class="theme-color" style="background: #1F2937;"></div>
+                                        <div class="theme-color" style="background: #374151;"></div>
+                                        <div class="theme-color" style="background: #4B5563;"></div>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                        
+                        <!-- Custom Color Picker -->
+                        <div>
+                            <h3 class="font-semibold mb-3">Custom Colors</h3>
+                            <div class="grid grid-cols-3 gap-4">
+                                <div>
+                                    <label class="block text-sm mb-2">Primary Color</label>
+                                    <input type="color" id="color1Picker" class="custom-color-input" value="#3B82F6">
+                                </div>
+                                <div>
+                                    <label class="block text-sm mb-2">Secondary Color</label>
+                                    <input type="color" id="color2Picker" class="custom-color-input" value="#8B5CF6">
+                                </div>
+                                <div>
+                                    <label class="block text-sm mb-2">Accent Color</label>
+                                    <input type="color" id="color3Picker" class="custom-color-input" value="#EC4899">
+                                </div>
+                            </div>
+                        </div>
+                        
+                        <!-- Gradient Direction -->
+                        <div>
+                            <h3 class="font-semibold mb-3">Gradient Direction</h3>
+                            <div class="flex flex-wrap gap-3">
+                                <button class="px-4 py-2 glass-effect rounded-lg hover:bg-blue-900/30 transition gradient-direction" data-direction="to right">→ Horizontal</button>
+                                <button class="px-4 py-2 glass-effect rounded-lg hover:bg-blue-900/30 transition gradient-direction" data-direction="to bottom">↓ Vertical</button>
+                                <button class="px-4 py-2 glass-effect rounded-lg hover:bg-blue-900/30 transition gradient-direction" data-direction="45deg">↗ Diagonal</button>
+                                <button class="px-4 py-2 glass-effect rounded-lg hover:bg-blue-900/30 transition gradient-direction" data-direction="135deg">↘ Diagonal</button>
+                            </div>
+                        </div>
+                        
+                        <!-- Apply Theme Button -->
+                        <div class="flex justify-end">
+                            <button id="applyThemeBtn" class="px-6 py-2 primary-gradient rounded-lg font-semibold hover:opacity-90 transition">
+                                <i class="fas fa-palette mr-2"></i>Apply Theme
+                            </button>
+                        </div>
+                    </div>
+                </div>
+
                 <!-- Privacy Settings -->
                 <div class="settings-card p-4 md:p-6">
                     <h2 class="text-xl font-bold mb-4 text-blue-300">Privacy Settings</h2>
                     
                     <div class="space-y-6">
+                        <!-- Mood & Interests Privacy -->
+                        <div>
+                            <h3 class="font-semibold mb-3">Mood & Interests Visibility</h3>
+                            <div class="space-y-3">
+                                <div class="mood-privacy-option" data-privacy="public">
+                                    <div class="flex items-center">
+                                        <div class="privacy-icon" style="background: rgba(34, 197, 94, 0.2);">
+                                            <i class="fas fa-globe text-green-400"></i>
+                                        </div>
+                                        <div>
+                                            <h4 class="font-medium">Public</h4>
+                                            <p class="text-sm text-blue-300">Everyone can see your moods and interests</p>
+                                        </div>
+                                    </div>
+                                </div>
+                                <div class="mood-privacy-option" data-privacy="friends">
+                                    <div class="flex items-center">
+                                        <div class="privacy-icon" style="background: rgba(59, 130, 246, 0.2);">
+                                            <i class="fas fa-user-friends text-blue-400"></i>
+                                        </div>
+                                        <div>
+                                            <h4 class="font-medium">Friends Only</h4>
+                                            <p class="text-sm text-blue-300">Only your friends can see your moods and interests</p>
+                                        </div>
+                                    </div>
+                                </div>
+                                <div class="mood-privacy-option" data-privacy="private">
+                                    <div class="flex items-center">
+                                        <div class="privacy-icon" style="background: rgba(107, 114, 128, 0.2);">
+                                            <i class="fas fa-lock text-gray-400"></i>
+                                        </div>
+                                        <div>
+                                            <h4 class="font-medium">Private</h4>
+                                            <p class="text-sm text-blue-300">Only you can see your moods and interests</p>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                        
                         <div class="flex flex-col sm:flex-row sm:items-center sm:justify-between">
                             <div class="mb-3 sm:mb-0">
                                 <h3 class="font-semibold">Profile Visibility</h3>
@@ -418,6 +849,30 @@
                             </div>
                             <label class="toggle-switch">
                                 <input type="checkbox" id="friendRequestNotificationsToggle">
+                                <span class="toggle-slider"></span>
+                            </label>
+                        </div>
+                        
+                        <!-- Mood Change Notifications -->
+                        <div class="flex flex-col sm:flex-row sm:items-center sm:justify-between">
+                            <div class="mb-3 sm:mb-0">
+                                <h3 class="font-semibold">Mood Change Notifications</h3>
+                                <p class="text-sm text-blue-300">Get notified when friends change their mood</p>
+                            </div>
+                            <label class="toggle-switch">
+                                <input type="checkbox" id="moodChangeNotificationsToggle">
+                                <span class="toggle-slider"></span>
+                            </label>
+                        </div>
+                        
+                        <!-- Interest Match Notifications -->
+                        <div class="flex flex-col sm:flex-row sm:items-center sm:justify-between">
+                            <div class="mb-3 sm:mb-0">
+                                <h3 class="font-semibold">Interest Match Notifications</h3>
+                                <p class="text-sm text-blue-300">Get notified when you have interest matches</p>
+                            </div>
+                            <label class="toggle-switch">
+                                <input type="checkbox" id="interestMatchNotificationsToggle">
                                 <span class="toggle-slider"></span>
                             </label>
                         </div>
@@ -583,6 +1038,14 @@
                 this.isConnected = false;
                 this.userData = {};
                 this.settingsListeners = [];
+                this.selectedMoods = [];
+                this.selectedInterests = [];
+                this.moodTheme = {
+                    colors: ['#3B82F6', '#8B5CF6', '#EC4899'],
+                    direction: '45deg',
+                    preset: 'ocean'
+                };
+                this.moodPrivacy = 'public';
             }
 
             async initialize() {
@@ -591,6 +1054,7 @@
                     await this.initializeFirebase();
                     this.setupEventListeners();
                     await this.loadUserSettings();
+                    this.initializeMoodSystem();
                     this.showNotification("Settings loaded successfully!", "success");
                 } catch (error) {
                     console.error('❌ Initialization failed:', error);
@@ -642,6 +1106,15 @@
                         // Update UI with user data
                         this.updateUserInterface();
                         
+                        // Load mood data if exists
+                        if (this.userData.moods) {
+                            this.selectedMoods = this.userData.moods.selectedMoods || [];
+                            this.selectedInterests = this.userData.moods.selectedInterests || [];
+                            this.moodTheme = this.userData.moods.theme || this.moodTheme;
+                            this.moodPrivacy = this.userData.moods.privacy || 'public';
+                            this.updateMoodUI();
+                        }
+                        
                         // Load settings
                         if (this.userData.settings) {
                             this.userSettings = this.userData.settings;
@@ -683,6 +1156,309 @@
                 document.getElementById('userId').textContent = this.currentUser.uid.slice(0, 8) + '...';
             }
 
+            initializeMoodSystem() {
+                // Initialize mood selection
+                this.setupMoodSelection();
+                
+                // Initialize mood theme customizer
+                this.setupMoodThemeCustomizer();
+                
+                // Initialize mood privacy settings
+                this.setupMoodPrivacy();
+                
+                // Update mood UI
+                this.updateMoodUI();
+            }
+
+            setupMoodSelection() {
+                // Mood chips selection
+                document.querySelectorAll('.mood-chip').forEach(chip => {
+                    chip.addEventListener('click', () => {
+                        const mood = chip.getAttribute('data-mood');
+                        const color = chip.getAttribute('data-color');
+                        
+                        if (this.selectedMoods.length >= 5 && !this.selectedMoods.includes(mood)) {
+                            this.showNotification('Maximum 5 moods allowed. Remove one to add another.', 'error');
+                            return;
+                        }
+                        
+                        if (this.selectedMoods.includes(mood)) {
+                            // Remove mood
+                            this.selectedMoods = this.selectedMoods.filter(m => m !== mood);
+                            chip.classList.remove('selected');
+                        } else {
+                            // Add mood
+                            this.selectedMoods.push(mood);
+                            chip.classList.add('selected');
+                        }
+                        
+                        this.updateSelectedMoodsDisplay();
+                        this.saveMoodsToFirebase();
+                    });
+                });
+                
+                // Interest tags selection
+                document.querySelectorAll('.interest-tag').forEach(tag => {
+                    tag.addEventListener('click', () => {
+                        const interest = tag.getAttribute('data-interest');
+                        
+                        if (this.selectedInterests.length >= 10 && !this.selectedInterests.includes(interest)) {
+                            this.showNotification('Maximum 10 interests allowed. Remove one to add another.', 'error');
+                            return;
+                        }
+                        
+                        if (this.selectedInterests.includes(interest)) {
+                            // Remove interest
+                            this.selectedInterests = this.selectedInterests.filter(i => i !== interest);
+                            tag.classList.remove('selected');
+                        } else {
+                            // Add interest
+                            this.selectedInterests.push(interest);
+                            tag.classList.add('selected');
+                        }
+                        
+                        this.updateInterestCount();
+                        this.saveMoodsToFirebase();
+                    });
+                });
+                
+                // Reset selections button
+                document.getElementById('resetSelectionsBtn').addEventListener('click', () => {
+                    if (confirm('Are you sure you want to reset all your mood and interest selections?')) {
+                        this.selectedMoods = [];
+                        this.selectedInterests = [];
+                        this.updateMoodUI();
+                        this.saveMoodsToFirebase();
+                        this.showNotification('All selections have been reset', 'success');
+                    }
+                });
+            }
+
+            setupMoodThemeCustomizer() {
+                // Preset theme selection
+                document.querySelectorAll('.preset-theme').forEach(theme => {
+                    theme.addEventListener('click', () => {
+                        const themeName = theme.getAttribute('data-theme');
+                        this.moodTheme.preset = themeName;
+                        
+                        // Update theme colors based on preset
+                        switch(themeName) {
+                            case 'ocean':
+                                this.moodTheme.colors = ['#3B82F6', '#60A5FA', '#93C5FD'];
+                                break;
+                            case 'sunset':
+                                this.moodTheme.colors = ['#F97316', '#FB923C', '#FDBA74'];
+                                break;
+                            case 'forest':
+                                this.moodTheme.colors = ['#10B981', '#34D399', '#6EE7B7'];
+                                break;
+                            case 'royal':
+                                this.moodTheme.colors = ['#8B5CF6', '#A78BFA', '#C4B5FD'];
+                                break;
+                            case 'candy':
+                                this.moodTheme.colors = ['#EC4899', '#F472B6', '#F9A8D4'];
+                                break;
+                            case 'midnight':
+                                this.moodTheme.colors = ['#1F2937', '#374151', '#4B5563'];
+                                break;
+                        }
+                        
+                        // Update color pickers
+                        document.getElementById('color1Picker').value = this.moodTheme.colors[0];
+                        document.getElementById('color2Picker').value = this.moodTheme.colors[1];
+                        document.getElementById('color3Picker').value = this.moodTheme.colors[2];
+                        
+                        // Update UI
+                        this.updateThemePreview();
+                        
+                        // Remove active class from all themes
+                        document.querySelectorAll('.preset-theme').forEach(t => t.classList.remove('selected'));
+                        // Add active class to selected theme
+                        theme.classList.add('selected');
+                    });
+                });
+                
+                // Color pickers
+                document.getElementById('color1Picker').addEventListener('input', (e) => {
+                    this.moodTheme.colors[0] = e.target.value;
+                    this.updateThemePreview();
+                });
+                
+                document.getElementById('color2Picker').addEventListener('input', (e) => {
+                    this.moodTheme.colors[1] = e.target.value;
+                    this.updateThemePreview();
+                });
+                
+                document.getElementById('color3Picker').addEventListener('input', (e) => {
+                    this.moodTheme.colors[2] = e.target.value;
+                    this.updateThemePreview();
+                });
+                
+                // Gradient direction buttons
+                document.querySelectorAll('.gradient-direction').forEach(btn => {
+                    btn.addEventListener('click', () => {
+                        this.moodTheme.direction = btn.getAttribute('data-direction');
+                        this.updateThemePreview();
+                        
+                        // Update active state
+                        document.querySelectorAll('.gradient-direction').forEach(b => {
+                            b.style.background = '';
+                        });
+                        btn.style.background = 'rgba(59, 130, 246, 0.3)';
+                    });
+                });
+                
+                // Apply theme button
+                document.getElementById('applyThemeBtn').addEventListener('click', () => {
+                    this.saveMoodThemeToFirebase();
+                    this.showNotification('Mood theme applied successfully!', 'success');
+                });
+                
+                // Initialize with default theme
+                this.updateThemePreview();
+            }
+
+            setupMoodPrivacy() {
+                // Privacy option selection
+                document.querySelectorAll('.mood-privacy-option').forEach(option => {
+                    option.addEventListener('click', () => {
+                        const privacy = option.getAttribute('data-privacy');
+                        this.moodPrivacy = privacy;
+                        
+                        // Update UI
+                        document.querySelectorAll('.mood-privacy-option').forEach(opt => {
+                            opt.classList.remove('selected');
+                        });
+                        option.classList.add('selected');
+                        
+                        // Save to Firebase
+                        this.saveMoodsToFirebase();
+                    });
+                });
+                
+                // Set initial privacy selection
+                document.querySelector(`.mood-privacy-option[data-privacy="${this.moodPrivacy}"]`)?.classList.add('selected');
+            }
+
+            updateMoodUI() {
+                this.updateSelectedMoodsDisplay();
+                this.updateInterestCount();
+                
+                // Update mood chips selection state
+                document.querySelectorAll('.mood-chip').forEach(chip => {
+                    const mood = chip.getAttribute('data-mood');
+                    if (this.selectedMoods.includes(mood)) {
+                        chip.classList.add('selected');
+                    } else {
+                        chip.classList.remove('selected');
+                    }
+                });
+                
+                // Update interest tags selection state
+                document.querySelectorAll('.interest-tag').forEach(tag => {
+                    const interest = tag.getAttribute('data-interest');
+                    if (this.selectedInterests.includes(interest)) {
+                        tag.classList.add('selected');
+                    } else {
+                        tag.classList.remove('selected');
+                    }
+                });
+            }
+
+            updateSelectedMoodsDisplay() {
+                const container = document.getElementById('selectedMoodsContainer');
+                const countElement = document.getElementById('moodCount');
+                
+                // Update count
+                countElement.textContent = this.selectedMoods.length;
+                
+                // Clear container
+                container.innerHTML = '';
+                
+                // Add selected moods
+                this.selectedMoods.forEach(mood => {
+                    const moodChip = document.querySelector(`.mood-chip[data-mood="${mood}"]`);
+                    if (moodChip) {
+                        const clone = moodChip.cloneNode(true);
+                        clone.classList.add('selected');
+                        
+                        // Add remove button
+                        const removeBtn = document.createElement('span');
+                        removeBtn.className = 'remove-btn';
+                        removeBtn.innerHTML = '<i class="fas fa-times"></i>';
+                        removeBtn.addEventListener('click', (e) => {
+                            e.stopPropagation();
+                            this.selectedMoods = this.selectedMoods.filter(m => m !== mood);
+                            this.updateMoodUI();
+                            this.saveMoodsToFirebase();
+                        });
+                        
+                        clone.appendChild(removeBtn);
+                        container.appendChild(clone);
+                    }
+                });
+                
+                // Show message if no moods selected
+                if (this.selectedMoods.length === 0) {
+                    container.innerHTML = '<div class="text-blue-300 text-sm italic">No moods selected yet</div>';
+                }
+            }
+
+            updateInterestCount() {
+                const countElement = document.getElementById('interestCount');
+                countElement.textContent = this.selectedInterests.length;
+            }
+
+            updateThemePreview() {
+                const preview = document.getElementById('moodThemePreview');
+                const [color1, color2, color3] = this.moodTheme.colors;
+                
+                // Update CSS variables
+                preview.style.setProperty('--color-1', color1);
+                preview.style.setProperty('--color-2', color2);
+                preview.style.setProperty('--color-3', color3);
+                
+                // Update background gradient
+                preview.style.background = `linear-gradient(${this.moodTheme.direction}, ${color1}, ${color2}, ${color3})`;
+            }
+
+            async saveMoodsToFirebase() {
+                if (!this.currentUser) return;
+                
+                try {
+                    await db.collection('users').doc(this.currentUser.uid).set({
+                        moods: {
+                            selectedMoods: this.selectedMoods,
+                            selectedInterests: this.selectedInterests,
+                            theme: this.moodTheme,
+                            privacy: this.moodPrivacy,
+                            updatedAt: new Date()
+                        }
+                    }, { merge: true });
+                    
+                    console.log("✅ Moods saved to Firebase");
+                } catch (error) {
+                    console.error('❌ Error saving moods:', error);
+                }
+            }
+
+            async saveMoodThemeToFirebase() {
+                if (!this.currentUser) return;
+                
+                try {
+                    await db.collection('users').doc(this.currentUser.uid).set({
+                        moods: {
+                            theme: this.moodTheme,
+                            updatedAt: new Date()
+                        }
+                    }, { merge: true });
+                    
+                    console.log("✅ Mood theme saved to Firebase");
+                } catch (error) {
+                    console.error('❌ Error saving mood theme:', error);
+                }
+            }
+
             async createUserDocument() {
                 try {
                     const defaultSettings = {
@@ -695,13 +1471,22 @@
                         pushNotifications: true,
                         emailNotifications: false,
                         messageNotifications: true,
-                        friendRequestNotifications: true
+                        friendRequestNotifications: true,
+                        moodChangeNotifications: true,
+                        interestMatchNotifications: true
                     };
 
                     await db.collection('users').doc(this.currentUser.uid).set({
                         profile: {
                             displayName: 'User_' + this.currentUser.uid.slice(-6),
                             email: this.currentUser.email,
+                            createdAt: new Date()
+                        },
+                        moods: {
+                            selectedMoods: [],
+                            selectedInterests: [],
+                            theme: this.moodTheme,
+                            privacy: 'public',
                             createdAt: new Date()
                         },
                         settings: defaultSettings,
@@ -730,7 +1515,9 @@
                     pushNotifications: true,
                     emailNotifications: false,
                     messageNotifications: true,
-                    friendRequestNotifications: true
+                    friendRequestNotifications: true,
+                    moodChangeNotifications: true,
+                    interestMatchNotifications: true
                 };
 
                 this.userSettings = defaultSettings;
@@ -756,7 +1543,9 @@
                     'pushNotificationsToggle': 'pushNotifications',
                     'emailNotificationsToggle': 'emailNotifications',
                     'messageNotificationsToggle': 'messageNotifications',
-                    'friendRequestNotificationsToggle': 'friendRequestNotifications'
+                    'friendRequestNotificationsToggle': 'friendRequestNotifications',
+                    'moodChangeNotificationsToggle': 'moodChangeNotifications',
+                    'interestMatchNotificationsToggle': 'interestMatchNotifications'
                 };
 
                 Object.entries(toggleMappings).forEach(([elementId, settingKey]) => {
@@ -999,7 +1788,9 @@
                     'pushNotificationsToggle': 'pushNotifications',
                     'emailNotificationsToggle': 'emailNotifications',
                     'messageNotificationsToggle': 'messageNotifications',
-                    'friendRequestNotificationsToggle': 'friendRequestNotifications'
+                    'friendRequestNotificationsToggle': 'friendRequestNotifications',
+                    'moodChangeNotificationsToggle': 'moodChangeNotifications',
+                    'interestMatchNotificationsToggle': 'interestMatchNotifications'
                 };
 
                 Object.entries(toggleMappings).forEach(([elementId, settingKey]) => {
@@ -1188,6 +1979,15 @@
                 if (savedSettings) {
                     this.userSettings = { ...this.userSettings, ...JSON.parse(savedSettings) };
                     this.applySettingsToUI();
+                }
+                
+                // Load moods from localStorage as fallback
+                const savedMoods = localStorage.getItem('uniconnectMoods');
+                if (savedMoods) {
+                    const moodData = JSON.parse(savedMoods);
+                    this.selectedMoods = moodData.selectedMoods || [];
+                    this.selectedInterests = moodData.selectedInterests || [];
+                    this.updateMoodUI();
                 }
             }
         }

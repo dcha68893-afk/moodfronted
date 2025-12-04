@@ -131,6 +131,242 @@
         padding: 0 4px;
     }
     
+    /* ========== MOOD & INTEREST SYSTEM - DESKTOP VERSION ========== */
+    .mood-badge {
+        display: inline-flex;
+        align-items: center;
+        padding: 6px 16px;
+        border-radius: 20px;
+        font-size: 12px;
+        font-weight: 600;
+        margin: 4px;
+        border: none;
+        cursor: default;
+        transition: all 0.3s ease;
+        white-space: nowrap;
+    }
+    
+    .mood-calm { 
+        background: linear-gradient(135deg, #3B82F6, #8B5CF6); 
+        color: white; 
+        box-shadow: 0 2px 8px rgba(59, 130, 246, 0.3);
+    }
+    
+    .mood-energetic { 
+        background: linear-gradient(135deg, #DC2626, #EA580C); 
+        color: white; 
+        box-shadow: 0 2px 8px rgba(220, 38, 38, 0.3);
+    }
+    
+    .mood-focus { 
+        background: linear-gradient(135deg, #059669, #10B981); 
+        color: white; 
+        box-shadow: 0 2px 8px rgba(5, 150, 105, 0.3);
+    }
+    
+    .mood-creative { 
+        background: linear-gradient(135deg, #7C3AED, #A78BFA); 
+        color: white; 
+        box-shadow: 0 2px 8px rgba(124, 58, 237, 0.3);
+    }
+    
+    .mood-relaxed { 
+        background: linear-gradient(135deg, #0891B2, #06B6D4); 
+        color: white; 
+        box-shadow: 0 2px 8px rgba(8, 145, 178, 0.3);
+    }
+    
+    .mood-social { 
+        background: linear-gradient(135deg, #DB2777, #EC4899); 
+        color: white; 
+        box-shadow: 0 2px 8px rgba(219, 39, 119, 0.3);
+    }
+    
+    .mood-learning { 
+        background: linear-gradient(135deg, #9333EA, #A855F7); 
+        color: white; 
+        box-shadow: 0 2px 8px rgba(147, 51, 234, 0.3);
+    }
+    
+    .mood-work { 
+        background: linear-gradient(135deg, #1E40AF, #3B82F6); 
+        color: white; 
+        box-shadow: 0 2px 8px rgba(30, 64, 175, 0.3);
+    }
+    
+    .mood-play { 
+        background: linear-gradient(135deg, #F59E0B, #FBBF24); 
+        color: white; 
+        box-shadow: 0 2px 8px rgba(245, 158, 11, 0.3);
+    }
+    
+    .mood-chill { 
+        background: linear-gradient(135deg, #0F766E, #14B8A6); 
+        color: white; 
+        box-shadow: 0 2px 8px rgba(15, 118, 110, 0.3);
+    }
+    
+    .interest-chip {
+        display: inline-flex;
+        align-items: center;
+        padding: 5px 12px;
+        border-radius: 16px;
+        font-size: 11px;
+        background: rgba(59, 130, 246, 0.1);
+        border: 1px solid rgba(59, 130, 246, 0.3);
+        color: #3B82F6;
+        margin: 3px;
+        transition: all 0.2s ease;
+        cursor: pointer;
+        font-weight: 500;
+    }
+    
+    .interest-chip:hover {
+        background: rgba(59, 130, 246, 0.2);
+        border-color: rgba(59, 130, 246, 0.5);
+        transform: translateY(-1px);
+    }
+    
+    .interest-chip.selected {
+        background: linear-gradient(135deg, #3B82F6, #8B5CF6);
+        color: white;
+        border-color: transparent;
+        box-shadow: 0 2px 8px rgba(59, 130, 246, 0.3);
+    }
+    
+    .mood-filter-dropdown {
+        position: relative;
+        display: inline-block;
+    }
+    
+    .mood-filter-button {
+        display: flex;
+        align-items: center;
+        padding: 8px 16px;
+        background: var(--kynecta-light);
+        border: 1px solid var(--kynecta-border);
+        border-radius: 20px;
+        font-size: 13px;
+        color: var(--kynecta-dark);
+        cursor: pointer;
+        transition: all 0.3s ease;
+    }
+    
+    .mood-filter-button:hover {
+        border-color: var(--kynecta-primary);
+        background: rgba(124, 58, 237, 0.05);
+    }
+    
+    .mood-filter-dropdown-content {
+        display: none;
+        position: absolute;
+        top: 100%;
+        left: 0;
+        min-width: 250px;
+        background: white;
+        border: 1px solid var(--kynecta-border);
+        border-radius: 12px;
+        box-shadow: 0 10px 25px rgba(0, 0, 0, 0.1);
+        z-index: 1000;
+        margin-top: 8px;
+        padding: 12px;
+    }
+    
+    .mood-filter-dropdown.active .mood-filter-dropdown-content {
+        display: block;
+    }
+    
+    .mood-filter-grid {
+        display: grid;
+        grid-template-columns: repeat(2, 1fr);
+        gap: 8px;
+    }
+    
+    .content-matched {
+        border-left: 3px solid #10B981;
+        background: rgba(16, 185, 129, 0.05);
+        padding-left: 12px;
+    }
+    
+    /* User mood status in chat list */
+    .user-mood-status {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        margin-top: 4px;
+    }
+    
+    .mood-indicator {
+        width: 8px;
+        height: 8px;
+        border-radius: 50%;
+        display: inline-block;
+    }
+    
+    .mood-text {
+        font-size: 11px;
+        color: #6B7280;
+        font-weight: 500;
+    }
+    
+    /* Mood selector in profile */
+    .mood-selector {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 8px;
+        margin: 12px 0;
+    }
+    
+    .mood-option {
+        padding: 8px 16px;
+        border-radius: 20px;
+        border: 2px solid transparent;
+        background: var(--kynecta-light);
+        cursor: pointer;
+        transition: all 0.3s ease;
+        font-size: 12px;
+        font-weight: 500;
+    }
+    
+    .mood-option:hover {
+        transform: translateY(-2px);
+        box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
+    }
+    
+    .mood-option.selected {
+        border-color: currentColor;
+        box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+    }
+    
+    /* Interest selector */
+    .interest-selector {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 8px;
+        margin: 12px 0;
+    }
+    
+    /* Mood in message bubbles */
+    .message-mood {
+        display: inline-flex;
+        align-items: center;
+        margin-top: 8px;
+        padding: 4px 10px;
+        border-radius: 16px;
+        font-size: 11px;
+        font-weight: 500;
+    }
+    
+    .message-sent .message-mood {
+        background: rgba(255, 255, 255, 0.2);
+        color: rgba(255, 255, 255, 0.9);
+    }
+    
+    .message-received .message-mood {
+        background: rgba(124, 58, 237, 0.1);
+        color: var(--kynecta-primary);
+    }
+    
     /* ========== TAB CONTENT PANELS ========== */
     .tab-content {
         flex: 1;
@@ -1304,6 +1540,27 @@
         height: 56px;
         font-size: 1.75rem;
     }
+    
+    /* Larger mood/interest elements for large desktop */
+    .mood-badge {
+        padding: 8px 18px;
+        font-size: 13px;
+        margin: 5px;
+    }
+    
+    .interest-chip {
+        padding: 6px 14px;
+        font-size: 12px;
+        margin: 4px;
+    }
+    
+    .mood-filter-dropdown-content {
+        min-width: 300px;
+    }
+    
+    .mood-filter-grid {
+        grid-template-columns: repeat(3, 1fr);
+    }
 }
 
 /* ========== DARK MODE ========== */
@@ -1357,4 +1614,38 @@
 
 [data-theme="dark"] .my-status {
     background: rgba(124, 58, 237, 0.15);
+}
+
+/* Dark mode mood styles */
+[data-theme="dark"] .mood-filter-button {
+    background: #374151;
+    border-color: #4B5563;
+    color: #D1D5DB;
+}
+
+[data-theme="dark"] .mood-filter-button:hover {
+    background: #4B5563;
+    border-color: #6B7280;
+}
+
+[data-theme="dark"] .mood-filter-dropdown-content {
+    background: #1F2937;
+    border-color: #374151;
+    box-shadow: 0 10px 25px rgba(0, 0, 0, 0.3);
+}
+
+[data-theme="dark"] .interest-chip {
+    background: rgba(59, 130, 246, 0.15);
+    border-color: rgba(59, 130, 246, 0.3);
+    color: #93c5fd;
+}
+
+[data-theme="dark"] .interest-chip:hover {
+    background: rgba(59, 130, 246, 0.25);
+    border-color: rgba(59, 130, 246, 0.5);
+}
+
+[data-theme="dark"] .content-matched {
+    border-left-color: #10B981;
+    background: rgba(16, 185, 129, 0.1);
 }

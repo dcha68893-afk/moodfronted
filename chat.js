@@ -1,4 +1,3 @@
-
 // ==================== GLOBAL ERROR HANDLING ====================
 
 function setupGlobalErrorHandling() {
@@ -194,6 +193,24 @@ let currentEditingFriendId = null;
 let typingTimeout = null;
 let typingListener = null;
 
+// MOOD SYSTEM VARIABLES
+let userMood = null;
+let friendMoods = {};
+let moodThemes = {
+    'happy': { color: '#FBBF24', bg: '#FEF3C7', icon: '😊' },
+    'excited': { color: '#F59E0B', bg: '#FEF3C7', icon: '🎉' },
+    'calm': { color: '#10B981', bg: '#D1FAE5', icon: '🧘' },
+    'sad': { color: '#6B7280', bg: '#F3F4F6', icon: '😔' },
+    'angry': { color: '#EF4444', bg: '#FEE2E2', icon: '😠' },
+    'love': { color: '#EC4899', bg: '#FCE7F3', icon: '❤️' },
+    'playful': { color: '#8B5CF6', bg: '#EDE9FE', icon: '😜' },
+    'focused': { color: '#3B82F6', bg: '#DBEAFE', icon: '🎯' },
+    'tired': { color: '#6366F1', bg: '#E0E7FF', icon: '😴' },
+    'creative': { color: '#8B5CF6', bg: '#EDE9FE', icon: '🎨' },
+    'chill': { color: '#10B981', bg: '#D1FAE5', icon: '😌' },
+    'adventurous': { color: '#F59E0B', bg: '#FEF3C7', icon: '🗺️' }
+};
+
 
 // DOM Elements
 const loadingScreen = document.getElementById('loadingScreen');
@@ -306,6 +323,7 @@ function initApp() {
         }
     });
 }
+
 function getDefaultAvatar(name = 'User') {
     return `https://ui-avatars.com/api/?name=${encodeURIComponent(name)}&background=7C3AED&color=fff`;
 }
@@ -497,9 +515,6 @@ async function loadUserData() {
 
         console.log('Performing comprehensive cleanup...');
 
-       
-        
-
         // 6. Unsubscribe from listeners
         if (unsubscribeMessages) { unsubscribeMessages(); unsubscribeMessages = null; }
         if (unsubscribeChats) { unsubscribeChats(); unsubscribeChats = null; }
@@ -528,6 +543,10 @@ async function loadUserData() {
                 email: currentUserData.email,
                 status: currentUserData.status
             });
+
+            // Load user mood
+            userMood = currentUserData.mood || 'happy';
+            updateMoodUI(userMood);
 
             initializeUserData();
 
@@ -577,7 +596,6 @@ async function loadUserData() {
         
         // ==================== STALE CALL CLEANUP ON STARTUP ====================
 
-       
         // Initialize business fields
         initializeBusinessDocument(currentUser.uid);
 
@@ -670,6 +688,7 @@ function showToast(message, type = 'info') {
         }, 300);
     }, 3000);
 }
+
 function loadUserSettings() {
     try {
         // Try to load from localStorage first
@@ -895,6 +914,7 @@ function saveSettings() {
         return false;
     }
 }
+
 function saveUserSettings() {
     localStorage.setItem('kynecta-settings', JSON.stringify(userSettings));
 }
@@ -966,10 +986,6 @@ function applyChatSettings() {
     }
 }
 
-
-
-
-
 // FIXED: Real-time friend loading with proper listeners
 function loadFriends() {
     console.log('Loading friends for user:', currentUser.uid);
@@ -999,6 +1015,11 @@ function loadFriends() {
                             friendshipId: doc.id,
                             ...friendData
                         });
+                        
+                        // Store friend's mood
+                        if (friendData.mood) {
+                            friendMoods[friendId] = friendData.mood;
+                        }
                     }
                 });
                 
@@ -1106,6 +1127,7 @@ function createNotificationsContainer() {
     document.body.appendChild(container);
     return container;
 }
+
 // Audio Recording Implementation
 let mediaRecorder;
 let audioChunks = [];
@@ -1376,6 +1398,7 @@ document.addEventListener('DOMContentLoaded', function() {
     // Set initial tab
     switchTab('chat');
 });
+
 // ADD THIS near top of file after variable declarations
 function formatTimeAgo(timestamp) {
     if (!timestamp) return 'Just now';
@@ -1393,6 +1416,7 @@ function formatTimeAgo(timestamp) {
     if (diffDays < 7) return `${diffDays}d ago`;
     return time.toLocaleDateString();
 }
+
 // NEW: Accept friend request
 async function acceptFriendRequest(friendshipId) {
     try {
@@ -1556,6 +1580,9 @@ function renderFriends(friendsToRender) {
     }
     
     friendsToRender.forEach(friend => {
+        const friendMood = friend.mood || 'happy';
+        const moodTheme = moodThemes[friendMood] || moodThemes.happy;
+        
         const friendItem = document.createElement('div');
         friendItem.className = 'friend-item bg-white rounded-lg p-4 mb-3 shadow-sm border border-gray-200 hover:shadow-md transition-shadow';
         friendItem.dataset.friendId = friend.id;
@@ -1572,6 +1599,9 @@ function renderFriends(friendsToRender) {
                         <div class="flex items-center space-x-2">
                             <h3 class="font-semibold text-gray-800">${friend.displayName}</h3>
                             ${friend.status === 'online' ? '<span class="px-2 py-1 bg-green-100 text-green-800 text-xs rounded-full">Online</span>' : ''}
+                            <span class="px-2 py-1 text-xs rounded-full" style="background-color: ${moodTheme.bg}; color: ${moodTheme.color}; border: 1px solid ${moodTheme.color}">
+                                ${moodTheme.icon} ${friendMood}
+                            </span>
                         </div>
                         <p class="text-sm text-gray-500 mt-1">${friend.about || 'Hey there! I am using Kynecta'}</p>
                         <div class="flex items-center space-x-3 mt-2 text-xs text-gray-400">
@@ -1708,6 +1738,7 @@ function renderFriends(friendsToRender) {
     
     console.log('✅ Friends rendered with new icon buttons');
 }
+
 // In chat.js, after friends are rendered, add:
 window.dispatchEvent(new CustomEvent('friendsRendered'));
 
@@ -1719,7 +1750,6 @@ window.addEventListener('friendsRendered', () => {
         window.addCallButtonsToChat();
     }, 100);
 });
-
 
 // Add this to your setupEventListeners function or initApp
 function fixChatInputSize() {
@@ -1743,15 +1773,14 @@ document.addEventListener('DOMContentLoaded', function() {
     fixChatInputSize();
 });
 
-
 function viewFriendProfile(friendId) {
     console.log('Viewing friend profile:', friendId);
-   if (friend.features && Object.keys(friend.features).length > 0) {
-    renderFeatures(friend.features); // existing function to show actual features
-} else {
-    // Only show "coming soon" if truly empty
-    document.getElementById('friendFeaturesContainer').innerHTML = '<p>Features coming soon</p>';
-}
+    if (friend.features && Object.keys(friend.features).length > 0) {
+        renderFeatures(friend.features); // existing function to show actual features
+    } else {
+        // Only show "coming soon" if truly empty
+        document.getElementById('friendFeaturesContainer').innerHTML = '<p>Features coming soon</p>';
+    }
 }
 
 function confirmRemoveFriend(friendId, friendName) {
@@ -1868,13 +1897,17 @@ async function startChat(friendId, friendName) {
             const chatListContainer = document.getElementById('chatListContainer');
             if (chatListContainer) chatListContainer.classList.add('hidden');
         }
+        
+        // Apply mood theme to chat interface
+        applyMoodThemeToChat();
+        
     } catch (error) {
         console.error('Error starting chat:', error);
         showToast('Error starting chat', 'error');
     }
 }
-// FIXED: Real-Time Message Loading with proper error handling
 
+// FIXED: Real-Time Message Loading with proper error handling
 // FIXED: Real-Time Message Loading with duplicate prevention
 function loadMessages(chatId) {
     console.log('Loading messages for chat:', chatId);
@@ -2051,6 +2084,7 @@ function addDateSeparator(dateString) {
     dateElement.innerHTML = `<span>${displayDate}</span>`;
     messagesContainer.appendChild(dateElement);
 }
+
 function addMessageToUI(message, messageId) {
     const messagesContainer = document.getElementById('messagesContainer');
     if (!messagesContainer) return;
@@ -2065,6 +2099,13 @@ function addMessageToUI(message, messageId) {
     if (message.status === 'read') statusIcon = '✓✓👁️';
     
     messageElement.className = `message-container ${isSent ? 'sent' : 'received'}`;
+    
+    // Apply mood styling if message has mood
+    if (message.mood) {
+        const moodTheme = moodThemes[message.mood] || moodThemes.happy;
+        messageElement.style.borderLeft = `3px solid ${moodTheme.color}`;
+        messageElement.style.backgroundColor = `${moodTheme.bg}20`; // 20 = 12.5% opacity
+    }
     
     // Check if message has file attachment
     if (message.file) {
@@ -2115,7 +2156,6 @@ function escapeHtml(text) {
 }
 
 // FIXED: Send Message with proper real-time updates
-// FIXED: Send Message with proper real-time updates
 async function sendMessage() {
     const messageInput = document.getElementById('messageInput');
     if (!messageInput) return;
@@ -2141,6 +2181,11 @@ async function sendMessage() {
             timestamp: firebase.firestore.FieldValue.serverTimestamp(),
             status: 'sent'
         };
+        
+        // Add current mood to message if available
+        if (userMood) {
+            message.mood = userMood;
+        }
         
         // Add message to Firebase
         const docRef = await db.collection('messages').add(message);
@@ -2177,6 +2222,7 @@ async function sendMessage() {
         showToast('Error sending message', 'error');
     }
 }
+
 function updateMessageStatus(chatId, status) {
     console.log('Updating message status to:', status, 'for chat:', chatId);
     
@@ -2297,6 +2343,11 @@ async function uploadFile(file) {
                     }
                 };
                 
+                // Add mood to file message if available
+                if (userMood) {
+                    message.mood = userMood;
+                }
+                
                 // Add message to Firebase
                 await db.collection('messages').add(message);
                 
@@ -2317,14 +2368,6 @@ async function uploadFile(file) {
         console.error('Error uploading file:', error);
         showToast('Error uploading file', 'error');
     }
-}
-
-function formatFileSize(bytes) {
-    if (bytes === 0) return '0 Bytes';
-    const k = 1024;
-    const sizes = ['Bytes', 'KB', 'MB', 'GB'];
-    const i = Math.floor(Math.log(bytes) / Math.log(k));
-    return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i];
 }
 
 // FIXED: Load chats with proper real-time updates
@@ -2386,6 +2429,10 @@ function loadChatsTemporary() {
                     chatItem.dataset.chatId = chat.id;
                     chatItem.dataset.otherUserId = otherParticipantId;
                     
+                    // Check if friend has mood
+                    const friendMood = friendMoods[otherParticipantId] || 'happy';
+                    const moodTheme = moodThemes[friendMood] || moodThemes.happy;
+                    
                     chatItem.innerHTML = `
                         <div class="contact-avatar">
                             <img class="w-12 h-12 rounded-full object-cover" src="https://ui-avatars.com/api/?name=${encodeURIComponent(otherParticipantName)}&background=7C3AED&color=fff" alt="${otherParticipantName}">
@@ -2416,7 +2463,6 @@ function loadChatsTemporary() {
             }
         });
 }
-
 
 // FIXED: Update Profile with proper error handling
 async function updateProfile() {
@@ -2489,61 +2535,6 @@ async function uploadToCloudinary(file, resourceType = 'image') {
     });
 }
 
-// REPLACE THIS:
-async function uploadProfilePicture(file) {
-    showToast("🔄 Uploading profile picture...", "info");
-
-    try {
-        // STEP 1: Upload to Cloudinary using the new function
-        const downloadURL = await uploadToCloudinary(file);
-        
-        console.log('✅ Cloudinary URL:', downloadURL);
-
-        // STEP 2: UPDATE FIREBASE FIRESTORE 
-        // This is how other users (who read your user data) will see the new picture.
-        await db.collection('users').doc(currentUser.uid).update({
-            photoURL: downloadURL
-        });
-        
-        // STEP 3: UPDATE LOCAL UI 
-        // This is how you see the picture change instantly.
-        currentUserData.photoURL = downloadURL; // Update local data
-        
-        // Find all elements that display the user's profile picture and update their source
-        const profilePics = document.querySelectorAll('.user-profile-pic');
-        profilePics.forEach(img => {
-            img.src = downloadURL;
-        });
-        
-        showToast("✅ Profile picture saved successfully!", "success");
-        
-        // Hide the modal/settings screen
-        document.getElementById('settingsModal').classList.add('hidden');
-
-    } catch (error) {
-        console.error("Profile picture upload failed:", error);
-        // Show the user-friendly error message from the catch block
-        showToast(`❌ Upload failed: ${error.message}`, "error");
-    }
-}
-function safeImageLoad(imgElement, src, fallbackText = '') {
-    if (!imgElement) return;
-    
-    imgElement.onerror = function() {
-        console.log('Image failed to load:', src);
-        // Use fallback avatar
-        if (fallbackText) {
-            const initial = fallbackText.charAt(0).toUpperCase();
-            imgElement.src = `https://ui-avatars.com/api/?name=${encodeURIComponent(fallbackText)}&background=7C3AED&color=fff`;
-        } else {
-            imgElement.src = 'https://ui-avatars.com/api/?name=User&background=7C3AED&color=fff';
-        }
-        imgElement.onerror = null; // Prevent infinite loop
-    };
-    
-    imgElement.src = src;
-}
-// WITH THIS:
 async function uploadProfilePicture(file) {
     try {
         showToast("🔄 Uploading profile picture...", "info");
@@ -2593,7 +2584,7 @@ async function uploadProfilePicture(file) {
         showToast(`❌ Upload failed: ${error.message}`, "error");
     }
 }
-// REPLACE THE uploadCoverPicture FUNCTION (around line 1250):
+
 async function uploadCoverPicture(file) {
     try {
         showToast("🔄 Uploading cover picture...", "info");
@@ -2679,6 +2670,7 @@ function handleTypingIndicator() {
         }, 1000);
     }
 }
+
 // Initialize business document for new users - UPDATED
 function initializeBusinessDocument(userId) {
     const businessDocRef = firebase.firestore().collection('business').doc(userId);
@@ -2710,7 +2702,6 @@ function initializeBusinessDocument(userId) {
         console.error('Error initializing business document:', error);
     });
 }
-
 
 // Call this in your initApp function
 // Function to send automatic greeting message
@@ -2757,6 +2748,7 @@ function createNewChat(otherUserId, otherUserName) {
         sendGreetingMessage(newChatId, otherUserId);
     }, 1000);
 }
+
 // Show away message in chat
 function showAwayMessageInChat(awayMessage) {
     // Remove existing away message if any
@@ -2864,6 +2856,7 @@ document.getElementById('awayBtn')?.addEventListener('click', () => {
     document.getElementById('awayModal').classList.remove('hidden');
     loadBusinessData();
 });
+
 // Integration with OpenAI API (example)
 async function generateAISummaryWithAPI(messages) {
     try {
@@ -2933,7 +2926,6 @@ async function generateSmartRepliesWithAPI(messages) {
     }
 }
 
-
 // FIXED: Push Notifications with proper permission handling
 async function requestNotificationPermission() {
     try {
@@ -2981,8 +2973,8 @@ async function sendPushNotification(userId, senderName, message) {
         console.error('Error sending push notification:', error);
     }
 }
-function setupToolsListeners() {
 
+function setupToolsListeners() {
     // FEATURES
     document.getElementById("featuresBtn")?.addEventListener("click", () => {
         document.getElementById("featuresModal").classList.remove("hidden", "opacity-0");
@@ -2998,9 +2990,9 @@ function setupToolsListeners() {
     document.getElementById("closeMood")?.addEventListener("click", () => {
         document.getElementById("moodModal").classList.add("hidden");
     });
-    // QUICK ACTIONS / SETTINGS - missing listeners (add these inside setupToolsListeners)
+    
+    // QUICK ACTIONS / SETTINGS
     document.getElementById('settingsSettingsBtn')?.addEventListener('click', () => {
-        // open the settings modal (your HTML contains a settings modal). If you used id 'settingsModal' adjust accordingly.
         const modal = document.getElementById('settingsModal');
         if (modal) modal.classList.remove('hidden');
     });
@@ -3016,174 +3008,175 @@ function setupToolsListeners() {
     });
 
     // Business tools
-    // Business tools - UPDATED WITH ACTUAL MODALS
-document.getElementById('catalogueBtn')?.addEventListener('click', () => {
-    document.getElementById('catalogueModal')?.classList.remove('hidden');
-});
+    document.getElementById('catalogueBtn')?.addEventListener('click', () => {
+        document.getElementById('catalogueModal')?.classList.remove('hidden');
+    });
 
-document.getElementById('advertiseBtn')?.addEventListener('click', () => {
-    document.getElementById('advertiseModal')?.classList.remove('hidden');
-});
+    document.getElementById('advertiseBtn')?.addEventListener('click', () => {
+        document.getElementById('advertiseModal')?.classList.remove('hidden');
+    });
 
-document.getElementById('labelsBtn')?.addEventListener('click', () => {
-    document.getElementById('labelsModal')?.classList.remove('hidden');
-});
+    document.getElementById('labelsBtn')?.addEventListener('click', () => {
+        document.getElementById('labelsModal')?.classList.remove('hidden');
+    });
 
-document.getElementById('greetingBtn')?.addEventListener('click', () => {
-    document.getElementById('greetingModal')?.classList.remove('hidden');
-});
+    document.getElementById('greetingBtn')?.addEventListener('click', () => {
+        document.getElementById('greetingModal')?.classList.remove('hidden');
+    });
 
-document.getElementById('awayBtn')?.addEventListener('click', () => {
-    document.getElementById('awayModal')?.classList.remove('hidden');
-});
-// Close listeners for business modals
-document.getElementById('closeCatalogue')?.addEventListener('click', () => {
-    document.getElementById('catalogueModal').classList.add('hidden');
-});
-
-document.getElementById('closeAdvertise')?.addEventListener('click', () => {
-    document.getElementById('advertiseModal').classList.add('hidden');
-});
-
-document.getElementById('closeLabels')?.addEventListener('click', () => {
-    document.getElementById('labelsModal').classList.add('hidden');
-});
-
-document.getElementById('closeGreeting')?.addEventListener('click', () => {
-    document.getElementById('greetingModal').classList.add('hidden');
-});
-
-document.getElementById('closeAway')?.addEventListener('click', () => {
-    document.getElementById('awayModal').classList.add('hidden');
-});
-// BUSINESS TOOLS SAVE/CREATE BUTTONS - FIXED VERSION
-document.getElementById('saveCatalogue')?.addEventListener('click', () => {
-    const productName = document.getElementById('productName')?.value;
-    const productPrice = document.getElementById('productPrice')?.value;
+    document.getElementById('awayBtn')?.addEventListener('click', () => {
+        document.getElementById('awayModal')?.classList.remove('hidden');
+    });
     
-    if (!productName) {
-        showToast('Please enter a product name', 'warning');
-        return;
-    }
-    
-    if (currentUser) {
-        firebase.firestore().collection('business').doc(currentUser.uid).collection('products').add({
-            name: productName,
-            price: parseFloat(productPrice) || 0,
-            description: document.getElementById('productDescription')?.value || '',
-            createdAt: firebase.firestore.FieldValue.serverTimestamp()
-        }).then(() => {
-            showToast('Product added to catalogue!', 'success');
-            document.getElementById('catalogueModal').classList.add('hidden');
-            // Clear form
-            document.getElementById('productName').value = '';
-            document.getElementById('productPrice').value = '';
-            document.getElementById('productDescription').value = '';
-        }).catch(error => {
-            showToast('Error adding product: ' + error.message, 'error');
-        });
-    }
-});
+    // Close listeners for business modals
+    document.getElementById('closeCatalogue')?.addEventListener('click', () => {
+        document.getElementById('catalogueModal').classList.add('hidden');
+    });
 
-document.getElementById('launchCampaign')?.addEventListener('click', () => {
-    const adTitle = document.getElementById('adTitle')?.value;
-    const targetAudience = document.getElementById('targetAudience')?.value;
-    const budget = document.getElementById('adBudget')?.value;
-    
-    if (!adTitle) {
-        showToast('Please enter an ad title', 'warning');
-        return;
-    }
-    
-    if (currentUser) {
-        firebase.firestore().collection('business').doc(currentUser.uid).collection('campaigns').add({
-            title: adTitle,
-            audience: targetAudience,
-            budget: parseFloat(budget) || 0,
-            status: 'active',
-            createdAt: firebase.firestore.FieldValue.serverTimestamp()
-        }).then(() => {
-            showToast('Advertising campaign launched!', 'success');
-            document.getElementById('advertiseModal').classList.add('hidden');
-            // Clear form
-            document.getElementById('adTitle').value = '';
-            document.getElementById('adBudget').value = '';
-        }).catch(error => {
-            showToast('Error launching campaign: ' + error.message, 'error');
-        });
-    }
-});
+    document.getElementById('closeAdvertise')?.addEventListener('click', () => {
+        document.getElementById('advertiseModal').classList.add('hidden');
+    });
 
-document.getElementById('createLabel')?.addEventListener('click', () => {
-    const labelName = document.getElementById('newLabelName')?.value;
-    const labelColor = document.getElementById('labelColor')?.value;
-    
-    if (!labelName) {
-        showToast('Please enter a label name', 'warning');
-        return;
-    }
-    
-    if (currentUser) {
-        firebase.firestore().collection('business').doc(currentUser.uid).collection('labels').add({
-            name: labelName,
-            color: labelColor,
-            createdAt: firebase.firestore.FieldValue.serverTimestamp()
-        }).then(() => {
-            showToast('Label created successfully!', 'success');
-            document.getElementById('labelsModal').classList.add('hidden');
-            // Clear form
-            document.getElementById('newLabelName').value = '';
-        }).catch(error => {
-            showToast('Error creating label: ' + error.message, 'error');
-        });
-    }
-});
+    document.getElementById('closeLabels')?.addEventListener('click', () => {
+        document.getElementById('labelsModal').classList.add('hidden');
+    });
 
-document.getElementById('saveGreeting')?.addEventListener('click', () => {
-    const greetingMessage = document.getElementById('greetingMessage')?.value;
-    
-    if (!greetingMessage) {
-        showToast('Please enter a greeting message', 'warning');
-        return;
-    }
-    
-    if (currentUser) {
-        // Use set with merge: true to create or update the document
-        firebase.firestore().collection('business').doc(currentUser.uid).set({
-            greetingMessage: greetingMessage,
-            updatedAt: firebase.firestore.FieldValue.serverTimestamp()
-        }, { merge: true }).then(() => {
-            showToast('Greeting message saved!', 'success');
-            document.getElementById('greetingModal').classList.add('hidden');
-        }).catch(error => {
-            showToast('Error saving greeting: ' + error.message, 'error');
-        });
-    }
-});
+    document.getElementById('closeGreeting')?.addEventListener('click', () => {
+        document.getElementById('greetingModal').classList.add('hidden');
+    });
 
-document.getElementById('saveAway')?.addEventListener('click', () => {
-    const awayMessage = document.getElementById('awayMessage')?.value;
-    const awayEnabled = document.getElementById('awayEnabled')?.checked;
+    document.getElementById('closeAway')?.addEventListener('click', () => {
+        document.getElementById('awayModal').classList.add('hidden');
+    });
     
-    if (!awayMessage) {
-        showToast('Please enter an away message', 'warning');
-        return;
-    }
-    
-    if (currentUser) {
-        // Use set with merge: true to create or update the document
-        firebase.firestore().collection('business').doc(currentUser.uid).set({
-            awayMessage: awayMessage,
-            awayEnabled: awayEnabled,
-            updatedAt: firebase.firestore.FieldValue.serverTimestamp()
-        }, { merge: true }).then(() => {
-            showToast('Away message settings saved!', 'success');
-            document.getElementById('awayModal').classList.add('hidden');
-        }).catch(error => {
-            showToast('Error saving away message: ' + error.message, 'error');
-        });
-    }
-});
+    // BUSINESS TOOLS SAVE/CREATE BUTTONS - FIXED VERSION
+    document.getElementById('saveCatalogue')?.addEventListener('click', () => {
+        const productName = document.getElementById('productName')?.value;
+        const productPrice = document.getElementById('productPrice')?.value;
+        
+        if (!productName) {
+            showToast('Please enter a product name', 'warning');
+            return;
+        }
+        
+        if (currentUser) {
+            firebase.firestore().collection('business').doc(currentUser.uid).collection('products').add({
+                name: productName,
+                price: parseFloat(productPrice) || 0,
+                description: document.getElementById('productDescription')?.value || '',
+                createdAt: firebase.firestore.FieldValue.serverTimestamp()
+            }).then(() => {
+                showToast('Product added to catalogue!', 'success');
+                document.getElementById('catalogueModal').classList.add('hidden');
+                // Clear form
+                document.getElementById('productName').value = '';
+                document.getElementById('productPrice').value = '';
+                document.getElementById('productDescription').value = '';
+            }).catch(error => {
+                showToast('Error adding product: ' + error.message, 'error');
+            });
+        }
+    });
+
+    document.getElementById('launchCampaign')?.addEventListener('click', () => {
+        const adTitle = document.getElementById('adTitle')?.value;
+        const targetAudience = document.getElementById('targetAudience')?.value;
+        const budget = document.getElementById('adBudget')?.value;
+        
+        if (!adTitle) {
+            showToast('Please enter an ad title', 'warning');
+            return;
+        }
+        
+        if (currentUser) {
+            firebase.firestore().collection('business').doc(currentUser.uid).collection('campaigns').add({
+                title: adTitle,
+                audience: targetAudience,
+                budget: parseFloat(budget) || 0,
+                status: 'active',
+                createdAt: firebase.firestore.FieldValue.serverTimestamp()
+            }).then(() => {
+                showToast('Advertising campaign launched!', 'success');
+                document.getElementById('advertiseModal').classList.add('hidden');
+                // Clear form
+                document.getElementById('adTitle').value = '';
+                document.getElementById('adBudget').value = '';
+            }).catch(error => {
+                showToast('Error launching campaign: ' + error.message, 'error');
+            });
+        }
+    });
+
+    document.getElementById('createLabel')?.addEventListener('click', () => {
+        const labelName = document.getElementById('newLabelName')?.value;
+        const labelColor = document.getElementById('labelColor')?.value;
+        
+        if (!labelName) {
+            showToast('Please enter a label name', 'warning');
+            return;
+        }
+        
+        if (currentUser) {
+            firebase.firestore().collection('business').doc(currentUser.uid).collection('labels').add({
+                name: labelName,
+                color: labelColor,
+                createdAt: firebase.firestore.FieldValue.serverTimestamp()
+            }).then(() => {
+                showToast('Label created successfully!', 'success');
+                document.getElementById('labelsModal').classList.add('hidden');
+                // Clear form
+                document.getElementById('newLabelName').value = '';
+            }).catch(error => {
+                showToast('Error creating label: ' + error.message, 'error');
+            });
+        }
+    });
+
+    document.getElementById('saveGreeting')?.addEventListener('click', () => {
+        const greetingMessage = document.getElementById('greetingMessage')?.value;
+        
+        if (!greetingMessage) {
+            showToast('Please enter a greeting message', 'warning');
+            return;
+        }
+        
+        if (currentUser) {
+            // Use set with merge: true to create or update the document
+            firebase.firestore().collection('business').doc(currentUser.uid).set({
+                greetingMessage: greetingMessage,
+                updatedAt: firebase.firestore.FieldValue.serverTimestamp()
+            }, { merge: true }).then(() => {
+                showToast('Greeting message saved!', 'success');
+                document.getElementById('greetingModal').classList.add('hidden');
+            }).catch(error => {
+                showToast('Error saving greeting: ' + error.message, 'error');
+            });
+        }
+    });
+
+    document.getElementById('saveAway')?.addEventListener('click', () => {
+        const awayMessage = document.getElementById('awayMessage')?.value;
+        const awayEnabled = document.getElementById('awayEnabled')?.checked;
+        
+        if (!awayMessage) {
+            showToast('Please enter an away message', 'warning');
+            return;
+        }
+        
+        if (currentUser) {
+            // Use set with merge: true to create or update the document
+            firebase.firestore().collection('business').doc(currentUser.uid).set({
+                awayMessage: awayMessage,
+                awayEnabled: awayEnabled,
+                updatedAt: firebase.firestore.FieldValue.serverTimestamp()
+            }, { merge: true }).then(() => {
+                showToast('Away message settings saved!', 'success');
+                document.getElementById('awayModal').classList.add('hidden');
+            }).catch(error => {
+                showToast('Error saving away message: ' + error.message, 'error');
+            });
+        }
+    });
 
     // AI Features
     document.getElementById('aiSummarize')?.addEventListener('click', () => {
@@ -3198,19 +3191,11 @@ document.getElementById('saveAway')?.addEventListener('click', () => {
     document.querySelectorAll(".mood-option").forEach(option => {
         option.addEventListener("click", () => {
             let selectedMood = option.dataset.mood;
-            showToast("Mood updated: " + selectedMood, "success");
+            updateUserMood(selectedMood);
             document.getElementById("moodModal").classList.add("hidden");
-
-            // Save mood to Firestore
-            if (currentUser) {
-                firebase.firestore().collection("users").doc(currentUser.uid).update({
-                    mood: selectedMood
-                });
-            }
         });
     });
     
-
     // QUICK ACTIONS
     document.getElementById("quickActionsBtn")?.addEventListener("click", () => {
         document.getElementById("quickActionsModal").classList.remove("hidden");
@@ -3219,6 +3204,7 @@ document.getElementById('saveAway')?.addEventListener('click', () => {
         document.getElementById("quickActionsModal").classList.add("hidden");
     });
 }
+
 // CLOSE Invite Friends Modal
 document.getElementById("closeInviteFriends")?.addEventListener("click", () => {
     document.getElementById("inviteFriendsModal").classList.add("hidden");
@@ -3238,6 +3224,7 @@ document.getElementById("closeSettings")?.addEventListener("click", () => {
 document.getElementById("closeStorageSettings")?.addEventListener("click", () => {
     document.getElementById("storageSettingsModal").classList.add("hidden");
 });
+
 // INVITE FRIENDS LINKS
 // FIXED: WhatsApp Invite Function
 document.getElementById("shareWhatsapp")?.addEventListener("click", () => {
@@ -3340,6 +3327,7 @@ function useFallbackCopy(text) {
         showToast("📋 Please copy this link manually: " + text, "info");
     }
 }
+
 // FIXED: SMS Invite Function
 document.getElementById("shareSMS")?.addEventListener("click", () => {
     try {
@@ -3383,6 +3371,7 @@ document.getElementById("avatarSettingsBtn")?.addEventListener("click", () => {
     // Open profile settings modal for avatar editing
     document.getElementById("profileSettingsModal").classList.remove("hidden");
 });
+
 // ACCESSIBILITY SETTINGS
 document.getElementById("accessibilityBtn")?.addEventListener("click", () => {
     document.getElementById("accessibilitySettingsModal").classList.remove("hidden");
@@ -3412,10 +3401,12 @@ document.getElementById("favoritesSettingsBtn")?.addEventListener("click", () =>
 document.getElementById("helpCenterBtn")?.addEventListener("click", () => {
     document.getElementById("helpCenterModal").classList.remove("hidden");
 });
+
 // APP INFO SETTINGS
 document.getElementById("appInfoBtn")?.addEventListener("click", () => {
     document.getElementById("appInfoModal").classList.remove("hidden");
 });
+
 document.getElementById("closeNotifications")?.addEventListener("click", () => {
     document.getElementById("notificationsSettingsModal").classList.add("hidden");
 });
@@ -3424,6 +3415,7 @@ document.getElementById("saveNotifications")?.addEventListener("click", () => {
     // Save logic here
     document.getElementById("notificationsSettingsModal").classList.add("hidden");
 });
+
 // Add these close listeners
 document.getElementById("closeProfileSettings")?.addEventListener("click", () => {
     document.getElementById("profileSettingsModal").classList.add("hidden");
@@ -3460,6 +3452,7 @@ document.getElementById("closeHelpCenter")?.addEventListener("click", () => {
 document.getElementById("closeAppInfo")?.addEventListener("click", () => {
     document.getElementById("appInfoModal").classList.add("hidden");
 });
+
 // Quick Actions functionality
 document.querySelectorAll("#quickActionsModal button").forEach(button => {
     button.addEventListener("click", (e) => {
@@ -3468,12 +3461,14 @@ document.querySelectorAll("#quickActionsModal button").forEach(button => {
         document.getElementById("quickActionsModal").classList.add("hidden");
     });
 });
+
 document.getElementById("contactUsBtn")?.addEventListener("click", () => {
     // Open contact modal or redirect
     showToast("Opening contact form...", "info");
     // You can create a contact modal or use mailto:
     window.location.href = "mailto:support@kynecta.com?subject=Support Request";
 });
+
 // PROFILE SETTINGS SAVE
 document.getElementById("saveProfile")?.addEventListener("click", () => {
     const name = document.getElementById("profileName").value;
@@ -3582,13 +3577,12 @@ document.getElementById("saveLanguage")?.addEventListener("click", () => {
             updatedAt: firebase.firestore.FieldValue.serverTimestamp()
         }).then(() => {
             showToast("Language settings saved!", "success");
-            document.getElementById("languageSettingsModal").classList.add("hidden");
+            document.getElementById("languageSettingsModal").classList.add('hidden');
         }).catch((error) => {
             showToast("Error saving language settings: " + error.message, "error");
         });
     }
 });
-
 
 // SAFE AI SMART REPLY FUNCTION
 document.getElementById('aiReply')?.addEventListener('click', () => {
@@ -3737,8 +3731,7 @@ function setupEventListeners() {
             console.log('Edit friend clicked:', friendName, friendId);
             openEditFriendModal(friendId, friendName, friendStatus);
         }
-        
-    
+    });
     
     // Theme toggle
     const themeToggle = document.getElementById('themeToggle');
@@ -3750,27 +3743,25 @@ function setupEventListeners() {
         });
     }
 
-    
     document.querySelectorAll('.tab-btn').forEach(btn => {
-    btn.addEventListener('click', () => {
-        const tab = btn.dataset.tab;
-        console.log('Switching to tab:', tab);
-        
-        // Update active tab
-        document.querySelectorAll('.tab-btn').forEach(b => {
-            b.classList.remove('tab-active');
-            b.classList.add('text-gray-500');
+        btn.addEventListener('click', () => {
+            const tab = btn.dataset.tab;
+            console.log('Switching to tab:', tab);
+            
+            // Update active tab
+            document.querySelectorAll('.tab-btn').forEach(b => {
+                b.classList.remove('tab-active');
+                b.classList.add('text-gray-500');
+            });
+            btn.classList.add('tab-active');
+            btn.classList.remove('text-gray-500');
+            
+            // Show active tab content
+            document.querySelectorAll('.tab-panel').forEach(panel => {
+                panel.classList.add('hidden');
+            });
         });
-        btn.classList.add('tab-active');
-        btn.classList.remove('text-gray-500');
-        
-        // Show active tab content
-        document.querySelectorAll('.tab-panel').forEach(panel => {
-            panel.classList.add('hidden');
-        });
-        
     });
-});
 
     // Settings modal
     const menuBtn = document.getElementById('menuBtn');
@@ -3843,8 +3834,6 @@ function setupEventListeners() {
         });
     }
 
-
-    
     // Edit friend modal
     const cancelEditFriend = document.getElementById('cancelEditFriend');
     if (cancelEditFriend) {
@@ -3956,8 +3945,6 @@ function setupEventListeners() {
         });
     }
 
-    
-
     // Back to chats (mobile)
     const backToChats = document.getElementById('backToChats');
     if (backToChats) {
@@ -4033,8 +4020,6 @@ function setupEventListeners() {
         }
     });
 
-    
-
     // All Friends Modal
     const manageFavorites = document.getElementById('manageFavorites');
     if (manageFavorites) {
@@ -4078,7 +4063,6 @@ function setupEventListeners() {
         // Add active state for touch
         if (e.target.classList.contains('contact-item') || 
             e.target.closest('.contact-item') ||
-
             e.target.classList.contains('btn') ||
             e.target.closest('.btn')) {
             e.target.style.opacity = '0.7';
@@ -4096,11 +4080,9 @@ function setupEventListeners() {
     }, { passive: true });
 
     console.log('Event listeners setup completed');
-});
-// ADD THIS SECTION:
-    console.log('Setting up settings save button...');
     
     // Settings save button
+    console.log('Setting up settings save button...');
     const saveSettingsBtn = document.getElementById('saveSettings');
     if (saveSettingsBtn) {
         saveSettingsBtn.addEventListener('click', function() {
@@ -4112,9 +4094,7 @@ function setupEventListeners() {
     } else {
         console.warn('Save settings button not found in DOM');
     }
-
 }
-
 
 // FIXED: Comprehensive modal event listeners setup
 function setupModalEventListeners() {
@@ -4122,7 +4102,6 @@ function setupModalEventListeners() {
     
     // Close buttons for all modals
     const closeButtons = [
-        
         { id: 'closeFeatures', modal: 'featuresModal' },
         { id: 'closeMood', modal: 'moodModal' },
         { id: 'closeQuickActions', modal: 'quickActionsModal' },
@@ -4349,7 +4328,6 @@ function initEmojiPicker() {
     });
 }
 
-
 function toggleEmojiPicker() {
     const emojiPicker = document.getElementById('emojiPicker');
     if (!emojiPicker) return;
@@ -4361,7 +4339,6 @@ function toggleEmojiPicker() {
     }
 }
 
-
 // ADD PERMISSION INSTRUCTIONS FUNCTION:
 function showPermissionInstructions() {
     const instructions = `
@@ -4439,1161 +4416,6 @@ function cleanupMediaStream() {
     }
 }
 
-
-// THEN THE REST OF YOUR VIDEO CALL FUNCTIONS:
-
-// REPLACE THE startVideoCall FUNCTION (around line 3300):
-async function startVideoCall() {
-    if (!currentChat) {
-        showToast('Please select a chat first', 'error');
-        return;
-    }
-
-    try {
-        console.log('Starting video call with:', currentChat.name);
-        showToast('Starting video call...', 'info');
-        
-        // Check browser support
-        if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
-            throw new Error('Your browser does not support video calling. Please use Chrome, Firefox, or Edge.');
-        }
-
-        // First, check if we already have permissions
-        let hasVideoPermission = false;
-        let hasAudioPermission = false;
-        
-        try {
-            const devices = await navigator.mediaDevices.enumerateDevices();
-            hasVideoPermission = devices.some(device => device.kind === 'videoinput' && device.deviceId !== '');
-            hasAudioPermission = devices.some(device => device.kind === 'audioinput' && device.deviceId !== '');
-        } catch (e) {
-            console.log('Could not enumerate devices:', e);
-        }
-
-        // Request camera and microphone permissions with progressive approach
-        let constraints = {
-            video: false,
-            audio: false
-        };
-
-        // If we don't have permissions, request them step by step
-        if (!hasVideoPermission || !hasAudioPermission) {
-            console.log('Requesting permissions step by step...');
-            
-            // First request audio only (more likely to be granted)
-            try {
-                const audioStream = await navigator.mediaDevices.getUserMedia({ audio: true });
-                console.log('✅ Audio permission granted');
-                audioStream.getTracks().forEach(track => track.stop()); // Clean up
-                hasAudioPermission = true;
-                constraints.audio = true;
-            } catch (audioError) {
-                console.warn('Audio permission denied:', audioError);
-                showToast('Microphone access is required for video calls', 'error');
-            }
-
-            // Then request video
-            try {
-                const videoStream = await navigator.mediaDevices.getUserMedia({ video: true });
-                console.log('✅ Video permission granted');
-                videoStream.getTracks().forEach(track => track.stop()); // Clean up
-                hasVideoPermission = true;
-                constraints.video = {
-                    width: { ideal: 1280 },
-                    height: { ideal: 720 },
-                    frameRate: { ideal: 30 }
-                };
-            } catch (videoError) {
-                console.warn('Video permission denied:', videoError);
-                showToast('Camera access is required for video calls', 'error');
-            }
-        } else {
-            // We already have permissions, request both
-            constraints = {
-                video: {
-                    width: { ideal: 1280 },
-                    height: { ideal: 720 },
-                    frameRate: { ideal: 30 }
-                },
-                audio: {
-                    echoCancellation: true,
-                    noiseSuppression: true,
-                    autoGainControl: true
-                }
-            };
-        }
-
-        // Check if we have at least audio permission
-        if (!hasAudioPermission && !hasVideoPermission) {
-            throw new Error('Camera and microphone permissions are required for video calls');
-        }
-
-        console.log('Requesting media stream with constraints:', constraints);
-        
-        // Get the final media stream
-        localStream = await navigator.mediaDevices.getUserMedia(constraints);
-        console.log('✅ Media stream obtained successfully');
-        
-        // Display local video stream if video is available
-        const localVideo = document.getElementById('localVideo');
-        const videoCallContainer = document.getElementById('videoCallContainer');
-        
-        if (localVideo && constraints.video) {
-            localVideo.srcObject = localStream;
-            localVideo.muted = true; // Mute local video to avoid echo
-            
-            // Wait for video to load
-            localVideo.onloadedmetadata = () => {
-                localVideo.play().catch(e => {
-                    console.warn('Video play warning:', e);
-                });
-            };
-            
-            // Handle video loading errors
-            localVideo.onerror = (e) => {
-                console.error('Video loading error:', e);
-                showToast('Error loading video stream', 'error');
-            };
-        } else if (!constraints.video) {
-            // Video permission was denied, show placeholder
-            console.log('Video permission not granted, showing audio-only call');
-            showToast('Video call started (audio only)', 'info');
-        }
-        
-        // Show call container
-        if (videoCallContainer) {
-            videoCallContainer.style.display = 'block';
-            videoCallContainer.classList.remove('hidden');
-            
-            // If no video, show audio-only UI
-            if (!constraints.video) {
-                videoCallContainer.classList.add('audio-only');
-            }
-        }
-        
-        // Set call state
-        isInCall = true;
-        isMuted = false;
-        isVideoOff = !constraints.video; // Video is off if permission was denied
-        
-        // Update UI buttons
-        updateCallButtons();
-        
-        console.log('Video call started successfully');
-        showToast(`Video call started with ${currentChat.name}`, 'success');
-        
-        // Start WebRTC connection
-        if (currentChat.friendId) {
-            await startCall(currentChat.friendId, 'video', currentChat.name);
-        }
-        
-    } catch (error) {
-        console.error('Error starting video call:', error);
-        
-        // User-friendly error messages
-        let errorMessage = 'Cannot start video call. ';
-        
-        if (error.name === 'NotAllowedError') {
-            errorMessage = 'Camera/microphone permission denied. ';
-            errorMessage += 'Please allow permissions in your browser settings and try again.';
-            showPermissionInstructions();
-        } else if (error.name === 'NotFoundError') {
-            errorMessage = 'No camera or microphone found. ';
-            errorMessage += 'Please check if your devices are connected properly.';
-        } else if (error.name === 'NotReadableError') {
-            errorMessage = 'Camera/microphone is already in use by another application.';
-        } else if (error.name === 'OverconstrainedError') {
-            errorMessage = 'Cannot find camera with required specifications. ';
-            errorMessage += 'Trying with default settings...';
-            // Retry with simpler constraints
-            setTimeout(() => startVideoCallWithSimpleConstraints(), 1000);
-            return;
-        } else if (error.name === 'TypeError') {
-            errorMessage = 'Media constraints are not valid.';
-        } else {
-            errorMessage += error.message;
-        }
-        
-        showToast(errorMessage, 'error');
-        
-        // Reset call state
-        isInCall = false;
-        cleanupMediaStream();
-    }
-}
-
-// ADD THIS NEW FUNCTION FOR SIMPLER CONSTRAINTS RETRY:
-async function startVideoCallWithSimpleConstraints() {
-    try {
-        console.log('Retrying with simpler constraints...');
-        
-        const simpleConstraints = {
-            video: true,
-            audio: true
-        };
-        
-        localStream = await navigator.mediaDevices.getUserMedia(simpleConstraints);
-        console.log('✅ Media stream obtained with simple constraints');
-        
-        // Continue with call setup...
-        const localVideo = document.getElementById('localVideo');
-        const videoCallContainer = document.getElementById('videoCallContainer');
-        
-        if (localVideo) {
-            localVideo.srcObject = localStream;
-            localVideo.muted = true;
-            
-            localVideo.onloadedmetadata = () => {
-                localVideo.play().catch(e => console.warn('Video play warning:', e));
-            };
-        }
-        
-        if (videoCallContainer) {
-            videoCallContainer.style.display = 'block';
-            videoCallContainer.classList.remove('hidden');
-            videoCallContainer.classList.remove('audio-only');
-        }
-        
-        isInCall = true;
-        isMuted = false;
-        isVideoOff = false;
-        updateCallButtons();
-        
-        showToast(`Video call started with ${currentChat.name}`, 'success');
-        
-        if (currentChat.friendId) {
-            await startCall(currentChat.friendId, 'video', currentChat.name);
-        }
-        
-    } catch (error) {
-        console.error('Error with simple constraints:', error);
-        showToast('Failed to start video call even with basic settings', 'error');
-        isInCall = false;
-        cleanupMediaStream();
-    }
-}
-
-// ADD PERMISSION INSTRUCTIONS FUNCTION:
-function showPermissionInstructions() {
-    const instructions = `
-        <div class="permission-instructions">
-            <h3>How to Enable Camera/Microphone Permissions</h3>
-            <div class="browser-instructions">
-                <div class="browser-chrome">
-                    <strong>Chrome:</strong>
-                    <ol>
-                        <li>Click the lock/camera icon in the address bar</li>
-                        <li>Change "Camera" and "Microphone" to "Allow"</li>
-                        <li>Refresh the page and try again</li>
-                    </ol>
-                </div>
-                <div class="browser-firefox">
-                    <strong>Firefox:</strong>
-                    <ol>
-                        <li>Click the camera icon in the address bar</li>
-                        <li>Select "Allow" for camera and microphone</li>
-                        <li>Check "Remember this decision"</li>
-                        <li>Refresh the page</li>
-                    </ol>
-                </div>
-                <div class="browser-edge">
-                    <strong>Edge:</strong>
-                    <ol>
-                        <li>Click the camera icon in the address bar</li>
-                        <li>Toggle camera and microphone to "Allow"</li>
-                        <li>Refresh the page</li>
-                    </ol>
-                </div>
-                <div class="browser-safari">
-                    <strong>Safari:</strong>
-                    <ol>
-                        <li>Go to Safari → Preferences → Websites</li>
-                        <li>Find Camera/Microphone and set to "Allow"</li>
-                        <li>Refresh the page</li>
-                    </ol>
-                </div>
-            </div>
-            <button onclick="closePermissionInstructions()" class="btn-primary">Got it</button>
-        </div>
-    `;
-    
-    // Create and show instructions modal
-    const modal = document.createElement('div');
-    modal.className = 'permission-modal';
-    modal.innerHTML = instructions;
-    document.body.appendChild(modal);
-}
-
-// ADD FUNCTION TO CLOSE INSTRUCTIONS:
-function closePermissionInstructions() {
-    const modal = document.querySelector('.permission-modal');
-    if (modal) {
-        modal.remove();
-    }
-}
-
-// UPDATE THE CLEANUP FUNCTION:
-function cleanupMediaStream() {
-    if (localStream) {
-        localStream.getTracks().forEach(track => {
-            track.stop();
-        });
-        localStream = null;
-    }
-    
-    // Hide video call container
-    const videoCallContainer = document.getElementById('videoCallContainer');
-    if (videoCallContainer) {
-        videoCallContainer.style.display = 'none';
-        videoCallContainer.classList.add('hidden');
-        videoCallContainer.classList.remove('audio-only');
-    }
-}
-
-// UPDATE THE updateCallButtons FUNCTION TO HANDLE AUDIO-ONLY:
-function updateCallButtons() {
-    const muteBtn = document.querySelector('.call-mute');
-    const videoBtn = document.querySelector('.call-video');
-    
-    if (muteBtn) {
-        muteBtn.innerHTML = isMuted ? '🎤' : '🔇';
-        muteBtn.title = isMuted ? 'Unmute' : 'Mute';
-    }
-    
-    if (videoBtn) {
-        if (isVideoOff) {
-            videoBtn.innerHTML = '📹';
-            videoBtn.title = 'Turn video on';
-            videoBtn.style.opacity = '0.5';
-        } else {
-            videoBtn.innerHTML = '📷';
-            videoBtn.title = 'Turn video off';
-            videoBtn.style.opacity = '1';
-        }
-    }
-}
-
-// UPDATE startVoiceCall FUNCTION:
-async function startVoiceCall() {
-    if (!currentChat) {
-        showToast('Please select a chat first', 'error');
-        disableCallButtons(false); // Re-enable buttons
-        return;
-    }
-
-    try {
-        console.log('Starting voice call with:', currentChat.name);
-        showToast('Starting voice call...', 'info');
-        
-        // Check browser support
-        if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
-            throw new Error('Your browser does not support voice calling.');
-        }
-
-        // Request ONLY microphone permissions - NO CAMERA
-        const constraints = {
-            video: false, // Explicitly false for voice calls
-            audio: {
-                echoCancellation: true,
-                noiseSuppression: true,
-                autoGainControl: true,
-                sampleRate: 44100,
-                channelCount: 1
-            }
-        };
-        
-        console.log('Requesting microphone permissions...');
-        
-        // Get user media
-        localStream = await navigator.mediaDevices.getUserMedia(constraints);
-        console.log('✅ Microphone access granted');
-        
-        // Show call container (voice call mode)
-        const videoCallContainer = document.getElementById('videoCallContainer');
-        if (videoCallContainer) {
-            videoCallContainer.style.display = 'block';
-            videoCallContainer.classList.remove('hidden');
-            
-            // Hide local video for voice call
-            const localVideo = document.getElementById('localVideo');
-            if (localVideo) {
-                localVideo.style.display = 'none';
-            }
-            
-            // Show voice call indicator
-            let voiceCallInfo = document.getElementById('voiceCallInfo');
-            if (!voiceCallInfo) {
-                voiceCallInfo = document.createElement('div');
-                voiceCallInfo.id = 'voiceCallInfo';
-                voiceCallInfo.className = 'text-center text-white p-4';
-                voiceCallInfo.innerHTML = `
-                    <div class="bg-purple-600 rounded-lg p-6">
-                        <i class="fas fa-phone text-4xl mb-2"></i>
-                        <p class="text-lg font-semibold">Voice Call with ${currentChat.name}</p>
-                        <p class="text-sm opacity-75">Call in progress...</p>
-                    </div>
-                `;
-                videoCallContainer.appendChild(voiceCallInfo);
-            }
-        }
-        
-        // Set call state
-        isInCall = true;
-        isMuted = false;
-        isVideoOff = true; // Voice call has no video
-        
-        // Update UI buttons
-        updateCallButtons();
-        
-        console.log('Voice call started successfully');
-        showToast(`Voice call started with ${currentChat.name}`, 'success');
-        
-        // Start WebRTC connection
-        if (currentChat.friendId) {
-            await startCall(currentChat.friendId, 'voice', currentChat.name);
-        }
-        
-    } catch (error) {
-        console.error('Error starting voice call:', error);
-        disableCallButtons(false); // Re-enable buttons on error
-        
-        let errorMessage = 'Cannot access microphone. ';
-        
-        if (error.name === 'NotAllowedError') {
-            errorMessage += 'Please allow microphone permissions in your browser settings.';
-            showPermissionInstructions();
-        } else if (error.name === 'NotFoundError') {
-            errorMessage += 'No microphone found. Please check your audio device.';
-        } else if (error.name === 'NotReadableError') {
-            errorMessage += 'Microphone is already in use by another application.';
-        } else {
-            errorMessage += error.message;
-        }
-        
-        showToast(errorMessage, 'error');
-    }
-}
-
-
-// Show permission instructions
-function showPermissionInstructions() {
-    const modal = document.createElement('div');
-    modal.className = 'fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50';
-    modal.innerHTML = `
-        <div class="bg-white rounded-lg p-6 max-w-md mx-4">
-            <h3 class="text-lg font-semibold mb-3">Camera & Microphone Permissions Required</h3>
-            <p class="text-gray-600 mb-4">To make calls, please allow camera and microphone access:</p>
-            <div class="bg-yellow-50 p-4 rounded-lg mb-4">
-                <h4 class="font-medium mb-2">How to enable:</h4>
-                <ul class="text-sm text-yellow-700 list-disc list-inside space-y-1">
-                    <li>Look for the camera/microphone icon in your browser's address bar</li>
-                    <li>Click the icon and select "Allow"</li>
-                    <li>Refresh the page and try again</li>
-                    <li>Make sure you're using HTTPS</li>
-                </ul>
-            </div>
-            <div class="flex justify-end">
-                <button id="closePermissionHelp" class="px-4 py-2 bg-purple-600 text-white rounded-lg hover:bg-purple-700">
-                    OK, I Understand
-                </button>
-            </div>
-        </div>
-    `;
-    
-    document.body.appendChild(modal);
-    
-    modal.querySelector('#closePermissionHelp').addEventListener('click', () => {
-        document.body.removeChild(modal);
-    });
-    
-    modal.addEventListener('click', (e) => {
-        if (e.target === modal) {
-            document.body.removeChild(modal);
-        }
-    });
-}
-
-// All Friends Display Implementation
-function openAllFriendsModal() {
-    console.log('Opening all friends modal');
-    if (allFriendsModal) allFriendsModal.classList.remove('hidden');
-    renderAllFriends();
-}
-
-function renderAllFriends() {
-    const allFriendsList = document.getElementById('allFriendsList');
-    const noAllFriendsMessage = document.getElementById('noAllFriendsMessage');
-    
-    if (!allFriendsList || !noAllFriendsMessage) return;
-    
-    allFriendsList.innerHTML = '';
-    
-    if (friends.length === 0) {
-        noAllFriendsMessage.classList.remove('hidden');
-        return;
-    }
-    
-    noAllFriendsMessage.classList.add('hidden');
-    
-    console.log('Rendering', friends.length, 'friends in all friends modal');
-    
-    friends.forEach(friend => {
-        const friendItem = document.createElement('div');
-        friendItem.className = 'contact-item';
-        friendItem.dataset.friendId = friend.id;
-        friendItem.innerHTML = `
-            <div class="contact-avatar">
-                <img class="w-12 h-12 rounded-full object-cover" src="${friend.photoURL || `https://ui-avatars.com/api/?name=${encodeURIComponent(friend.displayName)}&background=7C3AED&color=fff`}" alt="${friend.displayName}">
-                ${friend.status === 'online' ? '<div class="online-indicator"></div>' : ''}
-            </div>
-            <div class="contact-info">
-                <div class="contact-name">${friend.displayName}</div>
-                <div class="contact-status">${friend.status || 'offline'}</div>
-            </div>
-            <div class="flex space-x-2">
-                <button class="w-10 h-10 rounded-full bg-purple-100 text-purple-600 flex items-center justify-center hover:bg-purple-200 transition-colors message-friend-all" data-name="${friend.displayName}" data-id="${friend.id}">
-                    <i class="fas fa-comment"></i>
-                </button>
-                <button class="w-10 h-10 rounded-full bg-green-100 text-green-600 flex items-center justify-center hover:bg-green-200 transition-colors call-friend-all" data-name="${friend.displayName}" data-id="${friend.id}">
-                    <i class="fas fa-phone"></i>
-                </button>
-            </div>
-        `;
-        
-        allFriendsList.appendChild(friendItem);
-    });
-
-    // Use event delegation for dynamic buttons
-    allFriendsList.addEventListener('click', function(e) {
-        if (e.target.closest('.message-friend-all')) {
-            const btn = e.target.closest('.message-friend-all');
-            const friendId = btn.dataset.id;
-            const friendName = btn.dataset.name;
-            console.log('Message friend from all friends:', friendName, friendId);
-            startChat(friendId, friendName);
-            if (allFriendsModal) allFriendsModal.classList.add('hidden');
-        }
-        
-        if (e.target.closest('.call-friend-all')) {
-            const btn = e.target.closest('.call-friend-all');
-            const friendId = btn.dataset.id;
-            const friendName = btn.dataset.name;
-            console.log('Call friend from all friends:', friendName, friendId);
-            startCall(friendId, friendName);
-        }
-    });
-}
-
-function searchAllFriends(query) {
-    const allFriendsList = document.getElementById('allFriendsList');
-    const noAllFriendsMessage = document.getElementById('noAllFriendsMessage');
-    
-    if (!allFriendsList || !noAllFriendsMessage) return;
-    
-    if (!query) {
-        renderAllFriends();
-        return;
-    }
-    
-    const filteredFriends = friends.filter(friend => 
-        friend.displayName.toLowerCase().includes(query.toLowerCase()) ||
-        (friend.email && friend.email.toLowerCase().includes(query.toLowerCase())) ||
-        (friend.phone && friend.phone.includes(query))
-    );
-    
-    allFriendsList.innerHTML = '';
-    
-    if (filteredFriends.length === 0) {
-        noAllFriendsMessage.classList.remove('hidden');
-        noAllFriendsMessage.innerHTML = `
-            <i class="fas fa-search text-4xl mb-3 text-gray-300 block"></i>
-            <p>No friends found</p>
-            <p class="text-sm mt-1">Try a different search term</p>
-        `;
-        return;
-    }
-    
-    noAllFriendsMessage.classList.add('hidden');
-    
-    console.log('Displaying', filteredFriends.length, 'filtered friends');
-    
-    filteredFriends.forEach(friend => {
-        const friendItem = document.createElement('div');
-        friendItem.className = 'contact-item';
-        friendItem.dataset.friendId = friend.id;
-        friendItem.innerHTML = `
-            <div class="contact-avatar">
-                <img class="w-12 h-12 rounded-full object-cover" src="${friend.photoURL || `https://ui-avatars.com/api/?name=${encodeURIComponent(friend.displayName)}&background=7C3AED&color=fff`}" alt="${friend.displayName}">
-                ${friend.status === 'online' ? '<div class="online-indicator"></div>' : ''}
-            </div>
-            <div class="contact-info">
-                <div class="contact-name">${friend.displayName}</div>
-                <div class="contact-status">${friend.status || 'offline'}</div>
-            </div>
-            <div class="flex space-x-2">
-                <button class="w-10 h-10 rounded-full bg-purple-100 text-purple-600 flex items-center justify-center hover:bg-purple-200 transition-colors message-friend-all" data-name="${friend.displayName}" data-id="${friend.id}">
-                    <i class="fas fa-comment"></i>
-                </button>
-                <button class="w-10 h-10 rounded-full bg-green-100 text-green-600 flex items-center justify-center hover:bg-green-200 transition-colors call-friend-all" data-name="${friend.displayName}" data-id="${friend.id}">
-                    <i class="fas fa-phone"></i>
-                </button>
-            </div>
-        `;
-        
-        allFriendsList.appendChild(friendItem);
-    });
-
-    // Re-add event listeners using event delegation
-    allFriendsList.addEventListener('click', function(e) {
-        if (e.target.closest('.message-friend-all')) {
-            const btn = e.target.closest('.message-friend-all');
-            const friendId = btn.dataset.id;
-            const friendName = btn.dataset.name;
-            console.log('Message friend from filtered results:', friendName, friendId);
-            startChat(friendId, friendName);
-            if (allFriendsModal) allFriendsModal.classList.add('hidden');
-        }
-        
-        if (e.target.closest('.call-friend-all')) {
-            const btn = e.target.closest('.call-friend-all');
-            const friendId = btn.dataset.id;
-            const friendName = btn.dataset.name;
-            console.log('Call friend from filtered results:', friendName, friendId);
-            startCall(friendId, friendName);
-        }
-    });
-}
-
-// Add mobile-specific optimizations
-function optimizeForMobile() {
-    // Prevent zoom on input focus
-    document.addEventListener('touchstart', function(e) {
-        if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA') {
-            document.body.style.zoom = '100%';
-        }
-    }, { passive: true });
-
-    // Improve touch scrolling
-    document.addEventListener('touchmove', function(e) {
-        // Allow natural scrolling
-    }, { passive: true });
-
-    // Handle viewport height issues on mobile
-    function setViewportHeight() {
-        let vh = window.innerHeight * 0.01;
-        document.documentElement.style.setProperty('--vh', `${vh}px`);
-    }
-
-    setViewportHeight();
-    window.addEventListener('resize', setViewportHeight);
-    window.addEventListener('orientationchange', setViewportHeight);
-}
-
-// Initialize mobile optimizations
-if ('ontouchstart' in window || navigator.maxTouchPoints > 0) {
-    console.log('Mobile device detected, applying optimizations');
-    optimizeForMobile();
-}
-
-console.log('Chat application JavaScript loaded successfully')
-// Function to open business profile
-function openBusinessProfile(userId) {
-    const businessDocRef = firebase.firestore().collection('business').doc(userId);
-    const userDocRef = firebase.firestore().collection('users').doc(userId);
-    
-    Promise.all([businessDocRef.get(), userDocRef.get()]).then(([businessDoc, userDoc]) => {
-        if (businessDoc.exists && userDoc.exists) {
-            const businessData = businessDoc.data();
-            const userData = userDoc.data();
-            
-            // Update modal content
-            document.getElementById('businessProfileName').textContent = userData.displayName || userData.userName;
-            document.getElementById('businessProfileAvatar').src = userData.photoURL || './assets/default-avatar.png';
-            
-            // Show greeting message if available
-            if (businessData.greetingMessage) {
-                document.getElementById('businessGreetingSection').classList.remove('hidden');
-                document.getElementById('businessGreetingMessage').textContent = businessData.greetingMessage;
-            }
-            
-            // Show away message if enabled
-            if (businessData.awayEnabled && businessData.awayMessage) {
-                document.getElementById('businessAwaySection').classList.remove('hidden');
-                document.getElementById('businessAwayMessage').textContent = businessData.awayMessage;
-            }
-            
-            // Show catalogue if available
-            if (businessData.catalogue && businessData.catalogue.length > 0) {
-                document.getElementById('businessCatalogueSection').classList.remove('hidden');
-                const catalogueList = document.getElementById('businessCatalogueList');
-                catalogueList.innerHTML = businessData.catalogue.map(product => `
-                    <div class="flex justify-between items-center p-2 bg-gray-50 rounded-lg">
-                        <span class="font-medium">${product.name}</span>
-                        <span class="text-green-600 font-semibold">$${product.price}</span>
-                    </div>
-                `).join('');
-            }
-            
-            // Open modal
-            document.getElementById('businessProfileModal').classList.remove('hidden');
-        }
-    }).catch(error => {
-        console.error('Error loading business profile:', error);
-        showToast('Error loading business profile', 'error');
-    });
-}
-
-// Close business profile modal
-document.getElementById('closeBusinessProfile')?.addEventListener('click', () => {
-    document.getElementById('businessProfileModal').classList.add('hidden');
-});
-
-// Start chat from business profile
-document.getElementById('startBusinessChat')?.addEventListener('click', () => {
-    // Get the user ID from somewhere (you might need to store it when opening the modal)
-    const businessUserId = document.getElementById('businessProfileModal').getAttribute('data-user-id');
-    if (businessUserId) {
-        createNewChat(businessUserId, document.getElementById('businessProfileName').textContent);
-        document.getElementById('businessProfileModal').classList.add('hidden');
-    }
-});
-// Add business profile button to chat header
-function addBusinessProfileButton(otherUserId) {
-    const chatHeader = document.getElementById('chatHeader');
-    const existingButton = document.getElementById('businessProfileBtn');
-    
-    if (!existingButton) {
-        const businessProfileBtn = document.createElement('button');
-        businessProfileBtn.id = 'businessProfileBtn';
-        businessProfileBtn.className = 'bg-green-500 text-white p-2 rounded-xl hover:bg-green-600 transition-colors ml-2';
-        businessProfileBtn.innerHTML = '<i class="fas fa-store"></i>';
-        businessProfileBtn.title = 'View Business Profile';
-        businessProfileBtn.addEventListener('click', () => {
-            openBusinessProfile(otherUserId);
-        });
-        
-        const chatActions = chatHeader.querySelector('.flex.space-x-3');
-        if (chatActions) {
-            chatActions.appendChild(businessProfileBtn);
-        }
-    }
-}
-
-// In your loadChat function, add this:
-// In your chat selection function (this might be called loadChat or similar)
-function loadChat(chatId, otherUserId, otherUserName, otherUserAvatar) {
-    // Update global variables
-    currentChatId = chatId;
-    currentOtherUserId = otherUserId;
-    currentOtherUserName = otherUserName;
-    
-    console.log('Loading chat:', chatId, 'with user:', otherUserName);
-    
-    // Your existing chat loading code...
-    document.getElementById('chatHeader').classList.remove('hidden');
-    document.getElementById('inputArea').classList.remove('hidden');
-    document.getElementById('noMessagesMessage').classList.add('hidden');
-    
-    // Update chat header
-    document.getElementById('chatTitle').textContent = otherUserName;
-    document.getElementById('chatAvatar').src = otherUserAvatar || './assets/default-avatar.png';
-    
-    // Load messages for this chat
-    loadMessages(chatId);
-    
-    // Load business info if available
-    loadBusinessInfoForChat(otherUserId);
-}
-
-// Also update when creating a new chat
-function createNewChat(otherUserId, otherUserName, otherUserAvatar = '') {
-    const chatId = generateChatId(currentUser.uid, otherUserId);
-    
-    // Update global variables
-    currentChatId = chatId;
-    currentOtherUserId = otherUserId;
-    currentOtherUserName = otherUserName;
-    
-    console.log('Creating new chat:', chatId);
-    
-    // Check if chat already exists
-    firebase.firestore().collection('chats').doc(chatId).get()
-        .then((doc) => {
-            if (!doc.exists) {
-                // Create new chat
-                return firebase.firestore().collection('chats').doc(chatId).set({
-                    participants: [currentUser.uid, otherUserId],
-                    participantNames: {
-                        [currentUser.uid]: currentUserData.displayName || currentUserData.userName,
-                        [otherUserId]: otherUserName
-                    },
-                    participantAvatars: {
-                        [currentUser.uid]: currentUserData.photoURL || '',
-                        [otherUserId]: otherUserAvatar || ''
-                    },
-                    lastMessage: '',
-                    lastMessageTime: firebase.firestore.FieldValue.serverTimestamp(),
-                    createdAt: firebase.firestore.FieldValue.serverTimestamp(),
-                    updatedAt: firebase.firestore.FieldValue.serverTimestamp()
-                });
-            }
-        })
-        .then(() => {
-            // Load the newly created chat
-            loadChat(chatId, otherUserId, otherUserName, otherUserAvatar);
-            showToast(`Started chat with ${otherUserName}`, 'success');
-        })
-        .catch((error) => {
-            console.error('Error creating chat:', error);
-            showToast('Error creating chat', 'error');
-        });
-}
-// In your renderChats function, add business badges
-function renderChats(chats) {
-    const chatList = document.getElementById('chatList');
-    chatList.innerHTML = '';
-    
-    chats.forEach(chat => {
-        const chatItem = document.createElement('div');
-        chatItem.className = 'chat-item p-3 rounded-xl cursor-pointer hover:bg-gray-50 transition-colors';
-        chatItem.setAttribute('data-chat-id', chat.id);
-        chatItem.setAttribute('data-other-user-id', chat.otherUserId);
-        
-        let businessBadge = '';
-        if (chat.isBusinessAccount) {
-            businessBadge = '<span class="bg-green-100 text-green-800 text-xs px-2 py-1 rounded-full ml-2">Business</span>';
-        }
-        
-        chatItem.innerHTML = `
-            <div class="flex items-center">
-                <img src="${chat.avatar}" alt="${chat.name}" class="w-12 h-12 rounded-xl object-cover">
-                <div class="ml-3 flex-1">
-                    <div class="flex items-center">
-                        <h4 class="font-semibold text-gray-900">${chat.name}</h4>
-                        ${businessBadge}
-                    </div>
-                    <p class="text-sm text-gray-500 truncate">${chat.lastMessage || 'No messages yet'}</p>
-                </div>
-                <div class="text-right">
-                    <span class="text-xs text-gray-400">${formatTime(chat.timestamp)}</span>
-                    ${chat.unreadCount > 0 ? `<span class="ml-2 bg-purple-500 text-white text-xs rounded-full w-5 h-5 flex items-center justify-center">${chat.unreadCount}</span>` : ''}
-                </div>
-            </div>
-        `;
-        
-        chatList.appendChild(chatItem);
-    });
-}
-// AI SUMMARIZE CONVERSATION - ACTUAL IMPLEMENTATION
-document.getElementById('aiSummarize')?.addEventListener('click', () => {
-    if (!currentChatId) {
-        showToast('Please select a conversation first', 'warning');
-        return;
-    }
-    
-    showToast('Summarizing conversation...', 'info');
-    
-    // Get recent messages for summarization
-    firebase.firestore().collection('chats').doc(currentChatId).collection('messages')
-        .orderBy('timestamp', 'desc')
-        .limit(50)
-        .get()
-        .then((snapshot) => {
-            const messages = [];
-            snapshot.forEach(doc => {
-                const message = doc.data();
-                if (message.text && message.type !== 'system') {
-                    messages.push({
-                        text: message.text,
-                        sender: message.senderId === currentUser.uid ? 'You' : 'Them',
-                        time: message.timestamp?.toDate().toLocaleTimeString() || ''
-                    });
-                }
-            });
-            
-            if (messages.length === 0) {
-                showToast('No messages to summarize', 'warning');
-                return;
-            }
-            
-            // Reverse to get chronological order
-            messages.reverse();
-            
-            // Generate summary using AI (you can replace this with actual AI API)
-            const summary = generateConversationSummary(messages);
-            
-            // Show summary in a modal or directly in chat
-            showAISummaryModal(summary, messages.length);
-            
-        }).catch(error => {
-            console.error('Error summarizing conversation:', error);
-            showToast('Error summarizing conversation', 'error');
-        });
-});
-
-// Generate conversation summary
-function generateConversationSummary(messages) {
-    // This is a simple rule-based summary - replace with actual AI API call
-    const totalMessages = messages.length;
-    const yourMessages = messages.filter(m => m.sender === 'You').length;
-    const theirMessages = messages.filter(m => m.sender === 'Them').length;
-    
-    // Extract key topics (simple keyword extraction)
-    const allText = messages.map(m => m.text).join(' ').toLowerCase();
-    const commonWords = ['hello', 'hi', 'hey', 'ok', 'yes', 'no', 'thanks', 'thank you'];
-    const words = allText.split(/\s+/).filter(word => 
-        word.length > 3 && !commonWords.includes(word)
-    );
-    
-    // Count word frequency
-    const wordCount = {};
-    words.forEach(word => {
-        wordCount[word] = (wordCount[word] || 0) + 1;
-    });
-    
-    // Get top 3 topics
-    const topics = Object.entries(wordCount)
-        .sort((a, b) => b[1] - a[1])
-        .slice(0, 3)
-        .map(([word]) => word);
-    
-    // Generate summary
-    const summary = `
-        🤖 **Conversation Summary**
-        
-        📊 **Statistics:**
-        • Total messages: ${totalMessages}
-        • Your messages: ${yourMessages}
-        • Their messages: ${theirMessages}
-        
-        🔍 **Key Topics:**
-        ${topics.map(topic => `• ${topic}`).join('\n')}
-        
-        💬 **Recent Activity:**
-        ${messages.slice(-3).map(m => `• ${m.sender}: "${m.text.substring(0, 50)}${m.text.length > 50 ? '...' : ''}"`).join('\n')}
-    `;
-    
-    return summary;
-}
-// FIXED: Load Privacy Settings
-function loadPrivacySettings() {
-    if (!currentUser) return;
-    
-    // Load current privacy settings
-    const privacySettings = currentUserData.privacySettings || userSettings.privacy;
-    
-    // Set form values
-    const lastSeenPrivacy = document.getElementById("lastSeenPrivacy");
-    const profilePhotoPrivacy = document.getElementById("profilePhotoPrivacy");
-    const aboutPrivacy = document.getElementById("aboutPrivacy");
-    const statusPrivacy = document.getElementById("statusPrivacy");
-    const readReceiptsPrivacy = document.getElementById("readReceiptsPrivacy");
-    const disappearingMessagesPrivacy = document.getElementById("disappearingMessagesPrivacy");
-    const callsPrivacy = document.getElementById("callsPrivacy");
-    
-    if (lastSeenPrivacy) lastSeenPrivacy.value = privacySettings.lastSeen || 'everyone';
-    if (profilePhotoPrivacy) profilePhotoPrivacy.value = privacySettings.profilePhoto || 'everyone';
-    if (aboutPrivacy) aboutPrivacy.value = privacySettings.about || 'everyone';
-    if (statusPrivacy) statusPrivacy.value = privacySettings.status || 'everyone';
-    if (readReceiptsPrivacy) readReceiptsPrivacy.checked = privacySettings.readReceipts !== false;
-    if (disappearingMessagesPrivacy) disappearingMessagesPrivacy.value = privacySettings.disappearingMessages || 'off';
-    if (callsPrivacy) callsPrivacy.value = privacySettings.calls || 'everyone';
-}
-
-// Call this when privacy modal opens
-document.getElementById("privacySettingsBtn")?.addEventListener("click", () => {
-    document.getElementById("privacySettingsModal").classList.remove("hidden");
-    loadPrivacySettings();
-});
-// FIXED: Security Settings Implementation
-function loadSecuritySettings() {
-    if (!currentUser) return;
-    
-    const securitySettings = currentUserData.securitySettings || userSettings.security;
-    
-    // Set security toggles
-    const securityNotifications = document.getElementById("securityNotifications");
-    const passkeyToggle = document.getElementById("passkeyToggle");
-    const twoStepVerification = document.getElementById("twoStepVerification");
-    
-    if (securityNotifications) securityNotifications.checked = securitySettings.notifications !== false;
-    if (passkeyToggle) passkeyToggle.checked = securitySettings.passkeys || false;
-    if (twoStepVerification) twoStepVerification.checked = securitySettings.twoStepVerification || false;
-}
-
-// Security settings event listeners
-document.getElementById("securitySettingsBtn")?.addEventListener("click", () => {
-    // Since you mentioned security is under account settings, open that modal
-    document.getElementById("accountSettingsModal").classList.remove("hidden");
-    loadSecuritySettings();
-});
-
-// Business platform
-document.getElementById("businessPlatformBtn")?.addEventListener("click", () => {
-    showToast("Opening business platform...", "info");
-    // Implement business platform logic here
-});
-
-// Change number
-document.getElementById("changeNumberBtn")?.addEventListener("click", () => {
-    const newNumber = prompt("Enter your new phone number:");
-    if (newNumber) {
-        // Validate and update number
-        updatePhoneNumber(newNumber);
-    }
-});
-
-// Request account info
-document.getElementById("requestAccountInfoBtn")?.addEventListener("click", () => {
-    if (confirm("This will generate a report of your account data. Continue?")) {
-        requestAccountInfo();
-    }
-});
-
-// Delete account
-document.getElementById("deleteAccountBtn")?.addEventListener("click", () => {
-    if (confirm("Are you sure you want to delete your account? This action cannot be undone.")) {
-        if (confirm("This will permanently delete all your data. Type DELETE to confirm:")) {
-            deleteAccount();
-        }
-    }
-});
-
-// Implement the security functions
-async function updatePhoneNumber(newNumber) {
-    try {
-        // Update in Firebase Auth
-        await currentUser.updatePhoneNumber(newNumber);
-        
-        // Update in Firestore
-        await db.collection('users').doc(currentUser.uid).update({
-            phone: newNumber,
-            updatedAt: firebase.firestore.FieldValue.serverTimestamp()
-        });
-        
-        showToast("Phone number updated successfully", "success");
-    } catch (error) {
-        console.error("Error updating phone number:", error);
-        showToast("Error updating phone number", "error");
-    }
-}
-
-async function requestAccountInfo() {
-    try {
-        showToast("Generating account report...", "info");
-        
-        // This would typically be a server-side function
-        // For demo, we'll create a simple client-side report
-        const userData = await db.collection('users').doc(currentUser.uid).get();
-        const userMessages = await db.collection('messages')
-            .where('senderId', '==', currentUser.uid)
-            .limit(1000)
-            .get();
-            
-        const report = {
-            user: userData.data(),
-            messageCount: userMessages.size,
-            generatedAt: new Date().toISOString()
-        };
-        
-        // Download as JSON file
-        downloadJSON(report, 'kynecta_account_data.json');
-        showToast("Account report downloaded", "success");
-        
-    } catch (error) {
-        console.error("Error generating account report:", error);
-        showToast("Error generating account report", "error");
-    }
-}
-
-function downloadJSON(data, filename) {
-    const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = filename;
-    document.body.appendChild(a);
-    a.click();
-    document.body.removeChild(a);
-    URL.revokeObjectURL(url);
-}
-
-async function deleteAccount() {
-    try {
-        showToast("Deleting account...", "info");
-        
-        // Delete user data from Firestore
-        await db.collection('users').doc(currentUser.uid).delete();
-        
-        // Delete user's messages
-        const userMessages = await db.collection('messages')
-            .where('senderId', '==', currentUser.uid)
-            .get();
-            
-        const batch = db.batch();
-        userMessages.forEach(doc => {
-            batch.delete(doc.ref);
-        });
-        await batch.commit();
-        
-        // Delete user account from Firebase Auth
-        await currentUser.delete();
-        
-        showToast("Account deleted successfully", "success");
-        window.location.href = 'index.html';
-        
-    } catch (error) {
-        console.error("Error deleting account:", error);
-        showToast("Error deleting account: " + error.message, "error");
-    }
-}
-// COMPLETE: Setup all invite functionality
-function setupAllInviteFeatures() {
-    console.log("Setting up invite features...");
-    
-    // Check if buttons exist
-    const buttons = {
-        whatsapp: document.getElementById("shareWhatsapp"),
-        facebook: document.getElementById("shareFacebook"),
-        email: document.getElementById("shareEmail"),
-        qr: document.getElementById("shareQR"),
-        copy: document.getElementById("copyInviteLink"),
-        sms: document.getElementById("shareSMS")
-    };
-    
-    console.log("Found buttons:", buttons);
-    
-    // Setup each feature
-    setupWhatsAppShare();
-    setupCopyLink();
-    setupSMSShare();
-    
-    // Setup other features
-    setupQRCode();
-    setupFacebookShare();
-    setupEmailShare();
-}
-
-// Add these to your existing setup
-function setupQRCode() {
-    document.getElementById("shareQR")?.addEventListener("click", generateQRCode);
-}
-
-function setupFacebookShare() {
-    document.getElementById("shareFacebook")?.addEventListener("click", function() {
-        const url = `https://www.facebook.com/sharer/sharer.php?u=${encodeURIComponent('https://kynecta.com')}`;
-        window.open(url, '_blank', 'width=600,height=400');
-    });
-}
-
-function setupEmailShare() {
-    document.getElementById("shareEmail")?.addEventListener("click", function() {
-        const subject = "Join me on Kynecta!";
-        const body = "I'm using Kynecta to chat and connect. Download the app so we can chat there!\n\nDownload: https://kynecta.com";
-        window.location.href = `mailto:?subject=${encodeURIComponent(subject)}&body=${encodeURIComponent(body)}`;
-    });
-}
-// ADD THIS FUNCTION: QR Code Generator
 // REAL QR Code Generator
 function generateQRCode() {
     try {
@@ -5775,6 +4597,7 @@ function showManualCopyOption(link) {
         }
     });
 }
+
 // FIXED: WhatsApp Sharing that actually directs to user's WhatsApp
 function setupWhatsAppShare() {
     const whatsappBtn = document.getElementById("shareWhatsapp");
@@ -5807,6 +4630,7 @@ function setupWhatsAppShare() {
         }, 500);
     });
 }
+
 // FIXED: SMS Sharing that opens native messaging app
 function setupSMSShare() {
     const smsBtn = document.getElementById("shareSMS");
@@ -5840,160 +4664,922 @@ function setupSMSShare() {
         }, 2000);
     });
 }
-// chat.js
 
-function renderFriends(friendsToRender) {
-    const friendsList = document.getElementById('friendsList');
-    if (!friendsList) {
-        console.warn('Friends list element not found');
-        return;
-    }
-    
-    console.log('Rendering', friendsToRender.length, 'friends');
-    friendsList.innerHTML = '';
-    
-    if (friendsToRender.length === 0) {
-        friendsList.innerHTML = `
-            <div class="text-center text-gray-500 py-8">
-                <i class="fas fa-users text-4xl mb-3 text-gray-300 block"></i>
-                <p>No friends yet</p>
-                <p class="text-sm mt-1">Add friends to start chatting</p>
+// Show permission instructions
+function showPermissionInstructions() {
+    const modal = document.createElement('div');
+    modal.className = 'fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50';
+    modal.innerHTML = `
+        <div class="bg-white rounded-lg p-6 max-w-md mx-4">
+            <h3 class="text-lg font-semibold mb-3">Camera & Microphone Permissions Required</h3>
+            <p class="text-gray-600 mb-4">To make calls, please allow camera and microphone access:</p>
+            <div class="bg-yellow-50 p-4 rounded-lg mb-4">
+                <h4 class="font-medium mb-2">How to enable:</h4>
+                <ul class="text-sm text-yellow-700 list-disc list-inside space-y-1">
+                    <li>Look for the camera/microphone icon in your browser's address bar</li>
+                    <li>Click the icon and select "Allow"</li>
+                    <li>Refresh the page and try again</li>
+                    <li>Make sure you're using HTTPS</li>
+                </ul>
             </div>
-        `;
+            <div class="flex justify-end">
+                <button id="closePermissionHelp" class="px-4 py-2 bg-purple-600 text-white rounded-lg hover:bg-purple-700">
+                    OK, I Understand
+                </button>
+            </div>
+        </div>
+    `;
+    
+    document.body.appendChild(modal);
+    
+    modal.querySelector('#closePermissionHelp').addEventListener('click', () => {
+        document.body.removeChild(modal);
+    });
+    
+    modal.addEventListener('click', (e) => {
+        if (e.target === modal) {
+            document.body.removeChild(modal);
+        }
+    });
+}
+
+// All Friends Display Implementation
+function openAllFriendsModal() {
+    console.log('Opening all friends modal');
+    if (allFriendsModal) allFriendsModal.classList.remove('hidden');
+    renderAllFriends();
+}
+
+function renderAllFriends() {
+    const allFriendsList = document.getElementById('allFriendsList');
+    const noAllFriendsMessage = document.getElementById('noAllFriendsMessage');
+    
+    if (!allFriendsList || !noAllFriendsMessage) return;
+    
+    allFriendsList.innerHTML = '';
+    
+    if (friends.length === 0) {
+        noAllFriendsMessage.classList.remove('hidden');
         return;
     }
     
-    friendsToRender.forEach(friend => {
+    noAllFriendsMessage.classList.add('hidden');
+    
+    console.log('Rendering', friends.length, 'friends in all friends modal');
+    
+    friends.forEach(friend => {
+        const friendMood = friend.mood || 'happy';
+        const moodTheme = moodThemes[friendMood] || moodThemes.happy;
+        
         const friendItem = document.createElement('div');
-        friendItem.className = 'friend-item bg-white rounded-lg p-4 mb-3 shadow-sm border border-gray-200 hover:shadow-md transition-shadow';
+        friendItem.className = 'contact-item';
         friendItem.dataset.friendId = friend.id;
         friendItem.innerHTML = `
-            <div class="flex items-center justify-between">
-                <div class="flex items-center space-x-4 flex-1">
-                    <div class="relative">
-                        <img class="w-14 h-14 rounded-full object-cover border-2 border-purple-200" 
-                             src="${friend.photoURL || `https://ui-avatars.com/api/?name=${encodeURIComponent(friend.displayName)}&background=7C3AED&color=fff`}" 
-                             alt="${friend.displayName}">
-                        <div class="absolute -bottom-1 -right-1 w-4 h-4 rounded-full border-2 border-white ${friend.status === 'online' ? 'bg-green-500' : 'bg-gray-400'}"></div>
-                    </div>
-                    <div class="flex-1">
-                        <div class="flex items-center space-x-2">
-                            <h3 class="font-semibold text-gray-800">${friend.displayName}</h3>
-                            ${friend.status === 'online' ? '<span class="px-2 py-1 bg-green-100 text-green-800 text-xs rounded-full">Online</span>' : ''}
-                        </div>
-                        <p class="text-sm text-gray-500 mt-1">${friend.about || 'Hey there! I am using Kynecta'}</p>
-                        <div class="flex items-center space-x-3 mt-2 text-xs text-gray-400">
-                            ${friend.email ? `<span><i class="fas fa-envelope mr-1"></i>${friend.email}</span>` : ''}
-                            ${friend.phone ? `<span><i class="fas fa-phone mr-1"></i>${friend.phone}</span>` : ''}
-                        </div>
-                    </div>
+            <div class="contact-avatar">
+                <img class="w-12 h-12 rounded-full object-cover" src="${friend.photoURL || `https://ui-avatars.com/api/?name=${encodeURIComponent(friend.displayName)}&background=7C3AED&color=fff`}" alt="${friend.displayName}">
+                ${friend.status === 'online' ? '<div class="online-indicator"></div>' : ''}
+            </div>
+            <div class="contact-info">
+                <div class="contact-name">${friend.displayName}</div>
+                <div class="contact-status">${friend.status || 'offline'}</div>
+                <div class="contact-mood" style="color: ${moodTheme.color};">
+                    ${moodTheme.icon} ${friendMood}
                 </div>
-                
-                <div class="flex items-center space-x-2 ml-4">
-                    <!-- Chat Button -->
-                    <button class="friend-chat-btn flex items-center space-x-2 bg-purple-600 text-white px-4 py-2 rounded-lg hover:bg-purple-700 transition-colors shadow-sm" 
-                            data-id="${friend.id}" 
-                            data-name="${friend.displayName}">
-                        <i class="fas fa-comment"></i>
-                        <span>Chat</span>
-                    </button>
-                    
-                    <!-- Voice Call Button -->
-                    <button class="friend-call-btn flex items-center space-x-2 bg-green-600 text-white px-4 py-2 rounded-lg hover:bg-green-700 transition-colors shadow-sm" 
-                            data-id="${friend.id}" 
-                            data-name="${friend.displayName}">
-                        <i class="fas fa-phone"></i>
-                        <span>Call</span>
-                    </button>
-                    
-                    <!-- Video Call Button -->
-                    <button class="friend-video-call-btn flex items-center space-x-2 bg-blue-600 text-white px-4 py-2 rounded-lg hover:bg-blue-700 transition-colors shadow-sm" 
-                            data-id="${friend.id}" 
-                            data-name="${friend.displayName}">
-                        <i class="fas fa-video"></i>
-                        <span>Video</span>
-                    </button>
-                    
-                    <!-- More Options Button -->
-                    <div class="relative">
-                        <button class="friend-options-btn w-10 h-10 rounded-full bg-gray-100 text-gray-600 flex items-center justify-center hover:bg-gray-200 transition-colors">
-                            <i class="fas fa-ellipsis-v"></i>
-                        </button>
-                        <div class="friend-options-menu absolute right-0 top-12 bg-white rounded-lg shadow-lg border border-gray-200 py-2 z-10 hidden min-w-32">
-                            <button class="view-profile-btn w-full text-left px-4 py-2 hover:bg-gray-100 text-gray-700" data-id="${friend.id}">
-                                <i class="fas fa-user mr-2"></i>View Profile
-                            </button>
-                            <button class="remove-friend-btn w-full text-left px-4 py-2 hover:bg-gray-100 text-red-600" data-id="${friend.id}" data-name="${friend.displayName}">
-                                <i class="fas fa-user-times mr-2"></i>Remove
-                            </button>
-                        </div>
+            </div>
+            <div class="flex space-x-2">
+                <button class="w-10 h-10 rounded-full bg-purple-100 text-purple-600 flex items-center justify-center hover:bg-purple-200 transition-colors message-friend-all" data-name="${friend.displayName}" data-id="${friend.id}">
+                    <i class="fas fa-comment"></i>
+                </button>
+                <button class="w-10 h-10 rounded-full bg-green-100 text-green-600 flex items-center justify-center hover:bg-green-200 transition-colors call-friend-all" data-name="${friend.displayName}" data-id="${friend.id}">
+                    <i class="fas fa-phone"></i>
+                </button>
+            </div>
+        `;
+        
+        allFriendsList.appendChild(friendItem);
+    });
+
+    // Use event delegation for dynamic buttons
+    allFriendsList.addEventListener('click', function(e) {
+        if (e.target.closest('.message-friend-all')) {
+            const btn = e.target.closest('.message-friend-all');
+            const friendId = btn.dataset.id;
+            const friendName = btn.dataset.name;
+            console.log('Message friend from all friends:', friendName, friendId);
+            startChat(friendId, friendName);
+            if (allFriendsModal) allFriendsModal.classList.add('hidden');
+        }
+        
+        if (e.target.closest('.call-friend-all')) {
+            const btn = e.target.closest('.call-friend-all');
+            const friendId = btn.dataset.id;
+            const friendName = btn.dataset.name;
+            console.log('Call friend from all friends:', friendName, friendId);
+            startCall(friendId, friendName);
+        }
+    });
+}
+
+function searchAllFriends(query) {
+    const allFriendsList = document.getElementById('allFriendsList');
+    const noAllFriendsMessage = document.getElementById('noAllFriendsMessage');
+    
+    if (!allFriendsList || !noAllFriendsMessage) return;
+    
+    if (!query) {
+        renderAllFriends();
+        return;
+    }
+    
+    const filteredFriends = friends.filter(friend => 
+        friend.displayName.toLowerCase().includes(query.toLowerCase()) ||
+        (friend.email && friend.email.toLowerCase().includes(query.toLowerCase())) ||
+        (friend.phone && friend.phone.includes(query))
+    );
+    
+    allFriendsList.innerHTML = '';
+    
+    if (filteredFriends.length === 0) {
+        noAllFriendsMessage.classList.remove('hidden');
+        noAllFriendsMessage.innerHTML = `
+            <i class="fas fa-search text-4xl mb-3 text-gray-300 block"></i>
+            <p>No friends found</p>
+            <p class="text-sm mt-1">Try a different search term</p>
+        `;
+        return;
+    }
+    
+    noAllFriendsMessage.classList.add('hidden');
+    
+    console.log('Displaying', filteredFriends.length, 'filtered friends');
+    
+    filteredFriends.forEach(friend => {
+        const friendMood = friend.mood || 'happy';
+        const moodTheme = moodThemes[friendMood] || moodThemes.happy;
+        
+        const friendItem = document.createElement('div');
+        friendItem.className = 'contact-item';
+        friendItem.dataset.friendId = friend.id;
+        friendItem.innerHTML = `
+            <div class="contact-avatar">
+                <img class="w-12 h-12 rounded-full object-cover" src="${friend.photoURL || `https://ui-avatars.com/api/?name=${encodeURIComponent(friend.displayName)}&background=7C3AED&color=fff`}" alt="${friend.displayName}">
+                ${friend.status === 'online' ? '<div class="online-indicator"></div>' : ''}
+            </div>
+            <div class="contact-info">
+                <div class="contact-name">${friend.displayName}</div>
+                <div class="contact-status">${friend.status || 'offline'}</div>
+                <div class="contact-mood" style="color: ${moodTheme.color};">
+                    ${moodTheme.icon} ${friendMood}
+                </div>
+            </div>
+            <div class="flex space-x-2">
+                <button class="w-10 h-10 rounded-full bg-purple-100 text-purple-600 flex items-center justify-center hover:bg-purple-200 transition-colors message-friend-all" data-name="${friend.displayName}" data-id="${friend.id}">
+                    <i class="fas fa-comment"></i>
+                </button>
+                <button class="w-10 h-10 rounded-full bg-green-100 text-green-600 flex items-center justify-center hover:bg-green-200 transition-colors call-friend-all" data-name="${friend.displayName}" data-id="${friend.id}">
+                    <i class="fas fa-phone"></i>
+                </button>
+            </div>
+        `;
+        
+        allFriendsList.appendChild(friendItem);
+    });
+
+    // Re-add event listeners using event delegation
+    allFriendsList.addEventListener('click', function(e) {
+        if (e.target.closest('.message-friend-all')) {
+            const btn = e.target.closest('.message-friend-all');
+            const friendId = btn.dataset.id;
+            const friendName = btn.dataset.name;
+            console.log('Message friend from filtered results:', friendName, friendId);
+            startChat(friendId, friendName);
+            if (allFriendsModal) allFriendsModal.classList.add('hidden');
+        }
+        
+        if (e.target.closest('.call-friend-all')) {
+            const btn = e.target.closest('.call-friend-all');
+            const friendId = btn.dataset.id;
+            const friendName = btn.dataset.name;
+            console.log('Call friend from filtered results:', friendName, friendId);
+            startCall(friendId, friendName);
+        }
+    });
+}
+
+// Add mobile-specific optimizations
+function optimizeForMobile() {
+    // Prevent zoom on input focus
+    document.addEventListener('touchstart', function(e) {
+        if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA') {
+            document.body.style.zoom = '100%';
+        }
+    }, { passive: true });
+
+    // Improve touch scrolling
+    document.addEventListener('touchmove', function(e) {
+        // Allow natural scrolling
+    }, { passive: true });
+
+    // Handle viewport height issues on mobile
+    function setViewportHeight() {
+        let vh = window.innerHeight * 0.01;
+        document.documentElement.style.setProperty('--vh', `${vh}px`);
+    }
+
+    setViewportHeight();
+    window.addEventListener('resize', setViewportHeight);
+    window.addEventListener('orientationchange', setViewportHeight);
+}
+
+// Initialize mobile optimizations
+if ('ontouchstart' in window || navigator.maxTouchPoints > 0) {
+    console.log('Mobile device detected, applying optimizations');
+    optimizeForMobile();
+}
+
+// Function to open business profile
+function openBusinessProfile(userId) {
+    const businessDocRef = firebase.firestore().collection('business').doc(userId);
+    const userDocRef = firebase.firestore().collection('users').doc(userId);
+    
+    Promise.all([businessDocRef.get(), userDocRef.get()]).then(([businessDoc, userDoc]) => {
+        if (businessDoc.exists && userDoc.exists) {
+            const businessData = businessDoc.data();
+            const userData = userDoc.data();
+            
+            // Update modal content
+            document.getElementById('businessProfileName').textContent = userData.displayName || userData.userName;
+            document.getElementById('businessProfileAvatar').src = userData.photoURL || './assets/default-avatar.png';
+            
+            // Show greeting message if available
+            if (businessData.greetingMessage) {
+                document.getElementById('businessGreetingSection').classList.remove('hidden');
+                document.getElementById('businessGreetingMessage').textContent = businessData.greetingMessage;
+            }
+            
+            // Show away message if enabled
+            if (businessData.awayEnabled && businessData.awayMessage) {
+                document.getElementById('businessAwaySection').classList.remove('hidden');
+                document.getElementById('businessAwayMessage').textContent = businessData.awayMessage;
+            }
+            
+            // Show catalogue if available
+            if (businessData.catalogue && businessData.catalogue.length > 0) {
+                document.getElementById('businessCatalogueSection').classList.remove('hidden');
+                const catalogueList = document.getElementById('businessCatalogueList');
+                catalogueList.innerHTML = businessData.catalogue.map(product => `
+                    <div class="flex justify-between items-center p-2 bg-gray-50 rounded-lg">
+                        <span class="font-medium">${product.name}</span>
+                        <span class="text-green-600 font-semibold">$${product.price}</span>
                     </div>
+                `).join('');
+            }
+            
+            // Open modal
+            document.getElementById('businessProfileModal').classList.remove('hidden');
+        }
+    }).catch(error => {
+        console.error('Error loading business profile:', error);
+        showToast('Error loading business profile', 'error');
+    });
+}
+
+// Close business profile modal
+document.getElementById('closeBusinessProfile')?.addEventListener('click', () => {
+    document.getElementById('businessProfileModal').classList.add('hidden');
+});
+
+// Start chat from business profile
+document.getElementById('startBusinessChat')?.addEventListener('click', () => {
+    // Get the user ID from somewhere (you might need to store it when opening the modal)
+    const businessUserId = document.getElementById('businessProfileModal').getAttribute('data-user-id');
+    if (businessUserId) {
+        createNewChat(businessUserId, document.getElementById('businessProfileName').textContent);
+        document.getElementById('businessProfileModal').classList.add('hidden');
+    }
+});
+
+// Add business profile button to chat header
+function addBusinessProfileButton(otherUserId) {
+    const chatHeader = document.getElementById('chatHeader');
+    const existingButton = document.getElementById('businessProfileBtn');
+    
+    if (!existingButton) {
+        const businessProfileBtn = document.createElement('button');
+        businessProfileBtn.id = 'businessProfileBtn';
+        businessProfileBtn.className = 'bg-green-500 text-white p-2 rounded-xl hover:bg-green-600 transition-colors ml-2';
+        businessProfileBtn.innerHTML = '<i class="fas fa-store"></i>';
+        businessProfileBtn.title = 'View Business Profile';
+        businessProfileBtn.addEventListener('click', () => {
+            openBusinessProfile(otherUserId);
+        });
+        
+        const chatActions = chatHeader.querySelector('.flex.space-x-3');
+        if (chatActions) {
+            chatActions.appendChild(businessProfileBtn);
+        }
+    }
+}
+
+// In your loadChat function, add this:
+// In your chat selection function (this might be called loadChat or similar)
+function loadChat(chatId, otherUserId, otherUserName, otherUserAvatar) {
+    // Update global variables
+    currentChatId = chatId;
+    currentOtherUserId = otherUserId;
+    currentOtherUserName = otherUserName;
+    
+    console.log('Loading chat:', chatId, 'with user:', otherUserName);
+    
+    // Your existing chat loading code...
+    document.getElementById('chatHeader').classList.remove('hidden');
+    document.getElementById('inputArea').classList.remove('hidden');
+    document.getElementById('noMessagesMessage').classList.add('hidden');
+    
+    // Update chat header
+    document.getElementById('chatTitle').textContent = otherUserName;
+    document.getElementById('chatAvatar').src = otherUserAvatar || './assets/default-avatar.png';
+    
+    // Load messages for this chat
+    loadMessages(chatId);
+    
+    // Load business info if available
+    loadBusinessInfoForChat(otherUserId);
+}
+
+// Also update when creating a new chat
+function createNewChat(otherUserId, otherUserName, otherUserAvatar = '') {
+    const chatId = generateChatId(currentUser.uid, otherUserId);
+    
+    // Update global variables
+    currentChatId = chatId;
+    currentOtherUserId = otherUserId;
+    currentOtherUserName = otherUserName;
+    
+    console.log('Creating new chat:', chatId);
+    
+    // Check if chat already exists
+    firebase.firestore().collection('chats').doc(chatId).get()
+        .then((doc) => {
+            if (!doc.exists) {
+                // Create new chat
+                return firebase.firestore().collection('chats').doc(chatId).set({
+                    participants: [currentUser.uid, otherUserId],
+                    participantNames: {
+                        [currentUser.uid]: currentUserData.displayName || currentUserData.userName,
+                        [otherUserId]: otherUserName
+                    },
+                    participantAvatars: {
+                        [currentUser.uid]: currentUserData.photoURL || '',
+                        [otherUserId]: otherUserAvatar || ''
+                    },
+                    lastMessage: '',
+                    lastMessageTime: firebase.firestore.FieldValue.serverTimestamp(),
+                    createdAt: firebase.firestore.FieldValue.serverTimestamp(),
+                    updatedAt: firebase.firestore.FieldValue.serverTimestamp()
+                });
+            }
+        })
+        .then(() => {
+            // Load the newly created chat
+            loadChat(chatId, otherUserId, otherUserName, otherUserAvatar);
+            showToast(`Started chat with ${otherUserName}`, 'success');
+        })
+        .catch((error) => {
+            console.error('Error creating chat:', error);
+            showToast('Error creating chat', 'error');
+        });
+}
+
+// In your renderChats function, add business badges
+function renderChats(chats) {
+    const chatList = document.getElementById('chatList');
+    chatList.innerHTML = '';
+    
+    chats.forEach(chat => {
+        const chatItem = document.createElement('div');
+        chatItem.className = 'chat-item p-3 rounded-xl cursor-pointer hover:bg-gray-50 transition-colors';
+        chatItem.setAttribute('data-chat-id', chat.id);
+        chatItem.setAttribute('data-other-user-id', chat.otherUserId);
+        
+        let businessBadge = '';
+        if (chat.isBusinessAccount) {
+            businessBadge = '<span class="bg-green-100 text-green-800 text-xs px-2 py-1 rounded-full ml-2">Business</span>';
+        }
+        
+        chatItem.innerHTML = `
+            <div class="flex items-center">
+                <img src="${chat.avatar}" alt="${chat.name}" class="w-12 h-12 rounded-xl object-cover">
+                <div class="ml-3 flex-1">
+                    <div class="flex items-center">
+                        <h4 class="font-semibold text-gray-900">${chat.name}</h4>
+                        ${businessBadge}
+                    </div>
+                    <p class="text-sm text-gray-500 truncate">${chat.lastMessage || 'No messages yet'}</p>
+                </div>
+                <div class="text-right">
+                    <span class="text-xs text-gray-400">${formatTime(chat.timestamp)}</span>
+                    ${chat.unreadCount > 0 ? `<span class="ml-2 bg-purple-500 text-white text-xs rounded-full w-5 h-5 flex items-center justify-center">${chat.unreadCount}</span>` : ''}
                 </div>
             </div>
         `;
         
-        // Add safe image loading
-        const avatar = friendItem.querySelector('.friend-avatar');
-        if (avatar) {
-            avatar.onerror = function() {
-                this.src = `https://ui-avatars.com/api/?name=${encodeURIComponent(friend.displayName)}&background=7C3AED&color=fff`;
-            };
-        }
-        
-        friendsList.appendChild(friendItem);
+        chatList.appendChild(chatItem);
     });
-
-    // Add event listeners for friend actions
-    setupFriendEventListeners();
 }
 
-// FIXED: Safe element checker for all DOM operations
-function safeElement(id) {
-    const element = document.getElementById(id);
-    if (!element) {
-        console.warn(`Element with id '${id}' not found`);
-        return null;
+// AI SUMMARIZE CONVERSATION - ACTUAL IMPLEMENTATION
+document.getElementById('aiSummarize')?.addEventListener('click', () => {
+    if (!currentChatId) {
+        showToast('Please select a conversation first', 'warning');
+        return;
     }
-    return element;
-}
-
-function safeQuery(selector) {
-    const element = document.querySelector(selector);
-    if (!element) {
-        console.warn(`Element with selector '${selector}' not found`);
-        return null;
-    }
-    return element;
-}
-function fixAllImagesOnLoad() {
-    console.log('Scanning for broken images...');
-    document.querySelectorAll('img').forEach(img => {
-        // Skip if already handled or has valid src
-        if (img.classList.contains('error-handled') || 
-            img.src.startsWith('data:') ||
-            (img.src && img.src.startsWith('http') && !img.src.includes('IMAGE_URL') && !img.src.includes('127.0.0.1'))) {
-            return;
-        }
-        
-        // Skip empty preview images (they're meant to be empty)
-        if ((img.src === '' || !img.src) && 
-            (img.alt.includes('preview') || img.alt.includes('Preview') || 
-             img.classList.contains('hidden') || img.id.includes('preview'))) {
-            console.log('Skipping empty preview image:', img.alt || img.id);
-            return;
-        }
-        
-        // Fix problematic images
-        if (!img.src || 
-            img.src.includes('IMAGE_URL') || 
-            img.src.includes('127.0.0.1') ||
-            img.src.includes('chat.html') ||
-            !img.src.startsWith('http')) {
+    
+    showToast('Summarizing conversation...', 'info');
+    
+    // Get recent messages for summarization
+    firebase.firestore().collection('chats').doc(currentChatId).collection('messages')
+        .orderBy('timestamp', 'desc')
+        .limit(50)
+        .get()
+        .then((snapshot) => {
+            const messages = [];
+            snapshot.forEach(doc => {
+                const message = doc.data();
+                if (message.text && message.type !== 'system') {
+                    messages.push({
+                        text: message.text,
+                        sender: message.senderId === currentUser.uid ? 'You' : 'Them',
+                        time: message.timestamp?.toDate().toLocaleTimeString() || ''
+                    });
+                }
+            });
             
-            const userName = img.alt || 'User';
-            console.log('Fixing image:', img.src, '->', userName);
-            img.src = `https://ui-avatars.com/api/?name=${encodeURIComponent(userName)}&background=7C3AED&color=fff`;
-            img.classList.add('error-handled');
+            if (messages.length === 0) {
+                showToast('No messages to summarize', 'warning');
+                return;
+            }
+            
+            // Reverse to get chronological order
+            messages.reverse();
+            
+            // Generate summary using AI (you can replace this with actual AI API)
+            const summary = generateConversationSummary(messages);
+            
+            // Show summary in a modal or directly in chat
+            showAISummaryModal(summary, messages.length);
+            
+        }).catch(error => {
+            console.error('Error summarizing conversation:', error);
+            showToast('Error summarizing conversation', 'error');
+        });
+});
+
+// Generate conversation summary
+function generateConversationSummary(messages) {
+    // This is a simple rule-based summary - replace with actual AI API call
+    const totalMessages = messages.length;
+    const yourMessages = messages.filter(m => m.sender === 'You').length;
+    const theirMessages = messages.filter(m => m.sender === 'Them').length;
+    
+    // Extract key topics (simple keyword extraction)
+    const allText = messages.map(m => m.text).join(' ').toLowerCase();
+    const commonWords = ['hello', 'hi', 'hey', 'ok', 'yes', 'no', 'thanks', 'thank you'];
+    const words = allText.split(/\s+/).filter(word => 
+        word.length > 3 && !commonWords.includes(word)
+    );
+    
+    // Count word frequency
+    const wordCount = {};
+    words.forEach(word => {
+        wordCount[word] = (wordCount[word] || 0) + 1;
+    });
+    
+    // Get top 3 topics
+    const topics = Object.entries(wordCount)
+        .sort((a, b) => b[1] - a[1])
+        .slice(0, 3)
+        .map(([word]) => word);
+    
+    // Generate summary
+    const summary = `
+        🤖 **Conversation Summary**
+        
+        📊 **Statistics:**
+        • Total messages: ${totalMessages}
+        • Your messages: ${yourMessages}
+        • Their messages: ${theirMessages}
+        
+        🔍 **Key Topics:**
+        ${topics.map(topic => `• ${topic}`).join('\n')}
+        
+        💬 **Recent Activity:**
+        ${messages.slice(-3).map(m => `• ${m.sender}: "${m.text.substring(0, 50)}${m.text.length > 50 ? '...' : ''}"`).join('\n')}
+    `;
+    
+    return summary;
+}
+
+// FIXED: Load Privacy Settings
+function loadPrivacySettings() {
+    if (!currentUser) return;
+    
+    // Load current privacy settings
+    const privacySettings = currentUserData.privacySettings || userSettings.privacy;
+    
+    // Set form values
+    const lastSeenPrivacy = document.getElementById("lastSeenPrivacy");
+    const profilePhotoPrivacy = document.getElementById("profilePhotoPrivacy");
+    const aboutPrivacy = document.getElementById("aboutPrivacy");
+    const statusPrivacy = document.getElementById("statusPrivacy");
+    const readReceiptsPrivacy = document.getElementById("readReceiptsPrivacy");
+    const disappearingMessagesPrivacy = document.getElementById("disappearingMessagesPrivacy");
+    const callsPrivacy = document.getElementById("callsPrivacy");
+    
+    if (lastSeenPrivacy) lastSeenPrivacy.value = privacySettings.lastSeen || 'everyone';
+    if (profilePhotoPrivacy) profilePhotoPrivacy.value = privacySettings.profilePhoto || 'everyone';
+    if (aboutPrivacy) aboutPrivacy.value = privacySettings.about || 'everyone';
+    if (statusPrivacy) statusPrivacy.value = privacySettings.status || 'everyone';
+    if (readReceiptsPrivacy) readReceiptsPrivacy.checked = privacySettings.readReceipts !== false;
+    if (disappearingMessagesPrivacy) disappearingMessagesPrivacy.value = privacySettings.disappearingMessages || 'off';
+    if (callsPrivacy) callsPrivacy.value = privacySettings.calls || 'everyone';
+}
+
+// Call this when privacy modal opens
+document.getElementById("privacySettingsBtn")?.addEventListener("click", () => {
+    document.getElementById("privacySettingsModal").classList.remove("hidden");
+    loadPrivacySettings();
+});
+
+// FIXED: Security Settings Implementation
+function loadSecuritySettings() {
+    if (!currentUser) return;
+    
+    const securitySettings = currentUserData.securitySettings || userSettings.security;
+    
+    // Set security toggles
+    const securityNotifications = document.getElementById("securityNotifications");
+    const passkeyToggle = document.getElementById("passkeyToggle");
+    const twoStepVerification = document.getElementById("twoStepVerification");
+    
+    if (securityNotifications) securityNotifications.checked = securitySettings.notifications !== false;
+    if (passkeyToggle) passkeyToggle.checked = securitySettings.passkeys || false;
+    if (twoStepVerification) twoStepVerification.checked = securitySettings.twoStepVerification || false;
+}
+
+// Security settings event listeners
+document.getElementById("securitySettingsBtn")?.addEventListener("click", () => {
+    // Since you mentioned security is under account settings, open that modal
+    document.getElementById("accountSettingsModal").classList.remove("hidden");
+    loadSecuritySettings();
+});
+
+// Business platform
+document.getElementById("businessPlatformBtn")?.addEventListener("click", () => {
+    showToast("Opening business platform...", "info");
+    // Implement business platform logic here
+});
+
+// Change number
+document.getElementById("changeNumberBtn")?.addEventListener("click", () => {
+    const newNumber = prompt("Enter your new phone number:");
+    if (newNumber) {
+        // Validate and update number
+        updatePhoneNumber(newNumber);
+    }
+});
+
+// Request account info
+document.getElementById("requestAccountInfoBtn")?.addEventListener("click", () => {
+    if (confirm("This will generate a report of your account data. Continue?")) {
+        requestAccountInfo();
+    }
+});
+
+// Delete account
+document.getElementById("deleteAccountBtn")?.addEventListener("click", () => {
+    if (confirm("Are you sure you want to delete your account? This action cannot be undone.")) {
+        if (confirm("This will permanently delete all your data. Type DELETE to confirm:")) {
+            deleteAccount();
+        }
+    }
+});
+
+// Implement the security functions
+async function updatePhoneNumber(newNumber) {
+    try {
+        // Update in Firebase Auth
+        await currentUser.updatePhoneNumber(newNumber);
+        
+        // Update in Firestore
+        await db.collection('users').doc(currentUser.uid).update({
+            phone: newNumber,
+            updatedAt: firebase.firestore.FieldValue.serverTimestamp()
+        });
+        
+        showToast("Phone number updated successfully", "success");
+    } catch (error) {
+        console.error("Error updating phone number:", error);
+        showToast("Error updating phone number", "error");
+    }
+}
+
+async function requestAccountInfo() {
+    try {
+        showToast("Generating account report...", "info");
+        
+        // This would typically be a server-side function
+        // For demo, we'll create a simple client-side report
+        const userData = await db.collection('users').doc(currentUser.uid).get();
+        const userMessages = await db.collection('messages')
+            .where('senderId', '==', currentUser.uid)
+            .limit(1000)
+            .get();
+            
+        const report = {
+            user: userData.data(),
+            messageCount: userMessages.size,
+            generatedAt: new Date().toISOString()
+        };
+        
+        // Download as JSON file
+        downloadJSON(report, 'kynecta_account_data.json');
+        showToast("Account report downloaded", "success");
+        
+    } catch (error) {
+        console.error("Error generating account report:", error);
+        showToast("Error generating account report", "error");
+    }
+}
+
+function downloadJSON(data, filename) {
+    const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = filename;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+}
+
+async function deleteAccount() {
+    try {
+        showToast("Deleting account...", "info");
+        
+        // Delete user data from Firestore
+        await db.collection('users').doc(currentUser.uid).delete();
+        
+        // Delete user's messages
+        const userMessages = await db.collection('messages')
+            .where('senderId', '==', currentUser.uid)
+            .get();
+            
+        const batch = db.batch();
+        userMessages.forEach(doc => {
+            batch.delete(doc.ref);
+        });
+        await batch.commit();
+        
+        // Delete user account from Firebase Auth
+        await currentUser.delete();
+        
+        showToast("Account deleted successfully", "success");
+        window.location.href = 'index.html';
+        
+    } catch (error) {
+        console.error("Error deleting account:", error);
+        showToast("Error deleting account: " + error.message, "error");
+    }
+}
+
+// COMPLETE: Setup all invite functionality
+function setupAllInviteFeatures() {
+    console.log("Setting up invite features...");
+    
+    // Check if buttons exist
+    const buttons = {
+        whatsapp: document.getElementById("shareWhatsapp"),
+        facebook: document.getElementById("shareFacebook"),
+        email: document.getElementById("shareEmail"),
+        qr: document.getElementById("shareQR"),
+        copy: document.getElementById("copyInviteLink"),
+        sms: document.getElementById("shareSMS")
+    };
+    
+    console.log("Found buttons:", buttons);
+    
+    // Setup each feature
+    setupWhatsAppShare();
+    setupCopyLink();
+    setupSMSShare();
+    
+    // Setup other features
+    setupQRCode();
+    setupFacebookShare();
+    setupEmailShare();
+}
+
+// Add these to your existing setup
+function setupQRCode() {
+    document.getElementById("shareQR")?.addEventListener("click", generateQRCode);
+}
+
+function setupFacebookShare() {
+    document.getElementById("shareFacebook")?.addEventListener("click", function() {
+        const url = `https://www.facebook.com/sharer/sharer.php?u=${encodeURIComponent('https://kynecta.com')}`;
+        window.open(url, '_blank', 'width=600,height=400');
+    });
+}
+
+function setupEmailShare() {
+    document.getElementById("shareEmail")?.addEventListener("click", function() {
+        const subject = "Join me on Kynecta!";
+        const body = "I'm using Kynecta to chat and connect. Download the app so we can chat there!\n\nDownload: https://kynecta.com";
+        window.location.href = `mailto:?subject=${encodeURIComponent(subject)}&body=${encodeURIComponent(body)}`;
+    });
+}
+
+// MOOD SYSTEM FUNCTIONS
+function updateUserMood(mood) {
+    userMood = mood;
+    
+    // Update in Firestore
+    if (currentUser) {
+        db.collection('users').doc(currentUser.uid).update({
+            mood: mood,
+            updatedAt: firebase.firestore.FieldValue.serverTimestamp()
+        }).then(() => {
+            showToast(`Mood updated to: ${mood} ${moodThemes[mood]?.icon || '😊'}`, "success");
+            updateMoodUI(mood);
+            
+            // Apply mood theme to current chat if open
+            if (currentChat) {
+                applyMoodThemeToChat();
+            }
+        }).catch(error => {
+            console.error('Error updating mood:', error);
+            showToast('Error updating mood', 'error');
+        });
+    }
+}
+
+function updateMoodUI(mood) {
+    const moodTheme = moodThemes[mood] || moodThemes.happy;
+    
+    // Update current mood button
+    const currentMoodBtn = document.getElementById('currentMoodBtn');
+    if (currentMoodBtn) {
+        currentMoodBtn.innerHTML = `<i class="fas fa-smile"></i> ${moodTheme.icon} ${mood}`;
+        currentMoodBtn.style.backgroundColor = moodTheme.bg;
+        currentMoodBtn.style.color = moodTheme.color;
+        currentMoodBtn.style.borderColor = moodTheme.color;
+    }
+    
+    // Update mood in user profile
+    const userProfileMood = document.getElementById('userProfileMood');
+    if (userProfileMood) {
+        userProfileMood.innerHTML = `
+            <span style="color: ${moodTheme.color}; background-color: ${moodTheme.bg}; padding: 4px 8px; border-radius: 12px; border: 1px solid ${moodTheme.color};">
+                ${moodTheme.icon} ${mood}
+            </span>
+        `;
+    }
+}
+
+function renderUserSelections(selections) {
+    // Add mood indicator to chat header
+    const chatHeader = document.querySelector('.chat-header');
+    if (chatHeader && selections.moods.length > 0) {
+        // Remove existing mood indicator if any
+        const existingMoodIndicator = chatHeader.querySelector('.chat-mood-indicator');
+        if (existingMoodIndicator) {
+            existingMoodIndicator.remove();
+        }
+        
+        const mood = selections.moods[0];
+        const moodTheme = moodThemes[mood] || moodThemes.happy;
+        
+        const moodIndicator = document.createElement('div');
+        moodIndicator.className = 'chat-mood-indicator';
+        moodIndicator.innerHTML = `${moodTheme.icon} ${mood}`;
+        moodIndicator.style.color = moodTheme.color;
+        moodIndicator.style.backgroundColor = moodTheme.bg;
+        moodIndicator.style.borderColor = moodTheme.color;
+        moodIndicator.style.padding = '4px 8px';
+        moodIndicator.style.borderRadius = '12px';
+        moodIndicator.style.fontSize = '12px';
+        moodIndicator.style.marginLeft = '8px';
+        moodIndicator.style.border = '1px solid';
+        
+        chatHeader.appendChild(moodIndicator);
+    }
+    
+    // Color code messages by mood
+    applyMoodColorsToMessages(selections.moods[0]);
+}
+
+function applyMoodColorsToMessages(mood) {
+    const moodTheme = moodThemes[mood] || moodThemes.happy;
+    
+    // Apply to existing messages
+    const messageContainers = document.querySelectorAll('.message-container');
+    messageContainers.forEach(container => {
+        if (container.classList.contains('sent')) {
+            container.style.borderLeft = `3px solid ${moodTheme.color}`;
+            container.style.backgroundColor = `${moodTheme.bg}20`; // 20 = 12.5% opacity
         }
     });
 }
+
+function applyMoodThemeToChat() {
+    if (!currentChat || !userMood) return;
+    
+    const moodTheme = moodThemes[userMood] || moodThemes.happy;
+    
+    // Apply to chat header
+    const chatHeader = document.getElementById('chatHeader');
+    if (chatHeader) {
+        chatHeader.style.borderBottom = `2px solid ${moodTheme.color}`;
+    }
+    
+    // Apply to input area
+    const inputArea = document.getElementById('inputArea');
+    if (inputArea) {
+        inputArea.style.borderTop = `2px solid ${moodTheme.color}`;
+    }
+    
+    // Apply subtle background to messages container
+    const messagesContainer = document.getElementById('messagesContainer');
+    if (messagesContainer) {
+        messagesContainer.style.backgroundColor = `${moodTheme.bg}10`; // 10 = 6.25% opacity
+    }
+    
+    // Display user mood in chat header
+    const chatTitle = document.getElementById('chatTitle');
+    if (chatTitle) {
+        // Check if mood indicator already exists
+        let moodIndicator = chatTitle.parentElement.querySelector('.chat-mood-indicator');
+        if (!moodIndicator) {
+            moodIndicator = document.createElement('span');
+            moodIndicator.className = 'chat-mood-indicator ml-2';
+            chatTitle.parentElement.appendChild(moodIndicator);
+        }
+        moodIndicator.innerHTML = `${moodTheme.icon} ${userMood}`;
+        moodIndicator.style.color = moodTheme.color;
+        moodIndicator.style.backgroundColor = moodTheme.bg;
+        moodIndicator.style.borderColor = moodTheme.color;
+        moodIndicator.style.padding = '2px 6px';
+        moodIndicator.style.borderRadius = '8px';
+        moodIndicator.style.fontSize = '10px';
+        moodIndicator.style.border = '1px solid';
+    }
+}
+
+function filterChatListByMood(mood) {
+    if (!mood || mood === 'all') {
+        loadChatsTemporary();
+        return;
+    }
+    
+    // Filter chats based on friend's mood
+    const filteredFriends = friends.filter(friend => 
+        friend.mood === mood
+    );
+    
+    // Show only chats with friends who have this mood
+    const chatList = document.getElementById('chatList');
+    if (!chatList) return;
+    
+    // We need to reload chats with filtered friends
+    // This is a simplified version - you might need to adjust based on your chat structure
+    showToast(`Showing chats with ${mood} friends`, 'info');
+    
+    // For now, just highlight friends with matching mood
+    document.querySelectorAll('.contact-item').forEach(item => {
+        const friendId = item.dataset.otherUserId;
+        const friend = friends.find(f => f.id === friendId);
+        if (friend && friend.mood === mood) {
+            item.style.backgroundColor = `${moodThemes[mood].bg}30`;
+            item.style.borderLeft = `3px solid ${moodThemes[mood].color}`;
+        } else {
+            item.style.backgroundColor = '';
+            item.style.borderLeft = '';
+        }
+    });
+}
+
+// Update the mood selection event listeners
+document.querySelectorAll(".mood-option").forEach(option => {
+    option.addEventListener("click", () => {
+        let selectedMood = option.dataset.mood;
+        updateUserMood(selectedMood);
+        document.getElementById("moodModal").classList.add("hidden");
+        
+        // Apply the mood theme to current chat
+        renderUserSelections({ moods: [selectedMood] });
+    });
+});
+
+console.log('Chat application JavaScript loaded successfully with mood features');

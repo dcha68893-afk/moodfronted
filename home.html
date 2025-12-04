@@ -17,6 +17,8 @@
     <script src="https://www.gstatic.com/firebasejs/9.22.1/firebase-auth-compat.js"></script>
     <script src="https://www.gstatic.com/firebasejs/9.22.1/firebase-storage-compat.js"></script>
     
+    <script src="user-data.js"></script>
+<script src="display-user-selections.js"></script>
     <!-- Cloudinary -->
     <script src="https://upload-widget.cloudinary.com/global/all.js"></script>
     
@@ -1109,6 +1111,171 @@
             background: var(--glass-bg);
         }
 
+        /* NEW: Mood Filter Dropdown Styles */
+        .mood-filter-dropdown {
+            position: relative;
+            margin-left: 10px;
+        }
+
+        .mood-filter-btn {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            padding: 8px 16px;
+            background: var(--glass-bg);
+            border: 1px solid var(--glass-border);
+            border-radius: 20px;
+            color: var(--text-primary);
+            cursor: pointer;
+            transition: all 0.2s ease;
+            font-size: 0.9rem;
+        }
+
+        .mood-filter-btn:hover {
+            background: var(--glass-border);
+        }
+
+        .mood-dropdown-menu {
+            position: absolute;
+            top: 100%;
+            left: 0;
+            right: 0;
+            background: var(--card-bg);
+            border-radius: 12px;
+            box-shadow: 0 10px 25px rgba(0, 0, 0, 0.3);
+            z-index: 100;
+            padding: 8px;
+            min-width: 200px;
+            margin-top: 5px;
+            opacity: 0;
+            visibility: hidden;
+            transform: translateY(-10px);
+            transition: all 0.3s ease;
+        }
+
+        .mood-dropdown-menu.active {
+            opacity: 1;
+            visibility: visible;
+            transform: translateY(0);
+        }
+
+        .mood-dropdown-item {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            padding: 10px 12px;
+            border-radius: 8px;
+            cursor: pointer;
+            transition: all 0.2s ease;
+            font-size: 0.9rem;
+        }
+
+        .mood-dropdown-item:hover {
+            background: var(--glass-bg);
+        }
+
+        .mood-dropdown-item.active {
+            background: var(--accent-color);
+            color: white;
+        }
+
+        /* NEW: Interest Tabs Styles */
+        .interest-tabs {
+            display: flex;
+            gap: 10px;
+            padding: 10px 0;
+            overflow-x: auto;
+            scrollbar-width: none;
+        }
+
+        .interest-tabs::-webkit-scrollbar {
+            display: none;
+        }
+
+        .interest-tab {
+            padding: 8px 16px;
+            background: var(--glass-bg);
+            border-radius: 20px;
+            cursor: pointer;
+            transition: all 0.2s ease;
+            font-size: 0.85rem;
+            white-space: nowrap;
+        }
+
+        .interest-tab:hover {
+            background: var(--glass-border);
+        }
+
+        .interest-tab.active {
+            background: var(--accent-color);
+            color: white;
+        }
+
+        /* NEW: Mood Recommendations Section */
+        .mood-recommendations {
+            background: var(--card-bg);
+            border-radius: 16px;
+            padding: 20px;
+            margin-bottom: 20px;
+        }
+
+        .mood-recommendation-item {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            padding: 12px;
+            border-radius: 12px;
+            margin-bottom: 10px;
+            background: var(--glass-bg);
+            cursor: pointer;
+            transition: all 0.2s ease;
+        }
+
+        .mood-recommendation-item:hover {
+            transform: translateX(5px);
+            background: var(--glass-border);
+        }
+
+        .mood-recommendation-emoji {
+            font-size: 1.5rem;
+        }
+
+        .mood-recommendation-content {
+            flex: 1;
+        }
+
+        .mood-recommendation-title {
+            font-weight: bold;
+            color: var(--text-primary);
+            margin-bottom: 4px;
+        }
+
+        .mood-recommendation-desc {
+            font-size: 0.8rem;
+            color: var(--text-secondary);
+        }
+
+        /* NEW: Mood Badge Styles */
+        .mood-badge {
+            display: flex;
+            align-items: center;
+            gap: 6px;
+            padding: 6px 12px;
+            background: var(--glass-bg);
+            border-radius: 20px;
+            font-size: 0.85rem;
+            cursor: pointer;
+            transition: all 0.2s ease;
+        }
+
+        .mood-badge:hover {
+            background: var(--glass-border);
+        }
+
+        .mood-badge-emoji {
+            font-size: 1rem;
+        }
+
         /* Mobile Responsiveness */
         @media (max-width: 768px) {
             .masonry-grid {
@@ -1212,6 +1379,37 @@
                 margin-bottom: 0;
                 border-radius: 12px 12px 0 0;
             }
+
+            /* NEW: Mood filter dropdown mobile */
+            .mood-filter-dropdown {
+                margin-left: 5px;
+            }
+            
+            .mood-filter-btn {
+                padding: 6px 12px;
+                font-size: 0.8rem;
+            }
+            
+            .mood-dropdown-menu {
+                position: fixed;
+                top: auto;
+                bottom: 0;
+                left: 0;
+                right: 0;
+                border-radius: 12px 12px 0 0;
+                max-height: 50vh;
+                overflow-y: auto;
+            }
+
+            /* NEW: Interest tabs mobile */
+            .interest-tabs {
+                padding: 8px 0;
+            }
+            
+            .interest-tab {
+                padding: 6px 12px;
+                font-size: 0.8rem;
+            }
         }
 
         @media (max-width: 480px) {
@@ -1251,6 +1449,12 @@
                 width: 80px;
                 height: 80px;
                 margin-top: -40px;
+            }
+
+            /* NEW: Mood badge mobile */
+            .mood-badge {
+                padding: 4px 8px;
+                font-size: 0.75rem;
             }
         }
         
@@ -1474,6 +1678,47 @@
                         </div>
                     </div>
                     <div class="flex items-center space-x-4 ml-4">
+                        <!-- Mood Filter Dropdown in Header -->
+                        <div class="mood-filter-dropdown hidden lg:block">
+                            <button class="mood-filter-btn" id="moodFilterBtn">
+                                <i class="fas fa-filter"></i>
+                                <span>Filter Mood</span>
+                                <i class="fas fa-chevron-down"></i>
+                            </button>
+                            <div class="mood-dropdown-menu" id="moodDropdown">
+                                <div class="mood-dropdown-item" data-mood="all">
+                                    <span>😊</span>
+                                    <span>All Moods</span>
+                                </div>
+                                <div class="mood-dropdown-item" data-mood="happy">
+                                    <span>😄</span>
+                                    <span>Happy</span>
+                                </div>
+                                <div class="mood-dropdown-item" data-mood="creative">
+                                    <span>🎨</span>
+                                    <span>Creative</span>
+                                </div>
+                                <div class="mood-dropdown-item" data-mood="motivated">
+                                    <span>💪</span>
+                                    <span>Motivated</span>
+                                </div>
+                                <div class="mood-dropdown-item" data-mood="calm">
+                                    <span>😌</span>
+                                    <span>Calm</span>
+                                </div>
+                                <div class="mood-dropdown-item" data-mood="reflective">
+                                    <span>🤔</span>
+                                    <span>Reflective</span>
+                                </div>
+                            </div>
+                        </div>
+                        
+                        <!-- Current Mood Badge in Header -->
+                        <div class="mood-badge hidden lg:flex" id="currentMoodBadge">
+                            <span class="mood-badge-emoji" id="currentMoodEmoji">😊</span>
+                            <span id="currentMoodText">Happy</span>
+                        </div>
+                        
                         <button id="themeToggle" class="w-10 h-10 glass rounded-2xl flex items-center justify-center text-theme-secondary hover:text-theme-accent hover:scale-110 transition">
                             <i class="fas fa-palette"></i>
                         </button>
@@ -1483,12 +1728,40 @@
                         </button>
                     </div>
                 </div>
+                
+                <!-- Interest Tabs -->
+                <div class="interest-tabs mt-4" id="interestTabs">
+                    <div class="interest-tab active" data-interest="all">All</div>
+                    <div class="interest-tab" data-interest="technology">Technology</div>
+                    <div class="interest-tab" data-interest="sports">Sports</div>
+                    <div class="interest-tab" data-interest="music">Music</div>
+                    <div class="interest-tab" data-interest="art">Art</div>
+                    <div class="interest-tab" data-interest="travel">Travel</div>
+                    <div class="interest-tab" data-interest="food">Food</div>
+                    <div class="interest-tab" data-interest="gaming">Gaming</div>
+                    <div class="interest-tab" data-interest="fitness">Fitness</div>
+                    <div class="interest-tab" data-interest="fashion">Fashion</div>
+                </div>
             </header>
 
             <!-- Stories Section -->
             <div class="glass border-b border-purple-800 p-4">
                 <div class="flex space-x-6 overflow-x-auto scrollbar-hide pb-2" id="storiesContainer">
                     <!-- Stories will be loaded dynamically -->
+                </div>
+            </div>
+
+            <!-- Mood-based Content Recommendations -->
+            <div class="mood-recommendations glass border-b border-purple-800" id="moodRecommendations">
+                <div class="flex items-center justify-between mb-4">
+                    <h3 class="font-bold text-theme-accent flex items-center">
+                        <i class="fas fa-lightbulb mr-2"></i>
+                        Mood-Based Recommendations
+                    </h3>
+                    <span class="text-xs text-theme-secondary">Based on your current mood</span>
+                </div>
+                <div id="moodRecommendationsContent">
+                    <!-- Mood recommendations will be loaded dynamically -->
                 </div>
             </div>
 
@@ -1651,6 +1924,39 @@
         <!-- Right Sidebar -->
         <div id="rightSidebar" class="hidden lg:block w-80 glass border-l border-purple-800 overflow-y-auto custom-scrollbar">
             <div class="p-4 md:p-6">
+                <!-- Mood Filter Dropdown in Sidebar -->
+                <div class="glass border border-purple-700 rounded-2xl p-4 mb-6">
+                    <h3 class="font-bold text-theme-accent mb-4 flex items-center">
+                        <i class="fas fa-filter mr-2"></i> Filter by Mood
+                    </h3>
+                    <div class="mood-dropdown-menu" id="sidebarMoodDropdown">
+                        <div class="mood-dropdown-item active" data-mood="all">
+                            <span>😊</span>
+                            <span>All Moods</span>
+                        </div>
+                        <div class="mood-dropdown-item" data-mood="happy">
+                            <span>😄</span>
+                            <span>Happy</span>
+                        </div>
+                        <div class="mood-dropdown-item" data-mood="creative">
+                            <span>🎨</span>
+                            <span>Creative</span>
+                        </div>
+                        <div class="mood-dropdown-item" data-mood="motivated">
+                            <span>💪</span>
+                            <span>Motivated</span>
+                        </div>
+                        <div class="mood-dropdown-item" data-mood="calm">
+                            <span>😌</span>
+                            <span>Calm</span>
+                        </div>
+                        <div class="mood-dropdown-item" data-mood="reflective">
+                            <span>🤔</span>
+                            <span>Reflective</span>
+                        </div>
+                    </div>
+                </div>
+
                 <!-- User Profile Card -->
                 <div class="glass border border-purple-700 rounded-2xl p-4 mb-6">
                     <div class="flex items-center space-x-3 mb-4">
@@ -2013,6 +2319,11 @@
         let profilePictureFile = null;
         let coverPhotoFile = null;
 
+        // NEW: Mood System Variables
+        let userCurrentMood = 'happy';
+        let moodRecommendations = [];
+        let interestFilters = [];
+
         // DOM Elements
         const connectionStatus = document.getElementById('connectionStatus');
         const connectionText = document.getElementById('connectionText');
@@ -2141,6 +2452,17 @@
         const sidebar = document.getElementById('sidebar');
         const rightSidebar = document.getElementById('rightSidebar');
 
+        // NEW: Mood System Elements
+        const moodFilterBtn = document.getElementById('moodFilterBtn');
+        const moodDropdown = document.getElementById('moodDropdown');
+        const sidebarMoodDropdown = document.getElementById('sidebarMoodDropdown');
+        const currentMoodBadge = document.getElementById('currentMoodBadge');
+        const currentMoodEmoji = document.getElementById('currentMoodEmoji');
+        const currentMoodText = document.getElementById('currentMoodText');
+        const interestTabs = document.getElementById('interestTabs');
+        const moodRecommendationsSection = document.getElementById('moodRecommendations');
+        const moodRecommendationsContent = document.getElementById('moodRecommendationsContent');
+
         // Initialize the application
         function init() {
             // Set up Firebase authentication state observer
@@ -2164,6 +2486,9 @@
                         loadEvents();
                         loadReels();
                         loadSavedPosts();
+                        
+                        // NEW: Initialize mood system
+                        initializeMoodSystem();
                         
                         // Initialize new features
                         initializeNewFeatures();
@@ -2190,6 +2515,326 @@
             
             // Set up connection monitoring
             setupConnectionMonitoring();
+        }
+
+        // NEW: Initialize mood system
+        function initializeMoodSystem() {
+            // Load user's current mood from Firebase
+            loadUserMood();
+            
+            // Initialize mood filter dropdowns
+            initializeMoodFilterDropdowns();
+            
+            // Initialize interest tabs
+            initializeInterestTabs();
+            
+            // Load mood-based recommendations
+            loadMoodRecommendations();
+            
+            // Update mood badge display
+            updateMoodBadgeDisplay();
+        }
+
+        // NEW: Initialize mood filter dropdowns
+        function initializeMoodFilterDropdowns() {
+            // Header mood dropdown
+            if (moodFilterBtn) {
+                moodFilterBtn.addEventListener('click', toggleMoodDropdown);
+            }
+            
+            // Close dropdown when clicking outside
+            document.addEventListener('click', function(event) {
+                if (moodDropdown && !moodFilterBtn.contains(event.target) && !moodDropdown.contains(event.target)) {
+                    moodDropdown.classList.remove('active');
+                }
+            });
+            
+            // Set up mood dropdown items
+            const moodDropdownItems = document.querySelectorAll('.mood-dropdown-item');
+            moodDropdownItems.forEach(item => {
+                item.addEventListener('click', function() {
+                    const mood = this.dataset.mood;
+                    
+                    // Update all mood dropdowns
+                    document.querySelectorAll('.mood-dropdown-item').forEach(i => {
+                        i.classList.remove('active');
+                    });
+                    this.classList.add('active');
+                    
+                    // Update mood options
+                    document.querySelectorAll('.mood-option').forEach(option => {
+                        option.classList.remove('active');
+                        if (option.dataset.mood === mood) {
+                            option.classList.add('active');
+                        }
+                        if (mood === 'all' && option.dataset.mood === 'all') {
+                            option.classList.add('active');
+                        }
+                    });
+                    
+                    // Set current mood filter
+                    currentMoodFilter = mood;
+                    
+                    // Update user's current mood if not "all"
+                    if (mood !== 'all') {
+                        userCurrentMood = mood;
+                        updateUserMoodInFirebase(mood);
+                        updateMoodBadgeDisplay();
+                        loadMoodRecommendations();
+                    }
+                    
+                    // Reload posts with new filter
+                    reloadPosts();
+                    
+                    // Close dropdown
+                    moodDropdown.classList.remove('active');
+                });
+            });
+        }
+
+        // NEW: Initialize interest tabs
+        function initializeInterestTabs() {
+            const interestTabItems = document.querySelectorAll('.interest-tab');
+            interestTabItems.forEach(tab => {
+                tab.addEventListener('click', function() {
+                    // Remove active class from all tabs
+                    interestTabItems.forEach(t => t.classList.remove('active'));
+                    
+                    // Add active class to clicked tab
+                    this.classList.add('active');
+                    
+                    // Get interest filter
+                    const interest = this.dataset.interest;
+                    
+                    // Set current interest filter
+                    if (interest === 'all') {
+                        currentInterestFilter = null;
+                    } else {
+                        currentInterestFilter = interest;
+                    }
+                    
+                    // Reload posts with interest filter
+                    reloadPosts();
+                    
+                    // Update interest filter button
+                    if (interestFilterBtn && interest !== 'all') {
+                        interestFilterBtn.innerHTML = `<i class="fas fa-tags mr-1"></i> ${this.textContent}`;
+                    }
+                });
+            });
+        }
+
+        // NEW: Load user's mood from Firebase
+        function loadUserMood() {
+            if (!currentUser) return;
+            
+            db.collection('users').doc(currentUser.uid).get()
+                .then(doc => {
+                    if (doc.exists && doc.data().currentMood) {
+                        userCurrentMood = doc.data().currentMood;
+                        updateMoodBadgeDisplay();
+                        
+                        // Update mood dropdown selection
+                        updateMoodDropdownSelection();
+                    }
+                })
+                .catch(error => {
+                    console.error('Error loading user mood:', error);
+                });
+        }
+
+        // NEW: Update user's mood in Firebase
+        function updateUserMoodInFirebase(mood) {
+            if (!currentUser) return;
+            
+            db.collection('users').doc(currentUser.uid).update({
+                currentMood: mood,
+                lastMoodUpdate: firebase.firestore.FieldValue.serverTimestamp()
+            })
+            .then(() => {
+                console.log('User mood updated to:', mood);
+            })
+            .catch(error => {
+                console.error('Error updating user mood:', error);
+            });
+        }
+
+        // NEW: Update mood dropdown selection
+        function updateMoodDropdownSelection() {
+            const moodDropdownItems = document.querySelectorAll('.mood-dropdown-item');
+            moodDropdownItems.forEach(item => {
+                item.classList.remove('active');
+                if (item.dataset.mood === userCurrentMood) {
+                    item.classList.add('active');
+                }
+                if (userCurrentMood === 'all' && item.dataset.mood === 'all') {
+                    item.classList.add('active');
+                }
+            });
+            
+            // Update mood options
+            document.querySelectorAll('.mood-option').forEach(option => {
+                option.classList.remove('active');
+                if (option.dataset.mood === userCurrentMood) {
+                    option.classList.add('active');
+                }
+                if (userCurrentMood === 'all' && option.dataset.mood === 'all') {
+                    option.classList.add('active');
+                }
+            });
+        }
+
+        // NEW: Update mood badge display
+        function updateMoodBadgeDisplay() {
+            if (!currentMoodBadge || !currentMoodEmoji || !currentMoodText) return;
+            
+            const moodConfig = {
+                happy: { emoji: '😄', text: 'Happy' },
+                creative: { emoji: '🎨', text: 'Creative' },
+                motivated: { emoji: '💪', text: 'Motivated' },
+                calm: { emoji: '😌', text: 'Calm' },
+                reflective: { emoji: '🤔', text: 'Reflective' },
+                joy: { emoji: '😄', text: 'Joyful' },
+                love: { emoji: '❤️', text: 'Loving' },
+                excited: { emoji: '🤩', text: 'Excited' },
+                sad: { emoji: '😢', text: 'Sad' },
+                angry: { emoji: '😠', text: 'Angry' }
+            };
+            
+            const config = moodConfig[userCurrentMood] || { emoji: '😊', text: 'Happy' };
+            
+            currentMoodEmoji.textContent = config.emoji;
+            currentMoodText.textContent = config.text;
+        }
+
+        // NEW: Load mood-based recommendations
+        function loadMoodRecommendations() {
+            if (!moodRecommendationsContent) return;
+            
+            // Clear existing recommendations
+            moodRecommendationsContent.innerHTML = '';
+            
+            // Define recommendations based on mood
+            const recommendations = getMoodRecommendations(userCurrentMood);
+            
+            if (recommendations.length === 0) {
+                moodRecommendationsSection.style.display = 'none';
+                return;
+            }
+            
+            // Display recommendations
+            moodRecommendationsSection.style.display = 'block';
+            
+            recommendations.forEach(rec => {
+                const item = document.createElement('div');
+                item.className = 'mood-recommendation-item';
+                item.innerHTML = `
+                    <div class="mood-recommendation-emoji">${rec.emoji}</div>
+                    <div class="mood-recommendation-content">
+                        <div class="mood-recommendation-title">${rec.title}</div>
+                        <div class="mood-recommendation-desc">${rec.description}</div>
+                    </div>
+                `;
+                
+                // Add click event
+                item.addEventListener('click', function() {
+                    handleMoodRecommendationClick(rec);
+                });
+                
+                moodRecommendationsContent.appendChild(item);
+            });
+        }
+
+        // NEW: Get mood-based recommendations
+        function getMoodRecommendations(mood) {
+            const recommendations = {
+                happy: [
+                    { emoji: '🎉', title: 'Share Your Joy', description: 'Create a post about what makes you happy today' },
+                    { emoji: '👥', title: 'Connect with Friends', description: 'Message someone you haven\'t talked to in a while' },
+                    { emoji: '🎵', title: 'Upbeat Playlist', description: 'Check out trending music that matches your vibe' }
+                ],
+                creative: [
+                    { emoji: '🎨', title: 'Art Inspiration', description: 'Explore creative posts from other artists' },
+                    { emoji: '✍️', title: 'Start a Project', description: 'Share your creative process with the community' },
+                    { emoji: '📸', title: 'Photo Challenge', description: 'Join the daily photography challenge' }
+                ],
+                motivated: [
+                    { emoji: '💪', title: 'Fitness Groups', description: 'Join a workout challenge with others' },
+                    { emoji: '📚', title: 'Learning Resources', description: 'Discover educational content and courses' },
+                    { emoji: '🎯', title: 'Goal Setting', description: 'Share your goals and track progress' }
+                ],
+                calm: [
+                    { emoji: '🌿', title: 'Mindfulness Space', description: 'Join our meditation and mindfulness group' },
+                    { emoji: '📖', title: 'Reading Corner', description: 'Discover relaxing books and articles' },
+                    { emoji: '🎶', title: 'Calm Music', description: 'Listen to soothing playlists' }
+                ],
+                reflective: [
+                    { emoji: '📝', title: 'Journal Prompt', description: 'Write about your thoughts and reflections' },
+                    { emoji: '🤔', title: 'Deep Questions', description: 'Join philosophical discussions' },
+                    { emoji: '📚', title: 'Thoughtful Reads', description: 'Explore articles that make you think' }
+                ],
+                sad: [
+                    { emoji: '🤗', title: 'Support Group', description: 'Connect with others who understand' },
+                    { emoji: '🎬', title: 'Comfort Movies', description: 'Watch feel-good films recommended by others' },
+                    { emoji: '💌', title: 'Reach Out', description: 'Talk to a friend who always cheers you up' }
+                ],
+                angry: [
+                    { emoji: '🥊', title: 'Channel Energy', description: 'Join a fitness or boxing group' },
+                    { emoji: '🎧', title: 'Music Therapy', description: 'Listen to music that matches your energy' },
+                    { emoji: '📝', title: 'Express Yourself', description: 'Write about what\'s bothering you' }
+                ]
+            };
+            
+            return recommendations[mood] || [
+                { emoji: '✨', title: 'Explore Feed', description: 'Discover new content based on your interests' },
+                { emoji: '👥', title: 'Make Connections', description: 'Find and connect with like-minded people' },
+                { emoji: '🎯', title: 'Set Goals', description: 'Share what you want to achieve this week' }
+            ];
+        }
+
+        // NEW: Handle mood recommendation click
+        function handleMoodRecommendationClick(recommendation) {
+            console.log('Mood recommendation clicked:', recommendation.title);
+            
+            // Different actions based on recommendation type
+            if (recommendation.title.includes('Share')) {
+                openCreatePostModal();
+                if (modalPostInput) {
+                    modalPostInput.value = `Feeling ${userCurrentMood} today! ${getMoodPrompt(userCurrentMood)}`;
+                    modalPostInput.focus();
+                }
+            } else if (recommendation.title.includes('Connect') || recommendation.title.includes('Message')) {
+                // Redirect to chat or open chat modal
+                showNotification('Opening connections...', 'info');
+            } else if (recommendation.title.includes('Join') || recommendation.title.includes('Group')) {
+                // Show groups or spaces
+                showNotification('Loading groups...', 'info');
+            } else if (recommendation.title.includes('Listen') || recommendation.title.includes('Music')) {
+                // Show music recommendations
+                showNotification('Playing recommendations...', 'info');
+            }
+        }
+
+        // NEW: Get mood prompt for post creation
+        function getMoodPrompt(mood) {
+            const prompts = {
+                happy: 'Today is amazing! 🌟',
+                creative: 'Feeling inspired! 🎨',
+                motivated: 'Ready to conquer the day! 💪',
+                calm: 'Finding peace in the moment. 😌',
+                reflective: 'Thinking deeply about life. 🤔',
+                sad: 'Having a tough day but staying strong. 💪',
+                angry: 'Channeling this energy positively. ⚡'
+            };
+            
+            return prompts[mood] || 'Sharing my thoughts! 💭';
+        }
+
+        // NEW: Toggle mood dropdown
+        function toggleMoodDropdown() {
+            if (moodDropdown) {
+                moodDropdown.classList.toggle('active');
+            }
         }
 
         // Initialize new features
@@ -2226,6 +2871,23 @@
                     moodOptions.forEach(opt => opt.classList.remove('active'));
                     this.classList.add('active');
                     currentMoodFilter = this.dataset.mood;
+                    
+                    // Update mood dropdowns
+                    document.querySelectorAll('.mood-dropdown-item').forEach(item => {
+                        item.classList.remove('active');
+                        if (item.dataset.mood === currentMoodFilter) {
+                            item.classList.add('active');
+                        }
+                    });
+                    
+                    // Update user's current mood if not "all"
+                    if (currentMoodFilter !== 'all') {
+                        userCurrentMood = currentMoodFilter;
+                        updateUserMoodInFirebase(userCurrentMood);
+                        updateMoodBadgeDisplay();
+                        loadMoodRecommendations();
+                    }
+                    
                     reloadPosts();
                 });
             });
@@ -2475,6 +3137,15 @@
                             toggleTheme();
                         }
                         break;
+                    case 'm':
+                    case 'M':
+                        if (e.ctrlKey || e.metaKey) {
+                            e.preventDefault();
+                            if (moodFilterBtn) {
+                                moodFilterBtn.click();
+                            }
+                        }
+                        break;
                     case 'Escape':
                         closeCreatePostModal();
                         closeCreateStoryModal();
@@ -2482,6 +3153,9 @@
                         closeCreateReelModal();
                         closeProfilePictureModalFunc();
                         closeCoverPhotoModalFunc();
+                        if (moodDropdown && moodDropdown.classList.contains('active')) {
+                            moodDropdown.classList.remove('active');
+                        }
                         break;
                 }
             });
@@ -2571,6 +3245,11 @@
                     // Update UI with user data
                     updateUserUI();
                     
+                    // Load user's current mood
+                    if (userData.currentMood) {
+                        userCurrentMood = userData.currentMood;
+                    }
+                    
                     return userData;
                 } else {
                     // Create user document if it doesn't exist
@@ -2599,6 +3278,8 @@
                 followingCount: 0,
                 energy: 0,
                 badges: ['newcomer'],
+                currentMood: 'happy',
+                interests: [],
                 createdAt: firebase.firestore.FieldValue.serverTimestamp(),
                 // Gamification data
                 streak: 0,
@@ -3644,8 +4325,12 @@
             
             // Apply mood-based filtering
             if (currentMoodFilter && currentMoodFilter !== 'all') {
-                // Filter by mood if posts have mood metadata
-                console.log('Filtering by mood:', currentMoodFilter);
+                query = query.where('mood', '==', currentMoodFilter);
+            }
+            
+            // Apply interest filtering
+            if (currentInterestFilter) {
+                query = query.where('hashtags', 'array-contains', currentInterestFilter);
             }
             
             // Set up real-time listener
@@ -4093,7 +4778,12 @@
             
             // Apply mood-based filtering
             if (currentMoodFilter && currentMoodFilter !== 'all') {
-                console.log('Filtering by mood:', currentMoodFilter);
+                query = query.where('mood', '==', currentMoodFilter);
+            }
+            
+            // Apply interest filtering
+            if (currentInterestFilter) {
+                query = query.where('hashtags', 'array-contains', currentInterestFilter);
             }
             
             query.get()

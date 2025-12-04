@@ -32,6 +32,286 @@ body {
   line-height: 1.5;
 }
 
+/* ===== MOOD & INTEREST SYSTEM - UNIVERSAL STYLES ===== */
+.mood-badge {
+    display: inline-flex;
+    align-items: center;
+    padding: 4px 12px;
+    border-radius: 20px;
+    font-size: 12px;
+    font-weight: 500;
+    margin: 2px;
+    border: none;
+    cursor: default;
+    transition: all 0.3s ease;
+    white-space: nowrap;
+}
+
+/* All 10 mood colors */
+.mood-calm { 
+    background: linear-gradient(135deg, #3B82F6, #8B5CF6); 
+    color: white; 
+}
+
+.mood-energetic { 
+    background: linear-gradient(135deg, #DC2626, #EA580C); 
+    color: white; 
+}
+
+.mood-focus { 
+    background: linear-gradient(135deg, #059669, #10B981); 
+    color: white; 
+}
+
+.mood-creative { 
+    background: linear-gradient(135deg, #7C3AED, #A78BFA); 
+    color: white; 
+}
+
+.mood-relaxed { 
+    background: linear-gradient(135deg, #0891B2, #06B6D4); 
+    color: white; 
+}
+
+.mood-social { 
+    background: linear-gradient(135deg, #DB2777, #EC4899); 
+    color: white; 
+}
+
+.mood-learning { 
+    background: linear-gradient(135deg, #9333EA, #A855F7); 
+    color: white; 
+}
+
+.mood-work { 
+    background: linear-gradient(135deg, #1E40AF, #3B82F6); 
+    color: white; 
+}
+
+.mood-play { 
+    background: linear-gradient(135deg, #F59E0B, #FBBF24); 
+    color: white; 
+}
+
+.mood-chill { 
+    background: linear-gradient(135deg, #0F766E, #14B8A6); 
+    color: white; 
+}
+
+.interest-chip {
+    display: inline-flex;
+    align-items: center;
+    padding: 4px 10px;
+    border-radius: 16px;
+    font-size: 11px;
+    background: rgba(59, 130, 246, 0.1);
+    border: 1px solid rgba(59, 130, 246, 0.3);
+    color: #93c5fd;
+    margin: 2px;
+    transition: all 0.2s ease;
+    cursor: pointer;
+}
+
+.interest-chip:hover {
+    background: rgba(59, 130, 246, 0.2);
+    border-color: rgba(59, 130, 246, 0.5);
+}
+
+.interest-chip.selected {
+    background: linear-gradient(135deg, #3B82F6, #8B5CF6);
+    color: white;
+    border-color: transparent;
+}
+
+.mood-filter-dropdown {
+    position: relative;
+    display: inline-block;
+}
+
+/* Tablet-optimized filters */
+.tablet-mood-filters {
+    display: none;
+}
+
+@media (min-width: 768px) and (max-width: 1023px) {
+    .tablet-mood-filters {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 8px;
+        padding: 12px;
+        background: rgba(255, 255, 255, 0.05);
+        border-radius: 12px;
+        margin-bottom: 16px;
+    }
+    
+    .tablet-mood-filter-chip {
+        padding: 8px 16px;
+        border-radius: 20px;
+        background: rgba(255, 255, 255, 0.1);
+        border: 1px solid rgba(255, 255, 255, 0.2);
+        font-size: 12px;
+        cursor: pointer;
+        transition: all 0.3s ease;
+        white-space: nowrap;
+    }
+    
+    .tablet-mood-filter-chip:hover {
+        background: rgba(59, 130, 246, 0.2);
+        border-color: rgba(59, 130, 246, 0.5);
+    }
+    
+    .tablet-mood-filter-chip.active {
+        background: linear-gradient(135deg, #3B82F6, #8B5CF6);
+        color: white;
+        border-color: transparent;
+        box-shadow: 0 2px 8px rgba(59, 130, 246, 0.3);
+    }
+}
+
+.content-matched {
+    border-left: 3px solid #10B981;
+    background: rgba(16, 185, 129, 0.05);
+    padding-left: 12px;
+}
+
+/* Mobile mood selector overlay */
+.mood-selector-overlay {
+    position: fixed;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    background: rgba(0, 0, 0, 0.7);
+    backdrop-filter: blur(5px);
+    z-index: 2000;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 20px;
+    opacity: 0;
+    visibility: hidden;
+    transition: all 0.3s ease;
+}
+
+.mood-selector-overlay.active {
+    opacity: 1;
+    visibility: visible;
+}
+
+.mood-selector-modal {
+    background: white;
+    border-radius: 24px;
+    width: 100%;
+    max-width: 400px;
+    max-height: 80vh;
+    overflow-y: auto;
+    padding: 24px;
+    box-shadow: 0 20px 60px rgba(0, 0, 0, 0.3);
+}
+
+/* Mood selector grid */
+.mood-selector-grid {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 12px;
+    margin: 20px 0;
+}
+
+.mood-selector-option {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    padding: 16px 8px;
+    border-radius: 16px;
+    border: 2px solid transparent;
+    background: #f8fafc;
+    cursor: pointer;
+    transition: all 0.3s ease;
+}
+
+.mood-selector-option:hover {
+    transform: translateY(-4px);
+    box-shadow: 0 10px 25px rgba(0, 0, 0, 0.1);
+}
+
+.mood-selector-option.selected {
+    border-color: currentColor;
+    box-shadow: 0 10px 25px rgba(0, 0, 0, 0.15);
+}
+
+.mood-emoji-large {
+    font-size: 2rem;
+    margin-bottom: 8px;
+}
+
+.mood-name-large {
+    font-size: 12px;
+    font-weight: 600;
+    text-align: center;
+    color: #334155;
+}
+
+/* Interest selector */
+.interest-selector-grid {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    margin: 20px 0;
+    max-height: 200px;
+    overflow-y: auto;
+}
+
+/* Profile mood display */
+.profile-mood-display {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 12px;
+    background: rgba(255, 255, 255, 0.05);
+    border-radius: 16px;
+    margin: 16px 0;
+}
+
+.current-mood-indicator {
+    width: 40px;
+    height: 40px;
+    border-radius: 50%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 1.5rem;
+    color: white;
+}
+
+.mood-info {
+    flex: 1;
+}
+
+.mood-status {
+    font-size: 14px;
+    color: #94a3b8;
+    margin-top: 4px;
+}
+
+/* Mood timeline (for feed/posts) */
+.mood-timeline-item {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 12px;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+}
+
+.mood-timeline-time {
+    font-size: 12px;
+    color: #94a3b8;
+    min-width: 60px;
+}
+
+.mood-timeline-content {
+    flex: 1;
+}
+
 /* ===== RESPONSIVE CONTAINER SYSTEM ===== */
 .responsive-container {
   width: 100%;
@@ -312,11 +592,34 @@ header, .page-header, .app-header {
   .md\:grid-cols-3 {
     grid-template-columns: repeat(3, 1fr) !important;
   }
+  
+  /* Tablet-optimized mood selector */
+  .mood-selector-grid {
+    grid-template-columns: repeat(4, 1fr);
+    gap: 16px;
+  }
+  
+  .mood-selector-option {
+    padding: 20px 12px;
+  }
+  
+  .mood-emoji-large {
+    font-size: 2.5rem;
+  }
+  
+  .mood-name-large {
+    font-size: 14px;
+  }
 }
 
 @media (min-width: 1024px) {
   .lg\:grid-cols-4 {
     grid-template-columns: repeat(4, 1fr) !important;
+  }
+  
+  /* Desktop-optimized mood selector */
+  .mood-selector-grid {
+    grid-template-columns: repeat(5, 1fr);
   }
 }
 
@@ -592,6 +895,24 @@ header, .page-header, .app-header {
   
   /* Card adjustments */
   .card { padding: 0.875rem !important; }
+  
+  /* Mood selector adjustments for mobile */
+  .mood-selector-grid {
+    grid-template-columns: repeat(2, 1fr);
+    gap: 10px;
+  }
+  
+  .mood-selector-option {
+    padding: 12px 8px;
+  }
+  
+  .mood-emoji-large {
+    font-size: 1.5rem;
+  }
+  
+  .mood-name-large {
+    font-size: 11px;
+  }
 }
 
 /* ===== LANDSCAPE MOBILE ===== */
@@ -617,6 +938,15 @@ header, .page-header, .app-header {
 
   .flex-1 {
     height: 65vh !important;
+  }
+  
+  /* Mood selector for landscape */
+  .mood-selector-grid {
+    grid-template-columns: repeat(4, 1fr);
+  }
+  
+  .mood-selector-modal {
+    max-height: 90vh;
   }
 }
 
@@ -653,6 +983,11 @@ header, .page-header, .app-header {
   .flex-1 {
     width: calc(100vw - 300px) !important;
     height: 100vh !important;
+  }
+  
+  /* Tablet mood selector */
+  .mood-selector-modal {
+    max-width: 600px;
   }
 }
 
@@ -719,6 +1054,16 @@ header, .page-header, .app-header {
     margin-left: 280px !important;
     width: calc(100vw - 280px) !important;
   }
+  
+  /* Large desktop mood selector */
+  .mood-selector-modal {
+    max-width: 800px;
+  }
+  
+  .mood-selector-grid {
+    grid-template-columns: repeat(6, 1fr);
+    gap: 20px;
+  }
 }
 
 /* ===== ACCESSIBILITY & TOUCH OPTIMIZATIONS ===== */
@@ -730,6 +1075,18 @@ header, .page-header, .app-header {
 
   .card, .game-card {
     padding: 1rem !important;
+  }
+  
+  /* Larger touch targets for mood chips */
+  .mood-badge,
+  .interest-chip,
+  .mood-filter-chip {
+    min-height: 36px !important;
+    min-width: 60px !important;
+  }
+  
+  .mood-selector-option {
+    min-height: 100px !important;
   }
 }
 

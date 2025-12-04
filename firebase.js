@@ -25,7 +25,8 @@ import {
   collection,
   query,
   where,
-  getDocs
+  getDocs,
+  onSnapshot
 } from "https://www.gstatic.com/firebasejs/9.22.1/firebase-firestore.js";
 
 class FirebaseAuthService {
@@ -34,6 +35,7 @@ class FirebaseAuthService {
         this.auth = auth;
         this.db = db;
         this.isInitialized = false;
+        this.userListeners = new Map(); // Store real-time listeners
         this.init();
     }
 
@@ -131,7 +133,7 @@ class FirebaseAuthService {
     /**
      * Registers a new user with email and password
      */
-    async registerUser(email, password, displayName) {
+    async registerUser(email, password, displayName, moods = [], interests = []) {
         if (!this.isInitialized) {
             throw new Error('Firebase not initialized. Please try again.');
         }
@@ -146,12 +148,19 @@ class FirebaseAuthService {
                 displayName: displayName
             });
             
-            // Create user document in Firestore
+            // Create user document in Firestore with moods and interests
             const userDocRef = doc(this.db, 'users', user.uid);
             await setDoc(userDocRef, {
                 uid: user.uid,
                 displayName: displayName,
                 email: user.email,
+                moods: moods,                    // Added: User selected moods
+                interests: interests,            // Added: User selected interests
+                customColors: {                  // Added: User custom colors
+                    primary: '#3B82F6',
+                    secondary: '#8B5CF6',
+                    theme: 'calm'
+                },
                 avatar: this.getDefaultAvatar(displayName),
                 status: 'Online',
                 statusType: 'online',
@@ -186,6 +195,13 @@ class FirebaseAuthService {
                 uid: user.uid,
                 email: user.email,
                 displayName: displayName,
+                moods: moods,
+                interests: interests,
+                customColors: {
+                    primary: '#3B82F6',
+                    secondary: '#8B5CF6',
+                    theme: 'calm'
+                },
                 isNewUser: true
             }));
             
@@ -211,6 +227,9 @@ class FirebaseAuthService {
             const userCredential = await signInWithEmailAndPassword(this.auth, email, password);
             const user = userCredential.user;
             
+            // Get user data to include moods and interests
+            const userData = await this.getUserData(user.uid);
+            
             // Update last login timestamp and status in Firestore
             const userDocRef = doc(this.db, 'users', user.uid);
             await updateDoc(userDocRef, {
@@ -220,11 +239,18 @@ class FirebaseAuthService {
                 statusType: 'online'
             });
             
-            // Store user info in localStorage
+            // Store user info in localStorage with moods and interests
             localStorage.setItem('uniconnect-user', JSON.stringify({
                 uid: user.uid,
                 email: user.email,
                 displayName: user.displayName || user.email.split('@')[0],
+                moods: userData.moods || [],
+                interests: userData.interests || [],
+                customColors: userData.customColors || {
+                    primary: '#3B82F6',
+                    secondary: '#8B5CF6',
+                    theme: 'calm'
+                },
                 isNewUser: false
             }));
             
@@ -257,6 +283,9 @@ class FirebaseAuthService {
                 });
             }
             
+            // Remove real-time listeners
+            this.removeAllUserListeners();
+            
             await signOut(this.auth);
             
             // Remove user data from localStorage
@@ -284,11 +313,38 @@ class FirebaseAuthService {
             // Check Firebase auth first
             const firebaseUser = this.auth.currentUser;
             if (firebaseUser) {
+                // Try to get data from localStorage first
+                const userData = localStorage.getItem('uniconnect-user');
+                if (userData) {
+                    const parsedData = JSON.parse(userData);
+                    return {
+                        uid: firebaseUser.uid,
+                        email: firebaseUser.email,
+                        displayName: firebaseUser.displayName,
+                        emailVerified: firebaseUser.emailVerified,
+                        moods: parsedData.moods || [],
+                        interests: parsedData.interests || [],
+                        customColors: parsedData.customColors || {
+                            primary: '#3B82F6',
+                            secondary: '#8B5CF6',
+                            theme: 'calm'
+                        },
+                        isNewUser: false
+                    };
+                }
+                
                 return {
                     uid: firebaseUser.uid,
                     email: firebaseUser.email,
                     displayName: firebaseUser.displayName,
                     emailVerified: firebaseUser.emailVerified,
+                    moods: [],
+                    interests: [],
+                    customColors: {
+                        primary: '#3B82F6',
+                        secondary: '#8B5CF6',
+                        theme: 'calm'
+                    },
                     isNewUser: false
                 };
             }
@@ -329,7 +385,7 @@ class FirebaseAuthService {
     }
 
     /**
-     * Updates user profile information
+     * Updates user profile information including moods and interests
      */
     async updateUserProfile(updates) {
         if (!this.isInitialized) {
@@ -366,6 +422,99 @@ class FirebaseAuthService {
     }
 
     /**
+     * Updates user moods selection
+     */
+    async updateUserMoods(moods) {
+        if (!this.isInitialized) {
+            throw new Error('Firebase not initialized.');
+        }
+
+        try {
+            const user = this.auth.currentUser;
+            if (!user) throw new Error('No user logged in');
+
+            const userDocRef = doc(this.db, 'users', user.uid);
+            await updateDoc(userDocRef, {
+                moods: moods,
+                lastSeen: serverTimestamp()
+            });
+
+            // Update localStorage
+            const currentUserData = JSON.parse(localStorage.getItem('uniconnect-user') || '{}');
+            currentUserData.moods = moods;
+            localStorage.setItem('uniconnect-user', JSON.stringify(currentUserData));
+
+            console.log('✅ User moods updated successfully:', moods);
+            return true;
+        } catch (error) {
+            console.error('❌ Moods update failed:', error);
+            throw new Error(this.handleFirebaseError(error, 'moods update'));
+        }
+    }
+
+    /**
+     * Updates user interests selection
+     */
+    async updateUserInterests(interests) {
+        if (!this.isInitialized) {
+            throw new Error('Firebase not initialized.');
+        }
+
+        try {
+            const user = this.auth.currentUser;
+            if (!user) throw new Error('No user logged in');
+
+            const userDocRef = doc(this.db, 'users', user.uid);
+            await updateDoc(userDocRef, {
+                interests: interests,
+                lastSeen: serverTimestamp()
+            });
+
+            // Update localStorage
+            const currentUserData = JSON.parse(localStorage.getItem('uniconnect-user') || '{}');
+            currentUserData.interests = interests;
+            localStorage.setItem('uniconnect-user', JSON.stringify(currentUserData));
+
+            console.log('✅ User interests updated successfully:', interests);
+            return true;
+        } catch (error) {
+            console.error('❌ Interests update failed:', error);
+            throw new Error(this.handleFirebaseError(error, 'interests update'));
+        }
+    }
+
+    /**
+     * Updates user custom colors
+     */
+    async updateUserColors(customColors) {
+        if (!this.isInitialized) {
+            throw new Error('Firebase not initialized.');
+        }
+
+        try {
+            const user = this.auth.currentUser;
+            if (!user) throw new Error('No user logged in');
+
+            const userDocRef = doc(this.db, 'users', user.uid);
+            await updateDoc(userDocRef, {
+                customColors: customColors,
+                lastSeen: serverTimestamp()
+            });
+
+            // Update localStorage
+            const currentUserData = JSON.parse(localStorage.getItem('uniconnect-user') || '{}');
+            currentUserData.customColors = customColors;
+            localStorage.setItem('uniconnect-user', JSON.stringify(currentUserData));
+
+            console.log('✅ User colors updated successfully:', customColors);
+            return true;
+        } catch (error) {
+            console.error('❌ Colors update failed:', error);
+            throw new Error(this.handleFirebaseError(error, 'colors update'));
+        }
+    }
+
+    /**
      * Get user data from Firestore
      */
     async getUserData(uid) {
@@ -386,6 +535,90 @@ class FirebaseAuthService {
             console.error('❌ Get user data failed:', error);
             throw new Error(this.handleFirebaseError(error, 'get user data'));
         }
+    }
+
+    /**
+     * Add real-time listener for user data changes
+     */
+    addUserListener(uid, callback) {
+        if (!this.isInitialized) {
+            console.warn('Firebase not initialized, cannot add listener');
+            return null;
+        }
+
+        try {
+            const userDocRef = doc(this.db, 'users', uid);
+            
+            const unsubscribe = onSnapshot(userDocRef, (doc) => {
+                if (doc.exists()) {
+                    const userData = doc.data();
+                    callback(userData);
+                    
+                    // Update localStorage with latest data
+                    const currentUserData = JSON.parse(localStorage.getItem('uniconnect-user') || '{}');
+                    if (currentUserData.uid === uid) {
+                        const updatedData = {
+                            ...currentUserData,
+                            moods: userData.moods || [],
+                            interests: userData.interests || [],
+                            customColors: userData.customColors || {
+                                primary: '#3B82F6',
+                                secondary: '#8B5CF6',
+                                theme: 'calm'
+                            }
+                        };
+                        localStorage.setItem('uniconnect-user', JSON.stringify(updatedData));
+                    }
+                }
+            }, (error) => {
+                console.error('❌ Real-time listener error:', error);
+                this.handleFirebaseError(error, 'real-time listener');
+            });
+
+            // Store the unsubscribe function
+            const listenerId = `user_${uid}_${Date.now()}`;
+            this.userListeners.set(listenerId, unsubscribe);
+            
+            console.log(`✅ Added real-time listener for user: ${uid}`);
+            return listenerId;
+            
+        } catch (error) {
+            console.error('❌ Failed to add user listener:', error);
+            return null;
+        }
+    }
+
+    /**
+     * Remove specific user listener
+     */
+    removeUserListener(listenerId) {
+        const unsubscribe = this.userListeners.get(listenerId);
+        if (unsubscribe) {
+            unsubscribe();
+            this.userListeners.delete(listenerId);
+            console.log(`✅ Removed listener: ${listenerId}`);
+        }
+    }
+
+    /**
+     * Remove all user listeners
+     */
+    removeAllUserListeners() {
+        this.userListeners.forEach((unsubscribe, listenerId) => {
+            unsubscribe();
+            console.log(`✅ Removed listener: ${listenerId}`);
+        });
+        this.userListeners.clear();
+    }
+
+    /**
+     * Get user document reference for real-time updates
+     */
+    getUserDocRef(uid) {
+        if (!this.isInitialized) {
+            throw new Error('Firebase not initialized.');
+        }
+        return doc(this.db, 'users', uid);
     }
 
     /**

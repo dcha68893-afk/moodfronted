@@ -33,6 +33,331 @@ i, .fa, .fas, .far, .fab, .material-icons, .material-icons-outlined {
     justify-content: center;
 }
 
+/* ========== MOBILE MOOD & INTEREST SYSTEM ========== */
+.mood-badge {
+    display: inline-flex;
+    align-items: center;
+    padding: 5px 12px;
+    border-radius: 20px;
+    font-size: 11px;
+    font-weight: 600;
+    margin: 3px;
+    border: none;
+    cursor: default;
+    transition: all 0.3s ease;
+    white-space: nowrap;
+}
+
+.mood-calm { 
+    background: linear-gradient(135deg, #3B82F6, #8B5CF6); 
+    color: white; 
+    box-shadow: 0 2px 6px rgba(59, 130, 246, 0.3);
+}
+
+.mood-energetic { 
+    background: linear-gradient(135deg, #DC2626, #EA580C); 
+    color: white; 
+    box-shadow: 0 2px 6px rgba(220, 38, 38, 0.3);
+}
+
+.mood-focus { 
+    background: linear-gradient(135deg, #059669, #10B981); 
+    color: white; 
+    box-shadow: 0 2px 6px rgba(5, 150, 105, 0.3);
+}
+
+.mood-creative { 
+    background: linear-gradient(135deg, #7C3AED, #A78BFA); 
+    color: white; 
+    box-shadow: 0 2px 6px rgba(124, 58, 237, 0.3);
+}
+
+.mood-relaxed { 
+    background: linear-gradient(135deg, #0891B2, #06B6D4); 
+    color: white; 
+    box-shadow: 0 2px 6px rgba(8, 145, 178, 0.3);
+}
+
+.mood-social { 
+    background: linear-gradient(135deg, #DB2777, #EC4899); 
+    color: white; 
+    box-shadow: 0 2px 6px rgba(219, 39, 119, 0.3);
+}
+
+.mood-learning { 
+    background: linear-gradient(135deg, #9333EA, #A855F7); 
+    color: white; 
+    box-shadow: 0 2px 6px rgba(147, 51, 234, 0.3);
+}
+
+.mood-work { 
+    background: linear-gradient(135deg, #1E40AF, #3B82F6); 
+    color: white; 
+    box-shadow: 0 2px 6px rgba(30, 64, 175, 0.3);
+}
+
+.mood-play { 
+    background: linear-gradient(135deg, #F59E0B, #FBBF24); 
+    color: white; 
+    box-shadow: 0 2px 6px rgba(245, 158, 11, 0.3);
+}
+
+.mood-chill { 
+    background: linear-gradient(135deg, #0F766E, #14B8A6); 
+    color: white; 
+    box-shadow: 0 2px 6px rgba(15, 118, 110, 0.3);
+}
+
+.interest-chip {
+    display: inline-flex;
+    align-items: center;
+    padding: 4px 10px;
+    border-radius: 16px;
+    font-size: 10px;
+    background: rgba(59, 130, 246, 0.1);
+    border: 1px solid rgba(59, 130, 246, 0.3);
+    color: #3B82F6;
+    margin: 2px;
+    transition: all 0.2s ease;
+    cursor: pointer;
+    font-weight: 500;
+}
+
+.interest-chip:hover {
+    background: rgba(59, 130, 246, 0.2);
+    border-color: rgba(59, 130, 246, 0.5);
+    transform: translateY(-1px);
+}
+
+.interest-chip.selected {
+    background: linear-gradient(135deg, #3B82F6, #8B5CF6);
+    color: white;
+    border-color: transparent;
+    box-shadow: 0 2px 6px rgba(59, 130, 246, 0.3);
+}
+
+/* Mobile Mood Selector */
+.mood-selector-mobile {
+    position: fixed;
+    bottom: 70px;
+    left: 0;
+    right: 0;
+    background: white;
+    border-top: 1px solid var(--kynecta-border);
+    border-radius: 20px 20px 0 0;
+    padding: 16px;
+    z-index: 1001;
+    box-shadow: 0 -4px 20px rgba(0, 0, 0, 0.1);
+    transform: translateY(100%);
+    transition: transform 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.mood-selector-mobile.active {
+    transform: translateY(0);
+}
+
+.mood-selector-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 16px;
+    padding-bottom: 12px;
+    border-bottom: 1px solid var(--kynecta-border);
+}
+
+.mood-selector-title {
+    font-weight: 600;
+    font-size: 1.1rem;
+    color: var(--kynecta-dark);
+}
+
+.mood-selector-close {
+    background: transparent;
+    border: none;
+    color: var(--kynecta-dark);
+    font-size: 1.2rem;
+    cursor: pointer;
+    padding: 8px;
+    border-radius: 50%;
+}
+
+.mood-grid-mobile {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 10px;
+    margin-bottom: 20px;
+}
+
+.mood-option-mobile {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    padding: 12px 8px;
+    border-radius: 16px;
+    border: 2px solid transparent;
+    background: var(--kynecta-light);
+    cursor: pointer;
+    transition: all 0.3s ease;
+}
+
+.mood-option-mobile:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
+}
+
+.mood-option-mobile.selected {
+    border-color: currentColor;
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+}
+
+.mood-emoji {
+    font-size: 1.5rem;
+    margin-bottom: 6px;
+}
+
+.mood-name {
+    font-size: 11px;
+    font-weight: 500;
+    text-align: center;
+}
+
+/* Mobile Interest Selector */
+.interest-selector-mobile {
+    max-height: 200px;
+    overflow-y: auto;
+    margin-bottom: 20px;
+}
+
+.interest-grid-mobile {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+}
+
+/* Mood Filter for Mobile */
+.mood-filter-mobile {
+    display: flex;
+    overflow-x: auto;
+    gap: 8px;
+    padding: 12px 16px;
+    background: var(--kynecta-light);
+    border-bottom: 1px solid var(--kynecta-border);
+    -webkit-overflow-scrolling: touch;
+    scrollbar-width: none;
+}
+
+.mood-filter-mobile::-webkit-scrollbar {
+    display: none;
+}
+
+.mood-filter-chip {
+    padding: 8px 16px;
+    border-radius: 20px;
+    background: white;
+    border: 1px solid var(--kynecta-border);
+    font-size: 12px;
+    font-weight: 500;
+    white-space: nowrap;
+    cursor: pointer;
+    transition: all 0.3s ease;
+}
+
+.mood-filter-chip:hover {
+    border-color: var(--kynecta-primary);
+    background: rgba(124, 58, 237, 0.05);
+}
+
+.mood-filter-chip.active {
+    background: linear-gradient(135deg, var(--kynecta-primary), var(--kynecta-secondary));
+    color: white;
+    border-color: transparent;
+    box-shadow: 0 2px 8px rgba(124, 58, 237, 0.3);
+}
+
+.content-matched {
+    border-left: 3px solid #10B981;
+    background: rgba(16, 185, 129, 0.05);
+    padding-left: 12px;
+}
+
+/* User mood status in chat list */
+.user-mood-status {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    margin-top: 4px;
+}
+
+.mood-indicator {
+    width: 6px;
+    height: 6px;
+    border-radius: 50%;
+    display: inline-block;
+}
+
+.mood-text {
+    font-size: 10px;
+    color: #6B7280;
+    font-weight: 500;
+}
+
+/* Mood in message bubbles - Mobile optimized */
+.message-mood {
+    display: inline-flex;
+    align-items: center;
+    margin-top: 6px;
+    padding: 3px 8px;
+    border-radius: 12px;
+    font-size: 10px;
+    font-weight: 500;
+    max-width: 80%;
+}
+
+.message-sent .message-mood {
+    background: rgba(255, 255, 255, 0.2);
+    color: rgba(255, 255, 255, 0.9);
+}
+
+.message-received .message-mood {
+    background: rgba(124, 58, 237, 0.1);
+    color: var(--kynecta-primary);
+}
+
+/* Mood Quick Action in Input Area */
+.mood-quick-action {
+    position: relative;
+}
+
+.mood-quick-button {
+    width: 36px;
+    height: 36px;
+    border-radius: 50%;
+    background: linear-gradient(135deg, var(--kynecta-primary), var(--kynecta-secondary));
+    color: white;
+    border: none;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    cursor: pointer;
+    transition: all 0.3s ease;
+}
+
+.mood-quick-button:hover {
+    transform: scale(1.1);
+    box-shadow: 0 4px 12px rgba(124, 58, 237, 0.3);
+}
+
+.mood-quick-indicator {
+    position: absolute;
+    top: -2px;
+    right: -2px;
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    background: #10B981;
+    border: 2px solid white;
+}
+
 /* Touch interactions */
 .touch-reaction-zone {
     min-height: 80px;
@@ -943,6 +1268,37 @@ i, .fa, .fas, .far, .fab, .material-icons, .material-icons-outlined {
         -webkit-font-smoothing: antialiased;
     }
     
+    /* Mood selector adjustments for mobile */
+    .mood-selector-mobile {
+        bottom: 60px;
+    }
+    
+    .mood-grid-mobile {
+        grid-template-columns: repeat(2, 1fr);
+    }
+    
+    .mood-option-mobile {
+        padding: 10px 6px;
+    }
+    
+    .mood-emoji {
+        font-size: 1.3rem;
+    }
+    
+    .mood-name {
+        font-size: 10px;
+    }
+    
+    .interest-chip {
+        padding: 3px 8px;
+        font-size: 9px;
+    }
+    
+    .mood-filter-chip {
+        padding: 6px 12px;
+        font-size: 11px;
+    }
+    
     .modal-content {
         margin: 16px;
         max-width: calc(100% - 32px);
@@ -1120,6 +1476,10 @@ i, .fa, .fas, .far, .fab, .material-icons, .material-icons-outlined {
         .tab-btn {
             padding: 6px 10px;
         }
+        
+        .mood-selector-mobile {
+            bottom: 50px;
+        }
     }
     
     /* Show mobile input actions on mobile */
@@ -1281,6 +1641,28 @@ i, .fa, .fas, .far, .fab, .material-icons, .material-icons-outlined {
     .message-bubble {
         max-width: 90%;
     }
+    
+    /* Adjust mood grid for very small screens */
+    .mood-grid-mobile {
+        grid-template-columns: 1fr;
+    }
+    
+    .mood-option-mobile {
+        flex-direction: row;
+        justify-content: flex-start;
+        padding: 12px;
+    }
+    
+    .mood-emoji {
+        margin-right: 12px;
+        margin-bottom: 0;
+        font-size: 1.2rem;
+    }
+    
+    .mood-name {
+        font-size: 11px;
+        text-align: left;
+    }
 }
 
 /* ========== ANIMATIONS ========== */
@@ -1431,6 +1813,51 @@ button,
     background: rgba(124, 58, 237, 0.1);
 }
 
+/* Dark mode for mood system */
+[data-theme="dark"] .mood-selector-mobile {
+    background: #1F2937;
+    border-top-color: #374151;
+}
+
+[data-theme="dark"] .mood-selector-header {
+    border-bottom-color: #374151;
+}
+
+[data-theme="dark"] .mood-selector-title {
+    color: #F9FAFB;
+}
+
+[data-theme="dark"] .mood-option-mobile {
+    background: #374151;
+    color: #D1D5DB;
+}
+
+[data-theme="dark"] .mood-filter-chip {
+    background: #374151;
+    border-color: #4B5563;
+    color: #D1D5DB;
+}
+
+[data-theme="dark"] .mood-filter-chip:hover {
+    background: #4B5563;
+    border-color: #6B7280;
+}
+
+[data-theme="dark"] .mood-filter-chip.active {
+    color: white;
+}
+
+[data-theme="dark"] .interest-chip {
+    background: rgba(59, 130, 246, 0.15);
+    border-color: rgba(59, 130, 246, 0.3);
+    color: #93c5fd;
+}
+
+[data-theme="dark"] .content-matched {
+    border-left-color: #10B981;
+    background: rgba(16, 185, 129, 0.1);
+}
+
 /* ========== SAFARI SPECIFIC FIXES ========== */
 @supports (-webkit-touch-callout: none) {
     /* Safari specific styles */
@@ -1440,6 +1867,10 @@ button,
     
     .bottom-nav {
         padding-bottom: max(8px, env(safe-area-inset-bottom));
+    }
+    
+    .mood-selector-mobile {
+        padding-bottom: max(16px, env(safe-area-inset-bottom));
     }
 }
 
