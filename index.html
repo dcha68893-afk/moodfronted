@@ -38,6 +38,14 @@
         .section {
             transition: all 0.4s ease-in-out;
             width: 100%;
+            position: absolute;
+            top: 0;
+            left: 0;
+            opacity: 0;
+            transform: translateX(50px);
+            pointer-events: none;
+            overflow: hidden;
+            height: 0;
         }
         
         .section-hidden {
@@ -817,6 +825,176 @@
             -ms-context-menu: none;
             context-menu: none;
         }
+        
+        /* Mood and Interest Selection Styles */
+        .selection-card {
+            background: rgba(255, 255, 255, 0.05);
+            border: 2px solid rgba(255, 255, 255, 0.1);
+            border-radius: 16px;
+            padding: 1.5rem;
+            transition: all 0.3s ease;
+            cursor: pointer;
+            position: relative;
+            overflow: hidden;
+        }
+        
+        .selection-card:hover {
+            transform: translateY(-5px);
+            border-color: rgba(59, 130, 246, 0.5);
+            box-shadow: 0 10px 25px rgba(59, 130, 246, 0.2);
+        }
+        
+        .selection-card.selected {
+            border-color: #3b82f6;
+            background: rgba(59, 130, 246, 0.1);
+            box-shadow: 0 0 20px rgba(59, 130, 246, 0.3);
+        }
+        
+        .selection-card.selected::after {
+            content: '✓';
+            position: absolute;
+            top: 10px;
+            right: 10px;
+            width: 24px;
+            height: 24px;
+            background: #3b82f6;
+            border-radius: 50%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            color: white;
+            font-weight: bold;
+            font-size: 12px;
+        }
+        
+        .selection-icon {
+            width: 50px;
+            height: 50px;
+            border-radius: 12px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            margin-bottom: 1rem;
+            font-size: 1.25rem;
+        }
+        
+        .selection-counter {
+            position: fixed;
+            bottom: 20px;
+            right: 20px;
+            background: linear-gradient(135deg, #3B82F6, #8B5CF6);
+            color: white;
+            padding: 12px 20px;
+            border-radius: 25px;
+            font-weight: bold;
+            box-shadow: 0 4px 15px rgba(59, 130, 246, 0.3);
+            z-index: 1000;
+        }
+        
+        .selection-progress {
+            height: 4px;
+            background: rgba(255, 255, 255, 0.1);
+            border-radius: 2px;
+            overflow: hidden;
+            margin: 1.5rem 0;
+        }
+        
+        .selection-progress-bar {
+            height: 100%;
+            background: linear-gradient(90deg, #3B82F6, #8B5CF6);
+            transition: width 0.3s ease;
+        }
+        
+        .selection-next-btn {
+            width: 100%;
+            background: linear-gradient(135deg, #3B82F6, #8B5CF6);
+            color: white;
+            padding: 14px;
+            border-radius: 12px;
+            font-weight: bold;
+            font-size: 1rem;
+            border: none;
+            cursor: pointer;
+            transition: all 0.3s ease;
+            margin-top: 1rem;
+        }
+        
+        .selection-next-btn:hover:not(:disabled) {
+            transform: translateY(-2px);
+            box-shadow: 0 10px 20px rgba(59, 130, 246, 0.3);
+        }
+        
+        .selection-next-btn:disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
+        }
+        
+        .selection-back-btn {
+            background: rgba(255, 255, 255, 0.1);
+            color: white;
+            padding: 10px 20px;
+            border-radius: 8px;
+            border: 1px solid rgba(255, 255, 255, 0.2);
+            cursor: pointer;
+            transition: all 0.3s ease;
+            margin-top: 1rem;
+        }
+        
+        .selection-back-btn:hover {
+            background: rgba(255, 255, 255, 0.2);
+        }
+        
+        .selection-title {
+            font-size: 1.75rem;
+            font-weight: bold;
+            background: linear-gradient(135deg, #3B82F6, #8B5CF6);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            background-clip: text;
+            margin-bottom: 0.5rem;
+        }
+        
+        .selection-subtitle {
+            color: #94a3b8;
+            margin-bottom: 2rem;
+        }
+        
+        .selection-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
+            gap: 1rem;
+            margin-bottom: 2rem;
+        }
+        
+        @media (max-width: 640px) {
+            .selection-grid {
+                grid-template-columns: repeat(auto-fill, minmax(120px, 1fr));
+                gap: 0.75rem;
+            }
+        }
+        
+        @media (min-width: 768px) {
+            .selection-grid {
+                grid-template-columns: repeat(auto-fill, minmax(160px, 1fr));
+            }
+        }
+
+        /* Skip Selection Button */
+        .skip-selection-btn {
+            background: rgba(255, 255, 255, 0.05);
+            color: #94a3b8;
+            padding: 10px 20px;
+            border-radius: 8px;
+            border: 1px solid rgba(255, 255, 255, 0.1);
+            cursor: pointer;
+            transition: all 0.3s ease;
+            margin-top: 1rem;
+        }
+        
+        .skip-selection-btn:hover {
+            background: rgba(255, 255, 255, 0.1);
+            color: white;
+        }
     </style>
 </head>
 <body class="h-full dashboard-container bg-grid-pattern theme-calm protected-content no-screenshot no-context-menu">
@@ -1087,7 +1265,7 @@
     </div>
 
     <!-- Main Dashboard Container -->
-    <div class="min-h-screen flex flex-col lg:flex-row">
+    <div class="min-h-screen flex flex-col lg:flex-row" id="mainAppContainer">
         <!-- Left Side - Advertisement Section (Hidden on mobile) -->
         <div class="hidden lg:flex flex-1 p-4 md:p-8 items-center justify-center">
             <div class="max-w-2xl w-full">
@@ -1254,9 +1432,9 @@
             </div>
         </div>
 
-        <!-- Right Side - Content Area (Forms & Interactions) -->
+        <!-- Right Side - Content Area (All Sections) -->
         <div class="flex-1 flex items-center justify-center p-4 md:p-8">
-            <div class="w-full max-w-md">
+            <div class="w-full max-w-4xl relative">
                 <!-- Mobile Header -->
                 <div class="lg:hidden text-center mb-6 md:mb-8 mobile-margin">
                     <div class="flex items-center justify-center space-x-3 mb-4 md:mb-6">
@@ -1296,10 +1474,81 @@
                     </div>
                 </div>
 
-                <!-- Content Sections -->
-                <div class="content-area">
+                <!-- All Content Sections Container -->
+                <div class="content-area relative min-h-[600px]">
+                    <!-- Mood & Interest Selection Section -->
+                    <div id="selectionSection" class="section section-active">
+                        <!-- Progress Counter -->
+                        <div id="selectionCounter" class="selection-counter">
+                            <span id="selectedCount">0</span>/2 moods & <span id="selectedInterestsCount">0</span>/2 interests
+                        </div>
+
+                        <div class="min-h-screen flex flex-col items-center justify-center p-4 md:p-8">
+                            <div class="w-full max-w-4xl">
+                                <!-- Mood Selection Step -->
+                                <div id="moodSelectionStep">
+                                    <div class="text-center mb-8 md:mb-12">
+                                        <h1 class="selection-title">Welcome to kynecta! 🎉</h1>
+                                        <p class="selection-subtitle">First, let's personalize your experience. Choose up to 2 moods that best describe how you feel right now</p>
+                                    </div>
+
+                                    <!-- Progress Bar -->
+                                    <div class="selection-progress">
+                                        <div class="selection-progress-bar" id="moodProgressBar" style="width: 0%"></div>
+                                    </div>
+
+                                    <!-- Mood Selection Grid -->
+                                    <div class="selection-grid" id="moodSelectionGrid">
+                                        <!-- Mood cards will be populated by JavaScript -->
+                                    </div>
+
+                                    <!-- Navigation Buttons -->
+                                    <div class="flex flex-col sm:flex-row gap-4 mt-8">
+                                        <button id="skipMoodSelection" class="skip-selection-btn">
+                                            Skip for now <i class="fas fa-forward ml-2"></i>
+                                        </button>
+                                        <button id="nextToInterestsBtn" class="selection-next-btn" disabled>
+                                            Continue to Interests <i class="fas fa-arrow-right ml-2"></i>
+                                        </button>
+                                    </div>
+                                </div>
+
+                                <!-- Interest Selection Step -->
+                                <div id="interestSelectionStep" class="hidden">
+                                    <div class="text-center mb-8 md:mb-12">
+                                        <h1 class="selection-title">Great! Now Choose Your Interests</h1>
+                                        <p class="selection-subtitle">Select up to 2 interests that match what you love to do</p>
+                                    </div>
+
+                                    <!-- Progress Bar -->
+                                    <div class="selection-progress">
+                                        <div class="selection-progress-bar" id="interestProgressBar" style="width: 0%"></div>
+                                    </div>
+
+                                    <!-- Interest Selection Grid -->
+                                    <div class="selection-grid" id="interestSelectionGrid">
+                                        <!-- Interest cards will be populated by JavaScript -->
+                                    </div>
+
+                                    <!-- Navigation Buttons -->
+                                    <div class="flex flex-col sm:flex-row gap-4 mt-8">
+                                        <button id="backToMoodsBtn" class="selection-back-btn">
+                                            <i class="fas fa-arrow-left mr-2"></i> Back to Moods
+                                        </button>
+                                        <button id="skipInterestSelection" class="skip-selection-btn">
+                                            Skip for now <i class="fas fa-forward ml-2"></i>
+                                        </button>
+                                        <button id="finishSelectionBtn" class="selection-next-btn" disabled>
+                                            Finish & Continue <i class="fas fa-check ml-2"></i>
+                                        </button>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
                     <!-- Landing Section -->
-                    <div id="landingSection" class="section section-active">
+                    <div id="landingSection" class="section section-hidden">
                         <div class="text-center">
                             <h2 class="text-2xl md:text-3xl font-bold text-white mb-3 md:mb-4 responsive-heading">Your Global Journey Starts Here</h2>
                             <p class="text-blue-300 mb-6 md:mb-8 text-sm md:text-base responsive-text">
@@ -1771,7 +2020,7 @@
                 }
             }
 
-            async registerUser(email, password, displayName) {
+            async registerUser(email, password, displayName, userSelections = null) {
                 if (!this.isInitialized) {
                     throw new Error('Firebase not initialized. Please try again.');
                 }
@@ -1786,26 +2035,42 @@
                         displayName: displayName
                     });
                     
-                    // Create user document in Firestore - FIXED to match security rules
+                    // Get user selections from localStorage if not provided
+                    const selections = userSelections || window.kynectaApp?.getUserSelections() || {
+                        moods: [],
+                        interests: []
+                    };
+                    
+                    // Create user document in Firestore - UPDATED with comprehensive fields
                     const userDocRef = this.db.collection('users').doc(user.uid);
                     await userDocRef.set({
                         uid: user.uid,
-                        userId: user.uid, // Added to match security rules
+                        userId: user.uid,
                         email: user.email,
                         displayName: displayName,
-                        userName: displayName, // Added to match security rules
+                        userName: displayName,
                         photoURL: '',
                         bio: 'New kynecta member!',
                         createdAt: firebase.firestore.FieldValue.serverTimestamp(),
                         lastLogin: firebase.firestore.FieldValue.serverTimestamp(),
                         emailVerified: false,
-                        interests: [],
-                        preferredMoods: [],
+                        moods: selections.moods || [],
+                        interests: selections.interests || [],
                         customColors: {
                             primary: '#3B82F6',
                             secondary: '#8B5CF6',
                             theme: 'calm'
-                        }
+                        },
+                        selectedMoods: selections.moods || [],
+                        selectedInterests: selections.interests || [],
+                        moodHistory: [{
+                            date: firebase.firestore.FieldValue.serverTimestamp(),
+                            moods: selections.moods || []
+                        }],
+                        interestHistory: [{
+                            date: firebase.firestore.FieldValue.serverTimestamp(),
+                            interests: selections.interests || []
+                        }]
                     });
                     
                     // Store user info in localStorage
@@ -1814,12 +2079,17 @@
                         email: user.email,
                         displayName: displayName,
                         isNewUser: true,
+                        moods: selections.moods,
+                        interests: selections.interests,
                         customColors: {
                             primary: '#3B82F6',
                             secondary: '#8B5CF6',
                             theme: 'calm'
                         }
                     }));
+                    
+                    // Store selections for other pages to use
+                    localStorage.setItem('kynecta-selections', JSON.stringify(selections));
                     
                     console.log('✅ User registered successfully:', user.email);
                     return userCredential;
@@ -1867,19 +2137,25 @@
                     const userCredential = await firebase.auth().signInWithEmailAndPassword(email, password);
                     const user = userCredential.user;
                     
-                    // Update last login timestamp in Firestore
+                    // Get user data from Firestore
                     const userDocRef = this.db.collection('users').doc(user.uid);
+                    const userDoc = await userDocRef.get();
+                    const userData = userDoc.data();
+                    
+                    // Update last login timestamp
                     await userDocRef.update({
                         lastLogin: firebase.firestore.FieldValue.serverTimestamp()
                     });
                     
-                    // Get user's custom colors if they exist
-                    const userDoc = await userDocRef.get();
-                    const userData = userDoc.data();
                     const customColors = userData?.customColors || {
                         primary: '#3B82F6',
                         secondary: '#8B5CF6',
                         theme: 'calm'
+                    };
+                    
+                    const selections = {
+                        moods: userData?.moods || [],
+                        interests: userData?.interests || []
                     };
                     
                     // Store user info in localStorage
@@ -1888,8 +2164,13 @@
                         email: user.email,
                         displayName: user.displayName || user.email.split('@')[0],
                         isNewUser: false,
+                        moods: selections.moods,
+                        interests: selections.interests,
                         customColors: customColors
                     }));
+                    
+                    // Store selections for other pages to use
+                    localStorage.setItem('kynecta-selections', JSON.stringify(selections));
                     
                     console.log('✅ User logged in successfully:', user.email);
                     return userCredential;
@@ -1987,7 +2268,7 @@
 
         class kynectaApp {
             constructor() {
-                this.currentSection = 'landing';
+                this.currentSection = 'selection'; // Start with selection section
                 this.isTransitioning = false;
                 this.cookiesAccepted = false;
                 this.showingCookieBanner = false;
@@ -1996,6 +2277,12 @@
                     primary: '#3B82F6',
                     secondary: '#8B5CF6',
                     theme: 'calm'
+                };
+                
+                // User selections storage
+                this.userSelections = {
+                    moods: [],
+                    interests: []
                 };
                 
                 // Forgot password modal state
@@ -2013,6 +2300,9 @@
                 // Load user preferences if any
                 this.loadUserPreferences();
                 
+                // Initialize mood and interest selection
+                this.initializeSelection();
+                
                 // Start animated counters
                 this.startCounterAnimations();
                 
@@ -2028,7 +2318,251 @@
                 // Initialize security protection
                 this.setupSecurityProtection();
                 
+                // Check if user has already completed selection
+                this.checkSelectionCompletion();
+                
                 console.log('🚀 kynecta app initialized');
+            }
+
+            /**
+             * Check if user has already completed selection
+             */
+            checkSelectionCompletion() {
+                const selections = localStorage.getItem('kynecta-selections');
+                if (selections) {
+                    const parsed = JSON.parse(selections);
+                    // If user has made any selections, skip to landing page
+                    if (parsed.moods.length > 0 || parsed.interests.length > 0) {
+                        this.userSelections = parsed;
+                        this.showSection('landing');
+                    }
+                }
+            }
+
+            /**
+             * Initialize mood and interest selection system
+             */
+            initializeSelection() {
+                // Define available moods
+                this.availableMoods = [
+                    { id: 'calm', name: 'Calm', icon: 'fas fa-spa', color: 'from-blue-500 to-purple-600', description: 'Relaxed and peaceful' },
+                    { id: 'energetic', name: 'Energetic', icon: 'fas fa-bolt', color: 'from-red-500 to-orange-500', description: 'Full of energy and excitement' },
+                    { id: 'creative', name: 'Creative', icon: 'fas fa-paint-brush', color: 'from-purple-500 to-pink-600', description: 'Inspired and imaginative' },
+                    { id: 'chill', name: 'Chill', icon: 'fas fa-couch', color: 'from-green-500 to-blue-600', description: 'Easygoing and laid-back' },
+                    { id: 'romantic', name: 'Romantic', icon: 'fas fa-heart', color: 'from-pink-500 to-red-500', description: 'Affectionate and loving' },
+                    { id: 'adventurous', name: 'Adventurous', icon: 'fas fa-mountain', color: 'from-yellow-500 to-green-600', description: 'Excited for new experiences' },
+                    { id: 'focused', name: 'Focused', icon: 'fas fa-bullseye', color: 'from-indigo-500 to-blue-600', description: 'Concentrated and determined' },
+                    { id: 'playful', name: 'Playful', icon: 'fas fa-gamepad', color: 'from-yellow-400 to-orange-500', description: 'Fun-loving and cheerful' },
+                    { id: 'thoughtful', name: 'Thoughtful', icon: 'fas fa-brain', color: 'from-gray-600 to-blue-700', description: 'Reflective and considerate' },
+                    { id: 'social', name: 'Social', icon: 'fas fa-users', color: 'from-teal-500 to-green-600', description: 'Outgoing and friendly' }
+                ];
+
+                // Define available interests
+                this.availableInterests = [
+                    { id: 'gaming', name: 'Gaming', icon: 'fas fa-gamepad', color: 'from-purple-500 to-pink-600', description: 'Video games & eSports' },
+                    { id: 'music', name: 'Music', icon: 'fas fa-music', color: 'from-red-500 to-pink-500', description: 'All genres and instruments' },
+                    { id: 'sports', name: 'Sports', icon: 'fas fa-futbol', color: 'from-green-500 to-blue-600', description: 'Sports & fitness activities' },
+                    { id: 'art', name: 'Art', icon: 'fas fa-palette', color: 'from-yellow-500 to-orange-500', description: 'Visual arts & creativity' },
+                    { id: 'technology', name: 'Technology', icon: 'fas fa-laptop-code', color: 'from-blue-500 to-indigo-600', description: 'Tech, coding & innovation' },
+                    { id: 'travel', name: 'Travel', icon: 'fas fa-globe-americas', color: 'from-teal-500 to-green-600', description: 'Exploring new places' },
+                    { id: 'food', name: 'Food', icon: 'fas fa-utensils', color: 'from-orange-500 to-red-500', description: 'Cooking & culinary arts' },
+                    { id: 'fashion', name: 'Fashion', icon: 'fas fa-tshirt', color: 'from-pink-500 to-purple-600', description: 'Style & clothing trends' },
+                    { id: 'reading', name: 'Reading', icon: 'fas fa-book', color: 'from-brown-500 to-yellow-600', description: 'Books & literature' },
+                    { id: 'photography', name: 'Photography', icon: 'fas fa-camera', color: 'from-gray-600 to-blue-700', description: 'Photography & editing' },
+                    { id: 'business', name: 'Business', icon: 'fas fa-chart-line', color: 'from-green-600 to-teal-600', description: 'Entrepreneurship & finance' },
+                    { id: 'education', name: 'Education', icon: 'fas fa-graduation-cap', color: 'from-blue-600 to-indigo-700', description: 'Learning & courses' }
+                ];
+
+                // Populate mood selection grid
+                this.populateSelectionGrid('moodSelectionGrid', this.availableMoods, 'moods');
+                
+                // Populate interest selection grid
+                this.populateSelectionGrid('interestSelectionGrid', this.availableInterests, 'interests');
+                
+                // Load any existing selections
+                this.loadSelections();
+            }
+
+            /**
+             * Populate selection grid with cards
+             */
+            populateSelectionGrid(gridId, items, type) {
+                const grid = document.getElementById(gridId);
+                if (!grid) return;
+                
+                grid.innerHTML = items.map(item => `
+                    <div class="selection-card" data-id="${item.id}" data-type="${type}">
+                        <div class="selection-icon bg-gradient-to-br ${item.color} text-white">
+                            <i class="${item.icon}"></i>
+                        </div>
+                        <h3 class="text-white font-bold text-sm md:text-base mb-1">${item.name}</h3>
+                        <p class="text-gray-400 text-xs">${item.description}</p>
+                    </div>
+                `).join('');
+                
+                // Add click event listeners
+                grid.querySelectorAll('.selection-card').forEach(card => {
+                    card.addEventListener('click', () => {
+                        this.toggleSelection(card);
+                    });
+                });
+            }
+
+            /**
+             * Toggle selection of a mood or interest card
+             */
+            toggleSelection(card) {
+                const id = card.getAttribute('data-id');
+                const type = card.getAttribute('data-type');
+                const maxSelections = 2;
+                
+                // Check if already selected
+                const isSelected = card.classList.contains('selected');
+                const currentSelections = this.userSelections[type];
+                
+                if (isSelected) {
+                    // Remove from selection
+                    card.classList.remove('selected');
+                    this.userSelections[type] = currentSelections.filter(item => item !== id);
+                } else {
+                    // Check if max reached
+                    if (currentSelections.length >= maxSelections) {
+                        this.showToast(`Maximum ${maxSelections} ${type} allowed`, 'warning');
+                        return;
+                    }
+                    
+                    // Add to selection
+                    card.classList.add('selected');
+                    this.userSelections[type].push(id);
+                }
+                
+                // Update counters and UI
+                this.updateSelectionUI();
+                
+                // Save selections
+                this.saveSelections();
+            }
+
+            /**
+             * Update selection UI (counters, buttons, progress)
+             */
+            updateSelectionUI() {
+                // Update counter display
+                const moodCount = this.userSelections.moods.length;
+                const interestCount = this.userSelections.interests.length;
+                
+                // Update counter text
+                document.getElementById('selectedCount').textContent = moodCount;
+                document.getElementById('selectedInterestsCount').textContent = interestCount;
+                
+                // Update progress bars
+                document.getElementById('moodProgressBar').style.width = `${(moodCount / 2) * 100}%`;
+                document.getElementById('interestProgressBar').style.width = `${(interestCount / 2) * 100}%`;
+                
+                // Update button states
+                document.getElementById('nextToInterestsBtn').disabled = moodCount === 0;
+                document.getElementById('finishSelectionBtn').disabled = interestCount === 0;
+            }
+
+            /**
+             * Save selections to localStorage
+             */
+            saveSelections() {
+                localStorage.setItem('kynecta-selections', JSON.stringify(this.userSelections));
+            }
+
+            /**
+             * Load selections from localStorage
+             */
+            loadSelections() {
+                const savedSelections = localStorage.getItem('kynecta-selections');
+                if (savedSelections) {
+                    this.userSelections = JSON.parse(savedSelections);
+                    
+                    // Restore visual selection state
+                    this.restoreSelections();
+                    this.updateSelectionUI();
+                }
+            }
+
+            /**
+             * Restore visual selection state
+             */
+            restoreSelections() {
+                // Restore mood selections
+                this.userSelections.moods.forEach(moodId => {
+                    const card = document.querySelector(`.selection-card[data-id="${moodId}"][data-type="moods"]`);
+                    if (card) card.classList.add('selected');
+                });
+                
+                // Restore interest selections
+                this.userSelections.interests.forEach(interestId => {
+                    const card = document.querySelector(`.selection-card[data-id="${interestId}"][data-type="interests"]`);
+                    if (card) card.classList.add('selected');
+                });
+            }
+
+            /**
+             * Get user selections for other pages
+             */
+            getUserSelections() {
+                return this.userSelections;
+            }
+
+            /**
+             * Show mood or interest selection step
+             */
+            showSelectionStep(step) {
+                const moodStep = document.getElementById('moodSelectionStep');
+                const interestStep = document.getElementById('interestSelectionStep');
+                
+                if (step === 'moods') {
+                    moodStep.classList.remove('hidden');
+                    interestStep.classList.add('hidden');
+                } else if (step === 'interests') {
+                    moodStep.classList.add('hidden');
+                    interestStep.classList.remove('hidden');
+                }
+            }
+
+            /**
+             * Finish selection and show main app
+             */
+            finishSelection() {
+                // Save selections
+                this.saveSelections();
+                
+                // Show success message
+                this.showToast('Selections saved! Your kynecta experience will be personalized based on your choices.', 'success');
+                
+                // Transition to landing page
+                setTimeout(() => {
+                    this.showSection('landing');
+                }, 1000);
+            }
+
+            /**
+             * Skip mood selection
+             */
+            skipMoodSelection() {
+                this.showSelectionStep('interests');
+                this.showToast('You can always update your moods later in settings', 'info');
+            }
+
+            /**
+             * Skip interest selection
+             */
+            skipInterestSelection() {
+                // Save empty selections
+                this.saveSelections();
+                
+                // Show info message
+                this.showToast('You can add interests later in your profile settings', 'info');
+                
+                // Transition to landing page
+                setTimeout(() => {
+                    this.showSection('landing');
+                }, 500);
             }
 
             /**
@@ -2126,6 +2660,28 @@
              * Sets up all event listeners for the application
              */
             setupEventListeners() {
+                // Selection navigation buttons
+                document.getElementById('nextToInterestsBtn').addEventListener('click', () => {
+                    this.showSelectionStep('interests');
+                });
+                
+                document.getElementById('backToMoodsBtn').addEventListener('click', () => {
+                    this.showSelectionStep('moods');
+                });
+                
+                document.getElementById('finishSelectionBtn').addEventListener('click', () => {
+                    this.finishSelection();
+                });
+                
+                // Skip buttons
+                document.getElementById('skipMoodSelection').addEventListener('click', () => {
+                    this.skipMoodSelection();
+                });
+                
+                document.getElementById('skipInterestSelection').addEventListener('click', () => {
+                    this.skipInterestSelection();
+                });
+                
                 // Section navigation buttons
                 document.getElementById('showLoginBtn').addEventListener('click', () => this.showSection('login'));
                 document.getElementById('showRegisterBtn').addEventListener('click', () => {
@@ -2220,14 +2776,20 @@
              */
             setupMoodCustomizer() {
                 // Mood customizer button
-                document.getElementById('moodCustomizerBtn').addEventListener('click', () => {
-                    this.showMoodCustomizerModal();
-                });
+                const moodCustomizerBtn = document.getElementById('moodCustomizerBtn');
+                if (moodCustomizerBtn) {
+                    moodCustomizerBtn.addEventListener('click', () => {
+                        this.showMoodCustomizerModal();
+                    });
+                }
                 
                 // Close mood customizer modal
-                document.getElementById('closeMoodCustomizer').addEventListener('click', () => {
-                    this.hideMoodCustomizerModal();
-                });
+                const closeMoodCustomizer = document.getElementById('closeMoodCustomizer');
+                if (closeMoodCustomizer) {
+                    closeMoodCustomizer.addEventListener('click', () => {
+                        this.hideMoodCustomizerModal();
+                    });
+                }
                 
                 // Color palette selection
                 const colorOptions = document.querySelectorAll('.color-option');
@@ -2258,46 +2820,67 @@
                 });
                 
                 // Custom color inputs
-                document.getElementById('primaryColorPicker').addEventListener('input', (e) => {
-                    this.customColors.primary = e.target.value;
-                    this.updateMoodPreview();
-                    document.getElementById('customColorPreview').style.background = 
-                        `linear-gradient(135deg, ${this.customColors.primary}, ${this.customColors.secondary})`;
-                });
+                const primaryColorPicker = document.getElementById('primaryColorPicker');
+                const secondaryColorPicker = document.getElementById('secondaryColorPicker');
+                if (primaryColorPicker) {
+                    primaryColorPicker.addEventListener('input', (e) => {
+                        this.customColors.primary = e.target.value;
+                        this.updateMoodPreview();
+                        document.getElementById('customColorPreview').style.background = 
+                            `linear-gradient(135deg, ${this.customColors.primary}, ${this.customColors.secondary})`;
+                    });
+                }
                 
-                document.getElementById('secondaryColorPicker').addEventListener('input', (e) => {
-                    this.customColors.secondary = e.target.value;
-                    this.updateMoodPreview();
-                    document.getElementById('customColorPreview').style.background = 
-                        `linear-gradient(135deg, ${this.customColors.primary}, ${this.customColors.secondary})`;
-                });
+                if (secondaryColorPicker) {
+                    secondaryColorPicker.addEventListener('input', (e) => {
+                        this.customColors.secondary = e.target.value;
+                        this.updateMoodPreview();
+                        document.getElementById('customColorPreview').style.background = 
+                            `linear-gradient(135deg, ${this.customColors.primary}, ${this.customColors.secondary})`;
+                    });
+                }
                 
                 // Apply custom colors button
-                document.getElementById('applyCustomColors').addEventListener('click', () => {
-                    this.applyCustomColors();
-                });
+                const applyCustomColors = document.getElementById('applyCustomColors');
+                if (applyCustomColors) {
+                    applyCustomColors.addEventListener('click', () => {
+                        this.applyCustomColors();
+                    });
+                }
                 
                 // Color intensity slider
-                document.getElementById('colorIntensity').addEventListener('input', (e) => {
-                    this.updateColorIntensity(e.target.value);
-                });
+                const colorIntensity = document.getElementById('colorIntensity');
+                if (colorIntensity) {
+                    colorIntensity.addEventListener('input', (e) => {
+                        this.updateColorIntensity(e.target.value);
+                    });
+                }
                 
                 // Reset mood colors button
-                document.getElementById('resetMoodColors').addEventListener('click', () => {
-                    this.resetMoodColors();
-                });
+                const resetMoodColors = document.getElementById('resetMoodColors');
+                if (resetMoodColors) {
+                    resetMoodColors.addEventListener('click', () => {
+                        this.resetMoodColors();
+                    });
+                }
                 
                 // Save mood colors button
-                document.getElementById('saveMoodColors').addEventListener('click', () => {
-                    this.saveMoodColors();
-                });
+                const saveMoodColors = document.getElementById('saveMoodColors');
+                if (saveMoodColors) {
+                    saveMoodColors.addEventListener('click', () => {
+                        this.saveMoodColors();
+                    });
+                }
                 
                 // Close modal when clicking outside
-                document.getElementById('moodCustomizerModal').addEventListener('click', (e) => {
-                    if (e.target.id === 'moodCustomizerModal') {
-                        this.hideMoodCustomizerModal();
-                    }
-                });
+                const moodCustomizerModal = document.getElementById('moodCustomizerModal');
+                if (moodCustomizerModal) {
+                    moodCustomizerModal.addEventListener('click', (e) => {
+                        if (e.target.id === 'moodCustomizerModal') {
+                            this.hideMoodCustomizerModal();
+                        }
+                    });
+                }
             }
 
             /**
@@ -2305,7 +2888,9 @@
              */
             updateMoodPreview() {
                 const preview = document.getElementById('moodPreview');
-                preview.style.background = `linear-gradient(135deg, ${this.customColors.primary}, ${this.customColors.secondary})`;
+                if (preview) {
+                    preview.style.background = `linear-gradient(135deg, ${this.customColors.primary}, ${this.customColors.secondary})`;
+                }
             }
 
             /**
@@ -2315,7 +2900,9 @@
                 // This would adjust the saturation/brightness of colors based on intensity
                 // For now, we'll just update the preview opacity to simulate intensity
                 const preview = document.getElementById('moodPreview');
-                preview.style.opacity = 0.5 + (intensity / 100) * 0.5;
+                if (preview) {
+                    preview.style.opacity = 0.5 + (intensity / 100) * 0.5;
+                }
             }
 
             /**
@@ -2487,25 +3074,41 @@
              */
             setupForgotPassword() {
                 // Forgot password button in login form
-                document.getElementById('forgotPasswordBtn').addEventListener('click', () => {
-                    this.showForgotPasswordModal();
-                });
+                const forgotPasswordBtn = document.getElementById('forgotPasswordBtn');
+                if (forgotPasswordBtn) {
+                    forgotPasswordBtn.addEventListener('click', () => {
+                        this.showForgotPasswordModal();
+                    });
+                }
                 
                 // Close forgot password modal
-                document.getElementById('closeForgotPassword').addEventListener('click', () => {
-                    this.hideForgotPasswordModal();
-                });
+                const closeForgotPassword = document.getElementById('closeForgotPassword');
+                if (closeForgotPassword) {
+                    closeForgotPassword.addEventListener('click', () => {
+                        this.hideForgotPasswordModal();
+                    });
+                }
                 
                 // Forgot password form submissions
-                document.getElementById('forgotEmailForm').addEventListener('submit', (e) => this.handleForgotPasswordStep1(e));
-                document.getElementById('forgotSecretForm').addEventListener('submit', (e) => this.handleForgotPasswordStep3(e));
+                const forgotEmailForm = document.getElementById('forgotEmailForm');
+                if (forgotEmailForm) {
+                    forgotEmailForm.addEventListener('submit', (e) => this.handleForgotPasswordStep1(e));
+                }
+                
+                const forgotSecretForm = document.getElementById('forgotSecretForm');
+                if (forgotSecretForm) {
+                    forgotSecretForm.addEventListener('submit', (e) => this.handleForgotPasswordStep3(e));
+                }
                 
                 // Close modal when clicking outside
-                document.getElementById('forgotPasswordModal').addEventListener('click', (e) => {
-                    if (e.target.id === 'forgotPasswordModal') {
-                        this.hideForgotPasswordModal();
-                    }
-                });
+                const forgotPasswordModal = document.getElementById('forgotPasswordModal');
+                if (forgotPasswordModal) {
+                    forgotPasswordModal.addEventListener('click', (e) => {
+                        if (e.target.id === 'forgotPasswordModal') {
+                            this.hideForgotPasswordModal();
+                        }
+                    });
+                }
             }
 
             /**
@@ -2679,9 +3282,9 @@
                 this.setForgotPasswordStep(1);
                 
                 // Pre-fill with email from login form if available
-                const loginEmail = document.getElementById('loginEmail').value;
-                if (loginEmail) {
-                    document.getElementById('forgotIdentifier').value = loginEmail;
+                const loginEmail = document.getElementById('loginEmail');
+                if (loginEmail && loginEmail.value) {
+                    document.getElementById('forgotIdentifier').value = loginEmail.value;
                 }
             }
 
@@ -2836,25 +3439,60 @@
                 const currentSectionEl = document.getElementById(`${this.currentSection}Section`);
                 const newSectionEl = document.getElementById(`${sectionId}Section`);
                 
-                if (!currentSectionEl || !newSectionEl) {
+                if (!newSectionEl) {
                     this.isTransitioning = false;
                     return;
                 }
                 
-                // Add exit animation to current section
-                currentSectionEl.style.transition = 'all 0.4s ease-in-out';
-                currentSectionEl.style.opacity = '0';
-                currentSectionEl.style.transform = 'translateX(-50px)';
-                
-                // Hide current section and show new section after transition
-                setTimeout(() => {
-                    // Hide current section completely
-                    currentSectionEl.classList.remove('section-active');
-                    currentSectionEl.classList.add('section-hidden');
-                    currentSectionEl.style.opacity = '';
-                    currentSectionEl.style.transform = '';
+                if (currentSectionEl) {
+                    // Add exit animation to current section
+                    currentSectionEl.style.transition = 'all 0.4s ease-in-out';
+                    currentSectionEl.style.opacity = '0';
+                    currentSectionEl.style.transform = 'translateX(-50px)';
                     
-                    // Show new section with enter animation
+                    // Hide current section and show new section after transition
+                    setTimeout(() => {
+                        // Hide current section completely
+                        currentSectionEl.classList.remove('section-active');
+                        currentSectionEl.classList.add('section-hidden');
+                        currentSectionEl.style.opacity = '';
+                        currentSectionEl.style.transform = '';
+                        
+                        // Show new section with enter animation
+                        newSectionEl.classList.remove('section-hidden');
+                        newSectionEl.classList.add('section-active');
+                        newSectionEl.style.opacity = '0';
+                        newSectionEl.style.transform = 'translateX(50px)';
+                        
+                        // Trigger reflow
+                        newSectionEl.offsetHeight;
+                        
+                        // Animate in new section
+                        setTimeout(() => {
+                            newSectionEl.style.opacity = '1';
+                            newSectionEl.style.transform = 'translateX(0)';
+                            
+                            this.currentSection = sectionId;
+                            this.isTransitioning = false;
+                            
+                            // Focus on first input in form sections
+                            if (sectionId === 'login') {
+                                const emailInput = document.getElementById('loginEmail');
+                                if (emailInput) {
+                                    setTimeout(() => emailInput.focus(), 100);
+                                }
+                            } else if (sectionId === 'register') {
+                                const displayNameInput = document.getElementById('displayName');
+                                if (displayNameInput) {
+                                    setTimeout(() => displayNameInput.focus(), 100);
+                                }
+                            }
+                            
+                            console.log(`🔄 Switched to ${sectionId} section`);
+                        }, 50);
+                    }, 400);
+                } else {
+                    // No current section (first time showing)
                     newSectionEl.classList.remove('section-hidden');
                     newSectionEl.classList.add('section-active');
                     newSectionEl.style.opacity = '0';
@@ -2871,22 +3509,9 @@
                         this.currentSection = sectionId;
                         this.isTransitioning = false;
                         
-                        // Focus on first input in form sections
-                        if (sectionId === 'login') {
-                            const emailInput = document.getElementById('loginEmail');
-                            if (emailInput) {
-                                setTimeout(() => emailInput.focus(), 100);
-                            }
-                        } else if (sectionId === 'register') {
-                            const displayNameInput = document.getElementById('displayName');
-                            if (displayNameInput) {
-                                setTimeout(() => displayNameInput.focus(), 100);
-                            }
-                        }
-                        
                         console.log(`🔄 Switched to ${sectionId} section`);
                     }, 50);
-                }, 400);
+                }
             }
 
             /**
@@ -2999,8 +3624,8 @@
                     this.setRegisterLoadingState(true);
                     
                     try {
-                        // Call Firebase registration
-                        await window.firebaseAuth.registerUser(email, password, displayName);
+                        // Pass user selections to registration
+                        await window.firebaseAuth.registerUser(email, password, displayName, this.userSelections);
                         
                         // Success - redirect to profile page
                         this.redirectToProfile();
@@ -3317,7 +3942,7 @@
 
     </script>
     <script>
-        if ("serviceWorker" in navigation) {
+        if ("serviceWorker" in navigator) {
             navigator.serviceWorker.register("/service-worker.js");
         }
     </script>

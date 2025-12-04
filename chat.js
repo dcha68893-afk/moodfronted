@@ -1219,6 +1219,163 @@ async function sendAudioMessage(audioBlob) {
     }
 }
 
+// Tab switching functionality
+function switchTab(tabName) {
+    console.log('Switching to tab:', tabName);
+    
+    // Hide all tab panels
+    document.querySelectorAll('.tab-panel').forEach(panel => {
+        panel.classList.remove('active');
+    });
+    
+    // Remove active class from all tab buttons
+    document.querySelectorAll('.tab-btn').forEach(btn => {
+        btn.classList.remove('active');
+    });
+    
+    // Show selected tab panel
+    const tabPanel = document.getElementById(`${tabName}Tab`);
+    if (tabPanel) {
+        tabPanel.classList.add('active');
+        console.log('Tab panel found and activated:', tabPanel.id);
+    } else {
+        console.error('Tab panel not found:', `${tabName}Tab`);
+    }
+    
+    // Activate corresponding tab button
+    const tabButton = document.querySelector(`.tab-btn[data-tab="${tabName}"]`);
+    if (tabButton) {
+        tabButton.classList.add('active');
+    }
+    
+    // Load tab-specific content
+    loadTabContent(tabName);
+}
+
+function loadTabContent(tabName) {
+    switch(tabName) {
+        case 'chat':
+            loadChats();
+            break;
+        case 'updates':
+            loadStatusUpdates();
+            break;
+        case 'tools':
+            // Tools are already loaded in HTML
+            break;
+        case 'calls':
+            loadCallHistory();
+            break;
+        case 'friends':
+            loadFriendsList();
+            break;
+    }
+}
+
+// Example content loading functions
+function loadStatusUpdates() {
+    const recentStatuses = document.getElementById('recentStatuses');
+    if (recentStatuses) {
+        recentStatuses.innerHTML = `
+            <div class="status-item">
+                <div class="status-avatar">
+                    <img src="https://via.placeholder.com/50" alt="User">
+                </div>
+                <div class="status-info">
+                    <div class="status-name">John Doe</div>
+                    <div class="status-time">2 hours ago</div>
+                </div>
+            </div>
+            <div class="status-item">
+                <div class="status-avatar">
+                    <img src="https://via.placeholder.com/50" alt="User">
+                </div>
+                <div class="status-info">
+                    <div class="status-name">Jane Smith</div>
+                    <div class="status-time">4 hours ago</div>
+                </div>
+            </div>
+        `;
+    }
+}
+
+function loadCallHistory() {
+    const callHistory = document.getElementById('callHistory');
+    if (callHistory) {
+        callHistory.innerHTML = `
+            <div class="call-item">
+                <div class="call-avatar">
+                    <img src="https://via.placeholder.com/50" alt="User">
+                </div>
+                <div class="call-info">
+                    <div class="call-name">John Doe</div>
+                    <div class="call-details">
+                        <span class="call-type call-outgoing">
+                            <i class="fas fa-phone-alt"></i> Outgoing
+                        </span>
+                        <span class="call-time">Yesterday</span>
+                    </div>
+                </div>
+            </div>
+            <div class="call-item">
+                <div class="call-avatar">
+                    <img src="https://via.placeholder.com/50" alt="User">
+                </div>
+                <div class="call-info">
+                    <div class="call-name">Jane Smith</div>
+                    <div class="call-details">
+                        <span class="call-type call-incoming">
+                            <i class="fas fa-phone-alt"></i> Incoming
+                        </span>
+                        <span class="call-time">2 days ago</span>
+                    </div>
+                </div>
+            </div>
+        `;
+    }
+}
+
+function loadFriendsList() {
+    const friendsList = document.getElementById('friendsList');
+    if (friendsList) {
+        friendsList.innerHTML = `
+            <div class="friend-item">
+                <div class="friend-avatar">
+                    <img src="https://via.placeholder.com/50" alt="User">
+                    <div class="friend-status status-online"></div>
+                </div>
+                <div class="friend-info">
+                    <div class="friend-name">John Doe</div>
+                    <div class="friend-status-text">Online</div>
+                </div>
+            </div>
+            <div class="friend-item">
+                <div class="friend-avatar">
+                    <img src="https://via.placeholder.com/50" alt="User">
+                    <div class="friend-status status-away"></div>
+                </div>
+                <div class="friend-info">
+                    <div class="friend-name">Jane Smith</div>
+                    <div class="friend-status-text">Away</div>
+                </div>
+            </div>
+        `;
+    }
+}
+
+// Initialize tabs
+document.addEventListener('DOMContentLoaded', function() {
+    // Add click event listeners to tab buttons
+    document.querySelectorAll('.tab-btn').forEach(button => {
+        button.addEventListener('click', function() {
+            const tabName = this.getAttribute('data-tab');
+            switchTab(tabName);
+        });
+    });
+    
+    // Set initial tab
+    switchTab('chat');
+});
 // ADD THIS near top of file after variable declarations
 function formatTimeAgo(timestamp) {
     if (!timestamp) return 'Just now';

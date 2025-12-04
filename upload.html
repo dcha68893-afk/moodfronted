@@ -196,6 +196,43 @@
             margin-right: 10px;
         }
         
+        .user-tags {
+            background: #f0f7ff;
+            border-radius: 8px;
+            padding: 15px;
+            margin: 15px 0;
+            border-left: 4px solid #667eea;
+        }
+        
+        .tag-list {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 8px;
+            margin-top: 10px;
+        }
+        
+        .tag {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            padding: 6px 12px;
+            border-radius: 20px;
+            font-size: 0.85rem;
+            font-weight: 500;
+        }
+        
+        .tag-label {
+            font-weight: 600;
+            color: #333;
+            margin-bottom: 5px;
+            display: block;
+        }
+        
+        .no-tags {
+            color: #666;
+            font-style: italic;
+            font-size: 0.9rem;
+        }
+        
         @keyframes spin {
             0% { transform: rotate(0deg); }
             100% { transform: rotate(360deg); }
@@ -205,7 +242,14 @@
 <body>
     <div class="container">
         <h1>🌤️ Secure Cloudinary Upload</h1>
-        <p class="subtitle">Secure server-signed uploads with progress tracking</p>
+        <p class="subtitle">Secure server-signed uploads with mood/interests tagging</p>
+        
+        <!-- User Tags Display -->
+        <div class="user-tags" id="userTags" style="display: none;">
+            <span class="tag-label">Your upload will be tagged with:</span>
+            <div class="tag-list" id="tagList"></div>
+            <p class="no-tags" id="noTags" style="display: none;">No mood/interest tags selected</p>
+        </div>
         
         <div class="upload-area" id="uploadArea">
             <div class="upload-icon">📁</div>
@@ -232,7 +276,7 @@
         
         <div class="security-notice">
             <strong>🔒 Secure Upload:</strong> All files are securely signed by our server before being uploaded to Cloudinary. 
-            Your API keys are never exposed to the client.
+            Your API keys are never exposed to the client. Files are automatically tagged with your mood/interests.
         </div>
     </div>
 
@@ -246,6 +290,81 @@
         const progressBar = document.getElementById('progressBar');
         const progressFill = document.getElementById('progressFill');
         const resultDiv = document.getElementById('result');
+        const userTagsDiv = document.getElementById('userTags');
+        const tagListDiv = document.getElementById('tagList');
+        const noTagsDiv = document.getElementById('noTags');
+        
+        // User selections from localStorage or app instance
+        let userSelections = null;
+        let combinedTags = [];
+
+        // Load user selections on page load
+        document.addEventListener('DOMContentLoaded', function() {
+            loadUserSelections();
+        });
+
+        // Load user selections from localStorage or app instance
+        function loadUserSelections() {
+            try {
+                // Try to get from localStorage first
+                const selections = JSON.parse(localStorage.getItem('kynecta-selections'));
+                
+                // Or from the app instance if available
+                if (!selections && window.kynectaApp) {
+                    userSelections = window.kynectaApp.getUserSelections();
+                } else {
+                    userSelections = selections;
+                }
+                
+                // Process and display tags
+                if (userSelections) {
+                    processUserTags();
+                    displayUserTags();
+                } else {
+                    console.log('No user selections found');
+                }
+            } catch (error) {
+                console.error('Error loading user selections:', error);
+            }
+        }
+
+        // Process user tags from selections
+        function processUserTags() {
+            combinedTags = [];
+            
+            if (userSelections.moods && userSelections.moods.length > 0) {
+                combinedTags = combinedTags.concat(userSelections.moods);
+            }
+            
+            if (userSelections.interests && userSelections.interests.length > 0) {
+                combinedTags = combinedTags.concat(userSelections.interests);
+            }
+            
+            // Clean up tags - remove duplicates and format
+            combinedTags = [...new Set(combinedTags)]
+                .map(tag => tag.trim().toLowerCase().replace(/\s+/g, '_'))
+                .filter(tag => tag.length > 0);
+            
+            console.log('Processed user tags:', combinedTags);
+        }
+
+        // Display user tags in the UI
+        function displayUserTags() {
+            if (combinedTags.length > 0) {
+                tagListDiv.innerHTML = '';
+                combinedTags.forEach(tag => {
+                    const tagElement = document.createElement('span');
+                    tagElement.className = 'tag';
+                    tagElement.textContent = tag.replace(/_/g, ' ');
+                    tagListDiv.appendChild(tagElement);
+                });
+                userTagsDiv.style.display = 'block';
+                noTagsDiv.style.display = 'none';
+            } else {
+                userTagsDiv.style.display = 'block';
+                noTagsDiv.style.display = 'block';
+            }
+        }
 
         // Event Listeners
         fileInput.addEventListener('change', handleFileSelect);
@@ -306,7 +425,7 @@
             uploadBtn.disabled = false;
         }
 
-        // A) UPLOAD FUNCTION LOGIC - SECURE VERSION
+        // A) UPLOAD FUNCTION LOGIC - SECURE VERSION WITH TAGGING
         async function uploadFile() {
             const file = fileInput.files[0];
             if (!file) {
@@ -321,9 +440,9 @@
             resultDiv.style.display = 'none';
 
             try {
-                // B) CRITICAL SECURITY FIX: Two-step secure upload process
+                // B) CRITICAL SECURITY FIX: Two-step secure upload process with tagging
                 
-                // Step 1: Get signed upload parameters from our server
+                // Step 1: Get signed upload parameters from our server with user tags
                 console.log('🔐 Requesting signed upload parameters from server...');
                 const signResponse = await fetch('/api/cloudinary/sign-upload', {
                     method: 'POST',
@@ -333,7 +452,11 @@
                     body: JSON.stringify({
                         filename: file.name,
                         fileType: file.type,
-                        fileSize: file.size
+                        fileSize: file.size,
+                        // Include user tags in the request
+                        userTags: combinedTags,
+                        moods: userSelections?.moods || [],
+                        interests: userSelections?.interests || []
                     })
                 });
 
@@ -348,9 +471,10 @@
                 }
 
                 console.log('✅ Received signed parameters:', signData);
+                console.log('🏷️ Tags to be applied:', combinedTags);
 
-                // Step 2: Upload file to Cloudinary using signed parameters
-                console.log('📤 Uploading file to Cloudinary with signed request...');
+                // Step 2: Upload file to Cloudinary using signed parameters with tags
+                console.log('📤 Uploading file to Cloudinary with user tags...');
                 
                 const cloudinaryFormData = new FormData();
                 
@@ -361,6 +485,14 @@
                 
                 // Add the actual file
                 cloudinaryFormData.append('file', file);
+                
+                // Add tags to the upload if available
+                if (combinedTags.length > 0) {
+                    // Cloudinary accepts tags as comma-separated string
+                    const tagsString = combinedTags.join(',');
+                    cloudinaryFormData.append('tags', tagsString);
+                    console.log('🏷️ Adding tags to upload:', tagsString);
+                }
 
                 // Upload to Cloudinary with progress tracking
                 const xhr = new XMLHttpRequest();
@@ -411,13 +543,16 @@
                     body: JSON.stringify({
                         publicId: cloudinaryResult.public_id,
                         signature: cloudinaryResult.signature,
-                        version: cloudinaryResult.version
+                        version: cloudinaryResult.version,
+                        tags: combinedTags,
+                        moods: userSelections?.moods || [],
+                        interests: userSelections?.interests || []
                     })
                 });
 
                 const verifyData = await verifyResponse.json();
 
-                // Display success result
+                // Display success result with tags
                 showSuccess(cloudinaryResult, file);
 
             } catch (error) {
@@ -435,6 +570,9 @@
             const isImage = cloudinaryResult.resource_type === 'image';
             const isVideo = cloudinaryResult.resource_type === 'video';
             const isAudio = cloudinaryResult.resource_type === 'audio';
+            
+            // Check if tags were applied
+            const hasTags = cloudinaryResult.tags && cloudinaryResult.tags.length > 0;
             
             let previewHtml = '';
             if (isImage) {
@@ -454,6 +592,32 @@
                     </audio>
                 `;
             }
+            
+            // Display tags if available
+            let tagsHtml = '';
+            if (hasTags) {
+                tagsHtml = `
+                    <div style="margin: 15px 0;">
+                        <strong>🏷️ Tags Applied:</strong>
+                        <div class="tag-list" style="margin-top: 8px;">
+                            ${cloudinaryResult.tags.map(tag => `
+                                <span class="tag" style="background: #4CAF50; font-size: 0.8rem;">${tag}</span>
+                            `).join('')}
+                        </div>
+                    </div>
+                `;
+            } else if (combinedTags.length > 0) {
+                tagsHtml = `
+                    <div style="margin: 15px 0;">
+                        <strong>🏷️ User Tags (metadata):</strong>
+                        <div class="tag-list" style="margin-top: 8px;">
+                            ${combinedTags.map(tag => `
+                                <span class="tag" style="background: #2196F3; font-size: 0.8rem;">${tag.replace(/_/g, ' ')}</span>
+                            `).join('')}
+                        </div>
+                    </div>
+                `;
+            }
 
             resultDiv.innerHTML = `
                 <div class="success">
@@ -462,6 +626,8 @@
                     <p><strong>Type:</strong> ${cloudinaryResult.resource_type} / ${cloudinaryResult.format}</p>
                     <p><strong>Size:</strong> ${formatFileSize(cloudinaryResult.bytes)}</p>
                     <p><strong>Public ID:</strong> ${cloudinaryResult.public_id}</p>
+                    
+                    ${tagsHtml}
                     
                     ${previewHtml}
                     

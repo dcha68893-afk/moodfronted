@@ -40,6 +40,382 @@
         overflow: hidden;
     }
     
+    /* ========== SIDEBAR TABS (DESKTOP VERSION) ========== */
+    .sidebar-tabs {
+        display: flex !important;
+        background: var(--kynecta-light);
+        border-bottom: 1px solid var(--kynecta-border);
+        padding: 0 16px;
+        height: 60px;
+        min-height: 60px;
+        max-height: 60px;
+        flex-shrink: 0;
+        align-items: center;
+        justify-content: space-around;
+        position: relative;
+        z-index: 10;
+    }
+    
+    .tab-btn {
+        background: transparent;
+        border: none;
+        color: var(--kynecta-dark);
+        cursor: pointer;
+        padding: 12px 16px;
+        border-radius: 8px;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        justify-content: center;
+        gap: 4px;
+        transition: all 0.3s ease;
+        position: relative;
+        min-width: 70px;
+        opacity: 0.7;
+        font-size: 0.75rem;
+    }
+    
+    .tab-btn:hover {
+        background: rgba(124, 58, 237, 0.1);
+        opacity: 0.9;
+        transform: translateY(-1px);
+    }
+    
+    .tab-btn.active {
+        color: var(--kynecta-primary);
+        opacity: 1;
+        font-weight: 600;
+    }
+    
+    .tab-btn.active::after {
+        content: '';
+        position: absolute;
+        bottom: -1px;
+        left: 50%;
+        transform: translateX(-50%);
+        width: 40px;
+        height: 3px;
+        background: var(--kynecta-primary);
+        border-radius: 2px;
+    }
+    
+    .tab-icon {
+        font-size: 1.25rem;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        width: 24px;
+        height: 24px;
+    }
+    
+    .tab-label {
+        font-size: 0.75rem;
+        font-weight: 500;
+        white-space: nowrap;
+    }
+    
+    /* Tab notification badges */
+    .tab-badge {
+        position: absolute;
+        top: 6px;
+        right: 6px;
+        background: var(--kynecta-primary);
+        color: white;
+        font-size: 0.65rem;
+        min-width: 16px;
+        height: 16px;
+        border-radius: 50%;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        padding: 0 4px;
+    }
+    
+    /* ========== TAB CONTENT PANELS ========== */
+    .tab-content {
+        flex: 1;
+        overflow-y: auto;
+        overflow-x: hidden;
+        position: relative;
+        display: none;
+    }
+    
+    .tab-content.active {
+        display: block;
+    }
+    
+    /* Chat Tab (Default) */
+    #chatTab {
+        display: block;
+    }
+    
+    /* Updates Tab (Status/Stories) */
+    #updatesTab {
+        padding: 0;
+    }
+    
+    /* Status/Updates List */
+    .status-list {
+        padding: 0;
+    }
+    
+    .status-item {
+        display: flex;
+        align-items: center;
+        padding: 12px 16px;
+        cursor: pointer;
+        transition: background 0.2s;
+        border-bottom: 1px solid var(--kynecta-border);
+    }
+    
+    .status-item:hover {
+        background: rgba(124, 58, 237, 0.05);
+    }
+    
+    .status-avatar {
+        width: 56px;
+        height: 56px;
+        border-radius: 50%;
+        overflow: hidden;
+        border: 2px solid var(--kynecta-primary);
+        position: relative;
+        flex-shrink: 0;
+    }
+    
+    .status-avatar img {
+        width: 100%;
+        height: 100%;
+        object-fit: cover;
+    }
+    
+    .status-info {
+        margin-left: 12px;
+        flex: 1;
+    }
+    
+    .status-name {
+        font-weight: 600;
+        margin-bottom: 4px;
+    }
+    
+    .status-time {
+        font-size: 0.75rem;
+        color: #6B7280;
+    }
+    
+    .my-status {
+        background: rgba(124, 58, 237, 0.1);
+    }
+    
+    .my-status .status-avatar {
+        border-color: var(--kynecta-secondary);
+    }
+    
+    /* Tools Tab */
+    #toolsTab {
+        padding: 16px;
+    }
+    
+    .tools-grid {
+        display: grid;
+        grid-template-columns: repeat(2, 1fr);
+        gap: 12px;
+        margin-top: 16px;
+    }
+    
+    .tool-card {
+        background: var(--kynecta-light);
+        border: 1px solid var(--kynecta-border);
+        border-radius: 12px;
+        padding: 16px;
+        text-align: center;
+        cursor: pointer;
+        transition: all 0.3s ease;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        gap: 8px;
+    }
+    
+    .tool-card:hover {
+        background: rgba(124, 58, 237, 0.05);
+        border-color: var(--kynecta-primary);
+        transform: translateY(-2px);
+        box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
+    }
+    
+    .tool-icon {
+        width: 48px;
+        height: 48px;
+        border-radius: 12px;
+        background: var(--kynecta-primary);
+        color: white;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        font-size: 1.5rem;
+    }
+    
+    .tool-name {
+        font-weight: 600;
+        font-size: 0.875rem;
+    }
+    
+    .tool-description {
+        font-size: 0.75rem;
+        color: #6B7280;
+    }
+    
+    /* Calls Tab */
+    #callsTab {
+        padding: 0;
+    }
+    
+    .call-list {
+        padding: 0;
+    }
+    
+    .call-item {
+        display: flex;
+        align-items: center;
+        padding: 12px 16px;
+        cursor: pointer;
+        transition: background 0.2s;
+        border-bottom: 1px solid var(--kynecta-border);
+    }
+    
+    .call-item:hover {
+        background: rgba(124, 58, 237, 0.05);
+    }
+    
+    .call-avatar {
+        width: 48px;
+        height: 48px;
+        border-radius: 50%;
+        overflow: hidden;
+        flex-shrink: 0;
+        position: relative;
+    }
+    
+    .call-avatar img {
+        width: 100%;
+        height: 100%;
+        object-fit: cover;
+    }
+    
+    .call-info {
+        margin-left: 12px;
+        flex: 1;
+    }
+    
+    .call-name {
+        font-weight: 600;
+        margin-bottom: 4px;
+    }
+    
+    .call-details {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        font-size: 0.875rem;
+        color: #6B7280;
+    }
+    
+    .call-type {
+        font-size: 0.75rem;
+    }
+    
+    .call-incoming {
+        color: var(--kynecta-secondary);
+    }
+    
+    .call-outgoing {
+        color: var(--kynecta-primary);
+    }
+    
+    .call-missed {
+        color: #EF4444;
+    }
+    
+    .call-time {
+        font-size: 0.75rem;
+        color: #9CA3AF;
+    }
+    
+    /* Friends Tab */
+    #friendsTab {
+        padding: 0;
+    }
+    
+    .friends-list {
+        padding: 0;
+    }
+    
+    .friend-item {
+        display: flex;
+        align-items: center;
+        padding: 12px 16px;
+        cursor: pointer;
+        transition: background 0.2s;
+        border-bottom: 1px solid var(--kynecta-border);
+    }
+    
+    .friend-item:hover {
+        background: rgba(124, 58, 237, 0.05);
+    }
+    
+    .friend-avatar {
+        width: 48px;
+        height: 48px;
+        border-radius: 50%;
+        overflow: hidden;
+        flex-shrink: 0;
+        position: relative;
+    }
+    
+    .friend-avatar img {
+        width: 100%;
+        height: 100%;
+        object-fit: cover;
+    }
+    
+    .friend-status {
+        position: absolute;
+        bottom: 0;
+        right: 0;
+        width: 12px;
+        height: 12px;
+        border: 2px solid white;
+        border-radius: 50%;
+    }
+    
+    .status-online {
+        background: var(--kynecta-secondary);
+    }
+    
+    .status-offline {
+        background: #6B7280;
+    }
+    
+    .status-away {
+        background: #F59E0B;
+    }
+    
+    .friend-info {
+        margin-left: 12px;
+        flex: 1;
+    }
+    
+    .friend-name {
+        font-weight: 600;
+        margin-bottom: 4px;
+    }
+    
+    .friend-status-text {
+        font-size: 0.75rem;
+        color: #6B7280;
+    }
+    
     /* ========== PROFILE PICTURE & COVER PHOTO FIXES ========== */
     /* User Profile Header - Fix for avatar display */
     #userAvatar {
@@ -880,6 +1256,23 @@
         font-size: 18px;
     }
     
+    /* Larger tab styling for large desktop */
+    .sidebar-tabs {
+        height: 70px;
+    }
+    
+    .tab-btn {
+        min-width: 80px;
+        padding: 14px 18px;
+        font-size: 0.8rem;
+    }
+    
+    .tab-icon {
+        font-size: 1.5rem;
+        width: 28px;
+        height: 28px;
+    }
+    
     /* Larger profile images for desktop */
     #userAvatar,
     #chatAvatar {
@@ -894,6 +1287,22 @@
     
     #profileCoverPreview {
         height: 180px !important;
+    }
+    
+    /* Larger tools grid for desktop */
+    .tools-grid {
+        grid-template-columns: repeat(3, 1fr);
+        gap: 16px;
+    }
+    
+    .tool-card {
+        padding: 20px;
+    }
+    
+    .tool-icon {
+        width: 56px;
+        height: 56px;
+        font-size: 1.75rem;
     }
 }
 
@@ -911,4 +1320,41 @@
 [data-theme="dark"] .message-received {
     background: #202C33;
     color: #E9EDEF;
+}
+
+[data-theme="dark"] .sidebar-tabs {
+    background: #1F2937;
+    border-bottom-color: #374151;
+}
+
+[data-theme="dark"] .tab-btn {
+    color: #D1D5DB;
+}
+
+[data-theme="dark"] .tab-btn:hover {
+    background: rgba(124, 58, 237, 0.2);
+}
+
+[data-theme="dark"] .tab-btn.active {
+    color: var(--kynecta-primary);
+}
+
+[data-theme="dark"] .tool-card {
+    background: #374151;
+    border-color: #4B5563;
+}
+
+[data-theme="dark"] .tool-card:hover {
+    background: rgba(124, 58, 237, 0.15);
+    border-color: var(--kynecta-primary);
+}
+
+[data-theme="dark"] .status-item:hover,
+[data-theme="dark"] .call-item:hover,
+[data-theme="dark"] .friend-item:hover {
+    background: rgba(124, 58, 237, 0.1);
+}
+
+[data-theme="dark"] .my-status {
+    background: rgba(124, 58, 237, 0.15);
 }

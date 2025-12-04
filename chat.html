@@ -11,18 +11,24 @@
     <link href="https://cdn.jsdelivr.net/npm/tailwindcss@^2/dist/tailwind.min.css" rel="stylesheet">
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
     
-<script src="https://www.gstatic.com/firebasejs/9.22.0/firebase-app-compat.js"></script>
-<script src="https://www.gstatic.com/firebasejs/9.22.0/firebase-firestore-compat.js"></script>
-<script src="https://www.gstatic.com/firebasejs/9.22.0/firebase-auth-compat.js"></script>
-<script src="https://www.gstatic.com/firebasejs/9.22.0/firebase-storage-compat.js"></script>
-<script src="https://www.gstatic.com/firebasejs/9.22.0/firebase-messaging-compat.js"></script>
-<meta name="ignore-tailwind-cdn-warning" content="true">
+    <script src="https://www.gstatic.com/firebasejs/9.22.0/firebase-app-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/9.22.0/firebase-firestore-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/9.22.0/firebase-auth-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/9.22.0/firebase-storage-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/9.22.0/firebase-messaging-compat.js"></script>
+    
+    <!-- ADDED: User data and display scripts -->
+    <script src="user-data.js"></script>
+    <script src="display-user-selections.js"></script>
+    
+    <meta name="ignore-tailwind-cdn-warning" content="true">
     <script>
         window.tailwindConfig = { ignoreCDNWarning: true };
     </script>
-<link rel="stylesheet" href="chat.css">
-<link rel="stylesheet" href="mobile.css" media="(max-width: 768px)">
-<link rel="stylesheet" href="desktop.css" media="(min-width: 769px)">
+    
+    <link rel="stylesheet" href="chat.css">
+    <link rel="stylesheet" href="mobile.css" media="(max-width: 768px)">
+    <link rel="stylesheet" href="desktop.css" media="(min-width: 769px)">
 </head>
 <body class="h-full overflow-hidden" data-theme="light">
     <!-- Toast Notifications -->
@@ -84,6 +90,20 @@
                         <button id="themeToggle" class="text-xl cursor-pointer hover:scale-110 transition-transform">
                             <i class="fas fa-moon" id="themeIcon"></i>
                         </button>
+                    </div>
+                </div>
+
+                <!-- ADDED: Personalization Info Section -->
+                <div class="personalization-info bg-purple-800/30 p-3 border-b border-purple-700/30">
+                    <div class="flex items-center text-sm text-gray-300">
+                        <i class="fas fa-magic mr-2"></i>
+                        <span>Content is personalized based on your moods and interests</span>
+                    </div>
+                    
+                    <!-- Quick selection display -->
+                    <div class="flex flex-wrap mt-2 gap-1">
+                        <div id="currentMoodsMini" class="flex flex-wrap gap-1"></div>
+                        <div id="currentInterestsMini" class="flex flex-wrap gap-1"></div>
                     </div>
                 </div>
 
@@ -699,220 +719,219 @@
     </div>
 
     <!-- Status Creation Modal -->
-<div id="statusCreation" class="status-creation" style="display: none;">
-    <div class="status-creation-content">
-        <div class="kynecta-header p-4">
-            <div class="flex items-center justify-between">
-                <h3 class="text-xl font-semibold text-white">Create Status Update</h3>
-                <button id="closeStatusCreation" class="text-white/80 hover:text-white transition-colors">
+    <div id="statusCreation" class="status-creation" style="display: none;">
+        <div class="status-creation-content">
+            <div class="kynecta-header p-4">
+                <div class="flex items-center justify-between">
+                    <h3 class="text-xl font-semibold text-white">Create Status Update</h3>
+                    <button id="closeStatusCreation" class="text-white/80 hover:text-white transition-colors">
+                        <i class="fas fa-times text-xl"></i>
+                    </button>
+                </div>
+            </div>
+            
+            <!-- Hidden file inputs -->
+            <input type="file" id="statusImageInput" accept="image/*" class="hidden">
+            <input type="file" id="statusVideoInput" accept="video/*" class="hidden">
+            <input type="file" id="statusAudioInput" accept="audio/*" class="hidden">
+            
+            <div class="status-options">
+                <div class="status-option active" data-type="emoji">
+                    <i class="fas fa-smile text-xl mb-2"></i>
+                    <p>Emoji</p>
+                </div>
+                <div class="status-option" data-type="text">
+                    <i class="fas fa-font text-xl mb-2"></i>
+                    <p>Text</p>
+                </div>
+                <div class="status-option" data-type="image">
+                    <i class="fas fa-image text-xl mb-2"></i>
+                    <p>Image</p>
+                </div>
+                <div class="status-option" data-type="video">
+                    <i class="fas fa-video text-xl mb-2"></i>
+                    <p>Video</p>
+                </div>
+                <div class="status-option" data-type="audio">
+                    <i class="fas fa-music text-xl mb-2"></i>
+                    <p>Audio</p>
+                </div>
+                <div class="status-option" data-type="gif">
+                    <i class="fas fa-film text-xl mb-2"></i>
+                    <p>GIF</p>
+                </div>
+                <div class="status-option" data-type="sticker">
+                    <i class="fas fa-sticky-note text-xl mb-2"></i>
+                    <p>Sticker</p>
+                </div>
+                <div class="status-option" data-type="location">
+                    <i class="fas fa-map-marker-alt text-xl mb-2"></i>
+                    <p>Location</p>
+                </div>
+            </div>
+            
+            <div class="status-previews p-4">
+                <!-- Emoji Preview -->
+                <div id="emojiPreview" class="status-preview">
+                    <div class="text-center">
+                        <div class="text-8xl mb-4" contenteditable="true">😊</div>
+                        <p class="text-gray-500 text-sm">Click to change emoji</p>
+                    </div>
+                </div>
+                
+                <!-- Text Preview -->
+                <div id="textPreview" class="status-preview hidden">
+                    <div class="mb-4">
+                        <label class="block text-sm font-medium text-gray-700 mb-2">Background Color</label>
+                        <div class="flex flex-wrap gap-2">
+                            <div class="w-8 h-8 rounded-full bg-gradient-to-r from-purple-400 to-purple-600 cursor-pointer" data-color="purple"></div>
+                            <div class="w-8 h-8 rounded-full bg-gradient-to-r from-blue-400 to-blue-600 cursor-pointer" data-color="blue"></div>
+                            <div class="w-8 h-8 rounded-full bg-gradient-to-r from-green-400 to-green-600 cursor-pointer" data-color="green"></div>
+                            <div class="w-8 h-8 rounded-full bg-gradient-to-r from-red-400 to-red-600 cursor-pointer" data-color="red"></div>
+                            <div class="w-8 h-8 rounded-full bg-gradient-to-r from-yellow-400 to-yellow-600 cursor-pointer" data-color="yellow"></div>
+                            <div class="w-8 h-8 rounded-full bg-gradient-to-r from-pink-400 to-pink-600 cursor-pointer" data-color="pink"></div>
+                            <input type="color" id="customColor" class="w-8 h-8 cursor-pointer">
+                        </div>
+                    </div>
+                    <div class="mb-4">
+                        <label class="block text-sm font-medium text-gray-700 mb-2">Text Style</label>
+                        <div class="flex space-x-3">
+                            <select id="textFont" class="flex-1 p-2 border rounded-lg">
+                                <option value="Arial">Arial</option>
+                                <option value="Helvetica">Helvetica</option>
+                                <option value="Courier New">Courier New</option>
+                                <option value="Georgia">Georgia</option>
+                            </select>
+                            <input type="range" id="textSize" min="16" max="72" value="24" class="flex-1">
+                        </div>
+                    </div>
+                    <textarea 
+                        id="statusTextInput" 
+                        class="w-full p-4 border border-gray-300 rounded-xl resize-none focus:border-purple-500 focus:ring-1 focus:ring-purple-500 text-center text-2xl" 
+                        placeholder="What's on your mind?"
+                        rows="4"
+                    ></textarea>
+                </div>
+                
+                <!-- Image Preview -->
+                <div id="imagePreview" class="status-preview hidden">
+                    <div class="text-center">
+                        <div id="statusImagePreview" class="hidden">
+                            <img id="statusImagePreviewImg" class="max-w-full max-h-64 mx-auto rounded-lg mb-4" alt="Image preview">
+                        </div>
+                        <button onclick="document.getElementById('statusImageInput').click()" class="bg-purple-600 text-white px-6 py-3 rounded-xl hover:bg-purple-700 transition-colors font-medium">
+                            <i class="fas fa-upload mr-2"></i>Choose Image
+                        </button>
+                        <p class="text-gray-500 text-sm mt-2">Max: 10MB, Supported: JPG, PNG, GIF</p>
+                    </div>
+                </div>
+                
+                <!-- Video Preview -->
+                <div id="videoPreview" class="status-preview hidden">
+                    <div class="text-center">
+                        <div id="statusVideoPreview" class="hidden">
+                            <video id="statusVideoPreviewVideo" controls class="max-w-full max-h-64 mx-auto rounded-lg mb-4"></video>
+                        </div>
+                        <button onclick="document.getElementById('statusVideoInput').click()" class="bg-purple-600 text-white px-6 py-3 rounded-xl hover:bg-purple-700 transition-colors font-medium">
+                            <i class="fas fa-upload mr-2"></i>Choose Video
+                        </button>
+                        <p class="text-gray-500 text-sm mt-2">Max: 10 seconds, 50MB</p>
+                    </div>
+                </div>
+                
+                <!-- Audio Preview -->
+                <div id="audioPreview" class="status-preview hidden">
+                    <div class="text-center">
+                        <div id="statusAudioPreview" class="hidden">
+                            <audio id="statusAudioPreviewAudio" controls class="w-full mb-4"></audio>
+                        </div>
+                        <button onclick="document.getElementById('statusAudioInput').click()" class="bg-purple-600 text-white px-6 py-3 rounded-xl hover:bg-purple-700 transition-colors font-medium">
+                            <i class="fas fa-upload mr-2"></i>Choose Audio
+                        </button>
+                        <p class="text-gray-500 text-sm mt-2">Max: 10 seconds, 50MB</p>
+                    </div>
+                </div>
+            </div>
+            
+            <!-- CAPTION INPUT (Add this - was missing) -->
+            <div class="p-4 border-t border-gray-200">
+                <input 
+                    type="text" 
+                    id="statusCaption" 
+                    placeholder="Add a caption (optional)" 
+                    class="w-full p-3 border border-gray-300 rounded-lg mb-3 focus:border-purple-500 focus:ring-1 focus:ring-purple-500"
+                >
+                <button id="postStatus" class="w-full py-3 bg-gradient-to-r from-purple-500 to-green-500 text-white rounded-xl font-semibold hover:opacity-90 transition-opacity">
+                    Post Status
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Status Modal (for viewing statuses) -->
+    <div id="statusModal" class="fixed inset-0 bg-black bg-opacity-90 z-50 flex items-center justify-center hidden">
+        <div class="status-modal-container bg-white rounded-lg max-w-2xl w-full mx-4 max-h-[90vh] overflow-hidden flex flex-col">
+            <div class="status-header flex items-center justify-between p-4 border-b">
+                <div class="flex items-center space-x-3">
+                    <img id="statusUserAvatar" class="w-12 h-12 rounded-full" src="" alt="">
+                    <div>
+                        <h3 id="statusUserName" class="font-semibold"></h3>
+                        <p id="statusTime" class="text-sm text-gray-500"></p>
+                    </div>
+                </div>
+                
+                <!-- Status Expiry Indicator - Added here -->
+                <div class="status-expiry-indicator">
+                    <div class="expiry-progress-bar">
+                        <div class="expiry-progress" id="statusExpiryProgress" style="width: 50%"></div>
+                    </div>
+                    <span id="expiryTime" class="text-xs text-gray-500">Expires in 12h</span>
+                </div>
+                
+                <button id="closeStatusModal" class="text-gray-500 hover:text-gray-700 text-2xl">
+                    <i class="fas fa-times"></i>
+                </button>
+            </div>
+            
+            <div class="status-content flex-1 p-6 overflow-y-auto">
+                <div id="statusMedia" class="mb-4 flex items-center justify-center"></div>
+                <div id="statusText" class="text-gray-800 mt-4"></div>
+                <div id="statusCaption" class="text-gray-600 mt-2 text-sm"></div>
+            </div>
+            
+            <div class="status-footer p-4 border-t">
+                <div class="flex items-center justify-between text-sm text-gray-600">
+                    <div class="flex items-center space-x-4">
+                        <span id="viewersCount">
+                            <i class="fas fa-eye mr-1"></i>
+                            <span>0 viewers</span>
+                        </span>
+                        <button id="viewViewersBtn" class="text-purple-600 hover:text-purple-800 font-medium">
+                            View all
+                        </button>
+                    </div>
+                    <button id="deleteStatusBtn" class="text-red-600 hover:text-red-800 hidden">
+                        <i class="fas fa-trash mr-1"></i> Delete
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Viewers List Modal -->
+    <div id="viewersModal" class="fixed inset-0 bg-black bg-opacity-90 z-60 flex items-center justify-center hidden">
+        <div class="bg-white rounded-lg max-w-md w-full mx-4 max-h-[70vh] overflow-hidden">
+            <div class="p-4 border-b flex justify-between items-center">
+                <h3 class="font-semibold">Viewers</h3>
+                <button id="closeViewersModal" class="text-gray-500 hover:text-gray-700">
                     <i class="fas fa-times text-xl"></i>
                 </button>
             </div>
-        </div>
-        
-        <!-- Hidden file inputs -->
-        <input type="file" id="statusImageInput" accept="image/*" class="hidden">
-        <input type="file" id="statusVideoInput" accept="video/*" class="hidden">
-        <input type="file" id="statusAudioInput" accept="audio/*" class="hidden">
-        
-        <div class="status-options">
-            <div class="status-option active" data-type="emoji">
-                <i class="fas fa-smile text-xl mb-2"></i>
-                <p>Emoji</p>
-            </div>
-            <div class="status-option" data-type="text">
-                <i class="fas fa-font text-xl mb-2"></i>
-                <p>Text</p>
-            </div>
-            <div class="status-option" data-type="image">
-                <i class="fas fa-image text-xl mb-2"></i>
-                <p>Image</p>
-            </div>
-            <div class="status-option" data-type="video">
-                <i class="fas fa-video text-xl mb-2"></i>
-                <p>Video</p>
-            </div>
-            <div class="status-option" data-type="audio">
-                <i class="fas fa-music text-xl mb-2"></i>
-                <p>Audio</p>
-            </div>
-            <div class="status-option" data-type="gif">
-                <i class="fas fa-film text-xl mb-2"></i>
-                <p>GIF</p>
-            </div>
-            <div class="status-option" data-type="sticker">
-                <i class="fas fa-sticky-note text-xl mb-2"></i>
-                <p>Sticker</p>
-            </div>
-            <div class="status-option" data-type="location">
-                <i class="fas fa-map-marker-alt text-xl mb-2"></i>
-                <p>Location</p>
-            </div>
-        </div>
-        
-        <div class="status-previews p-4">
-            <!-- Emoji Preview -->
-            <div id="emojiPreview" class="status-preview">
-                <div class="text-center">
-                    <div class="text-8xl mb-4" contenteditable="true">😊</div>
-                    <p class="text-gray-500 text-sm">Click to change emoji</p>
-                </div>
-            </div>
-            
-            <!-- Text Preview -->
-            <div id="textPreview" class="status-preview hidden">
-                <div class="mb-4">
-                    <label class="block text-sm font-medium text-gray-700 mb-2">Background Color</label>
-                    <div class="flex flex-wrap gap-2">
-                        <div class="w-8 h-8 rounded-full bg-gradient-to-r from-purple-400 to-purple-600 cursor-pointer" data-color="purple"></div>
-                        <div class="w-8 h-8 rounded-full bg-gradient-to-r from-blue-400 to-blue-600 cursor-pointer" data-color="blue"></div>
-                        <div class="w-8 h-8 rounded-full bg-gradient-to-r from-green-400 to-green-600 cursor-pointer" data-color="green"></div>
-                        <div class="w-8 h-8 rounded-full bg-gradient-to-r from-red-400 to-red-600 cursor-pointer" data-color="red"></div>
-                        <div class="w-8 h-8 rounded-full bg-gradient-to-r from-yellow-400 to-yellow-600 cursor-pointer" data-color="yellow"></div>
-                        <div class="w-8 h-8 rounded-full bg-gradient-to-r from-pink-400 to-pink-600 cursor-pointer" data-color="pink"></div>
-                        <input type="color" id="customColor" class="w-8 h-8 cursor-pointer">
-                    </div>
-                </div>
-                <div class="mb-4">
-                    <label class="block text-sm font-medium text-gray-700 mb-2">Text Style</label>
-                    <div class="flex space-x-3">
-                        <select id="textFont" class="flex-1 p-2 border rounded-lg">
-                            <option value="Arial">Arial</option>
-                            <option value="Helvetica">Helvetica</option>
-                            <option value="Courier New">Courier New</option>
-                            <option value="Georgia">Georgia</option>
-                        </select>
-                        <input type="range" id="textSize" min="16" max="72" value="24" class="flex-1">
-                    </div>
-                </div>
-                <textarea 
-                    id="statusTextInput" 
-                    class="w-full p-4 border border-gray-300 rounded-xl resize-none focus:border-purple-500 focus:ring-1 focus:ring-purple-500 text-center text-2xl" 
-                    placeholder="What's on your mind?"
-                    rows="4"
-                ></textarea>
-            </div>
-            
-            <!-- Image Preview -->
-            <div id="imagePreview" class="status-preview hidden">
-                <div class="text-center">
-                    <div id="statusImagePreview" class="hidden">
-                        <img id="statusImagePreviewImg" class="max-w-full max-h-64 mx-auto rounded-lg mb-4" alt="Image preview">
-                    </div>
-                    <button onclick="document.getElementById('statusImageInput').click()" class="bg-purple-600 text-white px-6 py-3 rounded-xl hover:bg-purple-700 transition-colors font-medium">
-                        <i class="fas fa-upload mr-2"></i>Choose Image
-                    </button>
-                    <p class="text-gray-500 text-sm mt-2">Max: 10MB, Supported: JPG, PNG, GIF</p>
-                </div>
-            </div>
-            
-            <!-- Video Preview -->
-            <div id="videoPreview" class="status-preview hidden">
-                <div class="text-center">
-                    <div id="statusVideoPreview" class="hidden">
-                        <video id="statusVideoPreviewVideo" controls class="max-w-full max-h-64 mx-auto rounded-lg mb-4"></video>
-                    </div>
-                    <button onclick="document.getElementById('statusVideoInput').click()" class="bg-purple-600 text-white px-6 py-3 rounded-xl hover:bg-purple-700 transition-colors font-medium">
-                        <i class="fas fa-upload mr-2"></i>Choose Video
-                    </button>
-                    <p class="text-gray-500 text-sm mt-2">Max: 10 seconds, 50MB</p>
-                </div>
-            </div>
-            
-            <!-- Audio Preview -->
-            <div id="audioPreview" class="status-preview hidden">
-                <div class="text-center">
-                    <div id="statusAudioPreview" class="hidden">
-                        <audio id="statusAudioPreviewAudio" controls class="w-full mb-4"></audio>
-                    </div>
-                    <button onclick="document.getElementById('statusAudioInput').click()" class="bg-purple-600 text-white px-6 py-3 rounded-xl hover:bg-purple-700 transition-colors font-medium">
-                        <i class="fas fa-upload mr-2"></i>Choose Audio
-                    </button>
-                    <p class="text-gray-500 text-sm mt-2">Max: 10 seconds, 50MB</p>
-                </div>
-            </div>
-        </div>
-        
-        <!-- CAPTION INPUT (Add this - was missing) -->
-        <div class="p-4 border-t border-gray-200">
-            <input 
-                type="text" 
-                id="statusCaption" 
-                placeholder="Add a caption (optional)" 
-                class="w-full p-3 border border-gray-300 rounded-lg mb-3 focus:border-purple-500 focus:ring-1 focus:ring-purple-500"
-            >
-            <button id="postStatus" class="w-full py-3 bg-gradient-to-r from-purple-500 to-green-500 text-white rounded-xl font-semibold hover:opacity-90 transition-opacity">
-                Post Status
-            </button>
-        </div>
-    </div>
-</div>
-
-<!-- Status Modal (for viewing statuses) -->
-<div id="statusModal" class="fixed inset-0 bg-black bg-opacity-90 z-50 flex items-center justify-center hidden">
-    <div class="status-modal-container bg-white rounded-lg max-w-2xl w-full mx-4 max-h-[90vh] overflow-hidden flex flex-col">
-        <div class="status-header flex items-center justify-between p-4 border-b">
-            <div class="flex items-center space-x-3">
-                <img id="statusUserAvatar" class="w-12 h-12 rounded-full" src="" alt="">
-                <div>
-                    <h3 id="statusUserName" class="font-semibold"></h3>
-                    <p id="statusTime" class="text-sm text-gray-500"></p>
-                </div>
-            </div>
-            
-            <!-- Status Expiry Indicator - Added here -->
-            <div class="status-expiry-indicator">
-                <div class="expiry-progress-bar">
-                    <div class="expiry-progress" id="statusExpiryProgress" style="width: 50%"></div>
-                </div>
-                <span id="expiryTime" class="text-xs text-gray-500">Expires in 12h</span>
-            </div>
-            
-            <button id="closeStatusModal" class="text-gray-500 hover:text-gray-700 text-2xl">
-                <i class="fas fa-times"></i>
-            </button>
-        </div>
-        
-        <div class="status-content flex-1 p-6 overflow-y-auto">
-            <div id="statusMedia" class="mb-4 flex items-center justify-center"></div>
-            <div id="statusText" class="text-gray-800 mt-4"></div>
-            <div id="statusCaption" class="text-gray-600 mt-2 text-sm"></div>
-        </div>
-        
-        <div class="status-footer p-4 border-t">
-            <div class="flex items-center justify-between text-sm text-gray-600">
-                <div class="flex items-center space-x-4">
-                    <span id="viewersCount">
-                        <i class="fas fa-eye mr-1"></i>
-                        <span>0 viewers</span>
-                    </span>
-                    <button id="viewViewersBtn" class="text-purple-600 hover:text-purple-800 font-medium">
-                        View all
-                    </button>
-                </div>
-                <button id="deleteStatusBtn" class="text-red-600 hover:text-red-800 hidden">
-                    <i class="fas fa-trash mr-1"></i> Delete
-                </button>
+            <div id="viewersList" class="p-4 overflow-y-auto max-h-96">
+                <!-- Viewers will be listed here -->
             </div>
         </div>
     </div>
-</div>
-
-<!-- Viewers List Modal -->
-<div id="viewersModal" class="fixed inset-0 bg-black bg-opacity-90 z-60 flex items-center justify-center hidden">
-    <div class="bg-white rounded-lg max-w-md w-full mx-4 max-h-[70vh] overflow-hidden">
-        <div class="p-4 border-b flex justify-between items-center">
-            <h3 class="font-semibold">Viewers</h3>
-            <button id="closeViewersModal" class="text-gray-500 hover:text-gray-700">
-                <i class="fas fa-times text-xl"></i>
-            </button>
-        </div>
-        <div id="viewersList" class="p-4 overflow-y-auto max-h-96">
-            <!-- Viewers will be listed here -->
-        </div>
-    </div>
-</div>
-                
 
     <!-- Enhanced Viewers & Reactions Modal -->
     <div id="enhancedViewersModal" class="fixed inset-0 bg-black bg-opacity-90 z-60 flex items-center justify-center hidden">
@@ -2980,20 +2999,10 @@
         </div>
     </div>
 
-<!-- Ringtone Select -->
-<select id="ringtoneSelect" class="hidden"></select>
-
-<!-- Save Settings Button -->
-<button id="saveSettings" class="hidden">Save</button>
-
-<!-- Notifications Settings Modal -->
-<div id="notificationsSettingsModal" class="hidden"></div>
-
     <script src="chat.js"></script>
     <script src="call.js"></script>
     <script src="status.js"></script>
     <script src="groups.js"></script>
-
 
 </body>
 </html>

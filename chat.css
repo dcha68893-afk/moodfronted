@@ -4296,3 +4296,180 @@ textarea:focus {
 [data-theme="dark"] .data-usage-meter {
   background: #374151;
 }
+/* Mood/Interest Filtering UI */
+.mood-filter-btn {
+    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+    color: white;
+    border: none;
+    border-radius: 50%;
+    width: 36px;
+    height: 36px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    cursor: pointer;
+    transition: transform 0.2s;
+}
+
+.mood-filter-btn:hover {
+    transform: scale(1.1);
+}
+
+/* Mood Filter Modal */
+.mood-filter-modal .modal-content {
+    max-width: 500px;
+    max-height: 80vh;
+    overflow-y: auto;
+}
+
+.filter-section {
+    margin-bottom: 24px;
+    padding-bottom: 16px;
+    border-bottom: 1px solid #e5e7eb;
+}
+
+.filter-section h4 {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin-bottom: 8px;
+    color: #374151;
+}
+
+.filter-section h4 i {
+    color: #7c3aed;
+}
+
+.filter-section p {
+    color: #6b7280;
+    margin-bottom: 16px;
+    font-size: 14px;
+}
+
+.filter-toggle {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    margin-bottom: 16px;
+    cursor: pointer;
+}
+
+.filter-toggle input[type="checkbox"] {
+    display: none;
+}
+
+.toggle-slider {
+    width: 50px;
+    height: 26px;
+    background-color: #d1d5db;
+    border-radius: 34px;
+    position: relative;
+    transition: background-color 0.2s;
+}
+
+.toggle-slider:before {
+    content: "";
+    position: absolute;
+    width: 22px;
+    height: 22px;
+    border-radius: 50%;
+    left: 2px;
+    bottom: 2px;
+    background-color: white;
+    transition: transform 0.2s;
+}
+
+.filter-toggle input:checked + .toggle-slider {
+    background-color: #7c3aed;
+}
+
+.filter-toggle input:checked + .toggle-slider:before {
+    transform: translateX(24px);
+}
+
+.mood-tags, .interest-tags {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    margin-top: 12px;
+}
+
+.mood-tag, .interest-tag {
+    padding: 6px 12px;
+    background-color: #f3f4f6;
+    border-radius: 20px;
+    font-size: 14px;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    transition: all 0.2s;
+    border: 2px solid transparent;
+}
+
+.mood-tag:hover, .interest-tag:hover {
+    background-color: #e5e7eb;
+}
+
+.mood-tag.selected, .interest-tag.selected {
+    background-color: #ede9fe;
+    border-color: #7c3aed;
+    color: #7c3aed;
+}
+
+.mood-tag.selected i, .interest-tag.selected i {
+    font-size: 12px;
+}
+
+.current-selections {
+    background-color: #f9fafb;
+    padding: 16px;
+    border-radius: 8px;
+    margin-top: 24px;
+}
+
+.current-selections h4 {
+    margin-bottom: 12px;
+    color: #374151;
+}
+
+.selections-display {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    margin-bottom: 12px;
+}
+
+.moods-display, .interests-display {
+    font-size: 14px;
+}
+
+.moods-display strong, .interests-display strong {
+    color: #4b5563;
+    margin-right: 8px;
+}
+
+/* Mood indicators in status items */
+.status-mood-indicator {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    font-size: 12px;
+    color: #7c3aed;
+    background-color: #ede9fe;
+    padding: 2px 8px;
+    border-radius: 12px;
+    margin-left: 8px;
+}
+
+.status-interest-indicator {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    font-size: 12px;
+    color: #10b981;
+    background-color: #d1fae5;
+    padding: 2px 8px;
+    border-radius: 12px;
+    margin-left: 8px;
+}
