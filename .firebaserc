@@ -1,0 +1,31 @@
+{
+  "projects": {
+    "default": "uniconnect-ee95c",
+    "development": "uniconnect-ee95c-dev",
+    "staging": "uniconnect-ee95c-staging", 
+    "production": "uniconnect-ee95c"
+  },
+  "targets": {
+    "uniconnect-ee95c": {
+      "hosting": {
+        "uniconnect-app": [
+          "uniconnect-ee95c"
+        ]
+      }
+    },
+    "uniconnect-ee95c-dev": {
+      "hosting": {
+        "uniconnect-app-dev": [
+          "uniconnect-ee95c-dev"
+        ]
+      }
+    },
+    "uniconnect-ee95c-staging": {
+      "hosting": {
+        "uniconnect-app-staging": [
+          "uniconnect-ee95c-staging"
+        ]
+      }
+    }
+  }
+}

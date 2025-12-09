@@ -1,3 +1,4 @@
+<<<<<<< HEAD
 <!DOCTYPE html>
 <html lang="en" class="h-full">
 <head>
@@ -3947,4 +3948,3955 @@
         }
     </script>
 </body>
+=======
+<!DOCTYPE html>
+<html lang="en" class="h-full">
+<head>
+<link rel="manifest" href="manifest.json">
+<meta name="theme-color" content="#4F46E5">
+<link rel="icon" href="icons/icon-192x192.png">
+     <meta name="theme-color" content="#000000">
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=5.0, user-scalable=yes">
+    <title>kynecta - Connect Globally, Create Together</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css" rel="stylesheet">
+    
+    <!-- Firebase SDK -->
+    <script src="https://www.gstatic.com/firebasejs/9.22.1/firebase-app-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/9.22.1/firebase-auth-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/9.22.1/firebase-firestore-compat.js"></script>
+    
+    <style>
+        /* CSS Variables for Dynamic Colors */
+        :root {
+            --primary-color: #3B82F6;
+            --secondary-color: #8B5CF6;
+            --accent-color: #60A5FA;
+        }
+        
+        /* Improved responsive base sizes */
+        html {
+            font-size: 14px;
+        }
+        
+        @media (min-width: 768px) {
+            html {
+                font-size: 16px;
+            }
+        }
+        
+        .section {
+            transition: all 0.4s ease-in-out;
+            width: 100%;
+            position: absolute;
+            top: 0;
+            left: 0;
+            opacity: 0;
+            transform: translateX(50px);
+            pointer-events: none;
+            overflow: hidden;
+            height: 0;
+        }
+        
+        .section-hidden {
+            opacity: 0;
+            transform: translateX(50px);
+            pointer-events: none;
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 0;
+            overflow: hidden;
+        }
+        
+        .section-active {
+            opacity: 1;
+            transform: translateX(0);
+            pointer-events: all;
+            position: relative;
+            height: auto;
+            overflow: visible;
+        }
+        
+        .glass-effect {
+            background: rgba(255, 255, 255, 0.1);
+            backdrop-filter: blur(20px);
+            border: 1px solid rgba(255, 255, 255, 0.2);
+        }
+        
+        .cyber-gradient {
+            background: linear-gradient(135deg, var(--primary-color) 0%, var(--secondary-color) 100%) !important;
+        }
+        
+        .quantum-glow {
+            box-shadow: 0 0 30px rgba(59, 130, 246, 0.4);
+        }
+        
+        .neon-text {
+            text-shadow: 0 0 10px rgba(59, 130, 246, 0.7),
+                         0 0 20px rgba(59, 130, 246, 0.5),
+                         0 0 30px rgba(59, 130, 246, 0.3);
+        }
+        
+        .loading-spinner {
+            border: 2px solid rgba(255, 255, 255, 0.3);
+            border-radius: 50%;
+            border-top: 2px solid var(--primary-color);
+            width: 16px;
+            height: 16px;
+            animation: spin 1s linear infinite;
+            display: inline-block;
+            margin-left: 8px;
+        }
+        
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+        
+        .shake {
+            animation: shake 0.5s ease-in-out;
+        }
+        
+        @keyframes shake {
+            0%, 100% { transform: translateX(0); }
+            25% { transform: translateX(-5px); }
+            75% { transform: translateX(5px); }
+        }
+        
+        .input-error {
+            border-color: #ef4444 !important;
+            box-shadow: 0 0 0 3px rgba(239, 68, 68, 0.1) !important;
+        }
+        
+        .input-success {
+            border-color: #10b981 !important;
+            box-shadow: 0 0 0 3px rgba(16, 185, 129, 0.1) !important;
+        }
+        
+        .error-message {
+            background: rgba(239, 68, 68, 0.1);
+            border: 1px solid rgba(239, 68, 68, 0.3);
+            color: #fca5a5;
+            padding: 0.75rem;
+            border-radius: 0.5rem;
+            margin-bottom: 1rem;
+        }
+        
+        .success-message {
+            background: rgba(34, 197, 94, 0.1);
+            border: 1px solid rgba(34, 197, 94, 0.3);
+            color: #86efac;
+            padding: 0.75rem;
+            border-radius: 0.5rem;
+            margin-bottom: 1rem;
+        }
+        
+        .security-badge {
+            display: inline-flex;
+            align-items: center;
+            background: rgba(16, 185, 129, 0.1);
+            border: 1px solid rgba(16, 185, 129, 0.3);
+            color: #86efac;
+            padding: 0.25rem 0.5rem;
+            border-radius: 1rem;
+            font-size: 0.75rem;
+            margin-right: 0.5rem;
+            margin-bottom: 0.5rem;
+        }
+        
+        .connection-status {
+            position: fixed;
+            top: 10px;
+            right: 10px;
+            padding: 8px 16px;
+            border-radius: 20px;
+            font-size: 0.8rem;
+            z-index: 1000;
+            transition: all 0.3s;
+        }
+        
+        .connection-status.connected {
+            background: rgba(34, 197, 94, 0.8);
+            color: white;
+        }
+        
+        .connection-status.connecting {
+            background: rgba(245, 158, 11, 0.8);
+            color: white;
+        }
+        
+        .connection-status.disconnected {
+            background: rgba(239, 68, 68, 0.8);
+            color: white;
+        }
+        
+        /* Toast Styles */
+        #toastContainer {
+            position: fixed;
+            top: 1rem;
+            right: 1rem;
+            z-index: 1000;
+        }
+        
+        .toast {
+            opacity: 0;
+            transform: translateX(100%);
+            transition: all 0.3s ease-out;
+            margin-bottom: 0.5rem;
+            padding: 0.75rem 1rem;
+            border-radius: 0.5rem;
+            box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -2px rgba(0, 0, 0, 0.1);
+            color: white;
+            min-width: 250px;
+        }
+        
+        .toast.show {
+            opacity: 1;
+            transform: translateX(0);
+        }
+        
+        .toast.success { background-color: #10B981; }
+        .toast.error { background-color: #EF4444; }
+        .toast.warning { background-color: #F59E0B; }
+        
+        /* Cookie Consent Banner */
+        .cookie-banner {
+            position: fixed;
+            bottom: 0;
+            left: 0;
+            right: 0;
+            background: linear-gradient(135deg, #1e3a8a 0%, #3730a3 100%);
+            color: white;
+            padding: 1.5rem;
+            box-shadow: 0 -4px 20px rgba(0, 0, 0, 0.3);
+            z-index: 10000;
+            transform: translateY(100%);
+            transition: transform 0.5s ease-in-out;
+        }
+        
+        .cookie-banner.show {
+            transform: translateY(0);
+        }
+        
+        /* Attractive Advertisement Styles */
+        .feature-highlight {
+            background: linear-gradient(135deg, rgba(59, 130, 246, 0.1), rgba(139, 92, 246, 0.1));
+            border: 1px solid rgba(59, 130, 246, 0.3);
+            transition: all 0.3s ease;
+        }
+        
+        .feature-highlight:hover {
+            transform: translateY(-5px);
+            box-shadow: 0 20px 40px rgba(59, 130, 246, 0.2);
+        }
+        
+        .pulse-glow {
+            animation: pulse-glow 2s infinite;
+        }
+        
+        @keyframes pulse-glow {
+            0%, 100% { box-shadow: 0 0 20px rgba(59, 130, 246, 0.4); }
+            50% { box-shadow: 0 0 40px rgba(59, 130, 246, 0.8); }
+        }
+        
+        .floating {
+            animation: floating 3s ease-in-out infinite;
+        }
+        
+        @keyframes floating {
+            0%, 100% { transform: translateY(0); }
+            50% { transform: translateY(-10px); }
+        }
+        
+        .gradient-text {
+            background: linear-gradient(135deg, var(--primary-color), var(--secondary-color), #f472b6);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            background-clip: text;
+        }
+        
+        .stats-counter {
+            font-size: 1.5rem;
+            font-weight: bold;
+            background: linear-gradient(135deg, var(--primary-color), var(--secondary-color));
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            background-clip: text;
+        }
+        
+        @media (min-width: 768px) {
+            .stats-counter {
+                font-size: 2.5rem;
+            }
+        }
+        
+        /* Unified Dashboard Layout */
+        .dashboard-container {
+            min-height: 100vh;
+            background: linear-gradient(135deg, #0f172a 0%, #1e1b4b 50%, #0f172a 100%);
+            transition: all 0.5s ease-in-out;
+        }
+        
+        .content-area {
+            transition: all 0.5s ease-in-out;
+            position: relative;
+            min-height: 500px;
+        }
+        
+        .form-container {
+            max-width: 400px;
+            margin: 0 auto;
+        }
+        
+        /* Background Patterns */
+        .bg-grid-pattern {
+            background-image: 
+                linear-gradient(rgba(99, 102, 241, 0.1) 1px, transparent 1px),
+                linear-gradient(90deg, rgba(99, 102, 241, 0.1) 1px, transparent 1px);
+            background-size: 50px 50px;
+        }
+        
+        /* Mood Theme Colors */
+        .theme-calm {
+            --primary-color: #3B82F6;
+            --secondary-color: #8B5CF6;
+            --accent-color: #60A5FA;
+            background: linear-gradient(135deg, #0f172a 0%, #1e3a8a 50%, #0f172a 100%) !important;
+        }
+        
+        .theme-energetic {
+            --primary-color: #DC2626;
+            --secondary-color: #EA580C;
+            --accent-color: #F97316;
+            background: linear-gradient(135deg, #431407 0%, #9a3412 50%, #431407 100%) !important;
+        }
+        
+        .theme-creative {
+            --primary-color: #7C3AED;
+            --secondary-color: #DB2777;
+            --accent-color: #A855F7;
+            background: linear-gradient(135deg, #1e1b4b 0%, #7e22ce 50%, #1e1b4b 100%) !important;
+        }
+        
+        .theme-chill {
+            --primary-color: #059669;
+            --secondary-color: #10B981;
+            --accent-color: #34D399;
+            background: linear-gradient(135deg, #064e3b 0%, #059669 50%, #064e3b 100%) !important;
+        }
+        
+        .theme-romantic {
+            --primary-color: #DB2777;
+            --secondary-color: #BE185D;
+            --accent-color: #EC4899;
+            background: linear-gradient(135deg, #831843 0%, #db2777 50%, #831843 100%) !important;
+        }
+        
+        /* Mood Selector */
+        .mood-selector {
+            position: fixed;
+            top: 10px;
+            left: 10px;
+            z-index: 1000;
+        }
+        
+        .mood-btn {
+            background: rgba(255, 255, 255, 0.1);
+            backdrop-filter: blur(10px);
+            border: 1px solid rgba(255, 255, 255, 0.2);
+            color: white;
+            padding: 8px 12px;
+            border-radius: 20px;
+            cursor: pointer;
+            transition: all 0.3s ease;
+        }
+        
+        .mood-btn:hover {
+            background: rgba(255, 255, 255, 0.2);
+            transform: scale(1.05);
+        }
+        
+        .mood-options {
+            position: absolute;
+            top: 100%;
+            left: 0;
+            background: rgba(0, 0, 0, 0.9);
+            backdrop-filter: blur(20px);
+            border: 1px solid rgba(255, 255, 255, 0.2);
+            border-radius: 10px;
+            padding: 10px;
+            display: none;
+            grid-template-columns: repeat(3, 1fr);
+            gap: 5px;
+            min-width: 150px;
+        }
+        
+        .mood-options.show {
+            display: grid;
+        }
+        
+        .mood-option {
+            width: 40px;
+            height: 40px;
+            border-radius: 50%;
+            border: 2px solid transparent;
+            cursor: pointer;
+            transition: all 0.3s ease;
+        }
+        
+        .mood-option:hover {
+            transform: scale(1.1);
+            border-color: white;
+        }
+        
+        .mood-calm { background: linear-gradient(135deg, #3B82F6, #8B5CF6); }
+        .mood-energetic { background: linear-gradient(135deg, #DC2626, #EA580C); }
+        .mood-creative { background: linear-gradient(135deg, #7C3AED, #DB2777); }
+        .mood-chill { background: linear-gradient(135deg, #059669, #10B981); }
+        .mood-romantic { background: linear-gradient(135deg, #DB2777, #BE185D); }
+        .mood-default { background: linear-gradient(135deg, #6B7280, #4B5563); }
+        
+        /* Mobile Mood Selector */
+        .mobile-mood-selector {
+            position: fixed;
+            bottom: 20px;
+            left: 20px;
+            z-index: 1000;
+        }
+        
+        .mobile-mood-btn {
+            width: 50px;
+            height: 50px;
+            border-radius: 50%;
+            background: rgba(255, 255, 255, 0.1);
+            backdrop-filter: blur(10px);
+            border: 1px solid rgba(255, 255, 255, 0.2);
+            color: white;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            cursor: pointer;
+            transition: all 0.3s ease;
+            box-shadow: 0 4px 15px rgba(0, 0, 0, 0.3);
+        }
+        
+        .mobile-mood-btn:hover {
+            background: rgba(255, 255, 255, 0.2);
+            transform: scale(1.1);
+        }
+        
+        .mobile-mood-options {
+            position: absolute;
+            bottom: 60px;
+            left: 0;
+            background: rgba(0, 0, 0, 0.95);
+            backdrop-filter: blur(20px);
+            border: 1px solid rgba(255, 255, 255, 0.2);
+            border-radius: 16px;
+            padding: 12px;
+            display: none;
+            grid-template-columns: repeat(3, 1fr);
+            gap: 8px;
+            min-width: 160px;
+            box-shadow: 0 10px 30px rgba(0, 0, 0, 0.5);
+        }
+        
+        .mobile-mood-options.show {
+            display: grid;
+        }
+        
+        .mobile-mood-option {
+            width: 44px;
+            height: 44px;
+            border-radius: 50%;
+            border: 2px solid transparent;
+            cursor: pointer;
+            transition: all 0.3s ease;
+        }
+        
+        .mobile-mood-option:hover {
+            transform: scale(1.1);
+            border-color: white;
+        }
+        
+        .mobile-mood-option.active {
+            border-color: white;
+            box-shadow: 0 0 10px rgba(255, 255, 255, 0.5);
+        }
+        
+        /* Forgot Password Modal Styles */
+        .forgot-password-modal {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: rgba(0, 0, 0, 0.7);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            z-index: 10000;
+            opacity: 0;
+            visibility: hidden;
+            transition: all 0.3s ease;
+        }
+        
+        .forgot-password-modal.show {
+            opacity: 1;
+            visibility: visible;
+        }
+        
+        .forgot-password-content {
+            width: 90%;
+            max-width: 500px;
+            background: linear-gradient(135deg, #0f172a 0%, #1e293b 100%);
+            border-radius: 20px;
+            padding: 1.5rem;
+            box-shadow: 0 20px 40px rgba(0, 0, 0, 0.5);
+            transform: translateY(20px);
+            transition: transform 0.3s ease;
+        }
+        
+        .forgot-password-modal.show .forgot-password-content {
+            transform: translateY(0);
+        }
+        
+        .recovery-option-card {
+            transition: transform 0.2s, box-shadow 0.2s, border-color 0.2s;
+            cursor: pointer;
+            border: 2px solid transparent;
+        }
+        
+        .recovery-option-card:hover {
+            transform: translateY(-4px);
+            box-shadow: 0 10px 20px rgba(0, 0, 0, 0.2);
+            border-color: #3b82f6;
+        }
+
+        /* Improved responsive text sizes */
+        .responsive-text {
+            font-size: clamp(1rem, 4vw, 1.5rem);
+        }
+        
+        .responsive-heading {
+            font-size: clamp(1.5rem, 6vw, 2.5rem);
+        }
+        
+        .responsive-subheading {
+            font-size: clamp(1rem, 3vw, 1.25rem);
+        }
+
+        /* Better mobile layout */
+        @media (max-width: 767px) {
+            .mobile-padding {
+                padding: 1rem;
+            }
+            
+            .mobile-margin {
+                margin-bottom: 1.5rem;
+            }
+            
+            .mobile-text-center {
+                text-align: center;
+            }
+            
+            .mobile-stack {
+                flex-direction: column;
+            }
+            
+            .mobile-space-y > * + * {
+                margin-top: 1rem;
+            }
+            
+            .forgot-password-content {
+                padding: 1rem;
+            }
+        }
+        
+        @media (min-width: 768px) {
+            .forgot-password-content {
+                padding: 2rem;
+            }
+        }
+
+        /* New Platform Feature Styles */
+        .platform-feature {
+            background: linear-gradient(135deg, rgba(59, 130, 246, 0.05), rgba(139, 92, 246, 0.05));
+            border: 1px solid rgba(59, 130, 246, 0.2);
+            border-radius: 16px;
+            padding: 1.5rem;
+            transition: all 0.3s ease;
+        }
+        
+        .platform-feature:hover {
+            transform: translateY(-5px);
+            box-shadow: 0 15px 30px rgba(59, 130, 246, 0.2);
+            border-color: rgba(59, 130, 246, 0.4);
+        }
+        
+        .feature-icon {
+            width: 60px;
+            height: 60px;
+            border-radius: 16px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            margin-bottom: 1rem;
+            font-size: 1.5rem;
+        }
+        
+        .mood-tag {
+            display: inline-block;
+            padding: 0.25rem 0.75rem;
+            border-radius: 20px;
+            font-size: 0.75rem;
+            font-weight: 500;
+            margin-right: 0.5rem;
+            margin-bottom: 0.5rem;
+        }
+        
+        .mood-tag.calm { background: rgba(59, 130, 246, 0.2); color: #93c5fd; }
+        .mood-tag.energetic { background: rgba(239, 68, 68, 0.2); color: #fca5a5; }
+        .mood-tag.creative { background: rgba(168, 85, 247, 0.2); color: #d8b4fe; }
+        .mood-tag.chill { background: rgba(16, 185, 129, 0.2); color: #86efac; }
+        .mood-tag.romantic { background: rgba(236, 72, 153, 0.2); color: #f9a8d4; }
+        
+        .interest-badge {
+            display: inline-flex;
+            align-items: center;
+            background: rgba(99, 102, 241, 0.1);
+            border: 1px solid rgba(99, 102, 241, 0.3);
+            color: #a5b4fc;
+            padding: 0.25rem 0.75rem;
+            border-radius: 1rem;
+            font-size: 0.75rem;
+            margin-right: 0.5rem;
+            margin-bottom: 0.5rem;
+        }
+        
+        .payment-badge {
+            display: inline-flex;
+            align-items: center;
+            background: rgba(16, 185, 129, 0.1);
+            border: 1px solid rgba(16, 185, 129, 0.3);
+            color: #86efac;
+            padding: 0.25rem 0.75rem;
+            border-radius: 1rem;
+            font-size: 0.75rem;
+            margin-right: 0.5rem;
+            margin-bottom: 0.5rem;
+        }
+        
+        /* Mood Customizer Styles */
+        .mood-customizer {
+            position: fixed;
+            top: 10px;
+            right: 10px;
+            z-index: 1000;
+        }
+        
+        .mood-customizer-btn {
+            background: rgba(255, 255, 255, 0.1);
+            backdrop-filter: blur(10px);
+            border: 1px solid rgba(255, 255, 255, 0.2);
+            color: white;
+            padding: 8px 12px;
+            border-radius: 20px;
+            cursor: pointer;
+            transition: all 0.3s ease;
+        }
+        
+        .mood-customizer-btn:hover {
+            background: rgba(255, 255, 255, 0.2);
+            transform: scale(1.05);
+        }
+        
+        .mood-customizer-modal {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: rgba(0, 0, 0, 0.7);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            z-index: 10000;
+            opacity: 0;
+            visibility: hidden;
+            transition: all 0.3s ease;
+        }
+        
+        .mood-customizer-modal.show {
+            opacity: 1;
+            visibility: visible;
+        }
+        
+        .mood-customizer-content {
+            width: 90%;
+            max-width: 600px;
+            background: linear-gradient(135deg, #0f172a 0%, #1e293b 100%);
+            border-radius: 20px;
+            padding: 1.5rem;
+            box-shadow: 0 20px 40px rgba(0, 0, 0, 0.5);
+            transform: translateY(20px);
+            transition: transform 0.3s ease;
+        }
+        
+        .mood-customizer-modal.show .mood-customizer-content {
+            transform: translateY(0);
+        }
+        
+        .color-palette {
+            display: grid;
+            grid-template-columns: repeat(5, 1fr);
+            gap: 10px;
+            margin-bottom: 1.5rem;
+        }
+        
+        .color-option {
+            width: 100%;
+            aspect-ratio: 1;
+            border-radius: 10px;
+            cursor: pointer;
+            transition: all 0.3s ease;
+            border: 2px solid transparent;
+        }
+        
+        .color-option:hover {
+            transform: scale(1.1);
+        }
+        
+        .color-option.active {
+            border-color: white;
+            box-shadow: 0 0 15px rgba(255, 255, 255, 0.5);
+        }
+        
+        .custom-color-input {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            margin-top: 1rem;
+        }
+        
+        .custom-color-preview {
+            width: 40px;
+            height: 40px;
+            border-radius: 10px;
+            border: 2px solid rgba(255, 255, 255, 0.3);
+        }
+        
+        .intensity-slider {
+            width: 100%;
+            margin: 1rem 0;
+        }
+        
+        .mood-preview {
+            width: 100%;
+            height: 100px;
+            border-radius: 10px;
+            margin-top: 1rem;
+            background: linear-gradient(135deg, var(--primary-color), var(--secondary-color));
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            color: white;
+            font-weight: bold;
+            transition: all 0.3s ease;
+        }
+        
+        /* Mobile-specific styles for mood customizer */
+        @media (max-width: 767px) {
+            .mood-customizer {
+                position: fixed;
+                bottom: 20px;
+                right: 20px;
+                top: auto;
+                left: auto;
+                z-index: 1000;
+            }
+            
+            .mood-customizer-btn {
+                width: 50px;
+                height: 50px;
+                border-radius: 50%;
+                display: flex;
+                align-items: center;
+                justify-content: center;
+                padding: 0;
+            }
+            
+            .mood-customizer-btn span {
+                display: none;
+            }
+            
+            .mood-customizer-content {
+                padding: 1rem;
+                max-height: 80vh;
+                overflow-y: auto;
+            }
+            
+            .color-palette {
+                grid-template-columns: repeat(3, 1fr);
+                gap: 8px;
+            }
+            
+            .custom-color-input {
+                flex-direction: column;
+                gap: 10px;
+            }
+        }
+
+        /* Security protection styles */
+        .protected-content {
+            -webkit-user-select: none;
+            -moz-user-select: none;
+            -ms-user-select: none;
+            user-select: none;
+            -webkit-touch-callout: none;
+            -webkit-tap-highlight-color: transparent;
+        }
+        
+        .no-screenshot {
+            -webkit-touch-callout: none;
+            -webkit-user-select: none;
+            -khtml-user-select: none;
+            -moz-user-select: none;
+            -ms-user-select: none;
+            user-select: none;
+        }
+        
+        /* Hide context menu */
+        .no-context-menu {
+            -webkit-context-menu: none;
+            -moz-context-menu: none;
+            -ms-context-menu: none;
+            context-menu: none;
+        }
+        
+        /* Mood and Interest Selection Styles */
+        .selection-card {
+            background: rgba(255, 255, 255, 0.05);
+            border: 2px solid rgba(255, 255, 255, 0.1);
+            border-radius: 16px;
+            padding: 1.5rem;
+            transition: all 0.3s ease;
+            cursor: pointer;
+            position: relative;
+            overflow: hidden;
+        }
+        
+        .selection-card:hover {
+            transform: translateY(-5px);
+            border-color: rgba(59, 130, 246, 0.5);
+            box-shadow: 0 10px 25px rgba(59, 130, 246, 0.2);
+        }
+        
+        .selection-card.selected {
+            border-color: #3b82f6;
+            background: rgba(59, 130, 246, 0.1);
+            box-shadow: 0 0 20px rgba(59, 130, 246, 0.3);
+        }
+        
+        .selection-card.selected::after {
+            content: '✓';
+            position: absolute;
+            top: 10px;
+            right: 10px;
+            width: 24px;
+            height: 24px;
+            background: #3b82f6;
+            border-radius: 50%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            color: white;
+            font-weight: bold;
+            font-size: 12px;
+        }
+        
+        .selection-icon {
+            width: 50px;
+            height: 50px;
+            border-radius: 12px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            margin-bottom: 1rem;
+            font-size: 1.25rem;
+        }
+        
+        .selection-counter {
+            position: fixed;
+            bottom: 20px;
+            right: 20px;
+            background: linear-gradient(135deg, #3B82F6, #8B5CF6);
+            color: white;
+            padding: 12px 20px;
+            border-radius: 25px;
+            font-weight: bold;
+            box-shadow: 0 4px 15px rgba(59, 130, 246, 0.3);
+            z-index: 1000;
+        }
+        
+        .selection-progress {
+            height: 4px;
+            background: rgba(255, 255, 255, 0.1);
+            border-radius: 2px;
+            overflow: hidden;
+            margin: 1.5rem 0;
+        }
+        
+        .selection-progress-bar {
+            height: 100%;
+            background: linear-gradient(90deg, #3B82F6, #8B5CF6);
+            transition: width 0.3s ease;
+        }
+        
+        .selection-next-btn {
+            width: 100%;
+            background: linear-gradient(135deg, #3B82F6, #8B5CF6);
+            color: white;
+            padding: 14px;
+            border-radius: 12px;
+            font-weight: bold;
+            font-size: 1rem;
+            border: none;
+            cursor: pointer;
+            transition: all 0.3s ease;
+            margin-top: 1rem;
+        }
+        
+        .selection-next-btn:hover:not(:disabled) {
+            transform: translateY(-2px);
+            box-shadow: 0 10px 20px rgba(59, 130, 246, 0.3);
+        }
+        
+        .selection-next-btn:disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
+        }
+        
+        .selection-back-btn {
+            background: rgba(255, 255, 255, 0.1);
+            color: white;
+            padding: 10px 20px;
+            border-radius: 8px;
+            border: 1px solid rgba(255, 255, 255, 0.2);
+            cursor: pointer;
+            transition: all 0.3s ease;
+            margin-top: 1rem;
+        }
+        
+        .selection-back-btn:hover {
+            background: rgba(255, 255, 255, 0.2);
+        }
+        
+        .selection-title {
+            font-size: 1.75rem;
+            font-weight: bold;
+            background: linear-gradient(135deg, #3B82F6, #8B5CF6);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            background-clip: text;
+            margin-bottom: 0.5rem;
+        }
+        
+        .selection-subtitle {
+            color: #94a3b8;
+            margin-bottom: 2rem;
+        }
+        
+        .selection-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
+            gap: 1rem;
+            margin-bottom: 2rem;
+        }
+        
+        @media (max-width: 640px) {
+            .selection-grid {
+                grid-template-columns: repeat(auto-fill, minmax(120px, 1fr));
+                gap: 0.75rem;
+            }
+        }
+        
+        @media (min-width: 768px) {
+            .selection-grid {
+                grid-template-columns: repeat(auto-fill, minmax(160px, 1fr));
+            }
+        }
+
+        /* Skip Selection Button */
+        .skip-selection-btn {
+            background: rgba(255, 255, 255, 0.05);
+            color: #94a3b8;
+            padding: 10px 20px;
+            border-radius: 8px;
+            border: 1px solid rgba(255, 255, 255, 0.1);
+            cursor: pointer;
+            transition: all 0.3s ease;
+            margin-top: 1rem;
+        }
+        
+        .skip-selection-btn:hover {
+            background: rgba(255, 255, 255, 0.1);
+            color: white;
+        }
+    </style>
+</head>
+<body class="h-full dashboard-container bg-grid-pattern theme-calm protected-content no-screenshot no-context-menu">
+    <!-- Mood Theme Selector (Desktop) -->
+    <div class="mood-selector hidden lg:block">
+        <button class="mood-btn flex items-center space-x-2">
+            <i class="fas fa-palette"></i>
+            <span class="hidden sm:inline">Mood</span>
+        </button>
+        <div class="mood-options">
+            <div class="mood-option mood-calm" data-theme="calm" title="Calm"></div>
+            <div class="mood-option mood-energetic" data-theme="energetic" title="Energetic"></div>
+            <div class="mood-option mood-creative" data-theme="creative" title="Creative"></div>
+            <div class="mood-option mood-chill" data-theme="chill" title="Chill"></div>
+            <div class="mood-option mood-romantic" data-theme="romantic" title="Romantic"></div>
+            <div class="mood-option mood-default" data-theme="default" title="Default"></div>
+        </div>
+    </div>
+
+    <!-- Mobile Mood Selector -->
+    <div class="mobile-mood-selector lg:hidden">
+        <button class="mobile-mood-btn">
+            <i class="fas fa-palette"></i>
+        </button>
+        <div class="mobile-mood-options">
+            <div class="mobile-mood-option mood-calm" data-theme="calm" title="Calm"></div>
+            <div class="mobile-mood-option mood-energetic" data-theme="energetic" title="Energetic"></div>
+            <div class="mobile-mood-option mood-creative" data-theme="creative" title="Creative"></div>
+            <div class="mobile-mood-option mood-chill" data-theme="chill" title="Chill"></div>
+            <div class="mobile-mood-option mood-romantic" data-theme="romantic" title="Romantic"></div>
+            <div class="mobile-mood-option mood-default" data-theme="default" title="Default"></div>
+        </div>
+    </div>
+
+    <!-- Mood Customizer -->
+    <div class="mood-customizer">
+        <button class="mood-customizer-btn flex items-center space-x-2" id="moodCustomizerBtn">
+            <i class="fas fa-sliders-h"></i>
+            <span class="hidden sm:inline">Customize</span>
+        </button>
+    </div>
+
+    <!-- Mood Customizer Modal -->
+    <div id="moodCustomizerModal" class="mood-customizer-modal">
+        <div class="mood-customizer-content">
+            <div class="flex items-center justify-between mb-6">
+                <div class="flex items-center space-x-3">
+                    <i class="fas fa-palette text-2xl text-blue-400"></i>
+                    <h2 class="text-xl md:text-2xl font-bold text-white">Mood Color Customizer</h2>
+                </div>
+                <button id="closeMoodCustomizer" class="text-gray-400 hover:text-white transition">
+                    <i class="fas fa-times text-xl"></i>
+                </button>
+            </div>
+
+            <div class="mb-6">
+                <h3 class="text-lg font-semibold text-white mb-3">Select Your Mood Color</h3>
+                <div class="color-palette">
+                    <div class="color-option active" style="background: linear-gradient(135deg, #3B82F6, #8B5CF6);" data-primary="#3B82F6" data-secondary="#8B5CF6" data-theme="calm"></div>
+                    <div class="color-option" style="background: linear-gradient(135deg, #DC2626, #EA580C);" data-primary="#DC2626" data-secondary="#EA580C" data-theme="energetic"></div>
+                    <div class="color-option" style="background: linear-gradient(135deg, #7C3AED, #DB2777);" data-primary="#7C3AED" data-secondary="#DB2777" data-theme="creative"></div>
+                    <div class="color-option" style="background: linear-gradient(135deg, #059669, #10B981);" data-primary="#059669" data-secondary="#10B981" data-theme="chill"></div>
+                    <div class="color-option" style="background: linear-gradient(135deg, #DB2777, #BE185D);" data-primary="#DB2777" data-secondary="#BE185D" data-theme="romantic"></div>
+                    <div class="color-option" style="background: linear-gradient(135deg, #6B7280, #4B5563);" data-primary="#6B7280" data-secondary="#4B5563" data-theme="default"></div>
+                    <div class="color-option" style="background: linear-gradient(135deg, #F59E0B, #D97706);" data-primary="#F59E0B" data-secondary="#D97706" data-theme="sunny"></div>
+                    <div class="color-option" style="background: linear-gradient(135deg, #8B5CF6, #EC4899);" data-primary="#8B5CF6" data-secondary="#EC4899" data-theme="vibrant"></div>
+                    <div class="color-option" style="background: linear-gradient(135deg, #06B6D4, #0EA5E9);" data-primary="#06B6D4" data-secondary="#0EA5E9" data-theme="ocean"></div>
+                    <div class="color-option" style="background: linear-gradient(135deg, #84CC16, #22C55E);" data-primary="#84CC16" data-secondary="#22C55E" data-theme="fresh"></div>
+                </div>
+                
+                <div class="custom-color-input">
+                    <div class="custom-color-preview" id="customColorPreview" style="background: linear-gradient(135deg, #3B82F6, #8B5CF6);"></div>
+                    <div class="flex flex-col w-full">
+                        <label class="text-white text-sm mb-1">Primary Color</label>
+                        <input type="color" id="primaryColorPicker" value="#3B82F6" class="w-full">
+                    </div>
+                    <div class="flex flex-col w-full">
+                        <label class="text-white text-sm mb-1">Secondary Color</label>
+                        <input type="color" id="secondaryColorPicker" value="#8B5CF6" class="w-full">
+                    </div>
+                    <button id="applyCustomColors" class="px-4 py-2 bg-blue-500 text-white rounded-lg hover:bg-blue-600 transition mt-4">
+                        Apply
+                    </button>
+                </div>
+            </div>
+
+            <div class="mb-6">
+                <h3 class="text-lg font-semibold text-white mb-3">Color Intensity</h3>
+                <input type="range" min="0" max="100" value="50" class="intensity-slider" id="colorIntensity">
+                <div class="flex justify-between text-xs text-gray-400">
+                    <span>Subtle</span>
+                    <span>Balanced</span>
+                    <span>Vibrant</span>
+                </div>
+            </div>
+
+            <div>
+                <h3 class="text-lg font-semibold text-white mb-3">Preview</h3>
+                <div class="mood-preview" id="moodPreview">
+                    Your Mood Preview
+                </div>
+            </div>
+
+            <div class="flex justify-between mt-6">
+                <button id="resetMoodColors" class="px-4 py-2 border border-gray-600 text-gray-300 rounded-lg hover:bg-gray-700 transition">
+                    Reset to Default
+                </button>
+                <button id="saveMoodColors" class="px-4 py-2 bg-blue-500 text-white rounded-lg hover:bg-blue-600 transition">
+                    Save Mood Colors
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Connection Status -->
+    <div class="connection-status connecting" id="connectionStatus">
+        <i class="fas fa-circle-notch fa-spin mr-2"></i>
+        <span id="connectionText">Connecting to kynecta...</span>
+    </div>
+
+    <!-- Toast Container -->
+    <div id="toastContainer"></div>
+
+    <!-- Cookie Consent Banner -->
+    <div id="cookieBanner" class="cookie-banner">
+        <div class="max-w-4xl mx-auto">
+            <div class="flex flex-col md:flex-row items-center justify-between">
+                <div class="flex-1 mb-4 md:mb-0">
+                    <h3 class="text-xl font-bold mb-2">🍪 We Value Your Privacy</h3>
+                    <p class="text-blue-200 text-sm md:text-base">
+                        We use cookies to enhance your experience, analyze traffic, and personalize content. 
+                        By continuing to use kynecta, you agree to our use of cookies and our Privacy Policy.
+                    </p>
+                </div>
+                <div class="flex flex-col sm:flex-row space-y-2 sm:space-y-0 sm:space-x-4">
+                    <button id="cookieReject" class="px-4 py-2 border border-blue-400 text-blue-400 rounded-lg hover:bg-blue-400 hover:text-white transition text-sm md:text-base">
+                        Reject Non-Essential
+                    </button>
+                    <button id="cookieAccept" class="px-4 py-2 bg-blue-500 text-white rounded-lg hover:bg-blue-600 transition pulse-glow text-sm md:text-base">
+                        Accept All
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Forgot Password Modal -->
+    <div id="forgotPasswordModal" class="forgot-password-modal">
+        <div class="forgot-password-content">
+            <div class="flex items-center justify-between mb-6">
+                <div class="flex items-center space-x-3">
+                    <i class="fas fa-lock text-2xl text-blue-400"></i>
+                    <h2 class="text-xl md:text-2xl font-bold text-white">Account Recovery</h2>
+                </div>
+                <button id="closeForgotPassword" class="text-gray-400 hover:text-white transition">
+                    <i class="fas fa-times text-xl"></i>
+                </button>
+            </div>
+
+            <!-- Step 1: Email/Identifier Input -->
+            <div id="forgot-step-1-email">
+                <p class="text-gray-300 mb-6 text-sm md:text-base">
+                    Please enter your registered email to find your account.
+                </p>
+                <form id="forgotEmailForm">
+                    <div class="mb-6">
+                        <label for="forgotIdentifier" class="block text-sm font-medium text-gray-300 mb-2">Email Address</label>
+                        <input type="email" id="forgotIdentifier" name="identifier" required placeholder="name@example.com"
+                               class="w-full p-3 rounded-xl glass-effect border border-blue-700 focus:ring-blue-500 focus:border-blue-500 transition duration-200 text-white text-sm md:text-base">
+                    </div>
+                    <button type="submit" id="forgotSubmitBtn"
+                            class="w-full cyber-gradient text-white py-3 rounded-xl font-semibold shadow-lg hover:shadow-blue-500/50 transition duration-300 transform hover:scale-[1.01] flex items-center justify-center text-sm md:text-base">
+                        <i class="fas fa-search mr-2"></i> Find Account
+                    </button>
+                </form>
+            </div>
+
+            <!-- Step 2: Method Selection -->
+            <div id="forgot-step-2-methods" class="hidden">
+                <h2 class="text-lg md:text-xl font-semibold mb-4 text-gray-100">Choose Recovery Method</h2>
+                <p class="text-gray-300 mb-6 text-sm md:text-base">
+                    Select how you'd like to receive your password reset instructions.
+                </p>
+                <div class="space-y-4">
+                    <!-- Option 1: Email Link (Firebase Default) -->
+                    <div onclick="selectRecoveryMethod('email')" class="recovery-option-card glass-effect p-4 rounded-xl flex items-center space-x-4">
+                        <i class="fas fa-envelope text-xl md:text-2xl text-green-400"></i>
+                        <div>
+                            <h3 class="font-bold text-base md:text-lg">Email Link</h3>
+                            <p class="text-xs md:text-sm text-gray-400">Send a password reset link to your registered email.</p>
+                        </div>
+                    </div>
+
+                    <!-- Option 2: Phone Number (Code) -->
+                    <div onclick="selectRecoveryMethod('phone')" class="recovery-option-card glass-effect p-4 rounded-xl flex items-center space-x-4">
+                        <i class="fas fa-mobile-alt text-xl md:text-2xl text-yellow-400"></i>
+                        <div>
+                            <h3 class="font-bold text-base md:text-lg">Phone Number (SMS Code)</h3>
+                            <p class="text-xs md:text-sm text-gray-400">Receive a one-time code via SMS to reset your password.</p>
+                        </div>
+                    </div>
+
+                    <!-- Option 3: Voice Call -->
+                    <div onclick="selectRecoveryMethod('voice')" class="recovery-option-card glass-effect p-4 rounded-xl flex items-center space-x-4">
+                        <i class="fas fa-phone-volume text-xl md:text-2xl text-red-400"></i>
+                        <div>
+                            <h3 class="font-bold text-base md:text-lg">Voice Call</h3>
+                            <p class="text-xs md:text-sm text-gray-400">Receive an automated voice call with a verification code.</p>
+                        </div>
+                    </div>
+
+                    <!-- Option 4: Secret Text (Security Question) -->
+                    <div onclick="selectRecoveryMethod('secret')" class="recovery-option-card glass-effect p-4 rounded-xl flex items-center space-x-4">
+                        <i class="fas fa-user-secret text-xl md:text-2xl text-purple-400"></i>
+                        <div>
+                            <h3 class="font-bold text-base md:text-lg">Secret Text / Security Question</h3>
+                            <p class="text-xs md:text-sm text-gray-400">Answer your security question for direct reset access.</p>
+                        </div>
+                    </div>
+                </div>
+            </div>
+            
+            <!-- Step 3: Specific Recovery Form (Secret Text example) -->
+            <div id="forgot-step-3-secret-reset" class="hidden">
+                <h2 class="text-lg md:text-xl font-semibold mb-4 text-gray-100">Secret Text Recovery</h2>
+                <p class="text-gray-300 mb-6 text-sm md:text-base">
+                    To confirm your identity, please answer your secret question.
+                </p>
+                <form id="forgotSecretForm">
+                    <div class="mb-4">
+                        <label for="forgotSecurityQuestion" class="block text-sm font-medium text-gray-300 mb-2">Security Question</label>
+                        <p id="forgotSecurityQuestion" class="p-3 rounded-xl glass-effect border border-blue-700 text-sm md:text-base">
+                            What was the name of your first pet? (Simulated)
+                        </p>
+                    </div>
+                    <div class="mb-6">
+                        <label for="forgotSecurityAnswer" class="block text-sm font-medium text-gray-300 mb-2">Your Answer</label>
+                        <input type="text" id="forgotSecurityAnswer" name="securityAnswer" required
+                               class="w-full p-3 rounded-xl glass-effect border border-blue-700 focus:ring-blue-500 focus:border-blue-500 transition duration-200 text-white text-sm md:text-base">
+                    </div>
+                    
+                    <button type="submit" id="forgotSecretSubmitBtn"
+                            class="w-full cyber-gradient text-white py-3 rounded-xl font-semibold shadow-lg hover:shadow-blue-500/50 transition duration-300 transform hover:scale-[1.01] flex items-center justify-center text-sm md:text-base">
+                        <i class="fas fa-check-circle mr-2"></i> Verify & Reset
+                    </button>
+                </form>
+                <button onclick="changeRecoveryMethod()"
+                        class="w-full mt-4 text-gray-400 py-3 rounded-xl font-semibold hover:text-gray-100 transition duration-200 text-sm md:text-base">
+                    Change Recovery Method
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Loading Modal -->
+    <div id="loadingModal" class="fixed inset-0 bg-black bg-opacity-70 flex items-center justify-center hidden z-50">
+        <div class="flex flex-col items-center p-8 rounded-xl glass-effect mx-4">
+            <i class="fas fa-spinner fa-spin text-4xl text-blue-400 mb-4"></i>
+            <p class="text-lg font-medium text-gray-100 text-center" id="loadingText">Processing...</p>
+        </div>
+    </div>
+
+    <!-- Animated Background -->
+    <div class="fixed inset-0 overflow-hidden pointer-events-none">
+        <div class="absolute w-2 h-2 bg-blue-400 rounded-full animate-pulse" style="top: 20%; left: 10%;"></div>
+        <div class="absolute w-1 h-1 bg-purple-400 rounded-full animate-pulse" style="top: 60%; left: 80%; animation-delay: 1s;"></div>
+        <div class="absolute w-3 h-3 bg-cyan-400 rounded-full animate-pulse" style="top: 40%; left: 50%; animation-delay: 2s;"></div>
+    </div>
+
+    <!-- Main Dashboard Container -->
+    <div class="min-h-screen flex flex-col lg:flex-row" id="mainAppContainer">
+        <!-- Left Side - Advertisement Section (Hidden on mobile) -->
+        <div class="hidden lg:flex flex-1 p-4 md:p-8 items-center justify-center">
+            <div class="max-w-2xl w-full">
+                <!-- Header -->
+                <div class="text-center mb-6 md:mb-8">
+                    <div class="flex items-center justify-center space-x-3 md:space-x-4 mb-4 md:mb-6">
+                        <div class="w-16 h-16 md:w-20 md:h-20 cyber-gradient rounded-xl md:rounded-2xl flex items-center justify-center quantum-glow floating">
+                            <i class="fas fa-globe-americas text-white text-2xl md:text-3xl"></i>
+                        </div>
+                        <div>
+                            <span class="text-3xl md:text-5xl font-bold text-transparent bg-clip-text bg-gradient-to-r from-blue-400 to-purple-400 neon-text">
+                                kynecta
+                            </span>
+                            <p class="text-blue-300 text-sm md:text-lg mt-1 md:mt-2">Where the World Connects</p>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Attractive Advertisement Content -->
+                <div class="space-y-6 md:space-y-8">
+                    <div class="text-center">
+                        <h2 class="text-2xl md:text-4xl font-bold gradient-text mb-3 md:mb-4 responsive-heading">Join 500,000+ Global Connectors!</h2>
+                        <p class="text-blue-200 text-base md:text-xl mb-4 md:mb-6 responsive-subheading">The world's most vibrant community is waiting for you</p>
+                    </div>
+
+                    <!-- Platform Features -->
+                    <div class="grid grid-cols-1 gap-4 md:gap-6 mb-6 md:mb-8">
+                        <div class="platform-feature">
+                            <div class="flex items-start space-x-4">
+                                <div class="feature-icon bg-gradient-to-br from-blue-500 to-purple-600 text-white">
+                                    <i class="fas fa-comments"></i>
+                                </div>
+                                <div class="flex-1">
+                                    <h3 class="text-lg md:text-xl font-bold text-white mb-2">Mood-Based Chat</h3>
+                                    <p class="text-blue-300 text-sm md:text-base mb-3">Connect with people who match your current mood. Find calm conversations or energetic debates based on how you feel. <strong>Create polls and voting sessions</strong> to engage your community in decision-making.</p>
+                                    <div class="flex flex-wrap">
+                                        <span class="mood-tag calm">Calm</span>
+                                        <span class="mood-tag energetic">Energetic</span>
+                                        <span class="mood-tag creative">Creative</span>
+                                        <span class="mood-tag chill">Chill</span>
+                                        <span class="mood-tag romantic">Romantic</span>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                        
+                        <div class="platform-feature">
+                            <div class="flex items-start space-x-4">
+                                <div class="feature-icon bg-gradient-to-br from-green-500 to-blue-600 text-white">
+                                    <i class="fas fa-shopping-cart"></i>
+                                </div>
+                                <div class="flex-1">
+                                    <h3 class="text-lg md:text-xl font-bold text-white mb-2">Interest-Based Marketplace</h3>
+                                    <p class="text-blue-300 text-sm md:text-base mb-3">Buy and sell services, goods, and skills within communities that share your interests. Find unique offerings from like-minded people.</p>
+                                    <div class="flex flex-wrap">
+                                        <span class="interest-badge"><i class="fas fa-concierge-bell mr-1"></i> Services</span>
+                                        <span class="interest-badge"><i class="fas fa-box mr-1"></i> Goods</span>
+                                        <span class="interest-badge"><i class="fas fa-tools mr-1"></i> Skills</span>
+                                        <span class="interest-badge"><i class="fas fa-laptop-code mr-1"></i> Digital</span>
+                                        <span class="interest-badge"><i class="fas fa-hands-helping mr-1"></i> Consulting</span>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                        
+                        <div class="platform-feature">
+                            <div class="flex items-start space-x-4">
+                                <div class="feature-icon bg-gradient-to-br from-purple-500 to-pink-600 text-white">
+                                    <i class="fas fa-gamepad"></i>
+                                </div>
+                                <div class="flex-1">
+                                    <h3 class="text-lg md:text-xl font-bold text-white mb-2">Interactive Games</h3>
+                                    <p class="text-blue-300 text-sm md:text-base mb-3">Play games with friends or find new gaming partners based on shared interests and skill levels.</p>
+                                    <div class="flex flex-wrap">
+                                        <span class="interest-badge"><i class="fas fa-chess mr-1"></i> Strategy</span>
+                                        <span class="interest-badge"><i class="fas fa-dice mr-1"></i> Casual</span>
+                                        <span class="interest-badge"><i class="fas fa-trophy mr-1"></i> Competitive</span>
+                                        <span class="interest-badge"><i class="fas fa-puzzle-piece mr-1"></i> Puzzle</span>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                        
+                        <div class="platform-feature">
+                            <div class="flex items-start space-x-4">
+                                <div class="feature-icon bg-gradient-to-br from-yellow-500 to-orange-600 text-white">
+                                    <i class="fas fa-newspaper"></i>
+                                </div>
+                                <div class="flex-1">
+                                    <h3 class="text-lg md:text-xl font-bold text-white mb-2">Personalized Feed</h3>
+                                    <p class="text-blue-300 text-sm md:text-base mb-3">Discover content tailored to your interests and mood. Follow creators who share your passions.</p>
+                                    <div class="flex flex-wrap">
+                                        <span class="interest-badge"><i class="fas fa-video mr-1"></i> Video</span>
+                                        <span class="interest-badge"><i class="fas fa-image mr-1"></i> Images</span>
+                                        <span class="interest-badge"><i class="fas fa-podcast mr-1"></i> Audio</span>
+                                        <span class="interest-badge"><i class="fas fa-file-text mr-1"></i> Articles</span>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Secure Payments -->
+                    <div class="glass-effect border border-green-700 rounded-2xl p-4 md:p-6">
+                        <div class="flex items-center space-x-3 mb-4">
+                            <i class="fas fa-shield-alt text-2xl text-green-400"></i>
+                            <h3 class="text-lg md:text-xl font-bold text-white">Secure Payments</h3>
+                        </div>
+                        <p class="text-blue-300 text-sm md:text-base mb-4">
+                            Shop with confidence using our encrypted payment system. All transactions are protected with bank-level security.
+                        </p>
+                        <div class="flex flex-wrap">
+                            <span class="payment-badge"><i class="fas fa-lock mr-1"></i> Encrypted</span>
+                            <span class="payment-badge"><i class="fas fa-shield-check mr-1"></i> Protected</span>
+                            <span class="payment-badge"><i class="fas fa-user-shield mr-1"></i> Verified</span>
+                        </div>
+                    </div>
+
+                    <!-- Live Stats Counter -->
+                    <div class="grid grid-cols-2 gap-4 md:gap-6 mb-6 md:mb-8">
+                        <div class="text-center">
+                            <div class="stats-counter" id="onlineCount">500K+</div>
+                            <div class="text-blue-300 text-xs md:text-sm">Active Users</div>
+                        </div>
+                        <div class="text-center">
+                            <div class="stats-counter" id="countryCount">190+</div>
+                            <div class="text-blue-300 text-xs md:text-sm">Countries</div>
+                        </div>
+                        <div class="text-center">
+                            <div class="stats-counter" id="languageCount">50+</div>
+                            <div class="text-blue-300 text-xs md:text-sm">Languages</div>
+                        </div>
+                        <div class="text-center">
+                            <div class="stats-counter" id="communityCount">10K+</div>
+                            <div class="text-blue-300 text-xs md:text-sm">Communities</div>
+                        </div>
+                    </div>
+
+                    <!-- Success Stories -->
+                    <div class="bg-black/30 rounded-xl p-4 md:p-6 border border-purple-500/30">
+                        <h3 class="text-lg md:text-xl font-bold text-center text-white mb-4 md:mb-6">🌟 Success Stories</h3>
+                        <div class="space-y-3 md:space-y-4">
+                            <div class="flex items-start space-x-3">
+                                <div class="w-10 h-10 md:w-12 md:h-12 bg-gradient-to-br from-blue-500 to-purple-600 rounded-full flex items-center justify-center flex-shrink-0">
+                                    <span class="text-white font-bold text-sm">S</span>
+                                </div>
+                                <div>
+                                    <p class="text-white font-semibold text-sm md:text-base">"Found my business partner in Japan! kynecta made global networking effortless."</p>
+                                    <p class="text-blue-300 text-xs md:text-sm">- Sarah, Entrepreneur from USA</p>
+                                </div>
+                            </div>
+                            <div class="flex items-start space-x-3">
+                                <div class="w-10 h-10 md:w-12 md:h-12 bg-gradient-to-br from-green-500 to-blue-600 rounded-full flex items-center justify-center flex-shrink-0">
+                                    <span class="text-white font-bold text-sm">A</span>
+                                </div>
+                                <div>
+                                    <p class="text-white font-semibold text-sm md:text-base">"Learned Spanish while making friends from Mexico! Best language exchange platform."</p>
+                                    <p class="text-blue-300 text-xs md:text-sm">- Alex, Student from UK</p>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Right Side - Content Area (All Sections) -->
+        <div class="flex-1 flex items-center justify-center p-4 md:p-8">
+            <div class="w-full max-w-4xl relative">
+                <!-- Mobile Header -->
+                <div class="lg:hidden text-center mb-6 md:mb-8 mobile-margin">
+                    <div class="flex items-center justify-center space-x-3 mb-4 md:mb-6">
+                        <div class="w-12 h-12 md:w-16 md:h-16 cyber-gradient rounded-xl flex items-center justify-center quantum-glow">
+                            <i class="fas fa-globe text-white text-xl md:text-2xl"></i>
+                        </div>
+                        <div>
+                            <span class="text-2xl md:text-3xl font-bold text-transparent bg-clip-text bg-gradient-to-r from-blue-400 to-purple-400 neon-text">
+                                kynecta
+                            </span>
+                            <p class="text-blue-300 text-xs md:text-sm">Where the World Connects</p>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Error/Success Messages -->
+                <div id="messageContainer"></div>
+
+                <!-- Security Status -->
+                <div id="securityStatus" class="glass-effect border border-blue-700 rounded-2xl p-3 md:p-4 mb-4 md:mb-6 hidden">
+                    <div class="flex items-center justify-between">
+                        <div class="flex items-center space-x-2 md:space-x-3">
+                            <i class="fas fa-shield-check text-green-400 text-base md:text-lg"></i>
+                            <div>
+                                <span class="text-xs md:text-sm font-medium text-green-400">Secure Connection Established</span>
+                                <p class="text-xs text-blue-300 mt-1">All data is encrypted and secure</p>
+                            </div>
+                        </div>
+                        <div class="flex space-x-1">
+                            <span class="security-badge text-xs">
+                                <i class="fas fa-lock mr-1"></i> HTTPS
+                            </span>
+                            <span class="security-badge text-xs">
+                                <i class="fas fa-shield-alt mr-1"></i> Encrypted
+                            </span>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- All Content Sections Container -->
+                <div class="content-area relative min-h-[600px]">
+                    <!-- Mood & Interest Selection Section -->
+                    <div id="selectionSection" class="section section-active">
+                        <!-- Progress Counter -->
+                        <div id="selectionCounter" class="selection-counter">
+                            <span id="selectedCount">0</span>/2 moods & <span id="selectedInterestsCount">0</span>/2 interests
+                        </div>
+
+                        <div class="min-h-screen flex flex-col items-center justify-center p-4 md:p-8">
+                            <div class="w-full max-w-4xl">
+                                <!-- Mood Selection Step -->
+                                <div id="moodSelectionStep">
+                                    <div class="text-center mb-8 md:mb-12">
+                                        <h1 class="selection-title">Welcome to kynecta! 🎉</h1>
+                                        <p class="selection-subtitle">First, let's personalize your experience. Choose up to 2 moods that best describe how you feel right now</p>
+                                    </div>
+
+                                    <!-- Progress Bar -->
+                                    <div class="selection-progress">
+                                        <div class="selection-progress-bar" id="moodProgressBar" style="width: 0%"></div>
+                                    </div>
+
+                                    <!-- Mood Selection Grid -->
+                                    <div class="selection-grid" id="moodSelectionGrid">
+                                        <!-- Mood cards will be populated by JavaScript -->
+                                    </div>
+
+                                    <!-- Navigation Buttons -->
+                                    <div class="flex flex-col sm:flex-row gap-4 mt-8">
+                                        <button id="skipMoodSelection" class="skip-selection-btn">
+                                            Skip for now <i class="fas fa-forward ml-2"></i>
+                                        </button>
+                                        <button id="nextToInterestsBtn" class="selection-next-btn" disabled>
+                                            Continue to Interests <i class="fas fa-arrow-right ml-2"></i>
+                                        </button>
+                                    </div>
+                                </div>
+
+                                <!-- Interest Selection Step -->
+                                <div id="interestSelectionStep" class="hidden">
+                                    <div class="text-center mb-8 md:mb-12">
+                                        <h1 class="selection-title">Great! Now Choose Your Interests</h1>
+                                        <p class="selection-subtitle">Select up to 2 interests that match what you love to do</p>
+                                    </div>
+
+                                    <!-- Progress Bar -->
+                                    <div class="selection-progress">
+                                        <div class="selection-progress-bar" id="interestProgressBar" style="width: 0%"></div>
+                                    </div>
+
+                                    <!-- Interest Selection Grid -->
+                                    <div class="selection-grid" id="interestSelectionGrid">
+                                        <!-- Interest cards will be populated by JavaScript -->
+                                    </div>
+
+                                    <!-- Navigation Buttons -->
+                                    <div class="flex flex-col sm:flex-row gap-4 mt-8">
+                                        <button id="backToMoodsBtn" class="selection-back-btn">
+                                            <i class="fas fa-arrow-left mr-2"></i> Back to Moods
+                                        </button>
+                                        <button id="skipInterestSelection" class="skip-selection-btn">
+                                            Skip for now <i class="fas fa-forward ml-2"></i>
+                                        </button>
+                                        <button id="finishSelectionBtn" class="selection-next-btn" disabled>
+                                            Finish & Continue <i class="fas fa-check ml-2"></i>
+                                        </button>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Landing Section -->
+                    <div id="landingSection" class="section section-hidden">
+                        <div class="text-center">
+                            <h2 class="text-2xl md:text-3xl font-bold text-white mb-3 md:mb-4 responsive-heading">Your Global Journey Starts Here</h2>
+                            <p class="text-blue-300 mb-6 md:mb-8 text-sm md:text-base responsive-text">
+                                Join millions who have transformed how they connect, learn, and grow with people from every corner of the world.
+                            </p>
+                            
+                            <div class="space-y-3 md:space-y-4">
+                                <button id="showLoginBtn" class="w-full cyber-gradient text-white py-3 md:py-4 px-4 md:px-6 rounded-xl text-base md:text-lg font-semibold hover:scale-105 transition focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-cyan-400 quantum-glow pulse-glow">
+                                    <i class="fas fa-sign-in-alt mr-2"></i>Continue Your Journey
+                                </button>
+                                <button id="showRegisterBtn" class="w-full glass-effect text-white py-3 md:py-4 px-4 md:px-6 rounded-xl text-base md:text-lg font-semibold hover:scale-105 transition focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-cyan-400 border border-blue-700 hover:border-cyan-500">
+                                    <i class="fas fa-user-plus mr-2"></i>Start Free Adventure
+                                </button>
+                            </div>
+                            
+                            <div class="mt-6 md:mt-8 flex justify-center space-x-4 md:space-x-6 text-xs md:text-sm text-blue-300 flex-wrap gap-2">
+                                <div class="flex items-center">
+                                    <i class="fas fa-bolt text-yellow-400 mr-1 md:mr-2"></i>
+                                    <span>Instant Setup</span>
+                                </div>
+                                <div class="flex items-center">
+                                    <i class="fas fa-globe text-green-400 mr-1 md:mr-2"></i>
+                                    <span>Global Access</span>
+                                </div>
+                                <div class="flex items-center">
+                                    <i class="fas fa-heart text-pink-400 mr-1 md:mr-2"></i>
+                                    <span>Always Free</span>
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- Mobile Feature Highlights -->
+                        <div class="lg:hidden mt-6 md:mt-8">
+                            <h3 class="text-lg md:text-xl font-bold text-center text-white mb-4">Discover kynecta</h3>
+                            <div class="grid grid-cols-1 gap-4">
+                                <div class="platform-feature">
+                                    <div class="flex items-start space-x-4">
+                                        <div class="feature-icon bg-gradient-to-br from-blue-500 to-purple-600 text-white">
+                                            <i class="fas fa-comments"></i>
+                                        </div>
+                                        <div class="flex-1">
+                                            <h4 class="text-base font-bold text-white mb-2">Mood-Based Chat</h4>
+                                            <p class="text-blue-300 text-xs mb-2">Connect with people who match your current mood. <strong>Create polls and voting sessions</strong> to engage your community.</p>
+                                            <div class="flex flex-wrap">
+                                                <span class="mood-tag calm">Calm</span>
+                                                <span class="mood-tag energetic">Energetic</span>
+                                                <span class="mood-tag creative">Creative</span>
+                                            </div>
+                                        </div>
+                                    </div>
+                                </div>
+                                
+                                <div class="platform-feature">
+                                    <div class="flex items-start space-x-4">
+                                        <div class="feature-icon bg-gradient-to-br from-green-500 to-blue-600 text-white">
+                                            <i class="fas fa-shopping-cart"></i>
+                                        </div>
+                                        <div class="flex-1">
+                                            <h4 class="text-base font-bold text-white mb-2">Marketplace</h4>
+                                            <p class="text-blue-300 text-xs mb-2">Buy & sell services, goods, and skills.</p>
+                                            <div class="flex flex-wrap">
+                                                <span class="interest-badge"><i class="fas fa-concierge-bell mr-1"></i> Services</span>
+                                                <span class="interest-badge"><i class="fas fa-box mr-1"></i> Goods</span>
+                                                <span class="interest-badge"><i class="fas fa-tools mr-1"></i> Skills</span>
+                                            </div>
+                                        </div>
+                                    </div>
+                                </div>
+                                
+                                <div class="platform-feature">
+                                    <div class="flex items-start space-x-4">
+                                        <div class="feature-icon bg-gradient-to-br from-purple-500 to-pink-600 text-white">
+                                            <i class="fas fa-gamepad"></i>
+                                        </div>
+                                        <div class="flex-1">
+                                            <h4 class="text-base font-bold text-white mb-2">Games</h4>
+                                            <p class="text-blue-300 text-xs mb-2">Play with friends based on shared interests.</p>
+                                            <div class="flex flex-wrap">
+                                                <span class="interest-badge"><i class="fas fa-chess mr-1"></i> Strategy</span>
+                                                <span class="interest-badge"><i class="fas fa-dice mr-1"></i> Casual</span>
+                                                <span class="interest-badge"><i class="fas fa-trophy mr-1"></i> Competitive</span>
+                                            </div>
+                                        </div>
+                                    </div>
+                                </div>
+                                
+                                <div class="platform-feature">
+                                    <div class="flex items-start space-x-4">
+                                        <div class="feature-icon bg-gradient-to-br from-yellow-500 to-orange-600 text-white">
+                                            <i class="fas fa-newspaper"></i>
+                                        </div>
+                                        <div class="flex-1">
+                                            <h4 class="text-base font-bold text-white mb-2">Feed</h4>
+                                            <p class="text-blue-300 text-xs mb-2">Discover content tailored to your interests.</p>
+                                            <div class="flex flex-wrap">
+                                                <span class="interest-badge"><i class="fas fa-video mr-1"></i> Video</span>
+                                                <span class="interest-badge"><i class="fas fa-image mr-1"></i> Images</span>
+                                                <span class="interest-badge"><i class="fas fa-podcast mr-1"></i> Audio</span>
+                                            </div>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                            
+                            <!-- Mobile Stats -->
+                            <div class="mt-4 md:mt-6 grid grid-cols-4 gap-2 md:gap-4">
+                                <div class="text-center">
+                                    <div class="text-lg md:text-xl font-bold text-blue-400">500K+</div>
+                                    <div class="text-blue-300 text-xs">Users</div>
+                                </div>
+                                <div class="text-center">
+                                    <div class="text-lg md:text-xl font-bold text-blue-400">190+</div>
+                                    <div class="text-blue-300 text-xs">Countries</div>
+                                </div>
+                                <div class="text-center">
+                                    <div class="text-lg md:text-xl font-bold text-blue-400">50+</div>
+                                    <div class="text-blue-300 text-xs">Languages</div>
+                                </div>
+                                <div class="text-center">
+                                    <div class="text-lg md:text-xl font-bold text-blue-400">10K+</div>
+                                    <div class="text-blue-300 text-xs">Communities</div>
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- Security Features -->
+                        <div class="glass-effect border border-blue-700 rounded-2xl p-4 md:p-6 mt-6 md:mt-8">
+                            <h3 class="text-xs md:text-sm font-medium text-cyan-400 mb-2 md:mb-3">Why Choose kynecta?</h3>
+                            <ul class="text-xs md:text-sm text-blue-400 space-y-1 md:space-y-2">
+                                <li class="flex items-center">
+                                    <i class="fas fa-check-circle text-green-400 mr-1 md:mr-2 text-xs"></i>
+                                    <span>No hidden fees - completely free forever</span>
+                                </li>
+                                <li class="flex items-center">
+                                    <i class="fas fa-check-circle text-green-400 mr-1 md:mr-2 text-xs"></i>
+                                    <span>Connect with verified users worldwide</span>
+                                </li>
+                                <li class="flex items-center">
+                                    <i class="fas fa-check-circle text-green-400 mr-1 md:mr-2 text-xs"></i>
+                                    <span>Advanced translation for seamless communication</span>
+                                </li>
+                            </ul>
+                        </div>
+                    </div>
+
+                    <!-- Login Section -->
+                    <div id="loginSection" class="section section-hidden">
+                        <div class="text-center mb-4 md:mb-6">
+                            <h2 class="text-2xl md:text-3xl font-bold text-white mb-1 md:mb-2 responsive-heading">Welcome Back</h2>
+                            <p class="text-blue-300 text-sm md:text-base responsive-text">
+                                Continue your global journey with kynecta
+                            </p>
+                        </div>
+
+                        <!-- Password Login Form -->
+                        <div class="space-y-4 md:space-y-6">
+                            <form class="space-y-4 md:space-y-6" id="loginForm">
+                                <div>
+                                    <label for="loginEmail" class="block text-xs md:text-sm font-medium text-cyan-400 mb-1 md:mb-2">
+                                        Email address
+                                        <span class="text-red-400 ml-1">*</span>
+                                    </label>
+                                    <div class="relative">
+                                        <input id="loginEmail" name="email" type="email" autocomplete="email" required 
+                                               class="glass-effect appearance-none block w-full px-3 md:px-4 py-2 md:py-3 border border-blue-700 rounded-xl placeholder-blue-400 focus:outline-none focus:ring-2 focus:ring-cyan-400 focus:border-cyan-400 text-white pl-10 md:pl-12 transition text-sm md:text-base"
+                                               placeholder="Enter your email">
+                                        <div class="absolute left-3 md:left-4 top-1/2 transform -translate-y-1/2 text-blue-400">
+                                            <i class="fas fa-envelope text-sm md:text-base"></i>
+                                        </div>
+                                    </div>
+                                    <div id="loginEmailError" class="text-red-400 text-xs mt-1 hidden"></div>
+                                </div>
+
+                                <div>
+                                    <label for="loginPassword" class="block text-xs md:text-sm font-medium text-blue-400 mb-1 md:mb-2">
+                                        Password
+                                        <span class="text-red-400 ml-1">*</span>
+                                    </label>
+                                    <div class="relative">
+                                        <input id="loginPassword" name="password" type="password" autocomplete="current-password" required 
+                                               class="glass-effect appearance-none block w-full px-3 md:px-4 py-2 md:py-3 border border-blue-700 rounded-xl placeholder-blue-400 focus:outline-none focus:ring-2 focus:ring-blue-400 focus:border-blue-400 text-white pl-10 md:pl-12 pr-10 md:pr-12 transition text-sm md:text-base"
+                                               placeholder="Enter your password">
+                                        <div class="absolute left-3 md:left-4 top-1/2 transform -translate-y-1/2 text-blue-400">
+                                            <i class="fas fa-lock text-sm md:text-base"></i>
+                                        </div>
+                                        <button type="button" id="toggleLoginPassword" class="absolute right-3 md:right-4 top-1/2 transform -translate-y-1/2 text-blue-400 hover:text-cyan-400 transition">
+                                            <i class="fas fa-eye text-sm md:text-base"></i>
+                                        </button>
+                                    </div>
+                                    <div id="loginPasswordError" class="text-red-400 text-xs mt-1 hidden"></div>
+                                </div>
+
+                                <div class="flex items-center justify-between text-xs md:text-sm">
+                                    <div class="flex items-center">
+                                        <input id="remember-me" name="remember-me" type="checkbox" 
+                                               class="h-3 w-3 md:h-4 md:w-4 text-cyan-400 focus:ring-cyan-400 border-blue-700 rounded glass-effect">
+                                        <label for="remember-me" class="ml-2 block text-blue-300">Remember me</label>
+                                    </div>
+                                    <div>
+                                        <button type="button" id="forgotPasswordBtn" class="font-medium text-purple-400 hover:text-purple-300 transition">Forgot password?</button>
+                                    </div>
+                                </div>
+
+                                <div>
+                                    <button type="submit" id="loginBtn"
+                                            class="w-full cyber-gradient text-white py-2 md:py-3 px-4 rounded-xl text-base md:text-lg font-semibold hover:scale-105 transition focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-cyan-400 quantum-glow disabled:opacity-50 disabled:cursor-not-allowed">
+                                        <span id="loginBtnText" class="text-sm md:text-base">Sign In</span>
+                                        <div id="loginSpinner" class="loading-spinner hidden"></div>
+                                    </button>
+                                </div>
+                            </form>
+                        </div>
+
+                        <!-- Switch to Register -->
+                        <div class="mt-4 md:mt-6 text-center">
+                            <p class="text-blue-300 text-xs md:text-sm">
+                                Don't have an account?{' '}
+                                <button id="switchToRegisterFromLogin" class="font-medium text-purple-400 hover:text-purple-300 transition">
+                                    Create one now
+                                </button>
+                            </p>
+                        </div>
+
+                        <!-- Back Button -->
+                        <div class="mt-3 md:mt-4 text-center">
+                            <button id="backToLandingFromLogin" class="text-blue-400 hover:text-cyan-400 transition text-xs md:text-sm">
+                                <i class="fas fa-arrow-left mr-1 md:mr-2"></i> Back to Home
+                            </button>
+                        </div>
+                    </div>
+
+                    <!-- Register Section -->
+                    <div id="registerSection" class="section section-hidden">
+                        <div class="text-center mb-4 md:mb-6">
+                            <h2 class="text-2xl md:text-3xl font-bold text-white mb-1 md:mb-2 responsive-heading">Join kynecta</h2>
+                            <p class="text-blue-300 text-sm md:text-base responsive-text">
+                                Start your global adventure today
+                            </p>
+                        </div>
+
+                        <!-- Registration Form -->
+                        <form id="registration-form" class="space-y-4 md:space-y-6">
+                            <div>
+                                <label for="displayName" class="block text-xs md:text-sm font-medium text-cyan-400 mb-1 md:mb-2">
+                                    Display Name
+                                    <span class="text-red-400 ml-1">*</span>
+                                </label>
+                                <div class="relative">
+                                    <input type="text" id="displayName" name="displayName" required autocomplete="name"
+                                           class="glass-effect appearance-none block w-full px-3 md:px-4 py-2 md:py-3 border border-blue-700 rounded-xl placeholder-blue-400 focus:outline-none focus:ring-2 focus:ring-cyan-400 focus:border-cyan-400 text-white pl-10 md:pl-12 transition text-sm md:text-base"
+                                           placeholder="Enter your display name">
+                                    <div class="absolute left-3 md:left-4 top-1/2 transform -translate-y-1/2 text-blue-400">
+                                        <i class="fas fa-user text-sm md:text-base"></i>
+                                    </div>
+                                </div>
+                                <div id="displayNameError" class="text-red-400 text-xs mt-1 hidden"></div>
+                            </div>
+                            
+                            <div>
+                                <label for="registerEmail" class="block text-xs md:text-sm font-medium text-cyan-400 mb-1 md:mb-2">
+                                    Email Address
+                                    <span class="text-red-400 ml-1">*</span>
+                                </label>
+                                <div class="relative">
+                                    <input type="email" id="registerEmail" name="email" required autocomplete="email"
+                                           class="glass-effect appearance-none block w-full px-3 md:px-4 py-2 md:py-3 border border-blue-700 rounded-xl placeholder-blue-400 focus:outline-none focus:ring-2 focus:ring-cyan-400 focus:border-cyan-400 text-white pl-10 md:pl-12 transition text-sm md:text-base"
+                                           placeholder="Enter your email">
+                                    <div class="absolute left-3 md:left-4 top-1/2 transform -translate-y-1/2 text-blue-400">
+                                        <i class="fas fa-envelope text-sm md:text-base"></i>
+                                    </div>
+                                </div>
+                                <div id="registerEmailError" class="text-red-400 text-xs mt-1 hidden"></div>
+                            </div>
+                            
+                            <div>
+                                <label for="registerPassword" class="block text-xs md:text-sm font-medium text-blue-400 mb-1 md:mb-2">
+                                    Password (6+ characters)
+                                    <span class="text-red-400 ml-1">*</span>
+                                </label>
+                                <div class="relative">
+                                    <input type="password" id="registerPassword" name="password" required autocomplete="new-password"
+                                           class="glass-effect appearance-none block w-full px-3 md:px-4 py-2 md:py-3 border border-blue-700 rounded-xl placeholder-blue-400 focus:outline-none focus:ring-2 focus:ring-blue-400 focus:border-blue-400 text-white pl-10 md:pl-12 pr-10 md:pr-12 transition text-sm md:text-base"
+                                           placeholder="Enter your password">
+                                    <div class="absolute left-3 md:left-4 top-1/2 transform -translate-y-1/2 text-blue-400">
+                                        <i class="fas fa-lock text-sm md:text-base"></i>
+                                    </div>
+                                    <button type="button" id="toggleRegisterPassword" class="absolute right-3 md:right-4 top-1/2 transform -translate-y-1/2 text-blue-400 hover:text-cyan-400 transition">
+                                        <i class="fas fa-eye text-sm md:text-base"></i>
+                                    </button>
+                                </div>
+                                <div id="registerPasswordError" class="text-red-400 text-xs mt-1 hidden"></div>
+                            </div>
+                            
+                            <div>
+                                <label for="confirmPassword" class="block text-xs md:text-sm font-medium text-blue-400 mb-1 md:mb-2">
+                                    Confirm Password
+                                    <span class="text-red-400 ml-1">*</span>
+                                </label>
+                                <div class="relative">
+                                    <input type="password" id="confirmPassword" name="confirmPassword" required autocomplete="new-password"
+                                           class="glass-effect appearance-none block w-full px-3 md:px-4 py-2 md:py-3 border border-blue-700 rounded-xl placeholder-blue-400 focus:outline-none focus:ring-2 focus:ring-blue-400 focus:border-blue-400 text-white pl-10 md:pl-12 pr-10 md:pr-12 transition text-sm md:text-base"
+                                           placeholder="Confirm your password">
+                                    <div class="absolute left-3 md:left-4 top-1/2 transform -translate-y-1/2 text-blue-400">
+                                        <i class="fas fa-lock text-sm md:text-base"></i>
+                                    </div>
+                                    <button type="button" id="toggleConfirmPassword" class="absolute right-3 md:right-4 top-1/2 transform -translate-y-1/2 text-blue-400 hover:text-cyan-400 transition">
+                                        <i class="fas fa-eye text-sm md:text-base"></i>
+                                    </button>
+                                </div>
+                                <div id="confirmPasswordError" class="text-red-400 text-xs mt-1 hidden"></div>
+                            </div>
+
+                            <!-- Terms Agreement -->
+                            <div class="flex items-start space-x-2 md:space-x-3 text-xs md:text-sm">
+                                <input type="checkbox" id="termsAgreement" required
+                                       class="h-3 w-3 md:h-4 md:w-4 text-cyan-400 focus:ring-cyan-400 border-blue-700 rounded glass-effect mt-0.5">
+                                <label for="termsAgreement" class="text-blue-300">
+                                    I agree to the <a href="#" class="text-purple-400 hover:text-purple-300">Terms of Service</a> and <a href="#" class="text-purple-400 hover:text-purple-300">Privacy Policy</a>
+                                </label>
+                            </div>
+                            <div id="termsError" class="text-red-400 text-xs hidden">Please accept the terms and conditions</div>
+
+                            <button type="submit" id="registerBtn"
+                                    class="w-full cyber-gradient text-white py-2 md:py-3 px-4 rounded-xl text-base md:text-lg font-semibold hover:scale-105 transition focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-cyan-400 quantum-glow disabled:opacity-50 disabled:cursor-not-allowed">
+                                <span id="registerBtnText" class="text-sm md:text-base">Create Account</span>
+                                <div id="registerSpinner" class="loading-spinner hidden"></div>
+                            </button>
+                        </form>
+
+                        <!-- Switch to Login -->
+                        <div class="mt-4 md:mt-6 text-center">
+                            <p class="text-blue-300 text-xs md:text-sm">
+                                Already have an account?{' '}
+                                <button id="switchToLoginFromRegister" class="font-medium text-purple-400 hover:text-purple-300 transition">
+                                    Sign in here
+                                </button>
+                            </p>
+                        </div>
+
+                        <!-- Back Button -->
+                        <div class="mt-3 md:mt-4 text-center">
+                            <button id="backToLandingFromRegister" class="text-blue-400 hover:text-cyan-400 transition text-xs md:text-sm">
+                                <i class="fas fa-arrow-left mr-1 md:mr-2"></i> Back to Home
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Firebase Configuration and Initialization -->
+    <script>
+        // Firebase configuration
+        const firebaseConfig = {
+            apiKey: "AIzaSyDHHyGgsSV18BcXrGgzi4C8frzDAE1C1zo",
+            authDomain: "uniconnect-ee95c.firebaseapp.com",
+            projectId: "uniconnect-ee95c",
+            storageBucket: "uniconnect-ee95c.firebasestorage.app",
+            messagingSenderId: "1003264444309",
+            appId: "1:1003264444309:web:9f0307516e44d21e97d89c"
+        };
+
+        class FirebaseAuthService {
+            constructor() {
+                this.app = null;
+                this.auth = null;
+                this.db = null;
+                this.isInitialized = false;
+                this.init();
+            }
+
+            async init() {
+                try {
+                    console.log('🔄 Starting Firebase initialization...');
+                    this.updateConnectionStatus('connecting', 'Connecting to kynecta...');
+                    
+                    // Check if Firebase is available
+                    if (typeof firebase === 'undefined') {
+                        throw new Error('Firebase SDK not loaded');
+                    }
+                    
+                    console.log('🔥 Firebase SDK loaded, initializing app...');
+                    
+                    // Initialize Firebase
+                    this.app = firebase.initializeApp(firebaseConfig);
+                    this.auth = firebase.auth();
+                    this.db = firebase.firestore();
+                    
+                    // Set Firestore settings to avoid connection issues
+                    this.db.settings({
+                        cacheSizeBytes: firebase.firestore.CACHE_SIZE_UNLIMITED
+                    });
+                    
+                    console.log('📡 Testing Firebase connection...');
+                    
+                    // Simple connection test - try to get auth state
+                    await new Promise((resolve, reject) => {
+                        const unsubscribe = this.auth.onAuthStateChanged((user) => {
+                            unsubscribe();
+                            resolve(user);
+                        }, reject);
+                        
+                        // Timeout after 10 seconds
+                        setTimeout(() => reject(new Error('Firebase connection timeout')), 10000);
+                    });
+                    
+                    this.isInitialized = true;
+                    this.updateConnectionStatus('connected', 'KYNECTA');
+                    
+                    // Show security status with checkmark
+                    const securityStatus = document.getElementById('securityStatus');
+                    securityStatus.classList.remove('hidden');
+                    securityStatus.innerHTML = `
+                        <div class="flex items-center justify-between">
+                            <div class="flex items-center space-x-2 md:space-x-3">
+                                <i class="fas fa-check-circle text-green-400 text-base md:text-lg"></i>
+                                <div>
+                                    <span class="text-xs md:text-sm font-medium text-green-400">Secure Connection Established</span>
+                                    <p class="text-xs text-blue-300 mt-1">All data is encrypted and secure</p>
+                                </div>
+                            </div>
+                            <div class="flex space-x-1">
+                                <span class="security-badge text-xs">
+                                    <i class="fas fa-lock mr-1"></i> HTTPS
+                                </span>
+                                <span class="security-badge text-xs">
+                                    <i class="fas fa-shield-alt mr-1"></i> Encrypted
+                                </span>
+                            </div>
+                        </div>
+                    `;
+                    
+                    // Auto-hide security status after 2 seconds
+                    setTimeout(() => {
+                        securityStatus.classList.add('hidden');
+                    }, 2000);
+                    
+                    console.log('✅ Firebase initialized successfully!');
+                    
+                } catch (error) {
+                    console.error('❌ Firebase initialization failed:', error);
+                    this.updateConnectionStatus('disconnected', 'Connection Failed');
+                    
+                    // Show security status with cross
+                    const securityStatus = document.getElementById('securityStatus');
+                    securityStatus.classList.remove('hidden');
+                    securityStatus.innerHTML = `
+                        <div class="flex items-center justify-between">
+                            <div class="flex items-center space-x-2 md:space-x-3">
+                                <i class="fas fa-times-circle text-red-400 text-base md:text-lg"></i>
+                                <div>
+                                    <span class="text-xs md:text-sm font-medium text-red-400">Connection Failed</span>
+                                    <p class="text-xs text-blue-300 mt-1">Please check your internet connection</p>
+                                </div>
+                            </div>
+                            <div class="flex space-x-1">
+                                <span class="security-badge text-xs" style="background: rgba(239, 68, 68, 0.1); border-color: rgba(239, 68, 68, 0.3); color: #fca5a5;">
+                                    <i class="fas fa-unlock mr-1"></i> Offline
+                                </span>
+                            </div>
+                        </div>
+                    `;
+                    
+                    // Show error message
+                    if (window.kynectaApp) {
+                        window.kynectaApp.showMessage(' connection failed. Please check your connection.', 'error');
+                    }
+                }
+            }
+
+            async registerUser(email, password, displayName, userSelections = null) {
+                if (!this.isInitialized) {
+                    throw new Error('Firebase not initialized. Please try again.');
+                }
+
+                try {
+                    // Create user with email and password
+                    const userCredential = await firebase.auth().createUserWithEmailAndPassword(email, password);
+                    const user = userCredential.user;
+                    
+                    // Update user profile with display name
+                    await user.updateProfile({
+                        displayName: displayName
+                    });
+                    
+                    // Get user selections from localStorage if not provided
+                    const selections = userSelections || window.kynectaApp?.getUserSelections() || {
+                        moods: [],
+                        interests: []
+                    };
+                    
+                    // Create user document in Firestore - UPDATED with comprehensive fields
+                    const userDocRef = this.db.collection('users').doc(user.uid);
+                    await userDocRef.set({
+                        uid: user.uid,
+                        userId: user.uid,
+                        email: user.email,
+                        displayName: displayName,
+                        userName: displayName,
+                        photoURL: '',
+                        bio: 'New kynecta member!',
+                        createdAt: firebase.firestore.FieldValue.serverTimestamp(),
+                        lastLogin: firebase.firestore.FieldValue.serverTimestamp(),
+                        emailVerified: false,
+                        moods: selections.moods || [],
+                        interests: selections.interests || [],
+                        customColors: {
+                            primary: '#3B82F6',
+                            secondary: '#8B5CF6',
+                            theme: 'calm'
+                        },
+                        selectedMoods: selections.moods || [],
+                        selectedInterests: selections.interests || [],
+                        moodHistory: [{
+                            date: firebase.firestore.FieldValue.serverTimestamp(),
+                            moods: selections.moods || []
+                        }],
+                        interestHistory: [{
+                            date: firebase.firestore.FieldValue.serverTimestamp(),
+                            interests: selections.interests || []
+                        }]
+                    });
+                    
+                    // Store user info in localStorage
+                    localStorage.setItem('kynecta-user', JSON.stringify({
+                        uid: user.uid,
+                        email: user.email,
+                        displayName: displayName,
+                        isNewUser: true,
+                        moods: selections.moods,
+                        interests: selections.interests,
+                        customColors: {
+                            primary: '#3B82F6',
+                            secondary: '#8B5CF6',
+                            theme: 'calm'
+                        }
+                    }));
+                    
+                    // Store selections for other pages to use
+                    localStorage.setItem('kynecta-selections', JSON.stringify(selections));
+                    
+                    console.log('✅ User registered successfully:', user.email);
+                    return userCredential;
+                    
+                } catch (error) {
+                    console.error('❌ Registration failed:', error);
+                    
+                    // Handle specific error cases with detailed messages
+                    let errorMessage = 'Registration failed. Please try again.';
+                    
+                    switch (error.code) {
+                        case 'auth/email-already-in-use':
+                            errorMessage = 'This email is already registered. Please try logging in.';
+                            break;
+                        case 'auth/weak-password':
+                            errorMessage = 'Password is too weak. Please use a stronger password (at least 6 characters).';
+                            break;
+                        case 'auth/invalid-email':
+                            errorMessage = 'Invalid email address. Please check your email.';
+                            break;
+                        case 'auth/operation-not-allowed':
+                            errorMessage = 'Email/password accounts are not enabled. Please contact support.';
+                            break;
+                        case 'auth/network-request-failed':
+                            errorMessage = 'Network error. Please check your internet connection.';
+                            break;
+                        case 'permission-denied':
+                            errorMessage = 'Database permission denied. Please check security rules.';
+                            break;
+                        default:
+                            errorMessage = `Registration failed: ${error.message}`;
+                    }
+                    
+                    throw new Error(errorMessage);
+                }
+            }
+
+            async loginUser(email, password) {
+                if (!this.isInitialized) {
+                    throw new Error('Firebase not initialized. Please try again.');
+                }
+
+                try {
+                    // Sign in user
+                    const userCredential = await firebase.auth().signInWithEmailAndPassword(email, password);
+                    const user = userCredential.user;
+                    
+                    // Get user data from Firestore
+                    const userDocRef = this.db.collection('users').doc(user.uid);
+                    const userDoc = await userDocRef.get();
+                    const userData = userDoc.data();
+                    
+                    // Update last login timestamp
+                    await userDocRef.update({
+                        lastLogin: firebase.firestore.FieldValue.serverTimestamp()
+                    });
+                    
+                    const customColors = userData?.customColors || {
+                        primary: '#3B82F6',
+                        secondary: '#8B5CF6',
+                        theme: 'calm'
+                    };
+                    
+                    const selections = {
+                        moods: userData?.moods || [],
+                        interests: userData?.interests || []
+                    };
+                    
+                    // Store user info in localStorage
+                    localStorage.setItem('kynecta-user', JSON.stringify({
+                        uid: user.uid,
+                        email: user.email,
+                        displayName: user.displayName || user.email.split('@')[0],
+                        isNewUser: false,
+                        moods: selections.moods,
+                        interests: selections.interests,
+                        customColors: customColors
+                    }));
+                    
+                    // Store selections for other pages to use
+                    localStorage.setItem('kynecta-selections', JSON.stringify(selections));
+                    
+                    console.log('✅ User logged in successfully:', user.email);
+                    return userCredential;
+                    
+                } catch (error) {
+                    console.error('❌ Login failed:', error.code, error.message);
+                    
+                    // Simplified error message for security
+                    let errorMessage = 'Login failed. Please check your credentials and try again.';
+                    
+                    // For debugging, we can log the actual error but show generic message to user
+                    console.log('Actual Firebase error:', error.code, error.message);
+                    
+                    throw new Error(errorMessage);
+                }
+            }
+
+            async sendPasswordResetEmail(email) {
+                if (!this.isInitialized) {
+                    throw new Error('Firebase not initialized. Please try again.');
+                }
+
+                try {
+                    await this.auth.sendPasswordResetEmail(email);
+                    console.log('✅ Password reset email sent successfully');
+                    return true;
+                } catch (error) {
+                    console.error('❌ Password reset failed:', error);
+                    
+                    let errorMessage = 'Password reset failed. Please try again.';
+                    
+                    switch (error.code) {
+                        case 'auth/user-not-found':
+                            errorMessage = 'No account found with this email address.';
+                            break;
+                        case 'auth/invalid-email':
+                            errorMessage = 'Invalid email address. Please check your email.';
+                            break;
+                        case 'auth/too-many-requests':
+                            errorMessage = 'Too many attempts. Please try again later.';
+                            break;
+                        case 'auth/network-request-failed':
+                            errorMessage = 'Network error. Please check your internet connection.';
+                            break;
+                        default:
+                            errorMessage = `Password reset failed: ${error.message}`;
+                    }
+                    
+                    throw new Error(errorMessage);
+                }
+            }
+
+            updateConnectionStatus(status, message) {
+                const statusElement = document.getElementById('connectionStatus');
+                const textElement = document.getElementById('connectionText');
+                
+                if (statusElement && textElement) {
+                    statusElement.className = `connection-status ${status}`;
+                    
+                    // Update icon and text based on status
+                    if (status === 'connected') {
+                        statusElement.innerHTML = '<i class="fas fa-check-circle mr-2"></i><span id="connectionText">' + message + '</span>';
+                    } else if (status === 'connecting') {
+                        statusElement.innerHTML = '<i class="fas fa-circle-notch fa-spin mr-2"></i><span id="connectionText">' + message + '</span>';
+                    } else {
+                        statusElement.innerHTML = '<i class="fas fa-times-circle mr-2"></i><span id="connectionText">' + message + '</span>';
+                    }
+                }
+            }
+
+            // Test function for debugging
+            async testFirestoreWrite() {
+                try {
+                    const testRef = this.db.collection('test').doc('test');
+                    await testRef.set({ test: true, timestamp: new Date() });
+                    console.log('✅ Firestore write test passed');
+                    return true;
+                } catch (error) {
+                    console.error('❌ Firestore write test failed:', error);
+                    return false;
+                }
+            }
+        }
+
+        // Initialize Firebase Auth Service
+        window.firebaseAuth = new FirebaseAuthService();
+    </script>
+    
+    <!-- Application Script -->
+    <script>
+        /**
+         * kynecta - Main Application Script
+         * Handles section transitions, cookies, mood themes, and UI interactions
+         */
+
+        class kynectaApp {
+            constructor() {
+                this.currentSection = 'selection'; // Start with selection section
+                this.isTransitioning = false;
+                this.cookiesAccepted = false;
+                this.showingCookieBanner = false;
+                this.currentTheme = 'calm';
+                this.customColors = {
+                    primary: '#3B82F6',
+                    secondary: '#8B5CF6',
+                    theme: 'calm'
+                };
+                
+                // User selections storage
+                this.userSelections = {
+                    moods: [],
+                    interests: []
+                };
+                
+                // Forgot password modal state
+                this.forgotPasswordStep = 1;
+                this.forgotPasswordIdentifier = '';
+                this.forgotPasswordMethod = '';
+                
+                this.init();
+            }
+
+            init() {
+                // Initialize event listeners
+                this.setupEventListeners();
+                
+                // Load user preferences if any
+                this.loadUserPreferences();
+                
+                // Initialize mood and interest selection
+                this.initializeSelection();
+                
+                // Start animated counters
+                this.startCounterAnimations();
+                
+                // Initialize mood theme
+                this.loadThemePreference();
+                
+                // Initialize mood customizer
+                this.setupMoodCustomizer();
+                
+                // Initialize mobile mood selector
+                this.setupMobileMoodSelector();
+                
+                // Initialize security protection
+                this.setupSecurityProtection();
+                
+                // Check if user has already completed selection
+                this.checkSelectionCompletion();
+                
+                console.log('🚀 kynecta app initialized');
+            }
+
+            /**
+             * Check if user has already completed selection
+             */
+            checkSelectionCompletion() {
+                const selections = localStorage.getItem('kynecta-selections');
+                if (selections) {
+                    const parsed = JSON.parse(selections);
+                    // If user has made any selections, skip to landing page
+                    if (parsed.moods.length > 0 || parsed.interests.length > 0) {
+                        this.userSelections = parsed;
+                        this.showSection('landing');
+                    }
+                }
+            }
+
+            /**
+             * Initialize mood and interest selection system
+             */
+            initializeSelection() {
+                // Define available moods
+                this.availableMoods = [
+                    { id: 'calm', name: 'Calm', icon: 'fas fa-spa', color: 'from-blue-500 to-purple-600', description: 'Relaxed and peaceful' },
+                    { id: 'energetic', name: 'Energetic', icon: 'fas fa-bolt', color: 'from-red-500 to-orange-500', description: 'Full of energy and excitement' },
+                    { id: 'creative', name: 'Creative', icon: 'fas fa-paint-brush', color: 'from-purple-500 to-pink-600', description: 'Inspired and imaginative' },
+                    { id: 'chill', name: 'Chill', icon: 'fas fa-couch', color: 'from-green-500 to-blue-600', description: 'Easygoing and laid-back' },
+                    { id: 'romantic', name: 'Romantic', icon: 'fas fa-heart', color: 'from-pink-500 to-red-500', description: 'Affectionate and loving' },
+                    { id: 'adventurous', name: 'Adventurous', icon: 'fas fa-mountain', color: 'from-yellow-500 to-green-600', description: 'Excited for new experiences' },
+                    { id: 'focused', name: 'Focused', icon: 'fas fa-bullseye', color: 'from-indigo-500 to-blue-600', description: 'Concentrated and determined' },
+                    { id: 'playful', name: 'Playful', icon: 'fas fa-gamepad', color: 'from-yellow-400 to-orange-500', description: 'Fun-loving and cheerful' },
+                    { id: 'thoughtful', name: 'Thoughtful', icon: 'fas fa-brain', color: 'from-gray-600 to-blue-700', description: 'Reflective and considerate' },
+                    { id: 'social', name: 'Social', icon: 'fas fa-users', color: 'from-teal-500 to-green-600', description: 'Outgoing and friendly' }
+                ];
+
+                // Define available interests
+                this.availableInterests = [
+                    { id: 'gaming', name: 'Gaming', icon: 'fas fa-gamepad', color: 'from-purple-500 to-pink-600', description: 'Video games & eSports' },
+                    { id: 'music', name: 'Music', icon: 'fas fa-music', color: 'from-red-500 to-pink-500', description: 'All genres and instruments' },
+                    { id: 'sports', name: 'Sports', icon: 'fas fa-futbol', color: 'from-green-500 to-blue-600', description: 'Sports & fitness activities' },
+                    { id: 'art', name: 'Art', icon: 'fas fa-palette', color: 'from-yellow-500 to-orange-500', description: 'Visual arts & creativity' },
+                    { id: 'technology', name: 'Technology', icon: 'fas fa-laptop-code', color: 'from-blue-500 to-indigo-600', description: 'Tech, coding & innovation' },
+                    { id: 'travel', name: 'Travel', icon: 'fas fa-globe-americas', color: 'from-teal-500 to-green-600', description: 'Exploring new places' },
+                    { id: 'food', name: 'Food', icon: 'fas fa-utensils', color: 'from-orange-500 to-red-500', description: 'Cooking & culinary arts' },
+                    { id: 'fashion', name: 'Fashion', icon: 'fas fa-tshirt', color: 'from-pink-500 to-purple-600', description: 'Style & clothing trends' },
+                    { id: 'reading', name: 'Reading', icon: 'fas fa-book', color: 'from-brown-500 to-yellow-600', description: 'Books & literature' },
+                    { id: 'photography', name: 'Photography', icon: 'fas fa-camera', color: 'from-gray-600 to-blue-700', description: 'Photography & editing' },
+                    { id: 'business', name: 'Business', icon: 'fas fa-chart-line', color: 'from-green-600 to-teal-600', description: 'Entrepreneurship & finance' },
+                    { id: 'education', name: 'Education', icon: 'fas fa-graduation-cap', color: 'from-blue-600 to-indigo-700', description: 'Learning & courses' }
+                ];
+
+                // Populate mood selection grid
+                this.populateSelectionGrid('moodSelectionGrid', this.availableMoods, 'moods');
+                
+                // Populate interest selection grid
+                this.populateSelectionGrid('interestSelectionGrid', this.availableInterests, 'interests');
+                
+                // Load any existing selections
+                this.loadSelections();
+            }
+
+            /**
+             * Populate selection grid with cards
+             */
+            populateSelectionGrid(gridId, items, type) {
+                const grid = document.getElementById(gridId);
+                if (!grid) return;
+                
+                grid.innerHTML = items.map(item => `
+                    <div class="selection-card" data-id="${item.id}" data-type="${type}">
+                        <div class="selection-icon bg-gradient-to-br ${item.color} text-white">
+                            <i class="${item.icon}"></i>
+                        </div>
+                        <h3 class="text-white font-bold text-sm md:text-base mb-1">${item.name}</h3>
+                        <p class="text-gray-400 text-xs">${item.description}</p>
+                    </div>
+                `).join('');
+                
+                // Add click event listeners
+                grid.querySelectorAll('.selection-card').forEach(card => {
+                    card.addEventListener('click', () => {
+                        this.toggleSelection(card);
+                    });
+                });
+            }
+
+            /**
+             * Toggle selection of a mood or interest card
+             */
+            toggleSelection(card) {
+                const id = card.getAttribute('data-id');
+                const type = card.getAttribute('data-type');
+                const maxSelections = 2;
+                
+                // Check if already selected
+                const isSelected = card.classList.contains('selected');
+                const currentSelections = this.userSelections[type];
+                
+                if (isSelected) {
+                    // Remove from selection
+                    card.classList.remove('selected');
+                    this.userSelections[type] = currentSelections.filter(item => item !== id);
+                } else {
+                    // Check if max reached
+                    if (currentSelections.length >= maxSelections) {
+                        this.showToast(`Maximum ${maxSelections} ${type} allowed`, 'warning');
+                        return;
+                    }
+                    
+                    // Add to selection
+                    card.classList.add('selected');
+                    this.userSelections[type].push(id);
+                }
+                
+                // Update counters and UI
+                this.updateSelectionUI();
+                
+                // Save selections
+                this.saveSelections();
+            }
+
+            /**
+             * Update selection UI (counters, buttons, progress)
+             */
+            updateSelectionUI() {
+                // Update counter display
+                const moodCount = this.userSelections.moods.length;
+                const interestCount = this.userSelections.interests.length;
+                
+                // Update counter text
+                document.getElementById('selectedCount').textContent = moodCount;
+                document.getElementById('selectedInterestsCount').textContent = interestCount;
+                
+                // Update progress bars
+                document.getElementById('moodProgressBar').style.width = `${(moodCount / 2) * 100}%`;
+                document.getElementById('interestProgressBar').style.width = `${(interestCount / 2) * 100}%`;
+                
+                // Update button states
+                document.getElementById('nextToInterestsBtn').disabled = moodCount === 0;
+                document.getElementById('finishSelectionBtn').disabled = interestCount === 0;
+            }
+
+            /**
+             * Save selections to localStorage
+             */
+            saveSelections() {
+                localStorage.setItem('kynecta-selections', JSON.stringify(this.userSelections));
+            }
+
+            /**
+             * Load selections from localStorage
+             */
+            loadSelections() {
+                const savedSelections = localStorage.getItem('kynecta-selections');
+                if (savedSelections) {
+                    this.userSelections = JSON.parse(savedSelections);
+                    
+                    // Restore visual selection state
+                    this.restoreSelections();
+                    this.updateSelectionUI();
+                }
+            }
+
+            /**
+             * Restore visual selection state
+             */
+            restoreSelections() {
+                // Restore mood selections
+                this.userSelections.moods.forEach(moodId => {
+                    const card = document.querySelector(`.selection-card[data-id="${moodId}"][data-type="moods"]`);
+                    if (card) card.classList.add('selected');
+                });
+                
+                // Restore interest selections
+                this.userSelections.interests.forEach(interestId => {
+                    const card = document.querySelector(`.selection-card[data-id="${interestId}"][data-type="interests"]`);
+                    if (card) card.classList.add('selected');
+                });
+            }
+
+            /**
+             * Get user selections for other pages
+             */
+            getUserSelections() {
+                return this.userSelections;
+            }
+
+            /**
+             * Show mood or interest selection step
+             */
+            showSelectionStep(step) {
+                const moodStep = document.getElementById('moodSelectionStep');
+                const interestStep = document.getElementById('interestSelectionStep');
+                
+                if (step === 'moods') {
+                    moodStep.classList.remove('hidden');
+                    interestStep.classList.add('hidden');
+                } else if (step === 'interests') {
+                    moodStep.classList.add('hidden');
+                    interestStep.classList.remove('hidden');
+                }
+            }
+
+            /**
+             * Finish selection and show main app
+             */
+            finishSelection() {
+                // Save selections
+                this.saveSelections();
+                
+                // Show success message
+                this.showToast('Selections saved! Your kynecta experience will be personalized based on your choices.', 'success');
+                
+                // Transition to landing page
+                setTimeout(() => {
+                    this.showSection('landing');
+                }, 1000);
+            }
+
+            /**
+             * Skip mood selection
+             */
+            skipMoodSelection() {
+                this.showSelectionStep('interests');
+                this.showToast('You can always update your moods later in settings', 'info');
+            }
+
+            /**
+             * Skip interest selection
+             */
+            skipInterestSelection() {
+                // Save empty selections
+                this.saveSelections();
+                
+                // Show info message
+                this.showToast('You can add interests later in your profile settings', 'info');
+                
+                // Transition to landing page
+                setTimeout(() => {
+                    this.showSection('landing');
+                }, 500);
+            }
+
+            /**
+             * Sets up security protection to prevent copying and screenshots
+             */
+            setupSecurityProtection() {
+                // Disable right-click context menu
+                document.addEventListener('contextmenu', (e) => {
+                    e.preventDefault();
+                    this.showToast('Right-click is disabled for security', 'warning');
+                    return false;
+                });
+                
+                // Disable text selection
+                document.addEventListener('selectstart', (e) => {
+                    e.preventDefault();
+                    return false;
+                });
+                
+                // Disable drag and drop
+                document.addEventListener('dragstart', (e) => {
+                    e.preventDefault();
+                    return false;
+                });
+                
+                // Disable copy
+                document.addEventListener('copy', (e) => {
+                    e.preventDefault();
+                    this.showToast('Copying is disabled for security', 'warning');
+                    return false;
+                });
+                
+                // Disable cut
+                document.addEventListener('cut', (e) => {
+                    e.preventDefault();
+                    return false;
+                });
+                
+                // Disable print screen and other screenshot keys
+                document.addEventListener('keydown', (e) => {
+                    // Disable Print Screen
+                    if (e.key === 'PrintScreen') {
+                        e.preventDefault();
+                        this.showToast('Screenshots are disabled for security', 'warning');
+                        return false;
+                    }
+                    
+                    // Disable Alt+Print Screen
+                    if (e.altKey && e.key === 'PrintScreen') {
+                        e.preventDefault();
+                        this.showToast('Screenshots are disabled for security', 'warning');
+                        return false;
+                    }
+                    
+                    // Disable Windows+Print Screen
+                    if (e.metaKey && e.key === 'PrintScreen') {
+                        e.preventDefault();
+                        this.showToast('Screenshots are disabled for security', 'warning');
+                        return false;
+                    }
+                    
+                    // Disable F12 (Developer Tools)
+                    if (e.key === 'F12') {
+                        e.preventDefault();
+                        this.showToast('Developer tools are disabled', 'warning');
+                        return false;
+                    }
+                    
+                    // Disable Ctrl+Shift+I (Developer Tools)
+                    if (e.ctrlKey && e.shiftKey && e.key === 'I') {
+                        e.preventDefault();
+                        this.showToast('Developer tools are disabled', 'warning');
+                        return false;
+                    }
+                    
+                    // Disable Ctrl+Shift+C (Developer Tools - Element Inspector)
+                    if (e.ctrlKey && e.shiftKey && e.key === 'C') {
+                        e.preventDefault();
+                        this.showToast('Element inspection is disabled', 'warning');
+                        return false;
+                    }
+                    
+                    // Disable Ctrl+U (View Source)
+                    if (e.ctrlKey && e.key === 'u') {
+                        e.preventDefault();
+                        this.showToast('View source is disabled', 'warning');
+                        return false;
+                    }
+                });
+                
+                console.log('🔒 Security protection enabled');
+            }
+
+            /**
+             * Sets up all event listeners for the application
+             */
+            setupEventListeners() {
+                // Selection navigation buttons
+                document.getElementById('nextToInterestsBtn').addEventListener('click', () => {
+                    this.showSelectionStep('interests');
+                });
+                
+                document.getElementById('backToMoodsBtn').addEventListener('click', () => {
+                    this.showSelectionStep('moods');
+                });
+                
+                document.getElementById('finishSelectionBtn').addEventListener('click', () => {
+                    this.finishSelection();
+                });
+                
+                // Skip buttons
+                document.getElementById('skipMoodSelection').addEventListener('click', () => {
+                    this.skipMoodSelection();
+                });
+                
+                document.getElementById('skipInterestSelection').addEventListener('click', () => {
+                    this.skipInterestSelection();
+                });
+                
+                // Section navigation buttons
+                document.getElementById('showLoginBtn').addEventListener('click', () => this.showSection('login'));
+                document.getElementById('showRegisterBtn').addEventListener('click', () => {
+                    // Show cookie banner only when registering (new users)
+                    this.showCookieBannerForNewUsers();
+                    this.showSection('register');
+                });
+                
+                // Back buttons
+                document.getElementById('backToLandingFromLogin').addEventListener('click', () => this.showSection('landing'));
+                document.getElementById('backToLandingFromRegister').addEventListener('click', () => {
+                    // Hide cookie banner when going back from register
+                    this.hideCookieBanner();
+                    this.showSection('landing');
+                });
+                
+                // Switch between login and register
+                document.getElementById('switchToRegisterFromLogin').addEventListener('click', () => {
+                    this.showCookieBannerForNewUsers();
+                    this.showSection('register');
+                });
+                
+                document.getElementById('switchToLoginFromRegister').addEventListener('click', () => {
+                    this.hideCookieBanner();
+                    this.showSection('login');
+                });
+                
+                // Form submissions
+                document.getElementById('loginForm').addEventListener('submit', (e) => this.handleLogin(e));
+                document.getElementById('registration-form').addEventListener('submit', (e) => this.handleRegistration(e));
+                
+                // Cookie consent
+                document.getElementById('cookieAccept').addEventListener('click', () => this.acceptCookies());
+                document.getElementById('cookieReject').addEventListener('click', () => this.rejectCookies());
+                
+                // Password visibility toggles
+                this.setupPasswordToggles();
+                
+                // Mood theme selector
+                this.setupMoodSelector();
+                
+                // Forgot password functionality
+                this.setupForgotPassword();
+            }
+
+            /**
+             * Sets up mobile mood selector functionality
+             */
+            setupMobileMoodSelector() {
+                const mobileMoodBtn = document.querySelector('.mobile-mood-btn');
+                const mobileMoodOptions = document.querySelector('.mobile-mood-options');
+                const mobileMoodOptionsList = document.querySelectorAll('.mobile-mood-option');
+
+                // Toggle mobile mood options visibility
+                if (mobileMoodBtn) {
+                    mobileMoodBtn.addEventListener('click', (e) => {
+                        e.stopPropagation();
+                        mobileMoodOptions.classList.toggle('show');
+                    });
+                }
+
+                // Close mobile mood options when clicking outside
+                document.addEventListener('click', () => {
+                    if (mobileMoodOptions) {
+                        mobileMoodOptions.classList.remove('show');
+                    }
+                });
+
+                // Prevent mobile mood options from closing when clicking inside
+                if (mobileMoodOptions) {
+                    mobileMoodOptions.addEventListener('click', (e) => {
+                        e.stopPropagation();
+                    });
+                }
+
+                // Handle mobile mood selection
+                if (mobileMoodOptionsList) {
+                    mobileMoodOptionsList.forEach(option => {
+                        option.addEventListener('click', () => {
+                            const theme = option.getAttribute('data-theme');
+                            this.changeTheme(theme);
+                            if (mobileMoodOptions) {
+                                mobileMoodOptions.classList.remove('show');
+                            }
+                        });
+                    });
+                }
+            }
+
+            /**
+             * Sets up mood customizer functionality
+             */
+            setupMoodCustomizer() {
+                // Mood customizer button
+                const moodCustomizerBtn = document.getElementById('moodCustomizerBtn');
+                if (moodCustomizerBtn) {
+                    moodCustomizerBtn.addEventListener('click', () => {
+                        this.showMoodCustomizerModal();
+                    });
+                }
+                
+                // Close mood customizer modal
+                const closeMoodCustomizer = document.getElementById('closeMoodCustomizer');
+                if (closeMoodCustomizer) {
+                    closeMoodCustomizer.addEventListener('click', () => {
+                        this.hideMoodCustomizerModal();
+                    });
+                }
+                
+                // Color palette selection
+                const colorOptions = document.querySelectorAll('.color-option');
+                colorOptions.forEach(option => {
+                    option.addEventListener('click', () => {
+                        // Remove active class from all options
+                        colorOptions.forEach(opt => opt.classList.remove('active'));
+                        // Add active class to clicked option
+                        option.classList.add('active');
+                        
+                        // Update custom colors
+                        this.customColors.primary = option.getAttribute('data-primary');
+                        this.customColors.secondary = option.getAttribute('data-secondary');
+                        this.customColors.theme = option.getAttribute('data-theme');
+                        
+                        // Update preview
+                        this.updateMoodPreview();
+                        
+                        // Update custom color inputs
+                        document.getElementById('primaryColorPicker').value = this.customColors.primary;
+                        document.getElementById('secondaryColorPicker').value = this.customColors.secondary;
+                        document.getElementById('customColorPreview').style.background = 
+                            `linear-gradient(135deg, ${this.customColors.primary}, ${this.customColors.secondary})`;
+                        
+                        // Apply the colors immediately
+                        this.applyCustomColors();
+                    });
+                });
+                
+                // Custom color inputs
+                const primaryColorPicker = document.getElementById('primaryColorPicker');
+                const secondaryColorPicker = document.getElementById('secondaryColorPicker');
+                if (primaryColorPicker) {
+                    primaryColorPicker.addEventListener('input', (e) => {
+                        this.customColors.primary = e.target.value;
+                        this.updateMoodPreview();
+                        document.getElementById('customColorPreview').style.background = 
+                            `linear-gradient(135deg, ${this.customColors.primary}, ${this.customColors.secondary})`;
+                    });
+                }
+                
+                if (secondaryColorPicker) {
+                    secondaryColorPicker.addEventListener('input', (e) => {
+                        this.customColors.secondary = e.target.value;
+                        this.updateMoodPreview();
+                        document.getElementById('customColorPreview').style.background = 
+                            `linear-gradient(135deg, ${this.customColors.primary}, ${this.customColors.secondary})`;
+                    });
+                }
+                
+                // Apply custom colors button
+                const applyCustomColors = document.getElementById('applyCustomColors');
+                if (applyCustomColors) {
+                    applyCustomColors.addEventListener('click', () => {
+                        this.applyCustomColors();
+                    });
+                }
+                
+                // Color intensity slider
+                const colorIntensity = document.getElementById('colorIntensity');
+                if (colorIntensity) {
+                    colorIntensity.addEventListener('input', (e) => {
+                        this.updateColorIntensity(e.target.value);
+                    });
+                }
+                
+                // Reset mood colors button
+                const resetMoodColors = document.getElementById('resetMoodColors');
+                if (resetMoodColors) {
+                    resetMoodColors.addEventListener('click', () => {
+                        this.resetMoodColors();
+                    });
+                }
+                
+                // Save mood colors button
+                const saveMoodColors = document.getElementById('saveMoodColors');
+                if (saveMoodColors) {
+                    saveMoodColors.addEventListener('click', () => {
+                        this.saveMoodColors();
+                    });
+                }
+                
+                // Close modal when clicking outside
+                const moodCustomizerModal = document.getElementById('moodCustomizerModal');
+                if (moodCustomizerModal) {
+                    moodCustomizerModal.addEventListener('click', (e) => {
+                        if (e.target.id === 'moodCustomizerModal') {
+                            this.hideMoodCustomizerModal();
+                        }
+                    });
+                }
+            }
+
+            /**
+             * Updates the mood preview based on selected colors
+             */
+            updateMoodPreview() {
+                const preview = document.getElementById('moodPreview');
+                if (preview) {
+                    preview.style.background = `linear-gradient(135deg, ${this.customColors.primary}, ${this.customColors.secondary})`;
+                }
+            }
+
+            /**
+             * Updates color intensity based on slider value
+             */
+            updateColorIntensity(intensity) {
+                // This would adjust the saturation/brightness of colors based on intensity
+                // For now, we'll just update the preview opacity to simulate intensity
+                const preview = document.getElementById('moodPreview');
+                if (preview) {
+                    preview.style.opacity = 0.5 + (intensity / 100) * 0.5;
+                }
+            }
+
+            /**
+             * Applies custom colors to the interface
+             */
+            applyCustomColors() {
+                // Update CSS variables with custom colors
+                document.documentElement.style.setProperty('--primary-color', this.customColors.primary);
+                document.documentElement.style.setProperty('--secondary-color', this.customColors.secondary);
+                
+                // Update gradient elements
+                const gradientElements = document.querySelectorAll('.cyber-gradient, .stats-counter, .gradient-text');
+                gradientElements.forEach(el => {
+                    if (el.classList.contains('cyber-gradient')) {
+                        el.style.background = `linear-gradient(135deg, ${this.customColors.primary}, ${this.customColors.secondary})`;
+                    } else if (el.classList.contains('stats-counter')) {
+                        el.style.background = `linear-gradient(135deg, ${this.customColors.primary}, ${this.customColors.secondary})`;
+                        el.style.webkitBackgroundClip = 'text';
+                        el.style.webkitTextFillColor = 'transparent';
+                        el.style.backgroundClip = 'text';
+                    } else if (el.classList.contains('gradient-text')) {
+                        el.style.background = `linear-gradient(135deg, ${this.customColors.primary}, ${this.customColors.secondary}, #f472b6)`;
+                        el.style.webkitBackgroundClip = 'text';
+                        el.style.webkitTextFillColor = 'transparent';
+                        el.style.backgroundClip = 'text';
+                    }
+                });
+                
+                // Update mood preview
+                this.updateMoodPreview();
+                
+                this.showToast('Custom colors applied!', 'success');
+            }
+
+            /**
+             * Resets mood colors to default
+             */
+            resetMoodColors() {
+                this.customColors = {
+                    primary: '#3B82F6',
+                    secondary: '#8B5CF6',
+                    theme: 'calm'
+                };
+                
+                // Reset color inputs
+                document.getElementById('primaryColorPicker').value = this.customColors.primary;
+                document.getElementById('secondaryColorPicker').value = this.customColors.secondary;
+                document.getElementById('customColorPreview').style.background = 
+                    `linear-gradient(135deg, ${this.customColors.primary}, ${this.customColors.secondary})`;
+                
+                // Reset active color option
+                const colorOptions = document.querySelectorAll('.color-option');
+                colorOptions.forEach(option => {
+                    option.classList.remove('active');
+                    if (option.getAttribute('data-theme') === 'calm') {
+                        option.classList.add('active');
+                    }
+                });
+                
+                // Reset intensity slider
+                document.getElementById('colorIntensity').value = 50;
+                
+                // Apply default colors
+                this.applyCustomColors();
+                
+                this.showToast('Colors reset to default', 'info');
+            }
+
+            /**
+             * Saves mood colors to user profile
+             */
+            async saveMoodColors() {
+                // In a real app, this would save to the user's profile in Firebase
+                // For now, we'll just save to localStorage
+                localStorage.setItem('kynecta-custom-colors', JSON.stringify(this.customColors));
+                
+                // If user is logged in, we would update their Firestore document
+                const user = JSON.parse(localStorage.getItem('kynecta-user'));
+                if (user && window.firebaseAuth && window.firebaseAuth.isInitialized) {
+                    try {
+                        const userDocRef = window.firebaseAuth.db.collection('users').doc(user.uid);
+                        await userDocRef.update({
+                            customColors: this.customColors
+                        });
+                        
+                        // Update local user data
+                        user.customColors = this.customColors;
+                        localStorage.setItem('kynecta-user', JSON.stringify(user));
+                    } catch (error) {
+                        console.error('Error saving custom colors:', error);
+                    }
+                }
+                
+                this.showToast('Mood colors saved to your profile!', 'success');
+                this.hideMoodCustomizerModal();
+            }
+
+            /**
+             * Shows the mood customizer modal
+             */
+            showMoodCustomizerModal() {
+                const modal = document.getElementById('moodCustomizerModal');
+                modal.classList.add('show');
+                
+                // Load current custom colors
+                const savedColors = localStorage.getItem('kynecta-custom-colors');
+                if (savedColors) {
+                    this.customColors = JSON.parse(savedColors);
+                    
+                    // Update color inputs
+                    document.getElementById('primaryColorPicker').value = this.customColors.primary;
+                    document.getElementById('secondaryColorPicker').value = this.customColors.secondary;
+                    document.getElementById('customColorPreview').style.background = 
+                        `linear-gradient(135deg, ${this.customColors.primary}, ${this.customColors.secondary})`;
+                    
+                    // Update active color option
+                    const colorOptions = document.querySelectorAll('.color-option');
+                    colorOptions.forEach(option => {
+                        option.classList.remove('active');
+                        if (option.getAttribute('data-theme') === this.customColors.theme) {
+                            option.classList.add('active');
+                        }
+                    });
+                }
+                
+                // Update preview
+                this.updateMoodPreview();
+            }
+
+            /**
+             * Hides the mood customizer modal
+             */
+            hideMoodCustomizerModal() {
+                const modal = document.getElementById('moodCustomizerModal');
+                modal.classList.remove('show');
+            }
+
+            /**
+             * Sets up password visibility toggle buttons
+             */
+            setupPasswordToggles() {
+                // Login password toggle
+                const toggleLoginBtn = document.getElementById('toggleLoginPassword');
+                if (toggleLoginBtn) {
+                    toggleLoginBtn.addEventListener('click', () => {
+                        this.togglePasswordVisibility('loginPassword', 'toggleLoginPassword');
+                    });
+                }
+                
+                // Register password toggle
+                const toggleRegisterBtn = document.getElementById('toggleRegisterPassword');
+                if (toggleRegisterBtn) {
+                    toggleRegisterBtn.addEventListener('click', () => {
+                        this.togglePasswordVisibility('registerPassword', 'toggleRegisterPassword');
+                    });
+                }
+                
+                // Confirm password toggle
+                const toggleConfirmBtn = document.getElementById('toggleConfirmPassword');
+                if (toggleConfirmBtn) {
+                    toggleConfirmBtn.addEventListener('click', () => {
+                        this.togglePasswordVisibility('confirmPassword', 'toggleConfirmPassword');
+                    });
+                }
+            }
+
+            /**
+             * Sets up forgot password functionality
+             */
+            setupForgotPassword() {
+                // Forgot password button in login form
+                const forgotPasswordBtn = document.getElementById('forgotPasswordBtn');
+                if (forgotPasswordBtn) {
+                    forgotPasswordBtn.addEventListener('click', () => {
+                        this.showForgotPasswordModal();
+                    });
+                }
+                
+                // Close forgot password modal
+                const closeForgotPassword = document.getElementById('closeForgotPassword');
+                if (closeForgotPassword) {
+                    closeForgotPassword.addEventListener('click', () => {
+                        this.hideForgotPasswordModal();
+                    });
+                }
+                
+                // Forgot password form submissions
+                const forgotEmailForm = document.getElementById('forgotEmailForm');
+                if (forgotEmailForm) {
+                    forgotEmailForm.addEventListener('submit', (e) => this.handleForgotPasswordStep1(e));
+                }
+                
+                const forgotSecretForm = document.getElementById('forgotSecretForm');
+                if (forgotSecretForm) {
+                    forgotSecretForm.addEventListener('submit', (e) => this.handleForgotPasswordStep3(e));
+                }
+                
+                // Close modal when clicking outside
+                const forgotPasswordModal = document.getElementById('forgotPasswordModal');
+                if (forgotPasswordModal) {
+                    forgotPasswordModal.addEventListener('click', (e) => {
+                        if (e.target.id === 'forgotPasswordModal') {
+                            this.hideForgotPasswordModal();
+                        }
+                    });
+                }
+            }
+
+            /**
+             * Toggles password field visibility
+             */
+            togglePasswordVisibility(passwordFieldId, toggleButtonId) {
+                const passwordInput = document.getElementById(passwordFieldId);
+                const toggleButton = document.getElementById(toggleButtonId);
+                
+                if (!passwordInput || !toggleButton) {
+                    console.error('Password field or toggle button not found:', passwordFieldId, toggleButtonId);
+                    return;
+                }
+                
+                const toggleIcon = toggleButton.querySelector('i');
+                
+                if (passwordInput.type === 'password') {
+                    passwordInput.type = 'text';
+                    toggleIcon.className = 'fas fa-eye-slash';
+                } else {
+                    passwordInput.type = 'password';
+                    toggleIcon.className = 'fas fa-eye';
+                }
+            }
+
+            /**
+             * Sets up mood theme selector
+             */
+            setupMoodSelector() {
+                const moodBtn = document.querySelector('.mood-btn');
+                const moodOptions = document.querySelector('.mood-options');
+                const moodOptionsList = document.querySelectorAll('.mood-option');
+
+                // Toggle mood options visibility
+                if (moodBtn) {
+                    moodBtn.addEventListener('click', (e) => {
+                        e.stopPropagation();
+                        moodOptions.classList.toggle('show');
+                    });
+                }
+
+                // Close mood options when clicking outside
+                document.addEventListener('click', () => {
+                    if (moodOptions) {
+                        moodOptions.classList.remove('show');
+                    }
+                });
+
+                // Prevent mood options from closing when clicking inside
+                if (moodOptions) {
+                    moodOptions.addEventListener('click', (e) => {
+                        e.stopPropagation();
+                    });
+                }
+
+                // Handle mood selection
+                if (moodOptionsList) {
+                    moodOptionsList.forEach(option => {
+                        option.addEventListener('click', () => {
+                            const theme = option.getAttribute('data-theme');
+                            this.changeTheme(theme);
+                            if (moodOptions) {
+                                moodOptions.classList.remove('show');
+                            }
+                        });
+                    });
+                }
+            }
+
+            /**
+             * Changes the theme based on mood selection
+             */
+            changeTheme(theme) {
+                const body = document.body;
+                
+                // Remove all theme classes
+                body.classList.remove('theme-calm', 'theme-energetic', 'theme-creative', 'theme-chill', 'theme-romantic', 'theme-default');
+                
+                // Add new theme class
+                body.classList.add(`theme-${theme}`);
+                
+                // Update current theme
+                this.currentTheme = theme;
+                
+                // Save theme preference
+                localStorage.setItem('kynecta-theme', theme);
+                
+                // Show theme change message
+                const themeNames = {
+                    'calm': 'Calm Blue',
+                    'energetic': 'Energetic Orange',
+                    'creative': 'Creative Purple',
+                    'chill': 'Chill Green',
+                    'romantic': 'Romantic Pink',
+                    'default': 'Default Dark'
+                };
+                
+                this.showToast(`Theme changed to ${themeNames[theme]}`, 'success');
+                console.log(`🎨 Theme changed to: ${theme}`);
+            }
+
+            /**
+             * Loads theme preference from localStorage
+             */
+            loadThemePreference() {
+                const savedTheme = localStorage.getItem('kynecta-theme');
+                if (savedTheme) {
+                    this.changeTheme(savedTheme);
+                }
+            }
+
+            /**
+             * Shows cookie banner only for new users (register flow)
+             */
+            showCookieBannerForNewUsers() {
+                const cookieDecision = localStorage.getItem('kynecta-cookies');
+                if (!cookieDecision && !this.showingCookieBanner) {
+                    this.showingCookieBanner = true;
+                    const banner = document.getElementById('cookieBanner');
+                    setTimeout(() => banner.classList.add('show'), 300);
+                }
+            }
+
+            /**
+             * Handles cookie acceptance
+             */
+            acceptCookies() {
+                localStorage.setItem('kynecta-cookies', 'accepted');
+                this.cookiesAccepted = true;
+                this.showingCookieBanner = false;
+                this.hideCookieBanner();
+                this.showToast('Cookies accepted. Thank you!', 'success');
+                
+                // Enable analytics and tracking here
+                console.log('🔍 Analytics enabled');
+            }
+
+            /**
+             * Handles cookie rejection
+             */
+            rejectCookies() {
+                localStorage.setItem('kynecta-cookies', 'rejected');
+                this.cookiesAccepted = false;
+                this.showingCookieBanner = false;
+                this.hideCookieBanner();
+                this.showToast('Non-essential cookies rejected.', 'info');
+                
+                // Disable analytics and tracking here
+                console.log('🔍 Analytics disabled');
+            }
+
+            /**
+             * Hides the cookie banner
+             */
+            hideCookieBanner() {
+                const banner = document.getElementById('cookieBanner');
+                if (banner) {
+                    banner.classList.remove('show');
+                }
+                this.showingCookieBanner = false;
+            }
+
+            /**
+             * Shows the forgot password modal
+             */
+            showForgotPasswordModal() {
+                const modal = document.getElementById('forgotPasswordModal');
+                modal.classList.add('show');
+                
+                // Reset to step 1
+                this.setForgotPasswordStep(1);
+                
+                // Pre-fill with email from login form if available
+                const loginEmail = document.getElementById('loginEmail');
+                if (loginEmail && loginEmail.value) {
+                    document.getElementById('forgotIdentifier').value = loginEmail.value;
+                }
+            }
+
+            /**
+             * Hides the forgot password modal
+             */
+            hideForgotPasswordModal() {
+                const modal = document.getElementById('forgotPasswordModal');
+                modal.classList.remove('show');
+                
+                // Reset state
+                this.forgotPasswordStep = 1;
+                this.forgotPasswordIdentifier = '';
+                this.forgotPasswordMethod = '';
+            }
+
+            /**
+             * Sets the current step in the forgot password flow
+             */
+            setForgotPasswordStep(step) {
+                this.forgotPasswordStep = step;
+                
+                // Hide all steps
+                document.getElementById('forgot-step-1-email').classList.add('hidden');
+                document.getElementById('forgot-step-2-methods').classList.add('hidden');
+                document.getElementById('forgot-step-3-secret-reset').classList.add('hidden');
+                
+                // Show current step
+                if (step === 1) {
+                    document.getElementById('forgot-step-1-email').classList.remove('hidden');
+                } else if (step === 2) {
+                    document.getElementById('forgot-step-2-methods').classList.remove('hidden');
+                } else if (step === 3) {
+                    document.getElementById('forgot-step-3-secret-reset').classList.remove('hidden');
+                }
+            }
+
+            /**
+             * Handles step 1 of forgot password (email input)
+             */
+            async handleForgotPasswordStep1(e) {
+                e.preventDefault();
+                
+                const identifier = document.getElementById('forgotIdentifier').value.trim();
+                
+                if (!identifier) {
+                    this.showToast('Please enter your email address.', 'error');
+                    return;
+                }
+                
+                if (!this.validateEmail(identifier)) {
+                    this.showToast('Please enter a valid email address.', 'error');
+                    return;
+                }
+                
+                this.showLoading('Locating account...');
+                
+                try {
+                    // Simulate account lookup
+                    await new Promise(resolve => setTimeout(resolve, 1500));
+                    
+                    this.forgotPasswordIdentifier = identifier;
+                    this.setForgotPasswordStep(2);
+                    this.hideLoading();
+                    
+                } catch (error) {
+                    this.hideLoading();
+                    this.showToast('Error locating account. Please try again.', 'error');
+                }
+            }
+
+            /**
+             * Handles step 3 of forgot password (secret question)
+             */
+            async handleForgotPasswordStep3(e) {
+                e.preventDefault();
+                
+                const answer = document.getElementById('forgotSecurityAnswer').value.trim();
+                
+                if (!answer) {
+                    this.showToast('Please provide an answer.', 'error');
+                    return;
+                }
+                
+                this.showLoading('Verifying your answer...');
+                
+                try {
+                    // Simulate verification
+                    await new Promise(resolve => setTimeout(resolve, 2000));
+                    
+                    // Mock correct answer
+                    if (answer.toLowerCase() === 'sparky') {
+                        this.hideLoading();
+                        this.showToast('Security question verified! You can now set a new password (Simulated).', 'success');
+                        this.hideForgotPasswordModal();
+                    } else {
+                        this.hideLoading();
+                        this.showToast('Incorrect answer. Please try again.', 'error');
+                    }
+                    
+                } catch (error) {
+                    this.hideLoading();
+                    this.showToast('Error verifying answer. Please try again.', 'error');
+                }
+            }
+
+            /**
+             * Starts animated counters for statistics
+             */
+            startCounterAnimations() {
+                const counters = [
+                    { id: 'onlineCount', target: 500000, suffix: '+' },
+                    { id: 'countryCount', target: 190, suffix: '+' },
+                    { id: 'languageCount', target: 50, suffix: '+' },
+                    { id: 'communityCount', target: 10000, suffix: '+' }
+                ];
+
+                counters.forEach(counter => {
+                    this.animateCounter(counter.id, counter.target, counter.suffix);
+                });
+            }
+
+            /**
+             * Animates a counter from 0 to target value
+             */
+            animateCounter(elementId, target, suffix = '') {
+                const element = document.getElementById(elementId);
+                if (!element) return;
+
+                let current = 0;
+                const increment = target / 50;
+                const timer = setInterval(() => {
+                    current += increment;
+                    if (current >= target) {
+                        element.textContent = target.toLocaleString() + suffix;
+                        clearInterval(timer);
+                    } else {
+                        element.textContent = Math.floor(current).toLocaleString() + suffix;
+                    }
+                }, 40);
+            }
+
+            /**
+             * Shows the specified section with a smooth transition
+             */
+            showSection(sectionId) {
+                if (this.isTransitioning || this.currentSection === sectionId) return;
+                
+                this.isTransitioning = true;
+                
+                // Get section elements
+                const currentSectionEl = document.getElementById(`${this.currentSection}Section`);
+                const newSectionEl = document.getElementById(`${sectionId}Section`);
+                
+                if (!newSectionEl) {
+                    this.isTransitioning = false;
+                    return;
+                }
+                
+                if (currentSectionEl) {
+                    // Add exit animation to current section
+                    currentSectionEl.style.transition = 'all 0.4s ease-in-out';
+                    currentSectionEl.style.opacity = '0';
+                    currentSectionEl.style.transform = 'translateX(-50px)';
+                    
+                    // Hide current section and show new section after transition
+                    setTimeout(() => {
+                        // Hide current section completely
+                        currentSectionEl.classList.remove('section-active');
+                        currentSectionEl.classList.add('section-hidden');
+                        currentSectionEl.style.opacity = '';
+                        currentSectionEl.style.transform = '';
+                        
+                        // Show new section with enter animation
+                        newSectionEl.classList.remove('section-hidden');
+                        newSectionEl.classList.add('section-active');
+                        newSectionEl.style.opacity = '0';
+                        newSectionEl.style.transform = 'translateX(50px)';
+                        
+                        // Trigger reflow
+                        newSectionEl.offsetHeight;
+                        
+                        // Animate in new section
+                        setTimeout(() => {
+                            newSectionEl.style.opacity = '1';
+                            newSectionEl.style.transform = 'translateX(0)';
+                            
+                            this.currentSection = sectionId;
+                            this.isTransitioning = false;
+                            
+                            // Focus on first input in form sections
+                            if (sectionId === 'login') {
+                                const emailInput = document.getElementById('loginEmail');
+                                if (emailInput) {
+                                    setTimeout(() => emailInput.focus(), 100);
+                                }
+                            } else if (sectionId === 'register') {
+                                const displayNameInput = document.getElementById('displayName');
+                                if (displayNameInput) {
+                                    setTimeout(() => displayNameInput.focus(), 100);
+                                }
+                            }
+                            
+                            console.log(`🔄 Switched to ${sectionId} section`);
+                        }, 50);
+                    }, 400);
+                } else {
+                    // No current section (first time showing)
+                    newSectionEl.classList.remove('section-hidden');
+                    newSectionEl.classList.add('section-active');
+                    newSectionEl.style.opacity = '0';
+                    newSectionEl.style.transform = 'translateX(50px)';
+                    
+                    // Trigger reflow
+                    newSectionEl.offsetHeight;
+                    
+                    // Animate in new section
+                    setTimeout(() => {
+                        newSectionEl.style.opacity = '1';
+                        newSectionEl.style.transform = 'translateX(0)';
+                        
+                        this.currentSection = sectionId;
+                        this.isTransitioning = false;
+                        
+                        console.log(`🔄 Switched to ${sectionId} section`);
+                    }, 50);
+                }
+            }
+
+            /**
+             * Handles login form submission
+             */
+            async handleLogin(e) {
+                e.preventDefault();
+                
+                const email = document.getElementById('loginEmail').value.trim();
+                const password = document.getElementById('loginPassword').value;
+                
+                // Clear previous errors
+                this.clearFieldError('loginEmail');
+                this.clearFieldError('loginPassword');
+                
+                // Validate inputs
+                let isValid = true;
+                
+                if (!email) {
+                    this.showFieldError('loginEmail', 'Email is required');
+                    isValid = false;
+                } else if (!this.validateEmail(email)) {
+                    this.showFieldError('loginEmail', 'Please enter a valid email address');
+                    isValid = false;
+                }
+                
+                if (!password) {
+                    this.showFieldError('loginPassword', 'Password is required');
+                    isValid = false;
+                }
+                
+                if (isValid) {
+                    // Set loading state
+                    this.setLoginLoadingState(true);
+                    
+                    try {
+                        // Call Firebase authentication
+                        await window.firebaseAuth.loginUser(email, password);
+                        
+                        // Success - redirect to profile page
+                        this.redirectToProfile();
+                        
+                    } catch (error) {
+                        // Handle authentication error with simplified message
+                        this.showMessage('Login failed. Please check your credentials and try again.', 'error');
+                        this.setLoginLoadingState(false);
+                    }
+                }
+            }
+
+            /**
+             * Handles registration form submission
+             */
+            async handleRegistration(e) {
+                e.preventDefault();
+                
+                const displayName = document.getElementById('displayName').value.trim();
+                const email = document.getElementById('registerEmail').value.trim();
+                const password = document.getElementById('registerPassword').value;
+                const confirmPassword = document.getElementById('confirmPassword').value;
+                const termsAgreed = document.getElementById('termsAgreement').checked;
+                
+                // Clear previous errors
+                this.clearFieldError('displayName');
+                this.clearFieldError('registerEmail');
+                this.clearFieldError('registerPassword');
+                this.clearFieldError('confirmPassword');
+                this.clearFieldError('termsAgreement');
+                
+                // Validate inputs
+                let isValid = true;
+                
+                if (!displayName) {
+                    this.showFieldError('displayName', 'Display name is required');
+                    isValid = false;
+                }
+                
+                if (!email) {
+                    this.showFieldError('registerEmail', 'Email is required');
+                    isValid = false;
+                } else if (!this.validateEmail(email)) {
+                    this.showFieldError('registerEmail', 'Please enter a valid email address');
+                    isValid = false;
+                }
+                
+                if (!password) {
+                    this.showFieldError('registerPassword', 'Password is required');
+                    isValid = false;
+                } else if (password.length < 6) {
+                    this.showFieldError('registerPassword', 'Password must be at least 6 characters');
+                    isValid = false;
+                }
+                
+                if (!confirmPassword) {
+                    this.showFieldError('confirmPassword', 'Please confirm your password');
+                    isValid = false;
+                } else if (password !== confirmPassword) {
+                    this.showFieldError('confirmPassword', 'Passwords do not match');
+                    isValid = false;
+                }
+                
+                if (!termsAgreed) {
+                    const termsError = document.getElementById('termsError');
+                    if (termsError) termsError.classList.remove('hidden');
+                    isValid = false;
+                }
+                
+                if (isValid) {
+                    // Set loading state
+                    this.setRegisterLoadingState(true);
+                    
+                    try {
+                        // Pass user selections to registration
+                        await window.firebaseAuth.registerUser(email, password, displayName, this.userSelections);
+                        
+                        // Success - redirect to profile page
+                        this.redirectToProfile();
+                        
+                    } catch (error) {
+                        // Handle registration error
+                        this.showMessage(error.message, 'error');
+                        this.setRegisterLoadingState(false);
+                    }
+                }
+            }
+
+            /**
+             * Validates email format
+             */
+            validateEmail(email) {
+                const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+                return emailRegex.test(email);
+            }
+
+            /**
+             * Shows an error message for a form field
+             */
+            showFieldError(fieldId, message) {
+                const field = document.getElementById(fieldId);
+                const errorElement = document.getElementById(fieldId + 'Error');
+                
+                if (field && errorElement) {
+                    field.classList.add('input-error');
+                    field.classList.remove('input-success');
+                    errorElement.textContent = message;
+                    errorElement.classList.remove('hidden');
+                }
+            }
+
+            /**
+             * Clears error message for a form field
+             */
+            clearFieldError(fieldId) {
+                const field = document.getElementById(fieldId);
+                const errorElement = document.getElementById(fieldId + 'Error');
+                
+                if (field && errorElement) {
+                    field.classList.remove('input-error');
+                    errorElement.classList.add('hidden');
+                }
+                
+                // Special handling for terms agreement
+                if (fieldId === 'termsAgreement') {
+                    const termsError = document.getElementById('termsError');
+                    if (termsError) termsError.classList.add('hidden');
+                }
+            }
+
+            /**
+             * Shows a success message for a form field
+             */
+            showFieldSuccess(fieldId) {
+                const field = document.getElementById(fieldId);
+                if (field) {
+                    field.classList.add('input-success');
+                    field.classList.remove('input-error');
+                }
+            }
+
+            /**
+             * Sets loading state for login form
+             */
+            setLoginLoadingState(isLoading) {
+                const loginBtn = document.getElementById('loginBtn');
+                const loginBtnText = document.getElementById('loginBtnText');
+                const loginSpinner = document.getElementById('loginSpinner');
+
+                if (loginBtn && loginBtnText && loginSpinner) {
+                    loginBtn.disabled = isLoading;
+                    
+                    if (isLoading) {
+                        loginBtnText.textContent = 'Signing In...';
+                        loginSpinner.classList.remove('hidden');
+                    } else {
+                        loginBtnText.textContent = 'Sign In';
+                        loginSpinner.classList.add('hidden');
+                    }
+                }
+            }
+
+            /**
+             * Sets loading state for registration form
+             */
+            setRegisterLoadingState(isLoading) {
+                const registerBtn = document.getElementById('registerBtn');
+                const registerBtnText = document.getElementById('registerBtnText');
+                const registerSpinner = document.getElementById('registerSpinner');
+
+                if (registerBtn && registerBtnText && registerSpinner) {
+                    registerBtn.disabled = isLoading;
+                    
+                    if (isLoading) {
+                        registerBtnText.textContent = 'Creating Account...';
+                        registerSpinner.classList.remove('hidden');
+                    } else {
+                        registerBtnText.textContent = 'Create Account';
+                        registerSpinner.classList.add('hidden');
+                    }
+                }
+            }
+
+            /**
+             * Shows a message toast
+             */
+            showMessage(message, type = 'error') {
+                const messageContainer = document.getElementById('messageContainer');
+                const messageClass = type === 'error' ? 'error-message' : 'success-message';
+                
+                if (messageContainer) {
+                    messageContainer.innerHTML = `
+                        <div class="${messageClass}">
+                            <div class="flex items-center">
+                                <i class="fas ${type === 'error' ? 'fa-exclamation-triangle' : 'fa-check-circle'} mr-2"></i>
+                                <span class="text-sm">${message}</span>
+                            </div>
+                        </div>
+                    `;
+                    
+                    if (type === 'error') {
+                        messageContainer.classList.add('shake');
+                        setTimeout(() => messageContainer.classList.remove('shake'), 500);
+                    }
+                    
+                    if (type === 'success') {
+                        setTimeout(() => {
+                            if (messageContainer.innerHTML.includes(message)) {
+                                messageContainer.innerHTML = '';
+                            }
+                        }, 5000);
+                    }
+                }
+            }
+
+            /**
+             * Shows a toast notification
+             */
+            showToast(message, type = 'info') {
+                const toastContainer = document.getElementById('toastContainer');
+                if (!toastContainer) return;
+
+                const toast = document.createElement('div');
+                toast.className = `toast ${type}`;
+                toast.innerHTML = `
+                    <div class="flex items-center">
+                        <i class="fas fa-${type === 'success' ? 'check-circle' : type === 'error' ? 'exclamation-circle' : type === 'warning' ? 'exclamation-triangle' : 'info-circle'} mr-2"></i>
+                        <span class="font-medium text-sm">${message}</span>
+                    </div>
+                `;
+                
+                toastContainer.appendChild(toast);
+                
+                setTimeout(() => {
+                    toast.classList.add('show');
+                }, 100);
+                
+                setTimeout(() => {
+                    toast.classList.remove('show');
+                    setTimeout(() => {
+                        toastContainer.removeChild(toast);
+                    }, 300);
+                }, 3000);
+            }
+
+            /**
+             * Shows loading modal
+             */
+            showLoading(text = 'Processing...') {
+                const loadingModal = document.getElementById('loadingModal');
+                const loadingText = document.getElementById('loadingText');
+                
+                if (loadingModal && loadingText) {
+                    loadingText.textContent = text;
+                    loadingModal.classList.remove('hidden');
+                }
+            }
+
+            /**
+             * Hides loading modal
+             */
+            hideLoading() {
+                const loadingModal = document.getElementById('loadingModal');
+                if (loadingModal) {
+                    loadingModal.classList.add('hidden');
+                }
+            }
+
+            /**
+             * Loads user preferences from localStorage
+             */
+            loadUserPreferences() {
+                const savedEmail = localStorage.getItem('kynecta-email');
+                const rememberMe = localStorage.getItem('kynecta-remember') === 'true';
+                
+                if (savedEmail && rememberMe) {
+                    const loginEmail = document.getElementById('loginEmail');
+                    const rememberMeCheckbox = document.getElementById('remember-me');
+                    if (loginEmail) loginEmail.value = savedEmail;
+                    if (rememberMeCheckbox) rememberMeCheckbox.checked = true;
+                }
+                
+                // Load custom colors
+                const savedColors = localStorage.getItem('kynecta-custom-colors');
+                if (savedColors) {
+                    this.customColors = JSON.parse(savedColors);
+                    this.applyCustomColors();
+                }
+            }
+
+            /**
+             * Saves user preferences to localStorage
+             */
+            saveUserPreferences() {
+                const email = document.getElementById('loginEmail').value;
+                const rememberMe = document.getElementById('remember-me').checked;
+                
+                if (rememberMe && email) {
+                    localStorage.setItem('kynecta-email', email);
+                    localStorage.setItem('kynecta-remember', 'true');
+                } else {
+                    localStorage.removeItem('kynecta-email');
+                    localStorage.removeItem('kynecta-remember');
+                }
+            }
+
+            /**
+             * Redirects to the profile page with a smooth transition
+             */
+            redirectToProfile() {
+                // Save user preferences
+                this.saveUserPreferences();
+                
+                // Show success message
+                this.showMessage('Welcome to kynecta! Redirecting...', 'success');
+                
+                // Add a brief delay to show the success message
+                setTimeout(() => {
+                    // Apply fade-out transition to the entire page
+                    document.body.style.opacity = '0';
+                    document.body.style.transition = 'opacity 0.5s ease-in-out';
+                    
+                    // Redirect after transition completes
+                    setTimeout(() => {
+                        window.location.href = 'profile.html';
+                    }, 500);
+                }, 1000);
+            }
+        }
+
+        // Global functions for forgot password modal
+        function selectRecoveryMethod(method) {
+            if (window.kynectaApp) {
+                window.kynectaApp.forgotPasswordMethod = method;
+                
+                if (method === 'email') {
+                    executeRecovery('email');
+                } else if (method === 'phone' || method === 'voice') {
+                    executeRecovery(method);
+                } else if (method === 'secret') {
+                    window.kynectaApp.setForgotPasswordStep(3);
+                }
+            }
+        }
+
+        async function executeRecovery(method) {
+            if (!window.kynectaApp) return;
+            
+            const { forgotPasswordIdentifier } = window.kynectaApp;
+            
+            window.kynectaApp.showLoading(`Initiating ${method} recovery...`);
+            
+            if (method === 'email') {
+                try {
+                    await window.firebaseAuth.sendPasswordResetEmail(forgotPasswordIdentifier);
+                    window.kynectaApp.hideLoading();
+                    window.kynectaApp.showToast('Recovery email sent successfully! Please check your inbox (and spam folder) for the link.', 'success');
+                    window.kynectaApp.hideForgotPasswordModal();
+                } catch (error) {
+                    window.kynectaApp.hideLoading();
+                    window.kynectaApp.showToast(`Email reset failed: ${error.message}`, 'error');
+                }
+            } else if (method === 'phone' || method === 'voice') {
+                // Simulated Phone/Voice Call Recovery
+                await new Promise(resolve => setTimeout(resolve, 2000));
+                window.kynectaApp.hideLoading();
+                const action = method === 'phone' ? 'SMS code' : 'voice call';
+                window.kynectaApp.showToast(`A simulated ${action} has been initiated for ${forgotPasswordIdentifier}. Please check your phone for a code to complete the process.`, 'info');
+                window.kynectaApp.hideForgotPasswordModal();
+            }
+        }
+
+        function changeRecoveryMethod() {
+            if (window.kynectaApp) {
+                window.kynectaApp.setForgotPasswordStep(2);
+            }
+        }
+
+        // Initialize the app when DOM is loaded
+        document.addEventListener('DOMContentLoaded', () => {
+            window.kynectaApp = new kynectaApp();
+            
+            // Check Firebase status after a delay
+            setTimeout(() => {
+                if (!window.firebaseAuth || !window.firebaseAuth.isInitialized) {
+                    console.warn('⚠️ Firebase not initialized - using fallback mode');
+                }
+            }, 3000);
+        });
+
+    </script>
+    <script>
+        if ("serviceWorker" in navigator) {
+            navigator.serviceWorker.register("/service-worker.js");
+        }
+    </script>
+</body>
+>>>>>>> 35a7dd29c215aeda26525e12658dd8bef5034d22
 </html>
