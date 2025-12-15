@@ -130,6 +130,11 @@
             margin-right: auto;
             border-bottom-left-radius: 4px;
         }
+        /* Offline message styling */
+        .message-bubble.sent.offline {
+            background: linear-gradient(135deg, #8a8a8a 0%, #a0a0a0 100%);
+            opacity: 0.8;
+        }
         
         /* Loading animation */
         @keyframes pulse {
@@ -710,12 +715,21 @@
         .chat-item.unread {
             background-color: #f0f9ff;
         }
+        
+        /* Offline message styling */
+        .message-offline-indicator {
+            font-size: 10px;
+            color: #9ca3af;
+            margin-top: 2px;
+            font-style: italic;
+        }
     </style>
 </head>
 <body class="h-full overflow-hidden bg-gray-50" data-theme="light">
-    <!-- OFFLINE INDICATOR - ADDED -->
+    <!-- OFFLINE INDICATOR - UPDATED -->
     <div id="offlineIndicator" class="offline-indicator">
         <i class="fas fa-wifi-slash mr-2"></i>You are currently offline. Messages will be sent when connection is restored.
+        <span id="offlineMessageCount" class="ml-2 font-semibold"></span>
     </div>
 
     <div id="toastContainer" class="fixed top-4 right-4 z-50 space-y-2"></div>
@@ -793,11 +807,8 @@
                 <div id="chatListContainer" class="chat-list-container w-full md:w-1/3 lg:w-1/4 bg-white flex flex-col border-r border-gray-200">
                     <div class="kynecta-header p-4 flex justify-between items-center">
                         <div class="flex items-center">
-                            <!-- Profile icon button for mobile -->
-                            <button id="mobileProfileBtn" class="mobile-profile-button w-12 h-12 rounded-2xl bg-white/20 flex items-center justify-center text-white font-semibold mr-3 object-cover border-2 border-white/30 cursor-pointer" onclick="openSettingsModal()" title="Profile Settings">
-                                <i class="fas fa-user"></i>
-                            </button>
-                            <div>
+                            <!-- Profile icon button for mobile - UPDATED: Removed profile icon -->
+                            <div class="flex-1">
                                 <span id="userName" class="font-semibold text-white block"></span>
                                 <span id="userMood" class="text-white/80 text-sm"></span>
                             </div>
@@ -1128,10 +1139,7 @@
                 <div class="chat-list-container w-full md:w-1/3 lg:w-1/4 bg-white flex flex-col border-r border-gray-200">
                     <div class="kynecta-header p-4 flex justify-between items-center">
                         <div class="flex items-center">
-                            <!-- Profile icon button for mobile -->
-                            <button id="mobileProfileBtnTools" class="mobile-profile-button w-12 h-12 rounded-2xl bg-white/20 flex items-center justify-center text-white font-semibold mr-3 object-cover border-2 border-white/30 cursor-pointer" onclick="openSettingsModal()" title="Profile Settings">
-                                <i class="fas fa-user"></i>
-                            </button>
+                            <!-- Profile icon button for mobile - UPDATED: Removed profile icon -->
                             <div>
                                 <span id="userNameTools" class="font-semibold text-white block"></span>
                                 <span id="userMoodTools" class="text-white/80 text-sm"></span>
@@ -1231,10 +1239,7 @@
                 <div class="chat-list-container w-full md:w-1/3 lg:w-1/4 bg-white flex flex-col border-r border-gray-200">
                     <div class="kynecta-header p-4 flex justify-between items-center">
                         <div class="flex items-center">
-                            <!-- Profile icon button for mobile -->
-                            <button id="mobileProfileBtnSettings" class="mobile-profile-button w-12 h-12 rounded-2xl bg-white/20 flex items-center justify-center text-white font-semibold mr-3 object-cover border-2 border-white/30 cursor-pointer" onclick="openSettingsModal()" title="Profile Settings">
-                                <i class="fas fa-user"></i>
-                            </button>
+                            <!-- Profile icon button for mobile - UPDATED: Removed profile icon -->
                             <div>
                                 <span id="userNameSettings" class="font-semibold text-white block"></span>
                                 <span id="userMoodSettings" class="text-white/80 text-sm"></span>
@@ -3084,62 +3089,235 @@
         let unreadChatsCount = 0;
         let sentChatsCount = 0;
         let receivedChatsCount = 0;
+        let currentChatId = null; // Track current chat
+        let messageQueue = []; // Queue for messages to be sent when online
         
         // Check online status
         function updateOnlineStatus() {
+            const wasOnline = isOnline;
             isOnline = navigator.onLine;
             const offlineIndicator = document.getElementById('offlineIndicator');
+            const offlineMessageCount = document.getElementById('offlineMessageCount');
             
             if (offlineIndicator) {
                 if (!isOnline) {
                     offlineIndicator.classList.add('show');
+                    if (offlineMessageCount) {
+                        offlineMessageCount.textContent = `(${pendingMessages.length} pending)`;
+                    }
                 } else {
                     offlineIndicator.classList.remove('show');
                     // Try to send pending messages when back online
-                    sendPendingMessages();
+                    if (!wasOnline && isOnline) {
+                        sendPendingMessages();
+                    }
+                }
+            }
+            
+            // Update send button state
+            updateSendButtonState();
+        }
+        
+        // Update send button state based on online status
+        function updateSendButtonState() {
+            const sendBtn = document.getElementById('sendBtn');
+            const messageInput = document.getElementById('messageInput');
+            
+            if (sendBtn && messageInput) {
+                if (isOnline && currentChatId && messageInput.value.trim()) {
+                    sendBtn.disabled = false;
+                    sendBtn.classList.remove('opacity-50');
+                } else {
+                    sendBtn.disabled = true;
+                    sendBtn.classList.add('opacity-50');
                 }
             }
         }
         
         // Send pending messages when back online
-        function sendPendingMessages() {
+        async function sendPendingMessages() {
             if (pendingMessages.length > 0 && isOnline) {
-                pendingMessages.forEach(msg => {
-                    sendMessageToFirebase(msg);
-                });
+                const offlineIndicator = document.getElementById('offlineIndicator');
+                const offlineMessageCount = document.getElementById('offlineMessageCount');
+                
+                if (offlineIndicator && offlineMessageCount) {
+                    offlineMessageCount.textContent = `(Sending ${pendingMessages.length} messages...)`;
+                }
+                
+                // Create a copy of pending messages to avoid modification during iteration
+                const messagesToSend = [...pendingMessages];
                 pendingMessages = [];
+                
+                for (const message of messagesToSend) {
+                    try {
+                        await sendMessageToFirebase(message);
+                        // Update UI to show message as sent
+                        updateOfflineMessageStatus(message.localId, 'sent');
+                    } catch (error) {
+                        console.error('Failed to send pending message:', error);
+                        // Re-add to pending messages if failed
+                        pendingMessages.push(message);
+                    }
+                }
+                
+                // Update offline indicator
+                if (offlineIndicator && offlineMessageCount) {
+                    if (pendingMessages.length > 0) {
+                        offlineMessageCount.textContent = `(${pendingMessages.length} failed)`;
+                    } else {
+                        offlineIndicator.classList.remove('show');
+                    }
+                }
             }
         }
         
-        // Add message status indicator
-        function addMessageStatus(messageDiv, status) {
-            const statusSpan = document.createElement('span');
-            statusSpan.className = `message-status ${status}`;
+        // Update offline message status in UI
+        function updateOfflineMessageStatus(localMessageId, status) {
+            const messageElement = document.querySelector(`[data-local-id="${localMessageId}"]`);
+            if (messageElement) {
+                const statusSpan = messageElement.querySelector('.message-status');
+                if (statusSpan) {
+                    statusSpan.className = `message-status ${status}`;
+                    
+                    // Update icon based on status
+                    switch(status) {
+                        case 'pending':
+                            statusSpan.innerHTML = '🕒';
+                            statusSpan.title = 'Pending';
+                            messageElement.classList.add('offline');
+                            break;
+                        case 'sent':
+                            statusSpan.innerHTML = '✓';
+                            statusSpan.title = 'Sent';
+                            messageElement.classList.remove('offline');
+                            break;
+                        case 'delivered':
+                            statusSpan.innerHTML = '✓✓';
+                            statusSpan.title = 'Delivered';
+                            messageElement.classList.remove('offline');
+                            break;
+                        case 'read':
+                            statusSpan.innerHTML = '✓✓';
+                            statusSpan.style.color = '#10b981';
+                            statusSpan.title = 'Read';
+                            messageElement.classList.remove('offline');
+                            break;
+                    }
+                }
+                
+                // Remove offline indicator if message is sent
+                if (status !== 'pending') {
+                    const offlineIndicator = messageElement.querySelector('.message-offline-indicator');
+                    if (offlineIndicator) {
+                        offlineIndicator.remove();
+                    }
+                }
+            }
+        }
+        
+        // Generate unique local ID for offline messages
+        function generateLocalId() {
+            return 'local_' + Date.now() + '_' + Math.random().toString(36).substr(2, 9);
+        }
+        
+        // Display offline message immediately
+        function displayOfflineMessage(messageData, friendId) {
+            const messagesList = document.getElementById('messagesList');
+            const noMessagesMessage = document.getElementById('noMessagesMessage');
+            const currentUser = firebase.auth().currentUser;
             
-            switch(status) {
-                case 'pending':
-                    statusSpan.innerHTML = '🕒';
-                    statusSpan.title = 'Pending';
-                    break;
-                case 'sent':
-                    statusSpan.innerHTML = '✓';
-                    statusSpan.title = 'Sent';
-                    break;
-                case 'delivered':
-                    statusSpan.innerHTML = '✓✓';
-                    statusSpan.title = 'Delivered';
-                    break;
-                case 'read':
-                    statusSpan.innerHTML = '✓✓';
-                    statusSpan.style.color = '#10b981';
-                    statusSpan.title = 'Read';
-                    break;
+            if (!messagesList || !currentUser) return;
+            
+            // Hide "no messages" message if showing
+            if (noMessagesMessage && !noMessagesMessage.classList.contains('hidden')) {
+                noMessagesMessage.classList.add('hidden');
             }
             
-            const timeDiv = messageDiv.querySelector('.text-xs.opacity-70');
-            if (timeDiv) {
-                timeDiv.appendChild(statusSpan);
+            const messageDiv = document.createElement('div');
+            const isSent = messageData.senderId === currentUser.uid;
+            messageDiv.className = `message-bubble ${isSent ? 'sent' : 'received'} ${!isOnline && isSent ? 'offline' : ''} fade-in`;
+            messageDiv.dataset.localId = messageData.localId;
+            
+            // Get status based on online state
+            let status = messageData.status || 'pending';
+            if (!isOnline && isSent) {
+                status = 'pending';
             }
+            
+            let statusHtml = '';
+            if (isSent) {
+                statusHtml = `<span class="message-status ${status}">
+                    ${status === 'pending' ? '🕒' : 
+                      status === 'sent' ? '✓' : 
+                      status === 'delivered' ? '✓✓' : 
+                      status === 'read' ? '✓✓' : '✓'}
+                </span>`;
+            }
+            
+            // Add offline indicator for pending messages
+            let offlineIndicator = '';
+            if (status === 'pending' && !isOnline) {
+                offlineIndicator = '<div class="message-offline-indicator">Waiting for connection...</div>';
+            }
+            
+            messageDiv.innerHTML = `
+                <div>${messageData.text || ''}</div>
+                <div class="text-xs opacity-70 mt-1 text-right">
+                    ${formatTime(messageData.timestamp || new Date())}
+                    ${statusHtml}
+                </div>
+                ${offlineIndicator}
+            `;
+            
+            messagesList.appendChild(messageDiv);
+            
+            // Scroll to bottom
+            setTimeout(() => {
+                const messagesContainer = document.getElementById('messagesContainer');
+                if (messagesContainer) {
+                    messagesContainer.scrollTop = messagesContainer.scrollHeight;
+                }
+            }, 100);
+            
+            // If offline, add to pending messages
+            if (!isOnline && isSent && status === 'pending') {
+                pendingMessages.push({
+                    ...messageData,
+                    status: 'pending'
+                });
+                
+                // Update offline indicator
+                const offlineMessageCount = document.getElementById('offlineMessageCount');
+                if (offlineMessageCount) {
+                    offlineMessageCount.textContent = `(${pendingMessages.length} pending)`;
+                }
+                
+                // Store in local storage for persistence
+                storePendingMessage(friendId, messageData);
+            }
+        }
+        
+        // Store pending message in local storage
+        function storePendingMessage(friendId, messageData) {
+            const key = `kynecta_pending_${friendId}`;
+            const pending = JSON.parse(localStorage.getItem(key) || '[]');
+            pending.push(messageData);
+            localStorage.setItem(key, JSON.stringify(pending));
+        }
+        
+        // Load pending messages from local storage
+        function loadPendingMessages(friendId) {
+            const key = `kynecta_pending_${friendId}`;
+            const pending = JSON.parse(localStorage.getItem(key) || '[]');
+            return pending;
+        }
+        
+        // Remove pending message from local storage after successful send
+        function removePendingMessage(friendId, localId) {
+            const key = `kynecta_pending_${friendId}`;
+            const pending = JSON.parse(localStorage.getItem(key) || '[]');
+            const filtered = pending.filter(msg => msg.localId !== localId);
+            localStorage.setItem(key, JSON.stringify(filtered));
         }
         
         // Load user data from cache immediately
@@ -3370,6 +3548,8 @@
         
         // Open chat with friend
         function openChatWithFriend(friend) {
+            currentChatId = friend.id;
+            
             // Update chat header
             const chatAvatar = document.getElementById('chatAvatar');
             const chatTitle = document.getElementById('chatTitle');
@@ -3378,7 +3558,10 @@
             if (chatAvatar) {
                 chatAvatar.src = friend.profilePicture || 'https://ui-avatars.com/api/?name=' + encodeURIComponent(friend.displayName || 'Friend') + '&background=667eea&color=fff';
             }
-            if (chatTitle) chatTitle.textContent = friend.displayName || 'Friend';
+            if (chatTitle) {
+                chatTitle.textContent = friend.displayName || 'Friend';
+                chatTitle.dataset.friendId = friend.id;
+            }
             if (chatStatus) chatStatus.textContent = friend.status || 'Online';
             
             // Update call buttons
@@ -3400,6 +3583,16 @@
             
             // Mark messages as read
             markChatAsRead(friend.id);
+            
+            // Enable message input
+            const messageInput = document.getElementById('messageInput');
+            if (messageInput) {
+                messageInput.disabled = false;
+                messageInput.focus();
+            }
+            
+            // Update send button state
+            updateSendButtonState();
         }
         
         // Load chat messages
@@ -3412,6 +3605,14 @@
             // Clear current messages
             messagesList.innerHTML = '';
             
+            // Load pending messages first
+            const pendingMessages = loadPendingMessages(friendId);
+            if (pendingMessages.length > 0) {
+                pendingMessages.forEach(message => {
+                    displayOfflineMessage(message, friendId);
+                });
+            }
+            
             // Try to load from cache first
             const cachedMessages = localStorage.getItem(`kynecta_chat_${friendId}`);
             if (cachedMessages) {
@@ -3419,7 +3620,9 @@
                     const messages = JSON.parse(cachedMessages);
                     if (messages.length > 0) {
                         displayMessages(messages, friendId);
-                        noMessagesMessage.classList.add('hidden');
+                        if (pendingMessages.length === 0) {
+                            noMessagesMessage.classList.add('hidden');
+                        }
                         return;
                     }
                 } catch (e) {
@@ -3428,7 +3631,9 @@
             }
             
             // If no cached messages or error, show empty state
-            noMessagesMessage.classList.remove('hidden');
+            if (pendingMessages.length === 0) {
+                noMessagesMessage.classList.remove('hidden');
+            }
             
             // Load from Firebase
             loadMessagesFromFirebase(friendId);
@@ -3469,6 +3674,10 @@
                 
             } catch (error) {
                 console.error('Error loading messages:', error);
+                // If offline, this is expected - don't show error
+                if (isOnline) {
+                    showToast('Failed to load messages. Please check your connection.', 'error');
+                }
             }
         }
         
@@ -3477,17 +3686,20 @@
             const messagesList = document.getElementById('messagesList');
             if (!messagesList) return;
             
-            messagesList.innerHTML = '';
             const currentUser = firebase.auth().currentUser;
             
             messages.forEach(message => {
+                // Skip if this is a pending message (already displayed)
+                if (message.localId && document.querySelector(`[data-local-id="${message.localId}"]`)) {
+                    return;
+                }
+                
                 const messageDiv = document.createElement('div');
                 const isSent = message.senderId === currentUser?.uid;
                 messageDiv.className = `message-bubble ${isSent ? 'sent' : 'received'} fade-in`;
                 
                 let statusHtml = '';
                 if (isSent) {
-                    // ADDED: Message status indicator
                     const status = message.status || 'sent';
                     statusHtml = `<span class="message-status ${status}">
                         ${status === 'pending' ? '🕒' : 
@@ -3521,14 +3733,19 @@
         async function sendMessageToFirebase(messageData) {
             try {
                 const currentUser = firebase.auth().currentUser;
-                if (!currentUser) return;
+                if (!currentUser) {
+                    throw new Error('User not logged in');
+                }
                 
                 const db = firebase.firestore();
                 const chatId = [currentUser.uid, messageData.receiverId].sort().join('_');
                 
+                // Remove localId from data before sending to Firebase
+                const { localId, ...firebaseData } = messageData;
+                
                 // Add message with pending status
                 const messageRef = await db.collection('chats').doc(chatId).collection('messages').add({
-                    ...messageData,
+                    ...firebaseData,
                     status: 'pending',
                     timestamp: firebase.firestore.FieldValue.serverTimestamp()
                 });
@@ -3538,31 +3755,90 @@
                     status: 'sent'
                 });
                 
-                // Update UI
-                updateMessageStatus(messageData.receiverId, messageRef.id, 'sent');
+                // Update UI and remove from pending storage
+                updateOfflineMessageStatus(localId, 'sent');
+                removePendingMessage(messageData.receiverId, localId);
+                
+                return messageRef.id;
                 
             } catch (error) {
                 console.error('Error sending message:', error);
-                // Store message for retry when online
-                pendingMessages.push(messageData);
+                throw error;
             }
         }
         
-        // Update message status in UI
-        function updateMessageStatus(friendId, messageId, status) {
-            const messages = JSON.parse(localStorage.getItem(`kynecta_chat_${friendId}`) || '[]');
-            const messageIndex = messages.findIndex(m => m.id === messageId);
+        // Handle sending a message
+        async function sendMessage() {
+            const messageInput = document.getElementById('messageInput');
+            const text = messageInput.value.trim();
             
-            if (messageIndex !== -1) {
-                messages[messageIndex].status = status;
-                localStorage.setItem(`kynecta_chat_${friendId}`, JSON.stringify(messages));
-                
-                // Update UI if this chat is currently open
-                const chatTitle = document.getElementById('chatTitle');
-                if (chatTitle && chatTitle.dataset.friendId === friendId) {
-                    loadChatMessages(friendId);
-                }
+            if (!text || !currentChatId) return;
+            
+            const currentUser = firebase.auth().currentUser;
+            if (!currentUser) {
+                showToast('Please log in to send messages', 'error');
+                return;
             }
+            
+            // Create message data
+            const localId = generateLocalId();
+            const messageData = {
+                text: text,
+                senderId: currentUser.uid,
+                receiverId: currentChatId,
+                timestamp: new Date(),
+                localId: localId
+            };
+            
+            // Display message immediately
+            displayOfflineMessage(messageData, currentChatId);
+            
+            // Clear input
+            messageInput.value = '';
+            updateSendButtonState();
+            
+            // Auto-resize textarea
+            messageInput.style.height = 'auto';
+            messageInput.style.height = Math.min(messageInput.scrollHeight, 150) + 'px';
+            
+            // Send to Firebase if online
+            if (isOnline) {
+                try {
+                    await sendMessageToFirebase(messageData);
+                } catch (error) {
+                    console.error('Failed to send message:', error);
+                    // Message already displayed as pending, will retry when back online
+                }
+            } else {
+                // Show offline notification
+                showToast('Message saved offline. Will send when connected.', 'info');
+            }
+        }
+        
+        // Show toast notification
+        function showToast(message, type = 'info') {
+            const toastContainer = document.getElementById('toastContainer');
+            if (!toastContainer) return;
+            
+            const toast = document.createElement('div');
+            toast.className = `p-3 rounded-lg shadow-lg text-white ${
+                type === 'error' ? 'bg-red-500' : 
+                type === 'success' ? 'bg-green-500' : 
+                'bg-blue-500'
+            }`;
+            toast.innerHTML = `
+                <div class="flex items-center">
+                    <i class="fas fa-${type === 'error' ? 'exclamation-circle' : type === 'success' ? 'check-circle' : 'info-circle'} mr-2"></i>
+                    <span>${message}</span>
+                </div>
+            `;
+            
+            toastContainer.appendChild(toast);
+            
+            // Auto-remove after 3 seconds
+            setTimeout(() => {
+                toast.remove();
+            }, 3000);
         }
         
         // Format time
@@ -4210,6 +4486,33 @@
             // Setup chat filters
             setupChatFilters();
             
+            // Setup message input and send button
+            const messageInput = document.getElementById('messageInput');
+            const sendBtn = document.getElementById('sendBtn');
+            
+            if (messageInput) {
+                // Auto-resize textarea
+                messageInput.addEventListener('input', function() {
+                    this.style.height = 'auto';
+                    this.style.height = Math.min(this.scrollHeight, 150) + 'px';
+                    updateSendButtonState();
+                });
+                
+                // Send on Enter (without Shift)
+                messageInput.addEventListener('keydown', function(e) {
+                    if (e.key === 'Enter' && !e.shiftKey) {
+                        e.preventDefault();
+                        if (isOnline && currentChatId && this.value.trim()) {
+                            sendMessage();
+                        }
+                    }
+                });
+            }
+            
+            if (sendBtn) {
+                sendBtn.addEventListener('click', sendMessage);
+            }
+            
             const isMobile = window.innerWidth < 768;
             if (isMobile) {
                 const chatArea = document.getElementById('chatArea');
@@ -4301,6 +4604,11 @@
                 
                 // Load chats for filtering
                 loadChatsForFiltering();
+                
+                // Check if we need to send pending messages
+                if (isOnline && pendingMessages.length > 0) {
+                    sendPendingMessages();
+                }
             }, 300);
         });
         
@@ -4316,7 +4624,6 @@
         });
     </script>
     <script src="app.js" type="text/javascript"></script>
-    <script src="chat.js" type="text/javascript"></script>
     <script src="settings.js" type="text/javascript"></script>
 </body>
 </html>

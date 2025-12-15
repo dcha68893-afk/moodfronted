@@ -1504,6 +1504,48 @@
             display: none;
             white-space: nowrap;
         }
+        
+        /* Offline button styles */
+        .button-offline {
+            position: relative;
+        }
+        
+        .button-offline::after {
+            content: " (Offline)";
+            font-size: 10px;
+            opacity: 0.8;
+            color: var(--warning-color);
+        }
+        
+        .offline-warning-text {
+            color: var(--warning-color);
+            font-size: 11px;
+            margin-top: 2px;
+            font-weight: normal;
+        }
+        
+        .disabled-by-offline {
+            opacity: 0.6;
+            cursor: not-allowed;
+            position: relative;
+        }
+        
+        .disabled-by-offline::before {
+            content: "";
+            position: absolute;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            background: rgba(255, 255, 255, 0.5);
+            z-index: 1;
+            border-radius: inherit;
+        }
+        
+        .disabled-by-offline > * {
+            position: relative;
+            z-index: 2;
+        }
     </style>
 </head>
 <body>
@@ -2007,7 +2049,7 @@
         let reactionsChannel = null;
         let chatChannel = null;
         
-        // Offline state management
+        // Offline state management - FEATURE 1: Detect offline state
         let isOnline = navigator.onLine;
         let offlineCheckInterval = null;
         
@@ -2056,12 +2098,14 @@
         });
         
         async function initializeApp() {
-            // Initialize offline detection
+            // FEATURE 1: Initialize offline detection
             initializeOfflineDetection();
             
+            // FEATURE 4: Detect logged-in user via app.js (or Firebase auth)
             auth.onAuthStateChanged(async user => {
                 if (user) {
                     currentUser = user;
+                    console.log('User detected:', currentUser.uid);
                     await initializeUser();
                     await loadUserSettings();
                     setupEventListeners();
@@ -2069,17 +2113,21 @@
                     loadAllCalls();
                     setupPresenceTracking();
                     
-                    // Only initialize PeerJS if online
+                    // FEATURE 5: Only initialize PeerJS if online - calls work when network restored
                     if (isOnline) {
                         setTimeout(() => {
                             initializePeerJS();
                         }, 1000);
+                    } else {
+                        console.log('Offline: Skipping PeerJS initialization');
+                        showNotification('Offline: Call features unavailable', 'warning');
                     }
                     
                     // Listen for incoming calls from friends.html
                     listenForExternalCalls();
                     
                 } else {
+                    console.log('No user detected, redirecting to login');
                     window.location.href = 'index.html';
                 }
             });
@@ -2096,7 +2144,7 @@
             // Start periodic connectivity check
             offlineCheckInterval = setInterval(checkConnectivity, 30000);
             
-            // Initial UI update
+            // Initial UI update - FEATURE 2: Show "Calls require internet" message
             updateUIForConnectivity();
         }
         
@@ -2110,7 +2158,7 @@
             isOnline = true;
             updateUIForConnectivity();
             
-            // Try to reinitialize PeerJS
+            // FEATURE 5: Try to reinitialize PeerJS when network is restored
             if (!peer && currentUser) {
                 setTimeout(() => {
                     initializePeerJS();
@@ -2127,6 +2175,9 @@
                     lastOnline: firebase.firestore.FieldValue.serverTimestamp()
                 });
             }
+            
+            // Reload calls data
+            loadAllCalls();
         }
         
         function handleOffline() {
@@ -2134,7 +2185,7 @@
             isOnline = false;
             updateUIForConnectivity();
             
-            // Show notification
+            // FEATURE 2: Show "Calls require internet" message
             showNotification('You are offline. Calls require internet connection.', 'warning');
             
             // End any active calls
@@ -2173,11 +2224,11 @@
         
         function updateUIForConnectivity() {
             if (!isOnline) {
-                // Show offline overlay
+                // Show offline overlay - FEATURE 2
                 offlineOverlay.classList.add('active');
                 offlineIndicator.classList.add('active');
                 
-                // Disable call buttons
+                // FEATURE 1: Disable call buttons when offline
                 const callButtons = [
                     'newCallBtn',
                     'voiceCallBtn',
@@ -2185,7 +2236,8 @@
                     'groupCallBtn',
                     'startCallBtn',
                     'createVoiceLinkBtn',
-                    'createVideoLinkBtn'
+                    'createVideoLinkBtn',
+                    'addParticipantsBtn'
                 ];
                 
                 callButtons.forEach(buttonId => {
@@ -2193,16 +2245,18 @@
                     if (button) {
                         button.disabled = true;
                         button.title = 'Calls require internet connection';
+                        button.classList.add('disabled-by-offline');
                     }
                 });
                 
-                // Update button texts to indicate offline
+                // Update button texts to indicate offline - FEATURE 2
                 const quickActionButtons = document.querySelectorAll('.quick-action-btn');
                 quickActionButtons.forEach(button => {
                     if (button.disabled) {
                         const textElement = button.querySelector('.quick-action-text');
                         if (textElement) {
-                            textElement.innerHTML = textElement.textContent + ' <span style="font-size: 10px; color: var(--warning-color);">(Offline)</span>';
+                            const originalText = textElement.getAttribute('data-original-text') || textElement.textContent;
+                            textElement.innerHTML = originalText + '<div class="offline-warning-text">(Offline)</div>';
                         }
                     }
                 });
@@ -2212,6 +2266,13 @@
                 callbackButtons.forEach(button => {
                     button.disabled = true;
                     button.title = 'Calls require internet connection';
+                    button.classList.add('disabled-by-offline');
+                });
+                
+                // Disable contact checkboxes in new call modal
+                const contactCheckboxes = document.querySelectorAll('.contact-checkbox');
+                contactCheckboxes.forEach(checkbox => {
+                    checkbox.disabled = true;
                 });
                 
                 // Close new call modal if open
@@ -2220,12 +2281,27 @@
                     showNotification('Cannot start call while offline', 'error');
                 }
                 
+                // Close incoming call modal if open
+                if (incomingCallModal.classList.contains('active')) {
+                    incomingCallModal.classList.remove('active');
+                    showNotification('Cannot accept calls while offline', 'error');
+                }
+                
+                // Disable panel tabs that require internet
+                const panelTabs = document.querySelectorAll('.panel-tab');
+                panelTabs.forEach(tab => {
+                    if (tab.dataset.panel !== 'participants') {
+                        tab.disabled = true;
+                        tab.title = 'Feature unavailable offline';
+                    }
+                });
+                
             } else {
                 // Hide offline overlay
                 offlineOverlay.classList.remove('active');
                 offlineIndicator.classList.remove('active');
                 
-                // Enable call buttons
+                // FEATURE 1: Enable call buttons when online
                 const callButtons = [
                     'newCallBtn',
                     'voiceCallBtn',
@@ -2233,7 +2309,8 @@
                     'groupCallBtn',
                     'startCallBtn',
                     'createVoiceLinkBtn',
-                    'createVideoLinkBtn'
+                    'createVideoLinkBtn',
+                    'addParticipantsBtn'
                 ];
                 
                 callButtons.forEach(buttonId => {
@@ -2241,6 +2318,7 @@
                     if (button) {
                         button.disabled = false;
                         button.title = button.getAttribute('data-original-title') || '';
+                        button.classList.remove('disabled-by-offline');
                     }
                 });
                 
@@ -2249,8 +2327,8 @@
                 quickActionButtons.forEach(button => {
                     const textElement = button.querySelector('.quick-action-text');
                     if (textElement) {
-                        const originalText = textElement.getAttribute('data-original-text') || textElement.textContent.replace(' (Offline)', '');
-                        textElement.textContent = originalText;
+                        const originalText = textElement.getAttribute('data-original-text') || textElement.textContent;
+                        textElement.innerHTML = originalText;
                     }
                 });
                 
@@ -2259,6 +2337,20 @@
                 callbackButtons.forEach(button => {
                     button.disabled = false;
                     button.title = 'Call Back';
+                    button.classList.remove('disabled-by-offline');
+                });
+                
+                // Enable contact checkboxes
+                const contactCheckboxes = document.querySelectorAll('.contact-checkbox');
+                contactCheckboxes.forEach(checkbox => {
+                    checkbox.disabled = false;
+                });
+                
+                // Enable panel tabs
+                const panelTabs = document.querySelectorAll('.panel-tab');
+                panelTabs.forEach(tab => {
+                    tab.disabled = false;
+                    tab.title = '';
                 });
             }
         }
@@ -2268,7 +2360,7 @@
             window.addEventListener('message', function(event) {
                 console.log('Message received:', event.data);
                 
-                // Check if offline
+                // FEATURE 1: Check if offline before processing call requests
                 if (!isOnline) {
                     showNotification('Cannot start call while offline', 'error');
                     return;
@@ -2590,7 +2682,7 @@
         async function startCall(userId, type = 'video') {
             console.log('Starting call to:', userId, 'type:', type);
             
-            // Check if offline
+            // FEATURE 1: Check if offline before starting call
             if (!isOnline) {
                 showNotification('Cannot start call while offline', 'error');
                 return;
@@ -2910,7 +3002,7 @@
         async function startGroupCall(userIds) {
             console.log('Starting group call with:', userIds);
             
-            // Check if offline
+            // FEATURE 1: Check if offline
             if (!isOnline) {
                 showNotification('Cannot start call while offline', 'error');
                 return;
@@ -3205,6 +3297,13 @@
         
         async function acceptCall(type = 'voice') {
             try {
+                // FEATURE 1: Check if offline before accepting call
+                if (!isOnline) {
+                    showNotification('Cannot accept call while offline', 'error');
+                    declineCall();
+                    return;
+                }
+                
                 const incomingCall = window.incomingCall;
                 if (!incomingCall) {
                     showNotification('No incoming call to accept', 'error');
@@ -3310,6 +3409,13 @@
         
         async function loadUserSettings() {
             try {
+                // Only load settings if online
+                if (!isOnline) {
+                    updateSettingsUI();
+                    applyUserSettings();
+                    return;
+                }
+                
                 const settingsDoc = await db.collection('userSettings').doc(currentUser.uid).get();
                 
                 if (settingsDoc.exists) {
@@ -3874,7 +3980,7 @@
             const contactsList = document.getElementById('contactsList');
             const groupContactsList = document.getElementById('groupContactsList');
             
-            // If offline, show offline message
+            // If offline, show offline message - FEATURE 2
             if (!isOnline) {
                 const offlineMessage = '<div style="text-align: center; padding: 40px 20px; color: var(--text-secondary);"><i class="fas fa-wifi-slash" style="font-size: 48px; margin-bottom: 15px; opacity: 0.5;"></i><p>Contacts unavailable while offline</p><p class="subtext">Calls require internet connection</p></div>';
                 contactsList.innerHTML = offlineMessage;
@@ -4035,7 +4141,12 @@
             quickActionButtons.forEach(button => {
                 const textElement = button.querySelector('.quick-action-text');
                 if (textElement) {
-                    textElement.setAttribute('data-original-text', textElement.textContent);
+                    const originalText = textElement.textContent;
+                    textElement.setAttribute('data-original-text', originalText);
+                    // FEATURE 2: Initially add offline warning if offline
+                    if (!isOnline) {
+                        textElement.innerHTML = originalText + '<div class="offline-warning-text">(Offline)</div>';
+                    }
                 }
             });
             
@@ -4047,13 +4158,19 @@
                 'groupCallBtn',
                 'startCallBtn',
                 'createVoiceLinkBtn',
-                'createVideoLinkBtn'
+                'createVideoLinkBtn',
+                'addParticipantsBtn'
             ];
             
             callButtons.forEach(buttonId => {
                 const button = document.getElementById(buttonId);
                 if (button && button.title) {
                     button.setAttribute('data-original-title', button.title);
+                    // FEATURE 1: Initially disable if offline
+                    if (!isOnline) {
+                        button.disabled = true;
+                        button.classList.add('disabled-by-offline');
+                    }
                 }
             });
             
@@ -4122,7 +4239,7 @@
                 resetSettingsBtn.addEventListener('click', resetSettingsToDefault);
             }
             
-            // New call button
+            // New call button - FEATURE 1: Disabled when offline
             document.getElementById('newCallBtn').addEventListener('click', () => {
                 if (!isOnline) {
                     showNotification('Cannot start call while offline', 'error');
@@ -4134,7 +4251,7 @@
                 selectedContacts = [];
             });
             
-            // Quick action buttons
+            // Quick action buttons - FEATURE 1: Disabled when offline
             document.getElementById('voiceCallBtn').addEventListener('click', () => {
                 if (!isOnline) {
                     showNotification('Cannot start call while offline', 'error');
@@ -4197,7 +4314,7 @@
                 });
             });
             
-            // Start call button
+            // Start call button - FEATURE 1: Disabled when offline
             document.getElementById('startCallBtn').addEventListener('click', async () => {
                 if (!isOnline) {
                     showNotification('Cannot start call while offline', 'error');
@@ -4237,7 +4354,7 @@
                 selectedContacts = [];
             });
             
-            // Incoming call buttons
+            // Incoming call buttons - FEATURE 1: Disabled when offline
             document.getElementById('declineCallBtn').addEventListener('click', function() {
                 this.disabled = true;
                 declineCall();
@@ -4343,10 +4460,16 @@
                 callSidePanel.classList.add('collapsed');
             });
             
-            // Panel tabs
+            // Panel tabs - FEATURE 1: Disable some tabs when offline
             document.querySelectorAll('.panel-tab').forEach(tab => {
                 tab.addEventListener('click', function() {
                     const panelName = this.dataset.panel;
+                    
+                    // Check if offline and trying to access features that require internet
+                    if (!isOnline && panelName !== 'participants') {
+                        showNotification('This feature requires internet connection', 'error');
+                        return;
+                    }
                     
                     let isEnabled = true;
                     switch(panelName) {
@@ -4390,7 +4513,7 @@
                 });
             });
             
-            // Add participants button
+            // Add participants button - FEATURE 1: Disabled when offline
             document.getElementById('addParticipantsBtn').addEventListener('click', () => {
                 if (!isOnline) {
                     showNotification('Cannot add participants while offline', 'error');
@@ -4552,7 +4675,7 @@
                 missedCallsSection.classList.add('active');
                 
                 // Load missed calls if not already loaded
-                if (missedCallsList.children.length === 0) {
+                if (missedCallsList.children.length === 0 && isOnline) {
                     loadMissedCalls();
                 }
             });
@@ -4569,7 +4692,7 @@
                 groupCallsSection.classList.add('active');
                 
                 // Load group calls if not already loaded
-                if (groupCallsList.children.length === 0) {
+                if (groupCallsList.children.length === 0 && isOnline) {
                     loadGroupCalls();
                 }
             });

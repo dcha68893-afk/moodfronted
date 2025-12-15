@@ -36,7 +36,7 @@
     <script src="https://unpkg.com/wavesurfer.js@7"></script>
     
     <style>
-        /* OFFLINE STATUS INDICATOR */
+        /* OFFLINE STATUS INDICATOR - Enhanced */
         .offline-indicator {
             position: fixed;
             top: 10px;
@@ -51,6 +51,13 @@
             align-items: center;
             gap: 8px;
             box-shadow: 0 2px 10px rgba(0,0,0,0.2);
+            animation: pulse 2s infinite;
+        }
+        
+        @keyframes pulse {
+            0% { opacity: 0.8; }
+            50% { opacity: 1; }
+            100% { opacity: 0.8; }
         }
         
         .offline-indicator.active {
@@ -82,6 +89,7 @@
             justify-content: center;
             font-size: 10px;
             z-index: 2;
+            animation: spin 2s linear infinite;
         }
         
         .retry-upload-btn {
@@ -99,6 +107,24 @@
             background-color: #0073e6;
         }
         
+        /* Offline User Status */
+        .offline-user-avatar {
+            position: relative;
+        }
+        
+        .offline-user-avatar::after {
+            content: '';
+            position: absolute;
+            bottom: 0;
+            right: 0;
+            width: 10px;
+            height: 10px;
+            background-color: #ff9500;
+            border-radius: 50%;
+            border: 2px solid var(--bg-color);
+        }
+        
+        /* Existing CSS remains unchanged */
         * {
             margin: 0;
             padding: 0;
@@ -1888,6 +1914,21 @@
             font-size: 12px;
             margin-left: 10px;
         }
+        
+        /* Offline Cache Status */
+        .offline-cache-info {
+            background-color: var(--secondary-color);
+            padding: 10px 15px;
+            border-radius: 8px;
+            margin: 10px 20px;
+            font-size: 12px;
+            color: var(--text-secondary);
+            text-align: center;
+        }
+        
+        .offline-cache-info i {
+            margin-right: 5px;
+        }
     </style>
 </head>
 <body>
@@ -2063,6 +2104,11 @@
                     <div class="ai-suggestion" data-suggestion="Great day! 😊">Great day! 😊</div>
                     <div class="ai-suggestion" data-suggestion="Feeling blessed ✨">Feeling blessed ✨</div>
                     <div class="ai-suggestion" data-suggestion="What a view! 🌅">What a view! 🌅</div>
+                </div>
+                
+                <!-- Offline Posting Indicator -->
+                <div class="offline-cache-info" id="offlinePostingIndicator" style="display: none;">
+                    <i class="fas fa-wifi-slash"></i> You're offline. Status will be queued for upload when you're back online.
                 </div>
             </div>
             
@@ -2364,6 +2410,7 @@
         const screenshotOverlay = document.getElementById('screenshotOverlay');
         const pauseOverlay = document.getElementById('pauseOverlay');
         const offlineIndicator = document.getElementById('offlineIndicator');
+        const offlinePostingIndicator = document.getElementById('offlinePostingIndicator');
         
         // Initialize the application
         document.addEventListener('DOMContentLoaded', function() {
@@ -2380,7 +2427,7 @@
             setupOfflineSupport();
         });
         
-        // OFFLINE SUPPORT FUNCTIONS
+        // OFFLINE SUPPORT FUNCTIONS - Enhanced
         function setupOfflineSupport() {
             // Listen for online/offline events
             window.addEventListener('online', handleOnlineStatusChange);
@@ -2394,24 +2441,59 @@
             
             // Load pending uploads
             loadPendingUploads();
+            
+            // Check network status periodically
+            setInterval(() => {
+                handleOnlineStatusChange();
+            }, 5000);
         }
         
         function handleOnlineStatusChange() {
+            const wasOnline = isOnline;
             isOnline = navigator.onLine;
             
-            if (isOnline) {
-                // Hide offline indicator
+            if (isOnline && !wasOnline) {
+                // Just came online
                 offlineIndicator.classList.remove('active');
+                showNotification('You are back online. Syncing...', 'success');
                 
                 // Process pending uploads
                 processPendingUploads();
                 
                 // Sync any offline data
                 syncOfflineData();
-            } else {
-                // Show offline indicator
+                
+                // Reload statuses
+                loadStatusUpdates();
+                
+                // Update UI
+                updateOfflineIndicators();
+            } else if (!isOnline && wasOnline) {
+                // Just went offline
                 offlineIndicator.classList.add('active');
                 showNotification('You are offline. Statuses will be queued for upload.', 'warning');
+                
+                // Update UI
+                updateOfflineIndicators();
+            }
+            
+            // Update create status modal indicator
+            if (offlinePostingIndicator) {
+                offlinePostingIndicator.style.display = isOnline ? 'none' : 'block';
+            }
+        }
+        
+        function updateOfflineIndicators() {
+            // Update all offline indicators in the UI
+            const offlineTags = document.querySelectorAll('.offline-status-tag');
+            const pendingIndicators = document.querySelectorAll('.pending-upload-indicator');
+            
+            if (!isOnline) {
+                // Add offline indicator to section title
+                const sectionTitle = document.getElementById('sectionTitle');
+                if (sectionTitle && !sectionTitle.textContent.includes('(Offline)')) {
+                    sectionTitle.textContent += ' (Offline)';
+                }
             }
         }
         
@@ -2431,6 +2513,8 @@
                     
                     // Save filtered cache back
                     localStorage.setItem(`cachedStatuses_${currentUser?.uid}`, JSON.stringify(cachedStatuses));
+                    
+                    console.log(`Loaded ${cachedStatuses.length} cached statuses`);
                 } else {
                     cachedStatuses = [];
                 }
@@ -2442,8 +2526,16 @@
         
         function saveStatusToCache(status) {
             try {
-                // Add to cache
-                cachedStatuses.unshift(status);
+                // Check if status already exists in cache
+                const existingIndex = cachedStatuses.findIndex(s => s.id === status.id || s.tempId === status.tempId);
+                
+                if (existingIndex !== -1) {
+                    // Update existing cache entry
+                    cachedStatuses[existingIndex] = status;
+                } else {
+                    // Add to cache
+                    cachedStatuses.unshift(status);
+                }
                 
                 // Keep only last 100 statuses in cache
                 if (cachedStatuses.length > 100) {
@@ -2452,6 +2544,8 @@
                 
                 // Save to localStorage
                 localStorage.setItem(`cachedStatuses_${currentUser?.uid}`, JSON.stringify(cachedStatuses));
+                
+                console.log(`Saved status to cache. Total cached: ${cachedStatuses.length}`);
                 
                 // Update UI with cached status
                 if (!isOnline) {
@@ -2466,7 +2560,7 @@
             // Combine cached statuses with online statuses
             const allCombinedStatuses = [...allStatuses, ...cachedStatuses];
             
-            // Remove duplicates (by id)
+            // Remove duplicates (by id or tempId)
             const uniqueStatuses = [];
             const seenIds = new Set();
             
@@ -2681,6 +2775,14 @@
                     </div>
                 `;
             }
+            
+            // Show cache info
+            if (!isOnline && cachedStatuses.length > 0) {
+                const cacheInfo = document.createElement('div');
+                cacheInfo.className = 'offline-cache-info';
+                cacheInfo.innerHTML = `<i class="fas fa-database"></i> Showing ${cachedStatuses.length} cached status updates`;
+                recentStatusList.insertBefore(cacheInfo, recentStatusList.firstChild);
+            }
         }
         
         function loadPendingUploads() {
@@ -2688,6 +2790,7 @@
                 const pendingData = localStorage.getItem(`pendingUploads_${currentUser?.uid}`);
                 if (pendingData) {
                     pendingUploads = JSON.parse(pendingData);
+                    console.log(`Loaded ${pendingUploads.length} pending uploads`);
                 } else {
                     pendingUploads = [];
                 }
@@ -2720,6 +2823,8 @@
                     userAvatar: currentUser.photoURL || ''
                 });
                 
+                console.log(`Saved pending upload with tempId: ${tempId}`);
+                
                 return tempId;
             } catch (error) {
                 console.error('Error saving pending upload:', error);
@@ -2735,6 +2840,8 @@
                 // Also remove from cache
                 cachedStatuses = cachedStatuses.filter(status => status.tempId !== tempId);
                 localStorage.setItem(`cachedStatuses_${currentUser?.uid}`, JSON.stringify(cachedStatuses));
+                
+                console.log(`Removed pending upload: ${tempId}`);
             } catch (error) {
                 console.error('Error removing pending upload:', error);
             }
@@ -2744,13 +2851,15 @@
             if (isSyncing || pendingUploads.length === 0 || !isOnline) return;
             
             isSyncing = true;
-            showNotification('Syncing pending status updates...', 'success');
+            showNotification(`Syncing ${pendingUploads.length} pending status updates...`, 'success');
             
             // Process each pending upload
             for (let i = 0; i < pendingUploads.length; i++) {
                 const pendingStatus = pendingUploads[i];
                 
                 try {
+                    showNotification(`Uploading pending status ${i + 1} of ${pendingUploads.length}...`, 'success');
+                    
                     // Upload media files if needed
                     let mediaUrl = pendingStatus.content;
                     
@@ -2795,7 +2904,7 @@
                     // Remove from pending uploads
                     removePendingUpload(pendingStatus.tempId);
                     
-                    showNotification(`Uploaded pending status: ${pendingStatus.type}`, 'success');
+                    console.log(`Uploaded pending status: ${pendingStatus.type}`);
                     
                 } catch (error) {
                     console.error(`Error uploading pending status ${pendingStatus.tempId}:`, error);
@@ -2811,6 +2920,8 @@
             } else {
                 updateStatusListWithCache();
             }
+            
+            showNotification('Pending uploads synced!', 'success');
         }
         
         function retryPendingUpload(tempId) {
@@ -2898,40 +3009,128 @@
             
             // Sync poll votes
             syncOfflinePollVotes();
+            
+            // Sync answers
+            syncOfflineAnswers();
         }
         
         async function syncViewedStatuses() {
-            // Get offline viewed statuses
-            const offlineViewed = localStorage.getItem(`offlineViewed_${currentUser?.uid}`);
-            if (!offlineViewed) return;
-            
-            const viewedStatuses = JSON.parse(offlineViewed);
-            
-            // Sync each viewed status
-            for (const statusId of viewedStatuses) {
-                try {
-                    await db.collection('statuses')
-                        .doc(statusId)
-                        .update({
-                            viewers: firebase.firestore.FieldValue.arrayUnion(currentUser.uid)
-                        });
-                } catch (error) {
-                    console.error(`Error syncing viewed status ${statusId}:`, error);
+            try {
+                // Get offline viewed statuses
+                const offlineViewed = localStorage.getItem(`offlineViewed_${currentUser?.uid}`);
+                if (!offlineViewed) return;
+                
+                const viewedStatuses = JSON.parse(offlineViewed);
+                
+                if (viewedStatuses.length === 0) return;
+                
+                // Sync each viewed status
+                for (const statusId of viewedStatuses) {
+                    try {
+                        await db.collection('statuses')
+                            .doc(statusId)
+                            .update({
+                                viewers: firebase.firestore.FieldValue.arrayUnion(currentUser.uid)
+                            });
+                        console.log(`Synced viewed status: ${statusId}`);
+                    } catch (error) {
+                        console.error(`Error syncing viewed status ${statusId}:`, error);
+                    }
                 }
+                
+                // Clear offline viewed cache
+                localStorage.removeItem(`offlineViewed_${currentUser?.uid}`);
+                console.log('Synced offline viewed statuses');
+                
+            } catch (error) {
+                console.error('Error syncing viewed statuses:', error);
             }
-            
-            // Clear offline viewed cache
-            localStorage.removeItem(`offlineViewed_${currentUser?.uid}`);
         }
         
         function syncOfflineReactions() {
-            // Implementation for syncing offline reactions
-            // Similar to syncViewedStatuses but for reactions
+            try {
+                const offlineReactions = localStorage.getItem(`offlineReactions_${currentUser?.uid}`);
+                if (!offlineReactions) return;
+                
+                const reactions = JSON.parse(offlineReactions);
+                
+                Object.keys(reactions).forEach(async (statusId) => {
+                    try {
+                        await db.collection('statuses')
+                            .doc(statusId)
+                            .update({
+                                [`reactions.${currentUser.uid}`]: reactions[statusId]
+                            });
+                    } catch (error) {
+                        console.error(`Error syncing reaction for status ${statusId}:`, error);
+                    }
+                });
+                
+                localStorage.removeItem(`offlineReactions_${currentUser?.uid}`);
+                console.log('Synced offline reactions');
+                
+            } catch (error) {
+                console.error('Error syncing offline reactions:', error);
+            }
         }
         
         function syncOfflinePollVotes() {
-            // Implementation for syncing offline poll votes
-            // Similar to syncViewedStatuses but for poll votes
+            try {
+                const offlinePollVotes = localStorage.getItem(`offlinePollVotes_${currentUser?.uid}`);
+                if (!offlinePollVotes) return;
+                
+                const pollVotes = JSON.parse(offlinePollVotes);
+                
+                Object.keys(pollVotes).forEach(async (statusId) => {
+                    try {
+                        await db.collection('statuses')
+                            .doc(statusId)
+                            .update({
+                                [`pollVotes.${currentUser.uid}`]: pollVotes[statusId]
+                            });
+                    } catch (error) {
+                        console.error(`Error syncing poll vote for status ${statusId}:`, error);
+                    }
+                });
+                
+                localStorage.removeItem(`offlinePollVotes_${currentUser?.uid}`);
+                console.log('Synced offline poll votes');
+                
+            } catch (error) {
+                console.error('Error syncing offline poll votes:', error);
+            }
+        }
+        
+        function syncOfflineAnswers() {
+            try {
+                const offlineAnswers = localStorage.getItem(`offlineAnswers_${currentUser?.uid}`);
+                if (!offlineAnswers) return;
+                
+                const answers = JSON.parse(offlineAnswers);
+                
+                Object.keys(answers).forEach(async (statusId) => {
+                    try {
+                        await db.collection('statuses')
+                            .doc(statusId)
+                            .update({
+                                answers: firebase.firestore.FieldValue.arrayUnion({
+                                    userId: currentUser.uid,
+                                    userName: currentUser.displayName || 'User',
+                                    answer: answers[statusId],
+                                    timestamp: new Date()
+                                })
+                            });
+                    } catch (error) {
+                        console.error(`Error syncing answer for status ${statusId}:`, error);
+                    }
+                });
+                
+                localStorage.removeItem(`offlineAnswers_${currentUser?.uid}`);
+                console.log('Synced offline answers');
+                
+            } catch (error) {
+                console.error('Error syncing offline answers:', error);
+            }
         }
         
         // Modified saveStatusToFirestore function to handle offline mode
@@ -2982,6 +3181,14 @@
                 return statusRef.id;
             } catch (error) {
                 console.error('Error saving status:', error);
+                
+                // If online but save failed, save to pending uploads
+                if (isOnline) {
+                    const tempId = savePendingUpload(statusData);
+                    showNotification('Status queued for upload due to network error.', 'warning');
+                    return tempId;
+                }
+                
                 throw error;
             }
         }
@@ -3032,7 +3239,7 @@
             try {
                 if (!isOnline) {
                     // Load from cache when offline
-                    showNotification('Showing cached status updates', 'warning');
+                    console.log('Offline mode: Loading cached status updates');
                     updateStatusListWithCache();
                     return;
                 }
@@ -3081,6 +3288,8 @@
                     }
                 });
                 
+                console.log(`Loaded ${allStatuses.length} status updates from Firestore`);
+                
                 // Update my status item
                 updateMyStatusItem();
                 
@@ -3092,6 +3301,7 @@
                 
                 // Fallback to cache on error
                 if (!isOnline || error.code === 'unavailable') {
+                    console.log('Falling back to cached status updates');
                     showNotification('Using cached status updates', 'warning');
                     updateStatusListWithCache();
                 } else {
@@ -3100,6 +3310,12 @@
                 }
             }
         }
+        
+        // The rest of the existing code remains unchanged...
+        // All other functions (loadUserThemeAndMood, initializeApp, loadMutedUsers, etc.)
+        // should remain exactly as they were in the original code
+        
+        // ... [All other existing functions remain unchanged] ...
         
         function loadUserThemeAndMood() {
             try {
@@ -3148,6 +3364,11 @@
                     loadHighlightedStatuses();
                     loadUserGroups();
                     loadStatusUpdates();
+                    
+                    // Initialize offline support after user is loaded
+                    setTimeout(() => {
+                        setupOfflineSupport();
+                    }, 1000);
                 } else {
                     // Redirect to login page if not authenticated
                     window.location.href = 'index.html';
@@ -4926,6 +5147,11 @@
                     // Show AI suggestions
                     const aiSuggestions = document.getElementById('aiSuggestions');
                     if (aiSuggestions) aiSuggestions.style.display = 'block';
+                    
+                    // Show offline posting indicator if offline
+                    if (offlinePostingIndicator) {
+                        offlinePostingIndicator.style.display = isOnline ? 'none' : 'block';
+                    }
                 });
             }
             
@@ -4934,6 +5160,11 @@
             if (myStatusItem) {
                 myStatusItem.addEventListener('click', () => {
                     createStatusModal.classList.add('active');
+                    
+                    // Show offline posting indicator if offline
+                    if (offlinePostingIndicator) {
+                        offlinePostingIndicator.style.display = isOnline ? 'none' : 'block';
+                    }
                 });
             }
             
@@ -6065,6 +6296,11 @@
             // Hide AI suggestions
             const aiSuggestions = document.getElementById('aiSuggestions');
             if (aiSuggestions) aiSuggestions.style.display = 'none';
+            
+            // Hide offline posting indicator
+            if (offlinePostingIndicator) {
+                offlinePostingIndicator.style.display = 'none';
+            }
         }
     </script>
 </body>

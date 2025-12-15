@@ -21,6 +21,7 @@
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
     
     <style>
+        /* [All existing CSS remains exactly the same] */
         * {
             margin: 0;
             padding: 0;
@@ -916,6 +917,58 @@
             align-items: center;
             justify-content: center;
         }
+        
+        /* Global User Detection Status */
+        .user-status-indicator {
+            position: absolute;
+            top: 10px;
+            right: 200px;
+            background-color: var(--success-color);
+            color: white;
+            padding: 4px 10px;
+            border-radius: 12px;
+            font-size: 12px;
+            font-weight: 500;
+            display: flex;
+            align-items: center;
+            gap: 5px;
+        }
+        
+        .sync-status {
+            position: fixed;
+            top: 10px;
+            right: 10px;
+            background-color: var(--primary-color);
+            color: white;
+            padding: 6px 12px;
+            border-radius: 12px;
+            font-size: 12px;
+            font-weight: 500;
+            display: flex;
+            align-items: center;
+            gap: 5px;
+            z-index: 1001;
+            opacity: 0;
+            transform: translateY(-20px);
+            transition: all 0.3s;
+        }
+        
+        .sync-status.visible {
+            opacity: 1;
+            transform: translateY(0);
+        }
+        
+        .sync-status.syncing {
+            background-color: var(--warning-color);
+        }
+        
+        .sync-status.success {
+            background-color: var(--success-color);
+        }
+        
+        .sync-status.error {
+            background-color: var(--danger-color);
+        }
     </style>
 </head>
 <body>
@@ -927,6 +980,10 @@
                 <button class="add-friend-btn" id="addFriendBtn" title="Add Friend">
                     <i class="fas fa-user-plus"></i>
                 </button>
+                <div class="user-status-indicator" id="userStatusIndicator" style="display: none;">
+                    <i class="fas fa-user-circle"></i>
+                    <span id="userStatusText">Loading...</span>
+                </div>
                 <div class="offline-indicator" id="offlineIndicator" style="display: none;">
                     <i class="fas fa-wifi-slash"></i>
                     <span>Offline</span>
@@ -1079,6 +1136,12 @@
         <span id="notificationText">Operation completed successfully</span>
     </div>
     
+    <!-- Sync Status Indicator -->
+    <div class="sync-status" id="syncStatus">
+        <i class="fas fa-sync"></i>
+        <span id="syncStatusText">Syncing...</span>
+    </div>
+    
     <!-- Queue Indicator -->
     <div class="queue-indicator" id="queueIndicator" style="display: none;">
         <i class="fas fa-clock"></i>
@@ -1121,6 +1184,7 @@
         let actionQueue = [];
         let authCheckCompleted = false;
         let appInitialized = false;
+        let syncInProgress = false;
         
         // DOM Elements
         const addFriendModal = document.getElementById('addFriendModal');
@@ -1128,6 +1192,8 @@
         const notification = document.getElementById('notification');
         const offlineIndicator = document.getElementById('offlineIndicator');
         const queueIndicator = document.getElementById('queueIndicator');
+        const syncStatus = document.getElementById('syncStatus');
+        const userStatusIndicator = document.getElementById('userStatusIndicator');
         
         // Initialize the application
         document.addEventListener('DOMContentLoaded', async function() {
@@ -1150,7 +1216,7 @@
                 await initializeIndexedDB();
                 console.log('IndexedDB initialized');
                 
-                // Now check authentication
+                // Now check authentication - try multiple methods
                 await checkAuthentication();
                 
             } catch (error) {
@@ -1169,36 +1235,68 @@
             }
         });
         
-        // Check authentication status
+        // Enhanced global user detection from app.js
         async function checkAuthentication() {
             console.log('Checking authentication...');
             
-            // Set up auth state listener
+            // Method 1: Try to get user from global window object (app.js)
+            if (window.currentAppUser) {
+                console.log('Found user from global window object:', window.currentAppUser);
+                currentUser = window.currentAppUser;
+                authCheckCompleted = true;
+                await onUserDetected();
+                return;
+            }
+            
+            // Method 2: Try localStorage (used by many SPA auth systems)
+            const storedUser = localStorage.getItem('currentUser');
+            if (storedUser) {
+                try {
+                    const userData = JSON.parse(storedUser);
+                    console.log('Found user in localStorage:', userData);
+                    
+                    // Check if this is a Firebase user object
+                    if (userData.uid) {
+                        currentUser = {
+                            uid: userData.uid,
+                            email: userData.email,
+                            displayName: userData.displayName,
+                            photoURL: userData.photoURL,
+                            emailVerified: userData.emailVerified || false
+                        };
+                        
+                        authCheckCompleted = true;
+                        await onUserDetected();
+                        return;
+                    }
+                } catch (e) {
+                    console.log('Could not parse user from localStorage:', e);
+                }
+            }
+            
+            // Method 3: Standard Firebase auth listener (original method)
             return new Promise((resolve) => {
                 const unsubscribe = auth.onAuthStateChanged(async (user) => {
                     unsubscribe(); // Remove listener after first call
                     
                     if (user) {
-                        console.log('User authenticated:', user.uid, user.email);
+                        console.log('User authenticated via Firebase auth:', user.uid, user.email);
                         currentUser = user;
                         authCheckCompleted = true;
                         
-                        // Show user info in console
-                        console.log('User details:', {
+                        // Save user to localStorage for faster future detection
+                        localStorage.setItem('currentUser', JSON.stringify({
                             uid: user.uid,
                             email: user.email,
                             displayName: user.displayName,
-                            photoURL: user.photoURL
-                        });
+                            photoURL: user.photoURL,
+                            emailVerified: user.emailVerified
+                        }));
                         
-                        // Initialize app with user
-                        await initializeApp();
-                        
-                        // Update user's online status
-                        await updateUserOnlineStatus();
+                        await onUserDetected();
                         
                     } else {
-                        console.log('No user authenticated');
+                        console.log('No user authenticated via any method');
                         currentUser = null;
                         authCheckCompleted = true;
                         
@@ -1218,6 +1316,9 @@
                         document.getElementById('addFriendBtn').disabled = true;
                         document.getElementById('addFriendBtn').style.opacity = '0.5';
                         document.getElementById('addFriendBtn').style.cursor = 'not-allowed';
+                        
+                        // Hide user status indicator
+                        userStatusIndicator.style.display = 'none';
                     }
                     
                     resolve();
@@ -1235,7 +1336,7 @@
                         if (user) {
                             console.log('Found user via direct check:', user.uid);
                             currentUser = user;
-                            initializeApp();
+                            onUserDetected();
                         } else {
                             console.log('No user found after timeout');
                             document.getElementById('friendsSection').innerHTML = `
@@ -1251,8 +1352,60 @@
                         }
                         resolve();
                     }
-                }, 10000); // 10 second timeout
+                }, 5000); // 5 second timeout
             });
+        }
+        
+        // Handle user detection
+        async function onUserDetected() {
+            console.log('User detected:', currentUser.uid, currentUser.email);
+            
+            // Update UI with user status
+            updateUserStatusIndicator();
+            
+            // Show user info in console
+            console.log('User details:', {
+                uid: currentUser.uid,
+                email: currentUser.email,
+                displayName: currentUser.displayName,
+                photoURL: currentUser.photoURL
+            });
+            
+            // Immediately load cached data from IndexedDB
+            await loadFriendsFromIndexedDB();
+            
+            // Show cached friends immediately
+            updateFriendsList();
+            showNotification('Loaded cached friends data', 'success');
+            
+            // Initialize app with user
+            await initializeApp();
+            
+            // Update user's online status
+            await updateUserOnlineStatus();
+        }
+        
+        // Update user status indicator in UI
+        function updateUserStatusIndicator() {
+            if (!currentUser) {
+                userStatusIndicator.style.display = 'none';
+                return;
+            }
+            
+            userStatusIndicator.style.display = 'flex';
+            const userName = currentUser.displayName || currentUser.email || 'User';
+            userStatusIndicator.innerHTML = `
+                <i class="fas fa-user-circle"></i>
+                <span>${userName}</span>
+                ${!isOnline ? '<i class="fas fa-wifi-slash" style="margin-left: 5px;"></i>' : ''}
+            `;
+            
+            // Set color based on online status
+            if (isOnline) {
+                userStatusIndicator.style.backgroundColor = 'var(--success-color)';
+            } else {
+                userStatusIndicator.style.backgroundColor = 'var(--warning-color)';
+            }
         }
         
         // Update user's online status in Firebase
@@ -1296,45 +1449,32 @@
                 return;
             }
             
-            // Show loading state
-            document.getElementById('friendsSection').innerHTML = `
-                <div class="loading-placeholder" style="text-align: center; padding: 40px 20px; color: var(--text-secondary);">
-                    <div class="loading-spinner"></div>
-                    <p>Loading your friends...</p>
-                </div>
-            `;
-            
             try {
                 // Load friend tags
                 await loadFriendTags();
                 
                 // Check connectivity
                 if (isOnline) {
-                    console.log('Online mode: Loading from Firebase');
+                    console.log('Online mode: Syncing with Firebase');
                     
-                    // Load all data from Firebase
-                    await Promise.all([
-                        loadFriendsData(),
-                        loadFriendRequests(),
-                        loadBlockedUsers()
-                    ]);
+                    // Show sync status
+                    showSyncStatus('Syncing with server...', 'syncing');
                     
-                    // Save to IndexedDB for offline use
-                    await saveFriendsToIndexedDB();
-                    
-                    // Set up real-time listeners
-                    setupRealTimeListeners();
+                    // Sync all data from Firebase
+                    await syncWithFirebase();
                     
                     // Process any queued actions
                     await processActionQueue();
                     
+                    // Hide sync status after completion
+                    setTimeout(() => {
+                        hideSyncStatus();
+                    }, 2000);
+                    
                 } else {
-                    console.log('Offline mode: Loading from IndexedDB');
+                    console.log('Offline mode: Using cached data');
                     
-                    // Load from IndexedDB
-                    await loadFriendsFromIndexedDB();
-                    
-                    // Load queued actions
+                    // Load from IndexedDB (already loaded in onUserDetected)
                     await loadActionQueue();
                     
                     showNotification('Offline mode: Showing cached friends list', 'warning');
@@ -1364,6 +1504,53 @@
                     </div>
                 `;
             }
+        }
+        
+        // Sync with Firebase (online only)
+        async function syncWithFirebase() {
+            if (!currentUser || !isOnline) return;
+            
+            try {
+                console.log('Starting sync with Firebase...');
+                
+                // Load all data from Firebase
+                await Promise.all([
+                    loadFriendsData(),
+                    loadFriendRequests(),
+                    loadBlockedUsers()
+                ]);
+                
+                // Save to IndexedDB for offline use
+                await saveFriendsToIndexedDB();
+                
+                // Set up real-time listeners
+                setupRealTimeListeners();
+                
+                console.log('Sync completed successfully');
+                showSyncStatus('Sync completed', 'success');
+                
+            } catch (error) {
+                console.error('Error syncing with Firebase:', error);
+                showSyncStatus('Sync failed', 'error');
+                throw error;
+            }
+        }
+        
+        // Show sync status
+        function showSyncStatus(message, type = 'syncing') {
+            syncStatus.className = `sync-status visible ${type}`;
+            syncStatus.querySelector('#syncStatusText').textContent = message;
+            
+            // Auto-hide after 3 seconds for success/error
+            if (type === 'success' || type === 'error') {
+                setTimeout(() => {
+                    hideSyncStatus();
+                }, 3000);
+            }
+        }
+        
+        function hideSyncStatus() {
+            syncStatus.classList.remove('visible');
         }
         
         // IndexedDB initialization
@@ -1412,11 +1599,49 @@
                         queueStore.createIndex('status', 'status', { unique: false });
                         queueStore.createIndex('userId', 'userId', { unique: false });
                     }
+                    
+                    if (!db.objectStoreNames.contains('syncInfo')) {
+                        const syncStore = db.createObjectStore('syncInfo', { keyPath: 'userId' });
+                    }
                 };
             });
         }
         
-        // Action Queue Management
+        // Save sync timestamp
+        async function saveSyncTimestamp() {
+            if (!indexedDB || !currentUser) return;
+            
+            return new Promise((resolve, reject) => {
+                try {
+                    const transaction = indexedDB.transaction(['syncInfo'], 'readwrite');
+                    const syncStore = transaction.objectStore('syncInfo');
+                    
+                    const syncInfo = {
+                        userId: currentUser.uid,
+                        lastSync: new Date().toISOString(),
+                        friendsCount: friendsList.length,
+                        requestsCount: friendRequests.length
+                    };
+                    
+                    syncStore.put(syncInfo);
+                    
+                    transaction.oncomplete = () => {
+                        console.log('Sync timestamp saved');
+                        resolve();
+                    };
+                    
+                    transaction.onerror = (event) => {
+                        reject(event.target.error);
+                    };
+                    
+                } catch (error) {
+                    console.error('Error saving sync timestamp:', error);
+                    reject(error);
+                }
+            });
+        }
+        
+        // Action Queue Management (unchanged from your original code)
         async function addToActionQueue(action) {
             if (!indexedDB || !currentUser) return null;
             
@@ -1574,7 +1799,7 @@
             }
         }
         
-        // Process queued actions
+        // Process queued actions (unchanged from your original code)
         async function processQueuedFriendRequest(action) {
             const { toUserId, userData } = action.data;
             
@@ -1706,7 +1931,7 @@
             
             return new Promise((resolve, reject) => {
                 try {
-                    const transaction = indexedDB.transaction(['friends', 'friendRequests', 'blockedUsers'], 'readwrite');
+                    const transaction = indexedDB.transaction(['friends', 'friendRequests', 'blockedUsers', 'syncInfo'], 'readwrite');
                     
                     // Save friends
                     const friendsStore = transaction.objectStore('friends');
@@ -1748,6 +1973,16 @@
                         blockedStore.put(blockedData);
                     });
                     
+                    // Save sync timestamp
+                    const syncStore = transaction.objectStore('syncInfo');
+                    const syncInfo = {
+                        userId: currentUser.uid,
+                        lastSync: new Date().toISOString(),
+                        friendsCount: friendsList.length,
+                        requestsCount: friendRequests.length
+                    };
+                    syncStore.put(syncInfo);
+                    
                     transaction.oncomplete = () => {
                         console.log('Friends data saved to IndexedDB');
                         resolve();
@@ -1771,7 +2006,7 @@
             
             return new Promise((resolve, reject) => {
                 try {
-                    const transaction = indexedDB.transaction(['friends', 'friendRequests', 'blockedUsers'], 'readonly');
+                    const transaction = indexedDB.transaction(['friends', 'friendRequests', 'blockedUsers', 'syncInfo'], 'readonly');
                     
                     // Load friends
                     const friendsStore = transaction.objectStore('friends');
@@ -1791,9 +2026,14 @@
                     const blockedKeyRange = IDBKeyRange.only(currentUser.uid);
                     const blockedRequest = blockedIndex.getAll(blockedKeyRange);
                     
+                    // Load sync info
+                    const syncStore = transaction.objectStore('syncInfo');
+                    const syncRequest = syncStore.get(currentUser.uid);
+                    
                     let friendsLoaded = false;
                     let requestsLoaded = false;
                     let blockedLoaded = false;
+                    let syncLoaded = false;
                     
                     friendsRequest.onsuccess = (event) => {
                         const cachedFriends = event.target.result;
@@ -1822,7 +2062,7 @@
                         
                         friendsLoaded = true;
                         console.log('Loaded', friendsList.length, 'friends from IndexedDB');
-                        if (friendsLoaded && requestsLoaded && blockedLoaded) resolve();
+                        if (friendsLoaded && requestsLoaded && blockedLoaded && syncLoaded) resolve();
                     };
                     
                     requestsRequest.onsuccess = (event) => {
@@ -1844,7 +2084,7 @@
                         
                         requestsLoaded = true;
                         console.log('Loaded', friendRequests.length, 'friend requests from IndexedDB');
-                        if (friendsLoaded && requestsLoaded && blockedLoaded) resolve();
+                        if (friendsLoaded && requestsLoaded && blockedLoaded && syncLoaded) resolve();
                     };
                     
                     blockedRequest.onsuccess = (event) => {
@@ -1868,7 +2108,16 @@
                         
                         blockedLoaded = true;
                         console.log('Loaded', blockedUsers.length, 'blocked users from IndexedDB');
-                        if (friendsLoaded && requestsLoaded && blockedLoaded) resolve();
+                        if (friendsLoaded && requestsLoaded && blockedLoaded && syncLoaded) resolve();
+                    };
+                    
+                    syncRequest.onsuccess = (event) => {
+                        const syncInfo = event.target.result;
+                        if (syncInfo) {
+                            console.log('Last sync:', syncInfo.lastSync, 'Friends:', syncInfo.friendsCount);
+                        }
+                        syncLoaded = true;
+                        if (friendsLoaded && requestsLoaded && blockedLoaded && syncLoaded) resolve();
                     };
                     
                     transaction.onerror = (event) => {
@@ -1890,12 +2139,23 @@
                 isOnline = true;
                 console.log('App is online');
                 offlineIndicator.style.display = 'none';
+                updateUserStatusIndicator();
                 
                 // Sync data when coming back online
                 if (currentUser) {
-                    showNotification('Back online. Syncing data...', 'success');
-                    await syncOfflineData();
-                    await processActionQueue();
+                    showSyncStatus('Back online. Syncing data...', 'syncing');
+                    
+                    // Small delay to ensure network is stable
+                    setTimeout(async () => {
+                        try {
+                            await syncWithFirebase();
+                            await processActionQueue();
+                            showNotification('Data synced successfully', 'success');
+                        } catch (error) {
+                            console.error('Error syncing after coming online:', error);
+                            showNotification('Sync failed. Using cached data.', 'warning');
+                        }
+                    }, 1000);
                 }
             });
             
@@ -1903,6 +2163,7 @@
                 isOnline = false;
                 console.log('App is offline');
                 offlineIndicator.style.display = 'flex';
+                updateUserStatusIndicator();
                 
                 if (currentUser) {
                     showNotification('You are offline. Showing cached data.', 'warning');
@@ -1912,32 +2173,6 @@
             // Initial indicator
             if (!isOnline) {
                 offlineIndicator.style.display = 'flex';
-            }
-        }
-        
-        // Sync offline data when coming back online
-        async function syncOfflineData() {
-            if (!currentUser) return;
-            
-            try {
-                // Load fresh data from Firebase
-                await Promise.all([
-                    loadFriendsData(),
-                    loadFriendRequests(),
-                    loadBlockedUsers()
-                ]);
-                
-                // Save updated data to IndexedDB
-                await saveFriendsToIndexedDB();
-                
-                // Update UI
-                updateFriendsList();
-                
-                showNotification('Data synced successfully', 'success');
-                
-            } catch (error) {
-                console.error('Error syncing data:', error);
-                showNotification('Error syncing data', 'error');
             }
         }
         
@@ -3264,6 +3499,14 @@
                 }
             });
             
+            // Auto-sync when online (every 5 minutes)
+            setInterval(() => {
+                if (isOnline && currentUser && !syncInProgress) {
+                    console.log('Auto-syncing friends data...');
+                    syncWithFirebase();
+                }
+            }, 300000); // 5 minutes
+            
             // Refresh friends list every minute to update online status (only when online)
             setInterval(() => {
                 if (isOnline && currentUser && friendsList.length > 0) {
@@ -3784,11 +4027,15 @@
                     lastSeen: firebase.firestore.FieldValue.serverTimestamp()
                 }).then(() => {
                     auth.signOut().then(() => {
+                        // Clear localStorage
+                        localStorage.removeItem('currentUser');
                         window.location.href = 'index.html';
                     });
                 });
             } else {
                 auth.signOut().then(() => {
+                    // Clear localStorage
+                    localStorage.removeItem('currentUser');
                     window.location.href = 'index.html';
                 });
             }

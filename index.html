@@ -1824,7 +1824,7 @@
                                 <div class="flex items-center justify-between text-xs md:text-sm">
                                     <div class="flex items-center">
                                         <input id="remember-me" name="remember-me" type="checkbox" 
-                                               class="h-3 w-3 md:h-4 md:w-4 text-cyan-400 focus:ring-cyan-400 border-blue-700 rounded glass-effect">
+                                               class="h-3 w-3 md:h-4 md:w-4 text-cyan-400 focus:ring-cyan-400 border-blue-700 rounded glass-effect" checked>
                                         <label for="remember-me" class="ml-2 block text-blue-300">Remember me (Auto-login)</label>
                                     </div>
                                     <div>
@@ -1944,7 +1944,7 @@
                             <!-- Terms Agreement -->
                             <div class="flex items-start space-x-2 md:space-x-3 text-xs md:text-sm">
                                 <input type="checkbox" id="termsAgreement" required
-                                       class="h-3 w-3 md:h-4 md:w-4 text-cyan-400 focus:ring-cyan-400 border-blue-700 rounded glass-effect mt-0.5">
+                                       class="h-3 w-3 md:h-4 md:w-4 text-cyan-400 focus:ring-cyan-400 border-blue-700 rounded glass-effect mt-0.5" checked>
                                 <label for="termsAgreement" class="text-blue-300">
                                     I agree to the <a href="#" class="text-purple-400 hover:text-purple-300">Terms of Service</a> and <a href="#" class="text-purple-400 hover:text-purple-300">Privacy Policy</a>
                                 </label>
@@ -2183,7 +2183,7 @@
             async registerUser(email, password, displayName, userSelections = null) {
                 // Check if we're offline
                 if (!this.isOnline) {
-                    // Offline registration - store in IndexedDB and localStorage
+                    // Offline registration - store in localStorage only
                     return this.registerUserOffline(email, password, displayName, userSelections);
                 }
                 
@@ -2262,9 +2262,6 @@
                     // Enable auto-login by default
                     localStorage.setItem('kynecta-chat-auto-login', 'true');
                     
-                    // Also store in IndexedDB for offline access
-                    await window.kynectaChatApp?.offlineDB?.storeUserSession(userData);
-                    
                     console.log('✅ User registered successfully:', user.email);
                     return userCredential;
                     
@@ -2328,11 +2325,6 @@
                     localStorage.setItem('kynecta-chat-user', JSON.stringify(userData));
                     localStorage.setItem('kynecta-chat-selections', JSON.stringify(selections));
                     localStorage.setItem('kynecta-chat-auto-login', 'true');
-                    
-                    // Store in IndexedDB
-                    if (window.kynectaChatApp?.offlineDB) {
-                        await window.kynectaChatApp.offlineDB.storeUserSession(userData);
-                    }
                     
                     console.log('✅ User registered offline successfully:', email);
                     
@@ -2409,11 +2401,6 @@
                         localStorage.removeItem('kynecta-chat-email');
                     }
                     
-                    // Also store in IndexedDB for offline access
-                    if (window.kynectaChatApp?.offlineDB) {
-                        await window.kynectaChatApp.offlineDB.storeUserSession(localStorageUserData);
-                    }
-                    
                     console.log('✅ User logged in successfully:', user.email);
                     return userCredential;
                     
@@ -2432,20 +2419,12 @@
             
             async loginUserOffline(email, password, rememberMe = true) {
                 try {
-                    // Check IndexedDB first for cached user
-                    let userData = null;
-                    if (window.kynectaChatApp?.offlineDB) {
-                        userData = await window.kynectaChatApp.offlineDB.getUserByEmail(email);
-                    }
-                    
-                    // If not in IndexedDB, check localStorage
-                    if (!userData) {
-                        const savedUser = localStorage.getItem('kynecta-chat-user');
-                        if (savedUser) {
-                            const parsed = JSON.parse(savedUser);
-                            if (parsed.email === email) {
-                                userData = parsed;
-                            }
+                    // Check localStorage for cached user
+                    const savedUser = localStorage.getItem('kynecta-chat-user');
+                    if (savedUser) {
+                        const parsed = JSON.parse(savedUser);
+                        if (parsed.email === email) {
+                            userData = parsed;
                         }
                     }
                     
@@ -2470,11 +2449,6 @@
                         localStorage.setItem('kynecta-chat-email', email);
                     }
                     
-                    // Store in IndexedDB
-                    if (window.kynectaChatApp?.offlineDB) {
-                        await window.kynectaChatApp.offlineDB.storeUserSession(userData);
-                    }
-                    
                     console.log('✅ User logged in offline successfully:', email);
                     
                     return {
@@ -2493,20 +2467,29 @@
 
             async quickLogin() {
                 try {
-                    // Check if user is already authenticated with Firebase
-                    const currentUser = this.auth.currentUser;
-                    if (currentUser) {
-                        console.log('✅ Quick login successful via Firebase:', currentUser.email);
-                        return currentUser;
-                    }
-                    
-                    // Try to get saved user data from localStorage
+                    // First check localStorage for saved user (works offline)
                     const savedUser = localStorage.getItem('kynecta-chat-user');
                     if (!savedUser) {
                         throw new Error('No saved user found');
                     }
                     
                     const userData = JSON.parse(savedUser);
+                    
+                    // If we're online and Firebase is initialized, try to refresh the Firebase session
+                    if (this.isOnline && this.isInitialized) {
+                        try {
+                            // Check if user is already authenticated with Firebase
+                            const currentUser = this.auth.currentUser;
+                            if (!currentUser) {
+                                // Try to sign in with stored credentials
+                                // This would require storing password securely (not recommended)
+                                // For now, just use the localStorage data
+                                console.log('Using localStorage data for quick login');
+                            }
+                        } catch (firebaseError) {
+                            console.warn('Firebase quick login failed, using localStorage:', firebaseError);
+                        }
+                    }
                     
                     console.log('✅ Quick login using localStorage data:', userData.email);
                     
@@ -2617,7 +2600,6 @@
                 
                 // Offline support
                 this.isOnline = navigator.onLine;
-                this.offlineDB = null;
                 
                 // === INSTANT QUICK LOGIN CHECK - RUNS IMMEDIATELY ===
                 this.instantQuickLoginCheck();
@@ -2680,9 +2662,6 @@
             }
 
             init() {
-                // Initialize offline database
-                this.initOfflineDatabase();
-                
                 // Setup network detection
                 this.setupNetworkDetection();
                 
@@ -2711,19 +2690,6 @@
                 this.initFirebaseBackground();
                 
                 console.log('💬 kynecta Chat app initialized with offline support');
-            }
-            
-            /**
-             * Initialize IndexedDB for offline storage
-             */
-            async initOfflineDatabase() {
-                try {
-                    this.offlineDB = new OfflineDatabase();
-                    await this.offlineDB.init();
-                    console.log('💾 Offline database initialized');
-                } catch (error) {
-                    console.error('❌ Failed to initialize offline database:', error);
-                }
             }
             
             /**
@@ -3194,10 +3160,7 @@
                 localStorage.removeItem('kynecta-chat-user');
                 localStorage.removeItem('kynecta-chat-auto-login');
                 
-                // Clear IndexedDB
-                if (this.offlineDB) {
-                    this.offlineDB.clearUserSessions();
-                }
+                console.log('Quick login hidden and localStorage cleared');
             }
 
             /**
@@ -4057,211 +4020,6 @@
                         window.location.href = `chat.html?auth=${encodeURIComponent(authToken)}`;
                     }, 500);
                 }, 1000);
-            }
-        }
-        
-        /**
-         * Offline Database Class for IndexedDB
-         */
-        class OfflineDatabase {
-            constructor() {
-                this.db = null;
-                this.dbName = 'kynectaChatDB';
-                this.dbVersion = 1;
-            }
-            
-            async init() {
-                return new Promise((resolve, reject) => {
-                    if (!window.indexedDB) {
-                        console.warn('IndexedDB not supported, using localStorage only');
-                        resolve();
-                        return;
-                    }
-                    
-                    const request = indexedDB.open(this.dbName, this.dbVersion);
-                    
-                    request.onerror = (event) => {
-                        console.error('IndexedDB error:', event.target.error);
-                        reject(event.target.error);
-                    };
-                    
-                    request.onsuccess = (event) => {
-                        this.db = event.target.result;
-                        console.log('IndexedDB opened successfully');
-                        resolve();
-                    };
-                    
-                    request.onupgradeneeded = (event) => {
-                        const db = event.target.result;
-                        
-                        // Create user sessions store
-                        if (!db.objectStoreNames.contains('userSessions')) {
-                            const userStore = db.createObjectStore('userSessions', { keyPath: 'uid' });
-                            userStore.createIndex('email', 'email', { unique: true });
-                            userStore.createIndex('lastLogin', 'lastLogin', { unique: false });
-                        }
-                        
-                        // Create app data store
-                        if (!db.objectStoreNames.contains('appData')) {
-                            const appStore = db.createObjectStore('appData', { keyPath: 'key' });
-                        }
-                    };
-                });
-            }
-            
-            async storeUserSession(userData) {
-                return new Promise((resolve, reject) => {
-                    if (!this.db) {
-                        resolve();
-                        return;
-                    }
-                    
-                    const transaction = this.db.transaction(['userSessions'], 'readwrite');
-                    const store = transaction.objectStore('userSessions');
-                    
-                    const request = store.put({
-                        ...userData,
-                        storedAt: new Date().toISOString()
-                    });
-                    
-                    request.onsuccess = () => {
-                        console.log('User session stored in IndexedDB');
-                        resolve();
-                    };
-                    
-                    request.onerror = (event) => {
-                        console.error('Error storing user session:', event.target.error);
-                        reject(event.target.error);
-                    };
-                });
-            }
-            
-            async getUserByEmail(email) {
-                return new Promise((resolve, reject) => {
-                    if (!this.db) {
-                        resolve(null);
-                        return;
-                    }
-                    
-                    const transaction = this.db.transaction(['userSessions'], 'readonly');
-                    const store = transaction.objectStore('userSessions');
-                    const index = store.index('email');
-                    
-                    const request = index.get(email);
-                    
-                    request.onsuccess = (event) => {
-                        resolve(event.target.result || null);
-                    };
-                    
-                    request.onerror = (event) => {
-                        console.error('Error getting user by email:', event.target.error);
-                        reject(event.target.error);
-                    };
-                });
-            }
-            
-            async getLatestUserSession() {
-                return new Promise((resolve, reject) => {
-                    if (!this.db) {
-                        resolve(null);
-                        return;
-                    }
-                    
-                    const transaction = this.db.transaction(['userSessions'], 'readonly');
-                    const store = transaction.objectStore('userSessions');
-                    const index = store.index('lastLogin');
-                    
-                    const request = index.openCursor(null, 'prev');
-                    let latestUser = null;
-                    
-                    request.onsuccess = (event) => {
-                        const cursor = event.target.result;
-                        if (cursor) {
-                            latestUser = cursor.value;
-                        }
-                        resolve(latestUser);
-                    };
-                    
-                    request.onerror = (event) => {
-                        console.error('Error getting latest user session:', event.target.error);
-                        reject(event.target.error);
-                    };
-                });
-            }
-            
-            async clearUserSessions() {
-                return new Promise((resolve, reject) => {
-                    if (!this.db) {
-                        resolve();
-                        return;
-                    }
-                    
-                    const transaction = this.db.transaction(['userSessions'], 'readwrite');
-                    const store = transaction.objectStore('userSessions');
-                    
-                    const request = store.clear();
-                    
-                    request.onsuccess = () => {
-                        console.log('User sessions cleared from IndexedDB');
-                        resolve();
-                    };
-                    
-                    request.onerror = (event) => {
-                        console.error('Error clearing user sessions:', event.target.error);
-                        reject(event.target.error);
-                    };
-                });
-            }
-            
-            async storeAppData(key, data) {
-                return new Promise((resolve, reject) => {
-                    if (!this.db) {
-                        resolve();
-                        return;
-                    }
-                    
-                    const transaction = this.db.transaction(['appData'], 'readwrite');
-                    const store = transaction.objectStore('appData');
-                    
-                    const request = store.put({
-                        key: key,
-                        data: data,
-                        updatedAt: new Date().toISOString()
-                    });
-                    
-                    request.onsuccess = () => {
-                        console.log(`App data stored for key: ${key}`);
-                        resolve();
-                    };
-                    
-                    request.onerror = (event) => {
-                        console.error('Error storing app data:', event.target.error);
-                        reject(event.target.error);
-                    };
-                });
-            }
-            
-            async getAppData(key) {
-                return new Promise((resolve, reject) => {
-                    if (!this.db) {
-                        resolve(null);
-                        return;
-                    }
-                    
-                    const transaction = this.db.transaction(['appData'], 'readonly');
-                    const store = transaction.objectStore('appData');
-                    
-                    const request = store.get(key);
-                    
-                    request.onsuccess = (event) => {
-                        resolve(event.target.result?.data || null);
-                    };
-                    
-                    request.onerror = (event) => {
-                        console.error('Error getting app data:', event.target.error);
-                        reject(event.target.error);
-                    };
-                });
             }
         }
 

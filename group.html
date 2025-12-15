@@ -91,6 +91,8 @@
             justify-content: space-between;
             align-items: center;
             height: var(--header-height);
+            background: linear-gradient(135deg, var(--kynecta-blue), var(--kynecta-dark-blue));
+            color: white;
         }
         
         .user-profile {
@@ -104,7 +106,7 @@
             width: 40px;
             height: 40px;
             border-radius: 50%;
-            background-color: var(--secondary-color);
+            background-color: rgba(255, 255, 255, 0.2);
             display: flex;
             align-items: center;
             justify-content: center;
@@ -123,11 +125,12 @@
         .user-name {
             font-weight: 600;
             font-size: 16px;
+            color: white;
         }
         
         .user-status {
             font-size: 12px;
-            color: var(--text-secondary);
+            color: rgba(255, 255, 255, 0.8);
             display: flex;
             align-items: center;
             gap: 5px;
@@ -147,7 +150,7 @@
         }
         
         .sidebar-action-btn {
-            background: none;
+            background: rgba(255, 255, 255, 0.2);
             border: none;
             width: 40px;
             height: 40px;
@@ -156,14 +159,13 @@
             align-items: center;
             justify-content: center;
             cursor: pointer;
-            color: var(--text-secondary);
+            color: white;
             font-size: 20px;
             transition: background-color 0.2s;
         }
         
         .sidebar-action-btn:hover {
-            background-color: var(--secondary-color);
-            color: var(--kynecta-blue);
+            background-color: rgba(255, 255, 255, 0.3);
         }
         
         .search-container {
@@ -366,6 +368,8 @@
             align-items: center;
             justify-content: space-between;
             height: var(--header-height);
+            background: linear-gradient(135deg, var(--kynecta-blue), var(--kynecta-dark-blue));
+            color: white;
         }
         
         .group-header-info {
@@ -378,7 +382,7 @@
             width: 40px;
             height: 40px;
             border-radius: 50%;
-            background-color: var(--secondary-color);
+            background-color: rgba(255, 255, 255, 0.2);
             display: flex;
             align-items: center;
             justify-content: center;
@@ -429,10 +433,11 @@
             white-space: nowrap;
             overflow: hidden;
             text-overflow: ellipsis;
+            color: white;
         }
         
         .group-header-details p {
-            color: var(--text-secondary);
+            color: rgba(255, 255, 255, 0.8);
             font-size: 13px;
             white-space: nowrap;
             overflow: hidden;
@@ -445,10 +450,10 @@
         }
         
         .header-action-btn {
-            background: none;
+            background: rgba(255, 255, 255, 0.2);
             border: none;
             font-size: 20px;
-            color: var(--text-secondary);
+            color: white;
             cursor: pointer;
             width: 40px;
             height: 40px;
@@ -460,8 +465,7 @@
         }
         
         .header-action-btn:hover {
-            background-color: var(--secondary-color);
-            color: var(--kynecta-blue);
+            background-color: rgba(255, 255, 255, 0.3);
         }
         
         /* Chat Area */
@@ -710,6 +714,7 @@
             display: flex;
             justify-content: space-between;
             align-items: center;
+            background: linear-gradient(135deg, var(--kynecta-blue), var(--kynecta-dark-blue));
         }
         
         .details-header h3 {
@@ -717,7 +722,7 @@
         }
         
         .close-details-btn {
-            background: none;
+            background: rgba(255, 255, 255, 0.2);
             border: none;
             font-size: 20px;
             color: white;
@@ -732,7 +737,7 @@
         }
         
         .close-details-btn:hover {
-            background-color: rgba(255, 255, 255, 0.1);
+            background-color: rgba(255, 255, 255, 0.3);
         }
         
         .details-section {
@@ -1754,13 +1759,37 @@
         .gap-20 {
             gap: 20px;
         }
+        
+        /* Offline Message Styling */
+        .offline-message-indicator {
+            position: absolute;
+            top: -8px;
+            right: -8px;
+            background-color: var(--warning-color);
+            color: white;
+            font-size: 10px;
+            padding: 2px 6px;
+            border-radius: 10px;
+            z-index: 1;
+        }
+        
+        .offline-queue-badge {
+            position: absolute;
+            top: 5px;
+            right: 5px;
+            background-color: var(--warning-color);
+            color: white;
+            font-size: 10px;
+            padding: 2px 6px;
+            border-radius: 10px;
+        }
     </style>
 </head>
 <body>
     <!-- Offline Indicator -->
     <div id="offlineIndicator" class="offline-indicator hidden">
         <i class="fas fa-wifi-slash"></i>
-        <span>Offline Mode</span>
+        <span>Offline Mode - Using Cached Data</span>
     </div>
     
     <div class="app-container">
@@ -3022,6 +3051,12 @@
                     badgeHTML = `<div class="group-badge">📅</div>`;
                 }
                 
+                // Add offline indicator if group has pending messages
+                const pendingMessages = offlineMessagesQueue.filter(msg => msg.groupId === group.id);
+                if (pendingMessages.length > 0) {
+                    badgeHTML += `<div class="offline-queue-badge">${pendingMessages.length}</div>`;
+                }
+                
                 let lastMessagePreview = group.lastMessage;
                 if (group.lastMessageSender && group.lastMessage !== 'No messages yet') {
                     lastMessagePreview = `${group.lastMessageSender}: ${group.lastMessage}`;
@@ -3338,6 +3373,10 @@
                         `;
                 }
                 
+                // Add offline indicator if message is from offline queue
+                const offlineIndicatorHTML = message._offline ? 
+                    '<div class="offline-message-indicator"><i class="fas fa-clock"></i> Offline</div>' : '';
+                
                 // Add reactions
                 let reactionsHTML = '';
                 if (message.reactions && Object.keys(message.reactions).length > 0) {
@@ -3362,6 +3401,7 @@
                 messagesHTML += `
                     <div class="message-wrapper ${isSent ? 'sent' : 'received'}" data-message-id="${message.id}">
                         <div class="message-bubble ${isSent ? 'sent' : 'received'}" style="position: relative;">
+                            ${offlineIndicatorHTML}
                             ${starredIndicator}
                             ${!isSent && message.type !== 'system' ? `<div class="message-sender">${senderName}</div>` : ''}
                             ${messageContent}
@@ -3535,6 +3575,9 @@
                     }
                     
                     showNotification('Message saved offline. Will send when online.', 'warning');
+                    
+                    // Update groups list UI
+                    updateGroupInList(currentGroup.id);
                 }
                 
                 // Clear input
@@ -3550,6 +3593,22 @@
             } catch (error) {
                 console.error('Error sending message:', error);
                 showNotification('Error sending message', 'error');
+            }
+        }
+
+        function updateGroupInList(groupId) {
+            const groupItem = document.querySelector(`.group-item[data-group-id="${groupId}"]`);
+            if (groupItem) {
+                const pendingMessages = offlineMessagesQueue.filter(msg => msg.groupId === groupId);
+                if (pendingMessages.length > 0) {
+                    let badge = groupItem.querySelector('.offline-queue-badge');
+                    if (!badge) {
+                        badge = document.createElement('div');
+                        badge.className = 'offline-queue-badge';
+                        groupItem.querySelector('.group-avatar').appendChild(badge);
+                    }
+                    badge.textContent = pendingMessages.length;
+                }
             }
         }
 

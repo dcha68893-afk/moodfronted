@@ -1,5 +1,6 @@
 // app.js - Application Shell & Tab Controller for Kynecta
 // Manages the single-page application shell and tab visibility
+// Enhanced with Firebase auth, offline detection, and global state management
 
 // ============================================================================
 // CONFIGURATION
@@ -58,13 +59,14 @@ let isSidebarOpen = true;
 // FIREBASE AUTH STATE
 let currentUser = null;
 let firebaseInitialized = false;
+let authStateRestored = false;
 
 // NETWORK CONNECTIVITY STATE
 let isOnline = navigator.onLine;
 let syncQueue = []; // Queue for messages to sync when online
 
 // ============================================================================
-// FIREBASE INITIALIZATION (RUNS ALWAYS - NO ONLINE/OFFLINE CONDITION)
+// FIREBASE INITIALIZATION (ALWAYS RUNS - NO ONLINE/OFFLINE CONDITION)
 // ============================================================================
 
 function initializeFirebase() {
@@ -98,44 +100,28 @@ function initializeFirebase() {
     // Get auth instance
     const auth = firebase.auth();
     
-    // SET PERSISTENCE TO LOCAL (CRITICAL FOR OFFLINE AUTH)
+    // CRITICAL: Set persistence to LOCAL for offline login
     auth.setPersistence(firebase.auth.Auth.Persistence.LOCAL)
       .then(() => {
         console.log('Auth persistence set to LOCAL');
         
+        // Try to restore user from localStorage first (fastest)
+        restoreUserFromLocalStorage();
+        
         // Set up auth state observer (RUNS WITHOUT ONLINE/OFFLINE CONDITION)
         auth.onAuthStateChanged((user) => {
-          console.log('Auth state changed:', user ? 'User logged in' : 'No user');
-          currentUser = user;
+          console.log('Firebase auth state changed:', user ? 'User logged in' : 'No user');
+          handleAuthStateChange(user);
           
-          // Expose user globally for other modules
-          window.APP_AUTH = {
-            currentUser: user,
-            isAuthenticated: !!user,
-            userId: user ? user.uid : null
-          };
+          // Mark auth as restored
+          authStateRestored = true;
           
-          // Broadcast auth change to other components
-          const event = new CustomEvent('auth-state-change', {
-            detail: { user: user, isAuthenticated: !!user }
-          });
-          window.dispatchEvent(event);
-          
-          // Store in localStorage for cross-tab communication
-          try {
-            localStorage.setItem('kynecta-auth-state', JSON.stringify({
-              user: user ? {
-                uid: user.uid,
-                email: user.email,
-                displayName: user.displayName
-              } : null,
-              timestamp: new Date().toISOString()
-            }));
-          } catch (e) {
-            console.warn('Could not store auth state in localStorage:', e);
-          }
+          // Broadcast that auth is ready
+          broadcastAuthReady();
         }, (error) => {
           console.error('Auth state observer error:', error);
+          authStateRestored = true;
+          broadcastAuthReady();
         });
         
         firebaseInitialized = true;
@@ -145,13 +131,154 @@ function initializeFirebase() {
         console.error('Error setting auth persistence:', error);
         // Even if persistence fails, continue with default behavior
         firebaseInitialized = true;
+        authStateRestored = true;
+        broadcastAuthReady();
       });
 
   } catch (error) {
     console.error('Firebase initialization error:', error);
     // Don't prevent app from loading if Firebase fails
     firebaseInitialized = true;
+    authStateRestored = true;
+    broadcastAuthReady();
   }
+}
+
+// Restore user from localStorage (fastest method)
+function restoreUserFromLocalStorage() {
+  try {
+    const storedAuth = localStorage.getItem('kynecta-auth-state');
+    if (storedAuth) {
+      const authData = JSON.parse(storedAuth);
+      if (authData.user && authData.user.uid) {
+        console.log('Restoring user from localStorage:', authData.user.uid);
+        
+        // Create a minimal user object
+        const restoredUser = {
+          uid: authData.user.uid,
+          email: authData.user.email || '',
+          displayName: authData.user.displayName || 'User',
+          emailVerified: authData.user.emailVerified || false,
+          photoURL: authData.user.photoURL || null
+        };
+        
+        // Update global state immediately
+        currentUser = restoredUser;
+        updateGlobalAuthState(restoredUser);
+        
+        // Notify other components
+        broadcastAuthChange(restoredUser);
+      }
+    }
+  } catch (error) {
+    console.warn('Could not restore user from localStorage:', error);
+  }
+}
+
+// Handle auth state changes
+function handleAuthStateChange(user) {
+  currentUser = user;
+  
+  // Update global auth state
+  updateGlobalAuthState(user);
+  
+  // Broadcast auth change to other components
+  broadcastAuthChange(user);
+  
+  // Store in localStorage for persistence and cross-tab communication
+  storeAuthInLocalStorage(user);
+  
+  // If user logged in and we're online, update user data
+  if (user && isOnline) {
+    updateUserProfile(user);
+  }
+}
+
+// Update global auth state
+function updateGlobalAuthState(user) {
+  window.APP_AUTH = {
+    currentUser: user,
+    isAuthenticated: !!user,
+    userId: user ? user.uid : null,
+    userEmail: user ? user.email : null,
+    displayName: user ? user.displayName : null,
+    photoURL: user ? user.photoURL : null,
+    isAuthReady: authStateRestored,
+    timestamp: new Date().toISOString()
+  };
+  
+  // Dispatch custom event for other components
+  const event = new CustomEvent('auth-state-change', {
+    detail: { 
+      user: user, 
+      isAuthenticated: !!user,
+      isAuthReady: authStateRestored 
+    }
+  });
+  window.dispatchEvent(event);
+}
+
+// Broadcast auth change to other tabs/pages
+function broadcastAuthChange(user) {
+  const authData = {
+    type: 'auth-state',
+    user: user ? {
+      uid: user.uid,
+      email: user.email,
+      displayName: user.displayName,
+      photoURL: user.photoURL,
+      emailVerified: user.emailVerified
+    } : null,
+    isAuthenticated: !!user,
+    timestamp: new Date().toISOString()
+  };
+  
+  try {
+    localStorage.setItem('kynecta-auth-state', JSON.stringify(authData));
+    
+    // Dispatch storage event for other tabs/windows
+    window.dispatchEvent(new StorageEvent('storage', {
+      key: 'kynecta-auth-state',
+      newValue: JSON.stringify(authData)
+    }));
+  } catch (e) {
+    console.warn('Could not broadcast auth state to localStorage:', e);
+  }
+}
+
+// Store auth in localStorage
+function storeAuthInLocalStorage(user) {
+  try {
+    localStorage.setItem('kynecta-auth-state', JSON.stringify({
+      user: user ? {
+        uid: user.uid,
+        email: user.email,
+        displayName: user.displayName,
+        photoURL: user.photoURL,
+        emailVerified: user.emailVerified
+      } : null,
+      timestamp: new Date().toISOString()
+    }));
+  } catch (e) {
+    console.warn('Could not store auth state in localStorage:', e);
+  }
+}
+
+// Update user profile (when online)
+function updateUserProfile(user) {
+  // This can be extended to fetch additional user data from Firestore
+  console.log('User profile updated:', user.uid);
+}
+
+// Broadcast that auth is ready
+function broadcastAuthReady() {
+  const event = new CustomEvent('auth-ready', {
+    detail: { 
+      isReady: true,
+      timestamp: new Date().toISOString() 
+    }
+  });
+  window.dispatchEvent(event);
 }
 
 // ============================================================================
@@ -170,6 +297,9 @@ function initializeNetworkDetection() {
   
   // Initialize IndexedDB for queued messages
   initializeMessageQueue();
+  
+  // Start periodic sync check
+  startSyncMonitor();
 }
 
 // Handle online event
@@ -180,7 +310,7 @@ function handleOnline() {
   // Broadcast network change to other files
   broadcastNetworkChange(true);
   
-  // BACKGROUND SYNC HOOK - Trigger sync when coming online
+  // BACKGROUND SYNC: Trigger sync when coming online
   triggerBackgroundSync();
 }
 
@@ -197,23 +327,74 @@ function handleOffline() {
 function updateNetworkStatus(online) {
   isOnline = online;
   
-  // Expose globally for other modules (SEPARATE FROM AUTH)
+  // Expose globally for other modules
   window.APP_CONNECTIVITY = {
     isOnline: isOnline,
-    isOffline: !isOnline, // Add explicit isOffline flag
-    lastChange: new Date().toISOString()
+    isOffline: !isOnline,
+    lastChange: new Date().toISOString(),
+    syncQueueSize: syncQueue.length
   };
   
   // Dispatch custom event for other components
   const event = new CustomEvent('network-status-change', {
-    detail: { isOnline: isOnline, isOffline: !isOnline }
+    detail: { 
+      isOnline: isOnline, 
+      isOffline: !isOnline 
+    }
   });
   window.dispatchEvent(event);
+  
+  // Update UI based on network status
+  updateNetworkUI(online);
+}
+
+// Update UI based on network status
+function updateNetworkUI(online) {
+  // Remove existing network indicators
+  const existingIndicator = document.getElementById('network-status-indicator');
+  if (existingIndicator) {
+    existingIndicator.remove();
+  }
+  
+  if (!online) {
+    // Create offline indicator
+    const indicator = document.createElement('div');
+    indicator.id = 'network-status-indicator';
+    indicator.innerHTML = `
+      <div class="offline-indicator">
+        <span>⚠️ You're offline. Messages will be sent when you reconnect.</span>
+      </div>
+    `;
+    
+    // Add styles
+    const style = document.createElement('style');
+    style.textContent = `
+      .offline-indicator {
+        background: #f59e0b;
+        color: white;
+        padding: 8px 16px;
+        text-align: center;
+        font-size: 14px;
+        position: fixed;
+        top: 0;
+        left: 0;
+        right: 0;
+        z-index: 10000;
+        animation: slideDown 0.3s ease-out;
+      }
+      @keyframes slideDown {
+        from { transform: translateY(-100%); }
+        to { transform: translateY(0); }
+      }
+    `;
+    document.head.appendChild(style);
+    
+    document.body.prepend(indicator);
+  }
 }
 
 // Broadcast network changes
 function broadcastNetworkChange(isOnline) {
-  // Use localStorage as a cross-tab communication channel
   const status = {
     type: 'network-status',
     isOnline: isOnline,
@@ -234,7 +415,18 @@ function broadcastNetworkChange(isOnline) {
   }
 }
 
-// BACKGROUND SYNC HOOK - Placeholder for syncing queued messages
+// Start periodic sync monitor
+function startSyncMonitor() {
+  // Check for queued items every 30 seconds
+  setInterval(() => {
+    if (isOnline && syncQueue.length > 0) {
+      console.log('Periodic sync check - processing queue');
+      processQueuedMessages();
+    }
+  }, 30000);
+}
+
+// BACKGROUND SYNC: Process queued messages
 function triggerBackgroundSync() {
   console.log('Background sync triggered - app is online');
   
@@ -256,7 +448,7 @@ function initializeMessageQueue() {
     return;
   }
   
-  const request = indexedDB.open('KynectaMessageQueue', 1);
+  const request = indexedDB.open('KynectaMessageQueue', 2);
   
   request.onerror = function(event) {
     console.error('Failed to open IndexedDB:', event.target.error);
@@ -264,9 +456,10 @@ function initializeMessageQueue() {
   
   request.onupgradeneeded = function(event) {
     const db = event.target.result;
+    const oldVersion = event.oldVersion;
     
     // Create object store for queued messages
-    if (!db.objectStoreNames.contains('messages')) {
+    if (oldVersion < 1 || !db.objectStoreNames.contains('messages')) {
       const store = db.createObjectStore('messages', {
         keyPath: 'id',
         autoIncrement: true
@@ -275,20 +468,65 @@ function initializeMessageQueue() {
       // Create indexes for efficient querying
       store.createIndex('status', 'status', { unique: false });
       store.createIndex('timestamp', 'timestamp', { unique: false });
+      store.createIndex('type', 'type', { unique: false });
+    }
+    
+    // Create object store for other actions (status updates, friend requests, etc.)
+    if (oldVersion < 2 || !db.objectStoreNames.contains('actions')) {
+      const actionStore = db.createObjectStore('actions', {
+        keyPath: 'id',
+        autoIncrement: true
+      });
+      
+      actionStore.createIndex('status', 'status', { unique: false });
+      actionStore.createIndex('type', 'type', { unique: false });
+      actionStore.createIndex('timestamp', 'timestamp', { unique: false });
     }
   };
   
   request.onsuccess = function(event) {
     console.log('Message queue database initialized');
+    
+    // Load existing queue into memory
+    loadQueueIntoMemory(event.target.result);
   };
 }
 
-// Queue message for offline sync
-function queueMessageForSync(messageData) {
-  if (!window.indexedDB) return Promise.resolve(false);
+// Load existing queue into memory
+function loadQueueIntoMemory(db) {
+  const transaction = db.transaction(['messages', 'actions'], 'readonly');
+  const messageStore = transaction.objectStore('messages');
+  const actionStore = transaction.objectStore('actions');
+  
+  // Load messages
+  messageStore.getAll().onsuccess = function(event) {
+    const messages = event.target.result;
+    messages.forEach(msg => {
+      if (msg.status === 'pending') {
+        syncQueue.push(msg);
+      }
+    });
+    console.log(`Loaded ${messages.length} messages from queue`);
+  };
+  
+  // Load actions
+  actionStore.getAll().onsuccess = function(event) {
+    const actions = event.target.result;
+    actions.forEach(action => {
+      if (action.status === 'pending') {
+        syncQueue.push(action);
+      }
+    });
+    console.log(`Loaded ${actions.length} actions from queue`);
+  };
+}
+
+// Queue any action for offline sync
+function queueForSync(data, type = 'message') {
+  if (!window.indexedDB) return Promise.resolve({ queued: false, offline: true });
   
   return new Promise((resolve, reject) => {
-    const request = indexedDB.open('KynectaMessageQueue', 1);
+    const request = indexedDB.open('KynectaMessageQueue', 2);
     
     request.onerror = function(event) {
       console.error('Failed to open IndexedDB for queuing:', event.target.error);
@@ -297,32 +535,49 @@ function queueMessageForSync(messageData) {
     
     request.onsuccess = function(event) {
       const db = event.target.result;
-      const transaction = db.transaction(['messages'], 'readwrite');
-      const store = transaction.objectStore('messages');
+      const storeName = type === 'message' ? 'messages' : 'actions';
       
-      const message = {
-        ...messageData,
+      if (!db.objectStoreNames.contains(storeName)) {
+        reject(new Error(`Store ${storeName} not found`));
+        return;
+      }
+      
+      const transaction = db.transaction([storeName], 'readwrite');
+      const store = transaction.objectStore(storeName);
+      
+      const item = {
+        ...data,
+        type: type,
         status: 'pending',
         timestamp: new Date().toISOString(),
+        userId: currentUser ? currentUser.uid : 'anonymous',
         attempts: 0
       };
       
-      const addRequest = store.add(message);
+      const addRequest = store.add(item);
       
       addRequest.onsuccess = function() {
-        console.log('Message queued for sync:', messageData);
+        console.log(`${type} queued for sync:`, data);
         
         // Add to in-memory queue
         syncQueue.push({
           id: addRequest.result,
-          ...message
+          ...item
         });
         
-        resolve(true);
+        // Update global connectivity state
+        window.APP_CONNECTIVITY.syncQueueSize = syncQueue.length;
+        
+        resolve({ 
+          queued: true, 
+          offline: true, 
+          id: addRequest.result,
+          message: `${type} queued for when online`
+        });
       };
       
       addRequest.onerror = function(event) {
-        console.error('Failed to queue message:', event.target.error);
+        console.error(`Failed to queue ${type}:`, event.target.error);
         reject(event.target.error);
       };
     };
@@ -331,9 +586,11 @@ function queueMessageForSync(messageData) {
 
 // Process queued messages when online
 function processQueuedMessages() {
-  if (!isOnline || !window.indexedDB) return;
+  if (!isOnline || !window.indexedDB || syncQueue.length === 0) return;
   
-  const request = indexedDB.open('KynectaMessageQueue', 1);
+  console.log(`Processing ${syncQueue.length} queued items...`);
+  
+  const request = indexedDB.open('KynectaMessageQueue', 2);
   
   request.onerror = function(event) {
     console.error('Failed to open IndexedDB for processing:', event.target.error);
@@ -341,113 +598,248 @@ function processQueuedMessages() {
   
   request.onsuccess = function(event) {
     const db = event.target.result;
-    const transaction = db.transaction(['messages'], 'readonly');
-    const store = transaction.objectStore('messages');
-    const index = store.index('status');
-    const range = IDBKeyRange.only('pending');
     
-    const getRequest = index.getAll(range);
+    // Process messages
+    processStoreQueue(db, 'messages');
     
-    getRequest.onsuccess = function() {
-      const messages = getRequest.result;
-      
-      if (messages.length === 0) {
-        console.log('No pending messages to sync');
-        return;
-      }
-      
-      console.log(`Processing ${messages.length} queued messages`);
-      
-      // Process each message
-      messages.forEach(message => {
-        sendQueuedMessage(message, db);
-      });
-    };
+    // Process actions
+    processStoreQueue(db, 'actions');
   };
 }
 
-// Send a queued message
-function sendQueuedMessage(message, db) {
-  // This function should be customized based on your actual API
-  // For now, we'll simulate sending and update status
+// Process queue for a specific store
+function processStoreQueue(db, storeName) {
+  const transaction = db.transaction([storeName], 'readonly');
+  const store = transaction.objectStore(storeName);
+  const index = store.index('status');
+  const range = IDBKeyRange.only('pending');
   
-  console.log('Sending queued message:', message);
+  const getRequest = index.getAll(range);
   
-  // Simulate API call
-  setTimeout(() => {
-    // Update message status in IndexedDB
-    const transaction = db.transaction(['messages'], 'readwrite');
-    const store = transaction.objectStore('messages');
+  getRequest.onsuccess = function() {
+    const items = getRequest.result;
     
-    const updatedMessage = {
-      ...message,
-      status: 'sent',
-      sentAt: new Date().toISOString(),
-      attempts: (message.attempts || 0) + 1
-    };
+    if (items.length === 0) {
+      console.log(`No pending ${storeName} to sync`);
+      return;
+    }
     
-    const updateRequest = store.put(updatedMessage);
+    console.log(`Processing ${items.length} queued ${storeName}`);
     
-    updateRequest.onsuccess = function() {
-      console.log('Queued message sent successfully:', message.id);
-      
-      // Remove from in-memory queue
-      syncQueue = syncQueue.filter(item => item.id !== message.id);
-    };
-    
-    updateRequest.onerror = function(event) {
-      console.error('Failed to update message status:', event.target.error);
-    };
-  }, 1000);
+    // Process each item
+    items.forEach(item => {
+      sendQueuedItem(item, db, storeName);
+    });
+  };
 }
 
-// Safe API call wrapper with better error handling
-function safeApiCall(apiFunction, ...args) {
+// Send a queued item
+function sendQueuedItem(item, db, storeName) {
+  // Determine how to send based on type
+  const sendFunction = getSendFunctionForType(item.type || storeName);
+  
+  if (!sendFunction) {
+    console.warn(`No send function for type: ${item.type}`);
+    markItemAsFailed(item.id, db, storeName, 'No send function');
+    return;
+  }
+  
+  // Increment attempts
+  item.attempts = (item.attempts || 0) + 1;
+  
+  if (item.attempts > 5) {
+    // Too many attempts, mark as failed
+    markItemAsFailed(item.id, db, storeName, 'Max attempts exceeded');
+    return;
+  }
+  
+  // Try to send
+  sendFunction(item)
+    .then(result => {
+      // Success - mark as sent
+      markItemAsSent(item.id, db, storeName);
+    })
+    .catch(error => {
+      console.error(`Failed to send ${item.type}:`, error);
+      
+      // Update attempt count
+      updateItemAttempts(item.id, db, storeName, item.attempts);
+    });
+}
+
+// Get appropriate send function based on type
+function getSendFunctionForType(type) {
+  // These functions should be defined in respective modules
+  switch(type) {
+    case 'message':
+    case 'messages':
+      return window.sendQueuedMessage || defaultSendMessage;
+    case 'status':
+      return window.sendQueuedStatus || defaultSendStatus;
+    case 'friend_request':
+      return window.sendQueuedFriendRequest || defaultSendFriendRequest;
+    case 'call_log':
+      return window.sendQueuedCallLog || defaultSendCallLog;
+    default:
+      return defaultSendItem;
+  }
+}
+
+// Default send functions (to be overridden by specific modules)
+function defaultSendMessage(message) {
+  console.log('Sending queued message:', message);
+  // This should be implemented in chat.js
+  return Promise.resolve();
+}
+
+function defaultSendStatus(status) {
+  console.log('Sending queued status:', status);
+  // This should be implemented in status.js
+  return Promise.resolve();
+}
+
+function defaultSendFriendRequest(request) {
+  console.log('Sending queued friend request:', request);
+  // This should be implemented in friends.js
+  return Promise.resolve();
+}
+
+function defaultSendCallLog(callLog) {
+  console.log('Sending queued call log:', callLog);
+  // This should be implemented in calls.js
+  return Promise.resolve();
+}
+
+function defaultSendItem(item) {
+  console.log('Sending queued item:', item);
+  return Promise.resolve();
+}
+
+// Mark item as sent
+function markItemAsSent(itemId, db, storeName) {
+  const transaction = db.transaction([storeName], 'readwrite');
+  const store = transaction.objectStore(storeName);
+  
+  const getRequest = store.get(itemId);
+  
+  getRequest.onsuccess = function() {
+    const item = getRequest.result;
+    if (item) {
+      item.status = 'sent';
+      item.sentAt = new Date().toISOString();
+      
+      const updateRequest = store.put(item);
+      updateRequest.onsuccess = function() {
+        console.log(`${storeName} ${itemId} marked as sent`);
+        
+        // Remove from in-memory queue
+        syncQueue = syncQueue.filter(item => item.id !== itemId);
+        window.APP_CONNECTIVITY.syncQueueSize = syncQueue.length;
+      };
+    }
+  };
+}
+
+// Mark item as failed
+function markItemAsFailed(itemId, db, storeName, reason) {
+  const transaction = db.transaction([storeName], 'readwrite');
+  const store = transaction.objectStore(storeName);
+  
+  const getRequest = store.get(itemId);
+  
+  getRequest.onsuccess = function() {
+    const item = getRequest.result;
+    if (item) {
+      item.status = 'failed';
+      item.failedAt = new Date().toISOString();
+      item.failureReason = reason;
+      
+      store.put(item);
+      
+      // Remove from in-memory queue
+      syncQueue = syncQueue.filter(item => item.id !== itemId);
+      window.APP_CONNECTIVITY.syncQueueSize = syncQueue.length;
+    }
+  };
+}
+
+// Update item attempt count
+function updateItemAttempts(itemId, db, storeName, attempts) {
+  const transaction = db.transaction([storeName], 'readwrite');
+  const store = transaction.objectStore(storeName);
+  
+  const getRequest = store.get(itemId);
+  
+  getRequest.onsuccess = function() {
+    const item = getRequest.result;
+    if (item) {
+      item.attempts = attempts;
+      store.put(item);
+    }
+  };
+}
+
+// Safe API call wrapper with offline queuing
+function safeApiCall(apiFunction, data, type = 'action') {
   return new Promise((resolve, reject) => {
     if (!isOnline) {
       console.warn('API call prevented: offline mode');
       
-      // Queue the call data if possible
-      if (apiFunction.name && args.length > 0) {
-        queueMessageForSync({
-          api: apiFunction.name,
-          args: args,
-          timestamp: new Date().toISOString()
-        }).then(() => {
-          resolve({
-            success: false,
-            offline: true,
-            queued: true,
-            message: 'Action queued for when online'
-          });
-        }).catch(() => {
-          resolve({
-            success: false,
-            offline: true,
-            queued: false,
-            message: 'Offline mode: action not queued'
-          });
+      // Queue the data for later sync
+      queueForSync({
+        apiFunction: apiFunction.name || 'anonymous',
+        data: data,
+        originalCall: new Date().toISOString()
+      }, type)
+      .then(queueResult => {
+        resolve({
+          success: false,
+          offline: true,
+          queued: queueResult.queued,
+          message: 'Action queued for when online',
+          queueId: queueResult.id
         });
-      } else {
+      })
+      .catch(error => {
         resolve({
           success: false,
           offline: true,
           queued: false,
-          message: 'Offline mode'
+          message: 'Offline mode: action not queued',
+          error: error.message
         });
-      }
+      });
       return;
     }
     
-    // Proceed with normal API call
+    // Online - proceed with API call
     try {
-      const result = apiFunction(...args);
+      const result = apiFunction(data);
       
-      // Handle both promises and direct returns
       if (result && typeof result.then === 'function') {
         result.then(resolve).catch(error => {
           console.error('API call failed:', error);
-          reject(error);
+          
+          // If error is network-related, try to queue
+          if (!navigator.onLine || error.message.includes('network') || error.message.includes('offline')) {
+            queueForSync({
+              apiFunction: apiFunction.name || 'anonymous',
+              data: data,
+              error: error.message,
+              originalCall: new Date().toISOString()
+            }, type)
+            .then(queueResult => {
+              resolve({
+                success: false,
+                offline: true,
+                queued: queueResult.queued,
+                message: 'Network error - action queued for retry',
+                queueId: queueResult.id
+              });
+            });
+          } else {
+            reject(error);
+          }
         });
       } else {
         resolve(result);
@@ -459,43 +851,206 @@ function safeApiCall(apiFunction, ...args) {
   });
 }
 
-// Clear message queue (for testing/debugging)
-function clearMessageQueue() {
-  if (!window.indexedDB) return Promise.resolve(false);
+// ============================================================================
+// GLOBAL STATE EXPOSURE TO ALL PAGES
+// ============================================================================
+
+function exposeGlobalStateToIframes() {
+  // Create global state object if it doesn't exist
+  if (!window.KYNECTA_GLOBAL) {
+    window.KYNECTA_GLOBAL = {};
+  }
   
-  return new Promise((resolve, reject) => {
-    const request = indexedDB.open('KynectaMessageQueue', 1);
-    
-    request.onerror = function(event) {
-      reject(event.target.error);
-    };
-    
-    request.onsuccess = function(event) {
-      const db = event.target.result;
-      const transaction = db.transaction(['messages'], 'readwrite');
-      const store = transaction.objectStore('messages');
-      const clearRequest = store.clear();
+  // Expose auth state
+  window.KYNECTA_GLOBAL.auth = {
+    getCurrentUser: () => currentUser,
+    getUserId: () => currentUser ? currentUser.uid : null,
+    isAuthenticated: () => !!currentUser,
+    getUserEmail: () => currentUser ? currentUser.email : null,
+    getDisplayName: () => currentUser ? currentUser.displayName : null,
+    getPhotoURL: () => currentUser ? currentUser.photoURL : null,
+    isAuthReady: () => authStateRestored,
+    waitForAuth: () => {
+      return new Promise((resolve) => {
+        if (authStateRestored) {
+          resolve(currentUser);
+        } else {
+          const listener = () => {
+            window.removeEventListener('auth-ready', listener);
+            resolve(currentUser);
+          };
+          window.addEventListener('auth-ready', listener);
+        }
+      });
+    }
+  };
+  
+  // Expose network state
+  window.KYNECTA_GLOBAL.network = {
+    isOnline: () => isOnline,
+    isOffline: () => !isOnline,
+    getSyncQueueSize: () => syncQueue.length,
+    waitForOnline: () => {
+      return new Promise((resolve) => {
+        if (isOnline) {
+          resolve();
+        } else {
+          const listener = () => {
+            window.removeEventListener('network-status-change', listener);
+            resolve();
+          };
+          window.addEventListener('network-status-change', (e) => {
+            if (e.detail.isOnline) {
+              listener();
+            }
+          });
+        }
+      });
+    }
+  };
+  
+  // Expose sync functions
+  window.KYNECTA_GLOBAL.sync = {
+    queueForSync: queueForSync,
+    safeApiCall: safeApiCall,
+    processQueuedMessages: processQueuedMessages,
+    getQueuedItems: () => [...syncQueue]
+  };
+  
+  // Also expose directly to window for backward compatibility
+  window.getCurrentUser = () => currentUser;
+  window.getCurrentUserId = () => currentUser ? currentUser.uid : null;
+  window.isAuthenticated = () => !!currentUser;
+  window.isOnline = () => isOnline;
+  window.isOffline = () => !isOnline;
+}
+
+// ============================================================================
+// CROSS-PAGE COMMUNICATION
+// ============================================================================
+
+function setupCrossPageCommunication() {
+  // Listen for messages from iframes
+  window.addEventListener('message', handleIframeMessage);
+  
+  // Listen for storage events from other tabs
+  window.addEventListener('storage', handleStorageEvent);
+  
+  // Broadcast initial state to all iframes
+  setTimeout(broadcastStateToIframes, 1000);
+}
+
+function handleIframeMessage(event) {
+  // Only accept messages from our own domain
+  if (event.origin !== window.location.origin) return;
+  
+  const { type, data } = event.data || {};
+  
+  switch(type) {
+    case 'get-auth-state':
+      // Send auth state back to iframe
+      event.source.postMessage({
+        type: 'auth-state',
+        data: {
+          user: currentUser,
+          isAuthenticated: !!currentUser,
+          isAuthReady: authStateRestored
+        }
+      }, event.origin);
+      break;
       
-      clearRequest.onsuccess = function() {
-        syncQueue = [];
-        console.log('Message queue cleared');
-        resolve(true);
-      };
+    case 'get-network-state':
+      // Send network state back to iframe
+      event.source.postMessage({
+        type: 'network-state',
+        data: {
+          isOnline: isOnline,
+          isOffline: !isOnline
+        }
+      }, event.origin);
+      break;
       
-      clearRequest.onerror = function(event) {
-        reject(event.target.error);
-      };
-    };
+    case 'queue-action':
+      // Queue action from iframe
+      if (data) {
+        queueForSync(data, data.type || 'action')
+          .then(result => {
+            event.source.postMessage({
+              type: 'action-queued',
+              data: result
+            }, event.origin);
+          });
+      }
+      break;
+  }
+}
+
+function handleStorageEvent(event) {
+  // Handle auth state changes from other tabs
+  if (event.key === 'kynecta-auth-state' && event.newValue) {
+    try {
+      const authState = JSON.parse(event.newValue);
+      if (authState.type === 'auth-state') {
+        // Update local state if different
+        if (authState.user && (!currentUser || authState.user.uid !== currentUser.uid)) {
+          console.log('Auth state updated from other tab');
+          currentUser = authState.user;
+          updateGlobalAuthState(currentUser);
+        }
+      }
+    } catch (e) {
+      console.warn('Failed to parse auth state from storage:', e);
+    }
+  }
+  
+  // Handle network state changes from other tabs
+  if (event.key === 'kynecta-network-status' && event.newValue) {
+    try {
+      const networkState = JSON.parse(event.newValue);
+      if (networkState.type === 'network-status') {
+        if (isOnline !== networkState.isOnline) {
+          console.log('Network state updated from other tab');
+          updateNetworkStatus(networkState.isOnline);
+        }
+      }
+    } catch (e) {
+      console.warn('Failed to parse network state from storage:', e);
+    }
+  }
+}
+
+function broadcastStateToIframes() {
+  // This function would broadcast state to all iframes
+  // In a real implementation, you would get all iframes and post messages
+  const iframes = document.querySelectorAll('iframe');
+  iframes.forEach(iframe => {
+    try {
+      iframe.contentWindow.postMessage({
+        type: 'auth-state-update',
+        data: {
+          user: currentUser,
+          isAuthenticated: !!currentUser,
+          isAuthReady: authStateRestored
+        }
+      }, window.location.origin);
+      
+      iframe.contentWindow.postMessage({
+        type: 'network-state-update',
+        data: {
+          isOnline: isOnline,
+          isOffline: !isOnline
+        }
+      }, window.location.origin);
+    } catch (e) {
+      // Silent fail - iframe might not be ready or from different origin
+    }
   });
 }
 
 // ============================================================================
-// APPLICATION SHELL FUNCTIONS
+// APPLICATION SHELL FUNCTIONS (UNCHANGED)
 // ============================================================================
 
-/**
- * Toggle sidebar visibility on mobile
- */
 window.toggleSidebar = function() {
   const sidebar = document.querySelector('.sidebar');
   if (sidebar) {
@@ -504,9 +1059,6 @@ window.toggleSidebar = function() {
   }
 };
 
-/**
- * Load an HTML page into the content area without reloading
- */
 window.loadPage = function(page) {
   const contentArea = document.querySelector(APP_CONFIG.contentArea);
   if (!contentArea) {
@@ -521,31 +1073,22 @@ window.loadPage = function(page) {
     })
     .then(html => {
       contentArea.innerHTML = html;
-      // Initialize any scripts in the loaded content
       initializeLoadedContent(contentArea);
     })
     .catch(err => console.error("Load error:", err));
 };
 
-/**
- * Initialize scripts and components in loaded content
- */
 function initializeLoadedContent(container) {
-  // Find and execute inline scripts
   const scripts = container.querySelectorAll('script');
   scripts.forEach(script => {
     if (script.src) {
-      // Load external script
       const newScript = document.createElement('script');
       newScript.src = script.src;
       newScript.async = false;
       document.head.appendChild(newScript);
     } else if (script.textContent.trim()) {
       try {
-        // Execute inline script
-        const scriptContent = script.textContent;
-        // Wrap in try-catch to avoid scope issues
-        const executeScript = new Function(scriptContent);
+        const executeScript = new Function(script.textContent);
         executeScript();
       } catch (error) {
         console.error('Error executing inline script:', error);
@@ -555,12 +1098,9 @@ function initializeLoadedContent(container) {
 }
 
 // ============================================================================
-// TAB MANAGEMENT
+// TAB MANAGEMENT (UNCHANGED)
 // ============================================================================
 
-/**
- * Switch to a specific tab
- */
 function switchTab(tabName) {
   if (currentTab === tabName || isLoading) return;
   
@@ -570,19 +1110,14 @@ function switchTab(tabName) {
     return;
   }
   
-  // Check if this is an external tab that needs loading
   if (config.isExternal && EXTERNAL_TABS[tabName]) {
     loadExternalTab(tabName, EXTERNAL_TABS[tabName]);
     return;
   }
   
-  // For internal tabs (already in DOM)
   showTab(tabName);
 }
 
-/**
- * Show an internal tab (already present in DOM)
- */
 function showTab(tabName) {
   const config = TAB_CONFIG[tabName];
   if (!config) {
@@ -590,37 +1125,27 @@ function showTab(tabName) {
     return;
   }
   
-  // Hide all tabs
   hideAllTabs();
   
-  // Show the selected tab
   const tabContainer = document.querySelector(config.container);
   if (tabContainer) {
     tabContainer.classList.remove('hidden');
     tabContainer.classList.add('active');
     
-    // Update current tab
     currentTab = tabName;
     
-    // Update active tab UI
     updateActiveTabUI(tabName);
-    
-    // Update chat area visibility based on tab
     updateChatAreaVisibility(tabName);
     
     console.log(`Switched to tab: ${tabName}`);
   } else {
     console.error(`Tab container not found: ${config.container} for tab: ${tabName}`);
-    // Fallback: try to load as external tab if available
     if (EXTERNAL_TABS[tabName]) {
       loadExternalTab(tabName, EXTERNAL_TABS[tabName]);
     }
   }
 }
 
-/**
- * Load an external tab from separate HTML file
- */
 async function loadExternalTab(tabName, htmlFile) {
   if (isLoading) return;
   isLoading = true;
@@ -633,39 +1158,31 @@ async function loadExternalTab(tabName, htmlFile) {
     
     const html = await response.text();
     
-    // Get or create external container
     let container = document.getElementById('externalTabContainer');
     if (!container) {
       container = document.createElement('div');
       container.id = 'externalTabContainer';
       container.className = 'tab-panel';
       
-      // Find tab panels container
       const tabPanels = document.querySelector('.tab-panels') || document.querySelector('#content-area');
       if (tabPanels) {
         tabPanels.appendChild(container);
       } else {
-        // Fallback to body
         document.body.appendChild(container);
       }
     }
     
-    // Hide all tabs before showing new content
     hideAllTabs();
     
-    // Extract and insert content
     container.innerHTML = extractBodyContent(html);
     container.classList.remove('hidden');
     container.classList.add('active');
     
-    // Update UI
     updateActiveTabUI(tabName);
     updateChatAreaVisibility(tabName);
     
-    // Initialize scripts in loaded content
     initializeExternalContent(container);
     
-    // Update current tab
     currentTab = tabName;
     
     console.log(`Loaded external tab: ${tabName} from ${htmlFile}`);
@@ -674,7 +1191,6 @@ async function loadExternalTab(tabName, htmlFile) {
     console.error(`Error loading ${tabName}:`, error);
     showError(`Failed to load ${tabName}. Please try again.`);
     
-    // Fallback to internal tab if available
     if (TAB_CONFIG[tabName] && !TAB_CONFIG[tabName].isExternal) {
       showTab(tabName);
     }
@@ -684,24 +1200,18 @@ async function loadExternalTab(tabName, htmlFile) {
   }
 }
 
-/**
- * Hide all tab panels
- */
 function hideAllTabs() {
-  // Hide all .tab-panel elements
   document.querySelectorAll('.tab-panel').forEach(panel => {
     panel.classList.add('hidden');
     panel.classList.remove('active');
   });
   
-  // Also hide external container if it exists
   const externalContainer = document.getElementById('externalTabContainer');
   if (externalContainer) {
     externalContainer.classList.add('hidden');
     externalContainer.classList.remove('active');
   }
   
-  // Hide any content in main content area that's not a tab panel
   const contentArea = document.querySelector(APP_CONFIG.contentArea);
   if (contentArea) {
     const nonTabChildren = Array.from(contentArea.children).filter(child => 
@@ -713,17 +1223,12 @@ function hideAllTabs() {
   }
 }
 
-/**
- * Update the active tab UI in the sidebar
- */
 function updateActiveTabUI(tabName) {
-  // Reset all tab icons
   document.querySelectorAll('.nav-icon[data-tab]').forEach(icon => {
     icon.classList.remove('text-white', 'bg-purple-700', 'active');
     icon.classList.add('text-gray-400', 'hover:text-white', 'hover:bg-gray-800');
   });
   
-  // Activate current tab icon
   const activeIcon = document.querySelector(`[data-tab="${tabName}"]`);
   if (activeIcon) {
     activeIcon.classList.remove('text-gray-400', 'hover:text-white', 'hover:bg-gray-800');
@@ -731,9 +1236,6 @@ function updateActiveTabUI(tabName) {
   }
 }
 
-/**
- * Update chat area visibility based on active tab
- */
 function updateChatAreaVisibility(tabName) {
   const chatArea = document.getElementById('chatArea');
   const chatListContainer = document.getElementById('chatListContainer');
@@ -744,9 +1246,7 @@ function updateChatAreaVisibility(tabName) {
   
   const isMobile = window.innerWidth < 768;
   
-  // Show/hide based on tab
   if (tabName === 'chats' || tabName === 'groups') {
-    // Check if we're viewing a specific chat or the list
     const hasActiveChat = chatHeader && !chatHeader.classList.contains('hidden');
     
     if (hasActiveChat) {
@@ -766,7 +1266,6 @@ function updateChatAreaVisibility(tabName) {
       if (chatHeader) chatHeader.classList.add('hidden');
     }
   } else {
-    // For non-chat tabs, hide chat area
     chatArea.classList.add('hidden');
     chatListContainer.classList.remove('hidden');
     
@@ -774,7 +1273,6 @@ function updateChatAreaVisibility(tabName) {
     if (chatHeader) chatHeader.classList.add('hidden');
   }
   
-  // Update chat title for groups tab
   if (tabName === 'groups') {
     const chatTitle = document.getElementById('chatTitle');
     if (chatTitle) chatTitle.textContent = 'Group Chat';
@@ -782,45 +1280,33 @@ function updateChatAreaVisibility(tabName) {
 }
 
 // ============================================================================
-// UTILITY FUNCTIONS
+// UTILITY FUNCTIONS (UNCHANGED)
 // ============================================================================
 
-/**
- * Extract body content from HTML string
- */
 function extractBodyContent(html) {
-  // Try to extract body content
   const bodyMatch = html.match(/<body[^>]*>([\s\S]*)<\/body>/i);
   if (bodyMatch && bodyMatch[1]) {
     return bodyMatch[1];
   }
   
-  // If no body tag, try to extract main content
   const mainMatch = html.match(/<main[^>]*>([\s\S]*)<\/main>/i);
   if (mainMatch && mainMatch[1]) {
     return mainMatch[1];
   }
   
-  // Return the entire HTML if no specific tags found
   return html;
 }
 
-/**
- * Initialize scripts and events in external content
- */
 function initializeExternalContent(container) {
-  // Execute inline scripts
   const scripts = container.querySelectorAll('script');
   scripts.forEach(script => {
     if (script.src) {
-      // Load external script
       const newScript = document.createElement('script');
       newScript.src = script.src;
       newScript.async = false;
       document.head.appendChild(newScript);
     } else if (script.textContent.trim()) {
       try {
-        // Create and execute function from script content
         const executeScript = new Function(script.textContent);
         executeScript();
       } catch (error) {
@@ -829,17 +1315,12 @@ function initializeExternalContent(container) {
     }
   });
   
-  // Re-attach event listeners for buttons and links in the new content
   setTimeout(() => {
     attachEventListenersToNewContent(container);
   }, 100);
 }
 
-/**
- * Attach event listeners to elements in newly loaded content
- */
 function attachEventListenersToNewContent(container) {
-  // Handle modal triggers
   container.querySelectorAll('[data-modal]').forEach(element => {
     element.addEventListener('click', function(e) {
       e.preventDefault();
@@ -851,7 +1332,6 @@ function attachEventListenersToNewContent(container) {
     });
   });
   
-  // Handle modal closers
   container.querySelectorAll('[data-close-modal]').forEach(element => {
     element.addEventListener('click', function(e) {
       e.preventDefault();
@@ -860,11 +1340,9 @@ function attachEventListenersToNewContent(container) {
     });
   });
   
-  // Handle form submissions
   container.querySelectorAll('form').forEach(form => {
     form.addEventListener('submit', function(e) {
       e.preventDefault();
-      // Use safe API call for form submissions
       if (form.dataset.api) {
         const apiFunction = window[form.dataset.api];
         if (typeof apiFunction === 'function') {
@@ -908,7 +1386,6 @@ function hideLoadingIndicator() {
 }
 
 function showError(message) {
-  // Remove existing error messages
   document.querySelectorAll('.error-message').forEach(el => el.remove());
   
   const errorDiv = document.createElement('div');
@@ -930,7 +1407,6 @@ function showError(message) {
   
   document.body.appendChild(errorDiv);
   
-  // Auto-remove after 5 seconds
   setTimeout(() => {
     if (errorDiv.parentNode) {
       errorDiv.style.animation = 'slideOut 0.3s ease-in';
@@ -940,13 +1416,12 @@ function showError(message) {
 }
 
 // ============================================================================
-// EVENT HANDLERS
+// EVENT HANDLERS (UPDATED)
 // ============================================================================
 
 function setupEventListeners() {
   // Tab click handlers
   document.querySelectorAll('.nav-icon[data-tab]').forEach(icon => {
-    // Remove existing listeners by cloning
     const newIcon = icon.cloneNode(true);
     icon.parentNode.replaceChild(newIcon, icon);
     
@@ -999,7 +1474,6 @@ function setupEventListeners() {
           chatHeader.classList.remove('hidden');
         }
         
-        // Update chat title if available
         const chatName = chatItem.querySelector('.chat-name');
         if (chatName) {
           const chatTitle = document.getElementById('chatTitle');
@@ -1020,7 +1494,6 @@ function setupEventListeners() {
     resizeTimeout = setTimeout(() => {
       updateChatAreaVisibility(currentTab);
       
-      // Ensure sidebar is visible on desktop, hidden on mobile
       const sidebar = document.querySelector(APP_CONFIG.sidebar);
       if (sidebar) {
         if (window.innerWidth >= 768) {
@@ -1062,41 +1535,14 @@ function setupEventListeners() {
   // Handle Escape key to close modals and sidebar
   document.addEventListener('keydown', (e) => {
     if (e.key === 'Escape') {
-      // Close open modals
       document.querySelectorAll('.modal:not(.hidden)').forEach(modal => {
         if (!modal.classList.contains('hidden')) {
           modal.classList.add('hidden');
         }
       });
       
-      // Close sidebar on mobile
       if (window.innerWidth < 768 && isSidebarOpen) {
         toggleSidebar();
-      }
-    }
-  });
-  
-  // Listen for localStorage changes from other tabs
-  window.addEventListener('storage', (event) => {
-    if (event.key === 'kynecta-network-status' && event.newValue) {
-      try {
-        const status = JSON.parse(event.newValue);
-        if (status.type === 'network-status') {
-          updateNetworkStatus(status.isOnline);
-        }
-      } catch (e) {
-        console.warn('Failed to parse network status from storage:', e);
-      }
-    }
-    
-    // Listen for auth state changes from other tabs
-    if (event.key === 'kynecta-auth-state' && event.newValue) {
-      try {
-        const authState = JSON.parse(event.newValue);
-        // Update local auth state reference
-        currentUser = authState.user;
-      } catch (e) {
-        console.warn('Failed to parse auth state from storage:', e);
       }
     }
   });
@@ -1114,12 +1560,10 @@ window.closeModal = function(modalId) {
 };
 
 window.showSettingsSection = function(sectionName) {
-  // First hide all settings modals
   document.querySelectorAll('.settings-section').forEach(section => {
     section.classList.add('hidden');
   });
   
-  // Show the selected section
   const sectionElement = document.getElementById(sectionName + 'Settings');
   if (sectionElement) {
     sectionElement.classList.remove('hidden');
@@ -1130,7 +1574,6 @@ window.openSettingsModal = function() {
   const modal = document.getElementById('settingsModal');
   if (modal) {
     modal.classList.remove('hidden');
-    // Show default section
     showSettingsSection('account');
   }
 };
@@ -1149,7 +1592,6 @@ window.triggerFileInput = function(inputId) {
 function initializeApp() {
   console.log('Initializing Kynecta Application Shell...');
   
-  // Ensure DOM is ready
   if (document.readyState !== 'loading') {
     runInitialization();
   } else {
@@ -1159,13 +1601,19 @@ function initializeApp() {
 
 function runInitialization() {
   try {
-    // CRITICAL: Initialize Firebase FIRST (NO ONLINE/OFFLINE CONDITION)
+    // CRITICAL: Initialize Firebase FIRST (always runs)
     initializeFirebase();
+    
+    // Expose global state to all pages
+    exposeGlobalStateToIframes();
+    
+    // Setup cross-page communication
+    setupCrossPageCommunication();
     
     // Setup event listeners
     setupEventListeners();
     
-    // Initialize network detection (SEPARATE FROM AUTH)
+    // Initialize network detection (separate from auth)
     initializeNetworkDetection();
     
     // Ensure sidebar is properly initialized
@@ -1173,7 +1621,6 @@ function runInitialization() {
     if (sidebar) {
       sidebar.classList.remove('hidden');
       
-      // Set initial sidebar state based on screen size
       if (window.innerWidth >= 768) {
         sidebar.classList.remove('translate-x-full');
         sidebar.classList.add('translate-x-0');
@@ -1188,7 +1635,6 @@ function runInitialization() {
     // Ensure content area exists
     let contentArea = document.querySelector(APP_CONFIG.contentArea);
     if (!contentArea) {
-      // Create content area if it doesn't exist
       contentArea = document.createElement('main');
       contentArea.id = 'content-area';
       document.body.appendChild(contentArea);
@@ -1197,21 +1643,18 @@ function runInitialization() {
     // Load default page
     loadPage(APP_CONFIG.defaultPage);
     
-    // Set default tab to groups with a slight delay to ensure DOM is ready
+    // Set default tab to groups
     setTimeout(() => {
       try {
-        // First try to show the groups tab
         const groupsTab = document.querySelector(TAB_CONFIG.groups.container);
         if (groupsTab) {
           showTab('groups');
         } else {
-          // If groups tab doesn't exist, try to load it as external
           console.log('Groups tab not found in DOM, loading as external...');
           loadExternalTab('groups', EXTERNAL_TABS.groups);
         }
       } catch (error) {
         console.error('Error setting default tab:', error);
-        // Fallback to chats tab
         if (TAB_CONFIG.chats.container && document.querySelector(TAB_CONFIG.chats.container)) {
           showTab('chats');
         }
@@ -1223,7 +1666,6 @@ function runInitialization() {
     if (loadingScreen) {
       setTimeout(() => {
         loadingScreen.classList.add('hidden');
-        // Remove from DOM after animation
         setTimeout(() => {
           if (loadingScreen.parentNode) {
             loadingScreen.parentNode.removeChild(loadingScreen);
@@ -1244,7 +1686,6 @@ function runInitialization() {
 }
 
 function injectStyles() {
-  // Check if styles are already injected
   if (document.getElementById('app-styles')) return;
   
   const styles = `
@@ -1307,12 +1748,10 @@ function injectStyles() {
       }
     }
     
-    /* Sidebar transition */
     #sidebar {
       transition: transform 0.3s ease-in-out;
     }
     
-    /* Ensure content area takes remaining space */
     #content-area {
       flex: 1;
       overflow: auto;
@@ -1331,7 +1770,6 @@ function injectStyles() {
       display: none !important;
     }
     
-    /* Mobile sidebar styles */
     @media (max-width: 767px) {
       #sidebar {
         position: fixed;
@@ -1384,25 +1822,47 @@ window.openSettingsModal = openSettingsModal;
 window.APP_AUTH = {
   currentUser: null,
   isAuthenticated: false,
-  userId: null
+  userId: null,
+  isAuthReady: false
 };
 
 // NETWORK CONNECTIVITY
 window.APP_CONNECTIVITY = {
   isOnline: isOnline,
   isOffline: !isOnline,
-  lastChange: null
+  lastChange: null,
+  syncQueueSize: 0
 };
 
 // API and sync functions
 window.safeApiCall = safeApiCall;
-window.queueMessageForSync = queueMessageForSync;
-window.clearMessageQueue = clearMessageQueue;
+window.queueForSync = queueForSync;
+window.clearMessageQueue = function() {
+  // Clear both stores
+  const request = indexedDB.open('KynectaMessageQueue', 2);
+  
+  request.onsuccess = function(event) {
+    const db = event.target.result;
+    
+    // Clear messages
+    const msgTransaction = db.transaction(['messages'], 'readwrite');
+    msgTransaction.objectStore('messages').clear();
+    
+    // Clear actions
+    const actTransaction = db.transaction(['actions'], 'readwrite');
+    actTransaction.objectStore('actions').clear();
+    
+    syncQueue = [];
+    window.APP_CONNECTIVITY.syncQueueSize = 0;
+    
+    console.log('Message queue cleared');
+  };
+};
+
 window.processQueuedMessages = processQueuedMessages;
 
 // AUTH HELPER FUNCTIONS
 window.getCurrentUser = function() {
-  // Return current user from Firebase auth state
   return currentUser;
 };
 
@@ -1410,9 +1870,12 @@ window.getCurrentUserId = function() {
   return currentUser ? currentUser.uid : null;
 };
 
-// Check if user is authenticated
 window.isAuthenticated = function() {
   return !!currentUser;
+};
+
+window.isAuthReady = function() {
+  return authStateRestored;
 };
 
 window.showChatArea = function() {
@@ -1449,6 +1912,15 @@ window.showChatList = function() {
   }
 };
 
+// NETWORK FUNCTIONS
+window.isOnline = function() {
+  return isOnline;
+};
+
+window.isOffline = function() {
+  return !isOnline;
+};
+
 // ============================================================================
 // STARTUP
 // ============================================================================
@@ -1457,8 +1929,7 @@ window.showChatList = function() {
 if (document.readyState === 'loading') {
   document.addEventListener('DOMContentLoaded', initializeApp);
 } else {
-  // DOM already loaded, initialize immediately
   setTimeout(initializeApp, 0);
 }
 
-console.log('Kynecta app.js loaded - Application shell ready');
+console.log('Kynecta app.js loaded - Application shell ready with enhanced auth and offline support');
