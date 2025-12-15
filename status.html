@@ -36,6 +36,69 @@
     <script src="https://unpkg.com/wavesurfer.js@7"></script>
     
     <style>
+        /* OFFLINE STATUS INDICATOR */
+        .offline-indicator {
+            position: fixed;
+            top: 10px;
+            right: 10px;
+            background-color: #ff9500;
+            color: white;
+            padding: 8px 15px;
+            border-radius: 20px;
+            font-size: 12px;
+            z-index: 2000;
+            display: none;
+            align-items: center;
+            gap: 8px;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.2);
+        }
+        
+        .offline-indicator.active {
+            display: flex;
+        }
+        
+        .offline-status-tag {
+            display: inline-block;
+            background-color: #666;
+            color: white;
+            font-size: 10px;
+            padding: 2px 6px;
+            border-radius: 10px;
+            margin-left: 5px;
+            vertical-align: middle;
+        }
+        
+        .pending-upload-indicator {
+            position: absolute;
+            top: 5px;
+            right: 5px;
+            background-color: #ff9500;
+            color: white;
+            width: 20px;
+            height: 20px;
+            border-radius: 50%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 10px;
+            z-index: 2;
+        }
+        
+        .retry-upload-btn {
+            background-color: #0084ff;
+            color: white;
+            border: none;
+            padding: 4px 8px;
+            border-radius: 4px;
+            font-size: 11px;
+            cursor: pointer;
+            margin-left: 5px;
+        }
+        
+        .retry-upload-btn:hover {
+            background-color: #0073e6;
+        }
+        
         * {
             margin: 0;
             padding: 0;
@@ -1828,6 +1891,12 @@
     </style>
 </head>
 <body>
+    <!-- Offline Indicator -->
+    <div class="offline-indicator" id="offlineIndicator">
+        <i class="fas fa-wifi-slash"></i>
+        <span>You're offline. Showing cached statuses.</span>
+    </div>
+    
     <div class="app-container">
         <!-- Sidebar with status updates -->
         <div class="sidebar">
@@ -2236,6 +2305,12 @@
         let touchStartX = 0;
         let touchEndX = 0;
         
+        // OFFLINE SUPPORT VARIABLES
+        let isOnline = navigator.onLine;
+        let cachedStatuses = [];
+        let pendingUploads = [];
+        let isSyncing = false;
+        
         // Color palettes
         const textColors = [
             '#ffffff', '#000000', '#0084ff', '#34c759', '#ff3b30',
@@ -2288,6 +2363,7 @@
         const notification = document.getElementById('notification');
         const screenshotOverlay = document.getElementById('screenshotOverlay');
         const pauseOverlay = document.getElementById('pauseOverlay');
+        const offlineIndicator = document.getElementById('offlineIndicator');
         
         // Initialize the application
         document.addEventListener('DOMContentLoaded', function() {
@@ -2301,7 +2377,729 @@
             initializeEmojiPicker();
             setupScreenshotDetection();
             setupTouchGestures();
+            setupOfflineSupport();
         });
+        
+        // OFFLINE SUPPORT FUNCTIONS
+        function setupOfflineSupport() {
+            // Listen for online/offline events
+            window.addEventListener('online', handleOnlineStatusChange);
+            window.addEventListener('offline', handleOnlineStatusChange);
+            
+            // Initial check
+            handleOnlineStatusChange();
+            
+            // Load cached statuses
+            loadCachedStatuses();
+            
+            // Load pending uploads
+            loadPendingUploads();
+        }
+        
+        function handleOnlineStatusChange() {
+            isOnline = navigator.onLine;
+            
+            if (isOnline) {
+                // Hide offline indicator
+                offlineIndicator.classList.remove('active');
+                
+                // Process pending uploads
+                processPendingUploads();
+                
+                // Sync any offline data
+                syncOfflineData();
+            } else {
+                // Show offline indicator
+                offlineIndicator.classList.add('active');
+                showNotification('You are offline. Statuses will be queued for upload.', 'warning');
+            }
+        }
+        
+        function loadCachedStatuses() {
+            try {
+                const cachedData = localStorage.getItem(`cachedStatuses_${currentUser?.uid}`);
+                if (cachedData) {
+                    cachedStatuses = JSON.parse(cachedData);
+                    
+                    // Filter out expired statuses
+                    const now = new Date();
+                    cachedStatuses = cachedStatuses.filter(status => {
+                        if (!status.expiresAt) return true;
+                        const expiresAt = new Date(status.expiresAt);
+                        return expiresAt > now;
+                    });
+                    
+                    // Save filtered cache back
+                    localStorage.setItem(`cachedStatuses_${currentUser?.uid}`, JSON.stringify(cachedStatuses));
+                } else {
+                    cachedStatuses = [];
+                }
+            } catch (error) {
+                console.error('Error loading cached statuses:', error);
+                cachedStatuses = [];
+            }
+        }
+        
+        function saveStatusToCache(status) {
+            try {
+                // Add to cache
+                cachedStatuses.unshift(status);
+                
+                // Keep only last 100 statuses in cache
+                if (cachedStatuses.length > 100) {
+                    cachedStatuses = cachedStatuses.slice(0, 100);
+                }
+                
+                // Save to localStorage
+                localStorage.setItem(`cachedStatuses_${currentUser?.uid}`, JSON.stringify(cachedStatuses));
+                
+                // Update UI with cached status
+                if (!isOnline) {
+                    updateStatusListWithCache();
+                }
+            } catch (error) {
+                console.error('Error saving status to cache:', error);
+            }
+        }
+        
+        function updateStatusListWithCache() {
+            // Combine cached statuses with online statuses
+            const allCombinedStatuses = [...allStatuses, ...cachedStatuses];
+            
+            // Remove duplicates (by id)
+            const uniqueStatuses = [];
+            const seenIds = new Set();
+            
+            allCombinedStatuses.forEach(status => {
+                const statusId = status.id || status.tempId;
+                if (!seenIds.has(statusId)) {
+                    seenIds.add(statusId);
+                    uniqueStatuses.push(status);
+                }
+            });
+            
+            // Sort by date (newest first)
+            uniqueStatuses.sort((a, b) => {
+                const dateA = a.createdAt ? new Date(a.createdAt) : new Date();
+                const dateB = b.createdAt ? new Date(b.createdAt) : new Date();
+                return dateB - dateA;
+            });
+            
+            // Update the status list
+            updateStatusList(uniqueStatuses);
+        }
+        
+        function updateStatusList(statuses) {
+            const recentStatusList = document.getElementById('recentStatusList');
+            const sectionTitle = document.getElementById('sectionTitle');
+            
+            // Update section title
+            switch(currentCategory) {
+                case 'recent':
+                    sectionTitle.textContent = 'Recent Updates' + (!isOnline ? ' (Offline)' : '');
+                    break;
+                case 'viewed':
+                    sectionTitle.textContent = 'Viewed Updates' + (!isOnline ? ' (Offline)' : '');
+                    break;
+                case 'muted':
+                    sectionTitle.textContent = 'Muted Users' + (!isOnline ? ' (Offline)' : '');
+                    break;
+                case 'archive':
+                    sectionTitle.textContent = 'Archived Statuses' + (!isOnline ? ' (Offline)' : '');
+                    break;
+                case 'highlights':
+                    sectionTitle.textContent = 'Highlights' + (!isOnline ? ' (Offline)' : '');
+                    break;
+            }
+            
+            // Filter statuses based on current category
+            let filteredStatuses = [];
+            let showArchived = false;
+            
+            switch(currentCategory) {
+                case 'recent':
+                    filteredStatuses = statuses.filter(status => 
+                        !viewedStatuses.includes(status.id || status.tempId) && 
+                        !mutedUsers.includes(status.userId)
+                    );
+                    break;
+                    
+                case 'viewed':
+                    filteredStatuses = statuses.filter(status => 
+                        viewedStatuses.includes(status.id || status.tempId) &&
+                        !mutedUsers.includes(status.userId)
+                    );
+                    break;
+                    
+                case 'muted':
+                    filteredStatuses = statuses.filter(status => 
+                        mutedUsers.includes(status.userId)
+                    );
+                    break;
+                    
+                case 'archive':
+                    filteredStatuses = archivedStatuses;
+                    showArchived = true;
+                    break;
+                    
+                case 'highlights':
+                    filteredStatuses = highlightedStatuses;
+                    break;
+            }
+            
+            // Group by user (except for archive and highlights)
+            const statusesByUser = {};
+            if (!showArchived && currentCategory !== 'highlights') {
+                filteredStatuses.forEach(status => {
+                    if (!statusesByUser[status.userId]) {
+                        statusesByUser[status.userId] = [];
+                    }
+                    statusesByUser[status.userId].push(status);
+                });
+            } else {
+                // For archive and highlights, show individual statuses
+                filteredStatuses.forEach((status, index) => {
+                    statusesByUser[`status_${index}`] = [status];
+                });
+            }
+            
+            // Clear current list
+            recentStatusList.innerHTML = '';
+            
+            // Add status items
+            Object.keys(statusesByUser).forEach(userKey => {
+                const userStatuses = statusesByUser[userKey];
+                const latestStatus = userStatuses[0];
+                const userStatusCount = userStatuses.length;
+                
+                const timeAgo = getTimeAgo(latestStatus.createdAt);
+                const initials = latestStatus.userName ? 
+                    latestStatus.userName.split(' ').map(word => word[0]).join('').toUpperCase().substring(0, 2) : 
+                    'U';
+                
+                const statusItem = document.createElement('div');
+                statusItem.className = 'contact-status-item has-status';
+                if (showArchived) statusItem.classList.add('archived-status');
+                statusItem.dataset.statusId = latestStatus.id || latestStatus.tempId;
+                statusItem.dataset.userId = latestStatus.userId;
+                statusItem.dataset.userName = latestStatus.userName || 'User';
+                
+                // Check if viewed
+                const isViewed = viewedStatuses.includes(latestStatus.id || latestStatus.tempId) || latestStatus.userId === currentUser?.uid;
+                const ringColor = isViewed ? 'viewed' : '';
+                
+                // Check if this is a cached/pending status
+                const isCached = latestStatus.tempId || latestStatus.isCached;
+                const isPending = latestStatus.isPending;
+                
+                statusItem.innerHTML = `
+                    <div class="contact-status-avatar" ${latestStatus.userAvatar ? `style="background-image: url('${latestStatus.userAvatar}')"` : ''}>
+                        <div class="status-ring ${ringColor}"></div>
+                        ${latestStatus.userAvatar ? '' : `<span>${initials}</span>`}
+                        ${isPending ? '<div class="pending-upload-indicator" title="Pending upload"><i class="fas fa-clock"></i></div>' : ''}
+                    </div>
+                    <div class="contact-status-info">
+                        <div class="contact-status-name">${latestStatus.userName || 'User'} 
+                            ${isCached ? '<span class="offline-status-tag">Offline</span>' : ''}
+                            ${isPending ? '<span class="offline-status-tag">Pending</span>' : ''}
+                        </div>
+                        <div class="contact-status-time">${timeAgo}</div>
+                        ${latestStatus.type === 'poll' ? '<span style="color: var(--primary-color); font-size: 12px;">📊 Poll</span>' : ''}
+                        ${latestStatus.type === 'question' ? '<span style="color: var(--success-color); font-size: 12px;">❓ Question</span>' : ''}
+                        ${latestStatus.type === 'music' ? '<span style="color: var(--warning-color); font-size: 12px;">🎵 Music</span>' : ''}
+                    </div>
+                    ${showArchived ? '<button class="restore-btn">Restore</button>' : `<div class="contact-status-count">${userStatusCount}</div>`}
+                `;
+                
+                statusItem.addEventListener('click', (e) => {
+                    if (!e.target.classList.contains('restore-btn')) {
+                        if (showArchived) {
+                            // Show archived status in viewer
+                            openStatusViewer(latestStatus.userId, [latestStatus]);
+                        } else {
+                            openStatusViewer(latestStatus.userId, userStatuses);
+                        }
+                    }
+                });
+                
+                // Add retry button for pending uploads
+                if (isPending && isOnline) {
+                    const retryBtn = document.createElement('button');
+                    retryBtn.className = 'retry-upload-btn';
+                    retryBtn.textContent = 'Retry';
+                    retryBtn.addEventListener('click', (e) => {
+                        e.stopPropagation();
+                        retryPendingUpload(latestStatus.tempId);
+                    });
+                    statusItem.querySelector('.contact-status-info').appendChild(retryBtn);
+                }
+                
+                // Add restore button functionality for archived statuses
+                if (showArchived) {
+                    const restoreBtn = statusItem.querySelector('.restore-btn');
+                    restoreBtn.addEventListener('click', (e) => {
+                        e.stopPropagation();
+                        restoreStatusFromArchive(latestStatus.id || latestStatus.tempId);
+                    });
+                }
+                
+                recentStatusList.appendChild(statusItem);
+            });
+            
+            // If no statuses, show empty state
+            if (Object.keys(statusesByUser).length === 0) {
+                let emptyMessage = '';
+                switch(currentCategory) {
+                    case 'recent':
+                        emptyMessage = isOnline ? 'No recent status updates from your contacts' : 'No cached status updates available';
+                        break;
+                    case 'viewed':
+                        emptyMessage = 'No viewed status updates';
+                        break;
+                    case 'muted':
+                        emptyMessage = 'No muted users with status updates';
+                        break;
+                    case 'archive':
+                        emptyMessage = 'No archived statuses';
+                        break;
+                    case 'highlights':
+                        emptyMessage = 'No highlighted statuses';
+                        break;
+                }
+                
+                recentStatusList.innerHTML = `
+                    <div style="text-align: center; padding: 40px 20px; color: var(--text-secondary);">
+                        <i class="fas fa-comment" style="font-size: 48px; margin-bottom: 15px; opacity: 0.5;"></i>
+                        <p>${emptyMessage}</p>
+                        ${!isOnline ? '<p style="font-size: 14px; margin-top: 10px;">Status updates will be queued for upload when you\'re back online</p>' : ''}
+                        ${currentCategory === 'muted' ? 
+                            '<p style="font-size: 14px; margin-top: 10px;">Mute users by clicking on their status and selecting "Mute User"</p>' : 
+                            ''}
+                        ${currentCategory === 'highlights' ? 
+                            '<p style="font-size: 14px; margin-top: 10px;">Add statuses to highlights by clicking the star icon while viewing them</p>' : 
+                            ''}
+                    </div>
+                `;
+            }
+        }
+        
+        function loadPendingUploads() {
+            try {
+                const pendingData = localStorage.getItem(`pendingUploads_${currentUser?.uid}`);
+                if (pendingData) {
+                    pendingUploads = JSON.parse(pendingData);
+                } else {
+                    pendingUploads = [];
+                }
+            } catch (error) {
+                console.error('Error loading pending uploads:', error);
+                pendingUploads = [];
+            }
+        }
+        
+        function savePendingUpload(statusData) {
+            try {
+                // Generate a temporary ID for offline status
+                const tempId = 'temp_' + Date.now() + '_' + Math.random().toString(36).substr(2, 9);
+                statusData.tempId = tempId;
+                statusData.isPending = true;
+                statusData.createdAt = new Date().toISOString();
+                
+                // Add to pending uploads
+                pendingUploads.push(statusData);
+                
+                // Save to localStorage
+                localStorage.setItem(`pendingUploads_${currentUser?.uid}`, JSON.stringify(pendingUploads));
+                
+                // Also save to cache for immediate viewing
+                saveStatusToCache({
+                    ...statusData,
+                    isCached: true,
+                    userId: currentUser.uid,
+                    userName: currentUser.displayName || 'User',
+                    userAvatar: currentUser.photoURL || ''
+                });
+                
+                return tempId;
+            } catch (error) {
+                console.error('Error saving pending upload:', error);
+                return null;
+            }
+        }
+        
+        function removePendingUpload(tempId) {
+            try {
+                pendingUploads = pendingUploads.filter(upload => upload.tempId !== tempId);
+                localStorage.setItem(`pendingUploads_${currentUser?.uid}`, JSON.stringify(pendingUploads));
+                
+                // Also remove from cache
+                cachedStatuses = cachedStatuses.filter(status => status.tempId !== tempId);
+                localStorage.setItem(`cachedStatuses_${currentUser?.uid}`, JSON.stringify(cachedStatuses));
+            } catch (error) {
+                console.error('Error removing pending upload:', error);
+            }
+        }
+        
+        async function processPendingUploads() {
+            if (isSyncing || pendingUploads.length === 0 || !isOnline) return;
+            
+            isSyncing = true;
+            showNotification('Syncing pending status updates...', 'success');
+            
+            // Process each pending upload
+            for (let i = 0; i < pendingUploads.length; i++) {
+                const pendingStatus = pendingUploads[i];
+                
+                try {
+                    // Upload media files if needed
+                    let mediaUrl = pendingStatus.content;
+                    
+                    if (pendingStatus.type === 'photo' || pendingStatus.type === 'video' || pendingStatus.type === 'voice') {
+                        // Convert base64 to blob if needed
+                        if (pendingStatus.content && pendingStatus.content.startsWith('data:')) {
+                            const response = await fetch(pendingStatus.content);
+                            const blob = await response.blob();
+                            const file = new File([blob], `status_${Date.now()}.${pendingStatus.type === 'photo' ? 'jpg' : pendingStatus.type === 'video' ? 'mp4' : 'wav'}`, {
+                                type: blob.type
+                            });
+                            
+                            mediaUrl = await uploadToCloudinary(file);
+                        }
+                    }
+                    
+                    // Prepare status data for Firestore
+                    const statusData = {
+                        ...pendingStatus,
+                        content: mediaUrl,
+                        userId: currentUser.uid,
+                        userName: currentUser.displayName || 'User',
+                        userAvatar: currentUser.photoURL || '',
+                        createdAt: firebase.firestore.FieldValue.serverTimestamp(),
+                        expiresAt: new Date(Date.now() + (pendingStatus.duration || 72) * 60 * 60 * 1000),
+                        viewers: [],
+                        reactions: {},
+                        pollVotes: {},
+                        answers: [],
+                        screenshotNotifications: [],
+                        mood: userMood || 'happy'
+                    };
+                    
+                    // Remove temporary fields
+                    delete statusData.tempId;
+                    delete statusData.isPending;
+                    delete statusData.isCached;
+                    
+                    // Save to Firestore
+                    await db.collection('statuses').add(statusData);
+                    
+                    // Remove from pending uploads
+                    removePendingUpload(pendingStatus.tempId);
+                    
+                    showNotification(`Uploaded pending status: ${pendingStatus.type}`, 'success');
+                    
+                } catch (error) {
+                    console.error(`Error uploading pending status ${pendingStatus.tempId}:`, error);
+                    // Keep in pending uploads for retry
+                }
+            }
+            
+            isSyncing = false;
+            
+            // Reload statuses
+            if (isOnline) {
+                loadStatusUpdates();
+            } else {
+                updateStatusListWithCache();
+            }
+        }
+        
+        function retryPendingUpload(tempId) {
+            if (!isOnline) {
+                showNotification('Cannot retry upload while offline', 'error');
+                return;
+            }
+            
+            // Find the pending upload
+            const pendingUpload = pendingUploads.find(upload => upload.tempId === tempId);
+            if (pendingUpload) {
+                // Process this specific upload
+                processSinglePendingUpload(pendingUpload);
+            }
+        }
+        
+        async function processSinglePendingUpload(pendingStatus) {
+            try {
+                showNotification('Retrying upload...', 'success');
+                
+                // Upload media files if needed
+                let mediaUrl = pendingStatus.content;
+                
+                if (pendingStatus.type === 'photo' || pendingStatus.type === 'video' || pendingStatus.type === 'voice') {
+                    if (pendingStatus.content && pendingStatus.content.startsWith('data:')) {
+                        const response = await fetch(pendingStatus.content);
+                        const blob = await response.blob();
+                        const file = new File([blob], `status_${Date.now()}.${pendingStatus.type === 'photo' ? 'jpg' : pendingStatus.type === 'video' ? 'mp4' : 'wav'}`, {
+                            type: blob.type
+                        });
+                        
+                        mediaUrl = await uploadToCloudinary(file);
+                    }
+                }
+                
+                // Prepare status data for Firestore
+                const statusData = {
+                    ...pendingStatus,
+                    content: mediaUrl,
+                    userId: currentUser.uid,
+                    userName: currentUser.displayName || 'User',
+                    userAvatar: currentUser.photoURL || '',
+                    createdAt: firebase.firestore.FieldValue.serverTimestamp(),
+                    expiresAt: new Date(Date.now() + (pendingStatus.duration || 72) * 60 * 60 * 1000),
+                    viewers: [],
+                    reactions: {},
+                    pollVotes: {},
+                    answers: [],
+                    screenshotNotifications: [],
+                    mood: userMood || 'happy'
+                };
+                
+                // Remove temporary fields
+                delete statusData.tempId;
+                delete statusData.isPending;
+                delete statusData.isCached;
+                
+                // Save to Firestore
+                await db.collection('statuses').add(statusData);
+                
+                // Remove from pending uploads
+                removePendingUpload(pendingStatus.tempId);
+                
+                showNotification('Status uploaded successfully!', 'success');
+                
+                // Reload statuses
+                if (isOnline) {
+                    loadStatusUpdates();
+                } else {
+                    updateStatusListWithCache();
+                }
+                
+            } catch (error) {
+                console.error('Error retrying upload:', error);
+                showNotification('Failed to upload status. Will retry later.', 'error');
+            }
+        }
+        
+        function syncOfflineData() {
+            // Sync viewed statuses
+            syncViewedStatuses();
+            
+            // Sync reactions
+            syncOfflineReactions();
+            
+            // Sync poll votes
+            syncOfflinePollVotes();
+        }
+        
+        async function syncViewedStatuses() {
+            // Get offline viewed statuses
+            const offlineViewed = localStorage.getItem(`offlineViewed_${currentUser?.uid}`);
+            if (!offlineViewed) return;
+            
+            const viewedStatuses = JSON.parse(offlineViewed);
+            
+            // Sync each viewed status
+            for (const statusId of viewedStatuses) {
+                try {
+                    await db.collection('statuses')
+                        .doc(statusId)
+                        .update({
+                            viewers: firebase.firestore.FieldValue.arrayUnion(currentUser.uid)
+                        });
+                } catch (error) {
+                    console.error(`Error syncing viewed status ${statusId}:`, error);
+                }
+            }
+            
+            // Clear offline viewed cache
+            localStorage.removeItem(`offlineViewed_${currentUser?.uid}`);
+        }
+        
+        function syncOfflineReactions() {
+            // Implementation for syncing offline reactions
+            // Similar to syncViewedStatuses but for reactions
+        }
+        
+        function syncOfflinePollVotes() {
+            // Implementation for syncing offline poll votes
+            // Similar to syncViewedStatuses but for poll votes
+        }
+        
+        // Modified saveStatusToFirestore function to handle offline mode
+        async function saveStatusToFirestore(statusData) {
+            try {
+                if (!isOnline) {
+                    // Save to pending uploads for offline mode
+                    const tempId = savePendingUpload(statusData);
+                    showNotification('Status saved offline. Will upload when you\'re back online.', 'success');
+                    return tempId;
+                }
+                
+                // Calculate expiration time based on selected duration
+                const expiresAt = new Date(Date.now() + selectedDuration * 60 * 60 * 1000);
+                
+                // If scheduled, use scheduled time
+                const createdAt = scheduledTime ? new Date(scheduledTime) : firebase.firestore.FieldValue.serverTimestamp();
+                
+                const statusRef = await db.collection('statuses').add({
+                    ...statusData,
+                    userId: currentUser.uid,
+                    userName: currentUser.displayName || 'User',
+                    userAvatar: currentUser.photoURL || '',
+                    createdAt: createdAt,
+                    expiresAt: expiresAt,
+                    viewers: [],
+                    reactions: {},
+                    pollVotes: {},
+                    answers: [],
+                    screenshotNotifications: [],
+                    mood: userMood || 'happy',
+                    isHighlighted: false,
+                    isPinned: false,
+                    scheduled: !!scheduledTime
+                });
+                
+                // Also cache the status locally
+                saveStatusToCache({
+                    ...statusData,
+                    id: statusRef.id,
+                    userId: currentUser.uid,
+                    userName: currentUser.displayName || 'User',
+                    userAvatar: currentUser.photoURL || '',
+                    createdAt: new Date().toISOString(),
+                    expiresAt: expiresAt.toISOString()
+                });
+                
+                return statusRef.id;
+            } catch (error) {
+                console.error('Error saving status:', error);
+                throw error;
+            }
+        }
+        
+        // Modified markStatusAsViewed function to handle offline mode
+        async function markStatusAsViewed(statusId) {
+            try {
+                if (!viewedStatuses.includes(statusId)) {
+                    viewedStatuses.push(statusId);
+                    localStorage.setItem(`viewedStatuses_${currentUser.uid}`, JSON.stringify(viewedStatuses));
+                    
+                    if (isOnline) {
+                        // Update in Firestore
+                        try {
+                            await db.collection('statuses')
+                                .doc(statusId)
+                                .update({
+                                    viewers: firebase.firestore.FieldValue.arrayUnion(currentUser.uid)
+                                });
+                        } catch (error) {
+                            console.log('Could not update viewers in Firestore:', error.message);
+                            // Save for offline sync
+                            const offlineViewed = JSON.parse(localStorage.getItem(`offlineViewed_${currentUser.uid}`) || '[]');
+                            offlineViewed.push(statusId);
+                            localStorage.setItem(`offlineViewed_${currentUser.uid}`, JSON.stringify(offlineViewed));
+                        }
+                    } else {
+                        // Save for offline sync
+                        const offlineViewed = JSON.parse(localStorage.getItem(`offlineViewed_${currentUser.uid}`) || '[]');
+                        offlineViewed.push(statusId);
+                        localStorage.setItem(`offlineViewed_${currentUser.uid}`, JSON.stringify(offlineViewed));
+                    }
+                    
+                    // Update the status list
+                    if (isOnline) {
+                        loadStatusUpdates();
+                    } else {
+                        updateStatusListWithCache();
+                    }
+                }
+            } catch (error) {
+                console.error('Error marking status as viewed:', error);
+            }
+        }
+        
+        // Modified loadStatusUpdates function to use cache when offline
+        async function loadStatusUpdates() {
+            try {
+                if (!isOnline) {
+                    // Load from cache when offline
+                    showNotification('Showing cached status updates', 'warning');
+                    updateStatusListWithCache();
+                    return;
+                }
+                
+                const now = new Date();
+                
+                // Load statuses from Firestore with proper permissions
+                const statusesSnapshot = await db.collection('statuses')
+                    .where('expiresAt', '>', now)
+                    .orderBy('expiresAt', 'desc')
+                    .limit(100)
+                    .get();
+                
+                // Get user's viewed statuses from localStorage
+                const viewedKey = `viewedStatuses_${currentUser.uid}`;
+                const viewedData = localStorage.getItem(viewedKey);
+                viewedStatuses = viewedData ? JSON.parse(viewedData) : [];
+                
+                // Process statuses
+                allStatuses = [];
+                const userStatusMap = new Map();
+                
+                statusesSnapshot.forEach(doc => {
+                    const statusData = doc.data();
+                    const status = {
+                        id: doc.id,
+                        ...statusData,
+                        createdAt: statusData.createdAt ? statusData.createdAt.toDate() : new Date(),
+                        expiresAt: statusData.expiresAt ? statusData.expiresAt.toDate() : new Date(now.getTime() + 24 * 60 * 60 * 1000)
+                    };
+                    
+                    // Check if status is visible to user based on privacy
+                    if (isStatusVisible(status)) {
+                        // Don't show user's own statuses in the contacts list
+                        if (status.userId !== currentUser.uid) {
+                            if (!userStatusMap.has(status.userId)) {
+                                userStatusMap.set(status.userId, []);
+                            }
+                            userStatusMap.get(status.userId).push(status);
+                        }
+                        
+                        allStatuses.push(status);
+                        
+                        // Cache the status
+                        saveStatusToCache(status);
+                    }
+                });
+                
+                // Update my status item
+                updateMyStatusItem();
+                
+                // Update the status list
+                updateStatusListWithCache();
+                
+            } catch (error) {
+                console.error('Error loading status updates:', error);
+                
+                // Fallback to cache on error
+                if (!isOnline || error.code === 'unavailable') {
+                    showNotification('Using cached status updates', 'warning');
+                    updateStatusListWithCache();
+                } else {
+                    showNotification('Failed to load status updates', 'error');
+                    updateStatusListWithCache();
+                }
+            }
+        }
         
         function loadUserThemeAndMood() {
             try {
@@ -2443,64 +3241,6 @@
             }
         }
         
-        async function loadStatusUpdates() {
-            try {
-                const now = new Date();
-                
-                // Load statuses from Firestore with proper permissions
-                const statusesSnapshot = await db.collection('statuses')
-                    .where('expiresAt', '>', now)
-                    .orderBy('expiresAt', 'desc')
-                    .limit(100)
-                    .get();
-                
-                // Get user's viewed statuses from localStorage
-                const viewedKey = `viewedStatuses_${currentUser.uid}`;
-                const viewedData = localStorage.getItem(viewedKey);
-                viewedStatuses = viewedData ? JSON.parse(viewedData) : [];
-                
-                // Process statuses
-                allStatuses = [];
-                const userStatusMap = new Map();
-                
-                statusesSnapshot.forEach(doc => {
-                    const statusData = doc.data();
-                    const status = {
-                        id: doc.id,
-                        ...statusData,
-                        createdAt: statusData.createdAt ? statusData.createdAt.toDate() : new Date(),
-                        expiresAt: statusData.expiresAt ? statusData.expiresAt.toDate() : new Date(now.getTime() + 24 * 60 * 60 * 1000)
-                    };
-                    
-                    // Check if status is visible to user based on privacy
-                    if (isStatusVisible(status)) {
-                        // Don't show user's own statuses in the contacts list
-                        if (status.userId !== currentUser.uid) {
-                            if (!userStatusMap.has(status.userId)) {
-                                userStatusMap.set(status.userId, []);
-                            }
-                            userStatusMap.get(status.userId).push(status);
-                        }
-                        
-                        allStatuses.push(status);
-                    }
-                });
-                
-                // Update my status item
-                updateMyStatusItem();
-                
-                // Update the status list based on current category
-                updateStatusListByCategory();
-                
-            } catch (error) {
-                console.error('Error loading status updates:', error);
-                showNotification('Failed to load status updates', 'error');
-                
-                // Fallback to empty state
-                updateStatusListByCategory();
-            }
-        }
-        
         function isStatusVisible(status) {
             // Check if status has expired
             const now = new Date();
@@ -2585,195 +3325,6 @@
             }
         }
         
-        function updateStatusListByCategory() {
-            const recentStatusList = document.getElementById('recentStatusList');
-            const sectionTitle = document.getElementById('sectionTitle');
-            
-            // Update section title
-            switch(currentCategory) {
-                case 'recent':
-                    sectionTitle.textContent = 'Recent Updates';
-                    break;
-                case 'viewed':
-                    sectionTitle.textContent = 'Viewed Updates';
-                    break;
-                case 'muted':
-                    sectionTitle.textContent = 'Muted Users';
-                    break;
-                case 'archive':
-                    sectionTitle.textContent = 'Archived Statuses';
-                    break;
-                case 'highlights':
-                    sectionTitle.textContent = 'Highlights';
-                    break;
-            }
-            
-            // Filter statuses based on current category
-            let filteredStatuses = [];
-            let showArchived = false;
-            
-            switch(currentCategory) {
-                case 'recent':
-                    filteredStatuses = allStatuses.filter(status => 
-                        !viewedStatuses.includes(status.id) && 
-                        !mutedUsers.includes(status.userId)
-                    );
-                    break;
-                    
-                case 'viewed':
-                    filteredStatuses = allStatuses.filter(status => 
-                        viewedStatuses.includes(status.id) &&
-                        !mutedUsers.includes(status.userId)
-                    );
-                    break;
-                    
-                case 'muted':
-                    filteredStatuses = allStatuses.filter(status => 
-                        mutedUsers.includes(status.userId)
-                    );
-                    break;
-                    
-                case 'archive':
-                    filteredStatuses = archivedStatuses;
-                    showArchived = true;
-                    break;
-                    
-                case 'highlights':
-                    filteredStatuses = highlightedStatuses;
-                    break;
-            }
-            
-            // Group by user (except for archive and highlights)
-            const statusesByUser = {};
-            if (!showArchived && currentCategory !== 'highlights') {
-                filteredStatuses.forEach(status => {
-                    if (!statusesByUser[status.userId]) {
-                        statusesByUser[status.userId] = [];
-                    }
-                    statusesByUser[status.userId].push(status);
-                });
-            } else {
-                // For archive and highlights, show individual statuses
-                filteredStatuses.forEach((status, index) => {
-                    statusesByUser[`status_${index}`] = [status];
-                });
-            }
-            
-            // Clear current list
-            recentStatusList.innerHTML = '';
-            
-            // Add status items
-            Object.keys(statusesByUser).forEach(userKey => {
-                const userStatuses = statusesByUser[userKey];
-                const latestStatus = userStatuses[0];
-                const userStatusCount = userStatuses.length;
-                
-                const timeAgo = getTimeAgo(latestStatus.createdAt);
-                const initials = latestStatus.userName ? 
-                    latestStatus.userName.split(' ').map(word => word[0]).join('').toUpperCase().substring(0, 2) : 
-                    'U';
-                
-                const statusItem = document.createElement('div');
-                statusItem.className = 'contact-status-item has-status';
-                if (showArchived) statusItem.classList.add('archived-status');
-                statusItem.dataset.statusId = latestStatus.id;
-                statusItem.dataset.userId = latestStatus.userId;
-                statusItem.dataset.userName = latestStatus.userName || 'User';
-                
-                // Check if viewed
-                const isViewed = viewedStatuses.includes(latestStatus.id) || latestStatus.userId === currentUser.uid;
-                const ringColor = isViewed ? 'viewed' : '';
-                
-                statusItem.innerHTML = `
-                    <div class="contact-status-avatar" ${latestStatus.userAvatar ? `style="background-image: url('${latestStatus.userAvatar}')"` : ''}>
-                        <div class="status-ring ${ringColor}"></div>
-                        ${latestStatus.userAvatar ? '' : `<span>${initials}</span>`}
-                    </div>
-                    <div class="contact-status-info">
-                        <div class="contact-status-name">${latestStatus.userName || 'User'}</div>
-                        <div class="contact-status-time">${timeAgo}</div>
-                        ${latestStatus.type === 'poll' ? '<span style="color: var(--primary-color); font-size: 12px;">📊 Poll</span>' : ''}
-                        ${latestStatus.type === 'question' ? '<span style="color: var(--success-color); font-size: 12px;">❓ Question</span>' : ''}
-                        ${latestStatus.type === 'music' ? '<span style="color: var(--warning-color); font-size: 12px;">🎵 Music</span>' : ''}
-                    </div>
-                    ${showArchived ? '<button class="restore-btn">Restore</button>' : `<div class="contact-status-count">${userStatusCount}</div>`}
-                `;
-                
-                statusItem.addEventListener('click', (e) => {
-                    if (!e.target.classList.contains('restore-btn')) {
-                        if (showArchived) {
-                            // Show archived status in viewer
-                            openStatusViewer(latestStatus.userId, [latestStatus]);
-                        } else {
-                            openStatusViewer(latestStatus.userId, userStatuses);
-                        }
-                    }
-                });
-                
-                // Add restore button functionality for archived statuses
-                if (showArchived) {
-                    const restoreBtn = statusItem.querySelector('.restore-btn');
-                    restoreBtn.addEventListener('click', (e) => {
-                        e.stopPropagation();
-                        restoreStatusFromArchive(latestStatus.id);
-                    });
-                }
-                
-                recentStatusList.appendChild(statusItem);
-            });
-            
-            // If no statuses, show empty state
-            if (Object.keys(statusesByUser).length === 0) {
-                let emptyMessage = '';
-                switch(currentCategory) {
-                    case 'recent':
-                        emptyMessage = 'No recent status updates from your contacts';
-                        break;
-                    case 'viewed':
-                        emptyMessage = 'No viewed status updates';
-                        break;
-                    case 'muted':
-                        emptyMessage = 'No muted users with status updates';
-                        break;
-                    case 'archive':
-                        emptyMessage = 'No archived statuses';
-                        break;
-                    case 'highlights':
-                        emptyMessage = 'No highlighted statuses';
-                        break;
-                }
-                
-                recentStatusList.innerHTML = `
-                    <div style="text-align: center; padding: 40px 20px; color: var(--text-secondary);">
-                        <i class="fas fa-comment" style="font-size: 48px; margin-bottom: 15px; opacity: 0.5;"></i>
-                        <p>${emptyMessage}</p>
-                        ${currentCategory === 'muted' ? 
-                            '<p style="font-size: 14px; margin-top: 10px;">Mute users by clicking on their status and selecting "Mute User"</p>' : 
-                            ''}
-                        ${currentCategory === 'highlights' ? 
-                            '<p style="font-size: 14px; margin-top: 10px;">Add statuses to highlights by clicking the star icon while viewing them</p>' : 
-                            ''}
-                    </div>
-                `;
-            }
-        }
-        
-        function getTimeAgo(date) {
-            if (!date) return 'Just now';
-            
-            const now = new Date();
-            const diffMs = now - date;
-            const diffMins = Math.floor(diffMs / 60000);
-            const diffHours = Math.floor(diffMs / 3600000);
-            const diffDays = Math.floor(diffMs / 86400000);
-            
-            if (diffMins < 1) return 'Just now';
-            if (diffMins < 60) return `${diffMins}m ago`;
-            if (diffHours < 24) return `${diffHours}h ago`;
-            if (diffDays < 7) return `${diffDays}d ago`;
-            return `${Math.floor(diffDays / 7)}w ago`;
-        }
-        
         function openStatusViewer(userId, statuses) {
             currentStatusUser = userId;
             userStatuses = statuses;
@@ -2813,7 +3364,7 @@
             }
             
             const status = userStatuses[index];
-            currentStatusId = status.id;
+            currentStatusId = status.id || status.tempId;
             
             // Update user info
             document.getElementById('statusUserName').textContent = status.userName || 'User';
@@ -2874,9 +3425,9 @@
                     loadTextStatus(status);
             }
             
-            // Mark as viewed (only if not the owner)
-            if (status.userId !== currentUser.uid) {
-                markStatusAsViewed(status.id);
+            // Mark as viewed (only if not the owner and not a pending status)
+            if (status.userId !== currentUser.uid && !status.isPending) {
+                markStatusAsViewed(status.id || status.tempId);
             }
         }
         
@@ -3278,31 +3829,6 @@
                     }
                 }
             }, 50);
-        }
-        
-        async function markStatusAsViewed(statusId) {
-            try {
-                if (!viewedStatuses.includes(statusId)) {
-                    viewedStatuses.push(statusId);
-                    localStorage.setItem(`viewedStatuses_${currentUser.uid}`, JSON.stringify(viewedStatuses));
-                    
-                    // Update in Firestore
-                    try {
-                        await db.collection('statuses')
-                            .doc(statusId)
-                            .update({
-                                viewers: firebase.firestore.FieldValue.arrayUnion(currentUser.uid)
-                            });
-                    } catch (error) {
-                        console.log('Could not update viewers in Firestore:', error.message);
-                    }
-                    
-                    // Update the status list
-                    updateStatusListByCategory();
-                }
-            } catch (error) {
-                console.error('Error marking status as viewed:', error);
-            }
         }
         
         function closeStatusViewer() {
@@ -4077,39 +4603,6 @@
             });
         }
         
-        async function saveStatusToFirestore(statusData) {
-            try {
-                // Calculate expiration time based on selected duration
-                const expiresAt = new Date(Date.now() + selectedDuration * 60 * 60 * 1000);
-                
-                // If scheduled, use scheduled time
-                const createdAt = scheduledTime ? new Date(scheduledTime) : firebase.firestore.FieldValue.serverTimestamp();
-                
-                const statusRef = await db.collection('statuses').add({
-                    ...statusData,
-                    userId: currentUser.uid,
-                    userName: currentUser.displayName || 'User',
-                    userAvatar: currentUser.photoURL || '',
-                    createdAt: createdAt,
-                    expiresAt: expiresAt,
-                    viewers: [],
-                    reactions: {},
-                    pollVotes: {},
-                    answers: [],
-                    screenshotNotifications: [],
-                    mood: userMood || 'happy',
-                    isHighlighted: false,
-                    isPinned: false,
-                    scheduled: !!scheduledTime
-                });
-                
-                return statusRef.id;
-            } catch (error) {
-                console.error('Error saving status:', error);
-                throw error;
-            }
-        }
-        
         async function deleteStatus(statusId) {
             try {
                 if (!confirm('Are you sure you want to delete this status?')) {
@@ -4396,6 +4889,31 @@
                 clearInterval(recordingTimer);
                 const recordBtn = document.getElementById('recordBtn');
                 if (recordBtn) recordBtn.classList.remove('recording');
+            }
+        }
+        
+        function getTimeAgo(date) {
+            if (!date) return 'Just now';
+            
+            const now = new Date();
+            const dateObj = new Date(date);
+            const diffMs = now - dateObj;
+            const diffMins = Math.floor(diffMs / 60000);
+            const diffHours = Math.floor(diffMs / 3600000);
+            const diffDays = Math.floor(diffMs / 86400000);
+            
+            if (diffMins < 1) return 'Just now';
+            if (diffMins < 60) return `${diffMins}m ago`;
+            if (diffHours < 24) return `${diffHours}h ago`;
+            if (diffDays < 7) return `${diffDays}d ago`;
+            return `${Math.floor(diffDays / 7)}w ago`;
+        }
+        
+        function updateStatusListByCategory() {
+            if (isOnline) {
+                loadStatusUpdates();
+            } else {
+                updateStatusListWithCache();
             }
         }
         
@@ -4990,14 +5508,22 @@
                                 return;
                             }
                             
-                            showNotification('Uploading photo...', 'success');
-                            const mediaUrl = await uploadToCloudinary(currentMediaFile);
-                            statusData.content = mediaUrl;
+                            showNotification('Processing photo...', 'success');
                             
-                            const caption = document.getElementById('photoCaptionInput');
-                            if (caption && caption.value.trim()) {
-                                statusData.caption = caption.value.trim();
-                            }
+                            // Convert to base64 for offline storage
+                            const reader = new FileReader();
+                            reader.onload = async function(event) {
+                                statusData.content = event.target.result;
+                                
+                                const caption = document.getElementById('photoCaptionInput');
+                                if (caption && caption.value.trim()) {
+                                    statusData.caption = caption.value.trim();
+                                }
+                                
+                                await saveStatusToFirestore(statusData);
+                            };
+                            reader.readAsDataURL(currentMediaFile);
+                            return; // Early return since we're using async FileReader
                             
                         } else if (selectedStatusType === 'video') {
                             if (!currentMediaFile) {
@@ -5005,14 +5531,22 @@
                                 return;
                             }
                             
-                            showNotification('Uploading video...', 'success');
-                            const mediaUrl = await uploadToCloudinary(currentMediaFile);
-                            statusData.content = mediaUrl;
+                            showNotification('Processing video...', 'success');
                             
-                            const caption = document.getElementById('videoCaptionInput');
-                            if (caption && caption.value.trim()) {
-                                statusData.caption = caption.value.trim();
-                            }
+                            // Convert to base64 for offline storage
+                            const reader = new FileReader();
+                            reader.onload = async function(event) {
+                                statusData.content = event.target.result;
+                                
+                                const caption = document.getElementById('videoCaptionInput');
+                                if (caption && caption.value.trim()) {
+                                    statusData.caption = caption.value.trim();
+                                }
+                                
+                                await saveStatusToFirestore(statusData);
+                            };
+                            reader.readAsDataURL(currentMediaFile);
+                            return; // Early return since we're using async FileReader
                             
                         } else if (selectedStatusType === 'voice') {
                             if (!currentMediaFile) {
@@ -5020,10 +5554,18 @@
                                 return;
                             }
                             
-                            showNotification('Uploading voice message...', 'success');
-                            const mediaUrl = await uploadToCloudinary(currentMediaFile);
-                            statusData.content = mediaUrl;
-                            statusData.duration = recordingTime;
+                            showNotification('Processing voice message...', 'success');
+                            
+                            // Convert to base64 for offline storage
+                            const reader = new FileReader();
+                            reader.onload = async function(event) {
+                                statusData.content = event.target.result;
+                                statusData.duration = recordingTime;
+                                
+                                await saveStatusToFirestore(statusData);
+                            };
+                            reader.readAsDataURL(currentMediaFile);
+                            return; // Early return since we're using async FileReader
                             
                         } else if (selectedStatusType === 'poll') {
                             const questionInput = document.getElementById('pollQuestionInput');
@@ -5117,16 +5659,25 @@
                             }
                         }
                         
-                        showNotification('Posting status...', 'success');
-                        const statusId = await saveStatusToFirestore(statusData);
+                        await saveStatusToFirestore(statusData);
                         
                         createStatusModal.classList.remove('active');
                         resetCreateStatusForm();
                         
-                        showNotification(scheduledTime ? 'Status scheduled!' : 'Status posted successfully!', 'success');
+                        if (!isOnline) {
+                            showNotification('Status saved offline. Will upload when you\'re back online.', 'success');
+                        } else if (scheduledTime) {
+                            showNotification('Status scheduled!', 'success');
+                        } else {
+                            showNotification('Status posted successfully!', 'success');
+                        }
                         
                         // Reload statuses
-                        loadStatusUpdates();
+                        if (isOnline) {
+                            loadStatusUpdates();
+                        } else {
+                            updateStatusListWithCache();
+                        }
                         
                     } catch (error) {
                         console.error('Error posting status:', error);
@@ -5252,64 +5803,74 @@
                         
                         // Fetch viewers from Firestore
                         try {
-                            const statusDoc = await db.collection('statuses').doc(status.id).get();
-                            if (statusDoc.exists) {
-                                const viewers = statusDoc.data().viewers || [];
-                                const screenshotNotifications = statusDoc.data().screenshotNotifications || [];
-                                
-                                if (viewers.length > 0 && viewersList) {
-                                    for (const viewerId of viewers) {
-                                        if (viewerId === currentUser.uid) continue;
+                            if (status.id && !status.tempId) {
+                                const statusDoc = await db.collection('statuses').doc(status.id).get();
+                                if (statusDoc.exists) {
+                                    const viewers = statusDoc.data().viewers || [];
+                                    const screenshotNotifications = statusDoc.data().screenshotNotifications || [];
+                                    
+                                    if (viewers.length > 0 && viewersList) {
+                                        for (const viewerId of viewers) {
+                                            if (viewerId === currentUser.uid) continue;
+                                            
+                                            const viewerDoc = await db.collection('users').doc(viewerId).get();
+                                            if (viewerDoc.exists) {
+                                                const viewerData = viewerDoc.data();
+                                                const initials = viewerData.displayName ? 
+                                                    viewerData.displayName.split(' ').map(word => word[0]).join('').toUpperCase().substring(0, 2) : 
+                                                    'U';
+                                                
+                                                const viewerItem = document.createElement('div');
+                                                viewerItem.className = 'viewer-item';
+                                                
+                                                // Check if this viewer took a screenshot
+                                                const tookScreenshot = screenshotNotifications.some(notif => notif.userId === viewerId);
+                                                
+                                                viewerItem.innerHTML = `
+                                                    <div class="viewer-avatar" ${viewerData.photoURL ? `style="background-image: url('${viewerData.photoURL}')"` : ''}>
+                                                        ${viewerData.photoURL ? '' : `<span>${initials}</span>`}
+                                                        ${tookScreenshot ? '<span style="position: absolute; bottom: -5px; right: -5px; background: var(--danger-color); color: white; width: 20px; height: 20px; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-size: 10px;"><i class="fas fa-camera"></i></span>' : ''}
+                                                    </div>
+                                                    <div class="viewer-info">
+                                                        <div class="viewer-name">${viewerData.displayName || 'User'} ${tookScreenshot ? '<span style="color: var(--danger-color); font-size: 12px;">(took screenshot)</span>' : ''}</div>
+                                                        <div class="viewer-time">Viewed recently</div>
+                                                    </div>
+                                                `;
+                                                viewersList.appendChild(viewerItem);
+                                            }
+                                        }
                                         
-                                        const viewerDoc = await db.collection('users').doc(viewerId).get();
-                                        if (viewerDoc.exists) {
-                                            const viewerData = viewerDoc.data();
-                                            const initials = viewerData.displayName ? 
-                                                viewerData.displayName.split(' ').map(word => word[0]).join('').toUpperCase().substring(0, 2) : 
-                                                'U';
-                                            
-                                            const viewerItem = document.createElement('div');
-                                            viewerItem.className = 'viewer-item';
-                                            
-                                            // Check if this viewer took a screenshot
-                                            const tookScreenshot = screenshotNotifications.some(notif => notif.userId === viewerId);
-                                            
-                                            viewerItem.innerHTML = `
-                                                <div class="viewer-avatar" ${viewerData.photoURL ? `style="background-image: url('${viewerData.photoURL}')"` : ''}>
-                                                    ${viewerData.photoURL ? '' : `<span>${initials}</span>`}
-                                                    ${tookScreenshot ? '<span style="position: absolute; bottom: -5px; right: -5px; background: var(--danger-color); color: white; width: 20px; height: 20px; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-size: 10px;"><i class="fas fa-camera"></i></span>' : ''}
+                                        if (viewers.includes(currentUser.uid)) {
+                                            const currentUserItem = document.createElement('div');
+                                            currentUserItem.className = 'viewer-item';
+                                            currentUserItem.innerHTML = `
+                                                <div class="viewer-avatar" ${currentUser.photoURL ? `style="background-image: url('${currentUser.photoURL}')"` : ''}>
+                                                    ${currentUser.photoURL ? '' : '<span>ME</span>'}
                                                 </div>
                                                 <div class="viewer-info">
-                                                    <div class="viewer-name">${viewerData.displayName || 'User'} ${tookScreenshot ? '<span style="color: var(--danger-color); font-size: 12px;">(took screenshot)</span>' : ''}</div>
+                                                    <div class="viewer-name">You</div>
                                                     <div class="viewer-time">Viewed recently</div>
                                                 </div>
                                             `;
-                                            viewersList.appendChild(viewerItem);
+                                            viewersList.appendChild(currentUserItem);
                                         }
-                                    }
-                                    
-                                    if (viewers.includes(currentUser.uid)) {
-                                        const currentUserItem = document.createElement('div');
-                                        currentUserItem.className = 'viewer-item';
-                                        currentUserItem.innerHTML = `
-                                            <div class="viewer-avatar" ${currentUser.photoURL ? `style="background-image: url('${currentUser.photoURL}')"` : ''}>
-                                                ${currentUser.photoURL ? '' : '<span>ME</span>'}
-                                            </div>
-                                            <div class="viewer-info">
-                                                <div class="viewer-name">You</div>
-                                                <div class="viewer-time">Viewed recently</div>
+                                    } else if (viewersList) {
+                                        viewersList.innerHTML = `
+                                            <div style="text-align: center; padding: 40px 20px; color: var(--text-secondary);">
+                                                <i class="fas fa-eye" style="font-size: 48px; margin-bottom: 15px; opacity: 0.5;"></i>
+                                                <p>No viewers yet</p>
                                             </div>
                                         `;
-                                        viewersList.appendChild(currentUserItem);
                                     }
-                                } else if (viewersList) {
-                                    viewersList.innerHTML = `
-                                        <div style="text-align: center; padding: 40px 20px; color: var(--text-secondary);">
-                                            <i class="fas fa-eye" style="font-size: 48px; margin-bottom: 15px; opacity: 0.5;"></i>
-                                            <p>No viewers yet</p>
-                                        </div>
-                                    `;
                                 }
+                            } else if (viewersList) {
+                                // For offline/pending statuses
+                                viewersList.innerHTML = `
+                                    <div style="text-align: center; padding: 40px 20px; color: var(--text-secondary);">
+                                        <i class="fas fa-wifi-slash" style="font-size: 48px; margin-bottom: 15px; opacity: 0.5;"></i>
+                                        <p>Viewer information unavailable offline</p>
+                                    </div>
+                                `;
                             }
                         } catch (error) {
                             console.error('Error loading viewers:', error);
@@ -5360,13 +5921,22 @@
                     if (userStatuses && userStatuses[currentStatusIndex]) {
                         const statusId = userStatuses[currentStatusIndex].id;
                         
-                        db.collection('statuses').doc(statusId).update({
-                            [`reactions.${currentUser.uid}`]: emoji
-                        }).then(() => {
-                            showNotification(`Reacted with ${emoji}`, 'success');
-                        }).catch(error => {
-                            console.error('Error saving reaction:', error);
-                        });
+                        if (statusId && !userStatuses[currentStatusIndex].tempId) {
+                            db.collection('statuses').doc(statusId).update({
+                                [`reactions.${currentUser.uid}`]: emoji
+                            }).then(() => {
+                                showNotification(`Reacted with ${emoji}`, 'success');
+                            }).catch(error => {
+                                console.error('Error saving reaction:', error);
+                                // Save reaction for offline sync
+                                const offlineReactions = JSON.parse(localStorage.getItem(`offlineReactions_${currentUser.uid}`) || '{}');
+                                offlineReactions[statusId] = emoji;
+                                localStorage.setItem(`offlineReactions_${currentUser.uid}`, JSON.stringify(offlineReactions));
+                                showNotification(`Reacted with ${emoji} (offline)`, 'success');
+                            });
+                        } else {
+                            showNotification('Cannot react to offline status', 'warning');
+                        }
                     }
                     
                     this.style.transform = 'scale(1.3)';

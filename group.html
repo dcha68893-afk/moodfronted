@@ -23,9 +23,9 @@
     <!-- Font Awesome -->
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
     
-    <!-- Emoji Picker -->
-    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/emoji-picker-element@1.13.0/index.min.css">
-    <script src="https://cdn.jsdelivr.net/npm/emoji-picker-element@1.13.0/index.min.js"></script>
+    <!-- Emoji Picker - FIXED URL -->
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/emoji-picker-element@1.14.0/dist/style.css">
+    <script src="https://cdn.jsdelivr.net/npm/emoji-picker-element@1.14.0/dist/index.min.js" type="module"></script>
     
     <!-- Cloudinary Upload Widget -->
     <script src="https://upload-widget.cloudinary.com/global/all.js"></script>
@@ -1466,6 +1466,23 @@
             background-color: var(--warning-color);
         }
         
+        /* Offline Indicator */
+        .offline-indicator {
+            position: fixed;
+            top: 10px;
+            right: 10px;
+            background-color: var(--warning-color);
+            color: white;
+            padding: 8px 15px;
+            border-radius: 20px;
+            font-size: 12px;
+            z-index: 1000;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            box-shadow: var(--shadow);
+        }
+        
         /* Voice Message */
         .voice-message {
             display: flex;
@@ -1740,6 +1757,12 @@
     </style>
 </head>
 <body>
+    <!-- Offline Indicator -->
+    <div id="offlineIndicator" class="offline-indicator hidden">
+        <i class="fas fa-wifi-slash"></i>
+        <span>Offline Mode</span>
+    </div>
+    
     <div class="app-container">
         <!-- Sidebar with groups list -->
         <div class="sidebar">
@@ -2434,6 +2457,17 @@
         const auth = firebase.auth();
         const storage = firebase.storage();
 
+        // Enable offline persistence for Firestore
+        db.enablePersistence()
+            .catch((err) => {
+                console.warn('Failed to enable offline persistence:', err.code);
+                if (err.code == 'failed-precondition') {
+                    console.warn('Multiple tabs open, persistence can only be enabled in one tab at a time.');
+                } else if (err.code == 'unimplemented') {
+                    console.warn('The current browser does not support offline persistence.');
+                }
+            });
+
         // Global Variables
         let currentUser = null;
         let currentGroup = null;
@@ -2452,6 +2486,13 @@
         let currentCall = null;
         let localStream = null;
         let peerConnections = new Map();
+        
+        // Offline support variables
+        let isOnline = navigator.onLine;
+        let offlineMessagesQueue = [];
+        let offlineActivitiesQueue = [];
+        let pendingSyncOperations = [];
+        let syncInProgress = false;
 
         // DOM Elements
         const groupsList = document.getElementById('groupsList');
@@ -2477,11 +2518,15 @@
         const notificationText = document.getElementById('notificationText');
         const activityFeed = document.getElementById('activityFeed');
         const groupStats = document.getElementById('groupStats');
+        const offlineIndicator = document.getElementById('offlineIndicator');
 
         // Initialize App
         document.addEventListener('DOMContentLoaded', initializeApp);
 
         function initializeApp() {
+            // Set up online/offline detection
+            setupOnlineStatusDetection();
+            
             // Check authentication
             auth.onAuthStateChanged(async (user) => {
                 if (user) {
@@ -2489,10 +2534,77 @@
                     await loadUserData();
                     setupEventListeners();
                     setupRealTimeListeners();
+                    
+                    // Load cached data on initial load
+                    await loadCachedGroups();
                 } else {
                     window.location.href = 'index.html';
                 }
             });
+        }
+        
+        function setupOnlineStatusDetection() {
+            // Update online status initially
+            updateOnlineStatus();
+            
+            // Listen for online/offline events
+            window.addEventListener('online', updateOnlineStatus);
+            window.addEventListener('offline', updateOnlineStatus);
+        }
+        
+        function updateOnlineStatus() {
+            isOnline = navigator.onLine;
+            
+            if (isOnline) {
+                // Hide offline indicator
+                offlineIndicator.classList.add('hidden');
+                
+                // Show online notification
+                showNotification('Back online. Syncing data...', 'success');
+                
+                // Trigger sync when back online
+                setTimeout(() => {
+                    if (currentUser) {
+                        syncOfflineData();
+                    }
+                }, 1000);
+                
+                // Enable group creation buttons
+                document.querySelectorAll('#newGroupBtn, #createFirstGroupBtn, #createGroupMainBtn').forEach(btn => {
+                    btn.disabled = false;
+                    btn.title = 'New Group';
+                });
+            } else {
+                // Show offline indicator
+                offlineIndicator.classList.remove('hidden');
+                
+                // Show offline notification
+                showNotification('You are offline. Some features may be limited.', 'warning');
+                
+                // Disable group creation buttons
+                document.querySelectorAll('#newGroupBtn, #createFirstGroupBtn, #createGroupMainBtn').forEach(btn => {
+                    btn.disabled = true;
+                    btn.title = 'Offline - Group creation unavailable';
+                });
+            }
+            
+            // Update UI elements based on online status
+            updateUIForOnlineStatus();
+        }
+        
+        function updateUIForOnlineStatus() {
+            const createGroupBtn = document.getElementById('createGroupBtn');
+            if (createGroupBtn) {
+                if (!isOnline) {
+                    createGroupBtn.disabled = true;
+                    createGroupBtn.textContent = 'Offline - Cannot Create Group';
+                    createGroupBtn.title = 'Group creation requires internet connection';
+                } else {
+                    createGroupBtn.disabled = false;
+                    createGroupBtn.textContent = 'Create Group';
+                    createGroupBtn.title = '';
+                }
+            }
         }
 
         async function loadUserData() {
@@ -2501,6 +2613,9 @@
                 const userDoc = await db.collection('users').doc(currentUser.uid).get();
                 if (userDoc.exists) {
                     userData = userDoc.data();
+                    
+                    // Cache user data for offline use
+                    await cacheUserData(userData);
                     
                     // Update UI with user data using display-user-selections.js functionality
                     userName.textContent = userData.displayName || userData.email.split('@')[0];
@@ -2518,10 +2633,10 @@
                         userAvatar.innerHTML = '';
                     }
                     
-                    // Load friends list (from chat.html structure)
+                    // Load friends with offline fallback
                     await loadFriends();
                     
-                    // Load groups
+                    // Load groups with offline fallback
                     await loadGroups();
                     
                     // Load group settings
@@ -2529,10 +2644,45 @@
                     
                     // Update user status in real-time
                     updateUserOnlineStatus();
+                } else {
+                    // If no user data exists, create basic user data
+                    userData = {
+                        displayName: currentUser.email.split('@')[0],
+                        email: currentUser.email,
+                        mood: 'Feeling good',
+                        interests: []
+                    };
+                    await db.collection('users').doc(currentUser.uid).set(userData);
+                    updateUserStatusDisplay();
                 }
             } catch (error) {
                 console.error('Error loading user data:', error);
-                showNotification('Error loading user data', 'error');
+                
+                // Fallback to cached data if online load fails
+                if (!userData) {
+                    const cachedUserData = await getCachedUserData();
+                    if (cachedUserData) {
+                        userData = cachedUserData;
+                        updateUserUIFromCache();
+                        showNotification('Using cached data (offline mode)', 'warning');
+                    } else {
+                        showNotification('Error loading user data', 'error');
+                    }
+                }
+            }
+        }
+        
+        function updateUserUIFromCache() {
+            if (!userData) return;
+            
+            userName.textContent = userData.displayName || userData.email.split('@')[0];
+            userMood = userData.mood || 'Feeling good';
+            userInterests = userData.interests || [];
+            updateUserStatusDisplay();
+            
+            if (userData.photoURL) {
+                userAvatar.style.backgroundImage = `url('${userData.photoURL}')`;
+                userAvatar.innerHTML = '';
             }
         }
 
@@ -2545,7 +2695,7 @@
             userMoodEl.textContent = statusText;
             
             // Also update in database for other users to see
-            if (userData) {
+            if (userData && isOnline) {
                 db.collection('users').doc(currentUser.uid).update({
                     status: statusText,
                     lastSeen: firebase.firestore.FieldValue.serverTimestamp(),
@@ -2555,6 +2705,8 @@
         }
 
         function updateUserOnlineStatus() {
+            if (!isOnline) return;
+            
             // Set user as online
             db.collection('users').doc(currentUser.uid).update({
                 isOnline: true,
@@ -2563,20 +2715,28 @@
             
             // Handle window close/refresh
             window.addEventListener('beforeunload', () => {
-                db.collection('users').doc(currentUser.uid).update({
-                    isOnline: false,
-                    lastSeen: firebase.firestore.FieldValue.serverTimestamp()
-                });
+                if (isOnline) {
+                    db.collection('users').doc(currentUser.uid).update({
+                        isOnline: false,
+                        lastSeen: firebase.firestore.FieldValue.serverTimestamp()
+                    });
+                }
             });
         }
 
         async function loadFriends() {
             try {
-                // Load friends from user's friend list (from chat.html structure)
-                const friendsSnapshot = await db.collection('users')
-                    .doc(currentUser.uid)
-                    .collection('friends')
-                    .get();
+                // Try to load friends from cache first
+                const cachedFriends = await getCachedFriends();
+                if (cachedFriends && cachedFriends.length > 0) {
+                    friends = cachedFriends;
+                    console.log(`Loaded ${friends.length} friends from cache`);
+                }
+                
+                // Load friends from user's friend list
+                // First check if the user has a friends collection
+                const friendsRef = db.collection('users').doc(currentUser.uid).collection('friends');
+                const friendsSnapshot = await friendsRef.get();
                 
                 friends = [];
                 
@@ -2587,7 +2747,7 @@
                     const userDoc = await db.collection('users').doc(friendData.userId).get();
                     if (userDoc.exists) {
                         const userData = userDoc.data();
-                        friends.push({
+                        const friend = {
                             id: friendData.userId,
                             name: userData.displayName || userData.email.split('@')[0],
                             email: userData.email,
@@ -2596,21 +2756,55 @@
                             interests: userData.interests || [],
                             isOnline: userData.isOnline || false,
                             lastSeen: userData.lastSeen
-                        });
+                        };
+                        friends.push(friend);
+                        
+                        // Cache friend data for offline use
+                        await cacheFriend(friend);
                     }
                 }
                 
-                console.log(`Loaded ${friends.length} friends`);
+                console.log(`Loaded ${friends.length} friends from server`);
+                
+                // Cache friends list
+                await cacheFriendsList(friends);
                 
             } catch (error) {
                 console.error('Error loading friends:', error);
-                friends = [];
+                
+                // Fallback to cached friends if online load fails
+                if (friends.length === 0) {
+                    const cachedFriends = await getCachedFriends();
+                    if (cachedFriends) {
+                        friends = cachedFriends;
+                        console.log(`Using ${friends.length} cached friends (offline mode)`);
+                    } else {
+                        friends = [];
+                    }
+                }
             }
         }
 
         async function loadGroups() {
             try {
+                if (!currentUser) return;
+                
                 groupsSpinner.style.display = 'block';
+                
+                // Try to load groups from cache first
+                const cachedGroups = await getCachedGroups();
+                if (cachedGroups && cachedGroups.length > 0) {
+                    groups = cachedGroups;
+                    renderGroupsList();
+                    groupsSpinner.style.display = 'none';
+                    console.log(`Loaded ${groups.length} groups from cache`);
+                    
+                    // If offline, don't try to fetch from server
+                    if (!isOnline) {
+                        emptyGroupsState.classList.toggle('hidden', groups.length > 0);
+                        return;
+                    }
+                }
                 
                 // Load groups where user is a participant
                 const groupsSnapshot = await db.collection('groups')
@@ -2623,6 +2817,9 @@
                 if (groupsSnapshot.empty) {
                     emptyGroupsState.classList.remove('hidden');
                     groupsSpinner.style.display = 'none';
+                    
+                    // Cache empty groups state
+                    await cacheGroups([]);
                     return;
                 }
                 
@@ -2671,15 +2868,57 @@
                     group.recentActivity = activitySnapshot.size;
                     
                     groups.push(group);
+                    
+                    // Cache group messages for offline access
+                    await cacheGroupMessages(group.id);
                 }
                 
                 renderGroupsList();
                 groupsSpinner.style.display = 'none';
                 
+                // Cache groups list
+                await cacheGroups(groups);
+                
             } catch (error) {
                 console.error('Error loading groups:', error);
                 groupsSpinner.style.display = 'none';
-                emptyGroupsState.classList.remove('hidden');
+                
+                // Fallback to cached groups if online load fails
+                if (groups.length === 0) {
+                    const cachedGroups = await getCachedGroups();
+                    if (cachedGroups) {
+                        groups = cachedGroups;
+                        renderGroupsList();
+                        emptyGroupsState.classList.toggle('hidden', groups.length > 0);
+                        showNotification('Using cached groups (offline mode)', 'warning');
+                    } else {
+                        emptyGroupsState.classList.remove('hidden');
+                    }
+                }
+            }
+        }
+        
+        async function loadCachedGroups() {
+            try {
+                if (!currentUser) return;
+                
+                const cachedGroups = await getCachedGroups();
+                if (cachedGroups && cachedGroups.length > 0) {
+                    groups = cachedGroups;
+                    renderGroupsList();
+                    console.log(`Loaded ${groups.length} cached groups on initial load`);
+                    
+                    // Also load cached messages for the first group if available
+                    if (groups.length > 0) {
+                        const firstGroup = groups[0];
+                        const cachedMessages = await getCachedGroupMessages(firstGroup.id);
+                        if (cachedMessages && cachedMessages.length > 0) {
+                            console.log(`Loaded ${cachedMessages.length} cached messages for group ${firstGroup.name}`);
+                        }
+                    }
+                }
+            } catch (error) {
+                console.error('Error loading cached groups:', error);
             }
         }
 
@@ -2721,6 +2960,9 @@
                 settingsSnapshot.forEach(doc => {
                     groupSettings.set(doc.id, doc.data());
                 });
+                
+                // Cache group settings
+                await cacheGroupSettings(settingsSnapshot);
             } catch (error) {
                 console.error('Error loading group settings:', error);
             }
@@ -2829,7 +3071,7 @@
                 emptyChatState.style.display = 'none';
                 chatInputContainer.style.display = 'block';
                 
-                // Load messages
+                // Load messages with offline fallback
                 await loadGroupMessages(group.id);
                 
                 // Load activity feed
@@ -2838,16 +3080,20 @@
                 // Load statistics
                 await loadGroupStatistics(group.id);
                 
-                // Mark as read
-                await markGroupAsRead(group.id);
+                // Mark as read (only when online)
+                if (isOnline) {
+                    await markGroupAsRead(group.id);
+                }
                 
                 // Update group details panel if open
                 if (groupDetailsPanel.classList.contains('active')) {
                     updateGroupDetails();
                 }
                 
-                // Setup real-time listener for this group
-                setupGroupMessageListener(group.id);
+                // Setup real-time listener for this group (only when online)
+                if (isOnline) {
+                    setupGroupMessageListener(group.id);
+                }
                 
             } catch (error) {
                 console.error('Error selecting group:', error);
@@ -2885,6 +3131,27 @@
             try {
                 chatContainer.innerHTML = '<div class="spinner"></div>';
                 
+                // Try to load messages from cache first
+                const cachedMessages = await getCachedGroupMessages(groupId);
+                if (cachedMessages && cachedMessages.length > 0) {
+                    renderMessages(cachedMessages);
+                    console.log(`Loaded ${cachedMessages.length} cached messages for group ${groupId}`);
+                    
+                    // If offline, don't try to fetch from server
+                    if (!isOnline) {
+                        // Show offline indicator in chat
+                        const offlineMessage = document.createElement('div');
+                        offlineMessage.className = 'message-date';
+                        offlineMessage.innerHTML = `
+                            <div class="date-label" style="background-color: var(--warning-color); color: white;">
+                                <i class="fas fa-wifi-slash"></i> Offline - Showing cached messages
+                            </div>
+                        `;
+                        chatContainer.insertBefore(offlineMessage, chatContainer.firstChild);
+                        return;
+                    }
+                }
+                
                 const messagesSnapshot = await db.collection('groups')
                     .doc(groupId)
                     .collection('messages')
@@ -2904,21 +3171,55 @@
                     return;
                 }
                 
-                renderMessages(messagesSnapshot.docs);
+                const messages = messagesSnapshot.docs.map(doc => ({
+                    id: doc.id,
+                    ...doc.data()
+                }));
+                
+                renderMessages(messages);
+                
+                // Cache messages for offline access
+                await cacheGroupMessagesData(groupId, messages);
                 
             } catch (error) {
                 console.error('Error loading messages:', error);
-                showNotification('Error loading messages', 'error');
+                
+                // Fallback to cached messages
+                const cachedMessages = await getCachedGroupMessages(groupId);
+                if (cachedMessages && cachedMessages.length > 0) {
+                    renderMessages(cachedMessages);
+                    
+                    // Show offline indicator
+                    const offlineMessage = document.createElement('div');
+                    offlineMessage.className = 'message-date';
+                    offlineMessage.innerHTML = `
+                        <div class="date-label" style="background-color: var(--warning-color); color: white;">
+                            <i class="fas fa-wifi-slash"></i> Offline - Showing cached messages
+                        </div>
+                    `;
+                    chatContainer.insertBefore(offlineMessage, chatContainer.firstChild);
+                    
+                    showNotification('Showing cached messages (offline mode)', 'warning');
+                } else {
+                    chatContainer.innerHTML = `
+                        <div class="message-date">
+                            <div class="date-label">Today</div>
+                        </div>
+                        <div style="text-align: center; padding: 40px 20px; color: var(--text-secondary);">
+                            <p>Unable to load messages. Please check your connection.</p>
+                        </div>
+                    `;
+                }
             }
         }
 
-        function renderMessages(messageDocs) {
+        function renderMessages(messages) {
             let messagesHTML = '';
             let currentDate = '';
             
-            messageDocs.forEach(doc => {
-                const message = doc.data();
-                const messageDate = message.timestamp?.toDate() || new Date();
+            messages.forEach(message => {
+                const messageDate = message.timestamp?.toDate ? message.timestamp.toDate() : 
+                                  (message.timestamp ? new Date(message.timestamp) : new Date());
                 const dateStr = messageDate.toDateString();
                 
                 if (dateStr !== currentDate) {
@@ -2992,7 +3293,7 @@
                         break;
                         
                     case 'poll':
-                        messageContent = createPollMessage(message, doc.id);
+                        messageContent = createPollMessage(message, message.id);
                         break;
                         
                     case 'task':
@@ -3045,7 +3346,7 @@
                         const count = users.length;
                         const hasReacted = users.includes(currentUser.uid);
                         reactionsHTML += `
-                            <div class="reaction ${hasReacted ? 'active' : ''}" data-message-id="${doc.id}" data-reaction="${reaction}">
+                            <div class="reaction ${hasReacted ? 'active' : ''}" data-message-id="${message.id}" data-reaction="${reaction}">
                                 ${reaction} <span class="reaction-count">${count}</span>
                             </div>
                         `;
@@ -3059,7 +3360,7 @@
                     : '';
                 
                 messagesHTML += `
-                    <div class="message-wrapper ${isSent ? 'sent' : 'received'}" data-message-id="${doc.id}">
+                    <div class="message-wrapper ${isSent ? 'sent' : 'received'}" data-message-id="${message.id}">
                         <div class="message-bubble ${isSent ? 'sent' : 'received'}" style="position: relative;">
                             ${starredIndicator}
                             ${!isSent && message.type !== 'system' ? `<div class="message-sender">${senderName}</div>` : ''}
@@ -3178,7 +3479,10 @@
                     type: 'text',
                     timestamp: firebase.firestore.FieldValue.serverTimestamp(),
                     readBy: [],
-                    reactions: {}
+                    reactions: {},
+                    // Add offline status flag
+                    _offline: !isOnline,
+                    _pending: !isOnline
                 };
                 
                 // Check for mentions
@@ -3187,30 +3491,61 @@
                     message.mentions = mentions;
                 }
                 
-                // Add message to Firestore
-                await db.collection('groups')
-                    .doc(currentGroup.id)
-                    .collection('messages')
-                    .add(message);
-                
-                // Update group's last activity
-                await db.collection('groups')
-                    .doc(currentGroup.id)
-                    .update({
-                        updatedAt: firebase.firestore.FieldValue.serverTimestamp(),
-                        lastMessage: content.substring(0, 100)
+                if (isOnline) {
+                    // Add message to Firestore
+                    await db.collection('groups')
+                        .doc(currentGroup.id)
+                        .collection('messages')
+                        .add(message);
+                    
+                    // Update group's last activity
+                    await db.collection('groups')
+                        .doc(currentGroup.id)
+                        .update({
+                            updatedAt: firebase.firestore.FieldValue.serverTimestamp(),
+                            lastMessage: content.substring(0, 100)
+                        });
+                    
+                    // Add activity
+                    await addActivity('message', `${userData.displayName} sent a message`);
+                    
+                    showNotification('Message sent', 'success');
+                } else {
+                    // Queue message for offline sync
+                    const messageId = `offline_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+                    message.id = messageId;
+                    message.timestamp = new Date();
+                    
+                    // Add to offline queue
+                    offlineMessagesQueue.push({
+                        groupId: currentGroup.id,
+                        message: message,
+                        type: 'message'
                     });
-                
-                // Add activity
-                await addActivity('message', `${userData.displayName} sent a message`);
+                    
+                    // Cache the message locally for immediate display
+                    const cachedMessages = await getCachedGroupMessages(currentGroup.id) || [];
+                    cachedMessages.push(message);
+                    await cacheGroupMessagesData(currentGroup.id, cachedMessages);
+                    
+                    // Update UI immediately
+                    const messages = await getCachedGroupMessages(currentGroup.id);
+                    if (messages) {
+                        renderMessages(messages);
+                    }
+                    
+                    showNotification('Message saved offline. Will send when online.', 'warning');
+                }
                 
                 // Clear input
                 messageInput.value = '';
                 sendBtn.disabled = true;
                 messageInput.style.height = 'auto';
                 
-                // Update groups list
-                await loadGroups();
+                // Update groups list (only when online)
+                if (isOnline) {
+                    await loadGroups();
+                }
                 
             } catch (error) {
                 console.error('Error sending message:', error);
@@ -3244,6 +3579,8 @@
         }
 
         async function markGroupAsRead(groupId) {
+            if (!isOnline) return;
+            
             try {
                 await db.collection('groups')
                     .doc(groupId)
@@ -3264,6 +3601,12 @@
         }
 
         async function createGroup(groupData) {
+            // Prevent group creation while offline
+            if (!isOnline) {
+                showNotification('Cannot create groups while offline. Please connect to the internet.', 'error');
+                return;
+            }
+            
             try {
                 const groupId = db.collection('groups').doc().id;
                 
@@ -3449,16 +3792,32 @@
             if (!currentGroup) return;
             
             try {
-                await db.collection('groups')
-                    .doc(currentGroup.id)
-                    .collection('activities')
-                    .add({
-                        type: type,
-                        content: content,
-                        timestamp: firebase.firestore.FieldValue.serverTimestamp(),
-                        userId: currentUser.uid,
-                        userName: userData.displayName
+                if (isOnline) {
+                    await db.collection('groups')
+                        .doc(currentGroup.id)
+                        .collection('activities')
+                        .add({
+                            type: type,
+                            content: content,
+                            timestamp: firebase.firestore.FieldValue.serverTimestamp(),
+                            userId: currentUser.uid,
+                            userName: userData.displayName
+                        });
+                } else {
+                    // Queue activity for offline sync
+                    offlineActivitiesQueue.push({
+                        groupId: currentGroup.id,
+                        activity: {
+                            type: type,
+                            content: content,
+                            timestamp: new Date(),
+                            userId: currentUser.uid,
+                            userName: userData.displayName,
+                            _offline: true,
+                            _pending: true
+                        }
                     });
+                }
                 
             } catch (error) {
                 console.error('Error adding activity:', error);
@@ -3571,6 +3930,12 @@
         }
 
         async function handleAdminAction(e) {
+            // Check if online before performing admin action
+            if (!isOnline) {
+                showNotification('Admin actions require internet connection', 'error');
+                return;
+            }
+            
             const userId = e.currentTarget.dataset.userId;
             const isAdmin = currentGroup.admins?.includes(userId);
             
@@ -3614,6 +3979,12 @@
         }
 
         async function handleRemoveParticipant(e) {
+            // Check if online before removing participant
+            if (!isOnline) {
+                showNotification('Removing participants requires internet connection', 'error');
+                return;
+            }
+            
             const userId = e.currentTarget.dataset.userId;
             
             if (!confirm('Remove this participant from the group?')) return;
@@ -3760,6 +4131,12 @@
         }
 
         async function handleReactionClick(e) {
+            // Check if online before adding reaction
+            if (!isOnline) {
+                showNotification('Adding reactions requires internet connection', 'error');
+                return;
+            }
+            
             const reactionEl = e.currentTarget;
             const messageId = reactionEl.dataset.messageId;
             const reaction = reactionEl.dataset.reaction;
@@ -3817,6 +4194,9 @@
             document.getElementById('closeCreateGroupModal').addEventListener('click', hideCreateGroupModal);
             document.getElementById('cancelCreateGroup').addEventListener('click', hideCreateGroupModal);
             document.getElementById('createGroupBtn').addEventListener('click', handleCreateGroup);
+            
+            // Update create group button based on online status
+            updateUIForOnlineStatus();
             
             // Upload avatar
             document.getElementById('uploadAvatarBtn').addEventListener('click', () => {
@@ -4003,6 +4383,12 @@
         }
 
         function showCreateGroupModal() {
+            // Check if online before showing create group modal
+            if (!isOnline) {
+                showNotification('Group creation requires internet connection. Please go online to create a new group.', 'error');
+                return;
+            }
+            
             document.getElementById('createGroupModal').classList.add('active');
             document.getElementById('groupNameInput').focus();
         }
@@ -4053,6 +4439,13 @@
         }
 
         async function handleCreateGroup() {
+            // Double-check online status before creating group
+            if (!isOnline) {
+                showNotification('Cannot create groups while offline. Please connect to the internet.', 'error');
+                hideCreateGroupModal();
+                return;
+            }
+            
             const groupName = document.getElementById('groupNameInput').value.trim();
             const groupDescription = document.getElementById('groupDescriptionInput').value.trim();
             const groupType = document.getElementById('groupTypeSelect').value;
@@ -4165,6 +4558,12 @@
         async function handleCreatePoll() {
             if (!currentGroup) return;
             
+            // Check if online before creating poll
+            if (!isOnline) {
+                showNotification('Creating polls requires internet connection', 'error');
+                return;
+            }
+            
             const question = document.getElementById('pollQuestionInput').value.trim();
             const options = Array.from(document.querySelectorAll('.poll-option-input-field'))
                 .map(input => input.value.trim())
@@ -4215,6 +4614,12 @@
         async function handleCreateTask() {
             if (!currentGroup) return;
             
+            // Check if online before creating task
+            if (!isOnline) {
+                showNotification('Creating tasks requires internet connection', 'error');
+                return;
+            }
+            
             const title = document.getElementById('taskTitleInput').value.trim();
             const description = document.getElementById('taskDescriptionInput').value.trim();
             const assignee = document.getElementById('taskAssigneeSelect').value;
@@ -4257,6 +4662,12 @@
 
         async function handleCreateEvent() {
             if (!currentGroup) return;
+            
+            // Check if online before creating event
+            if (!isOnline) {
+                showNotification('Creating events requires internet connection', 'error');
+                return;
+            }
             
             const title = document.getElementById('eventTitleInput').value.trim();
             const description = document.getElementById('eventDescriptionInput').value.trim();
@@ -4349,6 +4760,12 @@
         }
 
         function showJoinGroupModal() {
+            // Check if online before joining group
+            if (!isOnline) {
+                showNotification('Joining groups requires internet connection', 'error');
+                return;
+            }
+            
             const code = prompt('Enter group invite code:');
             if (code) {
                 joinGroupByCode(code);
@@ -4356,6 +4773,12 @@
         }
 
         async function joinGroupByCode(code) {
+            // Check if online before joining group
+            if (!isOnline) {
+                showNotification('Joining groups requires internet connection', 'error');
+                return;
+            }
+            
             try {
                 const groupsSnapshot = await db.collection('groups')
                     .where('settings.inviteCode', '==', code)
@@ -4417,6 +4840,12 @@
 
         async function startGroupCall() {
             if (!currentGroup) return;
+            
+            // Check if online before starting call
+            if (!isOnline) {
+                showNotification('Group calls require internet connection', 'error');
+                return;
+            }
             
             if (currentGroup.participants.length > 32) {
                 showNotification('Group calls are limited to 32 participants', 'warning');
@@ -4581,7 +5010,7 @@
             document.getElementById('callParticipants').innerHTML = '';
             
             // Update call in Firebase
-            if (currentCall) {
+            if (currentCall && isOnline) {
                 await db.collection('calls').doc(currentCall).update({
                     endedAt: firebase.firestore.FieldValue.serverTimestamp()
                 });
@@ -4592,6 +5021,12 @@
 
         async function handleLeaveGroup() {
             if (!currentGroup) return;
+            
+            // Check if online before leaving group
+            if (!isOnline) {
+                showNotification('Leaving groups requires internet connection', 'error');
+                return;
+            }
             
             if (!confirm('Are you sure you want to leave this group?')) return;
             
@@ -4649,6 +5084,12 @@
         async function handleReportGroup() {
             if (!currentGroup) return;
             
+            // Check if online before reporting group
+            if (!isOnline) {
+                showNotification('Reporting groups requires internet connection', 'error');
+                return;
+            }
+            
             if (confirm('Report this group to administrators?')) {
                 try {
                     await db.collection('reports').add({
@@ -4671,36 +5112,90 @@
         }
 
         function setupEmojiPicker() {
-            if (window.emojiPicker) {
-                emojiPicker = new window.emojiPicker();
-                emojiPicker.addEventListener('emoji-click', event => {
-                    messageInput.value += event.detail.unicode;
-                    messageInput.focus();
-                    sendBtn.disabled = messageInput.value.trim() === '';
+            // Create a simple emoji picker since the external one has issues
+            const emojiBtn = document.getElementById('emojiBtn');
+            const quickEmojiBtn = document.getElementById('quickEmojiBtn');
+            const messageInput = document.getElementById('messageInput');
+            
+            const emojis = ['😀', '😂', '🥰', '😎', '👍', '❤️', '🔥', '🎉', '🙏', '🤔', '😢', '😡', '👏', '💯', '✨', '🎶', '🍕', '☕', '⚡', '🌈'];
+            
+            const createEmojiPicker = () => {
+                const picker = document.createElement('div');
+                picker.style.cssText = `
+                    position: absolute;
+                    bottom: 70px;
+                    right: 20px;
+                    background: white;
+                    border-radius: 12px;
+                    box-shadow: 0 5px 20px rgba(0,0,0,0.2);
+                    padding: 15px;
+                    display: grid;
+                    grid-template-columns: repeat(5, 1fr);
+                    gap: 10px;
+                    z-index: 1000;
+                    max-width: 250px;
+                `;
+                
+                emojis.forEach(emoji => {
+                    const emojiBtn = document.createElement('button');
+                    emojiBtn.textContent = emoji;
+                    emojiBtn.style.cssText = `
+                        font-size: 24px;
+                        background: none;
+                        border: none;
+                        cursor: pointer;
+                        padding: 5px;
+                        border-radius: 8px;
+                        transition: background 0.2s;
+                    `;
+                    emojiBtn.onmouseover = () => emojiBtn.style.background = '#f0f2f5';
+                    emojiBtn.onmouseout = () => emojiBtn.style.background = 'transparent';
+                    emojiBtn.onclick = () => {
+                        messageInput.value += emoji;
+                        messageInput.focus();
+                        sendBtn.disabled = messageInput.value.trim() === '';
+                        picker.style.display = 'none';
+                    };
+                    picker.appendChild(emojiBtn);
                 });
                 
-                document.getElementById('emojiBtn').addEventListener('click', () => {
-                    const container = document.getElementById('emojiPickerContainer');
-                    if (container.style.display === 'none') {
-                        container.innerHTML = '';
-                        container.appendChild(emojiPicker);
-                        container.style.display = 'block';
-                    } else {
-                        container.style.display = 'none';
-                    }
-                });
+                return picker;
+            };
+            
+            let picker = null;
+            
+            emojiBtn.addEventListener('click', () => {
+                if (!picker) {
+                    picker = createEmojiPicker();
+                    document.body.appendChild(picker);
+                }
                 
-                document.getElementById('quickEmojiBtn').addEventListener('click', () => {
-                    const container = document.getElementById('emojiPickerContainer');
-                    if (container.style.display === 'none') {
-                        container.innerHTML = '';
-                        container.appendChild(emojiPicker);
-                        container.style.display = 'block';
-                    } else {
-                        container.style.display = 'none';
-                    }
-                });
-            }
+                if (picker.style.display === 'none' || picker.style.display === '') {
+                    picker.style.display = 'grid';
+                } else {
+                    picker.style.display = 'none';
+                }
+            });
+            
+            quickEmojiBtn.addEventListener('click', () => {
+                if (!picker) {
+                    picker = createEmojiPicker();
+                    document.body.appendChild(picker);
+                }
+                
+                if (picker.style.display === 'none' || picker.style.display === '') {
+                    picker.style.display = 'grid';
+                } else {
+                    picker.style.display = 'none';
+                }
+            });
+            
+            // Close picker when clicking outside
+            document.addEventListener('click', (e) => {
+                if (picker && !picker.contains(e.target) && e.target !== emojiBtn && e.target !== quickEmojiBtn) {
+                    picker.style.display = 'none';
+                }
+            });
         }
 
         function setupGroupMessageListener(groupId) {
@@ -4708,7 +5203,9 @@
             realTimeListeners.forEach(unsubscribe => unsubscribe());
             realTimeListeners = [];
             
-            // Listen for new messages
+            // Listen for new messages (only when online)
+            if (!isOnline) return;
+            
             const unsubscribe = db.collection('groups')
                 .doc(groupId)
                 .collection('messages')
@@ -4731,6 +5228,9 @@
         }
 
         function setupRealTimeListeners() {
+            // Only setup real-time listeners when online
+            if (!isOnline || !currentUser) return;
+            
             // Listen for group updates
             const unsubscribeGroups = db.collection('groups')
                 .where('participants', 'array-contains', currentUser.uid)
@@ -4774,6 +5274,224 @@
             
             realTimeListeners.push(unsubscribeActivities);
         }
+        
+        // Functions for offline data caching and sync
+        
+        // Cache user data in localStorage
+        async function cacheUserData(userData) {
+            try {
+                localStorage.setItem(`kynecta_user_${currentUser.uid}`, JSON.stringify(userData));
+            } catch (error) {
+                console.error('Error caching user data:', error);
+            }
+        }
+        
+        // Get cached user data from localStorage
+        async function getCachedUserData() {
+            try {
+                if (!currentUser) return null;
+                const cached = localStorage.getItem(`kynecta_user_${currentUser.uid}`);
+                return cached ? JSON.parse(cached) : null;
+            } catch (error) {
+                console.error('Error getting cached user data:', error);
+                return null;
+            }
+        }
+        
+        // Cache friends list
+        async function cacheFriendsList(friends) {
+            try {
+                if (!currentUser) return;
+                localStorage.setItem(`kynecta_friends_${currentUser.uid}`, JSON.stringify(friends));
+            } catch (error) {
+                console.error('Error caching friends list:', error);
+            }
+        }
+        
+        // Get cached friends list
+        async function getCachedFriends() {
+            try {
+                if (!currentUser) return null;
+                const cached = localStorage.getItem(`kynecta_friends_${currentUser.uid}`);
+                return cached ? JSON.parse(cached) : null;
+            } catch (error) {
+                console.error('Error getting cached friends:', error);
+                return null;
+            }
+        }
+        
+        // Cache individual friend
+        async function cacheFriend(friend) {
+            try {
+                const friends = await getCachedFriends() || [];
+                const existingIndex = friends.findIndex(f => f.id === friend.id);
+                
+                if (existingIndex >= 0) {
+                    friends[existingIndex] = friend;
+                } else {
+                    friends.push(friend);
+                }
+                
+                await cacheFriendsList(friends);
+            } catch (error) {
+                console.error('Error caching friend:', error);
+            }
+        }
+        
+        // Cache groups list
+        async function cacheGroups(groups) {
+            try {
+                if (!currentUser) return;
+                localStorage.setItem(`kynecta_groups_${currentUser.uid}`, JSON.stringify(groups));
+            } catch (error) {
+                console.error('Error caching groups:', error);
+            }
+        }
+        
+        // Get cached groups list
+        async function getCachedGroups() {
+            try {
+                if (!currentUser) return null;
+                const cached = localStorage.getItem(`kynecta_groups_${currentUser.uid}`);
+                return cached ? JSON.parse(cached) : null;
+            } catch (error) {
+                console.error('Error getting cached groups:', error);
+                return null;
+            }
+        }
+        
+        // Cache group messages
+        async function cacheGroupMessages(groupId) {
+            if (!isOnline || !currentUser) return;
+            
+            try {
+                const messagesSnapshot = await db.collection('groups')
+                    .doc(groupId)
+                    .collection('messages')
+                    .orderBy('timestamp', 'asc')
+                    .limit(50)
+                    .get();
+                
+                const messages = messagesSnapshot.docs.map(doc => ({
+                    id: doc.id,
+                    ...doc.data()
+                }));
+                
+                localStorage.setItem(`kynecta_group_messages_${groupId}`, JSON.stringify(messages));
+            } catch (error) {
+                console.error('Error caching group messages:', error);
+            }
+        }
+        
+        // Cache group messages data
+        async function cacheGroupMessagesData(groupId, messages) {
+            try {
+                localStorage.setItem(`kynecta_group_messages_${groupId}`, JSON.stringify(messages));
+            } catch (error) {
+                console.error('Error caching group messages data:', error);
+            }
+        }
+        
+        // Get cached group messages
+        async function getCachedGroupMessages(groupId) {
+            try {
+                const cached = localStorage.getItem(`kynecta_group_messages_${groupId}`);
+                return cached ? JSON.parse(cached) : null;
+            } catch (error) {
+                console.error('Error getting cached group messages:', error);
+                return null;
+            }
+        }
+        
+        // Cache group settings
+        async function cacheGroupSettings(settingsSnapshot) {
+            try {
+                if (!currentUser) return;
+                const settings = {};
+                settingsSnapshot.forEach(doc => {
+                    settings[doc.id] = doc.data();
+                });
+                localStorage.setItem(`kynecta_group_settings_${currentUser.uid}`, JSON.stringify(settings));
+            } catch (error) {
+                console.error('Error caching group settings:', error);
+            }
+        }
+        
+        // Sync offline data when back online
+        async function syncOfflineData() {
+            if (syncInProgress || !isOnline || !currentUser) return;
+            
+            syncInProgress = true;
+            showNotification('Syncing offline data...', 'success');
+            
+            try {
+                // Sync offline messages
+                const messagesToSync = [...offlineMessagesQueue];
+                offlineMessagesQueue = [];
+                
+                for (const item of messagesToSync) {
+                    try {
+                        // Remove offline flags
+                        delete item.message._offline;
+                        delete item.message._pending;
+                        
+                        // Add to Firestore
+                        await db.collection('groups')
+                            .doc(item.groupId)
+                            .collection('messages')
+                            .add(item.message);
+                        
+                        console.log('Synced offline message:', item.message.content);
+                    } catch (error) {
+                        console.error('Error syncing offline message:', error);
+                        // Put back in queue for retry
+                        offlineMessagesQueue.push(item);
+                    }
+                }
+                
+                // Sync offline activities
+                const activitiesToSync = [...offlineActivitiesQueue];
+                offlineActivitiesQueue = [];
+                
+                for (const item of activitiesToSync) {
+                    try {
+                        // Remove offline flags
+                        delete item.activity._offline;
+                        delete item.activity._pending;
+                        
+                        // Add to Firestore
+                        await db.collection('groups')
+                            .doc(item.groupId)
+                            .collection('activities')
+                            .add(item.activity);
+                        
+                        console.log('Synced offline activity:', item.activity.content);
+                    } catch (error) {
+                        console.error('Error syncing offline activity:', error);
+                        // Put back in queue for retry
+                        offlineActivitiesQueue.push(item);
+                    }
+                }
+                
+                // Reload data from server
+                await loadGroups();
+                if (currentGroup) {
+                    await loadGroupMessages(currentGroup.id);
+                    await loadActivityFeed(currentGroup.id);
+                }
+                
+                // Clear any pending sync operations
+                pendingSyncOperations = [];
+                
+                showNotification('Offline data synced successfully!', 'success');
+                
+            } catch (error) {
+                console.error('Error syncing offline data:', error);
+                showNotification('Error syncing some offline data', 'error');
+            } finally {
+                syncInProgress = false;
+            }
+        }
 
         // Auto-resize textarea
         messageInput.addEventListener('input', function() {
@@ -4793,6 +5511,12 @@
 
         window.voteInPoll = async function(messageId, optionIndex) {
             if (!currentGroup) return;
+            
+            // Check if online before voting
+            if (!isOnline) {
+                showNotification('Voting in polls requires internet connection', 'error');
+                return;
+            }
             
             try {
                 const messageRef = db.collection('groups').doc(currentGroup.id).collection('messages').doc(messageId);
@@ -4862,6 +5586,12 @@
         window.rsvpToEvent = async function(messageId, response) {
             if (!currentGroup) return;
             
+            // Check if online before RSVP
+            if (!isOnline) {
+                showNotification('RSVP requires internet connection', 'error');
+                return;
+            }
+            
             try {
                 const messageRef = db.collection('groups').doc(currentGroup.id).collection('messages').doc(messageId);
                 const messageDoc = await messageRef.get();
@@ -4904,6 +5634,12 @@
         };
 
         window.starMessage = async function(messageId) {
+            // Check if online before starring
+            if (!isOnline) {
+                showNotification('Starring messages requires internet connection', 'error');
+                return;
+            }
+            
             try {
                 const messageRef = db.collection('groups').doc(currentGroup.id).collection('messages').doc(messageId);
                 const messageDoc = await messageRef.get();
@@ -4929,6 +5665,12 @@
         };
 
         window.showReactionPicker = function(messageId, event) {
+            // Check if online before showing reaction picker
+            if (!isOnline) {
+                showNotification('Adding reactions requires internet connection', 'error');
+                return;
+            }
+            
             const picker = document.getElementById('reactionPicker');
             picker.style.left = `${event.clientX}px`;
             picker.style.top = `${event.clientY - 50}px`;
@@ -4983,6 +5725,12 @@
         };
 
         window.forwardMessage = async function(messageId) {
+            // Check if online before forwarding
+            if (!isOnline) {
+                showNotification('Forwarding messages requires internet connection', 'error');
+                return;
+            }
+            
             const groupsList = groups.filter(g => g.id !== currentGroup.id);
             
             if (groupsList.length === 0) {
@@ -5033,6 +5781,12 @@
         };
 
         window.deleteMessage = async function(messageId) {
+            // Check if online before deleting
+            if (!isOnline) {
+                showNotification('Deleting messages requires internet connection', 'error');
+                return;
+            }
+            
             if (!confirm('Delete this message?')) return;
             
             try {
@@ -5056,6 +5810,12 @@
 
         // Media attachment functions
         async function attachDocument() {
+            // Check if online before attaching document
+            if (!isOnline) {
+                showNotification('Attaching documents requires internet connection', 'error');
+                return;
+            }
+            
             const input = document.createElement('input');
             input.type = 'file';
             input.accept = '.pdf,.doc,.docx,.txt';
@@ -5106,6 +5866,12 @@
         }
 
         async function attachCamera() {
+            // Check if online before attaching camera photo
+            if (!isOnline) {
+                showNotification('Sending photos requires internet connection', 'error');
+                return;
+            }
+            
             try {
                 const stream = await navigator.mediaDevices.getUserMedia({ video: true });
                 const video = document.createElement('video');
@@ -5196,6 +5962,12 @@
         }
 
         async function attachGallery() {
+            // Check if online before attaching gallery items
+            if (!isOnline) {
+                showNotification('Sending media requires internet connection', 'error');
+                return;
+            }
+            
             const input = document.createElement('input');
             input.type = 'file';
             input.accept = 'image/*,video/*';
@@ -5243,6 +6015,12 @@
         }
 
         async function attachAudio() {
+            // Check if online before attaching audio
+            if (!isOnline) {
+                showNotification('Sending audio requires internet connection', 'error');
+                return;
+            }
+            
             try {
                 const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
                 const mediaRecorder = new MediaRecorder(stream);
@@ -5365,6 +6143,12 @@
         }
 
         async function attachLocation() {
+            // Check if online before attaching location
+            if (!isOnline) {
+                showNotification('Sharing location requires internet connection', 'error');
+                return;
+            }
+            
             if (!navigator.geolocation) {
                 showNotification('Geolocation is not supported by your browser', 'error');
                 return;
@@ -5402,6 +6186,12 @@
         }
 
         async function attachContact() {
+            // Check if online before attaching contact
+            if (!isOnline) {
+                showNotification('Sharing contacts requires internet connection', 'error');
+                return;
+            }
+            
             const contactName = prompt('Enter contact name:');
             const contactPhone = prompt('Enter contact phone number:');
             
@@ -5468,6 +6258,9 @@
             
             input.click();
         }
+        
+        // Initialize online status
+        updateOnlineStatus();
     </script>
 </body>
 </html>

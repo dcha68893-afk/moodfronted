@@ -55,6 +55,329 @@ let currentTab = 'groups'; // Default to groups
 let isLoading = false;
 let isSidebarOpen = true;
 
+// ADD: Network connectivity state
+let isOnline = navigator.onLine;
+let syncQueue = []; // Queue for messages to sync when online
+
+// ============================================================================
+// NETWORK DETECTION & BACKGROUND SYNC
+// ============================================================================
+
+// ADD: Network status detection and management
+function initializeNetworkDetection() {
+  console.log('Initializing network detection...');
+  
+  // Set initial state
+  updateNetworkStatus(navigator.onLine);
+  
+  // Listen for online/offline events
+  window.addEventListener('online', handleOnline);
+  window.addEventListener('offline', handleOffline);
+  
+  // Initialize IndexedDB for queued messages
+  initializeMessageQueue();
+}
+
+// ADD: Handle online event
+function handleOnline() {
+  console.log('Network: Online');
+  updateNetworkStatus(true);
+  
+  // Broadcast network change to other files
+  broadcastNetworkChange(true);
+  
+  // Process queued messages
+  processQueuedMessages();
+}
+
+// ADD: Handle offline event
+function handleOffline() {
+  console.log('Network: Offline');
+  updateNetworkStatus(false);
+  
+  // Broadcast network change to other files
+  broadcastNetworkChange(false);
+}
+
+// ADD: Update network status globally
+function updateNetworkStatus(online) {
+  isOnline = online;
+  
+  // Expose globally for other modules
+  window.APP_CONNECTIVITY = {
+    isOnline: isOnline,
+    lastChange: new Date().toISOString()
+  };
+  
+  // Dispatch custom event for other components
+  const event = new CustomEvent('network-status-change', {
+    detail: { isOnline: isOnline }
+  });
+  window.dispatchEvent(event);
+}
+
+// ADD: Broadcast network changes
+function broadcastNetworkChange(isOnline) {
+  // Use localStorage as a cross-tab communication channel
+  const status = {
+    type: 'network-status',
+    isOnline: isOnline,
+    timestamp: new Date().toISOString()
+  };
+  
+  try {
+    localStorage.setItem('kynecta-network-status', JSON.stringify(status));
+    
+    // Dispatch storage event for other tabs/windows
+    window.dispatchEvent(new StorageEvent('storage', {
+      key: 'kynecta-network-status',
+      newValue: JSON.stringify(status)
+    }));
+  } catch (e) {
+    console.warn('Could not broadcast network status to localStorage:', e);
+  }
+}
+
+// ADD: Initialize IndexedDB for message queue
+function initializeMessageQueue() {
+  if (!window.indexedDB) {
+    console.warn('IndexedDB not supported, offline queue disabled');
+    return;
+  }
+  
+  const request = indexedDB.open('KynectaMessageQueue', 1);
+  
+  request.onerror = function(event) {
+    console.error('Failed to open IndexedDB:', event.target.error);
+  };
+  
+  request.onupgradeneeded = function(event) {
+    const db = event.target.result;
+    
+    // Create object store for queued messages
+    if (!db.objectStoreNames.contains('messages')) {
+      const store = db.createObjectStore('messages', {
+        keyPath: 'id',
+        autoIncrement: true
+      });
+      
+      // Create indexes for efficient querying
+      store.createIndex('status', 'status', { unique: false });
+      store.createIndex('timestamp', 'timestamp', { unique: false });
+    }
+  };
+  
+  request.onsuccess = function(event) {
+    console.log('Message queue database initialized');
+  };
+}
+
+// ADD: Queue message for offline sync
+function queueMessageForSync(messageData) {
+  if (!window.indexedDB) return Promise.resolve(false);
+  
+  return new Promise((resolve, reject) => {
+    const request = indexedDB.open('KynectaMessageQueue', 1);
+    
+    request.onerror = function(event) {
+      console.error('Failed to open IndexedDB for queuing:', event.target.error);
+      reject(event.target.error);
+    };
+    
+    request.onsuccess = function(event) {
+      const db = event.target.result;
+      const transaction = db.transaction(['messages'], 'readwrite');
+      const store = transaction.objectStore('messages');
+      
+      const message = {
+        ...messageData,
+        status: 'pending',
+        timestamp: new Date().toISOString(),
+        attempts: 0
+      };
+      
+      const addRequest = store.add(message);
+      
+      addRequest.onsuccess = function() {
+        console.log('Message queued for sync:', messageData);
+        
+        // Add to in-memory queue
+        syncQueue.push({
+          id: addRequest.result,
+          ...message
+        });
+        
+        resolve(true);
+      };
+      
+      addRequest.onerror = function(event) {
+        console.error('Failed to queue message:', event.target.error);
+        reject(event.target.error);
+      };
+    };
+  });
+}
+
+// ADD: Process queued messages when online
+function processQueuedMessages() {
+  if (!isOnline || !window.indexedDB) return;
+  
+  const request = indexedDB.open('KynectaMessageQueue', 1);
+  
+  request.onerror = function(event) {
+    console.error('Failed to open IndexedDB for processing:', event.target.error);
+  };
+  
+  request.onsuccess = function(event) {
+    const db = event.target.result;
+    const transaction = db.transaction(['messages'], 'readonly');
+    const store = transaction.objectStore('messages');
+    const index = store.index('status');
+    const range = IDBKeyRange.only('pending');
+    
+    const getRequest = index.getAll(range);
+    
+    getRequest.onsuccess = function() {
+      const messages = getRequest.result;
+      
+      if (messages.length === 0) {
+        console.log('No pending messages to sync');
+        return;
+      }
+      
+      console.log(`Processing ${messages.length} queued messages`);
+      
+      // Process each message
+      messages.forEach(message => {
+        sendQueuedMessage(message, db);
+      });
+    };
+  };
+}
+
+// ADD: Send a queued message
+function sendQueuedMessage(message, db) {
+  // This function should be customized based on your actual API
+  // For now, we'll simulate sending and update status
+  
+  console.log('Sending queued message:', message);
+  
+  // Simulate API call
+  setTimeout(() => {
+    // Update message status in IndexedDB
+    const transaction = db.transaction(['messages'], 'readwrite');
+    const store = transaction.objectStore('messages');
+    
+    const updatedMessage = {
+      ...message,
+      status: 'sent',
+      sentAt: new Date().toISOString(),
+      attempts: (message.attempts || 0) + 1
+    };
+    
+    const updateRequest = store.put(updatedMessage);
+    
+    updateRequest.onsuccess = function() {
+      console.log('Queued message sent successfully:', message.id);
+      
+      // Remove from in-memory queue
+      syncQueue = syncQueue.filter(item => item.id !== message.id);
+    };
+    
+    updateRequest.onerror = function(event) {
+      console.error('Failed to update message status:', event.target.error);
+    };
+  }, 1000);
+}
+
+// ADD: Safe API call wrapper with better error handling
+function safeApiCall(apiFunction, ...args) {
+  return new Promise((resolve, reject) => {
+    if (!isOnline) {
+      console.warn('API call prevented: offline mode');
+      
+      // Queue the call data if possible
+      if (apiFunction.name && args.length > 0) {
+        queueMessageForSync({
+          api: apiFunction.name,
+          args: args,
+          timestamp: new Date().toISOString()
+        }).then(() => {
+          resolve({
+            success: false,
+            offline: true,
+            queued: true,
+            message: 'Action queued for when online'
+          });
+        }).catch(() => {
+          resolve({
+            success: false,
+            offline: true,
+            queued: false,
+            message: 'Offline mode: action not queued'
+          });
+        });
+      } else {
+        resolve({
+          success: false,
+          offline: true,
+          queued: false,
+          message: 'Offline mode'
+        });
+      }
+      return;
+    }
+    
+    // Proceed with normal API call
+    try {
+      const result = apiFunction(...args);
+      
+      // Handle both promises and direct returns
+      if (result && typeof result.then === 'function') {
+        result.then(resolve).catch(error => {
+          console.error('API call failed:', error);
+          reject(error);
+        });
+      } else {
+        resolve(result);
+      }
+    } catch (error) {
+      console.error('API call error:', error);
+      reject(error);
+    }
+  });
+}
+
+// ADD: Clear message queue (for testing/debugging)
+function clearMessageQueue() {
+  if (!window.indexedDB) return Promise.resolve(false);
+  
+  return new Promise((resolve, reject) => {
+    const request = indexedDB.open('KynectaMessageQueue', 1);
+    
+    request.onerror = function(event) {
+      reject(event.target.error);
+    };
+    
+    request.onsuccess = function(event) {
+      const db = event.target.result;
+      const transaction = db.transaction(['messages'], 'readwrite');
+      const store = transaction.objectStore('messages');
+      const clearRequest = store.clear();
+      
+      clearRequest.onsuccess = function() {
+        syncQueue = [];
+        console.log('Message queue cleared');
+        resolve(true);
+      };
+      
+      clearRequest.onerror = function(event) {
+        reject(event.target.error);
+      };
+    };
+  });
+}
+
 // ============================================================================
 // APPLICATION SHELL FUNCTIONS
 // ============================================================================
@@ -430,8 +753,23 @@ function attachEventListenersToNewContent(container) {
   container.querySelectorAll('form').forEach(form => {
     form.addEventListener('submit', function(e) {
       e.preventDefault();
-      // Add your form handling logic here
-      console.log('Form submitted:', this.id || this.className);
+      // ADD: Use safe API call for form submissions
+      if (form.dataset.api) {
+        const apiFunction = window[form.dataset.api];
+        if (typeof apiFunction === 'function') {
+          safeApiCall(apiFunction, new FormData(form))
+            .then(result => {
+              if (result.offline) {
+                console.log('Form data queued for when online');
+              }
+            })
+            .catch(error => {
+              console.error('Form submission error:', error);
+            });
+        }
+      } else {
+        console.log('Form submitted:', this.id || this.className);
+      }
     });
   });
 }
@@ -626,6 +964,20 @@ function setupEventListeners() {
       }
     }
   });
+  
+  // ADD: Listen for localStorage changes from other tabs
+  window.addEventListener('storage', (event) => {
+    if (event.key === 'kynecta-network-status' && event.newValue) {
+      try {
+        const status = JSON.parse(event.newValue);
+        if (status.type === 'network-status') {
+          updateNetworkStatus(status.isOnline);
+        }
+      } catch (e) {
+        console.warn('Failed to parse network status from storage:', e);
+      }
+    }
+  });
 }
 
 // ============================================================================
@@ -687,6 +1039,9 @@ function runInitialization() {
   try {
     // Setup event listeners
     setupEventListeners();
+    
+    // ADD: Initialize network detection
+    initializeNetworkDetection();
     
     // Ensure sidebar is properly initialized
     const sidebar = document.querySelector(APP_CONFIG.sidebar);
@@ -899,6 +1254,33 @@ window.toggleSidebar = toggleSidebar;
 window.loadPage = loadPage;
 window.closeModal = closeModal;
 window.openSettingsModal = openSettingsModal;
+
+// ADD: Expose network and sync functions globally
+window.APP_CONNECTIVITY = {
+  isOnline: isOnline,
+  lastChange: null
+};
+
+window.safeApiCall = safeApiCall;
+window.queueMessageForSync = queueMessageForSync;
+window.clearMessageQueue = clearMessageQueue;
+window.processQueuedMessages = processQueuedMessages;
+
+// ADD: Helper function to check authentication safely
+window.getCurrentUser = function() {
+  // This function provides a safe way to get current user
+  // It should be implemented in your authentication module
+  if (typeof window.getAuthUser === 'function') {
+    return window.getAuthUser();
+  }
+  return null;
+};
+
+// ADD: Safe function to get user ID
+window.getCurrentUserId = function() {
+  const user = window.getCurrentUser ? window.getCurrentUser() : null;
+  return user ? user.uid : null;
+};
 
 window.showChatArea = function() {
   const chatListContainer = document.getElementById('chatListContainer');

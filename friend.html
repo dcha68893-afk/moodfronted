@@ -44,6 +44,7 @@
             --online-color: #34c759;
             --away-color: #ff9500;
             --offline-color: #8e8e93;
+            --offline-indicator: #ff9500;
         }
         
         body {
@@ -76,6 +77,7 @@
             display: flex;
             justify-content: space-between;
             align-items: center;
+            position: relative;
         }
         
         .sidebar-header h2 {
@@ -802,6 +804,23 @@
             margin: 4px 0;
         }
         
+        /* Offline Action Queue Indicator */
+        .queue-indicator {
+            position: fixed;
+            bottom: 70px;
+            right: 20px;
+            background-color: var(--warning-color);
+            color: white;
+            padding: 8px 15px;
+            border-radius: 8px;
+            box-shadow: var(--shadow);
+            z-index: 1000;
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            font-size: 14px;
+        }
+        
         /* Responsive */
         @media (max-width: 768px) {
             .sidebar {
@@ -849,6 +868,53 @@
         
         @keyframes spin {
             to { transform: rotate(360deg); }
+        }
+        
+        /* Offline Indicator */
+        .offline-indicator {
+            position: absolute;
+            top: 10px;
+            right: 80px;
+            background-color: var(--offline-indicator);
+            color: white;
+            padding: 4px 10px;
+            border-radius: 12px;
+            font-size: 12px;
+            font-weight: 500;
+            display: flex;
+            align-items: center;
+            gap: 5px;
+            animation: pulse 2s infinite;
+        }
+        
+        .offline-badge {
+            background-color: var(--offline-indicator);
+            color: white;
+            padding: 2px 6px;
+            border-radius: 4px;
+            font-size: 10px;
+            margin-left: 5px;
+        }
+        
+        /* Queued Action Indicator */
+        .queued-action {
+            position: relative;
+        }
+        
+        .queued-action::after {
+            content: '🕒';
+            position: absolute;
+            top: -5px;
+            right: -5px;
+            font-size: 12px;
+            background: var(--warning-color);
+            color: white;
+            border-radius: 50%;
+            width: 18px;
+            height: 18px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
         }
     </style>
 </head>
@@ -1009,6 +1075,12 @@
         <span id="notificationText">Operation completed successfully</span>
     </div>
     
+    <!-- Queue Indicator -->
+    <div class="queue-indicator" id="queueIndicator" style="display: none;">
+        <i class="fas fa-clock"></i>
+        <span id="queueCount">0</span> actions queued for when online
+    </div>
+    
     <script>
         // Firebase Configuration
         const firebaseConfig = {
@@ -1038,142 +1110,987 @@
         let friendTags = new Map();
         let searchMethod = 'username';
         let unsubscribes = [];
+        let isOnline = navigator.onLine;
+        let indexedDB = null;
+        let dbName = 'FriendsOfflineDB';
+        let dbVersion = 1;
+        let actionQueue = [];
         
         // DOM Elements
         const addFriendModal = document.getElementById('addFriendModal');
         const friendProfileModal = document.getElementById('friendProfileModal');
         const notification = document.getElementById('notification');
+        const sidebarHeader = document.querySelector('.sidebar-header');
+        const queueIndicator = document.getElementById('queueIndicator');
         
-        // Initialize the application
+        // Initialize the application - NO AUTHENTICATION CHECK
         document.addEventListener('DOMContentLoaded', function() {
-            initializeApp();
+            // Get the current user from Firebase Auth
+            currentUser = auth.currentUser;
+            
+            if (!currentUser) {
+                // Try to get user from auth state
+                auth.onAuthStateChanged(function(user) {
+                    if (user) {
+                        currentUser = user;
+                        console.log('User loaded from auth state:', currentUser.uid);
+                        initializeApp();
+                    } else {
+                        console.log('No user found');
+                        // Just initialize with null user - other files don't check either
+                        initializeApp();
+                    }
+                });
+            } else {
+                console.log('Current user loaded:', currentUser.uid);
+                initializeApp();
+            }
+            
             setupEventListeners();
+            setupOfflineIndicator();
+            initializeIndexedDB();
         });
         
         function initializeApp() {
-            auth.onAuthStateChanged(async user => {
-                if (user) {
-                    currentUser = user;
-                    console.log('User authenticated:', user.uid);
-                    
-                    // Load initial data
-                    await Promise.all([
-                        loadFriendsData(),
-                        loadFriendRequests(),
-                        loadBlockedUsers(),
-                        loadFriendTags()
-                    ]);
-                    
-                    setupPresenceTracking();
-                    setupRealTimeListeners();
-                    
-                } else {
-                    console.log('No user, redirecting to index');
-                    window.location.href = 'index.html';
-                }
-            });
-        }
-        
-        function setupPresenceTracking() {
-            const userStatusRef = db.collection('users').doc(currentUser.uid);
-            
-            const isOnlineForFirestore = {
-                status: 'online',
-                lastSeen: firebase.firestore.FieldValue.serverTimestamp(),
-                userId: currentUser.uid,
-                displayName: currentUser.displayName || 'User'
-            };
-            
-            const isAwayForFirestore = {
-                status: 'away',
-                lastSeen: firebase.firestore.FieldValue.serverTimestamp()
-            };
-            
-            const isOfflineForFirestore = {
-                status: 'offline',
-                lastSeen: firebase.firestore.FieldValue.serverTimestamp()
-            };
-            
-            // Set online status
-            userStatusRef.update(isOnlineForFirestore).catch(() => {
-                userStatusRef.set(isOnlineForFirestore, { merge: true });
-            });
-            
-            // Update status when page becomes visible/hidden
-            document.addEventListener('visibilitychange', () => {
-                if (document.visibilityState === 'visible') {
-                    userStatusRef.update(isOnlineForFirestore);
-                } else {
-                    userStatusRef.update(isAwayForFirestore);
-                }
-            });
-            
-            // Update status on page unload
-            window.addEventListener('beforeunload', () => {
-                userStatusRef.update(isOfflineForFirestore);
-            });
-        }
-        
-        function setupRealTimeListeners() {
-            // Clean up previous listeners
-            unsubscribes.forEach(unsubscribe => unsubscribe());
-            unsubscribes = [];
-            
-            // Listen for friend requests
-            const requestsUnsubscribe = db.collection('friend_requests')
-                .where('toUserId', '==', currentUser.uid)
-                .where('status', '==', 'pending')
-                .onSnapshot(snapshot => {
-                    snapshot.docChanges().forEach(change => {
-                        if (change.type === 'added') {
-                            loadFriendRequests();
-                            showNotification('New friend request received!', 'success');
-                        }
-                    });
-                });
-            
-            unsubscribes.push(requestsUnsubscribe);
-            
-            // Listen for friendship changes
-            const friendsUnsubscribe = db.collection('friendships')
-                .where('participants', 'array-contains', currentUser.uid)
-                .where('status', '==', 'accepted')
-                .onSnapshot(snapshot => {
-                    snapshot.docChanges().forEach(change => {
-                        if (change.type === 'added' || change.type === 'removed') {
-                            loadFriendsData();
-                        }
-                    });
-                });
-            
-            unsubscribes.push(friendsUnsubscribe);
-            
-            // Listen for user status updates
-            friendsList.forEach(friend => {
-                const statusUnsubscribe = db.collection('users')
-                    .doc(friend.id)
-                    .onSnapshot(doc => {
-                        if (doc.exists) {
-                            const userData = doc.data();
-                            friend.status = userData.status || 'offline';
-                            friend.lastSeen = userData.lastSeen?.toDate() || null;
-                            
-                            if (selectedFriend && selectedFriend.id === friend.id) {
-                                openFriendProfile(selectedFriend);
-                            }
-                            updateFriendsList();
-                        }
-                    });
+    // If no current user, we can't load friends
+    if (!currentUser) {
+        console.log('No current user, showing empty state');
+        document.getElementById('friendsSection').innerHTML = `
+            <div class="empty-state">
+                <i class="fas fa-users empty-state-icon"></i>
+                <p>Please log in to see your friends</p>
+                <p style="font-size: 14px; margin-top: 10px;">You need to be logged in to use the friends feature</p>
+            </div>
+        `;
+        return;
+    }
+    
+    // Initialize IndexedDB first
+    initializeIndexedDB().then(() => {
+        // Check if we're online
+        if (isOnline) {
+            // Online: Load from Firebase and sync
+            Promise.all([
+                loadFriendsData(),
+                loadFriendRequests(),
+                loadBlockedUsers(),
+                loadFriendTags(),
+                loadActionQueue() // Load pending actions
+            ]).then(() => {
+                // Save to IndexedDB for offline use
+                saveFriendsToIndexedDB();
                 
-                unsubscribes.push(statusUnsubscribe);
+                setupPresenceTracking();
+                setupRealTimeListeners();
+                
+                // Process any queued actions
+                processActionQueue();
+            });
+        } else {
+            // Offline: Load from IndexedDB
+            console.log('Offline mode: Loading from IndexedDB');
+            loadFriendsFromIndexedDB();
+            loadActionQueue(); // Load queued actions
+            loadFriendTags(); // Load friend tags
+            showNotification('Offline mode: Showing cached friends list', 'warning');
+        }
+    }).catch(error => {
+        console.error('IndexedDB initialization failed:', error);
+        
+        // Continue without IndexedDB support
+        if (isOnline && currentUser) {
+            Promise.all([
+                loadFriendsData(),
+                loadFriendRequests(),
+                loadBlockedUsers(),
+                loadFriendTags()
+            ]).then(() => {
+                setupPresenceTracking();
+                setupRealTimeListeners();
+            });
+        } else {
+            // Show offline message without cached data
+            document.getElementById('friendsSection').innerHTML = `
+                <div class="empty-state">
+                    <i class="fas fa-users empty-state-icon"></i>
+                    <p>Unable to load friends list</p>
+                    <p style="font-size: 14px; margin-top: 10px;">${error.message || 'Storage initialization failed'}</p>
+                </div>
+            `;
+        }
+    });
+}
+        // IndexedDB initialization
+function initializeIndexedDB() {
+    return new Promise((resolve, reject) => {
+        // Check if IndexedDB is available in this browser
+        if (!window.indexedDB) {
+            const error = new Error('IndexedDB is not supported in this browser');
+            console.error(error);
+            reject(error);
+            return;
+        }
+        
+        const request = window.indexedDB.open(dbName, dbVersion);
+        
+        request.onerror = (event) => {
+            console.error('IndexedDB error:', event.target.error);
+            reject(event.target.error);
+        };
+        
+        request.onsuccess = (event) => {
+            indexedDB = event.target.result;
+            console.log('IndexedDB initialized successfully');
+            resolve(indexedDB);
+        };
+        
+        request.onupgradeneeded = (event) => {
+            const db = event.target.result;
+            
+            // Create object stores if they don't exist
+            if (!db.objectStoreNames.contains('friends')) {
+                const friendsStore = db.createObjectStore('friends', { keyPath: 'id' });
+                friendsStore.createIndex('userId', 'userId', { unique: false });
+            }
+            
+            if (!db.objectStoreNames.contains('friendRequests')) {
+                const requestsStore = db.createObjectStore('friendRequests', { keyPath: 'id' });
+                requestsStore.createIndex('userId', 'userId', { unique: false });
+            }
+            
+            if (!db.objectStoreNames.contains('blockedUsers')) {
+                const blockedStore = db.createObjectStore('blockedUsers', { keyPath: 'id' });
+                blockedStore.createIndex('userId', 'userId', { unique: false });
+            }
+            
+            if (!db.objectStoreNames.contains('actionQueue')) {
+                const queueStore = db.createObjectStore('actionQueue', { keyPath: 'id', autoIncrement: true });
+                queueStore.createIndex('type', 'type', { unique: false });
+                queueStore.createIndex('status', 'status', { unique: false });
+            }
+        };
+    });
+}
+        
+        // Action Queue Management
+        async function addToActionQueue(action) {
+    if (!indexedDB || !currentUser) return;
+    
+    try {
+        const transaction = indexedDB.transaction(['actionQueue'], 'readwrite');
+        const queueStore = transaction.objectStore('actionQueue');
+        
+        const queuedAction = {
+            ...action,
+            userId: currentUser.uid,
+            createdAt: new Date().toISOString(),
+            status: 'pending'
+        };
+        
+        await new Promise((resolve, reject) => {
+            const request = queueStore.add(queuedAction);
+            request.onsuccess = () => resolve(request.result);
+            request.onerror = () => reject(request.error);
+        });
+        
+        // Update local queue with the returned ID
+        queuedAction.id = await new Promise((resolve) => {
+            const request = queueStore.add(queuedAction);
+            request.onsuccess = () => resolve(request.result);
+        });
+        
+        actionQueue.push(queuedAction);
+        updateQueueIndicator();
+        
+        console.log('Action added to queue:', action.type);
+        
+        return queuedAction.id;
+        
+    } catch (error) {
+        console.error('Error adding to action queue:', error);
+        throw error;
+    }
+}
+
+        
+        async function loadActionQueue() {
+            if (!indexedDB || !currentUser) return;
+            
+            try {
+                const transaction = indexedDB.transaction(['actionQueue'], 'readonly');
+                const queueStore = transaction.objectStore('actionQueue');
+                const request = queueStore.getAll();
+                
+                request.onsuccess = (event) => {
+                    actionQueue = event.target.result.filter(action => 
+                        action.userId === currentUser.uid && action.status === 'pending'
+                    );
+                    updateQueueIndicator();
+                    console.log('Loaded action queue:', actionQueue.length);
+                };
+                
+            } catch (error) {
+                console.error('Error loading action queue:', error);
+            }
+        }
+        
+        async function processActionQueue() {
+            if (!isOnline || !currentUser || actionQueue.length === 0) return;
+            
+            showNotification(`Processing ${actionQueue.length} queued actions...`, 'success');
+            
+            for (const action of actionQueue) {
+                try {
+                    switch (action.type) {
+                        case 'friend_request':
+                            await processQueuedFriendRequest(action);
+                            break;
+                        case 'accept_request':
+                            await processQueuedAcceptRequest(action);
+                            break;
+                        case 'decline_request':
+                            await processQueuedDeclineRequest(action);
+                            break;
+                        case 'cancel_request':
+                            await processQueuedCancelRequest(action);
+                            break;
+                        case 'remove_friend':
+                            await processQueuedRemoveFriend(action);
+                            break;
+                        case 'block_friend':
+                            await processQueuedBlockFriend(action);
+                            break;
+                        case 'unblock_user':
+                            await processQueuedUnblockUser(action);
+                            break;
+                    }
+                    
+                    // Mark as completed
+                    await markActionCompleted(action.id);
+                    
+                } catch (error) {
+                    console.error(`Error processing queued action ${action.type}:`, error);
+                }
+            }
+            
+            // Clear local queue
+            actionQueue = actionQueue.filter(action => action.status !== 'completed');
+            updateQueueIndicator();
+            
+            // Reload data
+            await Promise.all([
+                loadFriendsData(),
+                loadFriendRequests(),
+                loadBlockedUsers()
+            ]);
+            
+            showNotification('Queued actions processed successfully', 'success');
+        }
+        async function markActionCompleted(actionId) {
+    if (!indexedDB || !currentUser) return;
+    
+    return new Promise((resolve, reject) => {
+        try {
+            const transaction = indexedDB.transaction(['actionQueue'], 'readwrite');
+            const queueStore = transaction.objectStore('actionQueue');
+            
+            const getRequest = queueStore.get(actionId);
+            getRequest.onsuccess = (event) => {
+                const action = event.target.result;
+                if (action) {
+                    action.status = 'completed';
+                    const putRequest = queueStore.put(action);
+                    putRequest.onsuccess = () => {
+                        // Remove from local queue
+                        actionQueue = actionQueue.filter(a => a.id !== actionId);
+                        updateQueueIndicator();
+                        resolve();
+                    };
+                    putRequest.onerror = (e) => reject(e.target.error);
+                } else {
+                    resolve();
+                }
+            };
+            getRequest.onerror = (e) => reject(e.target.error);
+            
+        } catch (error) {
+            console.error('Error marking action as completed:', error);
+            reject(error);
+        }
+    });
+}
+       
+
+        function updateQueueIndicator() {
+            const queueCount = document.getElementById('queueCount');
+            if (actionQueue.length > 0) {
+                queueIndicator.style.display = 'flex';
+                queueCount.textContent = actionQueue.length;
+            } else {
+                queueIndicator.style.display = 'none';
+            }
+        }
+        
+        // Process queued actions
+        async function processQueuedFriendRequest(action) {
+            const { toUserId, userData } = action.data;
+            
+            if (!currentUser) return;
+            
+            // Check if request already exists
+            const existingRequest = await db.collection('friend_requests')
+                .where('fromUserId', '==', currentUser.uid)
+                .where('toUserId', '==', toUserId)
+                .where('status', '==', 'pending')
+                .get();
+            
+            if (!existingRequest.empty) return;
+            
+            // Create friend request
+            await db.collection('friend_requests').add({
+                fromUserId: currentUser.uid,
+                fromUserName: currentUser.displayName || 'User',
+                fromUserPhoto: currentUser.photoURL || '',
+                fromUserUsername: currentUser.username || '',
+                toUserId: toUserId,
+                toUserName: userData.displayName || 'User',
+                toUserUsername: userData.username || '',
+                status: 'pending',
+                message: 'Wants to be your friend',
+                createdAt: firebase.firestore.FieldValue.serverTimestamp()
+            });
+            
+            // Send notification
+            await sendNotification(toUserId, 'friend_request', {
+                message: `${currentUser.displayName || 'Someone'} sent you a friend request`,
+                type: 'friend_request'
             });
         }
         
+        async function processQueuedAcceptRequest(action) {
+            const { requestId, fromUserId } = action.data;
+            
+            if (!currentUser) return;
+            
+            // Update request status
+            await db.collection('friend_requests').doc(requestId).update({
+                status: 'accepted',
+                respondedAt: firebase.firestore.FieldValue.serverTimestamp()
+            });
+            
+            // Create friendship
+            await db.collection('friendships').add({
+                participants: [currentUser.uid, fromUserId],
+                status: 'accepted',
+                createdAt: firebase.firestore.FieldValue.serverTimestamp()
+            });
+            
+            // Send notification
+            await sendNotification(fromUserId, 'friend_request_accepted', {
+                message: `${currentUser.displayName || 'Someone'} accepted your friend request`,
+                type: 'friend_request_accepted'
+            });
+        }
+        
+        async function processQueuedDeclineRequest(action) {
+            const { requestId } = action.data;
+            
+            await db.collection('friend_requests').doc(requestId).update({
+                status: 'declined',
+                respondedAt: firebase.firestore.FieldValue.serverTimestamp()
+            });
+        }
+        
+        async function processQueuedCancelRequest(action) {
+            const { requestId } = action.data;
+            
+            await db.collection('friend_requests').doc(requestId).delete();
+        }
+        
+        async function processQueuedRemoveFriend(action) {
+            const { friendId } = action.data;
+            
+            const friend = userFriendsMap.get(friendId);
+            if (friend && friend.friendshipId) {
+                await db.collection('friendships').doc(friend.friendshipId).delete();
+            }
+        }
+        
+        async function processQueuedBlockFriend(action) {
+            const { friendId } = action.data;
+            
+            if (!currentUser) return;
+            
+            await db.collection('blocked_users').add({
+                blockerId: currentUser.uid,
+                blockedId: friendId,
+                blockedAt: firebase.firestore.FieldValue.serverTimestamp()
+            });
+            
+            // If they were friends, remove the friendship
+            const friend = userFriendsMap.get(friendId);
+            if (friend && friend.friendshipId) {
+                await db.collection('friendships').doc(friend.friendshipId).delete();
+            }
+        }
+        
+        async function processQueuedUnblockUser(action) {
+            const { blockedId } = action.data;
+            
+            await db.collection('blocked_users').doc(blockedId).delete();
+        }
+
+        async function clearActionQueue() {
+    if (!indexedDB || !currentUser) return;
+    
+    return new Promise((resolve, reject) => {
+        try {
+            const transaction = indexedDB.transaction(['actionQueue'], 'readwrite');
+            const queueStore = transaction.objectStore('actionQueue');
+            
+            // Clear all queued actions for current user
+            const keyRange = IDBKeyRange.bound(0, Infinity);
+            const request = queueStore.openCursor(keyRange);
+            
+            request.onsuccess = (event) => {
+                const cursor = event.target.result;
+                if (cursor) {
+                    if (cursor.value.userId === currentUser.uid) {
+                        cursor.delete();
+                    }
+                    cursor.continue();
+                } else {
+                    actionQueue = [];
+                    updateQueueIndicator();
+                    resolve();
+                }
+            };
+            
+            request.onerror = (e) => reject(e.target.error);
+            
+        } catch (error) {
+            console.error('Error clearing action queue:', error);
+            reject(error);
+        }
+    });
+}
+    async function getActionQueueCount() {
+    if (!indexedDB || !currentUser) return 0;
+    
+    return new Promise((resolve, reject) => {
+        try {
+            const transaction = indexedDB.transaction(['actionQueue'], 'readonly');
+            const queueStore = transaction.objectStore('actionQueue');
+            
+            // Count only pending actions for current user
+            const index = queueStore.index('status');
+            const keyRange = IDBKeyRange.only('pending');
+            const countRequest = index.count(keyRange);
+            
+            countRequest.onsuccess = () => resolve(countRequest.result);
+            countRequest.onerror = (e) => reject(e.target.error);
+            
+        } catch (error) {
+            console.error('Error getting action queue count:', error);
+            reject(error);
+        }
+    });
+}    
+
+async function deleteOldCachedData(maxAgeDays = 30) {
+    if (!indexedDB || !currentUser) return;
+    
+    return new Promise((resolve, reject) => {
+        try {
+            const transaction = indexedDB.transaction(['friends', 'friendRequests', 'blockedUsers'], 'readwrite');
+            const cutoffDate = new Date();
+            cutoffDate.setDate(cutoffDate.getDate() - maxAgeDays);
+            
+            // Delete old friends
+            const friendsStore = transaction.objectStore('friends');
+            const friendsRequest = friendsStore.openCursor();
+            friendsRequest.onsuccess = (event) => {
+                const cursor = event.target.result;
+                if (cursor) {
+                    if (cursor.value.userId === currentUser.uid) {
+                        const cachedDate = new Date(cursor.value.cachedAt);
+                        if (cachedDate < cutoffDate) {
+                            cursor.delete();
+                        }
+                    }
+                    cursor.continue();
+                }
+            };
+            
+            // Delete old friend requests
+            const requestsStore = transaction.objectStore('friendRequests');
+            const requestsRequest = requestsStore.openCursor();
+            requestsRequest.onsuccess = (event) => {
+                const cursor = event.target.result;
+                if (cursor) {
+                    if (cursor.value.userId === currentUser.uid) {
+                        const cachedDate = new Date(cursor.value.cachedAt);
+                        if (cachedDate < cutoffDate) {
+                            cursor.delete();
+                        }
+                    }
+                    cursor.continue();
+                }
+            };
+            
+            // Delete old blocked users
+            const blockedStore = transaction.objectStore('blockedUsers');
+            const blockedRequest = blockedStore.openCursor();
+            blockedRequest.onsuccess = (event) => {
+                const cursor = event.target.result;
+                if (cursor) {
+                    if (cursor.value.userId === currentUser.uid) {
+                        const cachedDate = new Date(cursor.value.cachedAt);
+                        if (cachedDate < cutoffDate) {
+                            cursor.delete();
+                        }
+                    }
+                    cursor.continue();
+                }
+            };
+            
+            transaction.oncomplete = () => {
+                console.log('Old cached data cleaned up');
+                resolve();
+            };
+            
+            transaction.onerror = (e) => reject(e.target.error);
+            
+        } catch (error) {
+            console.error('Error deleting old cached data:', error);
+            reject(error);
+        }
+    });
+}
+
+async function backupFriendsData() {
+    if (!indexedDB || !currentUser) return null;
+    
+    return new Promise((resolve, reject) => {
+        try {
+            const transaction = indexedDB.transaction(['friends', 'friendRequests', 'blockedUsers', 'actionQueue'], 'readonly');
+            
+            const backupData = {
+                friends: [],
+                friendRequests: [],
+                blockedUsers: [],
+                actionQueue: [],
+                timestamp: new Date().toISOString(),
+                userId: currentUser.uid
+            };
+            
+            // Backup friends
+            const friendsStore = transaction.objectStore('friends');
+            const friendsRequest = friendsStore.getAll();
+            friendsRequest.onsuccess = (event) => {
+                backupData.friends = event.target.result.filter(item => item.userId === currentUser.uid);
+            };
+            
+            // Backup friend requests
+            const requestsStore = transaction.objectStore('friendRequests');
+            const requestsRequest = requestsStore.getAll();
+            requestsRequest.onsuccess = (event) => {
+                backupData.friendRequests = event.target.result.filter(item => item.userId === currentUser.uid);
+            };
+            
+            // Backup blocked users
+            const blockedStore = transaction.objectStore('blockedUsers');
+            const blockedRequest = blockedStore.getAll();
+            blockedRequest.onsuccess = (event) => {
+                backupData.blockedUsers = event.target.result.filter(item => item.userId === currentUser.uid);
+            };
+            
+            // Backup action queue
+            const queueStore = transaction.objectStore('actionQueue');
+            const queueRequest = queueStore.getAll();
+            queueRequest.onsuccess = (event) => {
+                backupData.actionQueue = event.target.result.filter(item => item.userId === currentUser.uid);
+            };
+            
+            transaction.oncomplete = () => resolve(backupData);
+            transaction.onerror = (e) => reject(e.target.error);
+            
+        } catch (error) {
+            console.error('Error backing up friends data:', error);
+            reject(error);
+        }
+    });
+}
+
+async function restoreFriendsData(backupData) {
+    if (!indexedDB || !currentUser) return false;
+    
+    return new Promise((resolve, reject) => {
+        try {
+            // Verify backup data belongs to current user
+            if (backupData.userId !== currentUser.uid) {
+                reject(new Error('Backup data does not belong to current user'));
+                return;
+            }
+            
+            const transaction = indexedDB.transaction(['friends', 'friendRequests', 'blockedUsers', 'actionQueue'], 'readwrite');
+            
+            // Restore friends
+            const friendsStore = transaction.objectStore('friends');
+            backupData.friends.forEach(friend => {
+                friendsStore.put(friend);
+            });
+            
+            // Restore friend requests
+            const requestsStore = transaction.objectStore('friendRequests');
+            backupData.friendRequests.forEach(request => {
+                requestsStore.put(request);
+            });
+            
+            // Restore blocked users
+            const blockedStore = transaction.objectStore('blockedUsers');
+            backupData.blockedUsers.forEach(blocked => {
+                blockedStore.put(blocked);
+            });
+            
+            // Restore action queue
+            const queueStore = transaction.objectStore('actionQueue');
+            backupData.actionQueue.forEach(action => {
+                queueStore.put(action);
+            });
+            
+            transaction.oncomplete = () => {
+                console.log('Friends data restored from backup');
+                resolve(true);
+            };
+            
+            transaction.onerror = (e) => reject(e.target.error);
+            
+        } catch (error) {
+            console.error('Error restoring friends data:', error);
+            reject(error);
+        }
+    });
+}
+
+async function compactIndexedDB() {
+    if (!indexedDB || !currentUser) return;
+    
+    return new Promise((resolve, reject) => {
+        try {
+            const transaction = indexedDB.transaction(['friends'], 'readwrite');
+            const friendsStore = transaction.objectStore('friends');
+            
+            // Group friends by ID and keep only the most recent entry
+            const friendsMap = new Map();
+            const request = friendsStore.openCursor();
+            
+            request.onsuccess = (event) => {
+                const cursor = event.target.result;
+                if (cursor) {
+                    if (cursor.value.userId === currentUser.uid) {
+                        const existing = friendsMap.get(cursor.value.id);
+                        if (!existing || new Date(cursor.value.cachedAt) > new Date(existing.cachedAt)) {
+                            friendsMap.set(cursor.value.id, cursor.value);
+                        }
+                        cursor.delete();
+                    }
+                    cursor.continue();
+                } else {
+                    // Re-add the most recent entries
+                    friendsMap.forEach(friend => {
+                        friendsStore.add(friend);
+                    });
+                    console.log('IndexedDB compacted. Unique friends:', friendsMap.size);
+                    resolve();
+                }
+            };
+            
+            request.onerror = (e) => reject(e.target.error);
+            
+        } catch (error) {
+            console.error('Error compacting IndexedDB:', error);
+            reject(error);
+        }
+    });
+}
+        // Save friends to IndexedDB
+        
+async function saveFriendsToIndexedDB() {
+    if (!indexedDB || !currentUser) return;
+    
+    return new Promise((resolve, reject) => {
+        try {
+            const transaction = indexedDB.transaction(['friends', 'friendRequests', 'blockedUsers'], 'readwrite');
+            
+            // Save friends
+            const friendsStore = transaction.objectStore('friends');
+            friendsList.forEach(friend => {
+                const friendData = {
+                    ...friend,
+                    id: friend.id,
+                    userId: currentUser.uid,
+                    cachedAt: new Date().toISOString(),
+                    lastSeen: friend.lastSeen ? friend.lastSeen.toISOString() : null,
+                    createdAt: friend.createdAt.toISOString()
+                };
+                friendsStore.put(friendData);
+            });
+            
+            // Save friend requests
+            const requestsStore = transaction.objectStore('friendRequests');
+            friendRequests.forEach(request => {
+                const requestData = {
+                    ...request,
+                    id: request.id,
+                    userId: currentUser.uid,
+                    cachedAt: new Date().toISOString(),
+                    createdAt: request.createdAt.toISOString()
+                };
+                requestsStore.put(requestData);
+            });
+            
+            // Save blocked users
+            const blockedStore = transaction.objectStore('blockedUsers');
+            blockedUsers.forEach(blocked => {
+                const blockedData = {
+                    ...blocked,
+                    id: blocked.id,
+                    userId: currentUser.uid,
+                    cachedAt: new Date().toISOString(),
+                    blockedAt: blocked.blockedAt.toISOString()
+                };
+                blockedStore.put(blockedData);
+            });
+            
+            transaction.oncomplete = () => {
+                console.log('Friends data saved to IndexedDB');
+                resolve();
+            };
+            
+            transaction.onerror = (event) => {
+                console.error('Error saving to IndexedDB:', event.target.error);
+                reject(event.target.error);
+            };
+            
+        } catch (error) {
+            console.error('Error saving to IndexedDB:', error);
+            reject(error);
+        }
+    });
+}
+
+        // Load friends from IndexedDB
+        
+        async function loadFriendsFromIndexedDB() {
+    if (!indexedDB || !currentUser) return;
+    
+    return new Promise((resolve, reject) => {
+        try {
+            const transaction = indexedDB.transaction(['friends', 'friendRequests', 'blockedUsers'], 'readonly');
+            
+            // Load friends
+            const friendsStore = transaction.objectStore('friends');
+            const friendsIndex = friendsStore.index('userId');
+            const friendsKeyRange = IDBKeyRange.only(currentUser.uid);
+            const friendsRequest = friendsIndex.getAll(friendsKeyRange);
+            
+            // Load friend requests
+            const requestsStore = transaction.objectStore('friendRequests');
+            const requestsIndex = requestsStore.index('userId');
+            const requestsKeyRange = IDBKeyRange.only(currentUser.uid);
+            const requestsRequest = requestsIndex.getAll(requestsKeyRange);
+            
+            // Load blocked users
+            const blockedStore = transaction.objectStore('blockedUsers');
+            const blockedIndex = blockedStore.index('userId');
+            const blockedKeyRange = IDBKeyRange.only(currentUser.uid);
+            const blockedRequest = blockedIndex.getAll(blockedKeyRange);
+            
+            let friendsLoaded = false;
+            let requestsLoaded = false;
+            let blockedLoaded = false;
+            
+            friendsRequest.onsuccess = (event) => {
+                const cachedFriends = event.target.result;
+                friendsList = [];
+                userFriendsMap.clear();
+                
+                cachedFriends.forEach(friendData => {
+                    const friend = {
+                        id: friendData.id,
+                        friendshipId: friendData.friendshipId,
+                        name: friendData.name,
+                        email: friendData.email,
+                        username: friendData.username,
+                        phone: friendData.phone,
+                        photoURL: friendData.photoURL,
+                        status: 'offline',
+                        lastSeen: friendData.lastSeen ? new Date(friendData.lastSeen) : null,
+                        createdAt: new Date(friendData.createdAt),
+                        mood: friendData.mood || 'neutral',
+                        cached: true
+                    };
+                    
+                    friendsList.push(friend);
+                    userFriendsMap.set(friend.id, friend);
+                });
+                
+                friendsLoaded = true;
+                updateFriendsList();
+                if (friendsLoaded && requestsLoaded && blockedLoaded) resolve();
+            };
+            
+            requestsRequest.onsuccess = (event) => {
+                const cachedRequests = event.target.result;
+                friendRequests = [];
+                pendingRequests = [];
+                
+                cachedRequests.forEach(requestData => {
+                    friendRequests.push(requestData);
+                    if (requestData.type === 'received') {
+                        pendingRequests.push(requestData);
+                    }
+                });
+                
+                updatePendingCountBadge();
+                if (document.getElementById('pendingTab').classList.contains('active')) {
+                    updateFriendRequestsList();
+                }
+                
+                requestsLoaded = true;
+                if (friendsLoaded && requestsLoaded && blockedLoaded) resolve();
+            };
+            
+            blockedRequest.onsuccess = (event) => {
+                const cachedBlocked = event.target.result;
+                blockedUsers = [];
+                
+                cachedBlocked.forEach(blockedData => {
+                    blockedUsers.push({
+                        id: blockedData.id,
+                        blockedId: blockedData.blockedId,
+                        name: blockedData.name,
+                        username: blockedData.username,
+                        photoURL: blockedData.photoURL,
+                        blockedAt: new Date(blockedData.blockedAt)
+                    });
+                });
+                
+                if (document.getElementById('blockedTab').classList.contains('active')) {
+                    updateBlockedFriendsList();
+                }
+                
+                blockedLoaded = true;
+                if (friendsLoaded && requestsLoaded && blockedLoaded) resolve();
+            };
+            
+            transaction.onerror = (event) => {
+                console.error('Transaction error:', event.target.error);
+                reject(event.target.error);
+            };
+            
+            console.log('Loaded friends from IndexedDB:', friendsList.length);
+            
+        } catch (error) {
+            console.error('Error loading from IndexedDB:', error);
+            reject(error);
+        }
+    });
+}
+
+        // Setup offline indicator
+        function setupOfflineIndicator() {
+            // Update online status
+            window.addEventListener('online', async () => {
+                isOnline = true;
+                console.log('App is online');
+                hideOfflineIndicator();
+                
+                // Sync data when coming back online
+                if (currentUser) {
+                    showNotification('Back online. Syncing data...', 'success');
+                    await syncOfflineData();
+                    await processActionQueue();
+                }
+            });
+            
+            window.addEventListener('offline', () => {
+                isOnline = false;
+                console.log('App is offline');
+                showOfflineIndicator();
+                
+                if (currentUser) {
+                    showNotification('You are offline. Showing cached data.', 'warning');
+                }
+            });
+            
+            // Initial indicator
+            if (!isOnline) {
+                showOfflineIndicator();
+            }
+        }
+        
+        function showOfflineIndicator() {
+            // Remove existing indicator
+            hideOfflineIndicator();
+            
+            // Create offline indicator
+            const indicator = document.createElement('div');
+            indicator.className = 'offline-indicator';
+            indicator.innerHTML = `
+                <i class="fas fa-wifi-slash"></i>
+                <span>Offline</span>
+            `;
+            
+            sidebarHeader.appendChild(indicator);
+            
+            // Update friend statuses to show offline badge
+            updateFriendsList();
+        }
+        
+        function hideOfflineIndicator() {
+            const indicator = document.querySelector('.offline-indicator');
+            if (indicator) {
+                indicator.remove();
+            }
+        }
+        
+        // Sync offline data when coming back online
+        async function syncOfflineData() {
+            if (!currentUser) return;
+            
+            try {
+                // Load fresh data from Firebase
+                await Promise.all([
+                    loadFriendsData(),
+                    loadFriendRequests(),
+                    loadBlockedUsers()
+                ]);
+                
+                // Save updated data to IndexedDB
+                await saveFriendsToIndexedDB();
+                
+                // Update UI
+                updateFriendsList();
+                
+                showNotification('Data synced successfully', 'success');
+                
+            } catch (error) {
+                console.error('Error syncing data:', error);
+                showNotification('Error syncing data', 'error');
+            }
+        }
+        
+        // Modified loadFriendsData to handle offline mode
         async function loadFriendsData() {
+            // If no user or offline, don't try to load from Firebase
+            if (!currentUser || !isOnline) return;
+            
             try {
                 console.log('Loading friends data for user:', currentUser.uid);
                 
-                // Load friends list
+                // Load friends list from Firebase
                 const friendsSnapshot = await db.collection('friendships')
                     .where('participants', 'array-contains', currentUser.uid)
                     .where('status', '==', 'accepted')
@@ -1207,7 +2124,8 @@
                                 status: userData.status || 'offline',
                                 lastSeen: userData.lastSeen?.toDate() || null,
                                 createdAt: friendship.createdAt?.toDate() || new Date(),
-                                mood: userData.mood || 'neutral'
+                                mood: userData.mood || 'neutral',
+                                cached: false
                             };
                             
                             friendsList.push(friendData);
@@ -1221,20 +2139,86 @@
                 
             } catch (error) {
                 console.error('Error loading friends data:', error);
-                showNotification('Failed to load friends. Please check your connection.', 'error');
+                
+                // If error occurs and we're supposed to be online, try loading from IndexedDB
+                if (isOnline) {
+                    showNotification('Network error. Loading cached data.', 'warning');
+                    await loadFriendsFromIndexedDB();
+                }
             }
         }
         
+        // Setup real-time listeners for friends
+        function setupRealTimeListeners() {
+            // Unsubscribe from previous listeners
+            unsubscribes.forEach(unsub => unsub());
+            unsubscribes = [];
+            
+            if (!currentUser || !isOnline) return;
+            
+            // Listen for friend status changes
+            friendsList.forEach(friend => {
+                const unsubscribe = db.collection('users').doc(friend.id)
+                    .onSnapshot((doc) => {
+                        if (doc.exists) {
+                            const userData = doc.data();
+                            friend.status = userData.status || 'offline';
+                            friend.lastSeen = userData.lastSeen?.toDate() || null;
+                            friend.mood = userData.mood || 'neutral';
+                            
+                            // Update UI if this friend is visible
+                            updateFriendsList();
+                        }
+                    });
+                unsubscribes.push(unsubscribe);
+            });
+            
+            // Listen for new friend requests
+            const requestsUnsubscribe = db.collection('friend_requests')
+                .where('toUserId', '==', currentUser.uid)
+                .where('status', '==', 'pending')
+                .onSnapshot((snapshot) => {
+                    loadFriendRequests();
+                });
+            unsubscribes.push(requestsUnsubscribe);
+        }
+        
+        // Setup presence tracking
+        function setupPresenceTracking() {
+            if (!currentUser || !isOnline) return;
+            
+            // Set user status to online
+            db.collection('users').doc(currentUser.uid).update({
+                status: 'online',
+                lastSeen: firebase.firestore.FieldValue.serverTimestamp()
+            }).catch(error => {
+                console.error('Error setting online status:', error);
+            });
+            
+            // Update status when user goes offline
+            window.addEventListener('beforeunload', () => {
+                if (currentUser && isOnline) {
+                    db.collection('users').doc(currentUser.uid).update({
+                        status: 'offline',
+                        lastSeen: firebase.firestore.FieldValue.serverTimestamp()
+                    });
+                }
+            });
+        }
+        
+        // Load friend requests
         async function loadFriendRequests() {
+            if (!currentUser || !isOnline) return;
+            
             try {
-                // Load received friend requests
-                const receivedRequestsSnapshot = await db.collection('friend_requests')
+                // Load received requests
+                const receivedSnapshot = await db.collection('friend_requests')
                     .where('toUserId', '==', currentUser.uid)
                     .where('status', '==', 'pending')
                     .get();
                 
-                // Load sent friend requests
-                const sentRequestsSnapshot = await db.collection('friend_requests')
+                // Load sent requests
+                const sentSnapshot = await db.collection('friend_requests')
                     .where('fromUserId', '==', currentUser.uid)
                     .where('status', '==', 'pending')
                     .get();
@@ -1243,127 +2227,683 @@
                 pendingRequests = [];
                 
                 // Process received requests
-                for (const doc of receivedRequestsSnapshot.docs) {
+                receivedSnapshot.forEach(doc => {
                     const request = doc.data();
-                    const userDoc = await db.collection('users').doc(request.fromUserId).get();
-                    
-                    if (userDoc.exists) {
-                        const userData = userDoc.data();
-                        const requestData = {
-                            id: doc.id,
-                            type: 'received',
-                            fromUserId: request.fromUserId,
-                            fromUserName: userData.displayName || 'User',
-                            fromUserPhoto: userData.photoURL || '',
-                            fromUserEmail: userData.email || '',
-                            fromUserUsername: userData.username || '',
-                            createdAt: request.createdAt?.toDate() || new Date(),
-                            message: request.message || ''
-                        };
-                        
-                        friendRequests.push(requestData);
-                        pendingRequests.push(requestData);
-                    }
-                }
+                    friendRequests.push({
+                        id: doc.id,
+                        type: 'received',
+                        fromUserId: request.fromUserId,
+                        fromUserName: request.fromUserName,
+                        fromUserPhoto: request.fromUserPhoto,
+                        fromUserUsername: request.fromUserUsername,
+                        message: request.message,
+                        createdAt: request.createdAt?.toDate() || new Date(),
+                        status: request.status
+                    });
+                    pendingRequests.push({
+                        id: doc.id,
+                        type: 'received',
+                        fromUserId: request.fromUserId,
+                        fromUserName: request.fromUserName,
+                        fromUserPhoto: request.fromUserPhoto,
+                        fromUserUsername: request.fromUserUsername,
+                        message: request.message,
+                        createdAt: request.createdAt?.toDate() || new Date(),
+                        status: request.status
+                    });
+                });
                 
                 // Process sent requests
-                for (const doc of sentRequestsSnapshot.docs) {
+                sentSnapshot.forEach(doc => {
                     const request = doc.data();
-                    const userDoc = await db.collection('users').doc(request.toUserId).get();
-                    
-                    if (userDoc.exists) {
-                        const userData = userDoc.data();
-                        const requestData = {
-                            id: doc.id,
-                            type: 'sent',
-                            toUserId: request.toUserId,
-                            toUserName: userData.displayName || 'User',
-                            toUserPhoto: userData.photoURL || '',
-                            toUserUsername: userData.username || '',
-                            createdAt: request.createdAt?.toDate() || new Date(),
-                            message: request.message || ''
-                        };
-                        
-                        friendRequests.push(requestData);
-                    }
-                }
+                    friendRequests.push({
+                        id: doc.id,
+                        type: 'sent',
+                        toUserId: request.toUserId,
+                        toUserName: request.toUserName,
+                        toUserPhoto: request.toUserPhoto,
+                        toUserUsername: request.toUserUsername,
+                        message: request.message,
+                        createdAt: request.createdAt?.toDate() || new Date(),
+                        status: request.status
+                    });
+                });
                 
-                console.log('Found', friendRequests.length, 'friend requests');
-                
-                // Update pending count badge
+                // Update UI
                 updatePendingCountBadge();
-                
-                // Update UI if on pending tab
                 if (document.getElementById('pendingTab').classList.contains('active')) {
                     updateFriendRequestsList();
                 }
                 
+                // Save to IndexedDB
+                saveFriendsToIndexedDB();
+                
             } catch (error) {
                 console.error('Error loading friend requests:', error);
-                showNotification('Failed to load friend requests', 'error');
             }
         }
         
+        // Load blocked users
         async function loadBlockedUsers() {
+            if (!currentUser || !isOnline) return;
+            
             try {
-                const blockedSnapshot = await db.collection('blocked_users')
+                const snapshot = await db.collection('blocked_users')
                     .where('blockerId', '==', currentUser.uid)
                     .get();
                 
                 blockedUsers = [];
                 
-                for (const doc of blockedSnapshot.docs) {
-                    const blockData = doc.data();
-                    const userDoc = await db.collection('users').doc(blockData.blockedId).get();
+                for (const doc of snapshot.docs) {
+                    const blockedData = doc.data();
+                    const userDoc = await db.collection('users').doc(blockedData.blockedId).get();
                     
                     if (userDoc.exists) {
                         const userData = userDoc.data();
                         blockedUsers.push({
-                            id: blockData.blockedId,
+                            id: blockedData.blockedId,
                             blockedId: doc.id,
                             name: userData.displayName || 'User',
                             username: userData.username || '',
                             photoURL: userData.photoURL || '',
-                            blockedAt: blockData.blockedAt?.toDate() || new Date()
+                            blockedAt: blockedData.blockedAt?.toDate() || new Date()
                         });
                     }
                 }
                 
-                // Update UI if on blocked tab
+                // Update UI if blocked tab is active
                 if (document.getElementById('blockedTab').classList.contains('active')) {
                     updateBlockedFriendsList();
                 }
+                
+                // Save to IndexedDB
+                saveFriendsToIndexedDB();
                 
             } catch (error) {
                 console.error('Error loading blocked users:', error);
             }
         }
         
-        async function loadFriendTags() {
+        // Search users
+        async function searchUsers(query) {
+            if (!query.trim()) {
+                document.getElementById('searchResults').innerHTML = '';
+                document.getElementById('noResults').style.display = 'none';
+                document.getElementById('searchLoading').style.display = 'none';
+                return;
+            }
+            
+            if (!currentUser) {
+                showNotification('Please log in to search for users', 'warning');
+                return;
+            }
+            
+            if (!isOnline) {
+                // Show offline search results
+                createOfflineSearchResult(query);
+                return;
+            }
+            
+            document.getElementById('searchResults').innerHTML = '';
+            document.getElementById('noResults').style.display = 'none';
+            document.getElementById('searchLoading').style.display = 'block';
+            
             try {
-                const tagsData = localStorage.getItem(`friendTags_${currentUser.uid}`);
-                if (tagsData) {
-                    const tags = JSON.parse(tagsData);
-                    friendTags = new Map(tags);
+                let usersSnapshot;
+                
+                if (searchMethod === 'username') {
+                    usersSnapshot = await db.collection('users')
+                        .where('username', '>=', query)
+                        .where('username', '<=', query + '\uf8ff')
+                        .limit(10)
+                        .get();
+                } else if (searchMethod === 'email') {
+                    usersSnapshot = await db.collection('users')
+                        .where('email', '==', query)
+                        .limit(10)
+                        .get();
+                } else if (searchMethod === 'phone') {
+                    usersSnapshot = await db.collection('users')
+                        .where('phone', '==', query)
+                        .limit(10)
+                        .get();
                 }
+                
+                document.getElementById('searchLoading').style.display = 'none';
+                
+                if (usersSnapshot.empty) {
+                    document.getElementById('noResults').style.display = 'block';
+                    return;
+                }
+                
+                const searchResults = document.getElementById('searchResults');
+                
+                usersSnapshot.forEach(doc => {
+                    const userData = doc.data();
+                    const userId = doc.id;
+                    
+                    // Don't show current user in results
+                    if (userId === currentUser.uid) return;
+                    
+                    // Check if already friends
+                    const isFriend = userFriendsMap.has(userId);
+                    
+                    // Check if request already sent
+                    let requestSent = false;
+                    friendRequests.forEach(req => {
+                        if ((req.type === 'sent' && req.toUserId === userId) ||
+                            (req.type === 'received' && req.fromUserId === userId)) {
+                            requestSent = true;
+                        }
+                    });
+                    
+                    // Check if blocked
+                    const isBlocked = blockedUsers.some(blocked => blocked.id === userId);
+                    
+                    if (isBlocked) return;
+                    
+                    const resultItem = document.createElement('div');
+                    resultItem.className = 'search-result-item';
+                    resultItem.dataset.userId = userId;
+                    
+                    // Get initials for avatar
+                    let initials = 'U';
+                    if (userData.displayName) {
+                        initials = userData.displayName.split(' ').map(n => n[0]).join('').toUpperCase().substring(0, 2);
+                    }
+                    
+                    let buttonText = 'Add Friend';
+                    let buttonClass = 'add-friend-btn-result';
+                    let disabled = false;
+                    
+                    if (isFriend) {
+                        buttonText = 'Friends';
+                        buttonClass += ' friends';
+                        disabled = true;
+                    } else if (requestSent) {
+                        buttonText = 'Pending';
+                        buttonClass += ' pending';
+                        disabled = true;
+                    }
+                    
+                    resultItem.innerHTML = `
+                        <div class="friend-avatar" ${userData.photoURL ? `style="background-image: url('${userData.photoURL}')"` : ''}>
+                            ${userData.photoURL ? '' : `<span>${initials}</span>`}
+                        </div>
+                        <div class="search-result-info">
+                            <div class="search-result-name">${userData.displayName || 'User'}</div>
+                            <div class="search-result-meta">
+                                ${userData.username ? `@${userData.username}` : ''}
+                                ${userData.email ? ` • ${userData.email}` : ''}
+                            </div>
+                        </div>
+                        <button class="${buttonClass}" data-user-id="${userId}" ${disabled ? 'disabled' : ''}>
+                            ${buttonText}
+                        </button>
+                    `;
+                    
+                    // Add event listener to the button if not disabled
+                    if (!disabled) {
+                        const button = resultItem.querySelector('button');
+                        button.addEventListener('click', (e) => {
+                            e.stopPropagation();
+                            sendFriendRequest(userId, userData);
+                        });
+                    }
+                    
+                    searchResults.appendChild(resultItem);
+                });
+                
+                if (searchResults.children.length === 0) {
+                    document.getElementById('noResults').style.display = 'block';
+                }
+                
             } catch (error) {
-                console.error('Error loading friend tags:', error);
-                friendTags = new Map();
+                console.error('Error searching users:', error);
+                document.getElementById('searchLoading').style.display = 'none';
+                document.getElementById('noResults').style.display = 'block';
+                document.getElementById('noResults').querySelector('p').textContent = 'Error searching users';
             }
         }
         
-        function saveFriendTags() {
+        // Create offline search result
+        function createOfflineSearchResult(query) {
+            const searchResults = document.getElementById('searchResults');
+            searchResults.innerHTML = '';
+            document.getElementById('noResults').style.display = 'none';
+            document.getElementById('searchLoading').style.display = 'none';
+            
+            // Show offline message
+            const offlineMessage = document.createElement('div');
+            offlineMessage.className = 'empty-state';
+            offlineMessage.innerHTML = `
+                <i class="fas fa-wifi-slash empty-state-icon"></i>
+                <p>Search is not available offline</p>
+                <p style="font-size: 14px; margin-top: 10px;">Please connect to the internet to search for new friends</p>
+            `;
+            
+            searchResults.appendChild(offlineMessage);
+        }
+        
+        // Show friend context menu
+        function showFriendContextMenu(friend, event) {
+            // Remove existing context menu
+            const existingMenu = document.querySelector('.context-menu');
+            if (existingMenu) {
+                existingMenu.remove();
+            }
+            
+            const contextMenu = document.createElement('div');
+            contextMenu.className = 'context-menu';
+            contextMenu.style.position = 'fixed';
+            contextMenu.style.left = `${event.clientX}px`;
+            contextMenu.style.top = `${event.clientY}px`;
+            
+            contextMenu.innerHTML = `
+                <div class="context-menu-item" data-action="message">
+                    <i class="fas fa-comment"></i>
+                    <span>Message</span>
+                </div>
+                <div class="context-menu-item" data-action="call">
+                    <i class="fas fa-phone"></i>
+                    <span>Call</span>
+                </div>
+                <div class="context-menu-item" data-action="video">
+                    <i class="fas fa-video"></i>
+                    <span>Video Call</span>
+                </div>
+                <div class="context-divider"></div>
+                <div class="context-menu-item" data-action="profile">
+                    <i class="fas fa-user"></i>
+                    <span>View Profile</span>
+                </div>
+                <div class="context-menu-item" data-action="tag">
+                    <i class="fas fa-tag"></i>
+                    <span>Add Tag</span>
+                </div>
+                <div class="context-divider"></div>
+                <div class="context-menu-item" data-action="remove">
+                    <i class="fas fa-user-minus"></i>
+                    <span>Remove Friend</span>
+                </div>
+                <div class="context-menu-item" data-action="block">
+                    <i class="fas fa-ban"></i>
+                    <span>Block User</span>
+                </div>
+            `;
+            
+            document.body.appendChild(contextMenu);
+            
+            // Add event listeners
+            contextMenu.querySelector('[data-action="message"]').addEventListener('click', () => {
+                messageFriend(friend.id);
+                contextMenu.remove();
+            });
+            
+            contextMenu.querySelector('[data-action="call"]').addEventListener('click', () => {
+                startCall(friend.id, 'audio');
+                contextMenu.remove();
+            });
+            
+            contextMenu.querySelector('[data-action="video"]').addEventListener('click', () => {
+                startCall(friend.id, 'video');
+                contextMenu.remove();
+            });
+            
+            contextMenu.querySelector('[data-action="profile"]').addEventListener('click', () => {
+                openFriendProfile(friend);
+                contextMenu.remove();
+            });
+            
+            contextMenu.querySelector('[data-action="tag"]').addEventListener('click', () => {
+                addFriendTag(friend.id);
+                contextMenu.remove();
+            });
+            
+            contextMenu.querySelector('[data-action="remove"]').addEventListener('click', () => {
+                removeFriend(friend.id);
+                contextMenu.remove();
+            });
+            
+            contextMenu.querySelector('[data-action="block"]').addEventListener('click', () => {
+                blockFriend(friend.id);
+                contextMenu.remove();
+            });
+            
+            // Close context menu when clicking outside
+            setTimeout(() => {
+                const closeMenu = (e) => {
+                    if (!contextMenu.contains(e.target)) {
+                        contextMenu.remove();
+                        document.removeEventListener('click', closeMenu);
+                    }
+                };
+                document.addEventListener('click', closeMenu);
+            }, 10);
+        }
+        
+        // Send notification
+        async function sendNotification(toUserId, type, data) {
+            if (!currentUser || !isOnline) return;
+            
             try {
-                const tagsArray = Array.from(friendTags.entries());
-                localStorage.setItem(`friendTags_${currentUser.uid}`, JSON.stringify(tagsArray));
+                await db.collection('notifications').add({
+                    toUserId: toUserId,
+                    fromUserId: currentUser.uid,
+                    type: type,
+                    data: data,
+                    read: false,
+                    createdAt: firebase.firestore.FieldValue.serverTimestamp()
+                });
+            } catch (error) {
+                console.error('Error sending notification:', error);
+            }
+        }
+        
+        // Show notification
+        function showNotification(message, type = 'success') {
+            const notification = document.getElementById('notification');
+            const text = document.getElementById('notificationText');
+            
+            text.textContent = message;
+            notification.className = `notification ${type}`;
+            
+            notification.classList.add('active');
+            
+            setTimeout(() => {
+                notification.classList.remove('active');
+            }, 3000);
+        }
+        
+        // Update friend requests list
+        function updateFriendRequestsList() {
+            const requestsSection = document.getElementById('friendsRequestsSection');
+            
+            if (!currentUser) {
+                requestsSection.innerHTML = `
+                    <div class="empty-state">
+                        <i class="fas fa-user-clock empty-state-icon"></i>
+                        <p>Please log in to see friend requests</p>
+                    </div>
+                `;
+                return;
+            }
+            
+            if (friendRequests.length === 0) {
+                requestsSection.innerHTML = `
+                    <div class="empty-state">
+                        <i class="fas fa-user-clock empty-state-icon"></i>
+                        <p>No friend requests</p>
+                        <p style="font-size: 14px; margin-top: 10px;">When someone sends you a friend request, it will appear here</p>
+                    </div>
+                `;
+                return;
+            }
+            
+            // Separate received and sent requests
+            const receivedRequests = friendRequests.filter(req => req.type === 'received');
+            const sentRequests = friendRequests.filter(req => req.type === 'sent');
+            
+            requestsSection.innerHTML = '';
+            
+            // Show received requests
+            if (receivedRequests.length > 0) {
+                const receivedSection = document.createElement('div');
+                receivedSection.className = 'friends-section';
+                
+                const title = document.createElement('div');
+                title.className = 'section-title';
+                title.innerHTML = `
+                    <span>Received Requests</span>
+                    <span class="section-count">${receivedRequests.length}</span>
+                `;
+                receivedSection.appendChild(title);
+                
+                receivedRequests.forEach(request => {
+                    const requestItem = createFriendRequestItem(request);
+                    receivedSection.appendChild(requestItem);
+                });
+                
+                requestsSection.appendChild(receivedSection);
+            }
+            
+            // Show sent requests
+            if (sentRequests.length > 0) {
+                const sentSection = document.createElement('div');
+                sentSection.className = 'friends-section';
+                
+                const title = document.createElement('div');
+                title.className = 'section-title';
+                title.innerHTML = `
+                    <span>Sent Requests</span>
+                    <span class="section-count">${sentRequests.length}</span>
+                `;
+                sentSection.appendChild(title);
+                
+                sentRequests.forEach(request => {
+                    const requestItem = createFriendRequestItem(request);
+                    sentSection.appendChild(requestItem);
+                });
+                
+                requestsSection.appendChild(sentSection);
+            }
+        }
+        
+        // Create friend request item
+        function createFriendRequestItem(request) {
+            const requestItem = document.createElement('div');
+            requestItem.className = 'friend-request-item';
+            
+            // Get initials for avatar
+            let initials = 'U';
+            let name = '';
+            let username = '';
+            let photoURL = '';
+            
+            if (request.type === 'received') {
+                name = request.fromUserName;
+                username = request.fromUserUsername;
+                photoURL = request.fromUserPhoto;
+            } else {
+                name = request.toUserName;
+                username = request.toUserUsername;
+                photoURL = request.toUserPhoto;
+            }
+            
+            if (name) {
+                initials = name.split(' ').map(n => n[0]).join('').toUpperCase().substring(0, 2);
+            }
+            
+            requestItem.innerHTML = `
+                <div class="friend-avatar" ${photoURL ? `style="background-image: url('${photoURL}')"` : ''}>
+                    ${photoURL ? '' : `<span>${initials}</span>`}
+                </div>
+                <div class="friend-request-info">
+                    <div class="friend-request-name">${name}</div>
+                    <div class="friend-request-meta">
+                        ${username ? `@${username}` : ''}
+                        <div>${request.message}</div>
+                        <div style="font-size: 12px; color: var(--text-secondary); margin-top: 5px;">
+                            ${getTimeAgo(request.createdAt)}
+                        </div>
+                    </div>
+                    <div class="friend-request-actions">
+                        ${request.type === 'received' ? `
+                            <button class="request-action-btn request-accept" data-action="accept" data-request-id="${request.id}" data-from-user-id="${request.fromUserId}">
+                                <i class="fas fa-check"></i> Accept
+                            </button>
+                            <button class="request-action-btn request-decline" data-action="decline" data-request-id="${request.id}">
+                                <i class="fas fa-times"></i> Decline
+                            </button>
+                        ` : `
+                            <button class="request-action-btn request-decline" data-action="cancel" data-request-id="${request.id}">
+                                <i class="fas fa-times"></i> Cancel Request
+                            </button>
+                        `}
+                    </div>
+                </div>
+            `;
+            
+            // Add event listeners
+            if (request.type === 'received') {
+                requestItem.querySelector('[data-action="accept"]').addEventListener('click', (e) => {
+                    e.stopPropagation();
+                    acceptFriendRequest(request.id, request.fromUserId);
+                });
+                
+                requestItem.querySelector('[data-action="decline"]').addEventListener('click', (e) => {
+                    e.stopPropagation();
+                    declineFriendRequest(request.id);
+                });
+            } else {
+                requestItem.querySelector('[data-action="cancel"]').addEventListener('click', (e) => {
+                    e.stopPropagation();
+                    cancelFriendRequest(request.id);
+                });
+            }
+            
+            return requestItem;
+        }
+        
+        // Update blocked friends list
+        function updateBlockedFriendsList() {
+            const blockedSection = document.getElementById('blockedFriendsSection');
+            
+            if (!currentUser) {
+                blockedSection.innerHTML = `
+                    <div class="empty-state">
+                        <i class="fas fa-ban empty-state-icon"></i>
+                        <p>Please log in to see blocked users</p>
+                    </div>
+                `;
+                return;
+            }
+            
+            if (blockedUsers.length === 0) {
+                blockedSection.innerHTML = `
+                    <div class="empty-state">
+                        <i class="fas fa-ban empty-state-icon"></i>
+                        <p>No blocked users</p>
+                        <p style="font-size: 14px; margin-top: 10px;">When you block someone, they will appear here</p>
+                    </div>
+                `;
+                return;
+            }
+            
+            blockedSection.innerHTML = '';
+            
+            const title = document.createElement('div');
+            title.className = 'section-title';
+            title.innerHTML = `
+                <span>Blocked Users</span>
+                <span class="section-count">${blockedUsers.length}</span>
+            `;
+            blockedSection.appendChild(title);
+            
+            blockedUsers.forEach(blocked => {
+                const blockedItem = createBlockedFriendItem(blocked);
+                blockedSection.appendChild(blockedItem);
+            });
+        }
+        
+        // Create blocked friend item
+        function createBlockedFriendItem(blocked) {
+            const blockedItem = document.createElement('div');
+            blockedItem.className = 'blocked-friend-item';
+            
+            // Get initials for avatar
+            let initials = 'U';
+            if (blocked.name) {
+                initials = blocked.name.split(' ').map(n => n[0]).join('').toUpperCase().substring(0, 2);
+            }
+            
+            blockedItem.innerHTML = `
+                <div class="friend-avatar" ${blocked.photoURL ? `style="background-image: url('${blocked.photoURL}')"` : ''}>
+                    ${blocked.photoURL ? '' : `<span>${initials}</span>`}
+                </div>
+                <div class="friend-info">
+                    <div class="friend-name">${blocked.name}</div>
+                    <div class="friend-status-text">
+                        <i class="fas fa-ban" style="color: var(--danger-color);"></i>
+                        <span>Blocked</span>
+                        <span style="font-size: 12px; color: var(--text-secondary); margin-left: 10px;">
+                            Since ${blocked.blockedAt.toLocaleDateString()}
+                        </span>
+                    </div>
+                </div>
+                <div class="friend-actions">
+                    <button class="friend-action-btn" title="Unblock" data-action="unblock" data-user-id="${blocked.id}" data-blocked-id="${blocked.blockedId}">
+                        <i class="fas fa-unlock"></i>
+                    </button>
+                </div>
+            `;
+            
+            // Add event listener for unblock button
+            blockedItem.querySelector('[data-action="unblock"]').addEventListener('click', (e) => {
+                e.stopPropagation();
+                unblockUser(blocked.id, blocked.blockedId);
+            });
+            
+            return blockedItem;
+        }
+        
+        // Update pending count badge
+        function updatePendingCountBadge() {
+            const pendingCountBadge = document.getElementById('pendingCountBadge');
+            const pendingTab = document.getElementById('pendingTab');
+            
+            if (pendingRequests.length > 0) {
+                pendingCountBadge.textContent = pendingRequests.length;
+                pendingCountBadge.style.display = 'flex';
+                pendingTab.classList.add('has-notification');
+            } else {
+                pendingCountBadge.style.display = 'none';
+                pendingTab.classList.remove('has-notification');
+            }
+        }
+        
+        // Load friend tags
+        async function loadFriendTags() {
+            if (!currentUser) return;
+            
+            try {
+                // Try to load from localStorage first (for simplicity)
+                const savedTags = localStorage.getItem(`friend_tags_${currentUser.uid}`);
+                if (savedTags) {
+                    friendTags = new Map(JSON.parse(savedTags));
+                }
+            } catch (error) {
+                console.error('Error loading friend tags:', error);
+            }
+        }
+        
+        // Save friend tags
+        async function saveFriendTags() {
+            if (!currentUser) return;
+            
+            try {
+                localStorage.setItem(`friend_tags_${currentUser.uid}`, JSON.stringify([...friendTags]));
             } catch (error) {
                 console.error('Error saving friend tags:', error);
             }
         }
         
+        // Modified updateFriendsList to show offline indicator
         function updateFriendsList() {
             const friendsSection = document.getElementById('friendsSection');
             const searchTerm = document.getElementById('friendsSearch').value.toLowerCase();
+            
+            // If no current user, show login message
+            if (!currentUser) {
+                friendsSection.innerHTML = `
+                    <div class="empty-state">
+                        <i class="fas fa-users empty-state-icon"></i>
+                        <p>Please log in to see your friends</p>
+                        <p style="font-size: 14px; margin-top: 10px;">You need to be logged in to use the friends feature</p>
+                    </div>
+                `;
+                return;
+            }
             
             // Filter friends based on current tab and search
             let filteredFriends = [...friendsList];
@@ -1371,7 +2911,15 @@
             // Apply tab filter
             const activeTab = document.querySelector('.friend-tab.active').id;
             if (activeTab === 'onlineFriendsTab') {
-                filteredFriends = filteredFriends.filter(friend => friend.status === 'online');
+                if (!isOnline) {
+                    // When offline, show all friends with offline status
+                    filteredFriends = filteredFriends.map(friend => ({
+                        ...friend,
+                        status: 'offline'
+                    }));
+                } else {
+                    filteredFriends = filteredFriends.filter(friend => friend.status === 'online');
+                }
             }
             
             // Apply search filter
@@ -1410,16 +2958,25 @@
                     emptyMessage = 'No friends match your search';
                 } else if (activeTab === 'onlineFriendsTab') {
                     emptyMessage = 'No friends online';
+                    if (!isOnline) {
+                        emptyMessage += ' (offline mode)';
+                    }
                 } else {
                     emptyMessage = 'You have no friends yet';
+                    if (!isOnline) {
+                        emptyMessage += ' (offline mode)';
+                    }
                 }
                 
                 friendsSection.innerHTML = `
                     <div class="empty-state">
                         <i class="fas fa-users empty-state-icon"></i>
                         <p>${emptyMessage}</p>
-                        ${!searchTerm && activeTab === 'allFriendsTab' ? 
+                        ${!searchTerm && activeTab === 'allFriendsTab' && currentUser ? 
                             '<button class="request-action-btn request-accept" id="addFirstFriendBtn" style="margin-top: 20px;"><i class="fas fa-user-plus"></i> Add Friends</button>' : 
+                            ''}
+                        ${!isOnline ? 
+                            '<p style="font-size: 14px; margin-top: 10px; color: var(--warning-color);"><i class="fas fa-wifi-slash"></i> Offline mode - showing cached data</p>' : 
                             ''}
                     </div>
                 `;
@@ -1433,24 +2990,43 @@
                 // Add section title
                 const titleDiv = document.createElement('div');
                 titleDiv.className = 'section-title';
+                
+                let titleText = '';
+                if (activeTab === 'onlineFriendsTab') {
+                    titleText = 'Online Friends';
+                    if (!isOnline) {
+                        titleText += ' (Offline)';
+                    }
+                } else {
+                    titleText = 'All Friends';
+                    if (!isOnline) {
+                        titleText += ' (Offline)';
+                    }
+                }
+                
                 titleDiv.innerHTML = `
-                    <span>${activeTab === 'onlineFriendsTab' ? 'Online Friends' : 'All Friends'}</span>
+                    <span>${titleText}</span>
                     <span class="section-count">${filteredFriends.length}</span>
+                    ${!isOnline ? '<span class="offline-badge">Offline</span>' : ''}
                 `;
                 friendsSection.prepend(titleDiv);
             }
         }
         
+        // Modified createFriendItem to enable actions even when offline
         function createFriendItem(friend) {
             const friendItem = document.createElement('div');
-            friendItem.className = `friend-item ${friend.status === 'online' ? 'online' : ''}`;
+            friendItem.className = `friend-item ${friend.status === 'online' && isOnline ? 'online' : ''}`;
             friendItem.dataset.friendId = friend.id;
             
-            // Get status text
+            // Get status text - adjust for offline mode
             let statusText = 'Offline';
             let statusClass = 'status-offline';
             
-            if (friend.status === 'online') {
+            if (!isOnline) {
+                statusText = 'Offline (cached)';
+                statusClass = 'status-offline';
+            } else if (friend.status === 'online') {
                 statusText = 'Online';
                 statusClass = 'status-online';
             } else if (friend.status === 'away') {
@@ -1475,7 +3051,7 @@
                     <div class="friend-status ${statusClass}"></div>
                 </div>
                 <div class="friend-info">
-                    <div class="friend-name">${friend.name}</div>
+                    <div class="friend-name">${friend.name} ${!isOnline && friend.cached ? ' <i class="fas fa-database" style="color: var(--warning-color); font-size: 12px;" title="Cached data"></i>' : ''}</div>
                     <div class="friend-status-text">
                         <i class="fas fa-circle ${statusClass}"></i>
                         <span>${statusText}</span>
@@ -1525,600 +3101,13 @@
             return friendItem;
         }
         
-        function updateFriendRequestsList() {
-            const requestsSection = document.getElementById('friendsRequestsSection');
-            requestsSection.style.display = 'block';
-            
-            // Clear current list
-            requestsSection.innerHTML = '';
-            
-            // Add received requests
-            const receivedRequests = friendRequests.filter(req => req.type === 'received');
-            if (receivedRequests.length > 0) {
-                const receivedTitle = document.createElement('div');
-                receivedTitle.className = 'section-title';
-                receivedTitle.innerHTML = `
-                    <span>Received Requests</span>
-                    <span class="section-count">${receivedRequests.length}</span>
-                `;
-                requestsSection.appendChild(receivedTitle);
-                
-                receivedRequests.forEach(request => {
-                    const requestItem = createFriendRequestItem(request);
-                    requestsSection.appendChild(requestItem);
-                });
-            }
-            
-            // Add sent requests
-            const sentRequests = friendRequests.filter(req => req.type === 'sent');
-            if (sentRequests.length > 0) {
-                const sentTitle = document.createElement('div');
-                sentTitle.className = 'section-title';
-                sentTitle.innerHTML = `
-                    <span>Sent Requests</span>
-                    <span class="section-count">${sentRequests.length}</span>
-                `;
-                requestsSection.appendChild(sentTitle);
-                
-                sentRequests.forEach(request => {
-                    const requestItem = createFriendRequestItem(request);
-                    requestsSection.appendChild(requestItem);
-                });
-            }
-            
-            // Show empty state if no requests
-            if (friendRequests.length === 0) {
-                requestsSection.innerHTML = `
-                    <div class="empty-state">
-                        <i class="fas fa-clock empty-state-icon"></i>
-                        <p>No pending friend requests</p>
-                        <p style="font-size: 14px; margin-top: 10px;">Send some friend requests to get started!</p>
-                    </div>
-                `;
-            }
-        }
-        
-        function createFriendRequestItem(request) {
-            const requestItem = document.createElement('div');
-            requestItem.className = 'friend-request-item';
-            requestItem.dataset.requestId = request.id;
-            
-            if (request.type === 'received') {
-                // Get initials for avatar
-                let initials = 'U';
-                if (request.fromUserName) {
-                    initials = request.fromUserName.split(' ').map(n => n[0]).join('').toUpperCase().substring(0, 2);
-                }
-                
-                requestItem.innerHTML = `
-                    <div class="friend-avatar" ${request.fromUserPhoto ? `style="background-image: url('${request.fromUserPhoto}')"` : ''}>
-                        ${request.fromUserPhoto ? '' : `<span>${initials}</span>`}
-                    </div>
-                    <div class="friend-request-info">
-                        <div class="friend-request-name">${request.fromUserName}</div>
-                        <div class="friend-request-meta">@${request.fromUserUsername || 'user'} • ${request.message || 'Wants to be your friend'}</div>
-                        <div class="friend-request-actions">
-                            <button class="request-action-btn request-accept" data-action="accept">
-                                <i class="fas fa-check"></i> Accept
-                            </button>
-                            <button class="request-action-btn request-decline" data-action="decline">
-                                <i class="fas fa-times"></i> Decline
-                            </button>
-                        </div>
-                    </div>
-                `;
-                
-                // Add event listeners
-                requestItem.querySelector('[data-action="accept"]').addEventListener('click', () => {
-                    acceptFriendRequest(request.id, request.fromUserId);
-                });
-                
-                requestItem.querySelector('[data-action="decline"]').addEventListener('click', () => {
-                    declineFriendRequest(request.id);
-                });
-                
-            } else { // sent request
-                // Get initials for avatar
-                let initials = 'U';
-                if (request.toUserName) {
-                    initials = request.toUserName.split(' ').map(n => n[0]).join('').toUpperCase().substring(0, 2);
-                }
-                
-                requestItem.innerHTML = `
-                    <div class="friend-avatar" ${request.toUserPhoto ? `style="background-image: url('${request.toUserPhoto}')"` : ''}>
-                        ${request.toUserPhoto ? '' : `<span>${initials}</span>`}
-                    </div>
-                    <div class="friend-request-info">
-                        <div class="friend-request-name">${request.toUserName}</div>
-                        <div class="friend-request-meta">@${request.toUserUsername || 'user'} • Request sent ${getTimeAgo(request.createdAt)}</div>
-                        <div class="friend-request-actions">
-                            <button class="request-action-btn request-decline" data-action="cancel">
-                                <i class="fas fa-times"></i> Cancel Request
-                            </button>
-                        </div>
-                    </div>
-                `;
-                
-                // Add event listener
-                requestItem.querySelector('[data-action="cancel"]').addEventListener('click', () => {
-                    cancelFriendRequest(request.id);
-                });
-            }
-            
-            return requestItem;
-        }
-        
-        function updateBlockedFriendsList() {
-            const blockedSection = document.getElementById('blockedFriendsSection');
-            blockedSection.style.display = 'block';
-            
-            // Clear current list
-            blockedSection.innerHTML = '';
-            
-            if (blockedUsers.length > 0) {
-                const blockedTitle = document.createElement('div');
-                blockedTitle.className = 'section-title';
-                blockedTitle.innerHTML = `
-                    <span>Blocked Users</span>
-                    <span class="section-count">${blockedUsers.length}</span>
-                `;
-                blockedSection.appendChild(blockedTitle);
-                
-                blockedUsers.forEach(blockedUser => {
-                    const blockedItem = createBlockedFriendItem(blockedUser);
-                    blockedSection.appendChild(blockedItem);
-                });
-            } else {
-                blockedSection.innerHTML = `
-                    <div class="empty-state">
-                        <i class="fas fa-ban empty-state-icon"></i>
-                        <p>No blocked users</p>
-                        <p style="font-size: 14px; margin-top: 10px;">You haven't blocked anyone yet</p>
-                    </div>
-                `;
-            }
-        }
-        
-        function createBlockedFriendItem(blockedUser) {
-            const blockedItem = document.createElement('div');
-            blockedItem.className = 'blocked-friend-item';
-            blockedItem.dataset.blockedId = blockedUser.id;
-            
-            // Get initials for avatar
-            let initials = 'U';
-            if (blockedUser.name) {
-                initials = blockedUser.name.split(' ').map(n => n[0]).join('').toUpperCase().substring(0, 2);
-            }
-            
-            blockedItem.innerHTML = `
-                <div class="friend-avatar" ${blockedUser.photoURL ? `style="background-image: url('${blockedUser.photoURL}')"` : ''}>
-                    ${blockedUser.photoURL ? '' : `<span>${initials}</span>`}
-                </div>
-                <div class="friend-info">
-                    <div class="friend-name">${blockedUser.name}</div>
-                    <div class="friend-status-text">
-                        @${blockedUser.username || 'user'}
-                    </div>
-                </div>
-                <div class="friend-actions">
-                    <button class="friend-action-btn" title="Unblock" data-action="unblock">
-                        <i class="fas fa-unlock"></i>
-                    </button>
-                </div>
-            `;
-            
-            // Add event listener
-            blockedItem.querySelector('[data-action="unblock"]').addEventListener('click', () => {
-                unblockUser(blockedUser.id, blockedUser.blockedId);
-            });
-            
-            return blockedItem;
-        }
-        
-        function updatePendingCountBadge() {
-            const pendingCount = pendingRequests.length;
-            const badge = document.getElementById('pendingCountBadge');
-            
-            if (pendingCount > 0) {
-                badge.textContent = pendingCount > 9 ? '9+' : pendingCount.toString();
-                badge.style.display = 'flex';
-            } else {
-                badge.style.display = 'none';
-            }
-        }
-        
-        function getTimeAgo(date) {
-            if (!date) return 'Recently';
-            
-            const now = new Date();
-            const diffMs = now - date;
-            const diffMins = Math.floor(diffMs / 60000);
-            const diffHours = Math.floor(diffMs / 3600000);
-            const diffDays = Math.floor(diffMs / 86400000);
-            
-            if (diffMins < 1) return 'Just now';
-            if (diffMins < 60) return `${diffMins}m ago`;
-            if (diffHours < 24) return `${diffHours}h ago`;
-            if (diffDays < 7) return `${diffDays}d ago`;
-            return `${Math.floor(diffDays / 7)}w ago`;
-        }
-        
-        async function searchUsers(searchTerm) {
-            const searchResults = document.getElementById('searchResults');
-            const noResults = document.getElementById('noResults');
-            const searchLoading = document.getElementById('searchLoading');
-            
-            if (!searchTerm.trim()) {
-                searchResults.innerHTML = '';
-                noResults.style.display = 'none';
-                searchLoading.style.display = 'none';
+        // Modified openFriendProfile to handle offline mode
+        async function openFriendProfile(friend) {
+            if (!currentUser) {
+                showNotification('Please log in to view friend profiles', 'warning');
                 return;
             }
             
-            searchResults.innerHTML = '';
-            noResults.style.display = 'none';
-            searchLoading.style.display = 'block';
-            
-            try {
-                let querySnapshot;
-                
-                if (searchMethod === 'username') {
-                    // Search by username
-                    querySnapshot = await db.collection('users')
-                        .where('username', '>=', searchTerm.toLowerCase())
-                        .where('username', '<=', searchTerm.toLowerCase() + '\uf8ff')
-                        .limit(10)
-                        .get();
-                } else if (searchMethod === 'email') {
-                    // Search by exact email
-                    querySnapshot = await db.collection('users')
-                        .where('email', '==', searchTerm.toLowerCase())
-                        .limit(10)
-                        .get();
-                } else { // phone
-                    // Search by phone number (exact or partial)
-                    querySnapshot = await db.collection('users')
-                        .where('phone', '>=', searchTerm)
-                        .where('phone', '<=', searchTerm + '\uf8ff')
-                        .limit(10)
-                        .get();
-                }
-                
-                searchLoading.style.display = 'none';
-                
-                if (querySnapshot.empty) {
-                    noResults.style.display = 'block';
-                    return;
-                }
-                
-                for (const doc of querySnapshot.docs) {
-                    const userData = doc.data();
-                    
-                    // Don't show current user
-                    if (doc.id === currentUser.uid) continue;
-                    
-                    // Check if already friends
-                    const isFriend = friendsList.some(friend => friend.id === doc.id);
-                    
-                    // Check if already blocked
-                    const isBlocked = blockedUsers.some(blocked => blocked.id === doc.id);
-                    
-                    // Check if request already sent
-                    const requestSent = friendRequests.some(req => 
-                        (req.type === 'sent' && req.toUserId === doc.id) ||
-                        (req.type === 'received' && req.fromUserId === doc.id)
-                    );
-                    
-                    const resultItem = document.createElement('div');
-                    resultItem.className = 'search-result-item';
-                    resultItem.dataset.userId = doc.id;
-                    
-                    let buttonText = 'Add Friend';
-                    let buttonClass = 'add-friend-btn-result';
-                    let disabled = false;
-                    
-                    if (isBlocked) {
-                        buttonText = 'Blocked';
-                        buttonClass += ' pending';
-                        disabled = true;
-                    } else if (isFriend) {
-                        buttonText = 'Friends';
-                        buttonClass += ' friends';
-                        disabled = true;
-                    } else if (requestSent) {
-                        buttonText = 'Pending';
-                        buttonClass += ' pending';
-                        disabled = true;
-                    }
-                    
-                    // Get initials for avatar
-                    let initials = 'U';
-                    if (userData.displayName) {
-                        initials = userData.displayName.split(' ').map(n => n[0]).join('').toUpperCase().substring(0, 2);
-                    }
-                    
-                    resultItem.innerHTML = `
-                        <div class="friend-avatar" ${userData.photoURL ? `style="background-image: url('${userData.photoURL}')"` : ''}>
-                            ${userData.photoURL ? '' : `<span>${initials}</span>`}
-                        </div>
-                        <div class="search-result-info">
-                            <div class="search-result-name">${userData.displayName || 'User'}</div>
-                            <div class="search-result-meta">
-                                ${userData.username ? `@${userData.username}` : ''}
-                                ${userData.email ? ` • ${userData.email}` : ''}
-                                ${userData.phone ? ` • ${userData.phone}` : ''}
-                            </div>
-                        </div>
-                        <button class="${buttonClass}" ${disabled ? 'disabled' : ''}>
-                            ${buttonText}
-                        </button>
-                    `;
-                    
-                    // Add event listener to button
-                    const button = resultItem.querySelector('button');
-                    if (!disabled) {
-                        button.addEventListener('click', () => {
-                            sendFriendRequest(doc.id, userData);
-                        });
-                    }
-                    
-                    searchResults.appendChild(resultItem);
-                }
-                
-            } catch (error) {
-                console.error('Error searching users:', error);
-                searchLoading.style.display = 'none';
-                noResults.style.display = 'block';
-                showNotification('Error searching users', 'error');
-            }
-        }
-        
-        async function sendFriendRequest(toUserId, userData) {
-            try {
-                // Check if request already exists
-                const existingRequest = await db.collection('friend_requests')
-                    .where('fromUserId', '==', currentUser.uid)
-                    .where('toUserId', '==', toUserId)
-                    .where('status', '==', 'pending')
-                    .get();
-                
-                if (!existingRequest.empty) {
-                    showNotification('Friend request already sent', 'warning');
-                    return;
-                }
-                
-                // Check if already friends
-                const existingFriendship = await db.collection('friendships')
-                    .where('participants', 'array-contains', currentUser.uid)
-                    .where('participants', 'array-contains', toUserId)
-                    .where('status', '==', 'accepted')
-                    .get();
-                
-                if (!existingFriendship.empty) {
-                    showNotification('Already friends with this user', 'warning');
-                    return;
-                }
-                
-                // Create friend request
-                await db.collection('friend_requests').add({
-                    fromUserId: currentUser.uid,
-                    fromUserName: currentUser.displayName || 'User',
-                    fromUserPhoto: currentUser.photoURL || '',
-                    fromUserUsername: currentUser.username || '',
-                    toUserId: toUserId,
-                    toUserName: userData.displayName || 'User',
-                    toUserUsername: userData.username || '',
-                    status: 'pending',
-                    message: 'Wants to be your friend',
-                    createdAt: firebase.firestore.FieldValue.serverTimestamp()
-                });
-                
-                showNotification('Friend request sent!', 'success');
-                
-                // Update UI
-                loadFriendRequests();
-                
-                // Update search results
-                const searchTerm = document.getElementById('searchInput').value.trim();
-                if (searchTerm) {
-                    searchUsers(searchTerm);
-                }
-                
-                // Send notification
-                await sendNotification(toUserId, 'friend_request', {
-                    message: `${currentUser.displayName || 'Someone'} sent you a friend request`,
-                    type: 'friend_request'
-                });
-                
-            } catch (error) {
-                console.error('Error sending friend request:', error);
-                showNotification('Failed to send friend request', 'error');
-            }
-        }
-        
-        async function acceptFriendRequest(requestId, fromUserId) {
-            try {
-                // Update request status
-                await db.collection('friend_requests').doc(requestId).update({
-                    status: 'accepted',
-                    respondedAt: firebase.firestore.FieldValue.serverTimestamp()
-                });
-                
-                // Create friendship
-                const friendshipRef = await db.collection('friendships').add({
-                    participants: [currentUser.uid, fromUserId],
-                    status: 'accepted',
-                    createdAt: firebase.firestore.FieldValue.serverTimestamp()
-                });
-                
-                // Get user data for the new friend
-                const userDoc = await db.collection('users').doc(fromUserId).get();
-                const userData = userDoc.data();
-                
-                // Add to friends list
-                const newFriend = {
-                    id: fromUserId,
-                    friendshipId: friendshipRef.id,
-                    name: userData.displayName || 'User',
-                    email: userData.email || '',
-                    username: userData.username || '',
-                    phone: userData.phone || '',
-                    photoURL: userData.photoURL || '',
-                    status: userData.status || 'offline',
-                    createdAt: new Date()
-                };
-                
-                friendsList.push(newFriend);
-                userFriendsMap.set(fromUserId, newFriend);
-                
-                // Update UI
-                updateFriendsList();
-                loadFriendRequests();
-                
-                showNotification('Friend request accepted!', 'success');
-                
-                // Send notification
-                await sendNotification(fromUserId, 'friend_request_accepted', {
-                    message: `${currentUser.displayName || 'Someone'} accepted your friend request`,
-                    type: 'friend_request_accepted'
-                });
-                
-                // Update real-time listeners
-                setupRealTimeListeners();
-                
-            } catch (error) {
-                console.error('Error accepting friend request:', error);
-                showNotification('Failed to accept friend request', 'error');
-            }
-        }
-        
-        async function declineFriendRequest(requestId) {
-            try {
-                await db.collection('friend_requests').doc(requestId).update({
-                    status: 'declined',
-                    respondedAt: firebase.firestore.FieldValue.serverTimestamp()
-                });
-                
-                loadFriendRequests();
-                showNotification('Friend request declined', 'success');
-                
-            } catch (error) {
-                console.error('Error declining friend request:', error);
-                showNotification('Failed to decline friend request', 'error');
-            }
-        }
-        
-        async function cancelFriendRequest(requestId) {
-            try {
-                await db.collection('friend_requests').doc(requestId).delete();
-                
-                loadFriendRequests();
-                showNotification('Friend request cancelled', 'success');
-                
-            } catch (error) {
-                console.error('Error cancelling friend request:', error);
-                showNotification('Failed to cancel friend request', 'error');
-            }
-        }
-        
-        async function removeFriend(friendId) {
-            try {
-                if (!confirm('Are you sure you want to remove this friend?')) {
-                    return;
-                }
-                
-                const friend = userFriendsMap.get(friendId);
-                if (!friend) return;
-                
-                // Delete friendship
-                await db.collection('friendships').doc(friend.friendshipId).delete();
-                
-                // Remove from local lists
-                friendsList = friendsList.filter(f => f.id !== friendId);
-                userFriendsMap.delete(friendId);
-                
-                // Update UI
-                updateFriendsList();
-                
-                // Close profile modal if open
-                friendProfileModal.classList.remove('active');
-                
-                showNotification('Friend removed', 'success');
-                
-                // Update real-time listeners
-                setupRealTimeListeners();
-                
-            } catch (error) {
-                console.error('Error removing friend:', error);
-                showNotification('Failed to remove friend', 'error');
-            }
-        }
-        
-        async function blockFriend(friendId) {
-            try {
-                if (!confirm('Are you sure you want to block this user? They will no longer be able to contact you.')) {
-                    return;
-                }
-                
-                const friend = userFriendsMap.get(friendId);
-                
-                // Add to blocked users list
-                await db.collection('blocked_users').add({
-                    blockerId: currentUser.uid,
-                    blockedId: friendId,
-                    blockedAt: firebase.firestore.FieldValue.serverTimestamp()
-                });
-                
-                // If they were friends, remove the friendship
-                if (friend) {
-                    await db.collection('friendships').doc(friend.friendshipId).delete();
-                    
-                    // Remove from local lists
-                    friendsList = friendsList.filter(f => f.id !== friendId);
-                    userFriendsMap.delete(friendId);
-                }
-                
-                // Reload data
-                await Promise.all([
-                    loadFriendsData(),
-                    loadBlockedUsers()
-                ]);
-                
-                // Close profile modal if open
-                friendProfileModal.classList.remove('active');
-                
-                showNotification('User blocked successfully', 'success');
-                
-                // Update real-time listeners
-                setupRealTimeListeners();
-                
-            } catch (error) {
-                console.error('Error blocking user:', error);
-                showNotification('Failed to block user', 'error');
-            }
-        }
-        
-        async function unblockUser(userId, blockedId) {
-            try {
-                if (!confirm('Are you sure you want to unblock this user?')) {
-                    return;
-                }
-                
-                // Remove from blocked users
-                await db.collection('blocked_users').doc(blockedId).delete();
-                
-                // Reload data
-                await loadBlockedUsers();
-                
-                showNotification('User unblocked successfully', 'success');
-                
-            } catch (error) {
-                console.error('Error unblocking user:', error);
-                showNotification('Failed to unblock user', 'error');
-            }
-        }
-        
-        async function openFriendProfile(friend) {
             selectedFriend = friend;
             
             // Get initials for avatar
@@ -2133,7 +3122,7 @@
             document.getElementById('friendProfileAvatar').innerHTML = 
                 friend.photoURL ? '' : `<span>${initials}</span>`;
             
-            document.getElementById('friendProfileName').textContent = friend.name;
+            document.getElementById('friendProfileName').textContent = friend.name + (!isOnline && friend.cached ? ' (Cached)' : '');
             document.getElementById('friendProfileUsername').textContent = 
                 friend.username ? `@${friend.username}` : 'Not set';
             document.getElementById('friendProfileEmail').textContent = friend.email || 'Not set';
@@ -2151,7 +3140,10 @@
             let statusIconClass = 'status-offline';
             let statusText = 'Offline';
             
-            if (friend.status === 'online') {
+            if (!isOnline) {
+                statusIconClass = 'status-offline';
+                statusText = 'Offline (Cached)';
+            } else if (friend.status === 'online') {
                 statusIconClass = 'status-online';
                 statusText = 'Online';
             } else if (friend.status === 'away') {
@@ -2178,7 +3170,7 @@
                 tagsContainer.style.display = 'none';
             }
             
-            // Update actions grid
+            // Update actions grid - enable all actions (will queue if offline)
             const actionsGrid = document.getElementById('friendActionsGrid');
             actionsGrid.innerHTML = `
                 <button class="friend-action-grid-btn" data-action="message">
@@ -2224,10 +3216,6 @@
                 startCall(friend.id, 'video');
             });
             
-            actionsGrid.querySelector('[data-action="tag"]').addEventListener('click', () => {
-                addFriendTag(friend.id);
-            });
-            
             actionsGrid.querySelector('[data-action="remove"]').addEventListener('click', () => {
                 removeFriend(friend.id);
             });
@@ -2236,181 +3224,22 @@
                 blockFriend(friend.id);
             });
             
+            actionsGrid.querySelector('[data-action="tag"]').addEventListener('click', () => {
+                addFriendTag(friend.id);
+            });
+            
             // Show modal
             friendProfileModal.classList.add('active');
         }
         
-        function messageFriend(friendId) {
-            // Navigate to chat with this friend
-            window.location.href = `chat.html?friendId=${friendId}`;
-        }
-        
-        function startCall(friendId, type) {
-            // Navigate to call page with friend ID and call type
-            window.location.href = `call.html?friendId=${friendId}&type=${type}`;
-        }
-        
-        function addFriendTag(friendId) {
-            const tag = prompt('Enter a tag for this friend (e.g., Work, School, Close Friend):');
-            if (tag && tag.trim()) {
-                const tags = friendTags.get(friendId) || [];
-                if (!tags.includes(tag.trim())) {
-                    tags.push(tag.trim());
-                    friendTags.set(friendId, tags);
-                    saveFriendTags();
-                    
-                    // Update UI
-                    if (selectedFriend && selectedFriend.id === friendId) {
-                        openFriendProfile(selectedFriend);
-                    }
-                    updateFriendsList();
-                    
-                    showNotification('Tag added successfully', 'success');
-                }
-            }
-        }
-        
-        function showFriendContextMenu(friend, event) {
-            // Remove existing context menu
-            const existingMenu = document.querySelector('.context-menu');
-            if (existingMenu) {
-                existingMenu.remove();
-            }
-            
-            // Create context menu
-            const menu = document.createElement('div');
-            menu.className = 'context-menu';
-            menu.style.top = `${event.clientY}px`;
-            menu.style.left = `${event.clientX}px`;
-            
-            const tags = friendTags.get(friend.id) || [];
-            
-            menu.innerHTML = `
-                <div class="context-menu-item" data-action="profile">
-                    <i class="fas fa-user"></i> View Profile
-                </div>
-                <div class="context-menu-item" data-action="message">
-                    <i class="fas fa-comment"></i> Message
-                </div>
-                <div class="context-menu-item" data-action="call">
-                    <i class="fas fa-phone"></i> Call
-                </div>
-                <div class="context-menu-item" data-action="video">
-                    <i class="fas fa-video"></i> Video Call
-                </div>
-                ${tags.length > 0 ? '<div class="context-divider"></div>' : ''}
-                ${tags.map(tag => `
-                    <div class="context-menu-item" data-action="tag" data-tag="${tag}">
-                        <i class="fas fa-tag"></i> ${tag}
-                    </div>
-                `).join('')}
-                <div class="context-divider"></div>
-                <div class="context-menu-item" data-action="addtag">
-                    <i class="fas fa-plus"></i> Add Tag
-                </div>
-                <div class="context-menu-item" data-action="remove">
-                    <i class="fas fa-user-minus"></i> Remove Friend
-                </div>
-                <div class="context-menu-item danger-action" data-action="block">
-                    <i class="fas fa-ban"></i> Block
-                </div>
-            `;
-            
-            document.body.appendChild(menu);
-            
-            // Position menu to stay within viewport
-            const rect = menu.getBoundingClientRect();
-            if (rect.right > window.innerWidth) {
-                menu.style.left = `${window.innerWidth - rect.width - 10}px`;
-            }
-            if (rect.bottom > window.innerHeight) {
-                menu.style.top = `${window.innerHeight - rect.height - 10}px`;
-            }
-            
-            // Add event listeners
-            menu.querySelectorAll('.context-menu-item').forEach(item => {
-                item.addEventListener('click', (e) => {
-                    const action = item.dataset.action;
-                    
-                    switch(action) {
-                        case 'profile':
-                            openFriendProfile(friend);
-                            break;
-                        case 'message':
-                            messageFriend(friend.id);
-                            break;
-                        case 'call':
-                            startCall(friend.id, 'audio');
-                            break;
-                        case 'video':
-                            startCall(friend.id, 'video');
-                            break;
-                        case 'addtag':
-                            addFriendTag(friend.id);
-                            break;
-                        case 'tag':
-                            const tag = item.dataset.tag;
-                            document.getElementById('friendsSearch').value = tag;
-                            document.getElementById('friendsSearch').dispatchEvent(new Event('input'));
-                            break;
-                        case 'remove':
-                            removeFriend(friend.id);
-                            break;
-                        case 'block':
-                            blockFriend(friend.id);
-                            break;
-                    }
-                    
-                    menu.remove();
-                });
-            });
-            
-            // Close menu when clicking outside
-            const closeMenu = (e) => {
-                if (!menu.contains(e.target)) {
-                    menu.remove();
-                    document.removeEventListener('click', closeMenu);
-                }
-            };
-            
-            setTimeout(() => {
-                document.addEventListener('click', closeMenu);
-            }, 100);
-        }
-        
-        async function sendNotification(toUserId, type, data) {
-            try {
-                await db.collection('notifications').add({
-                    toUserId: toUserId,
-                    fromUserId: currentUser.uid,
-                    fromUserName: currentUser.displayName || 'User',
-                    type: type,
-                    data: data,
-                    read: false,
-                    createdAt: firebase.firestore.FieldValue.serverTimestamp()
-                });
-            } catch (error) {
-                console.error('Error sending notification:', error);
-            }
-        }
-        
-        function showNotification(message, type = 'success') {
-            const notificationText = document.getElementById('notificationText');
-            notificationText.textContent = message;
-            
-            notification.className = 'notification';
-            notification.classList.add(type);
-            
-            notification.classList.add('active');
-            
-            setTimeout(() => {
-                notification.classList.remove('active');
-            }, 3000);
-        }
-        
+        // Setup event listeners
         function setupEventListeners() {
-            // Add friend button
+            // Add friend button - ENABLED for offline
             document.getElementById('addFriendBtn').addEventListener('click', () => {
+                if (!currentUser) {
+                    showNotification('Please log in to add friends', 'warning');
+                    return;
+                }
                 addFriendModal.classList.add('active');
             });
             
@@ -2429,7 +3258,7 @@
                 }
             });
             
-            // Search method selection
+            // Search method selection - ENABLED for offline
             document.querySelectorAll('.search-method-btn').forEach(btn => {
                 btn.addEventListener('click', function() {
                     searchMethod = this.dataset.method;
@@ -2548,9 +3377,9 @@
                 }
             });
             
-            // Refresh friends list every minute to update online status
+            // Refresh friends list every minute to update online status (only when online)
             setInterval(() => {
-                if (currentUser && friendsList.length > 0) {
+                if (isOnline && currentUser && friendsList.length > 0) {
                     // Update online status for all friends
                     friendsList.forEach(async friend => {
                         try {
@@ -2569,6 +3398,507 @@
                 }
             }, 60000);
         }
+        
+        // Modified sendFriendRequest to queue when offline
+        async function sendFriendRequest(toUserId, userData) {
+            if (!currentUser) {
+                showNotification('Please log in to send friend requests', 'warning');
+                return;
+            }
+            
+            if (!isOnline) {
+                // Queue the action
+                await addToActionQueue({
+                    type: 'friend_request',
+                    data: { toUserId, userData }
+                });
+                
+                showNotification('Friend request will be sent when you\'re back online', 'warning');
+                return;
+            }
+            
+            try {
+                // Check if request already exists
+                const existingRequest = await db.collection('friend_requests')
+                    .where('fromUserId', '==', currentUser.uid)
+                    .where('toUserId', '==', toUserId)
+                    .where('status', '==', 'pending')
+                    .get();
+                
+                if (!existingRequest.empty) {
+                    showNotification('Friend request already sent', 'warning');
+                    return;
+                }
+                
+                // Check if already friends
+                const existingFriendship = await db.collection('friendships')
+                    .where('participants', 'array-contains', currentUser.uid)
+                    .where('participants', 'array-contains', toUserId)
+                    .where('status', '==', 'accepted')
+                    .get();
+                
+                if (!existingFriendship.empty) {
+                    showNotification('Already friends with this user', 'warning');
+                    return;
+                }
+                
+                // Create friend request
+                await db.collection('friend_requests').add({
+                    fromUserId: currentUser.uid,
+                    fromUserName: currentUser.displayName || 'User',
+                    fromUserPhoto: currentUser.photoURL || '',
+                    fromUserUsername: currentUser.username || '',
+                    toUserId: toUserId,
+                    toUserName: userData.displayName || 'User',
+                    toUserUsername: userData.username || '',
+                    status: 'pending',
+                    message: 'Wants to be your friend',
+                    createdAt: firebase.firestore.FieldValue.serverTimestamp()
+                });
+                
+                showNotification('Friend request sent!', 'success');
+                
+                // Update UI
+                loadFriendRequests();
+                
+                // Update search results
+                const searchTerm = document.getElementById('searchInput').value.trim();
+                if (searchTerm) {
+                    searchUsers(searchTerm);
+                }
+                
+                // Send notification
+                await sendNotification(toUserId, 'friend_request', {
+                    message: `${currentUser.displayName || 'Someone'} sent you a friend request`,
+                    type: 'friend_request'
+                });
+                
+            } catch (error) {
+                console.error('Error sending friend request:', error);
+                showNotification('Failed to send friend request', 'error');
+            }
+        }
+        
+        // Modified acceptFriendRequest to queue when offline
+        async function acceptFriendRequest(requestId, fromUserId) {
+            if (!currentUser) {
+                showNotification('Please log in to accept friend requests', 'warning');
+                return;
+            }
+            
+            if (!isOnline) {
+                // Queue the action
+                await addToActionQueue({
+                    type: 'accept_request',
+                    data: { requestId, fromUserId }
+                });
+                
+                showNotification('Friend request will be accepted when you\'re back online', 'warning');
+                return;
+            }
+            
+            try {
+                // Update request status
+                await db.collection('friend_requests').doc(requestId).update({
+                    status: 'accepted',
+                    respondedAt: firebase.firestore.FieldValue.serverTimestamp()
+                });
+                
+                // Create friendship
+                const friendshipRef = await db.collection('friendships').add({
+                    participants: [currentUser.uid, fromUserId],
+                    status: 'accepted',
+                    createdAt: firebase.firestore.FieldValue.serverTimestamp()
+                });
+                
+                // Get user data for the new friend
+                const userDoc = await db.collection('users').doc(fromUserId).get();
+                const userData = userDoc.data();
+                
+                // Add to friends list
+                const newFriend = {
+                    id: fromUserId,
+                    friendshipId: friendshipRef.id,
+                    name: userData.displayName || 'User',
+                    email: userData.email || '',
+                    username: userData.username || '',
+                    phone: userData.phone || '',
+                    photoURL: userData.photoURL || '',
+                    status: userData.status || 'offline',
+                    createdAt: new Date()
+                };
+                
+                friendsList.push(newFriend);
+                userFriendsMap.set(fromUserId, newFriend);
+                
+                // Update UI
+                updateFriendsList();
+                loadFriendRequests();
+                
+                // Save to IndexedDB
+                saveFriendsToIndexedDB();
+                
+                showNotification('Friend request accepted!', 'success');
+                
+                // Send notification
+                await sendNotification(fromUserId, 'friend_request_accepted', {
+                    message: `${currentUser.displayName || 'Someone'} accepted your friend request`,
+                    type: 'friend_request_accepted'
+                });
+                
+                // Update real-time listeners
+                setupRealTimeListeners();
+                
+            } catch (error) {
+                console.error('Error accepting friend request:', error);
+                showNotification('Failed to accept friend request', 'error');
+            }
+        }
+        
+        // Modified declineFriendRequest to queue when offline
+        async function declineFriendRequest(requestId) {
+            if (!currentUser) {
+                showNotification('Please log in to decline friend requests', 'warning');
+                return;
+            }
+            
+            if (!isOnline) {
+                // Queue the action
+                await addToActionQueue({
+                    type: 'decline_request',
+                    data: { requestId }
+                });
+                
+                showNotification('Friend request will be declined when you\'re back online', 'warning');
+                return;
+            }
+            
+            try {
+                await db.collection('friend_requests').doc(requestId).update({
+                    status: 'declined',
+                    respondedAt: firebase.firestore.FieldValue.serverTimestamp()
+                });
+                
+                loadFriendRequests();
+                showNotification('Friend request declined', 'success');
+                
+            } catch (error) {
+                console.error('Error declining friend request:', error);
+                showNotification('Failed to decline friend request', 'error');
+            }
+        }
+        
+        // Modified cancelFriendRequest to queue when offline
+        async function cancelFriendRequest(requestId) {
+            if (!currentUser) {
+                showNotification('Please log in to cancel friend requests', 'warning');
+                return;
+            }
+            
+            if (!isOnline) {
+                // Queue the action
+                await addToActionQueue({
+                    type: 'cancel_request',
+                    data: { requestId }
+                });
+                
+                showNotification('Friend request will be cancelled when you\'re back online', 'warning');
+                return;
+            }
+            
+            try {
+                await db.collection('friend_requests').doc(requestId).delete();
+                
+                loadFriendRequests();
+                showNotification('Friend request cancelled', 'success');
+                
+            } catch (error) {
+                console.error('Error cancelling friend request:', error);
+                showNotification('Failed to cancel friend request', 'error');
+            }
+        }
+        
+        // Modified removeFriend to queue when offline
+        async function removeFriend(friendId) {
+            if (!currentUser) {
+                showNotification('Please log in to remove friends', 'warning');
+                return;
+            }
+            
+            try {
+                if (!confirm('Are you sure you want to remove this friend?')) {
+                    return;
+                }
+                
+                const friend = userFriendsMap.get(friendId);
+                if (!friend) return;
+                
+                if (!isOnline) {
+                    // Queue the action
+                    await addToActionQueue({
+                        type: 'remove_friend',
+                        data: { friendId }
+                    });
+                    
+                    // Update local state immediately for better UX
+                    friendsList = friendsList.filter(f => f.id !== friendId);
+                    userFriendsMap.delete(friendId);
+                    
+                    // Update UI
+                    updateFriendsList();
+                    
+                    // Save to IndexedDB
+                    saveFriendsToIndexedDB();
+                    
+                    // Close profile modal if open
+                    friendProfileModal.classList.remove('active');
+                    
+                    showNotification('Friend will be removed when you\'re back online', 'warning');
+                    return;
+                }
+                
+                // Delete friendship
+                await db.collection('friendships').doc(friend.friendshipId).delete();
+                
+                // Remove from local lists
+                friendsList = friendsList.filter(f => f.id !== friendId);
+                userFriendsMap.delete(friendId);
+                
+                // Update UI
+                updateFriendsList();
+                
+                // Save to IndexedDB
+                saveFriendsToIndexedDB();
+                
+                // Close profile modal if open
+                friendProfileModal.classList.remove('active');
+                
+                showNotification('Friend removed', 'success');
+                
+                // Update real-time listeners
+                setupRealTimeListeners();
+                
+            } catch (error) {
+                console.error('Error removing friend:', error);
+                showNotification('Failed to remove friend', 'error');
+            }
+        }
+        
+        // Modified blockFriend to queue when offline
+        async function blockFriend(friendId) {
+            if (!currentUser) {
+                showNotification('Please log in to block users', 'warning');
+                return;
+            }
+            
+            try {
+                if (!confirm('Are you sure you want to block this user? They will no longer be able to contact you.')) {
+                    return;
+                }
+                
+                const friend = userFriendsMap.get(friendId);
+                
+                if (!isOnline) {
+                    // Queue the action
+                    await addToActionQueue({
+                        type: 'block_friend',
+                        data: { friendId }
+                    });
+                    
+                    // Update local state immediately for better UX
+                    if (friend) {
+                        friendsList = friendsList.filter(f => f.id !== friendId);
+                        userFriendsMap.delete(friendId);
+                    }
+                    
+                    // Add to blocked list
+                    const blockedUser = {
+                        id: friendId,
+                        blockedId: `temp_${Date.now()}`,
+                        name: friend ? friend.name : 'User',
+                        username: friend ? friend.username : '',
+                        photoURL: friend ? friend.photoURL : '',
+                        blockedAt: new Date()
+                    };
+                    
+                    blockedUsers.push(blockedUser);
+                    
+                    // Update UI
+                    updateFriendsList();
+                    if (document.getElementById('blockedTab').classList.contains('active')) {
+                        updateBlockedFriendsList();
+                    }
+                    
+                    // Save to IndexedDB
+                    saveFriendsToIndexedDB();
+                    
+                    // Close profile modal if open
+                    friendProfileModal.classList.remove('active');
+                    
+                    showNotification('User will be blocked when you\'re back online', 'warning');
+                    return;
+                }
+                
+                // Add to blocked users list
+                await db.collection('blocked_users').add({
+                    blockerId: currentUser.uid,
+                    blockedId: friendId,
+                    blockedAt: firebase.firestore.FieldValue.serverTimestamp()
+                });
+                
+                // If they were friends, remove the friendship
+                if (friend) {
+                    await db.collection('friendships').doc(friend.friendshipId).delete();
+                    
+                    // Remove from local lists
+                    friendsList = friendsList.filter(f => f.id !== friendId);
+                    userFriendsMap.delete(friendId);
+                }
+                
+                // Reload data
+                await Promise.all([
+                    loadFriendsData(),
+                    loadBlockedUsers()
+                ]);
+                
+                // Save to IndexedDB
+                saveFriendsToIndexedDB();
+                
+                // Close profile modal if open
+                friendProfileModal.classList.remove('active');
+                
+                showNotification('User blocked successfully', 'success');
+                
+                // Update real-time listeners
+                setupRealTimeListeners();
+                
+            } catch (error) {
+                console.error('Error blocking user:', error);
+                showNotification('Failed to block user', 'error');
+            }
+        }
+        
+        // Modified unblockUser to queue when offline
+        async function unblockUser(userId, blockedId) {
+            if (!currentUser) {
+                showNotification('Please log in to unblock users', 'warning');
+                return;
+            }
+            
+            try {
+                if (!confirm('Are you sure you want to unblock this user?')) {
+                    return;
+                }
+                
+                if (!isOnline) {
+                    // Queue the action
+                    await addToActionQueue({
+                        type: 'unblock_user',
+                        data: { blockedId }
+                    });
+                    
+                    // Update local state immediately for better UX
+                    blockedUsers = blockedUsers.filter(user => user.id !== userId);
+                    
+                    // Update UI
+                    updateBlockedFriendsList();
+                    
+                    // Save to IndexedDB
+                    saveFriendsToIndexedDB();
+                    
+                    showNotification('User will be unblocked when you\'re back online', 'warning');
+                    return;
+                }
+                
+                // Remove from blocked users
+                await db.collection('blocked_users').doc(blockedId).delete();
+                
+                // Reload data
+                await loadBlockedUsers();
+                
+                // Save to IndexedDB
+                saveFriendsToIndexedDB();
+                
+                showNotification('User unblocked successfully', 'success');
+                
+            } catch (error) {
+                console.error('Error unblocking user:', error);
+                showNotification('Failed to unblock user', 'error');
+            }
+        }
+        
+        // Modified messageFriend to work offline (queue messages)
+        function messageFriend(friendId) {
+            if (!currentUser) {
+                showNotification('Please log in to send messages', 'warning');
+                return;
+            }
+            
+            if (!isOnline) {
+                showNotification('Messages can be sent when you\'re back online', 'warning');
+                // Store message in localStorage or IndexedDB for later
+                localStorage.setItem('pendingMessage', JSON.stringify({
+                    friendId: friendId,
+                    timestamp: Date.now()
+                }));
+            }
+            // Navigate to chat with this friend
+            window.location.href = `chat.html?friendId=${friendId}`;
+        }
+        
+        // Modified startCall to work offline (queue call requests)
+        function startCall(friendId, type) {
+            if (!currentUser) {
+                showNotification('Please log in to make calls', 'warning');
+                return;
+            }
+            
+            if (!isOnline) {
+                showNotification('Calls can be made when you\'re back online', 'warning');
+                return;
+            }
+            // Navigate to call page with friend ID and call type
+            window.location.href = `call.html?friendId=${friendId}&type=${type}`;
+        }
+        
+        // Helper functions
+        function getTimeAgo(date) {
+            if (!date) return 'Recently';
+            
+            const now = new Date();
+            const diffMs = now - date;
+            const diffMins = Math.floor(diffMs / 60000);
+            const diffHours = Math.floor(diffMs / 3600000);
+            const diffDays = Math.floor(diffMs / 86400000);
+            
+            if (diffMins < 1) return 'Just now';
+            if (diffMins < 60) return `${diffMins}m ago`;
+            if (diffHours < 24) return `${diffHours}h ago`;
+            if (diffDays < 7) return `${diffDays}d ago`;
+            return `${Math.floor(diffDays / 7)}w ago`;
+        }
+        
+        function addFriendTag(friendId) {
+            const tag = prompt('Enter a tag for this friend (e.g., Work, School, Close Friend):');
+            if (tag && tag.trim()) {
+                const tags = friendTags.get(friendId) || [];
+                if (!tags.includes(tag.trim())) {
+                    tags.push(tag.trim());
+                    friendTags.set(friendId, tags);
+                    saveFriendTags();
+                    
+                    // Update UI
+                    if (selectedFriend && selectedFriend.id === friendId) {
+                        openFriendProfile(selectedFriend);
+                    }
+                    updateFriendsList();
+                    
+                    showNotification('Tag added successfully', 'success');
+                }
+            }
+        }
+        
+        // This is the complete code with all functions implemented
     </script>
 </body>
 </html>

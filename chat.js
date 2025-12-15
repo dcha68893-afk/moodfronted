@@ -193,6 +193,402 @@ var currentChat = window.currentChat;
 var currentChatId = window.currentChatId;
 var allUsers = window.allUsers;
 
+// ==================== OFFLINE MESSAGING SYSTEM ====================
+// IndexedDB for offline message queuing
+const OFFLINE_DB_NAME = 'UniConnectOfflineDB';
+const OFFLINE_DB_VERSION = 1;
+const OFFLINE_STORE_NAME = 'pendingMessages';
+let offlineDB = null;
+let isOnline = navigator.onLine;
+
+// Initialize IndexedDB for offline messaging
+async function initOfflineDB() {
+    return new Promise((resolve, reject) => {
+        const request = indexedDB.open(OFFLINE_DB_NAME, OFFLINE_DB_VERSION);
+        
+        request.onerror = (event) => {
+            console.error('IndexedDB error:', event.target.error);
+            reject(event.target.error);
+        };
+        
+        request.onsuccess = (event) => {
+            offlineDB = event.target.result;
+            console.log('✅ IndexedDB initialized for offline messaging');
+            resolve(offlineDB);
+        };
+        
+        request.onupgradeneeded = (event) => {
+            const db = event.target.result;
+            
+            // Create object store for pending messages
+            if (!db.objectStoreNames.contains(OFFLINE_STORE_NAME)) {
+                const store = db.createObjectStore(OFFLINE_STORE_NAME, { 
+                    keyPath: 'localId',
+                    autoIncrement: true 
+                });
+                
+                // Create indexes for efficient querying
+                store.createIndex('chatId', 'chatId', { unique: false });
+                store.createIndex('status', 'status', { unique: false });
+                store.createIndex('timestamp', 'timestamp', { unique: false });
+                
+                console.log('✅ Created pending messages store');
+            }
+        };
+    });
+}
+
+// Save message to IndexedDB for offline queuing
+async function saveMessageToOfflineQueue(messageData) {
+    if (!offlineDB) {
+        await initOfflineDB();
+    }
+    
+    return new Promise((resolve, reject) => {
+        const transaction = offlineDB.transaction([OFFLINE_STORE_NAME], 'readwrite');
+        const store = transaction.objectStore(OFFLINE_STORE_NAME);
+        
+        // Add offline metadata
+        const offlineMessage = {
+            ...messageData,
+            localId: Date.now() + Math.random().toString(36).substr(2, 9),
+            status: 'pending',
+            offlineSavedAt: new Date().toISOString(),
+            retryCount: 0
+        };
+        
+        const request = store.add(offlineMessage);
+        
+        request.onsuccess = () => {
+            console.log('📱 Message saved to offline queue:', offlineMessage.localId);
+            resolve(offlineMessage.localId);
+        };
+        
+        request.onerror = (event) => {
+            console.error('Error saving to offline queue:', event.target.error);
+            reject(event.target.error);
+        };
+    });
+}
+
+// Get pending messages for a specific chat
+async function getPendingMessages(chatId) {
+    if (!offlineDB) {
+        await initOfflineDB();
+    }
+    
+    return new Promise((resolve, reject) => {
+        const transaction = offlineDB.transaction([OFFLINE_STORE_NAME], 'readonly');
+        const store = transaction.objectStore(OFFLINE_STORE_NAME);
+        const index = store.index('chatId');
+        const request = index.getAll(chatId);
+        
+        request.onsuccess = (event) => {
+            const messages = event.target.result;
+            resolve(messages);
+        };
+        
+        request.onerror = (event) => {
+            console.error('Error getting pending messages:', event.target.error);
+            reject(event.target.error);
+        };
+    });
+}
+
+// Remove message from offline queue after successful send
+async function removeMessageFromQueue(localId) {
+    if (!offlineDB) {
+        await initOfflineDB();
+    }
+    
+    return new Promise((resolve, reject) => {
+        const transaction = offlineDB.transaction([OFFLINE_STORE_NAME], 'readwrite');
+        const store = transaction.objectStore(OFFLINE_STORE_NAME);
+        const request = store.delete(localId);
+        
+        request.onsuccess = () => {
+            console.log('✅ Removed message from offline queue:', localId);
+            resolve();
+        };
+        
+        request.onerror = (event) => {
+            console.error('Error removing from queue:', event.target.error);
+            reject(event.target.error);
+        };
+    });
+}
+
+// Update message status in offline queue
+async function updateMessageStatusInQueue(localId, updates) {
+    if (!offlineDB) {
+        await initOfflineDB();
+    }
+    
+    return new Promise((resolve, reject) => {
+        const transaction = offlineDB.transaction([OFFLINE_STORE_NAME], 'readwrite');
+        const store = transaction.objectStore(OFFLINE_STORE_NAME);
+        const getRequest = store.get(localId);
+        
+        getRequest.onsuccess = (event) => {
+            const message = event.target.result;
+            if (message) {
+                const updatedMessage = { ...message, ...updates };
+                const putRequest = store.put(updatedMessage);
+                
+                putRequest.onsuccess = () => {
+                    resolve(updatedMessage);
+                };
+                
+                putRequest.onerror = (event) => {
+                    reject(event.target.error);
+                };
+            } else {
+                reject(new Error('Message not found in queue'));
+            }
+        };
+        
+        getRequest.onerror = (event) => {
+            reject(event.target.error);
+        };
+    });
+}
+
+// Sync pending messages when coming back online
+async function syncPendingMessages() {
+    if (!offlineDB) {
+        await initOfflineDB();
+    }
+    
+    if (!isOnline || !db) {
+        console.log('⚠️ Cannot sync: offline or no database connection');
+        return;
+    }
+    
+    console.log('🔄 Syncing pending messages...');
+    
+    try {
+        const transaction = offlineDB.transaction([OFFLINE_STORE_NAME], 'readonly');
+        const store = transaction.objectStore(OFFLINE_STORE_NAME);
+        const request = store.getAll();
+        
+        request.onsuccess = async (event) => {
+            const pendingMessages = event.target.result;
+            console.log(`Found ${pendingMessages.length} pending messages to sync`);
+            
+            for (const message of pendingMessages) {
+                if (message.retryCount < 5) { // Max 5 retries
+                    await sendOfflineMessage(message);
+                } else {
+                    // Too many retries, mark as failed
+                    await updateMessageStatusInQueue(message.localId, {
+                        status: 'failed',
+                        lastError: 'Max retries exceeded'
+                    });
+                    console.warn(`Message ${message.localId} failed after ${message.retryCount} retries`);
+                }
+            }
+        };
+        
+        request.onerror = (event) => {
+            console.error('Error fetching pending messages:', event.target.error);
+        };
+    } catch (error) {
+        console.error('Error in syncPendingMessages:', error);
+    }
+}
+
+// Send a message that was saved offline
+async function sendOfflineMessage(offlineMessage) {
+    try {
+        console.log('🔄 Sending offline message:', offlineMessage.localId);
+        
+        // Prepare message for Firebase
+        const firebaseMessage = {
+            text: offlineMessage.text,
+            senderId: offlineMessage.senderId,
+            senderName: offlineMessage.senderName,
+            chatId: offlineMessage.chatId,
+            timestamp: new Date(offlineMessage.timestamp),
+            status: 'sent',
+            type: offlineMessage.type || 'text',
+            localId: offlineMessage.localId // Keep reference to offline ID
+        };
+        
+        // Add file data if present
+        if (offlineMessage.file) {
+            firebaseMessage.file = offlineMessage.file;
+        }
+        
+        // Send to Firebase
+        const docRef = await db.collection('messages').add(firebaseMessage);
+        console.log('✅ Offline message sent to Firebase:', docRef.id);
+        
+        // Update chat document with last message
+        await db.collection('chats').doc(offlineMessage.chatId).update({
+            lastMessage: offlineMessage.text.length > 50 ? offlineMessage.text.substring(0, 50) + '...' : offlineMessage.text,
+            lastMessageTime: new Date(),
+            [`unread.${offlineMessage.friendId}`]: 1
+        });
+        
+        // Remove from offline queue
+        await removeMessageFromQueue(offlineMessage.localId);
+        
+        // Update message status to delivered
+        updateMessageStatus(offlineMessage.chatId, 'delivered');
+        
+        return { success: true, firebaseId: docRef.id };
+        
+    } catch (error) {
+        console.error('Error sending offline message:', error);
+        
+        // Update retry count
+        await updateMessageStatusInQueue(offlineMessage.localId, {
+            retryCount: (offlineMessage.retryCount || 0) + 1,
+            lastError: error.message,
+            lastRetry: new Date().toISOString()
+        });
+        
+        return { success: false, error: error.message };
+    }
+}
+
+// Display offline messages in chat UI
+function displayOfflineMessages(chatId) {
+    if (!offlineDB) return;
+    
+    getPendingMessages(chatId).then(messages => {
+        const messagesContainer = document.getElementById('messagesContainer');
+        if (!messagesContainer) return;
+        
+        messages.forEach(message => {
+            // Check if message is already displayed
+            const existingMessage = messagesContainer.querySelector(`[data-local-id="${message.localId}"]`);
+            if (!existingMessage) {
+                addOfflineMessageToUI(message);
+            }
+        });
+    }).catch(error => {
+        console.error('Error displaying offline messages:', error);
+    });
+}
+
+// Add offline message to UI
+function addOfflineMessageToUI(message) {
+    const messagesContainer = document.getElementById('messagesContainer');
+    if (!messagesContainer) return;
+    
+    const messageElement = document.createElement('div');
+    const isSent = message.senderId === currentUser.uid;
+    const messageTime = message.timestamp ? 
+        new Date(message.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) 
+        : 'Just now';
+    
+    messageElement.className = `flex ${isSent ? 'justify-end' : 'justify-start'} mb-4`;
+    messageElement.dataset.localId = message.localId;
+    messageElement.dataset.status = message.status || 'pending';
+    
+    // Special styling for pending messages
+    const statusClass = message.status === 'pending' ? 'bg-gray-300 opacity-80' : 
+                       message.status === 'failed' ? 'bg-red-100' : 
+                       isSent ? 'bg-purple-600 text-white' : 'bg-gray-100 text-gray-800';
+    
+    messageElement.innerHTML = `
+        <div class="max-w-xs lg:max-w-md ${statusClass} rounded-2xl p-3 relative">
+            <div class="text-sm font-medium ${isSent && message.status !== 'pending' && message.status !== 'failed' ? 'text-purple-100' : 'text-gray-700'} mb-1">
+                ${isSent ? 'You' : (message.senderName || 'Unknown')}
+                ${message.status === 'pending' ? ' ⏳' : ''}
+                ${message.status === 'failed' ? ' ❌' : ''}
+            </div>
+            <div class="text-sm">${escapeHtml(message.text)}</div>
+            <div class="text-xs ${isSent && message.status !== 'pending' && message.status !== 'failed' ? 'text-purple-200' : 'text-gray-500'} mt-2 flex justify-between items-center">
+                <span>${messageTime}</span>
+                ${message.status === 'pending' ? 
+                    '<span class="ml-2"><i class="fas fa-clock animate-pulse"></i> Sending...</span>' : 
+                  message.status === 'failed' ? 
+                    '<span class="ml-2 text-red-500"><i class="fas fa-exclamation-triangle"></i> Failed</span>' : 
+                  isSent ? '<span class="ml-2">🕒</span>' : ''}
+            </div>
+            ${message.status === 'failed' ? `
+                <button onclick="retryMessage('${message.localId}')" class="mt-2 text-xs bg-red-500 hover:bg-red-600 text-white px-2 py-1 rounded">
+                    Retry
+                </button>
+            ` : ''}
+        </div>
+    `;
+    
+    messagesContainer.appendChild(messageElement);
+    
+    // Scroll to bottom
+    setTimeout(() => {
+        messagesContainer.scrollTop = messagesContainer.scrollHeight;
+    }, 100);
+}
+
+// Retry sending a failed message
+async function retryMessage(localId) {
+    try {
+        if (!offlineDB) {
+            await initOfflineDB();
+        }
+        
+        const transaction = offlineDB.transaction([OFFLINE_STORE_NAME], 'readwrite');
+        const store = transaction.objectStore(OFFLINE_STORE_NAME);
+        const getRequest = store.get(localId);
+        
+        getRequest.onsuccess = async (event) => {
+            const message = event.target.result;
+            if (message) {
+                // Update status to pending
+                await updateMessageStatusInQueue(localId, { status: 'pending' });
+                
+                // Update UI
+                const messageElement = document.querySelector(`[data-local-id="${localId}"]`);
+                if (messageElement) {
+                    messageElement.dataset.status = 'pending';
+                    messageElement.querySelector('button')?.remove();
+                }
+                
+                // Try to send again
+                await sendOfflineMessage(message);
+            }
+        };
+    } catch (error) {
+        console.error('Error retrying message:', error);
+        showToast('Failed to retry message', 'error');
+    }
+}
+
+// Setup network detection for offline messaging
+function setupOfflineMessagingNetworkDetection() {
+    window.addEventListener('online', async () => {
+        console.log('✅ Online - syncing pending messages');
+        isOnline = true;
+        
+        // Update connection status
+        updateConnectionStatus(true);
+        
+        // Sync pending messages
+        await syncPendingMessages();
+        
+        // Re-enable Firestore
+        if (db && typeof db.enableNetwork === 'function') {
+            db.enableNetwork().then(() => {
+                console.log('Firestore reconnected');
+            });
+        }
+    });
+    
+    window.addEventListener('offline', () => {
+        console.log('⚠️ Offline - queuing messages locally');
+        isOnline = false;
+        updateConnectionStatus(false);
+    });
+    
+    // Initial check
+    isOnline = navigator.onLine;
+    updateConnectionStatus(isOnline);
+}
+
 // ==================== IMAGE ERROR HANDLING ====================
 function setupImageErrorHandling() {
     console.log('Setting up image error handling...');
@@ -342,7 +738,7 @@ const messagesContainer = document.getElementById('messagesContainer') || docume
 // Sidebar Navigation Elements
 const navIcons = document.querySelectorAll('.nav-icon[data-tab]');
 
-// User Profile Header Elements
+// User Profile Header Elements - REMOVED from header, now in settings
 const userAvatar = document.getElementById('userAvatar');
 const userName = document.getElementById('userName');
 const userMood = document.getElementById('userMood');
@@ -890,37 +1286,39 @@ function getFileIcon(fileType) {
 }
 
 // ==================== INTERNET CONNECTION DETECTION ====================
-function setupInternetDetection() {
-    // Update UI based on connection status
-    function updateConnectionStatus(isOnline) {
-        let statusElement = document.getElementById('connectionStatus');
-        if (!statusElement) {
-            // Create status indicator if it doesn't exist
-            statusElement = document.createElement('div');
-            statusElement.id = 'connectionStatus';
-            statusElement.className = 'fixed top-0 left-0 right-0 z-50 text-center py-1 text-xs font-semibold transition-all duration-300';
-            statusElement.style.display = 'none';
-            document.body.appendChild(statusElement);
-        }
-        
-        if (isOnline) {
-            statusElement.textContent = '✅ Online';
-            statusElement.className = 'fixed top-0 left-0 right-0 z-50 text-center py-1 text-xs font-semibold bg-green-500 text-white transition-all duration-300';
-            setTimeout(() => {
-                statusElement.style.display = 'none';
-            }, 3000);
-        } else {
-            statusElement.textContent = '⚠️ You are offline - Some features may not work';
-            statusElement.className = 'fixed top-0 left-0 right-0 z-50 text-center py-1 text-xs font-semibold bg-red-500 text-white transition-all duration-300';
-            statusElement.style.display = 'block';
-        }
+function updateConnectionStatus(isOnline) {
+    let statusElement = document.getElementById('connectionStatus');
+    if (!statusElement) {
+        // Create status indicator if it doesn't exist
+        statusElement = document.createElement('div');
+        statusElement.id = 'connectionStatus';
+        statusElement.className = 'fixed top-0 left-0 right-0 z-50 text-center py-1 text-xs font-semibold transition-all duration-300';
+        statusElement.style.display = 'none';
+        document.body.appendChild(statusElement);
     }
     
+    if (isOnline) {
+        statusElement.textContent = '✅ Online';
+        statusElement.className = 'fixed top-0 left-0 right-0 z-50 text-center py-1 text-xs font-semibold bg-green-500 text-white transition-all duration-300';
+        setTimeout(() => {
+            statusElement.style.display = 'none';
+        }, 3000);
+    } else {
+        statusElement.textContent = '⚠️ You are offline - Messages will be sent when back online';
+        statusElement.className = 'fixed top-0 left-0 right-0 z-50 text-center py-1 text-xs font-semibold bg-yellow-500 text-white transition-all duration-300';
+        statusElement.style.display = 'block';
+    }
+}
+
+function setupInternetDetection() {
     // Listen for online/offline events
     window.addEventListener('online', () => {
         console.log('Internet connection restored');
+        isOnline = true;
         updateConnectionStatus(true);
-        showToast('Back online!', 'success');
+        
+        // Sync pending messages
+        syncPendingMessages();
         
         // Re-enable Firestore
         if (db && typeof db.enableNetwork === 'function') {
@@ -932,12 +1330,13 @@ function setupInternetDetection() {
     
     window.addEventListener('offline', () => {
         console.log('Internet connection lost');
+        isOnline = false;
         updateConnectionStatus(false);
-        showToast('You are offline', 'warning');
     });
     
     // Initial check
-    updateConnectionStatus(navigator.onLine);
+    isOnline = navigator.onLine;
+    updateConnectionStatus(isOnline);
 }
 
 // ==================== NETWORK & ERROR HANDLING ====================
@@ -957,11 +1356,11 @@ function setupNetworkMonitoring() {
 
     window.addEventListener('offline', () => {
         console.log('App is offline');
-        showToast('You are offline', 'warning');
+        showToast('You are offline - Messages will be queued', 'warning');
     });
 
     if (!navigator.onLine) {
-        showToast('You are currently offline', 'warning');
+        showToast('You are currently offline - Messages will be sent when back online', 'warning');
     }
 }
 
@@ -975,16 +1374,20 @@ async function initApp() {
     console.log('Initializing app...');
     
     try {
-        // 1. Ensure all UI elements exist
+        // 1. Initialize IndexedDB for offline messaging
+        await initOfflineDB();
+        
+        // 2. Ensure all UI elements exist
         ensureChatInterfaceElements();
         
-        // 2. Setup basic error handlers
+        // 3. Setup basic error handlers
         setupGlobalErrorHandling();
         setupImageErrorHandling();
         setupNetworkMonitoring();
         setupInternetDetection();
+        setupOfflineMessagingNetworkDetection();
 
-        // 3. Setup UI components
+        // 4. Setup UI components
         initializeTabs();
         setupEventListeners();
         initEmojiPicker();
@@ -995,14 +1398,14 @@ async function initApp() {
         setupBusinessTools();
         setupHelpCenter();
         setupModals();
-        setupSettingsModals(); // NEW: Setup all settings modals
+        setupSettingsModals();
         setupContextMenuActions();
         setupAutoScrollDetection();
         
-        // 4. Initialize Firebase with proper timing
+        // 5. Initialize Firebase with proper timing
         await initializeFirebaseProperly();
         
-        // 5. Check auth state
+        // 6. Check auth state
         if (auth) {
             auth.onAuthStateChanged(async (user) => {
                 if (user) {
@@ -1238,11 +1641,8 @@ async function loadUserData() {
 function initializeUserData() {
     console.log('Initializing UI with user data');
 
-    if (userName) userName.textContent = currentUserData.displayName;
-    if (userAvatar) userAvatar.src = currentUserData.photoURL;
-    if (userMood) userMood.textContent = currentUserData.mood || '😊';
-
-    // Update profile modal fields if they exist
+    // Profile picture is now only in settings, not in header
+    // Only update settings modal if it exists
     const profileName = document.getElementById('profileName');
     const profileAbout = document.getElementById('profileAbout');
     const profileEmail = document.getElementById('profileEmail');
@@ -1682,6 +2082,9 @@ async function startChat(friendId, friendName) {
         // Load messages
         loadMessages(chatId);
         
+        // Display offline messages for this chat
+        displayOfflineMessages(chatId);
+        
         // Mark messages as read
         markMessagesAsRead(chatId);
         
@@ -1736,6 +2139,67 @@ function goBackToTabs() {
 }
 
 // ==================== MESSAGE MANAGEMENT ====================
+// UPDATED: sendMessage with offline support
+async function sendMessage() {
+    const messageInput = document.getElementById('messageInput');
+    if (!messageInput) return;
+    
+    const text = messageInput.value.trim();
+    
+    if (!text || !currentChat) {
+        if (!text) {
+            showToast('Please enter a message', 'error');
+        }
+        return;
+    }
+    
+    console.log('Sending message:', text, 'to chat:', currentChat.id);
+    
+    // Always save message to offline queue first
+    const messageData = {
+        text: text,
+        senderId: currentUser.uid,
+        senderName: currentUserData.displayName,
+        chatId: currentChat.id,
+        timestamp: new Date().toISOString(),
+        status: 'pending',
+        type: 'text',
+        friendId: currentChat.friendId
+    };
+    
+    try {
+        // Save to offline queue
+        const localId = await saveMessageToOfflineQueue(messageData);
+        
+        // Display immediately in UI
+        messageData.localId = localId;
+        addOfflineMessageToUI(messageData);
+        
+        // Clear input
+        messageInput.value = '';
+        
+        // Try to send immediately if online
+        if (isOnline && db) {
+            await sendOfflineMessage(messageData);
+        } else {
+            showToast('Message saved offline. Will send when back online.', 'info');
+        }
+        
+        // Scroll to bottom
+        const messagesContainer = document.getElementById('messagesContainer');
+        if (messagesContainer) {
+            setTimeout(() => {
+                messagesContainer.scrollTop = messagesContainer.scrollHeight;
+            }, 100);
+        }
+        
+    } catch (error) {
+        console.error('Error in sendMessage:', error);
+        showToast('Error sending message: ' + error.message, 'error');
+    }
+}
+
+// UPDATED: loadMessages with offline support
 function loadMessages(chatId) {
     console.log('Loading messages for chat:', chatId);
     
@@ -1787,13 +2251,18 @@ function loadMessages(chatId) {
                 }
                 
                 if (snapshot.empty) {
-                    messagesContainer.innerHTML = `
-                        <div class="text-center text-gray-500 py-10">
-                            <i class="fas fa-comments text-4xl mb-3 text-gray-300 block"></i>
-                            <p>No messages yet</p>
-                            <p class="text-sm mt-1">Send a message to start the conversation</p>
-                        </div>
-                    `;
+                    // Check if we have offline messages
+                    getPendingMessages(chatId).then(offlineMessages => {
+                        if (offlineMessages.length === 0) {
+                            messagesContainer.innerHTML = `
+                                <div class="text-center text-gray-500 py-10">
+                                    <i class="fas fa-comments text-4xl mb-3 text-gray-300 block"></i>
+                                    <p>No messages yet</p>
+                                    <p class="text-sm mt-1">Send a message to start the conversation</p>
+                                </div>
+                            `;
+                        }
+                    });
                     return;
                 }
                 
@@ -1926,6 +2395,14 @@ function addMessageToUI(message, messageId) {
     const messagesContainer = document.getElementById('messagesContainer');
     if (!messagesContainer) return;
     
+    // Check if this is an offline message that's now sent
+    if (message.localId) {
+        const offlineElement = messagesContainer.querySelector(`[data-local-id="${message.localId}"]`);
+        if (offlineElement) {
+            offlineElement.remove();
+        }
+    }
+    
     const messageElement = document.createElement('div');
     
     const isSent = message.senderId === currentUser.uid;
@@ -2019,69 +2496,6 @@ function addMessageToUI(message, messageId) {
     }
 }
 
-async function sendMessage() {
-    const messageInput = document.getElementById('messageInput');
-    if (!messageInput) return;
-    
-    const text = messageInput.value.trim();
-    
-    if (!text || !currentChat) {
-        if (!text) {
-            showToast('Please enter a message', 'error');
-        }
-        return;
-    }
-    
-    console.log('Sending message:', text, 'to chat:', currentChat.id);
-    
-    try {
-        const message = {
-            text: text,
-            senderId: currentUser.uid,
-            senderName: currentUserData.displayName,
-            chatId: currentChat.id,
-            timestamp: new Date(), // Use regular Date instead of FieldValue
-            status: 'sent',
-            type: 'text'
-        };
-        
-        // Add message to Firebase
-        const docRef = await db.collection('messages').add(message);
-        console.log('Message sent with ID:', docRef.id);
-        
-        // Clear input
-        messageInput.value = '';
-        
-        // Update chat document with last message
-        await db.collection('chats').doc(currentChat.id).update({
-            lastMessage: text.length > 50 ? text.substring(0, 50) + '...' : text,
-            lastMessageTime: new Date(), // Use regular Date
-            [`typing.${currentUser.uid}`]: false, // Remove typing indicator
-            [`unread.${currentChat.friendId}`]: 1 // Use regular number
-        });
-        
-        console.log('Chat document updated with last message');
-        
-        // Update message status to delivered for all messages in this chat
-        updateMessageStatus(currentChat.id, 'delivered');
-        
-        // Scroll to bottom
-        const messagesContainer = document.getElementById('messagesContainer');
-        if (messagesContainer) {
-            setTimeout(() => {
-                messagesContainer.scrollTop = messagesContainer.scrollHeight;
-            }, 100);
-        }
-        
-        // Send push notification
-        sendPushNotification(currentChat.friendId, currentUserData.displayName, text);
-        
-    } catch (error) {
-        console.error('Error sending message:', error);
-        showToast('Error sending message: ' + error.message, 'error');
-    }
-}
-
 function updateMessageStatus(chatId, status) {
     console.log('Updating message status to:', status, 'for chat:', chatId);
     
@@ -2152,84 +2566,111 @@ async function uploadFile(file) {
         return;
     }
     
-    if (!storage) {
-        showToast('File upload not available', 'error');
-        return;
-    }
-    
     try {
         console.log('Uploading file:', file.name, 'to chat:', currentChat.id);
-        showToast('Uploading file...', 'info');
         
-        // Upload to Firebase Storage
-        const storageRef = storage.ref();
-        const fileRef = storageRef.child(`chat_files/${currentChat.id}/${Date.now()}_${file.name}`);
-        const uploadTask = fileRef.put(file);
+        // Prepare message data for offline queue
+        const messageData = {
+            text: `Shared a file: ${file.name}`,
+            senderId: currentUser.uid,
+            senderName: currentUserData.displayName,
+            chatId: currentChat.id,
+            timestamp: new Date().toISOString(),
+            status: 'pending',
+            type: 'file',
+            file: {
+                name: file.name,
+                type: file.type,
+                size: file.size
+            },
+            friendId: currentChat.friendId
+        };
+        
+        // Save to offline queue immediately
+        const localId = await saveMessageToOfflineQueue(messageData);
+        messageData.localId = localId;
+        
+        // Display in UI
+        addOfflineMessageToUI(messageData);
         
         // Show upload progress
-        if (fileName) fileName.textContent = file.name;
-        if (fileSize) fileSize.textContent = formatFileSize(file.size);
-        if (filePreview) filePreview.classList.remove('hidden');
+        showToast('Uploading file...', 'info');
         
-        uploadTask.on('state_changed', 
-            (snapshot) => {
-                // Update progress bar
-                const progress = (snapshot.bytesTransferred / snapshot.totalBytes) * 100;
-                console.log('Upload progress:', progress + '%');
-                if (uploadProgressBar) uploadProgressBar.style.width = `${progress}%`;
-            },
-            (error) => {
-                console.error('Error uploading file:', error);
-                showToast('Error uploading file', 'error');
-                if (filePreview) filePreview.classList.add('hidden');
-            },
-            async () => {
-                // Upload completed
-                console.log('File upload completed');
-                const downloadURL = await uploadTask.snapshot.ref.getDownloadURL();
-                
-                // Create message with file
-                const message = {
-                    text: `Shared a file: ${file.name}`,
-                    senderId: currentUser.uid,
-                    senderName: currentUserData.displayName,
-                    chatId: currentChat.id,
-                    timestamp: new Date(),
-                    status: 'sent',
-                    file: {
-                        name: file.name,
-                        url: downloadURL,
-                        type: file.type,
-                        size: file.size
+        // Try to upload if online
+        if (isOnline && storage) {
+            const storageRef = storage.ref();
+            const fileRef = storageRef.child(`chat_files/${currentChat.id}/${Date.now()}_${file.name}`);
+            const uploadTask = fileRef.put(file);
+            
+            uploadTask.on('state_changed', 
+                (snapshot) => {
+                    const progress = (snapshot.bytesTransferred / snapshot.totalBytes) * 100;
+                    console.log('Upload progress:', progress + '%');
+                },
+                (error) => {
+                    console.error('Error uploading file:', error);
+                    // Update status in queue
+                    updateMessageStatusInQueue(localId, {
+                        status: 'failed',
+                        lastError: error.message
+                    });
+                    showToast('Error uploading file', 'error');
+                },
+                async () => {
+                    // Upload completed
+                    const downloadURL = await uploadTask.snapshot.ref.getDownloadURL();
+                    
+                    // Update message with download URL
+                    await updateMessageStatusInQueue(localId, {
+                        file: {
+                            ...messageData.file,
+                            url: downloadURL
+                        }
+                    });
+                    
+                    // Try to send the offline message
+                    const updatedMessage = await getMessageFromQueue(localId);
+                    if (updatedMessage) {
+                        await sendOfflineMessage(updatedMessage);
                     }
-                };
-                
-                // Add message to Firebase
-                await db.collection('messages').add(message);
-                
-                // Update chat document with last message
-                await db.collection('chats').doc(currentChat.id).update({
-                    lastMessage: `Shared a file: ${file.name}`,
-                    lastMessageTime: new Date(),
-                    [`unread.${currentChat.friendId}`]: 1
-                });
-                
-                // Hide file preview
-                if (filePreview) filePreview.classList.add('hidden');
-                
-                console.log('File uploaded successfully');
-                showToast('File uploaded successfully', 'success');
-            }
-        );
+                    
+                    showToast('File uploaded successfully', 'success');
+                }
+            );
+        } else {
+            showToast('File saved offline. Will upload when back online.', 'info');
+        }
+        
     } catch (error) {
         console.error('Error uploading file:', error);
         showToast('Error uploading file: ' + error.message, 'error');
     }
 }
 
+// Helper function to get message from queue
+async function getMessageFromQueue(localId) {
+    if (!offlineDB) {
+        await initOfflineDB();
+    }
+    
+    return new Promise((resolve, reject) => {
+        const transaction = offlineDB.transaction([OFFLINE_STORE_NAME], 'readonly');
+        const store = transaction.objectStore(OFFLINE_STORE_NAME);
+        const request = store.get(localId);
+        
+        request.onsuccess = (event) => {
+            resolve(event.target.result);
+        };
+        
+        request.onerror = (event) => {
+            reject(event.target.error);
+        };
+    });
+}
+
 // ==================== TYPING INDICATOR ====================
 function handleTypingIndicator() {
-    if (currentChat && db) {
+    if (currentChat && db && isOnline) {
         console.log('Sending typing indicator for chat:', currentChat.id);
         
         // Send typing indicator
@@ -2245,7 +2686,7 @@ function handleTypingIndicator() {
         
         // Set timeout to remove typing indicator
         typingTimeout = setTimeout(() => {
-            if (db) {
+            if (db && isOnline) {
                 db.collection('chats').doc(currentChat.id).update({
                     [`typing.${currentUser.uid}`]: false
                 });
@@ -2404,18 +2845,17 @@ async function createNewPoll() {
             senderId: currentUser.uid,
             senderName: currentUserData.displayName,
             chatId: currentChat.id,
-            timestamp: new Date(),
-            status: 'sent'
+            timestamp: new Date().toISOString(),
+            status: 'pending',
+            friendId: currentChat.friendId
         };
         
-        await db.collection('messages').add(pollData);
+        // Save to offline queue
+        const localId = await saveMessageToOfflineQueue(pollData);
+        pollData.localId = localId;
         
-        // Update chat document with last message
-        await db.collection('chats').doc(currentChat.id).update({
-            lastMessage: `📊 Poll: ${pollQuestion.value.trim().substring(0, 30)}...`,
-            lastMessageTime: new Date(),
-            [`unread.${currentChat.friendId}`]: 1
-        });
+        // Display in UI
+        addOfflineMessageToUI(pollData);
         
         // Clear poll creation
         pollQuestion.value = '';
@@ -2424,7 +2864,12 @@ async function createNewPoll() {
         // Hide poll creation section
         if (pollCreationSection) pollCreationSection.classList.add('hidden');
         
-        showToast('Poll created successfully', 'success');
+        // Try to send if online
+        if (isOnline && db) {
+            await sendOfflineMessage(pollData);
+        } else {
+            showToast('Poll saved offline. Will send when back online.', 'info');
+        }
         
     } catch (error) {
         console.error('Error creating poll:', error);
@@ -3071,8 +3516,7 @@ async function uploadProfilePicture(file) {
                 // Update local data
                 currentUserData.photoURL = downloadURL;
                 
-                // Update UI
-                if (userAvatar) userAvatar.src = downloadURL;
+                // Update UI - only in settings modal, not in header
                 if (profilePicPreview) profilePicPreview.src = downloadURL;
                 
                 showToast('Profile picture updated successfully', 'success');
@@ -3161,9 +3605,6 @@ async function saveProfileSettings() {
         currentUserData.displayName = name;
         currentUserData.about = about || '';
         currentUserData.phone = phone || '';
-        
-        // Update UI
-        if (userName) userName.textContent = name;
         
         showToast('Profile updated successfully', 'success');
         console.log('Profile updated:', updates);
@@ -3703,7 +4144,6 @@ function updateMood(newMood) {
     })
     .then(() => {
         currentUserData.mood = newMood;
-        if (userMood) userMood.textContent = newMood;
         showToast(`Mood updated to ${newMood}`, 'success');
         
         // Reload mood suggestions
@@ -4061,4 +4501,10 @@ window.saveGreetingMessage = saveGreetingMessage;
 window.saveAwaySettings = saveAwaySettings;
 window.clearAppCache = clearAppCache;
 
-console.log('✅ chat.js fully loaded with all chat features including complete settings implementation');
+// Offline messaging functions
+window.initOfflineDB = initOfflineDB;
+window.syncPendingMessages = syncPendingMessages;
+window.retryMessage = retryMessage;
+window.sendOfflineMessage = sendOfflineMessage;
+
+console.log('✅ chat.js fully loaded with all chat features including offline messaging and complete settings implementation');

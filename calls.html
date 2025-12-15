@@ -47,6 +47,7 @@
             --shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
             --shadow-lg: 0 10px 30px rgba(0, 0, 0, 0.2);
             --video-bg: #1a1a1a;
+            --offline-overlay: rgba(255, 255, 255, 0.95);
         }
         
         body {
@@ -59,6 +60,86 @@
         .app-container {
             display: flex;
             height: 100vh;
+            position: relative;
+        }
+        
+        /* Offline Overlay */
+        .offline-overlay {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background-color: var(--offline-overlay);
+            z-index: 9999;
+            display: none;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            text-align: center;
+            padding: 20px;
+            animation: fadeIn 0.3s ease;
+        }
+        
+        .offline-overlay.active {
+            display: flex;
+        }
+        
+        .offline-icon {
+            font-size: 64px;
+            color: var(--text-secondary);
+            margin-bottom: 20px;
+            opacity: 0.7;
+        }
+        
+        .offline-title {
+            font-size: 24px;
+            font-weight: 600;
+            color: var(--text-primary);
+            margin-bottom: 10px;
+        }
+        
+        .offline-message {
+            font-size: 16px;
+            color: var(--text-secondary);
+            margin-bottom: 30px;
+            max-width: 400px;
+            line-height: 1.5;
+        }
+        
+        .offline-submessage {
+            font-size: 14px;
+            color: var(--text-secondary);
+            opacity: 0.8;
+            max-width: 400px;
+            margin-top: 20px;
+            padding: 15px;
+            background-color: var(--secondary-color);
+            border-radius: 12px;
+            border-left: 4px solid var(--warning-color);
+        }
+        
+        .offline-indicator {
+            position: fixed;
+            top: 20px;
+            right: 20px;
+            background-color: var(--warning-color);
+            color: white;
+            padding: 8px 16px;
+            border-radius: 20px;
+            font-size: 14px;
+            font-weight: 500;
+            z-index: 10000;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            box-shadow: var(--shadow);
+            animation: slideInRight 0.3s ease;
+            display: none;
+        }
+        
+        .offline-indicator.active {
+            display: flex;
         }
         
         /* Sidebar Styles */
@@ -70,6 +151,7 @@
             flex-direction: column;
             height: 100%;
             overflow: hidden;
+            position: relative;
         }
         
         .sidebar-header {
@@ -103,7 +185,13 @@
             backdrop-filter: blur(10px);
         }
         
-        .new-call-btn:hover {
+        .new-call-btn:disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
+            background-color: rgba(255, 255, 255, 0.1);
+        }
+        
+        .new-call-btn:hover:not(:disabled) {
             background-color: rgba(255, 255, 255, 0.3);
             transform: scale(1.05);
         }
@@ -180,9 +268,15 @@
             align-items: center;
             gap: 10px;
             transition: all 0.2s;
+            position: relative;
         }
         
-        .quick-action-btn:hover {
+        .quick-action-btn:disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
+        }
+        
+        .quick-action-btn:hover:not(:disabled) {
             background-color: #e4e6e9;
             transform: translateY(-2px);
         }
@@ -463,7 +557,12 @@
             transition: all 0.2s;
         }
         
-        .call-action-btn:hover {
+        .call-action-btn:disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
+        }
+        
+        .call-action-btn:hover:not(:disabled) {
             background-color: var(--secondary-color);
         }
         
@@ -1330,6 +1429,13 @@
                 height: 100%;
                 z-index: 200;
             }
+            
+            .offline-indicator {
+                top: 10px;
+                right: 10px;
+                font-size: 12px;
+                padding: 6px 12px;
+            }
         }
         
         /* Animations */
@@ -1351,15 +1457,80 @@
         .fade-in {
             animation: fadeIn 0.3s ease;
         }
+        
+        @keyframes slideInRight {
+            from { transform: translateX(100%); opacity: 0; }
+            to { transform: translateX(0); opacity: 1; }
+        }
+        
+        /* Offline-specific styles */
+        .call-button-disabled {
+            position: relative;
+        }
+        
+        .call-button-disabled::after {
+            content: " (Offline)";
+            font-size: 12px;
+            opacity: 0.8;
+        }
+        
+        .call-list-offline {
+            position: relative;
+        }
+        
+        .call-list-offline::before {
+            content: "";
+            position: absolute;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            background-color: rgba(255, 255, 255, 0.8);
+            z-index: 10;
+            display: none;
+        }
+        
+        .offline-message-small {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            background-color: var(--warning-color);
+            color: white;
+            padding: 8px 16px;
+            border-radius: 20px;
+            font-size: 14px;
+            z-index: 11;
+            display: none;
+            white-space: nowrap;
+        }
     </style>
 </head>
 <body>
+    <!-- Offline Overlay -->
+    <div class="offline-overlay" id="offlineOverlay">
+        <div class="offline-icon">
+            <i class="fas fa-wifi-slash"></i>
+        </div>
+        <div class="offline-title">You're Offline</div>
+        <div class="offline-message">Calls require internet connection to work properly.</div>
+        <div class="offline-submessage">
+            <i class="fas fa-info-circle"></i> You can still view your call history, but making or receiving calls requires an active internet connection.
+        </div>
+    </div>
+    
+    <!-- Offline Indicator -->
+    <div class="offline-indicator" id="offlineIndicator">
+        <i class="fas fa-wifi-slash"></i>
+        <span>Offline</span>
+    </div>
+    
     <div class="app-container">
         <!-- Sidebar with call history -->
         <div class="sidebar">
             <div class="sidebar-header">
                 <h2>Calls</h2>
-                <button class="new-call-btn" id="newCallBtn">
+                <button class="new-call-btn" id="newCallBtn" title="Start new call">
                     <i class="fas fa-phone-alt"></i>
                 </button>
             </div>
@@ -1372,19 +1543,19 @@
             
             <div class="call-list">
                 <div class="quick-actions">
-                    <button class="quick-action-btn" id="voiceCallBtn">
+                    <button class="quick-action-btn" id="voiceCallBtn" title="Start voice call">
                         <div class="quick-action-icon">
                             <i class="fas fa-phone"></i>
                         </div>
                         <div class="quick-action-text">Voice Call</div>
                     </button>
-                    <button class="quick-action-btn" id="videoCallBtn">
+                    <button class="quick-action-btn" id="videoCallBtn" title="Start video call">
                         <div class="quick-action-icon">
                             <i class="fas fa-video"></i>
                         </div>
                         <div class="quick-action-text">Video Call</div>
                     </button>
-                    <button class="quick-action-btn" id="groupCallBtn">
+                    <button class="quick-action-btn" id="groupCallBtn" title="Start group call">
                         <div class="quick-action-icon">
                             <i class="fas fa-users"></i>
                         </div>
@@ -1836,6 +2007,10 @@
         let reactionsChannel = null;
         let chatChannel = null;
         
+        // Offline state management
+        let isOnline = navigator.onLine;
+        let offlineCheckInterval = null;
+        
         // User settings with default values
         let userSettings = {
             reactions: true,
@@ -1864,6 +2039,8 @@
         const pipContainer = document.getElementById('pipContainer');
         const settingsPanel = document.getElementById('settingsPanel');
         const settingsToggle = document.getElementById('settingsToggle');
+        const offlineOverlay = document.getElementById('offlineOverlay');
+        const offlineIndicator = document.getElementById('offlineIndicator');
         
         // Call sections
         const allCallsSection = document.getElementById('allCallsSection');
@@ -1879,6 +2056,9 @@
         });
         
         async function initializeApp() {
+            // Initialize offline detection
+            initializeOfflineDetection();
+            
             auth.onAuthStateChanged(async user => {
                 if (user) {
                     currentUser = user;
@@ -1888,9 +2068,13 @@
                     initializeWhiteboard();
                     loadAllCalls();
                     setupPresenceTracking();
-                    setTimeout(() => {
-                        initializePeerJS();
-                    }, 1000);
+                    
+                    // Only initialize PeerJS if online
+                    if (isOnline) {
+                        setTimeout(() => {
+                            initializePeerJS();
+                        }, 1000);
+                    }
                     
                     // Listen for incoming calls from friends.html
                     listenForExternalCalls();
@@ -1901,10 +2085,194 @@
             });
         }
         
+        function initializeOfflineDetection() {
+            // Check initial online status
+            updateOnlineStatus();
+            
+            // Listen for online/offline events
+            window.addEventListener('online', handleOnline);
+            window.addEventListener('offline', handleOffline);
+            
+            // Start periodic connectivity check
+            offlineCheckInterval = setInterval(checkConnectivity, 30000);
+            
+            // Initial UI update
+            updateUIForConnectivity();
+        }
+        
+        function updateOnlineStatus() {
+            isOnline = navigator.onLine;
+            console.log('Network status:', isOnline ? 'Online' : 'Offline');
+        }
+        
+        function handleOnline() {
+            console.log('App is now online');
+            isOnline = true;
+            updateUIForConnectivity();
+            
+            // Try to reinitialize PeerJS
+            if (!peer && currentUser) {
+                setTimeout(() => {
+                    initializePeerJS();
+                }, 1000);
+            }
+            
+            // Show notification
+            showNotification('You are back online', 'success');
+            
+            // Update user presence
+            if (userPresenceRef && currentUser) {
+                userPresenceRef.update({
+                    online: true,
+                    lastOnline: firebase.firestore.FieldValue.serverTimestamp()
+                });
+            }
+        }
+        
+        function handleOffline() {
+            console.log('App is now offline');
+            isOnline = false;
+            updateUIForConnectivity();
+            
+            // Show notification
+            showNotification('You are offline. Calls require internet connection.', 'warning');
+            
+            // End any active calls
+            if (currentCall) {
+                endCall();
+            }
+            
+            // Update user presence
+            if (userPresenceRef && currentUser) {
+                userPresenceRef.update({
+                    online: false,
+                    lastOnline: firebase.firestore.FieldValue.serverTimestamp()
+                });
+            }
+        }
+        
+        function checkConnectivity() {
+            // Simple connectivity check by trying to fetch a small resource
+            fetch('https://www.google.com/favicon.ico', { 
+                mode: 'no-cors',
+                cache: 'no-cache'
+            })
+            .then(() => {
+                if (!isOnline) {
+                    console.log('Connectivity check passed - switching to online');
+                    handleOnline();
+                }
+            })
+            .catch(() => {
+                if (isOnline) {
+                    console.log('Connectivity check failed - switching to offline');
+                    handleOffline();
+                }
+            });
+        }
+        
+        function updateUIForConnectivity() {
+            if (!isOnline) {
+                // Show offline overlay
+                offlineOverlay.classList.add('active');
+                offlineIndicator.classList.add('active');
+                
+                // Disable call buttons
+                const callButtons = [
+                    'newCallBtn',
+                    'voiceCallBtn',
+                    'videoCallBtn',
+                    'groupCallBtn',
+                    'startCallBtn',
+                    'createVoiceLinkBtn',
+                    'createVideoLinkBtn'
+                ];
+                
+                callButtons.forEach(buttonId => {
+                    const button = document.getElementById(buttonId);
+                    if (button) {
+                        button.disabled = true;
+                        button.title = 'Calls require internet connection';
+                    }
+                });
+                
+                // Update button texts to indicate offline
+                const quickActionButtons = document.querySelectorAll('.quick-action-btn');
+                quickActionButtons.forEach(button => {
+                    if (button.disabled) {
+                        const textElement = button.querySelector('.quick-action-text');
+                        if (textElement) {
+                            textElement.innerHTML = textElement.textContent + ' <span style="font-size: 10px; color: var(--warning-color);">(Offline)</span>';
+                        }
+                    }
+                });
+                
+                // Disable call-back buttons in call history
+                const callbackButtons = document.querySelectorAll('.call-action-btn');
+                callbackButtons.forEach(button => {
+                    button.disabled = true;
+                    button.title = 'Calls require internet connection';
+                });
+                
+                // Close new call modal if open
+                if (newCallModal.classList.contains('active')) {
+                    newCallModal.classList.remove('active');
+                    showNotification('Cannot start call while offline', 'error');
+                }
+                
+            } else {
+                // Hide offline overlay
+                offlineOverlay.classList.remove('active');
+                offlineIndicator.classList.remove('active');
+                
+                // Enable call buttons
+                const callButtons = [
+                    'newCallBtn',
+                    'voiceCallBtn',
+                    'videoCallBtn',
+                    'groupCallBtn',
+                    'startCallBtn',
+                    'createVoiceLinkBtn',
+                    'createVideoLinkBtn'
+                ];
+                
+                callButtons.forEach(buttonId => {
+                    const button = document.getElementById(buttonId);
+                    if (button) {
+                        button.disabled = false;
+                        button.title = button.getAttribute('data-original-title') || '';
+                    }
+                });
+                
+                // Restore original button texts
+                const quickActionButtons = document.querySelectorAll('.quick-action-btn');
+                quickActionButtons.forEach(button => {
+                    const textElement = button.querySelector('.quick-action-text');
+                    if (textElement) {
+                        const originalText = textElement.getAttribute('data-original-text') || textElement.textContent.replace(' (Offline)', '');
+                        textElement.textContent = originalText;
+                    }
+                });
+                
+                // Enable call-back buttons in call history
+                const callbackButtons = document.querySelectorAll('.call-action-btn');
+                callbackButtons.forEach(button => {
+                    button.disabled = false;
+                    button.title = 'Call Back';
+                });
+            }
+        }
+        
         function listenForExternalCalls() {
             // Listen for messages from other tabs (like friends.html)
             window.addEventListener('message', function(event) {
                 console.log('Message received:', event.data);
+                
+                // Check if offline
+                if (!isOnline) {
+                    showNotification('Cannot start call while offline', 'error');
+                    return;
+                }
                 
                 // Accept calls initiated from friends.html
                 if (event.data && event.data.type === 'callUser') {
@@ -1938,7 +2306,11 @@
             if (callUserId) {
                 console.log('Call initiated via URL:', callUserId, callType);
                 setTimeout(() => {
-                    startCall(callUserId, callType);
+                    if (isOnline) {
+                        startCall(callUserId, callType);
+                    } else {
+                        showNotification('Cannot start call while offline', 'error');
+                    }
                 }, 2000);
                 
                 // Clean URL
@@ -1947,6 +2319,19 @@
         }
         
         async function initializeUser() {
+            // Only initialize user if online
+            if (!isOnline) {
+                const userData = {
+                    displayName: currentUser.displayName || `User_${currentUser.uid.substring(0, 8)}`
+                };
+                
+                window.userInitials = userData.displayName 
+                    ? userData.displayName.split(' ').map(n => n[0]).join('').toUpperCase().substring(0, 2)
+                    : 'ME';
+                window.userAvatar = currentUser.photoURL || '';
+                return;
+            }
+            
             const userRef = db.collection('users').doc(currentUser.uid);
             const userDoc = await userRef.get();
             
@@ -1978,7 +2363,7 @@
         }
         
         function setupPresenceTracking() {
-            if (!currentUser) return;
+            if (!currentUser || !isOnline) return;
             
             userPresenceRef = db.collection('userPresence').doc(currentUser.uid);
             
@@ -1992,7 +2377,7 @@
             userPresenceRef.set(presenceData, { merge: true });
             
             const updatePresenceWithPeerId = () => {
-                if (peer && peer.id) {
+                if (peer && peer.id && isOnline) {
                     userPresenceRef.update({
                         peerId: peer.id,
                         lastOnline: firebase.firestore.FieldValue.serverTimestamp()
@@ -2005,30 +2390,34 @@
             }
             
             document.addEventListener('visibilitychange', () => {
-                if (document.hidden) {
-                    userPresenceRef.update({
-                        online: false,
-                        lastOnline: firebase.firestore.FieldValue.serverTimestamp()
-                    });
-                } else {
-                    userPresenceRef.update({
-                        online: true,
-                        lastOnline: firebase.firestore.FieldValue.serverTimestamp()
-                    });
+                if (userPresenceRef && isOnline) {
+                    if (document.hidden) {
+                        userPresenceRef.update({
+                            online: false,
+                            lastOnline: firebase.firestore.FieldValue.serverTimestamp()
+                        });
+                    } else {
+                        userPresenceRef.update({
+                            online: true,
+                            lastOnline: firebase.firestore.FieldValue.serverTimestamp()
+                        });
+                    }
                 }
             });
             
             window.addEventListener('beforeunload', () => {
-                userPresenceRef.update({
-                    online: false,
-                    lastOnline: firebase.firestore.FieldValue.serverTimestamp()
-                });
+                if (userPresenceRef && isOnline) {
+                    userPresenceRef.update({
+                        online: false,
+                        lastOnline: firebase.firestore.FieldValue.serverTimestamp()
+                    });
+                }
             });
         }
         
         function initializePeerJS() {
-            if (!currentUser) {
-                console.error('Cannot initialize PeerJS: No user logged in');
+            if (!currentUser || !isOnline) {
+                console.error('Cannot initialize PeerJS: No user logged in or offline');
                 return;
             }
             
@@ -2056,7 +2445,7 @@
             peer.on('open', (id) => {
                 console.log('✅ PeerJS connected successfully with ID:', id);
                 
-                if (userPresenceRef) {
+                if (userPresenceRef && isOnline) {
                     userPresenceRef.update({
                         peerId: id,
                         lastOnline: firebase.firestore.FieldValue.serverTimestamp()
@@ -2160,7 +2549,7 @@
             peer.on('disconnected', () => {
                 console.log('PeerJS disconnected, attempting reconnect...');
                 setTimeout(() => {
-                    if (peer.disconnected) {
+                    if (peer.disconnected && isOnline) {
                         peer.reconnect();
                     }
                 }, 1000);
@@ -2172,6 +2561,11 @@
         }
         
         async function checkUserOnlineStatus(userId) {
+            // If we're offline, all users appear offline
+            if (!isOnline) {
+                return { online: false, lastOnline: 999, peerId: null };
+            }
+            
             try {
                 const presenceDoc = await db.collection('userPresence').doc(userId).get();
                 if (presenceDoc.exists) {
@@ -2195,6 +2589,12 @@
         
         async function startCall(userId, type = 'video') {
             console.log('Starting call to:', userId, 'type:', type);
+            
+            // Check if offline
+            if (!isOnline) {
+                showNotification('Cannot start call while offline', 'error');
+                return;
+            }
             
             if (!peer || !peer.id || peer.disconnected) {
                 showNotification('Not connected to call server. Please wait...', 'error');
@@ -2510,6 +2910,12 @@
         async function startGroupCall(userIds) {
             console.log('Starting group call with:', userIds);
             
+            // Check if offline
+            if (!isOnline) {
+                showNotification('Cannot start call while offline', 'error');
+                return;
+            }
+            
             if (!peer || !peer.id || peer.disconnected) {
                 showNotification('Not connected to call server', 'error');
                 return;
@@ -2757,7 +3163,7 @@
                 callInterval = null;
             }
             
-            if (currentCall && callStartTime) {
+            if (currentCall && callStartTime && isOnline) {
                 const endTime = new Date();
                 const duration = Math.floor((endTime - callStartTime) / 1000);
                 
@@ -2884,7 +3290,7 @@
                     console.error('Error closing incoming call:', e);
                 }
                 
-                if (window.callerData) {
+                if (window.callerData && isOnline) {
                     await db.collection('calls').add({
                         participants: [currentUser.uid, window.callerData.id],
                         initiator: window.callerData.id,
@@ -2937,7 +3343,7 @@
         }
         
         function saveUserSettings() {
-            if (!currentUser) return;
+            if (!currentUser || !isOnline) return;
             
             try {
                 db.collection('userSettings').doc(currentUser.uid).set(userSettings, { merge: true })
@@ -2990,6 +3396,32 @@
         async function loadAllCalls() {
             try {
                 allCallsList.innerHTML = '<div class="loading-placeholder" style="text-align: center; padding: 40px 20px; color: var(--text-secondary);"><i class="fas fa-spinner fa-spin" style="font-size: 24px; margin-bottom: 15px;"></i><p>Loading call history...</p></div>';
+                
+                // If offline, load from localStorage or show empty state
+                if (!isOnline) {
+                    allCallsList.innerHTML = `
+                        <div class="empty-state">
+                            <i class="fas fa-wifi-slash"></i>
+                            <p>Offline Mode</p>
+                            <p class="subtext">Call history unavailable while offline</p>
+                        </div>
+                    `;
+                    missedCallsList.innerHTML = `
+                        <div class="empty-state">
+                            <i class="fas fa-wifi-slash"></i>
+                            <p>Offline Mode</p>
+                            <p class="subtext">Missed calls unavailable while offline</p>
+                        </div>
+                    `;
+                    groupCallsList.innerHTML = `
+                        <div class="empty-state">
+                            <i class="fas fa-wifi-slash"></i>
+                            <p>Offline Mode</p>
+                            <p class="subtext">Group calls unavailable while offline</p>
+                        </div>
+                    `;
+                    return;
+                }
                 
                 const callsSnapshot = await db.collection('calls')
                     .where('participants', 'array-contains', currentUser.uid)
@@ -3167,7 +3599,7 @@
                         ${durationText ? `<span>• ${durationText}</span>` : ''}
                     </div>
                 </div>
-                <button class="call-action-btn" title="Call Back">
+                <button class="call-action-btn" title="Call Back" ${!isOnline ? 'disabled' : ''}>
                     <i class="fas fa-phone"></i>
                 </button>
             `;
@@ -3175,6 +3607,11 @@
             const callbackBtn = callItem.querySelector('.call-action-btn');
             callbackBtn.addEventListener('click', (e) => {
                 e.stopPropagation();
+                if (!isOnline) {
+                    showNotification('Cannot start call while offline', 'error');
+                    return;
+                }
+                
                 if (isGroupCall) {
                     startGroupCall(otherParticipantIds);
                 } else if (otherParticipantIds.length === 1) {
@@ -3437,6 +3874,14 @@
             const contactsList = document.getElementById('contactsList');
             const groupContactsList = document.getElementById('groupContactsList');
             
+            // If offline, show offline message
+            if (!isOnline) {
+                const offlineMessage = '<div style="text-align: center; padding: 40px 20px; color: var(--text-secondary);"><i class="fas fa-wifi-slash" style="font-size: 48px; margin-bottom: 15px; opacity: 0.5;"></i><p>Contacts unavailable while offline</p><p class="subtext">Calls require internet connection</p></div>';
+                contactsList.innerHTML = offlineMessage;
+                groupContactsList.innerHTML = offlineMessage;
+                return;
+            }
+            
             contactsList.innerHTML = '<div style="text-align: center; padding: 20px; color: var(--text-secondary);">Loading contacts...</div>';
             groupContactsList.innerHTML = '<div style="text-align: center; padding: 20px; color: var(--text-secondary);">Loading contacts...</div>';
             
@@ -3487,7 +3932,7 @@
                 `${Math.floor(userData.lastOnline / 60)}h ago`;
             
             contactItem.innerHTML = `
-                <input type="checkbox" class="contact-checkbox" id="contact_${userData.uid}">
+                <input type="checkbox" class="contact-checkbox" id="contact_${userData.uid}" ${!isOnline ? 'disabled' : ''}>
                 <div class="call-avatar" ${userData.photoURL ? `style="background-image: url('${userData.photoURL}')"` : ''}>
                     ${userData.photoURL ? '' : `<span>${initials}</span>`}
                     <div class="call-status-icon ${userData.online ? 'incoming' : 'missed'}" style="width: 12px; height: 12px;">
@@ -3508,6 +3953,12 @@
             
             const checkbox = contactItem.querySelector('.contact-checkbox');
             checkbox.addEventListener('change', function() {
+                if (!isOnline) {
+                    showNotification('Cannot select contacts while offline', 'error');
+                    this.checked = false;
+                    return;
+                }
+                
                 if (this.checked) {
                     selectedContacts.push(userData.uid);
                     contactItem.classList.add('selected');
@@ -3579,6 +4030,33 @@
         }
         
         function setupEventListeners() {
+            // Store original button texts for restoration when online
+            const quickActionButtons = document.querySelectorAll('.quick-action-btn');
+            quickActionButtons.forEach(button => {
+                const textElement = button.querySelector('.quick-action-text');
+                if (textElement) {
+                    textElement.setAttribute('data-original-text', textElement.textContent);
+                }
+            });
+            
+            // Store original button titles
+            const callButtons = [
+                'newCallBtn',
+                'voiceCallBtn',
+                'videoCallBtn',
+                'groupCallBtn',
+                'startCallBtn',
+                'createVoiceLinkBtn',
+                'createVideoLinkBtn'
+            ];
+            
+            callButtons.forEach(buttonId => {
+                const button = document.getElementById(buttonId);
+                if (button && button.title) {
+                    button.setAttribute('data-original-title', button.title);
+                }
+            });
+            
             // Settings toggle
             settingsToggle.addEventListener('click', function() {
                 if (!settingsPanel) return;
@@ -3646,6 +4124,11 @@
             
             // New call button
             document.getElementById('newCallBtn').addEventListener('click', () => {
+                if (!isOnline) {
+                    showNotification('Cannot start call while offline', 'error');
+                    return;
+                }
+                
                 newCallModal.classList.add('active');
                 loadContacts();
                 selectedContacts = [];
@@ -3653,16 +4136,31 @@
             
             // Quick action buttons
             document.getElementById('voiceCallBtn').addEventListener('click', () => {
+                if (!isOnline) {
+                    showNotification('Cannot start call while offline', 'error');
+                    return;
+                }
+                
                 newCallModal.classList.add('active');
                 document.querySelector('.new-call-tab[data-tab="contacts"]').click();
             });
             
             document.getElementById('videoCallBtn').addEventListener('click', () => {
+                if (!isOnline) {
+                    showNotification('Cannot start call while offline', 'error');
+                    return;
+                }
+                
                 newCallModal.classList.add('active');
                 document.querySelector('.new-call-tab[data-tab="contacts"]').click();
             });
             
             document.getElementById('groupCallBtn').addEventListener('click', () => {
+                if (!isOnline) {
+                    showNotification('Cannot start call while offline', 'error');
+                    return;
+                }
+                
                 newCallModal.classList.add('active');
                 document.querySelector('.new-call-tab[data-tab="group"]').click();
             });
@@ -3701,6 +4199,11 @@
             
             // Start call button
             document.getElementById('startCallBtn').addEventListener('click', async () => {
+                if (!isOnline) {
+                    showNotification('Cannot start call while offline', 'error');
+                    return;
+                }
+                
                 const activeTab = document.querySelector('.new-call-tab.active');
                 if (!activeTab) return;
                 
@@ -3889,6 +4392,11 @@
             
             // Add participants button
             document.getElementById('addParticipantsBtn').addEventListener('click', () => {
+                if (!isOnline) {
+                    showNotification('Cannot add participants while offline', 'error');
+                    return;
+                }
+                
                 newCallModal.classList.add('active');
                 document.querySelector('.new-call-tab[data-tab="contacts"]').click();
             });
@@ -4081,11 +4589,16 @@
                     endCall();
                 }
                 
-                if (userPresenceRef) {
+                if (userPresenceRef && isOnline) {
                     userPresenceRef.update({
                         online: false,
                         lastOnline: firebase.firestore.FieldValue.serverTimestamp()
                     });
+                }
+                
+                // Clear offline check interval
+                if (offlineCheckInterval) {
+                    clearInterval(offlineCheckInterval);
                 }
             });
             
@@ -4093,7 +4606,7 @@
         }
         
         function setupCallInvitationListener() {
-            if (!currentUser) return;
+            if (!currentUser || !isOnline) return;
             
             db.collection('callInvitations')
                 .where('to', '==', currentUser.uid)
@@ -4121,7 +4634,7 @@
         }
         
         setInterval(() => {
-            if (userPresenceRef && currentUser) {
+            if (userPresenceRef && currentUser && isOnline) {
                 userPresenceRef.update({
                     lastOnline: firebase.firestore.FieldValue.serverTimestamp()
                 });

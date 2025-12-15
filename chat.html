@@ -232,6 +232,28 @@
                 z-index: 1000 !important;
                 width: 64px;
             }
+            
+            /* Mobile header adjustments */
+            .kynecta-header.p-4 {
+                padding: 0.75rem !important;
+            }
+            
+            .mobile-header-buttons {
+                display: flex !important;
+                gap: 0.5rem;
+            }
+            
+            .desktop-header-buttons {
+                display: none !important;
+            }
+            
+            .sidebar-profile {
+                display: none !important;
+            }
+            
+            .mobile-profile-button {
+                display: block !important;
+            }
         }
         
         /* Tablet optimizations */
@@ -244,6 +266,24 @@
             .fixed.left-0 {
                 z-index: 1000 !important;
             }
+            
+            /* Tablet sidebar adjustments */
+            .nav-icon {
+                padding: 0.5rem !important;
+                font-size: 1.25rem !important;
+            }
+            
+            .sidebar-profile {
+                display: none !important;
+            }
+            
+            .mobile-profile-button {
+                display: none !important;
+            }
+            
+            .desktop-header-buttons {
+                display: flex !important;
+            }
         }
         
         /* Desktop optimizations */
@@ -255,6 +295,24 @@
             
             .fixed.left-0 {
                 z-index: 1000 !important;
+            }
+            
+            /* Desktop sidebar adjustments */
+            .nav-icon {
+                padding: 0.5rem !important;
+                font-size: 1.25rem !important;
+            }
+            
+            .sidebar-profile {
+                display: none !important;
+            }
+            
+            .mobile-profile-button {
+                display: none !important;
+            }
+            
+            .desktop-header-buttons {
+                display: flex !important;
             }
         }
         
@@ -497,9 +555,156 @@
             border-radius: 4px;
             transition: width 0.5s ease;
         }
+        
+        /* Message status indicators */
+        .message-status {
+            display: inline-flex;
+            align-items: center;
+            margin-left: 4px;
+            font-size: 12px;
+            opacity: 0.8;
+        }
+        
+        .message-status.pending {
+            color: #9ca3af;
+        }
+        
+        .message-status.sent {
+            color: #60a5fa;
+        }
+        
+        .message-status.delivered {
+            color: #34d399;
+        }
+        
+        .message-status.read {
+            color: #10b981;
+        }
+        
+        /* Offline indicator */
+        .offline-indicator {
+            position: fixed;
+            top: 0;
+            left: 64px;
+            right: 0;
+            background-color: #ef4444;
+            color: white;
+            text-align: center;
+            padding: 8px;
+            font-size: 14px;
+            font-weight: 500;
+            z-index: 1001;
+            display: none;
+        }
+        
+        .offline-indicator.show {
+            display: block;
+            animation: slideDown 0.3s ease-out;
+        }
+        
+        @keyframes slideDown {
+            from {
+                transform: translateY(-100%);
+                opacity: 0;
+            }
+            to {
+                transform: translateY(0);
+                opacity: 1;
+            }
+        }
+        
+        /* Mobile profile button */
+        .mobile-profile-button {
+            display: none;
+        }
+        
+        /* Chat filter tabs */
+        .chat-filter-tabs {
+            display: flex;
+            background-color: #f9fafb;
+            border-bottom: 1px solid #e5e7eb;
+            padding: 0.5rem;
+        }
+        
+        .chat-filter-tab {
+            flex: 1;
+            text-align: center;
+            padding: 0.75rem;
+            font-size: 0.875rem;
+            font-weight: 500;
+            color: #6b7280;
+            cursor: pointer;
+            border-radius: 0.5rem;
+            transition: all 0.2s ease;
+            margin: 0 0.125rem;
+        }
+        
+        .chat-filter-tab:hover {
+            background-color: #f3f4f6;
+            color: #4b5563;
+        }
+        
+        .chat-filter-tab.active {
+            background-color: #4f46e5;
+            color: white;
+        }
+        
+        .chat-filter-tab.active:hover {
+            background-color: #4338ca;
+        }
+        
+        /* Unread chat indicator */
+        .unread-indicator {
+            position: absolute;
+            top: 0.5rem;
+            right: 0.5rem;
+            width: 8px;
+            height: 8px;
+            background-color: #ef4444;
+            border-radius: 50%;
+            animation: pulse 1.5s infinite;
+        }
+        
+        .unread-count {
+            position: absolute;
+            top: -5px;
+            right: -5px;
+            background-color: #ef4444;
+            color: white;
+            font-size: 0.75rem;
+            min-width: 18px;
+            height: 18px;
+            border-radius: 9px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            padding: 0 4px;
+            font-weight: 600;
+        }
+        
+        /* Chat filter tab badge */
+        .filter-tab-badge {
+            background-color: #ef4444;
+            color: white;
+            font-size: 0.75rem;
+            min-width: 20px;
+            height: 20px;
+            border-radius: 10px;
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            margin-left: 4px;
+            padding: 0 6px;
+            font-weight: 600;
+        }
     </style>
 </head>
 <body class="h-full overflow-hidden bg-gray-50" data-theme="light">
+    <!-- OFFLINE INDICATOR - ADDED -->
+    <div id="offlineIndicator" class="offline-indicator">
+        <i class="fas fa-wifi-slash mr-2"></i>You are currently offline. Messages will be sent when connection is restored.
+    </div>
+
     <div id="toastContainer" class="fixed top-4 right-4 z-50 space-y-2"></div>
 
     <div id="loadingScreen" class="fixed inset-0 bg-white z-50 flex items-center justify-center">
@@ -514,9 +719,7 @@
 
     <!-- Permanent Sidebar - Always Visible -->
     <div id="permanentSidebar" class="fixed left-0 top-0 bottom-0 w-16 bg-gray-900 z-40 flex flex-col items-center py-6 space-y-8">
-        <div class="w-12 h-12 bg-gradient-to-r from-purple-500 to-green-500 rounded-2xl flex items-center justify-center">
-            <span class="text-white text-xl font-bold">K</span>
-        </div>
+        <!-- Profile section removed from sidebar -->
         
         <div class="flex-1 flex flex-col items-center space-y-8">
             <button class="nav-icon text-white text-2xl p-3 rounded-2xl bg-purple-700" data-page="chats" title="Chats">
@@ -577,19 +780,51 @@
                 <div id="chatListContainer" class="chat-list-container w-full md:w-1/3 lg:w-1/4 bg-white flex flex-col border-r border-gray-200">
                     <div class="kynecta-header p-4 flex justify-between items-center">
                         <div class="flex items-center">
-                            <img id="userAvatar" class="w-12 h-12 rounded-2xl bg-white/20 flex items-center justify-center text-white font-semibold mr-3 object-cover border-2 border-white/30" src="" alt="Profile">
+                            <!-- Profile icon button for mobile -->
+                            <button id="mobileProfileBtn" class="mobile-profile-button w-12 h-12 rounded-2xl bg-white/20 flex items-center justify-center text-white font-semibold mr-3 object-cover border-2 border-white/30 cursor-pointer" onclick="openSettingsModal()" title="Profile Settings">
+                                <i class="fas fa-user"></i>
+                            </button>
                             <div>
                                 <span id="userName" class="font-semibold text-white block"></span>
                                 <span id="userMood" class="text-white/80 text-sm"></span>
                             </div>
                         </div>
-                        <div class="flex space-x-3 text-white">
+                        <div class="flex space-x-3 text-white desktop-header-buttons">
                             <button id="startNewChatBtn" class="text-xl cursor-pointer hover:scale-110 transition-transform" title="Start New Chat">
                                 <i class="fas fa-plus"></i>
                             </button>
                             <button id="themeToggle" class="text-xl cursor-pointer hover:scale-110 transition-transform">
                                 <i class="fas fa-moon" id="themeIcon"></i>
                             </button>
+                        </div>
+                        <!-- Mobile header buttons -->
+                        <div class="mobile-header-buttons hidden">
+                            <button id="mobileNewChatBtn" class="text-xl cursor-pointer hover:scale-110 transition-transform text-white" title="Start New Chat">
+                                <i class="fas fa-plus"></i>
+                            </button>
+                            <button id="mobileThemeToggle" class="text-xl cursor-pointer hover:scale-110 transition-transform text-white">
+                                <i class="fas fa-moon" id="mobileThemeIcon"></i>
+                            </button>
+                        </div>
+                    </div>
+
+                    <!-- Chat Filter Tabs - ADDED -->
+                    <div class="chat-filter-tabs">
+                        <div class="chat-filter-tab active" data-filter="all">
+                            All
+                            <span id="allCount" class="filter-tab-badge hidden">0</span>
+                        </div>
+                        <div class="chat-filter-tab" data-filter="sent">
+                            Sent
+                            <span id="sentCount" class="filter-tab-badge hidden">0</span>
+                        </div>
+                        <div class="chat-filter-tab" data-filter="received">
+                            Received
+                            <span id="receivedCount" class="filter-tab-badge hidden">0</span>
+                        </div>
+                        <div class="chat-filter-tab" data-filter="unread">
+                            Unread
+                            <span id="unreadCount" class="filter-tab-badge hidden">0</span>
                         </div>
                     </div>
 
@@ -880,15 +1115,24 @@
                 <div class="chat-list-container w-full md:w-1/3 lg:w-1/4 bg-white flex flex-col border-r border-gray-200">
                     <div class="kynecta-header p-4 flex justify-between items-center">
                         <div class="flex items-center">
-                            <img id="userAvatarTools" class="w-12 h-12 rounded-2xl bg-white/20 flex items-center justify-center text-white font-semibold mr-3 object-cover border-2 border-white/30" src="" alt="Profile">
+                            <!-- Profile icon button for mobile -->
+                            <button id="mobileProfileBtnTools" class="mobile-profile-button w-12 h-12 rounded-2xl bg-white/20 flex items-center justify-center text-white font-semibold mr-3 object-cover border-2 border-white/30 cursor-pointer" onclick="openSettingsModal()" title="Profile Settings">
+                                <i class="fas fa-user"></i>
+                            </button>
                             <div>
                                 <span id="userNameTools" class="font-semibold text-white block"></span>
                                 <span id="userMoodTools" class="text-white/80 text-sm"></span>
                             </div>
                         </div>
-                        <div class="flex space-x-3 text-white">
+                        <div class="flex space-x-3 text-white desktop-header-buttons">
                             <button id="themeToggleTools" class="text-xl cursor-pointer hover:scale-110 transition-transform">
                                 <i class="fas fa-moon" id="themeIconTools"></i>
+                            </button>
+                        </div>
+                        <!-- Mobile header buttons -->
+                        <div class="mobile-header-buttons hidden">
+                            <button id="mobileThemeToggleTools" class="text-xl cursor-pointer hover:scale-110 transition-transform text-white">
+                                <i class="fas fa-moon" id="mobileThemeIconTools"></i>
                             </button>
                         </div>
                     </div>
@@ -974,15 +1218,24 @@
                 <div class="chat-list-container w-full md:w-1/3 lg:w-1/4 bg-white flex flex-col border-r border-gray-200">
                     <div class="kynecta-header p-4 flex justify-between items-center">
                         <div class="flex items-center">
-                            <img id="userAvatarSettings" class="w-12 h-12 rounded-2xl bg-white/20 flex items-center justify-center text-white font-semibold mr-3 object-cover border-2 border-white/30" src="" alt="Profile">
+                            <!-- Profile icon button for mobile -->
+                            <button id="mobileProfileBtnSettings" class="mobile-profile-button w-12 h-12 rounded-2xl bg-white/20 flex items-center justify-center text-white font-semibold mr-3 object-cover border-2 border-white/30 cursor-pointer" onclick="openSettingsModal()" title="Profile Settings">
+                                <i class="fas fa-user"></i>
+                            </button>
                             <div>
                                 <span id="userNameSettings" class="font-semibold text-white block"></span>
                                 <span id="userMoodSettings" class="text-white/80 text-sm"></span>
                             </div>
                         </div>
-                        <div class="flex space-x-3 text-white">
+                        <div class="flex space-x-3 text-white desktop-header-buttons">
                             <button id="themeToggleSettings" class="text-xl cursor-pointer hover:scale-110 transition-transform">
                                 <i class="fas fa-moon" id="themeIconSettings"></i>
+                            </button>
+                        </div>
+                        <!-- Mobile header buttons -->
+                        <div class="mobile-header-buttons hidden">
+                            <button id="mobileThemeToggleSettings" class="text-xl cursor-pointer hover:scale-110 transition-transform text-white">
+                                <i class="fas fa-moon" id="mobileThemeIconSettings"></i>
                             </button>
                         </div>
                     </div>
@@ -1360,7 +1613,7 @@
                                         <i class="fas fa-universal-access text-orange-500 mr-3 text-xl"></i>
                                         <div>
                                             <p class="font-medium">Accessibility</p>
-                                                    <p class="text-sm text-gray-500">Accessibility and display settings</p>
+                                            <p class="text-sm text-gray-500">Accessibility and display settings</p>
                                         </div>
                                     </div>
                                     <i class="fas fa-chevron-right text-gray-400"></i>
@@ -2768,6 +3021,21 @@
     </div>
    
    <script>
+        // Firebase configuration
+        const firebaseConfig = {
+            apiKey: "YOUR_API_KEY",
+            authDomain: "YOUR_AUTH_DOMAIN",
+            projectId: "YOUR_PROJECT_ID",
+            storageBucket: "YOUR_STORAGE_BUCKET",
+            messagingSenderId: "YOUR_MESSAGING_SENDER_ID",
+            appId: "YOUR_APP_ID"
+        };
+        
+        // Initialize Firebase if not already initialized
+        if (!firebase.apps.length) {
+            firebase.initializeApp(firebaseConfig);
+        }
+        
         // Disable right-click and inspect
         document.addEventListener('contextmenu', function(e) {
             e.preventDefault();
@@ -2796,6 +3064,70 @@
         let selectedFriendForChat = null;
         let friendsList = [];
         let cachedUserData = null;
+        let isOnline = navigator.onLine;
+        let pendingMessages = [];
+        let currentFilter = 'all'; // Default filter
+        let allChats = []; // Store all chats for filtering
+        let unreadChatsCount = 0;
+        let sentChatsCount = 0;
+        let receivedChatsCount = 0;
+        
+        // Check online status
+        function updateOnlineStatus() {
+            isOnline = navigator.onLine;
+            const offlineIndicator = document.getElementById('offlineIndicator');
+            
+            if (offlineIndicator) {
+                if (!isOnline) {
+                    offlineIndicator.classList.add('show');
+                } else {
+                    offlineIndicator.classList.remove('show');
+                    // Try to send pending messages when back online
+                    sendPendingMessages();
+                }
+            }
+        }
+        
+        // Send pending messages when back online
+        function sendPendingMessages() {
+            if (pendingMessages.length > 0 && isOnline) {
+                pendingMessages.forEach(msg => {
+                    sendMessageToFirebase(msg);
+                });
+                pendingMessages = [];
+            }
+        }
+        
+        // Add message status indicator
+        function addMessageStatus(messageDiv, status) {
+            const statusSpan = document.createElement('span');
+            statusSpan.className = `message-status ${status}`;
+            
+            switch(status) {
+                case 'pending':
+                    statusSpan.innerHTML = '🕒';
+                    statusSpan.title = 'Pending';
+                    break;
+                case 'sent':
+                    statusSpan.innerHTML = '✓';
+                    statusSpan.title = 'Sent';
+                    break;
+                case 'delivered':
+                    statusSpan.innerHTML = '✓✓';
+                    statusSpan.title = 'Delivered';
+                    break;
+                case 'read':
+                    statusSpan.innerHTML = '✓✓';
+                    statusSpan.style.color = '#10b981';
+                    statusSpan.title = 'Read';
+                    break;
+            }
+            
+            const timeDiv = messageDiv.querySelector('.text-xs.opacity-70');
+            if (timeDiv) {
+                timeDiv.appendChild(statusSpan);
+            }
+        }
         
         // Load user data from cache immediately
         function loadCachedUserData() {
@@ -2813,39 +3145,23 @@
         // Display user data
         function displayUserData(userData) {
             // Update main chat area
-            const userAvatar = document.getElementById('userAvatar');
             const userName = document.getElementById('userName');
             const userMood = document.getElementById('userMood');
-            
-            if (userAvatar && userData.profilePicture) {
-                userAvatar.src = userData.profilePicture;
-                userAvatar.onerror = function() {
-                    this.src = 'https://ui-avatars.com/api/?name=' + encodeURIComponent(userData.displayName || 'User') + '&background=667eea&color=fff';
-                };
-            }
             
             if (userName) userName.textContent = userData.displayName || 'User';
             if (userMood) userMood.textContent = userData.mood || 'No mood set';
             
             // Update tools area
-            const userAvatarTools = document.getElementById('userAvatarTools');
             const userNameTools = document.getElementById('userNameTools');
             const userMoodTools = document.getElementById('userMoodTools');
             
-            if (userAvatarTools && userData.profilePicture) {
-                userAvatarTools.src = userData.profilePicture;
-            }
             if (userNameTools) userNameTools.textContent = userData.displayName || 'User';
             if (userMoodTools) userMoodTools.textContent = userData.mood || 'No mood set';
             
             // Update settings area
-            const userAvatarSettings = document.getElementById('userAvatarSettings');
             const userNameSettings = document.getElementById('userNameSettings');
             const userMoodSettings = document.getElementById('userMoodSettings');
             
-            if (userAvatarSettings && userData.profilePicture) {
-                userAvatarSettings.src = userData.profilePicture;
-            }
             if (userNameSettings) userNameSettings.textContent = userData.displayName || 'User';
             if (userMoodSettings) userMoodSettings.textContent = userData.mood || 'No mood set';
             
@@ -2891,7 +3207,10 @@
                 
                 // Then load from Firebase
                 const currentUser = firebase.auth().currentUser;
-                if (!currentUser) return;
+                if (!currentUser) {
+                    console.log('No user logged in, skipping friend load');
+                    return;
+                }
                 
                 const db = firebase.firestore();
                 const friendsRef = db.collection('users').doc(currentUser.uid).collection('friends');
@@ -2912,6 +3231,10 @@
                 
             } catch (error) {
                 console.error('Error loading friends:', error);
+                // Show cached friends if available
+                if (friendsList.length > 0) {
+                    displayFriendsList();
+                }
             }
         }
         
@@ -3048,6 +3371,9 @@
             
             // Load messages for this chat
             loadChatMessages(friend.id);
+            
+            // Mark messages as read
+            markChatAsRead(friend.id);
         }
         
         // Load chat messages
@@ -3066,7 +3392,7 @@
                 try {
                     const messages = JSON.parse(cachedMessages);
                     if (messages.length > 0) {
-                        displayMessages(messages);
+                        displayMessages(messages, friendId);
                         noMessagesMessage.classList.add('hidden');
                         return;
                     }
@@ -3098,14 +3424,16 @@
                 const messages = [];
                 
                 snapshot.forEach(doc => {
-                    messages.unshift(doc.data());
+                    const messageData = doc.data();
+                    messageData.id = doc.id;
+                    messages.unshift(messageData);
                 });
                 
                 // Cache messages
                 localStorage.setItem(`kynecta_chat_${friendId}`, JSON.stringify(messages));
                 
                 // Display messages
-                displayMessages(messages);
+                displayMessages(messages, friendId);
                 
                 // Hide no messages message if there are messages
                 const noMessagesMessage = document.getElementById('noMessagesMessage');
@@ -3118,20 +3446,39 @@
             }
         }
         
-        // Display messages
-        function displayMessages(messages) {
+        // Display messages with status indicators
+        function displayMessages(messages, friendId) {
             const messagesList = document.getElementById('messagesList');
             if (!messagesList) return;
             
             messagesList.innerHTML = '';
+            const currentUser = firebase.auth().currentUser;
             
             messages.forEach(message => {
                 const messageDiv = document.createElement('div');
-                messageDiv.className = `message-bubble ${message.senderId === firebase.auth().currentUser?.uid ? 'sent' : 'received'}`;
+                const isSent = message.senderId === currentUser?.uid;
+                messageDiv.className = `message-bubble ${isSent ? 'sent' : 'received'} fade-in`;
+                
+                let statusHtml = '';
+                if (isSent) {
+                    // ADDED: Message status indicator
+                    const status = message.status || 'sent';
+                    statusHtml = `<span class="message-status ${status}">
+                        ${status === 'pending' ? '🕒' : 
+                          status === 'sent' ? '✓' : 
+                          status === 'delivered' ? '✓✓' : 
+                          status === 'read' ? '✓✓' : '✓'}
+                    </span>`;
+                }
+                
                 messageDiv.innerHTML = `
                     <div>${message.text || ''}</div>
-                    <div class="text-xs opacity-70 mt-1 text-right">${formatTime(message.timestamp)}</div>
+                    <div class="text-xs opacity-70 mt-1 text-right">
+                        ${formatTime(message.timestamp)}
+                        ${statusHtml}
+                    </div>
                 `;
+                
                 messagesList.appendChild(messageDiv);
             });
             
@@ -3142,6 +3489,54 @@
                     messagesContainer.scrollTop = messagesContainer.scrollHeight;
                 }
             }, 100);
+        }
+        
+        // Send message function
+        async function sendMessageToFirebase(messageData) {
+            try {
+                const currentUser = firebase.auth().currentUser;
+                if (!currentUser) return;
+                
+                const db = firebase.firestore();
+                const chatId = [currentUser.uid, messageData.receiverId].sort().join('_');
+                
+                // Add message with pending status
+                const messageRef = await db.collection('chats').doc(chatId).collection('messages').add({
+                    ...messageData,
+                    status: 'pending',
+                    timestamp: firebase.firestore.FieldValue.serverTimestamp()
+                });
+                
+                // Update message status to sent
+                await messageRef.update({
+                    status: 'sent'
+                });
+                
+                // Update UI
+                updateMessageStatus(messageData.receiverId, messageRef.id, 'sent');
+                
+            } catch (error) {
+                console.error('Error sending message:', error);
+                // Store message for retry when online
+                pendingMessages.push(messageData);
+            }
+        }
+        
+        // Update message status in UI
+        function updateMessageStatus(friendId, messageId, status) {
+            const messages = JSON.parse(localStorage.getItem(`kynecta_chat_${friendId}`) || '[]');
+            const messageIndex = messages.findIndex(m => m.id === messageId);
+            
+            if (messageIndex !== -1) {
+                messages[messageIndex].status = status;
+                localStorage.setItem(`kynecta_chat_${friendId}`, JSON.stringify(messages));
+                
+                // Update UI if this chat is currently open
+                const chatTitle = document.getElementById('chatTitle');
+                if (chatTitle && chatTitle.dataset.friendId === friendId) {
+                    loadChatMessages(friendId);
+                }
+            }
         }
         
         // Format time
@@ -3289,6 +3684,247 @@
             if (activeIcon) {
                 activeIcon.classList.remove('text-gray-400', 'hover:text-white', 'hover:bg-gray-800');
                 activeIcon.classList.add('text-white', 'bg-purple-700');
+            }
+        }
+        
+        // Chat Filter Functions - ADDED
+        function setupChatFilters() {
+            const filterTabs = document.querySelectorAll('.chat-filter-tab');
+            filterTabs.forEach(tab => {
+                tab.addEventListener('click', function() {
+                    // Remove active class from all tabs
+                    filterTabs.forEach(t => t.classList.remove('active'));
+                    
+                    // Add active class to clicked tab
+                    this.classList.add('active');
+                    
+                    // Set current filter
+                    currentFilter = this.dataset.filter;
+                    
+                    // Apply filter
+                    applyChatFilter();
+                });
+            });
+        }
+        
+        function applyChatFilter() {
+            const chatList = document.getElementById('chatList');
+            if (!chatList) return;
+            
+            // Get all chat items
+            const chatItems = Array.from(chatList.querySelectorAll('.chat-item'));
+            
+            // Filter based on current filter
+            chatItems.forEach(item => {
+                const isSent = item.classList.contains('sent-chat');
+                const isReceived = item.classList.contains('received-chat');
+                const isUnread = item.classList.contains('unread-chat');
+                
+                let shouldShow = false;
+                
+                switch(currentFilter) {
+                    case 'all':
+                        shouldShow = true;
+                        break;
+                    case 'sent':
+                        shouldShow = isSent;
+                        break;
+                    case 'received':
+                        shouldShow = isReceived;
+                        break;
+                    case 'unread':
+                        shouldShow = isUnread;
+                        break;
+                }
+                
+                if (shouldShow) {
+                    item.classList.remove('hidden');
+                } else {
+                    item.classList.add('hidden');
+                }
+            });
+            
+            // Show no chats message if no chats are visible
+            const visibleChats = chatItems.filter(item => !item.classList.contains('hidden'));
+            const noChatsMessage = document.getElementById('noChatsMessage');
+            
+            if (noChatsMessage) {
+                if (visibleChats.length === 0) {
+                    noChatsMessage.classList.remove('hidden');
+                } else {
+                    noChatsMessage.classList.add('hidden');
+                }
+            }
+        }
+        
+        function loadChatsForFiltering() {
+            // Load all chats from cache or Firebase
+            const cachedChats = localStorage.getItem('kynecta_all_chats');
+            if (cachedChats) {
+                try {
+                    allChats = JSON.parse(cachedChats);
+                    updateChatList();
+                    updateFilterCounts();
+                } catch (e) {
+                    console.error('Error parsing cached chats:', e);
+                }
+            }
+            
+            // Load from Firebase in background
+            loadAllChatsFromFirebase();
+        }
+        
+        async function loadAllChatsFromFirebase() {
+            try {
+                const currentUser = firebase.auth().currentUser;
+                if (!currentUser) return;
+                
+                const db = firebase.firestore();
+                const chatsRef = db.collection('chats')
+                    .where('participants', 'array-contains', currentUser.uid)
+                    .orderBy('lastMessageTime', 'desc');
+                
+                const snapshot = await chatsRef.get();
+                allChats = [];
+                
+                snapshot.forEach(doc => {
+                    const chatData = doc.data();
+                    chatData.id = doc.id;
+                    allChats.push(chatData);
+                });
+                
+                // Cache all chats
+                localStorage.setItem('kynecta_all_chats', JSON.stringify(allChats));
+                
+                // Update UI
+                updateChatList();
+                updateFilterCounts();
+                
+            } catch (error) {
+                console.error('Error loading all chats:', error);
+            }
+        }
+        
+        function updateChatList() {
+            const chatList = document.getElementById('chatList');
+            if (!chatList) return;
+            
+            // Clear existing chats
+            chatList.innerHTML = '';
+            
+            if (allChats.length === 0) {
+                chatList.innerHTML = `
+                    <div id="noChatsMessage" class="p-8 text-center text-gray-500">
+                        <i class="fas fa-comments text-4xl mb-3 text-gray-300 block"></i>
+                        <p>No chats yet</p>
+                        <p class="text-sm mt-1">Start a new conversation to begin</p>
+                        <button id="startFirstChatBtn" class="mt-4 px-4 py-2 bg-gradient-to-r from-purple-500 to-green-500 text-white rounded-lg font-medium hover:opacity-90 transition-opacity">
+                            Start New Chat
+                        </button>
+                    </div>
+                `;
+                return;
+            }
+            
+            const currentUser = firebase.auth().currentUser;
+            
+            allChats.forEach(chat => {
+                // Determine if chat is sent, received, or unread
+                const lastMessage = chat.lastMessage || {};
+                const isSent = lastMessage.senderId === currentUser?.uid;
+                const isUnread = chat.unread && !isSent;
+                
+                // Create chat item
+                const chatItem = document.createElement('div');
+                chatItem.className = `chat-item p-3 rounded-lg mb-2 flex items-center cursor-pointer ${isSent ? 'sent-chat' : 'received-chat'} ${isUnread ? 'unread-chat' : ''}`;
+                chatItem.dataset.chatId = chat.id;
+                
+                // Get other participant info
+                const otherParticipantId = chat.participants.find(p => p !== currentUser?.uid);
+                const friend = friendsList.find(f => f.id === otherParticipantId);
+                
+                chatItem.innerHTML = `
+                    <div class="flex items-center flex-1">
+                        <div class="w-12 h-12 rounded-full bg-gradient-to-r from-purple-500 to-green-500 flex items-center justify-center text-white font-semibold mr-3 overflow-hidden relative">
+                            ${friend?.profilePicture ? 
+                                `<img src="${friend.profilePicture}" alt="${friend.displayName}" class="w-full h-full object-cover">` :
+                                `<span>${friend?.displayName?.charAt(0) || 'C'}</span>`
+                            }
+                            ${isUnread ? '<div class="unread-indicator"></div>' : ''}
+                        </div>
+                        <div class="flex-1">
+                            <div class="font-medium flex justify-between">
+                                <span>${friend?.displayName || 'Chat'}</span>
+                                <span class="text-xs text-gray-500">${formatTime(chat.lastMessageTime)}</span>
+                            </div>
+                            <div class="text-sm text-gray-500 truncate">
+                                ${lastMessage.text || 'No messages yet'}
+                            </div>
+                        </div>
+                    </div>
+                `;
+                
+                chatItem.addEventListener('click', function() {
+                    if (friend) {
+                        openChatWithFriend(friend);
+                    }
+                });
+                
+                chatList.appendChild(chatItem);
+            });
+            
+            // Apply current filter
+            applyChatFilter();
+        }
+        
+        function updateFilterCounts() {
+            const currentUser = firebase.auth().currentUser;
+            
+            // Reset counts
+            unreadChatsCount = 0;
+            sentChatsCount = 0;
+            receivedChatsCount = 0;
+            
+            // Calculate counts
+            allChats.forEach(chat => {
+                const lastMessage = chat.lastMessage || {};
+                const isSent = lastMessage.senderId === currentUser?.uid;
+                const isUnread = chat.unread && !isSent;
+                
+                if (isUnread) unreadChatsCount++;
+                if (isSent) sentChatsCount++;
+                if (!isSent) receivedChatsCount++;
+            });
+            
+            // Update badge counts
+            updateFilterBadge('all', allChats.length);
+            updateFilterBadge('sent', sentChatsCount);
+            updateFilterBadge('received', receivedChatsCount);
+            updateFilterBadge('unread', unreadChatsCount);
+        }
+        
+        function updateFilterBadge(filter, count) {
+            const badge = document.getElementById(`${filter}Count`);
+            if (badge) {
+                if (count > 0) {
+                    badge.textContent = count;
+                    badge.classList.remove('hidden');
+                } else {
+                    badge.classList.add('hidden');
+                }
+            }
+        }
+        
+        function markChatAsRead(chatId) {
+            // Mark chat as read in local storage
+            const chatIndex = allChats.findIndex(c => c.id === chatId);
+            if (chatIndex !== -1 && allChats[chatIndex].unread) {
+                allChats[chatIndex].unread = false;
+                localStorage.setItem('kynecta_all_chats', JSON.stringify(allChats));
+                
+                // Update UI
+                updateChatList();
+                updateFilterCounts();
             }
         }
         
@@ -3453,6 +4089,11 @@
         
         // Theme toggle functionality
         function setupThemeToggle() {
+            // Load saved theme
+            const savedTheme = localStorage.getItem('kynecta_theme') || 'light';
+            setTheme(savedTheme);
+            
+            // Setup desktop theme toggle
             const themeToggle = document.getElementById('themeToggle');
             const themeIcon = document.getElementById('themeIcon');
             const themeToggleTools = document.getElementById('themeToggleTools');
@@ -3460,15 +4101,21 @@
             const themeToggleSettings = document.getElementById('themeToggleSettings');
             const themeIconSettings = document.getElementById('themeIconSettings');
             
-            // Load saved theme
-            const savedTheme = localStorage.getItem('kynecta_theme') || 'light';
-            setTheme(savedTheme);
+            // Setup mobile theme toggle
+            const mobileThemeToggle = document.getElementById('mobileThemeToggle');
+            const mobileThemeIcon = document.getElementById('mobileThemeIcon');
+            const mobileThemeToggleTools = document.getElementById('mobileThemeToggleTools');
+            const mobileThemeIconTools = document.getElementById('mobileThemeIconTools');
+            const mobileThemeToggleSettings = document.getElementById('mobileThemeToggleSettings');
+            const mobileThemeIconSettings = document.getElementById('mobileThemeIconSettings');
             
-            // Setup toggle handlers
             const toggleHandlers = [
                 { toggle: themeToggle, icon: themeIcon },
                 { toggle: themeToggleTools, icon: themeIconTools },
-                { toggle: themeToggleSettings, icon: themeIconSettings }
+                { toggle: themeToggleSettings, icon: themeIconSettings },
+                { toggle: mobileThemeToggle, icon: mobileThemeIcon },
+                { toggle: mobileThemeToggleTools, icon: mobileThemeIconTools },
+                { toggle: mobileThemeToggleSettings, icon: mobileThemeIconSettings }
             ];
             
             toggleHandlers.forEach(({ toggle, icon }) => {
@@ -3491,8 +4138,8 @@
             document.body.classList.toggle('text-gray-900', theme === 'light');
             document.body.classList.toggle('text-white', theme === 'dark');
             
-            // Update icons
-            const themeIcons = document.querySelectorAll('#themeIcon, #themeIconTools, #themeIconSettings');
+            // Update all icons
+            const themeIcons = document.querySelectorAll('#themeIcon, #themeIconTools, #themeIconSettings, #mobileThemeIcon, #mobileThemeIconTools, #mobileThemeIconSettings');
             themeIcons.forEach(icon => {
                 if (icon) {
                     icon.className = theme === 'light' ? 'fas fa-moon' : 'fas fa-sun';
@@ -3501,8 +4148,19 @@
         }
         
         document.addEventListener('DOMContentLoaded', function() {
+            // Initialize Firebase
+            console.log('Initializing Firebase...');
+            
+            // Initialize online status monitoring
+            updateOnlineStatus();
+            window.addEventListener('online', updateOnlineStatus);
+            window.addEventListener('offline', updateOnlineStatus);
+            
             // Load cached user data immediately
             loadCachedUserData();
+            
+            // Setup chat filters
+            setupChatFilters();
             
             const isMobile = window.innerWidth < 768;
             if (isMobile) {
@@ -3544,9 +4202,14 @@
             const startFirstChatBtn = document.getElementById('startFirstChatBtn');
             const cancelNewChatBtn = document.getElementById('cancelNewChat');
             const confirmStartChatBtn = document.getElementById('confirmStartChat');
+            const mobileNewChatBtn = document.getElementById('mobileNewChatBtn');
             
             if (startNewChatBtn) {
                 startNewChatBtn.addEventListener('click', startNewChatFlow);
+            }
+            
+            if (mobileNewChatBtn) {
+                mobileNewChatBtn.addEventListener('click', startNewChatFlow);
             }
             
             if (startFirstChatBtn) {
@@ -3587,6 +4250,9 @@
                 
                 // Load friends in background
                 loadFriends();
+                
+                // Load chats for filtering
+                loadChatsForFiltering();
             }, 300);
         });
         

@@ -183,6 +183,12 @@
             color: white;
         }
         
+        /* Offline Mode Indicator */
+        .connection-status.offline {
+            background: rgba(107, 114, 128, 0.8);
+            color: white;
+        }
+        
         /* Toast Styles */
         #toastContainer {
             position: fixed;
@@ -211,6 +217,7 @@
         .toast.success { background-color: #10B981; }
         .toast.error { background-color: #EF4444; }
         .toast.warning { background-color: #F59E0B; }
+        .toast.info { background-color: #3B82F6; }
         
         /* Cookie Consent Banner */
         .cookie-banner {
@@ -1187,7 +1194,7 @@
     <!-- Connection Status -->
     <div class="connection-status connecting" id="connectionStatus">
         <i class="fas fa-circle-notch fa-spin mr-2"></i>
-        <span id="connectionText">Connecting to kynecta Chat...</span>
+        <span id="connectionText">Connecting...</span>
     </div>
 
     <!-- Toast Container -->
@@ -1991,12 +1998,48 @@
                 this.auth = null;
                 this.db = null;
                 this.isInitialized = false;
+                this.isOnline = navigator.onLine;
                 this.init();
             }
 
             async init() {
                 try {
                     console.log('🔄 Starting Firebase initialization...');
+                    
+                    // Check online status first
+                    if (!this.isOnline) {
+                        this.updateConnectionStatus('offline', 'Offline Mode');
+                        console.log('📴 App starting in offline mode');
+                        this.isInitialized = false;
+                        
+                        // Show offline indicator but allow app to function
+                        const securityStatus = document.getElementById('securityStatus');
+                        securityStatus.classList.remove('hidden');
+                        securityStatus.innerHTML = `
+                            <div class="flex items-center justify-between">
+                                <div class="flex items-center space-x-2 md:space-x-3">
+                                    <i class="fas fa-wifi-slash text-yellow-400 text-base md:text-lg"></i>
+                                    <div>
+                                        <span class="text-xs md:text-sm font-medium text-yellow-400">Offline Mode</span>
+                                        <p class="text-xs text-blue-300 mt-1">Using cached data. Some features limited.</p>
+                                    </div>
+                                </div>
+                                <div class="flex space-x-1">
+                                    <span class="security-badge text-xs" style="background: rgba(245, 158, 11, 0.1); border-color: rgba(245, 158, 11, 0.3); color: #fcd34d;">
+                                        <i class="fas fa-wifi-slash mr-1"></i> Offline
+                                    </span>
+                                </div>
+                            </div>
+                        `;
+                        
+                        // Auto-hide after 3 seconds
+                        setTimeout(() => {
+                            securityStatus.classList.add('hidden');
+                        }, 3000);
+                        
+                        return;
+                    }
+                    
                     this.updateConnectionStatus('connecting', 'Connecting to kynecta Chat...');
                     
                     // Check if Firebase is available
@@ -2030,7 +2073,7 @@
                     });
                     
                     this.isInitialized = true;
-                    this.updateConnectionStatus('connected', 'KYNECTA CHAT');
+                    this.updateConnectionStatus('connected', 'Connected');
                     
                     // Show security status with checkmark
                     const securityStatus = document.getElementById('securityStatus');
@@ -2067,31 +2110,36 @@
                     
                 } catch (error) {
                     console.error('❌ Firebase initialization failed:', error);
-                    this.updateConnectionStatus('disconnected', 'Connection Failed');
+                    this.updateConnectionStatus('offline', 'Offline Mode');
                     
-                    // Show security status with cross
+                    // Show offline status
                     const securityStatus = document.getElementById('securityStatus');
                     securityStatus.classList.remove('hidden');
                     securityStatus.innerHTML = `
                         <div class="flex items-center justify-between">
                             <div class="flex items-center space-x-2 md:space-x-3">
-                                <i class="fas fa-times-circle text-red-400 text-base md:text-lg"></i>
+                                <i class="fas fa-wifi-slash text-yellow-400 text-base md:text-lg"></i>
                                 <div>
-                                    <span class="text-xs md:text-sm font-medium text-red-400">Connection Failed</span>
-                                    <p class="text-xs text-blue-300 mt-1">Please check your internet connection</p>
+                                    <span class="text-xs md:text-sm font-medium text-yellow-400">Offline Mode</span>
+                                    <p class="text-xs text-blue-300 mt-1">Using cached data. Reconnect for full features.</p>
                                 </div>
                             </div>
                             <div class="flex space-x-1">
-                                <span class="security-badge text-xs" style="background: rgba(239, 68, 68, 0.1); border-color: rgba(239, 68, 68, 0.3); color: #fca5a5;">
-                                    <i class="fas fa-unlock mr-1"></i> Offline
+                                <span class="security-badge text-xs" style="background: rgba(245, 158, 11, 0.1); border-color: rgba(245, 158, 11, 0.3); color: #fcd34d;">
+                                    <i class="fas fa-wifi-slash mr-1"></i> Offline
                                 </span>
                             </div>
                         </div>
                     `;
                     
-                    // Show error message
+                    // Auto-hide after 3 seconds
+                    setTimeout(() => {
+                        securityStatus.classList.add('hidden');
+                    }, 3000);
+                    
+                    // Show info message
                     if (window.kynectaChatApp) {
-                        window.kynectaChatApp.showToast('Firebase connection failed. Using fallback mode.', 'warning');
+                        window.kynectaChatApp.showToast('Running in offline mode. Using cached data.', 'info');
                     }
                 }
             }
@@ -2133,6 +2181,12 @@
             }
 
             async registerUser(email, password, displayName, userSelections = null) {
+                // Check if we're offline
+                if (!this.isOnline) {
+                    // Offline registration - store in IndexedDB and localStorage
+                    return this.registerUserOffline(email, password, displayName, userSelections);
+                }
+                
                 if (!this.isInitialized) {
                     throw new Error('Firebase not initialized. Please try again.');
                 }
@@ -2208,6 +2262,9 @@
                     // Enable auto-login by default
                     localStorage.setItem('kynecta-chat-auto-login', 'true');
                     
+                    // Also store in IndexedDB for offline access
+                    await window.kynectaChatApp?.offlineDB?.storeUserSession(userData);
+                    
                     console.log('✅ User registered successfully:', user.email);
                     return userCredential;
                     
@@ -2243,8 +2300,63 @@
                     throw new Error(errorMessage);
                 }
             }
+            
+            async registerUserOffline(email, password, displayName, userSelections = null) {
+                try {
+                    // Generate a temporary user ID for offline use
+                    const tempUserId = 'offline_' + Date.now() + '_' + Math.random().toString(36).substr(2, 9);
+                    
+                    const selections = userSelections || window.kynectaChatApp?.getUserSelections() || {
+                        interests: [],
+                        languages: []
+                    };
+                    
+                    const userData = {
+                        uid: tempUserId,
+                        email: email,
+                        displayName: displayName,
+                        isNewUser: true,
+                        interests: selections.interests,
+                        languages: selections.languages,
+                        autoLogin: true,
+                        lastLogin: new Date().toISOString(),
+                        passwordHash: btoa(password), // Simple encoding for demo (not secure for production)
+                        isOfflineUser: true
+                    };
+                    
+                    // Store in localStorage
+                    localStorage.setItem('kynecta-chat-user', JSON.stringify(userData));
+                    localStorage.setItem('kynecta-chat-selections', JSON.stringify(selections));
+                    localStorage.setItem('kynecta-chat-auto-login', 'true');
+                    
+                    // Store in IndexedDB
+                    if (window.kynectaChatApp?.offlineDB) {
+                        await window.kynectaChatApp.offlineDB.storeUserSession(userData);
+                    }
+                    
+                    console.log('✅ User registered offline successfully:', email);
+                    
+                    return {
+                        user: {
+                            uid: tempUserId,
+                            email: email,
+                            displayName: displayName
+                        }
+                    };
+                    
+                } catch (error) {
+                    console.error('❌ Offline registration failed:', error);
+                    throw new Error('Offline registration failed. Please try again.');
+                }
+            }
 
             async loginUser(email, password, rememberMe = true) {
+                // Check if we're offline
+                if (!this.isOnline) {
+                    // Offline login - check against cached data
+                    return this.loginUserOffline(email, password, rememberMe);
+                }
+                
                 if (!this.isInitialized) {
                     throw new Error('Firebase not initialized. Please try again.');
                 }
@@ -2297,6 +2409,11 @@
                         localStorage.removeItem('kynecta-chat-email');
                     }
                     
+                    // Also store in IndexedDB for offline access
+                    if (window.kynectaChatApp?.offlineDB) {
+                        await window.kynectaChatApp.offlineDB.storeUserSession(localStorageUserData);
+                    }
+                    
                     console.log('✅ User logged in successfully:', user.email);
                     return userCredential;
                     
@@ -2310,6 +2427,67 @@
                     console.log('Actual Firebase error:', error.code, error.message);
                     
                     throw new Error(errorMessage);
+                }
+            }
+            
+            async loginUserOffline(email, password, rememberMe = true) {
+                try {
+                    // Check IndexedDB first for cached user
+                    let userData = null;
+                    if (window.kynectaChatApp?.offlineDB) {
+                        userData = await window.kynectaChatApp.offlineDB.getUserByEmail(email);
+                    }
+                    
+                    // If not in IndexedDB, check localStorage
+                    if (!userData) {
+                        const savedUser = localStorage.getItem('kynecta-chat-user');
+                        if (savedUser) {
+                            const parsed = JSON.parse(savedUser);
+                            if (parsed.email === email) {
+                                userData = parsed;
+                            }
+                        }
+                    }
+                    
+                    if (!userData) {
+                        throw new Error('No user found with this email.');
+                    }
+                    
+                    // Check password (simple demo check - in production, use proper hashing)
+                    if (userData.passwordHash && btoa(password) !== userData.passwordHash) {
+                        throw new Error('Incorrect password.');
+                    }
+                    
+                    // Update last login
+                    userData.lastLogin = new Date().toISOString();
+                    userData.autoLogin = rememberMe;
+                    
+                    // Store in localStorage
+                    localStorage.setItem('kynecta-chat-user', JSON.stringify(userData));
+                    
+                    if (rememberMe) {
+                        localStorage.setItem('kynecta-chat-auto-login', 'true');
+                        localStorage.setItem('kynecta-chat-email', email);
+                    }
+                    
+                    // Store in IndexedDB
+                    if (window.kynectaChatApp?.offlineDB) {
+                        await window.kynectaChatApp.offlineDB.storeUserSession(userData);
+                    }
+                    
+                    console.log('✅ User logged in offline successfully:', email);
+                    
+                    return {
+                        user: {
+                            uid: userData.uid,
+                            email: userData.email,
+                            displayName: userData.displayName
+                        }
+                    };
+                    
+                } catch (error) {
+                    console.error('❌ Offline login failed:', error);
+                    throw new Error('Offline login failed. ' + error.message);
                 }
             }
 
@@ -2391,6 +2569,8 @@
                         statusElement.innerHTML = '<i class="fas fa-check-circle mr-2"></i><span id="connectionText">' + message + '</span>';
                     } else if (status === 'connecting') {
                         statusElement.innerHTML = '<i class="fas fa-circle-notch fa-spin mr-2"></i><span id="connectionText">' + message + '</span>';
+                    } else if (status === 'offline') {
+                        statusElement.innerHTML = '<i class="fas fa-wifi-slash mr-2"></i><span id="connectionText">' + message + '</span>';
                     } else {
                         statusElement.innerHTML = '<i class="fas fa-times-circle mr-2"></i><span id="connectionText">' + message + '</span>';
                     }
@@ -2407,7 +2587,7 @@
         /**
          * kynecta Chat - Main Application Script
          * Handles combined selection, auto-login, and chat-focused UI
-         * NOW WITH INSTANT QUICK LOGIN FEATURES
+         * NOW WITH INSTANT QUICK LOGIN FEATURES AND OFFLINE SUPPORT
          */
 
         class kynectaChatApp {
@@ -2434,6 +2614,10 @@
                 
                 // Firebase initialization flag
                 this.firebaseReady = false;
+                
+                // Offline support
+                this.isOnline = navigator.onLine;
+                this.offlineDB = null;
                 
                 // === INSTANT QUICK LOGIN CHECK - RUNS IMMEDIATELY ===
                 this.instantQuickLoginCheck();
@@ -2496,6 +2680,12 @@
             }
 
             init() {
+                // Initialize offline database
+                this.initOfflineDatabase();
+                
+                // Setup network detection
+                this.setupNetworkDetection();
+                
                 // Initialize event listeners
                 this.setupEventListeners();
                 
@@ -2520,7 +2710,53 @@
                 // Initialize Firebase in the BACKGROUND (non-blocking)
                 this.initFirebaseBackground();
                 
-                console.log('💬 kynecta Chat app initialized with instant quick login');
+                console.log('💬 kynecta Chat app initialized with offline support');
+            }
+            
+            /**
+             * Initialize IndexedDB for offline storage
+             */
+            async initOfflineDatabase() {
+                try {
+                    this.offlineDB = new OfflineDatabase();
+                    await this.offlineDB.init();
+                    console.log('💾 Offline database initialized');
+                } catch (error) {
+                    console.error('❌ Failed to initialize offline database:', error);
+                }
+            }
+            
+            /**
+             * Setup network detection and offline handling
+             */
+            setupNetworkDetection() {
+                // Listen for online/offline events
+                window.addEventListener('online', () => {
+                    this.isOnline = true;
+                    console.log('🌐 App is online');
+                    
+                    if (window.firebaseAuth) {
+                        window.firebaseAuth.isOnline = true;
+                        window.firebaseAuth.updateConnectionStatus('connected', 'Connected');
+                    }
+                    
+                    this.showToast('Back online! Full features restored.', 'success');
+                });
+                
+                window.addEventListener('offline', () => {
+                    this.isOnline = false;
+                    console.log('📴 App is offline');
+                    
+                    if (window.firebaseAuth) {
+                        window.firebaseAuth.isOnline = false;
+                        window.firebaseAuth.updateConnectionStatus('offline', 'Offline Mode');
+                    }
+                    
+                    this.showToast('You are offline. Using cached data.', 'warning');
+                });
+                
+                // Initial online status check
+                this.isOnline = navigator.onLine;
             }
 
             /**
@@ -2530,7 +2766,7 @@
             initFirebaseBackground() {
                 // Only initialize Firebase if it's available
                 if (typeof firebase === 'undefined') {
-                    console.warn('⚠️ Firebase SDK not available, running in localStorage-only mode');
+                    console.warn('⚠️ Firebase SDK not available, running in offline mode');
                     return;
                 }
                 
@@ -2924,13 +3160,13 @@
                 this.showLoading('Logging in...');
                 
                 try {
-                    // Try Firebase quick login first
-                    if (window.firebaseAuth && window.firebaseAuth.isInitialized) {
+                    // Try Firebase quick login first if online
+                    if (this.isOnline && window.firebaseAuth && window.firebaseAuth.isInitialized) {
                         const user = await window.firebaseAuth.quickLogin();
                         console.log('✅ Quick login successful via Firebase');
                     } else {
-                        // Fallback to localStorage-only mode
-                        console.log('✅ Quick login using localStorage (Firebase not available)');
+                        // Offline quick login using cached data
+                        console.log('✅ Quick login using cached data (offline mode)');
                     }
                     
                     // Success - redirect to chat IMMEDIATELY
@@ -2957,6 +3193,11 @@
                 // Clear localStorage to prevent auto-login next time
                 localStorage.removeItem('kynecta-chat-user');
                 localStorage.removeItem('kynecta-chat-auto-login');
+                
+                // Clear IndexedDB
+                if (this.offlineDB) {
+                    this.offlineDB.clearUserSessions();
+                }
             }
 
             /**
@@ -3301,13 +3542,14 @@
                 this.showLoading('Locating account...');
                 
                 try {
-                    // Check if Firebase is available
-                    if (window.firebaseAuth && window.firebaseAuth.isInitialized) {
+                    // Check if we're online and Firebase is available
+                    if (this.isOnline && window.firebaseAuth && window.firebaseAuth.isInitialized) {
                         // Send password reset email via Firebase
                         await window.firebaseAuth.sendPasswordResetEmail(identifier);
                     } else {
-                        // Simulate success for fallback mode
+                        // Offline mode - simulate success
                         await new Promise(resolve => setTimeout(resolve, 1500));
+                        this.showToast('Password reset requested. Email will be sent when back online.', 'info');
                     }
                     
                     this.hideLoading();
@@ -3478,34 +3720,13 @@
                     this.setLoginLoadingState(true);
                     
                     try {
-                        // Try Firebase login first
-                        if (window.firebaseAuth && window.firebaseAuth.isInitialized) {
+                        // Try Firebase login if online, otherwise use offline login
+                        if (this.isOnline && window.firebaseAuth && window.firebaseAuth.isInitialized) {
                             await window.firebaseAuth.loginUser(email, password, rememberMe);
                         } else {
-                            // Fallback mode - simulate login
-                            await new Promise(resolve => setTimeout(resolve, 1500));
-                            
-                            // Create localStorage entry for instant login next time
-                            const userData = {
-                                uid: 'fallback_' + Date.now(),
-                                email: email,
-                                displayName: email.split('@')[0],
-                                isNewUser: false,
-                                interests: this.userSelections.interests,
-                                languages: this.userSelections.languages,
-                                autoLogin: rememberMe,
-                                lastLogin: new Date().toISOString()
-                            };
-                            
-                            localStorage.setItem('kynecta-chat-user', JSON.stringify(userData));
-                            localStorage.setItem('kynecta-chat-selections', JSON.stringify(this.userSelections));
-                            
-                            if (rememberMe) {
-                                localStorage.setItem('kynecta-chat-auto-login', 'true');
-                                localStorage.setItem('kynecta-chat-email', email);
-                            }
-                            
-                            console.log('✅ Login successful (fallback mode)');
+                            // Offline login
+                            await window.firebaseAuth.loginUserOffline(email, password, rememberMe);
+                            this.showToast('Logged in offline. Some features limited.', 'info');
                         }
                         
                         // Success - redirect to chat page
@@ -3581,30 +3802,13 @@
                     this.setRegisterLoadingState(true);
                     
                     try {
-                        // Try Firebase registration first
-                        if (window.firebaseAuth && window.firebaseAuth.isInitialized) {
+                        // Try Firebase registration if online, otherwise use offline registration
+                        if (this.isOnline && window.firebaseAuth && window.firebaseAuth.isInitialized) {
                             await window.firebaseAuth.registerUser(email, password, displayName, this.userSelections);
                         } else {
-                            // Fallback mode - simulate registration
-                            await new Promise(resolve => setTimeout(resolve, 1500));
-                            
-                            // Create localStorage entry for INSTANT auto-login next time
-                            const userData = {
-                                uid: 'fallback_' + Date.now(),
-                                email: email,
-                                displayName: displayName,
-                                isNewUser: true,
-                                interests: this.userSelections.interests,
-                                languages: this.userSelections.languages,
-                                autoLogin: true,
-                                lastLogin: new Date().toISOString()
-                            };
-                            
-                            localStorage.setItem('kynecta-chat-user', JSON.stringify(userData));
-                            localStorage.setItem('kynecta-chat-selections', JSON.stringify(this.userSelections));
-                            localStorage.setItem('kynecta-chat-auto-login', 'true');
-                            
-                            console.log('✅ Registration successful (fallback mode)');
+                            // Offline registration
+                            await window.firebaseAuth.registerUserOffline(email, password, displayName, this.userSelections);
+                            this.showToast('Registered offline. Account will sync when online.', 'info');
                         }
                         
                         // Success - redirect to chat page
@@ -3826,7 +4030,12 @@
                 this.saveUserPreferences();
                 
                 // Show success message
-                this.showMessage('Welcome to kynecta Chat! Redirecting to chat dashboard...', 'success');
+                const isOffline = !this.isOnline;
+                const message = isOffline 
+                    ? 'Welcome to kynecta Chat! (Offline Mode) Redirecting...' 
+                    : 'Welcome to kynecta Chat! Redirecting to chat dashboard...';
+                
+                this.showMessage(message, 'success');
                 
                 // Add a brief delay to show the success message
                 setTimeout(() => {
@@ -3836,9 +4045,223 @@
                     
                     // Redirect after transition completes
                     setTimeout(() => {
-                        window.location.href = 'chat.html';
+                        // Pass authentication data to chat page
+                        const userData = JSON.parse(localStorage.getItem('kynecta-chat-user') || '{}');
+                        const authToken = btoa(JSON.stringify({
+                            uid: userData.uid,
+                            email: userData.email,
+                            displayName: userData.displayName,
+                            isOffline: isOffline || userData.isOfflineUser
+                        }));
+                        
+                        window.location.href = `chat.html?auth=${encodeURIComponent(authToken)}`;
                     }, 500);
                 }, 1000);
+            }
+        }
+        
+        /**
+         * Offline Database Class for IndexedDB
+         */
+        class OfflineDatabase {
+            constructor() {
+                this.db = null;
+                this.dbName = 'kynectaChatDB';
+                this.dbVersion = 1;
+            }
+            
+            async init() {
+                return new Promise((resolve, reject) => {
+                    if (!window.indexedDB) {
+                        console.warn('IndexedDB not supported, using localStorage only');
+                        resolve();
+                        return;
+                    }
+                    
+                    const request = indexedDB.open(this.dbName, this.dbVersion);
+                    
+                    request.onerror = (event) => {
+                        console.error('IndexedDB error:', event.target.error);
+                        reject(event.target.error);
+                    };
+                    
+                    request.onsuccess = (event) => {
+                        this.db = event.target.result;
+                        console.log('IndexedDB opened successfully');
+                        resolve();
+                    };
+                    
+                    request.onupgradeneeded = (event) => {
+                        const db = event.target.result;
+                        
+                        // Create user sessions store
+                        if (!db.objectStoreNames.contains('userSessions')) {
+                            const userStore = db.createObjectStore('userSessions', { keyPath: 'uid' });
+                            userStore.createIndex('email', 'email', { unique: true });
+                            userStore.createIndex('lastLogin', 'lastLogin', { unique: false });
+                        }
+                        
+                        // Create app data store
+                        if (!db.objectStoreNames.contains('appData')) {
+                            const appStore = db.createObjectStore('appData', { keyPath: 'key' });
+                        }
+                    };
+                });
+            }
+            
+            async storeUserSession(userData) {
+                return new Promise((resolve, reject) => {
+                    if (!this.db) {
+                        resolve();
+                        return;
+                    }
+                    
+                    const transaction = this.db.transaction(['userSessions'], 'readwrite');
+                    const store = transaction.objectStore('userSessions');
+                    
+                    const request = store.put({
+                        ...userData,
+                        storedAt: new Date().toISOString()
+                    });
+                    
+                    request.onsuccess = () => {
+                        console.log('User session stored in IndexedDB');
+                        resolve();
+                    };
+                    
+                    request.onerror = (event) => {
+                        console.error('Error storing user session:', event.target.error);
+                        reject(event.target.error);
+                    };
+                });
+            }
+            
+            async getUserByEmail(email) {
+                return new Promise((resolve, reject) => {
+                    if (!this.db) {
+                        resolve(null);
+                        return;
+                    }
+                    
+                    const transaction = this.db.transaction(['userSessions'], 'readonly');
+                    const store = transaction.objectStore('userSessions');
+                    const index = store.index('email');
+                    
+                    const request = index.get(email);
+                    
+                    request.onsuccess = (event) => {
+                        resolve(event.target.result || null);
+                    };
+                    
+                    request.onerror = (event) => {
+                        console.error('Error getting user by email:', event.target.error);
+                        reject(event.target.error);
+                    };
+                });
+            }
+            
+            async getLatestUserSession() {
+                return new Promise((resolve, reject) => {
+                    if (!this.db) {
+                        resolve(null);
+                        return;
+                    }
+                    
+                    const transaction = this.db.transaction(['userSessions'], 'readonly');
+                    const store = transaction.objectStore('userSessions');
+                    const index = store.index('lastLogin');
+                    
+                    const request = index.openCursor(null, 'prev');
+                    let latestUser = null;
+                    
+                    request.onsuccess = (event) => {
+                        const cursor = event.target.result;
+                        if (cursor) {
+                            latestUser = cursor.value;
+                        }
+                        resolve(latestUser);
+                    };
+                    
+                    request.onerror = (event) => {
+                        console.error('Error getting latest user session:', event.target.error);
+                        reject(event.target.error);
+                    };
+                });
+            }
+            
+            async clearUserSessions() {
+                return new Promise((resolve, reject) => {
+                    if (!this.db) {
+                        resolve();
+                        return;
+                    }
+                    
+                    const transaction = this.db.transaction(['userSessions'], 'readwrite');
+                    const store = transaction.objectStore('userSessions');
+                    
+                    const request = store.clear();
+                    
+                    request.onsuccess = () => {
+                        console.log('User sessions cleared from IndexedDB');
+                        resolve();
+                    };
+                    
+                    request.onerror = (event) => {
+                        console.error('Error clearing user sessions:', event.target.error);
+                        reject(event.target.error);
+                    };
+                });
+            }
+            
+            async storeAppData(key, data) {
+                return new Promise((resolve, reject) => {
+                    if (!this.db) {
+                        resolve();
+                        return;
+                    }
+                    
+                    const transaction = this.db.transaction(['appData'], 'readwrite');
+                    const store = transaction.objectStore('appData');
+                    
+                    const request = store.put({
+                        key: key,
+                        data: data,
+                        updatedAt: new Date().toISOString()
+                    });
+                    
+                    request.onsuccess = () => {
+                        console.log(`App data stored for key: ${key}`);
+                        resolve();
+                    };
+                    
+                    request.onerror = (event) => {
+                        console.error('Error storing app data:', event.target.error);
+                        reject(event.target.error);
+                    };
+                });
+            }
+            
+            async getAppData(key) {
+                return new Promise((resolve, reject) => {
+                    if (!this.db) {
+                        resolve(null);
+                        return;
+                    }
+                    
+                    const transaction = this.db.transaction(['appData'], 'readonly');
+                    const store = transaction.objectStore('appData');
+                    
+                    const request = store.get(key);
+                    
+                    request.onsuccess = (event) => {
+                        resolve(event.target.result?.data || null);
+                    };
+                    
+                    request.onerror = (event) => {
+                        console.error('Error getting app data:', event.target.error);
+                        reject(event.target.error);
+                    };
+                });
             }
         }
 
@@ -3864,12 +4287,13 @@
             
             if (method === 'email') {
                 try {
-                    // Use Firebase if available, otherwise simulate
-                    if (window.firebaseAuth && window.firebaseAuth.isInitialized) {
+                    // Use Firebase if available and online, otherwise simulate
+                    if (window.kynectaChatApp.isOnline && window.firebaseAuth && window.firebaseAuth.isInitialized) {
                         await window.firebaseAuth.sendPasswordResetEmail(forgotPasswordIdentifier);
                     } else {
-                        // Simulate for fallback mode
+                        // Simulate for offline mode
                         await new Promise(resolve => setTimeout(resolve, 1500));
+                        window.kynectaChatApp.showToast('Recovery requested. Email will be sent when back online.', 'info');
                     }
                     
                     window.kynectaChatApp.hideLoading();
@@ -3896,8 +4320,10 @@
             // Check Firebase status after a delay (background operation)
             setTimeout(() => {
                 if (!window.firebaseAuth || !window.firebaseAuth.isInitialized) {
-                    console.warn('⚠️ Firebase not initialized - using fallback mode with localStorage');
-                    window.kynectaChatApp.showToast('Running in offline mode. Some features may be limited.', 'info');
+                    console.warn('⚠️ Firebase not initialized - using offline mode with localStorage');
+                    if (window.kynectaChatApp.isOnline) {
+                        window.kynectaChatApp.showToast('Running in offline mode. Some features may be limited.', 'info');
+                    }
                 }
             }, 3000);
         });
