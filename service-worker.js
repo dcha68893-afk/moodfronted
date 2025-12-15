@@ -19,7 +19,7 @@ const APP_SHELL_ASSETS = [
   '/',
   '/index.html',
   '/chat.html',
-  '/friends.html',
+  '/friend.html',
   '/group.html',
   '/status.html',
   '/call.html',

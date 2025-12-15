@@ -163,10 +163,10 @@
         .iframe-container {
             position: fixed;
             top: 0;
-            left: 64px;
+            left: 60px; /* Changed from 64px to 60px */
             right: 0;
             bottom: 0;
-            width: calc(100% - 64px);
+            width: calc(100% - 60px); /* Changed from 64px to 60px */
             height: 100vh;
             background: white;
             z-index: 30;
@@ -223,19 +223,71 @@
             z-index: 1000 !important;
             transform: translateZ(0);
             will-change: transform;
+            width: 60px; /* Changed from 64px to 60px */
+        }
+        
+        /* Chat filter tabs in header */
+        .chat-filter-tabs-header {
+            display: flex;
+            background: rgba(255, 255, 255, 0.1);
+            border-radius: 20px;
+            padding: 4px;
+            margin-left: auto;
+            margin-right: 10px;
+        }
+        
+        .chat-filter-tab-header {
+            width: 40px;
+            height: 40px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            cursor: pointer;
+            border-radius: 50%;
+            transition: all 0.2s ease;
+            color: rgba(255, 255, 255, 0.8);
+            font-size: 18px;
+            position: relative;
+        }
+        
+        .chat-filter-tab-header:hover {
+            background: rgba(255, 255, 255, 0.15);
+            color: white;
+        }
+        
+        .chat-filter-tab-header.active {
+            background: rgba(255, 255, 255, 0.2);
+            color: white;
+        }
+        
+        .chat-filter-tab-badge {
+            position: absolute;
+            top: -2px;
+            right: -2px;
+            background-color: #ef4444;
+            color: white;
+            font-size: 10px;
+            min-width: 16px;
+            height: 16px;
+            border-radius: 8px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            padding: 0 3px;
+            font-weight: 600;
         }
         
         /* Mobile optimizations */
         @media (max-width: 767px) {
             .iframe-container {
-                left: 64px;
-                width: calc(100% - 64px);
+                left: 0;
+                width: 100%;
                 z-index: 30;
             }
             
             .fixed.left-0 {
                 z-index: 1000 !important;
-                width: 64px;
+                width: 60px; /* Changed from 64px to 60px */
             }
             
             /* Mobile header adjustments */
@@ -259,17 +311,114 @@
             .mobile-profile-button {
                 display: block !important;
             }
+            
+            /* Mobile sidebar at bottom */
+            #permanentSidebar {
+                top: auto;
+                bottom: 0;
+                left: 0;
+                right: 0;
+                height: 60px;
+                width: 100%;
+                flex-direction: row;
+                justify-content: space-around;
+                padding: 8px;
+                background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+                box-shadow: 0 -2px 10px rgba(0, 0, 0, 0.1);
+            }
+            
+            #permanentSidebar .flex-1 {
+                flex: 1;
+                display: flex;
+                flex-direction: row;
+                justify-content: space-around;
+                align-items: center;
+            }
+            
+            #permanentSidebar .nav-icon {
+                padding: 8px !important;
+                font-size: 1.2rem !important;
+                margin: 0;
+                width: 44px;
+                height: 44px;
+            }
+            
+            #permanentSidebar .space-y-8 {
+                margin: 0;
+                display: flex;
+                flex-direction: row;
+                justify-content: space-around;
+                width: 100%;
+            }
+            
+            #permanentSidebar button[data-page="settings"] {
+                display: none;
+            }
+            
+            /* Adjust chat app margin for sidebar */
+            #chatApp {
+                margin-left: 0;
+                width: 100%;
+                margin-bottom: 60px; /* Space for bottom navbar */
+            }
+            
+            /* Adjust content areas for sidebar */
+            #chatsContent,
+            #toolsContent,
+            #settingsContent {
+                margin-left: 0;
+                width: 100%;
+                height: calc(100vh - 60px);
+            }
+            
+            /* Make sure iframe pages don't hide sidebar */
+            .content-area.iframe-container {
+                left: 0;
+                width: 100%;
+                height: calc(100vh - 60px);
+            }
+            
+            /* Chat filter tabs for mobile */
+            .chat-filter-tabs-header {
+                margin: 0 auto;
+                background: rgba(255, 255, 255, 0.1);
+            }
+            
+            .chat-filter-tab-header {
+                width: 36px;
+                height: 36px;
+                font-size: 16px;
+            }
+            
+            .chat-filter-tab-badge {
+                font-size: 9px;
+                min-width: 14px;
+                height: 14px;
+                top: -1px;
+                right: -1px;
+            }
+            
+            /* Settings container height for mobile */
+            .settings-scroll-container {
+                height: 240px !important;
+            }
+            
+            .settings-item {
+                height: 80px !important;
+                min-height: 80px !important;
+            }
         }
         
         /* Tablet optimizations */
         @media (min-width: 768px) and (max-width: 1023px) {
             .iframe-container {
-                left: 64px;
-                width: calc(100% - 64px);
+                left: 60px; /* Changed from 64px to 60px */
+                width: calc(100% - 60px); /* Changed from 64px to 60px */
             }
             
             .fixed.left-0 {
                 z-index: 1000 !important;
+                width: 60px; /* Changed from 64px to 60px */
             }
             
             /* Tablet sidebar adjustments */
@@ -289,17 +438,28 @@
             .desktop-header-buttons {
                 display: flex !important;
             }
+            
+            /* Settings container height for tablet */
+            .settings-scroll-container {
+                height: 240px !important;
+            }
+            
+            .settings-item {
+                height: 80px !important;
+                min-height: 80px !important;
+            }
         }
         
         /* Desktop optimizations */
         @media (min-width: 1024px) {
             .iframe-container {
-                left: 64px;
-                width: calc(100% - 64px);
+                left: 60px; /* Changed from 64px to 60px */
+                width: calc(100% - 60px); /* Changed from 64px to 60px */
             }
             
             .fixed.left-0 {
                 z-index: 1000 !important;
+                width: 60px; /* Changed from 64px to 60px */
             }
             
             /* Desktop sidebar adjustments */
@@ -319,6 +479,16 @@
             .desktop-header-buttons {
                 display: flex !important;
             }
+            
+            /* Settings container height for desktop */
+            .settings-scroll-container {
+                height: 240px !important;
+            }
+            
+            .settings-item {
+                height: 80px !important;
+                min-height: 80px !important;
+            }
         }
         
         /* Ensure sidebar stays on top of everything */
@@ -328,8 +498,8 @@
         
         /* Adjust chat app margin for sidebar */
         #chatApp {
-            margin-left: 64px;
-            width: calc(100% - 64px);
+            margin-left: 60px; /* Changed from 64px to 60px */
+            width: calc(100% - 60px); /* Changed from 64px to 60px */
         }
         
         /* Adjust content areas for sidebar */
@@ -342,8 +512,8 @@
         
         /* Make sure iframe pages don't hide sidebar */
         .content-area.iframe-container {
-            left: 64px;
-            width: calc(100% - 64px);
+            left: 60px; /* Changed from 64px to 60px */
+            width: calc(100% - 60px); /* Changed from 64px to 60px */
         }
         
         /* Friend list item */
@@ -590,7 +760,7 @@
         .offline-indicator {
             position: fixed;
             top: 0;
-            left: 64px;
+            left: 60px; /* Changed from 64px to 60px */
             right: 0;
             background-color: #ef4444;
             color: white;
@@ -623,7 +793,7 @@
             display: none;
         }
         
-        /* Chat filter tabs */
+        /* Chat filter tabs - old style (keeping for reference) */
         .chat-filter-tabs {
             display: flex;
             background-color: #f9fafb;
@@ -687,7 +857,7 @@
             font-weight: 600;
         }
         
-        /* Chat filter tab badge */
+        /* Chat filter tab badge - old style */
         .filter-tab-badge {
             background-color: #ef4444;
             color: white;
@@ -722,6 +892,24 @@
             color: #9ca3af;
             margin-top: 2px;
             font-style: italic;
+        }
+        
+        /* Settings items fixed height */
+        .settings-item {
+            height: 80px;
+            min-height: 80px;
+        }
+        
+        /* Settings scroll container */
+        .settings-scroll-container {
+            height: 240px;
+            overflow-y: auto;
+        }
+        
+        /* Settings items in settings modal */
+        .settings-section-item .settings-item {
+            height: 80px;
+            min-height: 80px;
         }
     </style>
 </head>
@@ -814,6 +1002,26 @@
                             </div>
                         </div>
                         <div class="flex space-x-3 text-white desktop-header-buttons">
+                            <!-- Chat Filter Tabs in Header - ADDED -->
+                            <div class="chat-filter-tabs-header">
+                                <div class="chat-filter-tab-header active" data-filter="all" title="All Chats">
+                                    📥
+                                    <span id="allCountHeader" class="chat-filter-tab-badge hidden">0</span>
+                                </div>
+                                <div class="chat-filter-tab-header" data-filter="sent" title="Sent Chats">
+                                    📤
+                                    <span id="sentCountHeader" class="chat-filter-tab-badge hidden">0</span>
+                                </div>
+                                <div class="chat-filter-tab-header" data-filter="received" title="Received Chats">
+                                    📨
+                                    <span id="receivedCountHeader" class="chat-filter-tab-badge hidden">0</span>
+                                </div>
+                                <div class="chat-filter-tab-header" data-filter="unread" title="Unread Chats">
+                                    ●
+                                    <span id="unreadCountHeader" class="chat-filter-tab-badge hidden">0</span>
+                                </div>
+                            </div>
+                            
                             <button id="startNewChatBtn" class="text-xl cursor-pointer hover:scale-110 transition-transform" title="Start New Chat">
                                 <i class="fas fa-plus"></i>
                             </button>
@@ -823,6 +1031,26 @@
                         </div>
                         <!-- Mobile header buttons -->
                         <div class="mobile-header-buttons hidden">
+                            <!-- Chat Filter Tabs in Mobile Header - ADDED -->
+                            <div class="chat-filter-tabs-header">
+                                <div class="chat-filter-tab-header active" data-filter="all" title="All Chats">
+                                    📥
+                                    <span id="allCountHeaderMobile" class="chat-filter-tab-badge hidden">0</span>
+                                </div>
+                                <div class="chat-filter-tab-header" data-filter="sent" title="Sent Chats">
+                                    📤
+                                    <span id="sentCountHeaderMobile" class="chat-filter-tab-badge hidden">0</span>
+                                </div>
+                                <div class="chat-filter-tab-header" data-filter="received" title="Received Chats">
+                                    📨
+                                    <span id="receivedCountHeaderMobile" class="chat-filter-tab-badge hidden">0</span>
+                                </div>
+                                <div class="chat-filter-tab-header" data-filter="unread" title="Unread Chats">
+                                    ●
+                                    <span id="unreadCountHeaderMobile" class="chat-filter-tab-badge hidden">0</span>
+                                </div>
+                            </div>
+                            
                             <button id="mobileNewChatBtn" class="text-xl cursor-pointer hover:scale-110 transition-transform text-white" title="Start New Chat">
                                 <i class="fas fa-plus"></i>
                             </button>
@@ -832,25 +1060,8 @@
                         </div>
                     </div>
 
-                    <!-- Chat Filter Tabs - ADDED -->
-                    <div class="chat-filter-tabs">
-                        <div class="chat-filter-tab active" data-filter="all">
-                            All
-                            <span id="allCount" class="filter-tab-badge hidden">0</span>
-                        </div>
-                        <div class="chat-filter-tab" data-filter="sent">
-                            Sent
-                            <span id="sentCount" class="filter-tab-badge hidden">0</span>
-                        </div>
-                        <div class="chat-filter-tab" data-filter="received">
-                            Received
-                            <span id="receivedCount" class="filter-tab-badge hidden">0</span>
-                        </div>
-                        <div class="chat-filter-tab" data-filter="unread">
-                            Unread
-                            <span id="unreadCount" class="filter-tab-badge hidden">0</span>
-                        </div>
-                    </div>
+                    <!-- Old Chat Filter Tabs - REMOVED -->
+                    <!-- <div class="chat-filter-tabs"> ... </div> -->
 
                     <div class="personalization-info bg-purple-800/30 p-3 border-b border-purple-700/30">
                         <div class="flex items-center text-sm text-gray-300">
@@ -1259,7 +1470,7 @@
                     </div>
 
                     <div class="overflow-y-auto custom-scrollbar p-0">
-                        <div class="settings-scroll-container" style="height: 300px; overflow-y: auto;">
+                        <div class="settings-scroll-container">
                             <div class="settings-full-list">
                                 <div class="space-y-0">
                                     <div class="settings-section-item" data-section="profile">
@@ -1544,7 +1755,7 @@
             </div>
             
             <div class="overflow-y-auto max-h-[50vh] custom-scrollbar p-0">
-                <div class="settings-scroll-container" style="height: 300px; overflow-y: auto;">
+                <div class="settings-scroll-container">
                     <div class="settings-full-list">
                         <div class="space-y-0">
                             <div class="settings-section-item" data-section="profile">
@@ -3386,7 +3597,7 @@
             }
         }
         
-        // Load friends from Firebase - FIXED
+        // Load friends from Firebase - UPDATED: Faster loading
         async function loadFriends() {
             try {
                 // First try to load from cache
@@ -3442,7 +3653,7 @@
             }
         }
         
-        // Display friends list - FIXED
+        // Display friends list - UPDATED: Faster display
         function displayFriendsList() {
             const friendsListForChat = document.getElementById('friendsListForChat');
             if (!friendsListForChat) return;
@@ -3503,6 +3714,9 @@
                 
                 friendsListForChat.appendChild(friendItem);
             });
+            
+            // Update start chat button immediately
+            updateStartChatButton();
         }
         
         // Update start chat button state
@@ -3989,13 +4203,32 @@
             }
         }
         
-        // Chat Filter Functions - FIXED
+        // Chat Filter Functions - UPDATED: Header filter tabs
         function setupChatFilters() {
-            const filterTabs = document.querySelectorAll('.chat-filter-tab');
-            filterTabs.forEach(tab => {
+            // Setup desktop filter tabs
+            const filterTabsDesktop = document.querySelectorAll('.chat-filter-tab-header');
+            filterTabsDesktop.forEach(tab => {
                 tab.addEventListener('click', function() {
-                    // Remove active class from all tabs
-                    filterTabs.forEach(t => t.classList.remove('active'));
+                    // Remove active class from all desktop tabs
+                    filterTabsDesktop.forEach(t => t.classList.remove('active'));
+                    
+                    // Add active class to clicked tab
+                    this.classList.add('active');
+                    
+                    // Set current filter
+                    currentFilter = this.dataset.filter;
+                    
+                    // Apply filter
+                    applyChatFilter();
+                });
+            });
+            
+            // Setup mobile filter tabs
+            const filterTabsMobile = document.querySelectorAll('.chat-filter-tab-header');
+            filterTabsMobile.forEach(tab => {
+                tab.addEventListener('click', function() {
+                    // Remove active class from all mobile tabs
+                    filterTabsMobile.forEach(t => t.classList.remove('active'));
                     
                     // Add active class to clicked tab
                     this.classList.add('active');
@@ -4208,15 +4441,21 @@
                 if (!isSent) receivedChatsCount++;
             });
             
-            // Update badge counts
-            updateFilterBadge('all', allChats.length);
-            updateFilterBadge('sent', sentChatsCount);
-            updateFilterBadge('received', receivedChatsCount);
-            updateFilterBadge('unread', unreadChatsCount);
+            // Update header badge counts for desktop
+            updateFilterBadge('allCountHeader', allChats.length);
+            updateFilterBadge('sentCountHeader', sentChatsCount);
+            updateFilterBadge('receivedCountHeader', receivedChatsCount);
+            updateFilterBadge('unreadCountHeader', unreadChatsCount);
+            
+            // Update header badge counts for mobile
+            updateFilterBadge('allCountHeaderMobile', allChats.length);
+            updateFilterBadge('sentCountHeaderMobile', sentChatsCount);
+            updateFilterBadge('receivedCountHeaderMobile', receivedChatsCount);
+            updateFilterBadge('unreadCountHeaderMobile', unreadChatsCount);
         }
         
-        function updateFilterBadge(filter, count) {
-            const badge = document.getElementById(`${filter}Count`);
+        function updateFilterBadge(elementId, count) {
+            const badge = document.getElementById(elementId);
             if (badge) {
                 if (count > 0) {
                     badge.textContent = count;
@@ -4324,13 +4563,14 @@
             }
         }
         
-        // Start new chat - FIXED
+        // Start new chat - UPDATED: Faster loading
         function startNewChatFlow() {
             const startNewChatSection = document.getElementById('startNewChatSection');
             if (startNewChatSection) {
                 startNewChatSection.classList.remove('hidden');
-                // Load friends directly
-                loadFriends();
+                // Load friends immediately and display cached version first
+                displayFriendsList(); // Show cached friends first
+                loadFriends(); // Then load from Firebase in background
             }
         }
         
@@ -4400,7 +4640,7 @@
             }
         }
         
-        // Theme toggle functionality - FIXED
+        // Theme toggle functionality - UPDATED: All theme toggles functional
         function setupThemeToggle() {
             // Load saved theme
             const savedTheme = localStorage.getItem('kynecta_theme') || 'light';
@@ -4483,7 +4723,7 @@
             // Load cached user data immediately
             loadCachedUserData();
             
-            // Setup chat filters
+            // Setup chat filters in header
             setupChatFilters();
             
             // Setup message input and send button
@@ -4548,7 +4788,7 @@
                 });
             });
             
-            // Setup start new chat button - FIXED
+            // Setup start new chat button - UPDATED: Faster loading
             const startNewChatBtn = document.getElementById('startNewChatBtn');
             const startFirstChatBtn = document.getElementById('startFirstChatBtn');
             const cancelNewChatBtn = document.getElementById('cancelNewChat');
