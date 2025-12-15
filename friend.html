@@ -927,6 +927,10 @@
                 <button class="add-friend-btn" id="addFriendBtn" title="Add Friend">
                     <i class="fas fa-user-plus"></i>
                 </button>
+                <div class="offline-indicator" id="offlineIndicator" style="display: none;">
+                    <i class="fas fa-wifi-slash"></i>
+                    <span>Offline</span>
+                </div>
             </div>
             
             <div class="friends-tabs">
@@ -1115,203 +1119,337 @@
         let dbName = 'FriendsOfflineDB';
         let dbVersion = 1;
         let actionQueue = [];
+        let authCheckCompleted = false;
+        let appInitialized = false;
         
         // DOM Elements
         const addFriendModal = document.getElementById('addFriendModal');
         const friendProfileModal = document.getElementById('friendProfileModal');
         const notification = document.getElementById('notification');
-        const sidebarHeader = document.querySelector('.sidebar-header');
+        const offlineIndicator = document.getElementById('offlineIndicator');
         const queueIndicator = document.getElementById('queueIndicator');
         
-        // Initialize the application - NO AUTHENTICATION CHECK
-        document.addEventListener('DOMContentLoaded', function() {
-            // Get the current user from Firebase Auth
-            currentUser = auth.currentUser;
+        // Initialize the application
+        document.addEventListener('DOMContentLoaded', async function() {
+            console.log('Friends page loading...');
             
-            if (!currentUser) {
-                // Try to get user from auth state
-                auth.onAuthStateChanged(function(user) {
-                    if (user) {
-                        currentUser = user;
-                        console.log('User loaded from auth state:', currentUser.uid);
-                        initializeApp();
-                    } else {
-                        console.log('No user found');
-                        // Just initialize with null user - other files don't check either
-                        initializeApp();
-                    }
-                });
-            } else {
-                console.log('Current user loaded:', currentUser.uid);
-                initializeApp();
-            }
-            
-            setupEventListeners();
-            setupOfflineIndicator();
-            initializeIndexedDB();
-        });
-        
-        function initializeApp() {
-    // If no current user, we can't load friends
-    if (!currentUser) {
-        console.log('No current user, showing empty state');
-        document.getElementById('friendsSection').innerHTML = `
-            <div class="empty-state">
-                <i class="fas fa-users empty-state-icon"></i>
-                <p>Please log in to see your friends</p>
-                <p style="font-size: 14px; margin-top: 10px;">You need to be logged in to use the friends feature</p>
-            </div>
-        `;
-        return;
-    }
-    
-    // Initialize IndexedDB first
-    initializeIndexedDB().then(() => {
-        // Check if we're online
-        if (isOnline) {
-            // Online: Load from Firebase and sync
-            Promise.all([
-                loadFriendsData(),
-                loadFriendRequests(),
-                loadBlockedUsers(),
-                loadFriendTags(),
-                loadActionQueue() // Load pending actions
-            ]).then(() => {
-                // Save to IndexedDB for offline use
-                saveFriendsToIndexedDB();
-                
-                setupPresenceTracking();
-                setupRealTimeListeners();
-                
-                // Process any queued actions
-                processActionQueue();
-            });
-        } else {
-            // Offline: Load from IndexedDB
-            console.log('Offline mode: Loading from IndexedDB');
-            loadFriendsFromIndexedDB();
-            loadActionQueue(); // Load queued actions
-            loadFriendTags(); // Load friend tags
-            showNotification('Offline mode: Showing cached friends list', 'warning');
-        }
-    }).catch(error => {
-        console.error('IndexedDB initialization failed:', error);
-        
-        // Continue without IndexedDB support
-        if (isOnline && currentUser) {
-            Promise.all([
-                loadFriendsData(),
-                loadFriendRequests(),
-                loadBlockedUsers(),
-                loadFriendTags()
-            ]).then(() => {
-                setupPresenceTracking();
-                setupRealTimeListeners();
-            });
-        } else {
-            // Show offline message without cached data
+            // Show loading state
             document.getElementById('friendsSection').innerHTML = `
-                <div class="empty-state">
-                    <i class="fas fa-users empty-state-icon"></i>
-                    <p>Unable to load friends list</p>
-                    <p style="font-size: 14px; margin-top: 10px;">${error.message || 'Storage initialization failed'}</p>
+                <div class="loading-placeholder" style="text-align: center; padding: 40px 20px; color: var(--text-secondary);">
+                    <div class="loading-spinner"></div>
+                    <p>Initializing app...</p>
                 </div>
             `;
+            
+            // Setup basic event listeners that don't need auth
+            setupEventListeners();
+            setupOfflineIndicator();
+            
+            try {
+                // Initialize IndexedDB first
+                await initializeIndexedDB();
+                console.log('IndexedDB initialized');
+                
+                // Now check authentication
+                await checkAuthentication();
+                
+            } catch (error) {
+                console.error('Initialization error:', error);
+                showNotification('Error initializing app. Please refresh.', 'error');
+                document.getElementById('friendsSection').innerHTML = `
+                    <div class="empty-state">
+                        <i class="fas fa-exclamation-triangle empty-state-icon"></i>
+                        <p>Error loading app</p>
+                        <p style="font-size: 14px; margin-top: 10px;">${error.message || 'Unknown error'}</p>
+                        <button onclick="location.reload()" class="request-action-btn request-accept" style="margin-top: 20px;">
+                            <i class="fas fa-redo"></i> Refresh Page
+                        </button>
+                    </div>
+                `;
+            }
+        });
+        
+        // Check authentication status
+        async function checkAuthentication() {
+            console.log('Checking authentication...');
+            
+            // Set up auth state listener
+            return new Promise((resolve) => {
+                const unsubscribe = auth.onAuthStateChanged(async (user) => {
+                    unsubscribe(); // Remove listener after first call
+                    
+                    if (user) {
+                        console.log('User authenticated:', user.uid, user.email);
+                        currentUser = user;
+                        authCheckCompleted = true;
+                        
+                        // Show user info in console
+                        console.log('User details:', {
+                            uid: user.uid,
+                            email: user.email,
+                            displayName: user.displayName,
+                            photoURL: user.photoURL
+                        });
+                        
+                        // Initialize app with user
+                        await initializeApp();
+                        
+                        // Update user's online status
+                        await updateUserOnlineStatus();
+                        
+                    } else {
+                        console.log('No user authenticated');
+                        currentUser = null;
+                        authCheckCompleted = true;
+                        
+                        // Show login required message
+                        document.getElementById('friendsSection').innerHTML = `
+                            <div class="empty-state">
+                                <i class="fas fa-sign-in-alt empty-state-icon"></i>
+                                <p>Login Required</p>
+                                <p style="font-size: 14px; margin-top: 10px;">Please log in to access your friends list</p>
+                                <button onclick="window.location.href='index.html'" class="request-action-btn request-accept" style="margin-top: 20px;">
+                                    <i class="fas fa-sign-in-alt"></i> Go to Login
+                                </button>
+                            </div>
+                        `;
+                        
+                        // Disable add friend button
+                        document.getElementById('addFriendBtn').disabled = true;
+                        document.getElementById('addFriendBtn').style.opacity = '0.5';
+                        document.getElementById('addFriendBtn').style.cursor = 'not-allowed';
+                    }
+                    
+                    resolve();
+                });
+                
+                // Add timeout in case auth state change takes too long
+                setTimeout(() => {
+                    if (!authCheckCompleted) {
+                        console.log('Auth check timeout');
+                        unsubscribe();
+                        authCheckCompleted = true;
+                        
+                        // Try to get current user directly
+                        const user = auth.currentUser;
+                        if (user) {
+                            console.log('Found user via direct check:', user.uid);
+                            currentUser = user;
+                            initializeApp();
+                        } else {
+                            console.log('No user found after timeout');
+                            document.getElementById('friendsSection').innerHTML = `
+                                <div class="empty-state">
+                                    <i class="fas fa-exclamation-triangle empty-state-icon"></i>
+                                    <p>Authentication Timeout</p>
+                                    <p style="font-size: 14px; margin-top: 10px;">Please try refreshing the page</p>
+                                    <button onclick="location.reload()" class="request-action-btn request-accept" style="margin-top: 20px;">
+                                        <i class="fas fa-redo"></i> Refresh Page
+                                    </button>
+                                </div>
+                            `;
+                        }
+                        resolve();
+                    }
+                }, 10000); // 10 second timeout
+            });
         }
-    });
-}
+        
+        // Update user's online status in Firebase
+        async function updateUserOnlineStatus() {
+            if (!currentUser || !isOnline) return;
+            
+            try {
+                await db.collection('users').doc(currentUser.uid).update({
+                    status: 'online',
+                    lastSeen: firebase.firestore.FieldValue.serverTimestamp()
+                });
+                console.log('User status set to online');
+                
+                // Set up beforeunload to mark as offline when leaving
+                window.addEventListener('beforeunload', async () => {
+                    if (currentUser && isOnline) {
+                        try {
+                            await db.collection('users').doc(currentUser.uid).update({
+                                status: 'offline',
+                                lastSeen: firebase.firestore.FieldValue.serverTimestamp()
+                            });
+                        } catch (error) {
+                            console.error('Error setting offline status:', error);
+                        }
+                    }
+                });
+                
+            } catch (error) {
+                console.error('Error updating user status:', error);
+            }
+        }
+        
+        // Main app initialization
+        async function initializeApp() {
+            if (appInitialized) return;
+            
+            console.log('Initializing app for user:', currentUser ? currentUser.uid : 'No user');
+            
+            if (!currentUser) {
+                console.log('No current user, cannot initialize app');
+                return;
+            }
+            
+            // Show loading state
+            document.getElementById('friendsSection').innerHTML = `
+                <div class="loading-placeholder" style="text-align: center; padding: 40px 20px; color: var(--text-secondary);">
+                    <div class="loading-spinner"></div>
+                    <p>Loading your friends...</p>
+                </div>
+            `;
+            
+            try {
+                // Load friend tags
+                await loadFriendTags();
+                
+                // Check connectivity
+                if (isOnline) {
+                    console.log('Online mode: Loading from Firebase');
+                    
+                    // Load all data from Firebase
+                    await Promise.all([
+                        loadFriendsData(),
+                        loadFriendRequests(),
+                        loadBlockedUsers()
+                    ]);
+                    
+                    // Save to IndexedDB for offline use
+                    await saveFriendsToIndexedDB();
+                    
+                    // Set up real-time listeners
+                    setupRealTimeListeners();
+                    
+                    // Process any queued actions
+                    await processActionQueue();
+                    
+                } else {
+                    console.log('Offline mode: Loading from IndexedDB');
+                    
+                    // Load from IndexedDB
+                    await loadFriendsFromIndexedDB();
+                    
+                    // Load queued actions
+                    await loadActionQueue();
+                    
+                    showNotification('Offline mode: Showing cached friends list', 'warning');
+                }
+                
+                // Update UI
+                updateFriendsList();
+                
+                // Mark as initialized
+                appInitialized = true;
+                
+                console.log('App initialized successfully');
+                
+            } catch (error) {
+                console.error('Error initializing app:', error);
+                showNotification('Error loading friends data', 'error');
+                
+                // Show error state
+                document.getElementById('friendsSection').innerHTML = `
+                    <div class="empty-state">
+                        <i class="fas fa-exclamation-triangle empty-state-icon"></i>
+                        <p>Error Loading Friends</p>
+                        <p style="font-size: 14px; margin-top: 10px;">${error.message || 'Please check your connection'}</p>
+                        <button onclick="location.reload()" class="request-action-btn request-accept" style="margin-top: 20px;">
+                            <i class="fas fa-redo"></i> Try Again
+                        </button>
+                    </div>
+                `;
+            }
+        }
+        
         // IndexedDB initialization
-function initializeIndexedDB() {
-    return new Promise((resolve, reject) => {
-        // Check if IndexedDB is available in this browser
-        if (!window.indexedDB) {
-            const error = new Error('IndexedDB is not supported in this browser');
-            console.error(error);
-            reject(error);
-            return;
+        function initializeIndexedDB() {
+            return new Promise((resolve, reject) => {
+                if (!window.indexedDB) {
+                    reject(new Error('IndexedDB is not supported in this browser'));
+                    return;
+                }
+                
+                const request = window.indexedDB.open(dbName, dbVersion);
+                
+                request.onerror = (event) => {
+                    console.error('IndexedDB error:', event.target.error);
+                    reject(event.target.error);
+                };
+                
+                request.onsuccess = (event) => {
+                    indexedDB = event.target.result;
+                    console.log('IndexedDB initialized successfully');
+                    resolve(indexedDB);
+                };
+                
+                request.onupgradeneeded = (event) => {
+                    const db = event.target.result;
+                    
+                    // Create object stores
+                    if (!db.objectStoreNames.contains('friends')) {
+                        const friendsStore = db.createObjectStore('friends', { keyPath: 'id' });
+                        friendsStore.createIndex('userId', 'userId', { unique: false });
+                    }
+                    
+                    if (!db.objectStoreNames.contains('friendRequests')) {
+                        const requestsStore = db.createObjectStore('friendRequests', { keyPath: 'id' });
+                        requestsStore.createIndex('userId', 'userId', { unique: false });
+                    }
+                    
+                    if (!db.objectStoreNames.contains('blockedUsers')) {
+                        const blockedStore = db.createObjectStore('blockedUsers', { keyPath: 'id' });
+                        blockedStore.createIndex('userId', 'userId', { unique: false });
+                    }
+                    
+                    if (!db.objectStoreNames.contains('actionQueue')) {
+                        const queueStore = db.createObjectStore('actionQueue', { keyPath: 'id', autoIncrement: true });
+                        queueStore.createIndex('type', 'type', { unique: false });
+                        queueStore.createIndex('status', 'status', { unique: false });
+                        queueStore.createIndex('userId', 'userId', { unique: false });
+                    }
+                };
+            });
         }
-        
-        const request = window.indexedDB.open(dbName, dbVersion);
-        
-        request.onerror = (event) => {
-            console.error('IndexedDB error:', event.target.error);
-            reject(event.target.error);
-        };
-        
-        request.onsuccess = (event) => {
-            indexedDB = event.target.result;
-            console.log('IndexedDB initialized successfully');
-            resolve(indexedDB);
-        };
-        
-        request.onupgradeneeded = (event) => {
-            const db = event.target.result;
-            
-            // Create object stores if they don't exist
-            if (!db.objectStoreNames.contains('friends')) {
-                const friendsStore = db.createObjectStore('friends', { keyPath: 'id' });
-                friendsStore.createIndex('userId', 'userId', { unique: false });
-            }
-            
-            if (!db.objectStoreNames.contains('friendRequests')) {
-                const requestsStore = db.createObjectStore('friendRequests', { keyPath: 'id' });
-                requestsStore.createIndex('userId', 'userId', { unique: false });
-            }
-            
-            if (!db.objectStoreNames.contains('blockedUsers')) {
-                const blockedStore = db.createObjectStore('blockedUsers', { keyPath: 'id' });
-                blockedStore.createIndex('userId', 'userId', { unique: false });
-            }
-            
-            if (!db.objectStoreNames.contains('actionQueue')) {
-                const queueStore = db.createObjectStore('actionQueue', { keyPath: 'id', autoIncrement: true });
-                queueStore.createIndex('type', 'type', { unique: false });
-                queueStore.createIndex('status', 'status', { unique: false });
-            }
-        };
-    });
-}
         
         // Action Queue Management
         async function addToActionQueue(action) {
-    if (!indexedDB || !currentUser) return;
-    
-    try {
-        const transaction = indexedDB.transaction(['actionQueue'], 'readwrite');
-        const queueStore = transaction.objectStore('actionQueue');
-        
-        const queuedAction = {
-            ...action,
-            userId: currentUser.uid,
-            createdAt: new Date().toISOString(),
-            status: 'pending'
-        };
-        
-        await new Promise((resolve, reject) => {
-            const request = queueStore.add(queuedAction);
-            request.onsuccess = () => resolve(request.result);
-            request.onerror = () => reject(request.error);
-        });
-        
-        // Update local queue with the returned ID
-        queuedAction.id = await new Promise((resolve) => {
-            const request = queueStore.add(queuedAction);
-            request.onsuccess = () => resolve(request.result);
-        });
-        
-        actionQueue.push(queuedAction);
-        updateQueueIndicator();
-        
-        console.log('Action added to queue:', action.type);
-        
-        return queuedAction.id;
-        
-    } catch (error) {
-        console.error('Error adding to action queue:', error);
-        throw error;
-    }
-}
-
+            if (!indexedDB || !currentUser) return null;
+            
+            try {
+                const transaction = indexedDB.transaction(['actionQueue'], 'readwrite');
+                const queueStore = transaction.objectStore('actionQueue');
+                
+                const queuedAction = {
+                    ...action,
+                    userId: currentUser.uid,
+                    createdAt: new Date().toISOString(),
+                    status: 'pending',
+                    id: Date.now() + Math.random().toString(36).substr(2, 9) // Generate unique ID
+                };
+                
+                await new Promise((resolve, reject) => {
+                    const request = queueStore.add(queuedAction);
+                    request.onsuccess = () => resolve(request.result);
+                    request.onerror = () => reject(request.error);
+                });
+                
+                actionQueue.push(queuedAction);
+                updateQueueIndicator();
+                
+                console.log('Action added to queue:', action.type, queuedAction.id);
+                
+                return queuedAction.id;
+                
+            } catch (error) {
+                console.error('Error adding to action queue:', error);
+                throw error;
+            }
+        }
         
         async function loadActionQueue() {
             if (!indexedDB || !currentUser) return;
@@ -1319,15 +1457,21 @@ function initializeIndexedDB() {
             try {
                 const transaction = indexedDB.transaction(['actionQueue'], 'readonly');
                 const queueStore = transaction.objectStore('actionQueue');
-                const request = queueStore.getAll();
                 
-                request.onsuccess = (event) => {
-                    actionQueue = event.target.result.filter(action => 
-                        action.userId === currentUser.uid && action.status === 'pending'
-                    );
-                    updateQueueIndicator();
-                    console.log('Loaded action queue:', actionQueue.length);
-                };
+                return new Promise((resolve, reject) => {
+                    const request = queueStore.getAll();
+                    
+                    request.onsuccess = (event) => {
+                        actionQueue = event.target.result.filter(action => 
+                            action.userId === currentUser.uid && action.status === 'pending'
+                        );
+                        updateQueueIndicator();
+                        console.log('Loaded action queue:', actionQueue.length);
+                        resolve();
+                    };
+                    
+                    request.onerror = (event) => reject(event.target.error);
+                });
                 
             } catch (error) {
                 console.error('Error loading action queue:', error);
@@ -1337,10 +1481,13 @@ function initializeIndexedDB() {
         async function processActionQueue() {
             if (!isOnline || !currentUser || actionQueue.length === 0) return;
             
+            console.log('Processing action queue:', actionQueue.length, 'actions');
             showNotification(`Processing ${actionQueue.length} queued actions...`, 'success');
             
-            for (const action of actionQueue) {
+            for (const action of [...actionQueue]) { // Create copy to avoid modification during iteration
                 try {
+                    console.log('Processing action:', action.type, action.id);
+                    
                     switch (action.type) {
                         case 'friend_request':
                             await processQueuedFriendRequest(action);
@@ -1373,11 +1520,7 @@ function initializeIndexedDB() {
                 }
             }
             
-            // Clear local queue
-            actionQueue = actionQueue.filter(action => action.status !== 'completed');
-            updateQueueIndicator();
-            
-            // Reload data
+            // Reload data to reflect changes
             await Promise.all([
                 loadFriendsData(),
                 loadFriendRequests(),
@@ -1386,41 +1529,41 @@ function initializeIndexedDB() {
             
             showNotification('Queued actions processed successfully', 'success');
         }
+        
         async function markActionCompleted(actionId) {
-    if (!indexedDB || !currentUser) return;
-    
-    return new Promise((resolve, reject) => {
-        try {
-            const transaction = indexedDB.transaction(['actionQueue'], 'readwrite');
-            const queueStore = transaction.objectStore('actionQueue');
+            if (!indexedDB || !currentUser) return;
             
-            const getRequest = queueStore.get(actionId);
-            getRequest.onsuccess = (event) => {
-                const action = event.target.result;
-                if (action) {
-                    action.status = 'completed';
-                    const putRequest = queueStore.put(action);
-                    putRequest.onsuccess = () => {
-                        // Remove from local queue
-                        actionQueue = actionQueue.filter(a => a.id !== actionId);
-                        updateQueueIndicator();
-                        resolve();
+            return new Promise((resolve, reject) => {
+                try {
+                    const transaction = indexedDB.transaction(['actionQueue'], 'readwrite');
+                    const queueStore = transaction.objectStore('actionQueue');
+                    
+                    const getRequest = queueStore.get(actionId);
+                    getRequest.onsuccess = (event) => {
+                        const action = event.target.result;
+                        if (action) {
+                            action.status = 'completed';
+                            const putRequest = queueStore.put(action);
+                            putRequest.onsuccess = () => {
+                                // Remove from local queue
+                                actionQueue = actionQueue.filter(a => a.id !== actionId);
+                                updateQueueIndicator();
+                                resolve();
+                            };
+                            putRequest.onerror = (e) => reject(e.target.error);
+                        } else {
+                            resolve();
+                        }
                     };
-                    putRequest.onerror = (e) => reject(e.target.error);
-                } else {
-                    resolve();
+                    getRequest.onerror = (e) => reject(e.target.error);
+                    
+                } catch (error) {
+                    console.error('Error marking action as completed:', error);
+                    reject(error);
                 }
-            };
-            getRequest.onerror = (e) => reject(e.target.error);
-            
-        } catch (error) {
-            console.error('Error marking action as completed:', error);
-            reject(error);
+            });
         }
-    });
-}
-       
-
+        
         function updateQueueIndicator() {
             const queueCount = document.getElementById('queueCount');
             if (actionQueue.length > 0) {
@@ -1444,14 +1587,17 @@ function initializeIndexedDB() {
                 .where('status', '==', 'pending')
                 .get();
             
-            if (!existingRequest.empty) return;
+            if (!existingRequest.empty) {
+                console.log('Friend request already exists, skipping');
+                return;
+            }
             
             // Create friend request
             await db.collection('friend_requests').add({
                 fromUserId: currentUser.uid,
                 fromUserName: currentUser.displayName || 'User',
                 fromUserPhoto: currentUser.photoURL || '',
-                fromUserUsername: currentUser.username || '',
+                fromUserUsername: await getCurrentUsername(),
                 toUserId: toUserId,
                 toUserName: userData.displayName || 'User',
                 toUserUsername: userData.username || '',
@@ -1460,11 +1606,7 @@ function initializeIndexedDB() {
                 createdAt: firebase.firestore.FieldValue.serverTimestamp()
             });
             
-            // Send notification
-            await sendNotification(toUserId, 'friend_request', {
-                message: `${currentUser.displayName || 'Someone'} sent you a friend request`,
-                type: 'friend_request'
-            });
+            console.log('Friend request sent to:', toUserId);
         }
         
         async function processQueuedAcceptRequest(action) {
@@ -1485,11 +1627,7 @@ function initializeIndexedDB() {
                 createdAt: firebase.firestore.FieldValue.serverTimestamp()
             });
             
-            // Send notification
-            await sendNotification(fromUserId, 'friend_request_accepted', {
-                message: `${currentUser.displayName || 'Someone'} accepted your friend request`,
-                type: 'friend_request_accepted'
-            });
+            console.log('Friend request accepted:', requestId);
         }
         
         async function processQueuedDeclineRequest(action) {
@@ -1499,12 +1637,15 @@ function initializeIndexedDB() {
                 status: 'declined',
                 respondedAt: firebase.firestore.FieldValue.serverTimestamp()
             });
+            
+            console.log('Friend request declined:', requestId);
         }
         
         async function processQueuedCancelRequest(action) {
             const { requestId } = action.data;
             
             await db.collection('friend_requests').doc(requestId).delete();
+            console.log('Friend request cancelled:', requestId);
         }
         
         async function processQueuedRemoveFriend(action) {
@@ -1513,6 +1654,7 @@ function initializeIndexedDB() {
             const friend = userFriendsMap.get(friendId);
             if (friend && friend.friendshipId) {
                 await db.collection('friendships').doc(friend.friendshipId).delete();
+                console.log('Friend removed:', friendId);
             }
         }
         
@@ -1532,480 +1674,222 @@ function initializeIndexedDB() {
             if (friend && friend.friendshipId) {
                 await db.collection('friendships').doc(friend.friendshipId).delete();
             }
+            
+            console.log('User blocked:', friendId);
         }
         
         async function processQueuedUnblockUser(action) {
             const { blockedId } = action.data;
             
             await db.collection('blocked_users').doc(blockedId).delete();
+            console.log('User unblocked:', blockedId);
         }
-
-        async function clearActionQueue() {
-    if (!indexedDB || !currentUser) return;
-    
-    return new Promise((resolve, reject) => {
-        try {
-            const transaction = indexedDB.transaction(['actionQueue'], 'readwrite');
-            const queueStore = transaction.objectStore('actionQueue');
+        
+        // Get current user's username
+        async function getCurrentUsername() {
+            if (!currentUser) return '';
             
-            // Clear all queued actions for current user
-            const keyRange = IDBKeyRange.bound(0, Infinity);
-            const request = queueStore.openCursor(keyRange);
-            
-            request.onsuccess = (event) => {
-                const cursor = event.target.result;
-                if (cursor) {
-                    if (cursor.value.userId === currentUser.uid) {
-                        cursor.delete();
-                    }
-                    cursor.continue();
-                } else {
-                    actionQueue = [];
-                    updateQueueIndicator();
-                    resolve();
+            try {
+                const userDoc = await db.collection('users').doc(currentUser.uid).get();
+                if (userDoc.exists) {
+                    return userDoc.data().username || '';
                 }
-            };
-            
-            request.onerror = (e) => reject(e.target.error);
-            
-        } catch (error) {
-            console.error('Error clearing action queue:', error);
-            reject(error);
-        }
-    });
-}
-    async function getActionQueueCount() {
-    if (!indexedDB || !currentUser) return 0;
-    
-    return new Promise((resolve, reject) => {
-        try {
-            const transaction = indexedDB.transaction(['actionQueue'], 'readonly');
-            const queueStore = transaction.objectStore('actionQueue');
-            
-            // Count only pending actions for current user
-            const index = queueStore.index('status');
-            const keyRange = IDBKeyRange.only('pending');
-            const countRequest = index.count(keyRange);
-            
-            countRequest.onsuccess = () => resolve(countRequest.result);
-            countRequest.onerror = (e) => reject(e.target.error);
-            
-        } catch (error) {
-            console.error('Error getting action queue count:', error);
-            reject(error);
-        }
-    });
-}    
-
-async function deleteOldCachedData(maxAgeDays = 30) {
-    if (!indexedDB || !currentUser) return;
-    
-    return new Promise((resolve, reject) => {
-        try {
-            const transaction = indexedDB.transaction(['friends', 'friendRequests', 'blockedUsers'], 'readwrite');
-            const cutoffDate = new Date();
-            cutoffDate.setDate(cutoffDate.getDate() - maxAgeDays);
-            
-            // Delete old friends
-            const friendsStore = transaction.objectStore('friends');
-            const friendsRequest = friendsStore.openCursor();
-            friendsRequest.onsuccess = (event) => {
-                const cursor = event.target.result;
-                if (cursor) {
-                    if (cursor.value.userId === currentUser.uid) {
-                        const cachedDate = new Date(cursor.value.cachedAt);
-                        if (cachedDate < cutoffDate) {
-                            cursor.delete();
-                        }
-                    }
-                    cursor.continue();
-                }
-            };
-            
-            // Delete old friend requests
-            const requestsStore = transaction.objectStore('friendRequests');
-            const requestsRequest = requestsStore.openCursor();
-            requestsRequest.onsuccess = (event) => {
-                const cursor = event.target.result;
-                if (cursor) {
-                    if (cursor.value.userId === currentUser.uid) {
-                        const cachedDate = new Date(cursor.value.cachedAt);
-                        if (cachedDate < cutoffDate) {
-                            cursor.delete();
-                        }
-                    }
-                    cursor.continue();
-                }
-            };
-            
-            // Delete old blocked users
-            const blockedStore = transaction.objectStore('blockedUsers');
-            const blockedRequest = blockedStore.openCursor();
-            blockedRequest.onsuccess = (event) => {
-                const cursor = event.target.result;
-                if (cursor) {
-                    if (cursor.value.userId === currentUser.uid) {
-                        const cachedDate = new Date(cursor.value.cachedAt);
-                        if (cachedDate < cutoffDate) {
-                            cursor.delete();
-                        }
-                    }
-                    cursor.continue();
-                }
-            };
-            
-            transaction.oncomplete = () => {
-                console.log('Old cached data cleaned up');
-                resolve();
-            };
-            
-            transaction.onerror = (e) => reject(e.target.error);
-            
-        } catch (error) {
-            console.error('Error deleting old cached data:', error);
-            reject(error);
-        }
-    });
-}
-
-async function backupFriendsData() {
-    if (!indexedDB || !currentUser) return null;
-    
-    return new Promise((resolve, reject) => {
-        try {
-            const transaction = indexedDB.transaction(['friends', 'friendRequests', 'blockedUsers', 'actionQueue'], 'readonly');
-            
-            const backupData = {
-                friends: [],
-                friendRequests: [],
-                blockedUsers: [],
-                actionQueue: [],
-                timestamp: new Date().toISOString(),
-                userId: currentUser.uid
-            };
-            
-            // Backup friends
-            const friendsStore = transaction.objectStore('friends');
-            const friendsRequest = friendsStore.getAll();
-            friendsRequest.onsuccess = (event) => {
-                backupData.friends = event.target.result.filter(item => item.userId === currentUser.uid);
-            };
-            
-            // Backup friend requests
-            const requestsStore = transaction.objectStore('friendRequests');
-            const requestsRequest = requestsStore.getAll();
-            requestsRequest.onsuccess = (event) => {
-                backupData.friendRequests = event.target.result.filter(item => item.userId === currentUser.uid);
-            };
-            
-            // Backup blocked users
-            const blockedStore = transaction.objectStore('blockedUsers');
-            const blockedRequest = blockedStore.getAll();
-            blockedRequest.onsuccess = (event) => {
-                backupData.blockedUsers = event.target.result.filter(item => item.userId === currentUser.uid);
-            };
-            
-            // Backup action queue
-            const queueStore = transaction.objectStore('actionQueue');
-            const queueRequest = queueStore.getAll();
-            queueRequest.onsuccess = (event) => {
-                backupData.actionQueue = event.target.result.filter(item => item.userId === currentUser.uid);
-            };
-            
-            transaction.oncomplete = () => resolve(backupData);
-            transaction.onerror = (e) => reject(e.target.error);
-            
-        } catch (error) {
-            console.error('Error backing up friends data:', error);
-            reject(error);
-        }
-    });
-}
-
-async function restoreFriendsData(backupData) {
-    if (!indexedDB || !currentUser) return false;
-    
-    return new Promise((resolve, reject) => {
-        try {
-            // Verify backup data belongs to current user
-            if (backupData.userId !== currentUser.uid) {
-                reject(new Error('Backup data does not belong to current user'));
-                return;
+            } catch (error) {
+                console.error('Error getting username:', error);
             }
-            
-            const transaction = indexedDB.transaction(['friends', 'friendRequests', 'blockedUsers', 'actionQueue'], 'readwrite');
-            
-            // Restore friends
-            const friendsStore = transaction.objectStore('friends');
-            backupData.friends.forEach(friend => {
-                friendsStore.put(friend);
-            });
-            
-            // Restore friend requests
-            const requestsStore = transaction.objectStore('friendRequests');
-            backupData.friendRequests.forEach(request => {
-                requestsStore.put(request);
-            });
-            
-            // Restore blocked users
-            const blockedStore = transaction.objectStore('blockedUsers');
-            backupData.blockedUsers.forEach(blocked => {
-                blockedStore.put(blocked);
-            });
-            
-            // Restore action queue
-            const queueStore = transaction.objectStore('actionQueue');
-            backupData.actionQueue.forEach(action => {
-                queueStore.put(action);
-            });
-            
-            transaction.oncomplete = () => {
-                console.log('Friends data restored from backup');
-                resolve(true);
-            };
-            
-            transaction.onerror = (e) => reject(e.target.error);
-            
-        } catch (error) {
-            console.error('Error restoring friends data:', error);
-            reject(error);
+            return '';
         }
-    });
-}
-
-async function compactIndexedDB() {
-    if (!indexedDB || !currentUser) return;
-    
-    return new Promise((resolve, reject) => {
-        try {
-            const transaction = indexedDB.transaction(['friends'], 'readwrite');
-            const friendsStore = transaction.objectStore('friends');
-            
-            // Group friends by ID and keep only the most recent entry
-            const friendsMap = new Map();
-            const request = friendsStore.openCursor();
-            
-            request.onsuccess = (event) => {
-                const cursor = event.target.result;
-                if (cursor) {
-                    if (cursor.value.userId === currentUser.uid) {
-                        const existing = friendsMap.get(cursor.value.id);
-                        if (!existing || new Date(cursor.value.cachedAt) > new Date(existing.cachedAt)) {
-                            friendsMap.set(cursor.value.id, cursor.value);
-                        }
-                        cursor.delete();
-                    }
-                    cursor.continue();
-                } else {
-                    // Re-add the most recent entries
-                    friendsMap.forEach(friend => {
-                        friendsStore.add(friend);
-                    });
-                    console.log('IndexedDB compacted. Unique friends:', friendsMap.size);
-                    resolve();
-                }
-            };
-            
-            request.onerror = (e) => reject(e.target.error);
-            
-        } catch (error) {
-            console.error('Error compacting IndexedDB:', error);
-            reject(error);
-        }
-    });
-}
+        
         // Save friends to IndexedDB
-        
-async function saveFriendsToIndexedDB() {
-    if (!indexedDB || !currentUser) return;
-    
-    return new Promise((resolve, reject) => {
-        try {
-            const transaction = indexedDB.transaction(['friends', 'friendRequests', 'blockedUsers'], 'readwrite');
+        async function saveFriendsToIndexedDB() {
+            if (!indexedDB || !currentUser) return;
             
-            // Save friends
-            const friendsStore = transaction.objectStore('friends');
-            friendsList.forEach(friend => {
-                const friendData = {
-                    ...friend,
-                    id: friend.id,
-                    userId: currentUser.uid,
-                    cachedAt: new Date().toISOString(),
-                    lastSeen: friend.lastSeen ? friend.lastSeen.toISOString() : null,
-                    createdAt: friend.createdAt.toISOString()
-                };
-                friendsStore.put(friendData);
-            });
-            
-            // Save friend requests
-            const requestsStore = transaction.objectStore('friendRequests');
-            friendRequests.forEach(request => {
-                const requestData = {
-                    ...request,
-                    id: request.id,
-                    userId: currentUser.uid,
-                    cachedAt: new Date().toISOString(),
-                    createdAt: request.createdAt.toISOString()
-                };
-                requestsStore.put(requestData);
-            });
-            
-            // Save blocked users
-            const blockedStore = transaction.objectStore('blockedUsers');
-            blockedUsers.forEach(blocked => {
-                const blockedData = {
-                    ...blocked,
-                    id: blocked.id,
-                    userId: currentUser.uid,
-                    cachedAt: new Date().toISOString(),
-                    blockedAt: blocked.blockedAt.toISOString()
-                };
-                blockedStore.put(blockedData);
-            });
-            
-            transaction.oncomplete = () => {
-                console.log('Friends data saved to IndexedDB');
-                resolve();
-            };
-            
-            transaction.onerror = (event) => {
-                console.error('Error saving to IndexedDB:', event.target.error);
-                reject(event.target.error);
-            };
-            
-        } catch (error) {
-            console.error('Error saving to IndexedDB:', error);
-            reject(error);
-        }
-    });
-}
-
-        // Load friends from IndexedDB
-        
-        async function loadFriendsFromIndexedDB() {
-    if (!indexedDB || !currentUser) return;
-    
-    return new Promise((resolve, reject) => {
-        try {
-            const transaction = indexedDB.transaction(['friends', 'friendRequests', 'blockedUsers'], 'readonly');
-            
-            // Load friends
-            const friendsStore = transaction.objectStore('friends');
-            const friendsIndex = friendsStore.index('userId');
-            const friendsKeyRange = IDBKeyRange.only(currentUser.uid);
-            const friendsRequest = friendsIndex.getAll(friendsKeyRange);
-            
-            // Load friend requests
-            const requestsStore = transaction.objectStore('friendRequests');
-            const requestsIndex = requestsStore.index('userId');
-            const requestsKeyRange = IDBKeyRange.only(currentUser.uid);
-            const requestsRequest = requestsIndex.getAll(requestsKeyRange);
-            
-            // Load blocked users
-            const blockedStore = transaction.objectStore('blockedUsers');
-            const blockedIndex = blockedStore.index('userId');
-            const blockedKeyRange = IDBKeyRange.only(currentUser.uid);
-            const blockedRequest = blockedIndex.getAll(blockedKeyRange);
-            
-            let friendsLoaded = false;
-            let requestsLoaded = false;
-            let blockedLoaded = false;
-            
-            friendsRequest.onsuccess = (event) => {
-                const cachedFriends = event.target.result;
-                friendsList = [];
-                userFriendsMap.clear();
-                
-                cachedFriends.forEach(friendData => {
-                    const friend = {
-                        id: friendData.id,
-                        friendshipId: friendData.friendshipId,
-                        name: friendData.name,
-                        email: friendData.email,
-                        username: friendData.username,
-                        phone: friendData.phone,
-                        photoURL: friendData.photoURL,
-                        status: 'offline',
-                        lastSeen: friendData.lastSeen ? new Date(friendData.lastSeen) : null,
-                        createdAt: new Date(friendData.createdAt),
-                        mood: friendData.mood || 'neutral',
-                        cached: true
+            return new Promise((resolve, reject) => {
+                try {
+                    const transaction = indexedDB.transaction(['friends', 'friendRequests', 'blockedUsers'], 'readwrite');
+                    
+                    // Save friends
+                    const friendsStore = transaction.objectStore('friends');
+                    friendsList.forEach(friend => {
+                        const friendData = {
+                            ...friend,
+                            id: friend.id,
+                            userId: currentUser.uid,
+                            cachedAt: new Date().toISOString(),
+                            lastSeen: friend.lastSeen ? friend.lastSeen.toISOString() : null,
+                            createdAt: friend.createdAt ? friend.createdAt.toISOString() : new Date().toISOString()
+                        };
+                        friendsStore.put(friendData);
+                    });
+                    
+                    // Save friend requests
+                    const requestsStore = transaction.objectStore('friendRequests');
+                    friendRequests.forEach(request => {
+                        const requestData = {
+                            ...request,
+                            id: request.id,
+                            userId: currentUser.uid,
+                            cachedAt: new Date().toISOString(),
+                            createdAt: request.createdAt ? request.createdAt.toISOString() : new Date().toISOString()
+                        };
+                        requestsStore.put(requestData);
+                    });
+                    
+                    // Save blocked users
+                    const blockedStore = transaction.objectStore('blockedUsers');
+                    blockedUsers.forEach(blocked => {
+                        const blockedData = {
+                            ...blocked,
+                            id: blocked.id,
+                            userId: currentUser.uid,
+                            cachedAt: new Date().toISOString(),
+                            blockedAt: blocked.blockedAt ? blocked.blockedAt.toISOString() : new Date().toISOString()
+                        };
+                        blockedStore.put(blockedData);
+                    });
+                    
+                    transaction.oncomplete = () => {
+                        console.log('Friends data saved to IndexedDB');
+                        resolve();
                     };
                     
-                    friendsList.push(friend);
-                    userFriendsMap.set(friend.id, friend);
-                });
-                
-                friendsLoaded = true;
-                updateFriendsList();
-                if (friendsLoaded && requestsLoaded && blockedLoaded) resolve();
-            };
-            
-            requestsRequest.onsuccess = (event) => {
-                const cachedRequests = event.target.result;
-                friendRequests = [];
-                pendingRequests = [];
-                
-                cachedRequests.forEach(requestData => {
-                    friendRequests.push(requestData);
-                    if (requestData.type === 'received') {
-                        pendingRequests.push(requestData);
-                    }
-                });
-                
-                updatePendingCountBadge();
-                if (document.getElementById('pendingTab').classList.contains('active')) {
-                    updateFriendRequestsList();
+                    transaction.onerror = (event) => {
+                        console.error('Error saving to IndexedDB:', event.target.error);
+                        reject(event.target.error);
+                    };
+                    
+                } catch (error) {
+                    console.error('Error saving to IndexedDB:', error);
+                    reject(error);
                 }
-                
-                requestsLoaded = true;
-                if (friendsLoaded && requestsLoaded && blockedLoaded) resolve();
-            };
-            
-            blockedRequest.onsuccess = (event) => {
-                const cachedBlocked = event.target.result;
-                blockedUsers = [];
-                
-                cachedBlocked.forEach(blockedData => {
-                    blockedUsers.push({
-                        id: blockedData.id,
-                        blockedId: blockedData.blockedId,
-                        name: blockedData.name,
-                        username: blockedData.username,
-                        photoURL: blockedData.photoURL,
-                        blockedAt: new Date(blockedData.blockedAt)
-                    });
-                });
-                
-                if (document.getElementById('blockedTab').classList.contains('active')) {
-                    updateBlockedFriendsList();
-                }
-                
-                blockedLoaded = true;
-                if (friendsLoaded && requestsLoaded && blockedLoaded) resolve();
-            };
-            
-            transaction.onerror = (event) => {
-                console.error('Transaction error:', event.target.error);
-                reject(event.target.error);
-            };
-            
-            console.log('Loaded friends from IndexedDB:', friendsList.length);
-            
-        } catch (error) {
-            console.error('Error loading from IndexedDB:', error);
-            reject(error);
+            });
         }
-    });
-}
-
+        
+        // Load friends from IndexedDB
+        async function loadFriendsFromIndexedDB() {
+            if (!indexedDB || !currentUser) return;
+            
+            return new Promise((resolve, reject) => {
+                try {
+                    const transaction = indexedDB.transaction(['friends', 'friendRequests', 'blockedUsers'], 'readonly');
+                    
+                    // Load friends
+                    const friendsStore = transaction.objectStore('friends');
+                    const friendsIndex = friendsStore.index('userId');
+                    const friendsKeyRange = IDBKeyRange.only(currentUser.uid);
+                    const friendsRequest = friendsIndex.getAll(friendsKeyRange);
+                    
+                    // Load friend requests
+                    const requestsStore = transaction.objectStore('friendRequests');
+                    const requestsIndex = requestsStore.index('userId');
+                    const requestsKeyRange = IDBKeyRange.only(currentUser.uid);
+                    const requestsRequest = requestsIndex.getAll(requestsKeyRange);
+                    
+                    // Load blocked users
+                    const blockedStore = transaction.objectStore('blockedUsers');
+                    const blockedIndex = blockedStore.index('userId');
+                    const blockedKeyRange = IDBKeyRange.only(currentUser.uid);
+                    const blockedRequest = blockedIndex.getAll(blockedKeyRange);
+                    
+                    let friendsLoaded = false;
+                    let requestsLoaded = false;
+                    let blockedLoaded = false;
+                    
+                    friendsRequest.onsuccess = (event) => {
+                        const cachedFriends = event.target.result;
+                        friendsList = [];
+                        userFriendsMap.clear();
+                        
+                        cachedFriends.forEach(friendData => {
+                            const friend = {
+                                id: friendData.id,
+                                friendshipId: friendData.friendshipId,
+                                name: friendData.name || 'User',
+                                email: friendData.email || '',
+                                username: friendData.username || '',
+                                phone: friendData.phone || '',
+                                photoURL: friendData.photoURL || '',
+                                status: 'offline',
+                                lastSeen: friendData.lastSeen ? new Date(friendData.lastSeen) : null,
+                                createdAt: friendData.createdAt ? new Date(friendData.createdAt) : new Date(),
+                                mood: friendData.mood || 'neutral',
+                                cached: true
+                            };
+                            
+                            friendsList.push(friend);
+                            userFriendsMap.set(friend.id, friend);
+                        });
+                        
+                        friendsLoaded = true;
+                        console.log('Loaded', friendsList.length, 'friends from IndexedDB');
+                        if (friendsLoaded && requestsLoaded && blockedLoaded) resolve();
+                    };
+                    
+                    requestsRequest.onsuccess = (event) => {
+                        const cachedRequests = event.target.result;
+                        friendRequests = [];
+                        pendingRequests = [];
+                        
+                        cachedRequests.forEach(requestData => {
+                            friendRequests.push(requestData);
+                            if (requestData.type === 'received') {
+                                pendingRequests.push(requestData);
+                            }
+                        });
+                        
+                        updatePendingCountBadge();
+                        if (document.getElementById('pendingTab').classList.contains('active')) {
+                            updateFriendRequestsList();
+                        }
+                        
+                        requestsLoaded = true;
+                        console.log('Loaded', friendRequests.length, 'friend requests from IndexedDB');
+                        if (friendsLoaded && requestsLoaded && blockedLoaded) resolve();
+                    };
+                    
+                    blockedRequest.onsuccess = (event) => {
+                        const cachedBlocked = event.target.result;
+                        blockedUsers = [];
+                        
+                        cachedBlocked.forEach(blockedData => {
+                            blockedUsers.push({
+                                id: blockedData.id,
+                                blockedId: blockedData.blockedId,
+                                name: blockedData.name || 'User',
+                                username: blockedData.username || '',
+                                photoURL: blockedData.photoURL || '',
+                                blockedAt: blockedData.blockedAt ? new Date(blockedData.blockedAt) : new Date()
+                            });
+                        });
+                        
+                        if (document.getElementById('blockedTab').classList.contains('active')) {
+                            updateBlockedFriendsList();
+                        }
+                        
+                        blockedLoaded = true;
+                        console.log('Loaded', blockedUsers.length, 'blocked users from IndexedDB');
+                        if (friendsLoaded && requestsLoaded && blockedLoaded) resolve();
+                    };
+                    
+                    transaction.onerror = (event) => {
+                        console.error('Transaction error:', event.target.error);
+                        reject(event.target.error);
+                    };
+                    
+                } catch (error) {
+                    console.error('Error loading from IndexedDB:', error);
+                    reject(error);
+                }
+            });
+        }
+        
         // Setup offline indicator
         function setupOfflineIndicator() {
             // Update online status
             window.addEventListener('online', async () => {
                 isOnline = true;
                 console.log('App is online');
-                hideOfflineIndicator();
+                offlineIndicator.style.display = 'none';
                 
                 // Sync data when coming back online
                 if (currentUser) {
@@ -2018,7 +1902,7 @@ async function saveFriendsToIndexedDB() {
             window.addEventListener('offline', () => {
                 isOnline = false;
                 console.log('App is offline');
-                showOfflineIndicator();
+                offlineIndicator.style.display = 'flex';
                 
                 if (currentUser) {
                     showNotification('You are offline. Showing cached data.', 'warning');
@@ -2027,32 +1911,7 @@ async function saveFriendsToIndexedDB() {
             
             // Initial indicator
             if (!isOnline) {
-                showOfflineIndicator();
-            }
-        }
-        
-        function showOfflineIndicator() {
-            // Remove existing indicator
-            hideOfflineIndicator();
-            
-            // Create offline indicator
-            const indicator = document.createElement('div');
-            indicator.className = 'offline-indicator';
-            indicator.innerHTML = `
-                <i class="fas fa-wifi-slash"></i>
-                <span>Offline</span>
-            `;
-            
-            sidebarHeader.appendChild(indicator);
-            
-            // Update friend statuses to show offline badge
-            updateFriendsList();
-        }
-        
-        function hideOfflineIndicator() {
-            const indicator = document.querySelector('.offline-indicator');
-            if (indicator) {
-                indicator.remove();
+                offlineIndicator.style.display = 'flex';
             }
         }
         
@@ -2082,10 +1941,17 @@ async function saveFriendsToIndexedDB() {
             }
         }
         
-        // Modified loadFriendsData to handle offline mode
+        // Load friends data from Firebase
         async function loadFriendsData() {
-            // If no user or offline, don't try to load from Firebase
-            if (!currentUser || !isOnline) return;
+            if (!currentUser) {
+                console.log('No current user, skipping friends load');
+                return;
+            }
+            
+            if (!isOnline) {
+                console.log('Offline, skipping Firebase load');
+                return;
+            }
             
             try {
                 console.log('Loading friends data for user:', currentUser.uid);
@@ -2098,8 +1964,8 @@ async function saveFriendsToIndexedDB() {
                 
                 console.log('Found', friendsSnapshot.size, 'friendships');
                 
-                friendsList = [];
-                userFriendsMap.clear();
+                const tempFriendsList = [];
+                const tempUserFriendsMap = new Map();
                 
                 for (const doc of friendsSnapshot.docs) {
                     const friendship = doc.data();
@@ -2108,31 +1974,47 @@ async function saveFriendsToIndexedDB() {
                     if (friendId) {
                         // Check if user is blocked
                         const isBlocked = blockedUsers.some(blocked => blocked.id === friendId);
-                        if (isBlocked) continue;
+                        if (isBlocked) {
+                            console.log('Skipping blocked friend:', friendId);
+                            continue;
+                        }
                         
-                        const userDoc = await db.collection('users').doc(friendId).get();
-                        if (userDoc.exists) {
-                            const userData = userDoc.data();
-                            const friendData = {
-                                id: friendId,
-                                friendshipId: doc.id,
-                                name: userData.displayName || 'User',
-                                email: userData.email || '',
-                                username: userData.username || '',
-                                phone: userData.phone || '',
-                                photoURL: userData.photoURL || '',
-                                status: userData.status || 'offline',
-                                lastSeen: userData.lastSeen?.toDate() || null,
-                                createdAt: friendship.createdAt?.toDate() || new Date(),
-                                mood: userData.mood || 'neutral',
-                                cached: false
-                            };
-                            
-                            friendsList.push(friendData);
-                            userFriendsMap.set(friendId, friendData);
+                        try {
+                            const userDoc = await db.collection('users').doc(friendId).get();
+                            if (userDoc.exists) {
+                                const userData = userDoc.data();
+                                const friendData = {
+                                    id: friendId,
+                                    friendshipId: doc.id,
+                                    name: userData.displayName || 'User',
+                                    email: userData.email || '',
+                                    username: userData.username || '',
+                                    phone: userData.phone || '',
+                                    photoURL: userData.photoURL || '',
+                                    status: userData.status || 'offline',
+                                    lastSeen: userData.lastSeen?.toDate() || null,
+                                    createdAt: friendship.createdAt?.toDate() || new Date(),
+                                    mood: userData.mood || 'neutral',
+                                    cached: false
+                                };
+                                
+                                tempFriendsList.push(friendData);
+                                tempUserFriendsMap.set(friendId, friendData);
+                                console.log('Loaded friend:', friendData.name, friendData.username);
+                            } else {
+                                console.log('User document not found for friend:', friendId);
+                            }
+                        } catch (userError) {
+                            console.error('Error loading user data for friend:', friendId, userError);
                         }
                     }
                 }
+                
+                // Update global variables
+                friendsList = tempFriendsList;
+                userFriendsMap = tempUserFriendsMap;
+                
+                console.log('Total friends loaded:', friendsList.length);
                 
                 // Update UI
                 updateFriendsList();
@@ -2156,19 +2038,26 @@ async function saveFriendsToIndexedDB() {
             
             if (!currentUser || !isOnline) return;
             
+            console.log('Setting up real-time listeners for', friendsList.length, 'friends');
+            
             // Listen for friend status changes
             friendsList.forEach(friend => {
                 const unsubscribe = db.collection('users').doc(friend.id)
                     .onSnapshot((doc) => {
                         if (doc.exists) {
                             const userData = doc.data();
-                            friend.status = userData.status || 'offline';
-                            friend.lastSeen = userData.lastSeen?.toDate() || null;
-                            friend.mood = userData.mood || 'neutral';
-                            
-                            // Update UI if this friend is visible
-                            updateFriendsList();
+                            const updatedFriend = userFriendsMap.get(friend.id);
+                            if (updatedFriend) {
+                                updatedFriend.status = userData.status || 'offline';
+                                updatedFriend.lastSeen = userData.lastSeen?.toDate() || null;
+                                updatedFriend.mood = userData.mood || 'neutral';
+                                
+                                // Update UI if this friend is visible
+                                updateFriendsList();
+                            }
                         }
+                    }, (error) => {
+                        console.error('Error in friend status listener:', error);
                     });
                 unsubscribes.push(unsubscribe);
             });
@@ -2178,39 +2067,23 @@ async function saveFriendsToIndexedDB() {
                 .where('toUserId', '==', currentUser.uid)
                 .where('status', '==', 'pending')
                 .onSnapshot((snapshot) => {
+                    console.log('Friend requests updated, reloading...');
                     loadFriendRequests();
+                }, (error) => {
+                    console.error('Error in friend requests listener:', error);
                 });
             unsubscribes.push(requestsUnsubscribe);
+            
+            console.log('Real-time listeners set up');
         }
         
-        // Setup presence tracking
-        function setupPresenceTracking() {
-            if (!currentUser || !isOnline) return;
-            
-            // Set user status to online
-            db.collection('users').doc(currentUser.uid).update({
-                status: 'online',
-                lastSeen: firebase.firestore.FieldValue.serverTimestamp()
-            }).catch(error => {
-                console.error('Error setting online status:', error);
-            });
-            
-            // Update status when user goes offline
-            window.addEventListener('beforeunload', () => {
-                if (currentUser && isOnline) {
-                    db.collection('users').doc(currentUser.uid).update({
-                        status: 'offline',
-                        lastSeen: firebase.firestore.FieldValue.serverTimestamp()
-                    });
-                }
-            });
-        }
-        
-        // Load friend requests
+        // Load friend requests from Firebase
         async function loadFriendRequests() {
             if (!currentUser || !isOnline) return;
             
             try {
+                console.log('Loading friend requests for user:', currentUser.uid);
+                
                 // Load received requests
                 const receivedSnapshot = await db.collection('friend_requests')
                     .where('toUserId', '==', currentUser.uid)
@@ -2269,6 +2142,8 @@ async function saveFriendsToIndexedDB() {
                     });
                 });
                 
+                console.log('Loaded', friendRequests.length, 'friend requests');
+                
                 // Update UI
                 updatePendingCountBadge();
                 if (document.getElementById('pendingTab').classList.contains('active')) {
@@ -2276,18 +2151,20 @@ async function saveFriendsToIndexedDB() {
                 }
                 
                 // Save to IndexedDB
-                saveFriendsToIndexedDB();
+                await saveFriendsToIndexedDB();
                 
             } catch (error) {
                 console.error('Error loading friend requests:', error);
             }
         }
         
-        // Load blocked users
+        // Load blocked users from Firebase
         async function loadBlockedUsers() {
             if (!currentUser || !isOnline) return;
             
             try {
+                console.log('Loading blocked users for user:', currentUser.uid);
+                
                 const snapshot = await db.collection('blocked_users')
                     .where('blockerId', '==', currentUser.uid)
                     .get();
@@ -2296,20 +2173,26 @@ async function saveFriendsToIndexedDB() {
                 
                 for (const doc of snapshot.docs) {
                     const blockedData = doc.data();
-                    const userDoc = await db.collection('users').doc(blockedData.blockedId).get();
-                    
-                    if (userDoc.exists) {
-                        const userData = userDoc.data();
-                        blockedUsers.push({
-                            id: blockedData.blockedId,
-                            blockedId: doc.id,
-                            name: userData.displayName || 'User',
-                            username: userData.username || '',
-                            photoURL: userData.photoURL || '',
-                            blockedAt: blockedData.blockedAt?.toDate() || new Date()
-                        });
+                    try {
+                        const userDoc = await db.collection('users').doc(blockedData.blockedId).get();
+                        
+                        if (userDoc.exists) {
+                            const userData = userDoc.data();
+                            blockedUsers.push({
+                                id: blockedData.blockedId,
+                                blockedId: doc.id,
+                                name: userData.displayName || 'User',
+                                username: userData.username || '',
+                                photoURL: userData.photoURL || '',
+                                blockedAt: blockedData.blockedAt?.toDate() || new Date()
+                            });
+                        }
+                    } catch (userError) {
+                        console.error('Error loading blocked user data:', userError);
                     }
                 }
+                
+                console.log('Loaded', blockedUsers.length, 'blocked users');
                 
                 // Update UI if blocked tab is active
                 if (document.getElementById('blockedTab').classList.contains('active')) {
@@ -2317,14 +2200,14 @@ async function saveFriendsToIndexedDB() {
                 }
                 
                 // Save to IndexedDB
-                saveFriendsToIndexedDB();
+                await saveFriendsToIndexedDB();
                 
             } catch (error) {
                 console.error('Error loading blocked users:', error);
             }
         }
         
-        // Search users
+        // Search users in Firebase
         async function searchUsers(query) {
             if (!query.trim()) {
                 document.getElementById('searchResults').innerHTML = '';
@@ -2377,13 +2260,14 @@ async function saveFriendsToIndexedDB() {
                 }
                 
                 const searchResults = document.getElementById('searchResults');
+                let hasResults = false;
                 
-                usersSnapshot.forEach(doc => {
+                for (const doc of usersSnapshot.docs) {
                     const userData = doc.data();
                     const userId = doc.id;
                     
                     // Don't show current user in results
-                    if (userId === currentUser.uid) return;
+                    if (userId === currentUser.uid) continue;
                     
                     // Check if already friends
                     const isFriend = userFriendsMap.has(userId);
@@ -2400,7 +2284,9 @@ async function saveFriendsToIndexedDB() {
                     // Check if blocked
                     const isBlocked = blockedUsers.some(blocked => blocked.id === userId);
                     
-                    if (isBlocked) return;
+                    if (isBlocked) continue;
+                    
+                    hasResults = true;
                     
                     const resultItem = document.createElement('div');
                     resultItem.className = 'search-result-item';
@@ -2452,9 +2338,9 @@ async function saveFriendsToIndexedDB() {
                     }
                     
                     searchResults.appendChild(resultItem);
-                });
+                }
                 
-                if (searchResults.children.length === 0) {
+                if (!hasResults) {
                     document.getElementById('noResults').style.display = 'block';
                 }
                 
@@ -2871,6 +2757,7 @@ async function saveFriendsToIndexedDB() {
                 const savedTags = localStorage.getItem(`friend_tags_${currentUser.uid}`);
                 if (savedTags) {
                     friendTags = new Map(JSON.parse(savedTags));
+                    console.log('Loaded friend tags:', friendTags.size);
                 }
             } catch (error) {
                 console.error('Error loading friend tags:', error);
@@ -2888,7 +2775,7 @@ async function saveFriendsToIndexedDB() {
             }
         }
         
-        // Modified updateFriendsList to show offline indicator
+        // Update friends list
         function updateFriendsList() {
             const friendsSection = document.getElementById('friendsSection');
             const searchTerm = document.getElementById('friendsSearch').value.toLowerCase();
@@ -3013,7 +2900,7 @@ async function saveFriendsToIndexedDB() {
             }
         }
         
-        // Modified createFriendItem to enable actions even when offline
+        // Create friend item
         function createFriendItem(friend) {
             const friendItem = document.createElement('div');
             friendItem.className = `friend-item ${friend.status === 'online' && isOnline ? 'online' : ''}`;
@@ -3101,7 +2988,7 @@ async function saveFriendsToIndexedDB() {
             return friendItem;
         }
         
-        // Modified openFriendProfile to handle offline mode
+        // Open friend profile
         async function openFriendProfile(friend) {
             if (!currentUser) {
                 showNotification('Please log in to view friend profiles', 'warning');
@@ -3170,7 +3057,7 @@ async function saveFriendsToIndexedDB() {
                 tagsContainer.style.display = 'none';
             }
             
-            // Update actions grid - enable all actions (will queue if offline)
+            // Update actions grid
             const actionsGrid = document.getElementById('friendActionsGrid');
             actionsGrid.innerHTML = `
                 <button class="friend-action-grid-btn" data-action="message">
@@ -3234,7 +3121,7 @@ async function saveFriendsToIndexedDB() {
         
         // Setup event listeners
         function setupEventListeners() {
-            // Add friend button - ENABLED for offline
+            // Add friend button
             document.getElementById('addFriendBtn').addEventListener('click', () => {
                 if (!currentUser) {
                     showNotification('Please log in to add friends', 'warning');
@@ -3258,7 +3145,7 @@ async function saveFriendsToIndexedDB() {
                 }
             });
             
-            // Search method selection - ENABLED for offline
+            // Search method selection
             document.querySelectorAll('.search-method-btn').forEach(btn => {
                 btn.addEventListener('click', function() {
                     searchMethod = this.dataset.method;
@@ -3380,26 +3267,13 @@ async function saveFriendsToIndexedDB() {
             // Refresh friends list every minute to update online status (only when online)
             setInterval(() => {
                 if (isOnline && currentUser && friendsList.length > 0) {
-                    // Update online status for all friends
-                    friendsList.forEach(async friend => {
-                        try {
-                            const userDoc = await db.collection('users').doc(friend.id).get();
-                            if (userDoc.exists) {
-                                const userData = userDoc.data();
-                                friend.status = userData.status || 'offline';
-                                friend.lastSeen = userData.lastSeen?.toDate() || null;
-                            }
-                        } catch (error) {
-                            console.error('Error updating friend status:', error);
-                        }
-                    });
-                    
+                    console.log('Auto-refreshing friends list');
                     updateFriendsList();
                 }
             }, 60000);
         }
         
-        // Modified sendFriendRequest to queue when offline
+        // Send friend request
         async function sendFriendRequest(toUserId, userData) {
             if (!currentUser) {
                 showNotification('Please log in to send friend requests', 'warning');
@@ -3442,12 +3316,15 @@ async function saveFriendsToIndexedDB() {
                     return;
                 }
                 
+                // Get current user's username
+                const currentUsername = await getCurrentUsername();
+                
                 // Create friend request
                 await db.collection('friend_requests').add({
                     fromUserId: currentUser.uid,
                     fromUserName: currentUser.displayName || 'User',
                     fromUserPhoto: currentUser.photoURL || '',
-                    fromUserUsername: currentUser.username || '',
+                    fromUserUsername: currentUsername,
                     toUserId: toUserId,
                     toUserName: userData.displayName || 'User',
                     toUserUsername: userData.username || '',
@@ -3479,7 +3356,7 @@ async function saveFriendsToIndexedDB() {
             }
         }
         
-        // Modified acceptFriendRequest to queue when offline
+        // Accept friend request
         async function acceptFriendRequest(requestId, fromUserId) {
             if (!currentUser) {
                 showNotification('Please log in to accept friend requests', 'warning');
@@ -3555,7 +3432,7 @@ async function saveFriendsToIndexedDB() {
             }
         }
         
-        // Modified declineFriendRequest to queue when offline
+        // Decline friend request
         async function declineFriendRequest(requestId) {
             if (!currentUser) {
                 showNotification('Please log in to decline friend requests', 'warning');
@@ -3588,7 +3465,7 @@ async function saveFriendsToIndexedDB() {
             }
         }
         
-        // Modified cancelFriendRequest to queue when offline
+        // Cancel friend request
         async function cancelFriendRequest(requestId) {
             if (!currentUser) {
                 showNotification('Please log in to cancel friend requests', 'warning');
@@ -3618,7 +3495,7 @@ async function saveFriendsToIndexedDB() {
             }
         }
         
-        // Modified removeFriend to queue when offline
+        // Remove friend
         async function removeFriend(friendId) {
             if (!currentUser) {
                 showNotification('Please log in to remove friends', 'warning');
@@ -3684,7 +3561,7 @@ async function saveFriendsToIndexedDB() {
             }
         }
         
-        // Modified blockFriend to queue when offline
+        // Block friend
         async function blockFriend(friendId) {
             if (!currentUser) {
                 showNotification('Please log in to block users', 'warning');
@@ -3778,7 +3655,7 @@ async function saveFriendsToIndexedDB() {
             }
         }
         
-        // Modified unblockUser to queue when offline
+        // Unblock user
         async function unblockUser(userId, blockedId) {
             if (!currentUser) {
                 showNotification('Please log in to unblock users', 'warning');
@@ -3827,7 +3704,7 @@ async function saveFriendsToIndexedDB() {
             }
         }
         
-        // Modified messageFriend to work offline (queue messages)
+        // Message friend
         function messageFriend(friendId) {
             if (!currentUser) {
                 showNotification('Please log in to send messages', 'warning');
@@ -3836,7 +3713,7 @@ async function saveFriendsToIndexedDB() {
             
             if (!isOnline) {
                 showNotification('Messages can be sent when you\'re back online', 'warning');
-                // Store message in localStorage or IndexedDB for later
+                // Store message in localStorage for later
                 localStorage.setItem('pendingMessage', JSON.stringify({
                     friendId: friendId,
                     timestamp: Date.now()
@@ -3846,7 +3723,7 @@ async function saveFriendsToIndexedDB() {
             window.location.href = `chat.html?friendId=${friendId}`;
         }
         
-        // Modified startCall to work offline (queue call requests)
+        // Start call
         function startCall(friendId, type) {
             if (!currentUser) {
                 showNotification('Please log in to make calls', 'warning');
@@ -3898,7 +3775,29 @@ async function saveFriendsToIndexedDB() {
             }
         }
         
-        // This is the complete code with all functions implemented
+        // Logout function (optional, can be added to a logout button)
+        function logout() {
+            if (currentUser && isOnline) {
+                // Set user status to offline before logging out
+                db.collection('users').doc(currentUser.uid).update({
+                    status: 'offline',
+                    lastSeen: firebase.firestore.FieldValue.serverTimestamp()
+                }).then(() => {
+                    auth.signOut().then(() => {
+                        window.location.href = 'index.html';
+                    });
+                });
+            } else {
+                auth.signOut().then(() => {
+                    window.location.href = 'index.html';
+                });
+            }
+        }
+        
+        // Make logout function available globally (optional)
+        window.logout = logout;
+        
+        console.log('Friends page script loaded successfully');
     </script>
 </body>
 </html>

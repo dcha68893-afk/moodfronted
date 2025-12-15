@@ -697,6 +697,19 @@
             padding: 0 6px;
             font-weight: 600;
         }
+        
+        /* Chat item states for filtering */
+        .chat-item.sent {
+            border-left: 3px solid #667eea;
+        }
+        
+        .chat-item.received {
+            border-left: 3px solid #34d399;
+        }
+        
+        .chat-item.unread {
+            background-color: #f0f9ff;
+        }
     </style>
 </head>
 <body class="h-full overflow-hidden bg-gray-50" data-theme="light">
@@ -3195,7 +3208,7 @@
             }
         }
         
-        // Load friends from Firebase
+        // Load friends from Firebase - FIXED
         async function loadFriends() {
             try {
                 // First try to load from cache
@@ -3213,21 +3226,34 @@
                 }
                 
                 const db = firebase.firestore();
-                const friendsRef = db.collection('users').doc(currentUser.uid).collection('friends');
-                const snapshot = await friendsRef.get();
+                const userDoc = await db.collection('users').doc(currentUser.uid).get();
                 
-                friendsList = [];
-                snapshot.forEach(doc => {
-                    const friendData = doc.data();
-                    friendData.id = doc.id;
-                    friendsList.push(friendData);
-                });
-                
-                // Cache the friends list
-                localStorage.setItem('kynecta_friends', JSON.stringify(friendsList));
-                
-                // Update display
-                displayFriendsList();
+                if (userDoc.exists) {
+                    const userData = userDoc.data();
+                    if (userData.friends && Array.isArray(userData.friends)) {
+                        friendsList = [];
+                        
+                        // Fetch each friend's details
+                        for (const friendId of userData.friends) {
+                            try {
+                                const friendDoc = await db.collection('users').doc(friendId).get();
+                                if (friendDoc.exists) {
+                                    const friendData = friendDoc.data();
+                                    friendData.id = friendId;
+                                    friendsList.push(friendData);
+                                }
+                            } catch (error) {
+                                console.error(`Error fetching friend ${friendId}:`, error);
+                            }
+                        }
+                        
+                        // Cache the friends list
+                        localStorage.setItem('kynecta_friends', JSON.stringify(friendsList));
+                        
+                        // Update display
+                        displayFriendsList();
+                    }
+                }
                 
             } catch (error) {
                 console.error('Error loading friends:', error);
@@ -3238,7 +3264,7 @@
             }
         }
         
-        // Display friends list
+        // Display friends list - FIXED
         function displayFriendsList() {
             const friendsListForChat = document.getElementById('friendsListForChat');
             if (!friendsListForChat) return;
@@ -3687,7 +3713,7 @@
             }
         }
         
-        // Chat Filter Functions - ADDED
+        // Chat Filter Functions - FIXED
         function setupChatFilters() {
             const filterTabs = document.querySelectorAll('.chat-filter-tab');
             filterTabs.forEach(tab => {
@@ -3711,14 +3737,21 @@
             const chatList = document.getElementById('chatList');
             if (!chatList) return;
             
-            // Get all chat items
+            // Get all chat items (excluding the noChatsMessage)
             const chatItems = Array.from(chatList.querySelectorAll('.chat-item'));
+            const noChatsMessage = document.getElementById('noChatsMessage');
             
-            // Filter based on current filter
+            if (chatItems.length === 0) {
+                if (noChatsMessage) noChatsMessage.classList.remove('hidden');
+                return;
+            }
+            
+            let visibleCount = 0;
+            
             chatItems.forEach(item => {
-                const isSent = item.classList.contains('sent-chat');
-                const isReceived = item.classList.contains('received-chat');
-                const isUnread = item.classList.contains('unread-chat');
+                const isSent = item.classList.contains('sent');
+                const isReceived = item.classList.contains('received');
+                const isUnread = item.classList.contains('unread');
                 
                 let shouldShow = false;
                 
@@ -3739,17 +3772,15 @@
                 
                 if (shouldShow) {
                     item.classList.remove('hidden');
+                    visibleCount++;
                 } else {
                     item.classList.add('hidden');
                 }
             });
             
-            // Show no chats message if no chats are visible
-            const visibleChats = chatItems.filter(item => !item.classList.contains('hidden'));
-            const noChatsMessage = document.getElementById('noChatsMessage');
-            
+            // Show/hide no chats message
             if (noChatsMessage) {
-                if (visibleChats.length === 0) {
+                if (visibleCount === 0) {
                     noChatsMessage.classList.remove('hidden');
                 } else {
                     noChatsMessage.classList.add('hidden');
@@ -3780,17 +3811,22 @@
                 if (!currentUser) return;
                 
                 const db = firebase.firestore();
-                const chatsRef = db.collection('chats')
-                    .where('participants', 'array-contains', currentUser.uid)
-                    .orderBy('lastMessageTime', 'desc');
                 
+                // Get all chats where current user is a participant
+                const chatsRef = db.collection('chats');
                 const snapshot = await chatsRef.get();
+                
                 allChats = [];
+                const currentUserId = currentUser.uid;
                 
                 snapshot.forEach(doc => {
                     const chatData = doc.data();
                     chatData.id = doc.id;
-                    allChats.push(chatData);
+                    
+                    // Check if current user is a participant
+                    if (chatData.participants && chatData.participants.includes(currentUserId)) {
+                        allChats.push(chatData);
+                    }
                 });
                 
                 // Cache all chats
@@ -3834,14 +3870,14 @@
                 const isSent = lastMessage.senderId === currentUser?.uid;
                 const isUnread = chat.unread && !isSent;
                 
+                // Get other participant info
+                const otherParticipantId = chat.participants?.find(p => p !== currentUser?.uid);
+                const friend = friendsList.find(f => f.id === otherParticipantId);
+                
                 // Create chat item
                 const chatItem = document.createElement('div');
-                chatItem.className = `chat-item p-3 rounded-lg mb-2 flex items-center cursor-pointer ${isSent ? 'sent-chat' : 'received-chat'} ${isUnread ? 'unread-chat' : ''}`;
+                chatItem.className = `chat-item p-3 rounded-lg mb-2 flex items-center cursor-pointer ${isSent ? 'sent' : 'received'} ${isUnread ? 'unread' : ''}`;
                 chatItem.dataset.chatId = chat.id;
-                
-                // Get other participant info
-                const otherParticipantId = chat.participants.find(p => p !== currentUser?.uid);
-                const friend = friendsList.find(f => f.id === otherParticipantId);
                 
                 chatItem.innerHTML = `
                     <div class="flex items-center flex-1">
@@ -4012,11 +4048,12 @@
             }
         }
         
-        // Start new chat
+        // Start new chat - FIXED
         function startNewChatFlow() {
             const startNewChatSection = document.getElementById('startNewChatSection');
             if (startNewChatSection) {
                 startNewChatSection.classList.remove('hidden');
+                // Load friends directly
                 loadFriends();
             }
         }
@@ -4087,7 +4124,7 @@
             }
         }
         
-        // Theme toggle functionality
+        // Theme toggle functionality - FIXED
         function setupThemeToggle() {
             // Load saved theme
             const savedTheme = localStorage.getItem('kynecta_theme') || 'light';
@@ -4133,16 +4170,27 @@
         // Set theme
         function setTheme(theme) {
             document.body.setAttribute('data-theme', theme);
+            
+            // Update body classes
             document.body.classList.toggle('bg-gray-50', theme === 'light');
             document.body.classList.toggle('bg-gray-900', theme === 'dark');
             document.body.classList.toggle('text-gray-900', theme === 'light');
             document.body.classList.toggle('text-white', theme === 'dark');
             
-            // Update all icons
-            const themeIcons = document.querySelectorAll('#themeIcon, #themeIconTools, #themeIconSettings, #mobileThemeIcon, #mobileThemeIconTools, #mobileThemeIconSettings');
-            themeIcons.forEach(icon => {
+            // Update all theme icons
+            const themeIcons = [
+                'themeIcon', 'themeIconTools', 'themeIconSettings',
+                'mobileThemeIcon', 'mobileThemeIconTools', 'mobileThemeIconSettings'
+            ];
+            
+            themeIcons.forEach(iconId => {
+                const icon = document.getElementById(iconId);
                 if (icon) {
-                    icon.className = theme === 'light' ? 'fas fa-moon' : 'fas fa-sun';
+                    if (theme === 'light') {
+                        icon.className = 'fas fa-moon';
+                    } else {
+                        icon.className = 'fas fa-sun';
+                    }
                 }
             });
         }
@@ -4197,7 +4245,7 @@
                 });
             });
             
-            // Setup start new chat button
+            // Setup start new chat button - FIXED
             const startNewChatBtn = document.getElementById('startNewChatBtn');
             const startFirstChatBtn = document.getElementById('startFirstChatBtn');
             const cancelNewChatBtn = document.getElementById('cancelNewChat');

@@ -55,15 +55,109 @@ let currentTab = 'groups'; // Default to groups
 let isLoading = false;
 let isSidebarOpen = true;
 
-// ADD: Network connectivity state
+// FIREBASE AUTH STATE
+let currentUser = null;
+let firebaseInitialized = false;
+
+// NETWORK CONNECTIVITY STATE
 let isOnline = navigator.onLine;
 let syncQueue = []; // Queue for messages to sync when online
+
+// ============================================================================
+// FIREBASE INITIALIZATION (RUNS ALWAYS - NO ONLINE/OFFLINE CONDITION)
+// ============================================================================
+
+function initializeFirebase() {
+  if (firebaseInitialized) {
+    console.log('Firebase already initialized');
+    return;
+  }
+
+  console.log('Initializing Firebase...');
+  
+  try {
+    // Check if Firebase is available
+    if (typeof firebase === 'undefined' || !firebase.apps || !firebase.auth) {
+      console.warn('Firebase SDK not loaded yet, will retry on next page load');
+      setTimeout(initializeFirebase, 1000);
+      return;
+    }
+
+    // Initialize Firebase app if not already initialized
+    if (firebase.apps.length === 0) {
+      // Firebase config should be defined in index.html or loaded elsewhere
+      if (window.firebaseConfig) {
+        firebase.initializeApp(window.firebaseConfig);
+        console.log('Firebase app initialized');
+      } else {
+        console.warn('Firebase config not found. Make sure firebaseConfig is defined globally.');
+        return;
+      }
+    }
+
+    // Get auth instance
+    const auth = firebase.auth();
+    
+    // SET PERSISTENCE TO LOCAL (CRITICAL FOR OFFLINE AUTH)
+    auth.setPersistence(firebase.auth.Auth.Persistence.LOCAL)
+      .then(() => {
+        console.log('Auth persistence set to LOCAL');
+        
+        // Set up auth state observer (RUNS WITHOUT ONLINE/OFFLINE CONDITION)
+        auth.onAuthStateChanged((user) => {
+          console.log('Auth state changed:', user ? 'User logged in' : 'No user');
+          currentUser = user;
+          
+          // Expose user globally for other modules
+          window.APP_AUTH = {
+            currentUser: user,
+            isAuthenticated: !!user,
+            userId: user ? user.uid : null
+          };
+          
+          // Broadcast auth change to other components
+          const event = new CustomEvent('auth-state-change', {
+            detail: { user: user, isAuthenticated: !!user }
+          });
+          window.dispatchEvent(event);
+          
+          // Store in localStorage for cross-tab communication
+          try {
+            localStorage.setItem('kynecta-auth-state', JSON.stringify({
+              user: user ? {
+                uid: user.uid,
+                email: user.email,
+                displayName: user.displayName
+              } : null,
+              timestamp: new Date().toISOString()
+            }));
+          } catch (e) {
+            console.warn('Could not store auth state in localStorage:', e);
+          }
+        }, (error) => {
+          console.error('Auth state observer error:', error);
+        });
+        
+        firebaseInitialized = true;
+        console.log('Firebase auth initialized successfully');
+      })
+      .catch((error) => {
+        console.error('Error setting auth persistence:', error);
+        // Even if persistence fails, continue with default behavior
+        firebaseInitialized = true;
+      });
+
+  } catch (error) {
+    console.error('Firebase initialization error:', error);
+    // Don't prevent app from loading if Firebase fails
+    firebaseInitialized = true;
+  }
+}
 
 // ============================================================================
 // NETWORK DETECTION & BACKGROUND SYNC
 // ============================================================================
 
-// ADD: Network status detection and management
 function initializeNetworkDetection() {
   console.log('Initializing network detection...');
   
@@ -78,7 +172,7 @@ function initializeNetworkDetection() {
   initializeMessageQueue();
 }
 
-// ADD: Handle online event
+// Handle online event
 function handleOnline() {
   console.log('Network: Online');
   updateNetworkStatus(true);
@@ -86,11 +180,11 @@ function handleOnline() {
   // Broadcast network change to other files
   broadcastNetworkChange(true);
   
-  // Process queued messages
-  processQueuedMessages();
+  // BACKGROUND SYNC HOOK - Trigger sync when coming online
+  triggerBackgroundSync();
 }
 
-// ADD: Handle offline event
+// Handle offline event
 function handleOffline() {
   console.log('Network: Offline');
   updateNetworkStatus(false);
@@ -99,29 +193,31 @@ function handleOffline() {
   broadcastNetworkChange(false);
 }
 
-// ADD: Update network status globally
+// Update network status globally
 function updateNetworkStatus(online) {
   isOnline = online;
   
-  // Expose globally for other modules
+  // Expose globally for other modules (SEPARATE FROM AUTH)
   window.APP_CONNECTIVITY = {
     isOnline: isOnline,
+    isOffline: !isOnline, // Add explicit isOffline flag
     lastChange: new Date().toISOString()
   };
   
   // Dispatch custom event for other components
   const event = new CustomEvent('network-status-change', {
-    detail: { isOnline: isOnline }
+    detail: { isOnline: isOnline, isOffline: !isOnline }
   });
   window.dispatchEvent(event);
 }
 
-// ADD: Broadcast network changes
+// Broadcast network changes
 function broadcastNetworkChange(isOnline) {
   // Use localStorage as a cross-tab communication channel
   const status = {
     type: 'network-status',
     isOnline: isOnline,
+    isOffline: !isOnline,
     timestamp: new Date().toISOString()
   };
   
@@ -138,7 +234,22 @@ function broadcastNetworkChange(isOnline) {
   }
 }
 
-// ADD: Initialize IndexedDB for message queue
+// BACKGROUND SYNC HOOK - Placeholder for syncing queued messages
+function triggerBackgroundSync() {
+  console.log('Background sync triggered - app is online');
+  
+  // Process queued messages
+  processQueuedMessages();
+  
+  // Call global sync function if defined (for other modules)
+  if (typeof window.syncOfflineData === 'function') {
+    window.syncOfflineData().catch(error => {
+      console.warn('Background sync error:', error);
+    });
+  }
+}
+
+// Initialize IndexedDB for message queue
 function initializeMessageQueue() {
   if (!window.indexedDB) {
     console.warn('IndexedDB not supported, offline queue disabled');
@@ -172,7 +283,7 @@ function initializeMessageQueue() {
   };
 }
 
-// ADD: Queue message for offline sync
+// Queue message for offline sync
 function queueMessageForSync(messageData) {
   if (!window.indexedDB) return Promise.resolve(false);
   
@@ -218,7 +329,7 @@ function queueMessageForSync(messageData) {
   });
 }
 
-// ADD: Process queued messages when online
+// Process queued messages when online
 function processQueuedMessages() {
   if (!isOnline || !window.indexedDB) return;
   
@@ -255,7 +366,7 @@ function processQueuedMessages() {
   };
 }
 
-// ADD: Send a queued message
+// Send a queued message
 function sendQueuedMessage(message, db) {
   // This function should be customized based on your actual API
   // For now, we'll simulate sending and update status
@@ -290,7 +401,7 @@ function sendQueuedMessage(message, db) {
   }, 1000);
 }
 
-// ADD: Safe API call wrapper with better error handling
+// Safe API call wrapper with better error handling
 function safeApiCall(apiFunction, ...args) {
   return new Promise((resolve, reject) => {
     if (!isOnline) {
@@ -348,7 +459,7 @@ function safeApiCall(apiFunction, ...args) {
   });
 }
 
-// ADD: Clear message queue (for testing/debugging)
+// Clear message queue (for testing/debugging)
 function clearMessageQueue() {
   if (!window.indexedDB) return Promise.resolve(false);
   
@@ -753,7 +864,7 @@ function attachEventListenersToNewContent(container) {
   container.querySelectorAll('form').forEach(form => {
     form.addEventListener('submit', function(e) {
       e.preventDefault();
-      // ADD: Use safe API call for form submissions
+      // Use safe API call for form submissions
       if (form.dataset.api) {
         const apiFunction = window[form.dataset.api];
         if (typeof apiFunction === 'function') {
@@ -965,7 +1076,7 @@ function setupEventListeners() {
     }
   });
   
-  // ADD: Listen for localStorage changes from other tabs
+  // Listen for localStorage changes from other tabs
   window.addEventListener('storage', (event) => {
     if (event.key === 'kynecta-network-status' && event.newValue) {
       try {
@@ -975,6 +1086,17 @@ function setupEventListeners() {
         }
       } catch (e) {
         console.warn('Failed to parse network status from storage:', e);
+      }
+    }
+    
+    // Listen for auth state changes from other tabs
+    if (event.key === 'kynecta-auth-state' && event.newValue) {
+      try {
+        const authState = JSON.parse(event.newValue);
+        // Update local auth state reference
+        currentUser = authState.user;
+      } catch (e) {
+        console.warn('Failed to parse auth state from storage:', e);
       }
     }
   });
@@ -1037,10 +1159,13 @@ function initializeApp() {
 
 function runInitialization() {
   try {
+    // CRITICAL: Initialize Firebase FIRST (NO ONLINE/OFFLINE CONDITION)
+    initializeFirebase();
+    
     // Setup event listeners
     setupEventListeners();
     
-    // ADD: Initialize network detection
+    // Initialize network detection (SEPARATE FROM AUTH)
     initializeNetworkDetection();
     
     // Ensure sidebar is properly initialized
@@ -1255,31 +1380,39 @@ window.loadPage = loadPage;
 window.closeModal = closeModal;
 window.openSettingsModal = openSettingsModal;
 
-// ADD: Expose network and sync functions globally
+// AUTH STATE MANAGEMENT
+window.APP_AUTH = {
+  currentUser: null,
+  isAuthenticated: false,
+  userId: null
+};
+
+// NETWORK CONNECTIVITY
 window.APP_CONNECTIVITY = {
   isOnline: isOnline,
+  isOffline: !isOnline,
   lastChange: null
 };
 
+// API and sync functions
 window.safeApiCall = safeApiCall;
 window.queueMessageForSync = queueMessageForSync;
 window.clearMessageQueue = clearMessageQueue;
 window.processQueuedMessages = processQueuedMessages;
 
-// ADD: Helper function to check authentication safely
+// AUTH HELPER FUNCTIONS
 window.getCurrentUser = function() {
-  // This function provides a safe way to get current user
-  // It should be implemented in your authentication module
-  if (typeof window.getAuthUser === 'function') {
-    return window.getAuthUser();
-  }
-  return null;
+  // Return current user from Firebase auth state
+  return currentUser;
 };
 
-// ADD: Safe function to get user ID
 window.getCurrentUserId = function() {
-  const user = window.getCurrentUser ? window.getCurrentUser() : null;
-  return user ? user.uid : null;
+  return currentUser ? currentUser.uid : null;
+};
+
+// Check if user is authenticated
+window.isAuthenticated = function() {
+  return !!currentUser;
 };
 
 window.showChatArea = function() {
