@@ -1436,6 +1436,54 @@
                 font-size: 12px;
                 padding: 6px 12px;
             }
+            
+            /* Ensure call history is visible in mobile */
+            .call-list-content {
+                max-height: 40vh;
+                overflow-y: auto;
+            }
+            
+            .calls-list {
+                max-height: 35vh;
+                overflow-y: auto;
+            }
+            
+            /* Make call items more touch-friendly on mobile */
+            .call-item {
+                padding: 12px;
+                margin-bottom: 8px;
+            }
+            
+            .call-avatar {
+                width: 45px;
+                height: 45px;
+                font-size: 16px;
+            }
+            
+            .call-name {
+                font-size: 15px;
+            }
+            
+            .call-details {
+                font-size: 13px;
+            }
+            
+            .quick-actions {
+                padding: 0 15px;
+                gap: 10px;
+            }
+            
+            .quick-action-btn {
+                padding: 15px 10px;
+            }
+            
+            .quick-action-icon {
+                font-size: 20px;
+            }
+            
+            .quick-action-text {
+                font-size: 13px;
+            }
         }
         
         /* Animations */
@@ -1545,6 +1593,18 @@
         .disabled-by-offline > * {
             position: relative;
             z-index: 2;
+        }
+        
+        /* Call history offline badge */
+        .offline-history-badge {
+            display: inline-block;
+            background-color: var(--secondary-color);
+            color: var(--text-secondary);
+            font-size: 11px;
+            padding: 2px 8px;
+            border-radius: 10px;
+            margin-left: 8px;
+            vertical-align: middle;
         }
     </style>
 </head>
@@ -2101,7 +2161,7 @@
             // FEATURE 1: Initialize offline detection
             initializeOfflineDetection();
             
-            // FEATURE 4: Detect logged-in user via app.js (or Firebase auth)
+            // FEATURE 5: Detect logged-in user via app.js (or Firebase auth)
             auth.onAuthStateChanged(async user => {
                 if (user) {
                     currentUser = user;
@@ -2110,16 +2170,18 @@
                     await loadUserSettings();
                     setupEventListeners();
                     initializeWhiteboard();
-                    loadAllCalls();
-                    setupPresenceTracking();
-                    
-                    // FEATURE 5: Only initialize PeerJS if online - calls work when network restored
+                    // FEATURE 1 & 2: Load calls from local storage when offline
                     if (isOnline) {
+                        loadAllCalls();
+                        setupPresenceTracking();
+                        
+                        // FEATURE 5: Only initialize PeerJS if online - calls work when network restored
                         setTimeout(() => {
                             initializePeerJS();
                         }, 1000);
                     } else {
-                        console.log('Offline: Skipping PeerJS initialization');
+                        console.log('Offline: Loading call history from local storage');
+                        loadCallsFromLocalStorage();
                         showNotification('Offline: Call features unavailable', 'warning');
                     }
                     
@@ -2128,7 +2190,10 @@
                     
                 } else {
                     console.log('No user detected, redirecting to login');
-                    window.location.href = 'index.html';
+                    // Check if we're in the app.js context
+                    if (typeof window !== 'undefined' && window.location.pathname.includes('calls.html')) {
+                        window.location.href = 'index.html';
+                    }
                 }
             });
         }
@@ -2176,7 +2241,7 @@
                 });
             }
             
-            // Reload calls data
+            // Reload calls data from server
             loadAllCalls();
         }
         
@@ -2200,6 +2265,9 @@
                     lastOnline: firebase.firestore.FieldValue.serverTimestamp()
                 });
             }
+            
+            // FEATURE 1: Load calls from local storage when offline
+            loadCallsFromLocalStorage();
         }
         
         function checkConnectivity() {
@@ -2228,7 +2296,7 @@
                 offlineOverlay.classList.add('active');
                 offlineIndicator.classList.add('active');
                 
-                // FEATURE 1: Disable call buttons when offline
+                // FEATURE 4: Disable call buttons when offline (but keep them visible)
                 const callButtons = [
                     'newCallBtn',
                     'voiceCallBtn',
@@ -2301,7 +2369,7 @@
                 offlineOverlay.classList.remove('active');
                 offlineIndicator.classList.remove('active');
                 
-                // FEATURE 1: Enable call buttons when online
+                // FEATURE 4: Enable call buttons when online
                 const callButtons = [
                     'newCallBtn',
                     'voiceCallBtn',
@@ -2353,6 +2421,220 @@
                     tab.title = '';
                 });
             }
+        }
+        
+        // FEATURE 1: Load calls from local storage when offline
+        function loadCallsFromLocalStorage() {
+            console.log('Loading calls from local storage (offline mode)');
+            
+            try {
+                const storedCalls = localStorage.getItem(`callHistory_${currentUser.uid}`);
+                let calls = [];
+                
+                if (storedCalls) {
+                    calls = JSON.parse(storedCalls);
+                    console.log(`Loaded ${calls.length} calls from local storage`);
+                }
+                
+                // Display calls in all sections
+                displayCallsFromArray(calls, allCallsList, 'all');
+                
+                // Filter and display missed calls
+                const missedCalls = calls.filter(call => call.status === 'missed');
+                displayCallsFromArray(missedCalls, missedCallsList, 'missed');
+                
+                // Filter and display group calls
+                const groupCalls = calls.filter(call => call.group === true || call.participants.length > 2);
+                displayCallsFromArray(groupCalls, groupCallsList, 'group');
+                
+                // Add offline badge to section title
+                const sectionTitle = document.querySelector('.section-title');
+                if (sectionTitle && !sectionTitle.querySelector('.offline-history-badge')) {
+                    const badge = document.createElement('span');
+                    badge.className = 'offline-history-badge';
+                    badge.textContent = 'Offline';
+                    sectionTitle.appendChild(badge);
+                }
+                
+            } catch (error) {
+                console.error('Error loading calls from local storage:', error);
+                showNotification('Failed to load offline call history', 'error');
+            }
+        }
+        
+        // FEATURE 1: Save calls to local storage
+        function saveCallToLocalStorage(callData) {
+            try {
+                const storedCalls = localStorage.getItem(`callHistory_${currentUser.uid}`);
+                let calls = [];
+                
+                if (storedCalls) {
+                    calls = JSON.parse(storedCalls);
+                }
+                
+                // Add new call
+                calls.unshift({
+                    ...callData,
+                    id: `local_${Date.now()}`,
+                    savedAt: new Date().toISOString()
+                });
+                
+                // Keep only last 100 calls
+                if (calls.length > 100) {
+                    calls = calls.slice(0, 100);
+                }
+                
+                localStorage.setItem(`callHistory_${currentUser.uid}`, JSON.stringify(calls));
+                console.log('Call saved to local storage');
+                
+            } catch (error) {
+                console.error('Error saving call to local storage:', error);
+            }
+        }
+        
+        // FEATURE 1: Display calls from array (for offline mode)
+        function displayCallsFromArray(callsArray, container, type) {
+            if (!callsArray || callsArray.length === 0) {
+                let emptyMessage = '';
+                switch(type) {
+                    case 'missed':
+                        emptyMessage = `
+                            <div class="empty-state">
+                                <i class="fas fa-phone-slash"></i>
+                                <p>No missed calls</p>
+                                <p class="subtext">All calls have been answered</p>
+                            </div>
+                        `;
+                        break;
+                    case 'group':
+                        emptyMessage = `
+                            <div class="empty-state">
+                                <i class="fas fa-users"></i>
+                                <p>No group calls</p>
+                                <p class="subtext">Start your first group call</p>
+                            </div>
+                        `;
+                        break;
+                    default:
+                        emptyMessage = `
+                            <div class="empty-state">
+                                <i class="fas fa-phone"></i>
+                                <p>No recent calls</p>
+                                <p class="subtext">Start your first call with the button above</p>
+                            </div>
+                        `;
+                }
+                container.innerHTML = emptyMessage;
+                return;
+            }
+            
+            container.innerHTML = '';
+            
+            // Process each call
+            callsArray.forEach(callData => {
+                displayCallItemFromData(callData, container);
+            });
+        }
+        
+        // FEATURE 1: Display call item from data (for offline mode)
+        function displayCallItemFromData(callData, container) {
+            const otherParticipantIds = callData.participants ? 
+                callData.participants.filter(id => id !== currentUser.uid) : [];
+            let displayName = '';
+            
+            if (otherParticipantIds.length === 1) {
+                // Try to get name from local storage
+                const contactName = localStorage.getItem(`contact_${otherParticipantIds[0]}_name`);
+                displayName = contactName || 'Unknown';
+            } else if (otherParticipantIds.length > 1) {
+                displayName = `Group Call (${callData.participants.length})`;
+            } else {
+                displayName = 'Unknown';
+            }
+            
+            const isGroupCall = callData.participants && (callData.participants.length > 2 || callData.group);
+            const callType = callData.type || 'voice';
+            const callStatus = callData.status || 'completed';
+            const isMissed = callStatus === 'missed';
+            const isOutgoing = callData.initiator === currentUser.uid;
+            
+            let callTime = 'Recently';
+            if (callData.timestamp) {
+                const timestamp = typeof callData.timestamp === 'string' ? 
+                    new Date(callData.timestamp) : 
+                    (callData.timestamp.toDate ? callData.timestamp.toDate() : new Date(callData.timestamp));
+                callTime = formatTimeAgo(timestamp);
+            } else if (callData.savedAt) {
+                callTime = formatTimeAgo(new Date(callData.savedAt));
+            }
+            
+            let durationText = '';
+            if (callData.duration && callData.duration > 0) {
+                const minutes = Math.floor(callData.duration / 60);
+                const seconds = callData.duration % 60;
+                durationText = `${minutes}:${seconds.toString().padStart(2, '0')}`;
+            }
+            
+            const callItem = document.createElement('div');
+            callItem.className = 'call-item';
+            callItem.dataset.callId = callData.id || `local_${Date.now()}`;
+            
+            let statusIconClass = '';
+            let statusIcon = '';
+            
+            if (isMissed) {
+                statusIconClass = 'missed';
+                statusIcon = isOutgoing ? 'fas fa-phone-slash' : 'fas fa-phone-missed';
+            } else if (isOutgoing) {
+                statusIconClass = 'outgoing';
+                statusIcon = 'fas fa-phone-alt';
+            } else {
+                statusIconClass = 'incoming';
+                statusIcon = 'fas fa-phone';
+            }
+            
+            const initials = displayName.split(' ').map(word => word[0]).join('').toUpperCase().substring(0, 2);
+            
+            callItem.innerHTML = `
+                <div class="call-avatar">
+                    <span>${initials}</span>
+                    <div class="call-status-icon ${statusIconClass}">
+                        <i class="${statusIcon}"></i>
+                    </div>
+                </div>
+                <div class="call-info">
+                    <div class="call-name">
+                        <span>${displayName}</span>
+                        <span class="call-time">${callTime}</span>
+                    </div>
+                    <div class="call-details">
+                        <i class="fas fa-${callType === 'video' ? 'video' : 'phone'}"></i>
+                        <span>${isMissed ? 'Missed' : (isOutgoing ? 'Outgoing' : 'Incoming')}</span>
+                        ${durationText ? `<span>• ${durationText}</span>` : ''}
+                        ${callData.id && callData.id.startsWith('local_') ? '<span class="offline-history-badge" style="font-size: 10px; padding: 1px 6px;">Offline</span>' : ''}
+                    </div>
+                </div>
+                <button class="call-action-btn" title="Call Back" ${!isOnline ? 'disabled' : ''}>
+                    <i class="fas fa-phone"></i>
+                </button>
+            `;
+            
+            const callbackBtn = callItem.querySelector('.call-action-btn');
+            callbackBtn.addEventListener('click', (e) => {
+                e.stopPropagation();
+                if (!isOnline) {
+                    showNotification('Cannot start call while offline', 'error');
+                    return;
+                }
+                
+                if (isGroupCall && otherParticipantIds.length > 0) {
+                    startGroupCall(otherParticipantIds);
+                } else if (otherParticipantIds.length === 1) {
+                    startCall(otherParticipantIds[0], callType);
+                }
+            });
+            
+            container.appendChild(callItem);
         }
         
         function listenForExternalCalls() {
@@ -2413,14 +2695,20 @@
         async function initializeUser() {
             // Only initialize user if online
             if (!isOnline) {
-                const userData = {
-                    displayName: currentUser.displayName || `User_${currentUser.uid.substring(0, 8)}`
-                };
-                
-                window.userInitials = userData.displayName 
-                    ? userData.displayName.split(' ').map(n => n[0]).join('').toUpperCase().substring(0, 2)
-                    : 'ME';
-                window.userAvatar = currentUser.photoURL || '';
+                // FEATURE 5: Get user info from app.js context or local storage
+                const userInfo = localStorage.getItem(`userInfo_${currentUser.uid}`);
+                if (userInfo) {
+                    const userData = JSON.parse(userInfo);
+                    window.userInitials = userData.displayName 
+                        ? userData.displayName.split(' ').map(n => n[0]).join('').toUpperCase().substring(0, 2)
+                        : 'ME';
+                    window.userAvatar = userData.photoURL || '';
+                } else {
+                    window.userInitials = currentUser.displayName 
+                        ? currentUser.displayName.split(' ').map(n => n[0]).join('').toUpperCase().substring(0, 2)
+                        : 'ME';
+                    window.userAvatar = currentUser.photoURL || '';
+                }
                 return;
             }
             
@@ -2447,6 +2735,12 @@
             const userData = userDoc.exists ? userDoc.data() : {
                 displayName: currentUser.displayName || 'User'
             };
+            
+            // Save user info to local storage for offline use
+            localStorage.setItem(`userInfo_${currentUser.uid}`, JSON.stringify({
+                displayName: userData.displayName,
+                photoURL: userData.photoURL || currentUser.photoURL || ''
+            }));
             
             window.userInitials = userData.displayName 
                 ? userData.displayName.split(' ').map(n => n[0]).join('').toUpperCase().substring(0, 2)
@@ -2682,7 +2976,7 @@
         async function startCall(userId, type = 'video') {
             console.log('Starting call to:', userId, 'type:', type);
             
-            // FEATURE 1: Check if offline before starting call
+            // FEATURE 1 & 4: Check if offline before starting call
             if (!isOnline) {
                 showNotification('Cannot start call while offline', 'error');
                 return;
@@ -2699,12 +2993,13 @@
             if (!status.online) {
                 showNotification('User is offline. They will see missed call when back online.', 'warning');
                 
-                await db.collection('calls').add({
+                // FEATURE 1: Save missed call to local storage
+                saveCallToLocalStorage({
                     participants: [currentUser.uid, userId],
                     initiator: currentUser.uid,
                     type: type,
                     status: 'missed',
-                    timestamp: firebase.firestore.FieldValue.serverTimestamp(),
+                    timestamp: new Date().toISOString(),
                     missedReason: 'user_offline'
                 });
                 
@@ -2761,12 +3056,13 @@
                         console.log('Call timeout - no answer');
                         showNotification('No answer. Call ended.', 'warning');
                         
-                        await db.collection('calls').add({
+                        // FEATURE 1: Save missed call to local storage
+                        saveCallToLocalStorage({
                             participants: [currentUser.uid, userId],
                             initiator: currentUser.uid,
                             type: type,
                             status: 'missed',
-                            timestamp: firebase.firestore.FieldValue.serverTimestamp(),
+                            timestamp: new Date().toISOString(),
                             duration: 0
                         });
                         
@@ -2830,12 +3126,13 @@
                         db.collection('callInvitations').doc(callId).delete();
                     }
                     
-                    db.collection('calls').add({
+                    // FEATURE 1: Save connected call to local storage
+                    saveCallToLocalStorage({
                         participants: [currentUser.uid, userId],
                         initiator: currentUser.uid,
                         type: type,
                         status: 'connected',
-                        timestamp: firebase.firestore.FieldValue.serverTimestamp(),
+                        timestamp: new Date().toISOString(),
                         startTime: callStartTime
                     });
                     
@@ -3002,7 +3299,7 @@
         async function startGroupCall(userIds) {
             console.log('Starting group call with:', userIds);
             
-            // FEATURE 1: Check if offline
+            // FEATURE 1 & 4: Check if offline
             if (!isOnline) {
                 showNotification('Cannot start call while offline', 'error');
                 return;
@@ -3069,13 +3366,14 @@
                 startCallTimer();
                 if (currentCall) currentCall.status = 'connected';
                 
-                await db.collection('calls').add({
+                // FEATURE 1: Save group call to local storage
+                saveCallToLocalStorage({
                     participants: callParticipants,
                     initiator: currentUser.uid,
                     type: 'video',
                     group: true,
                     status: 'connected',
-                    timestamp: firebase.firestore.FieldValue.serverTimestamp(),
+                    timestamp: new Date().toISOString(),
                     startTime: callStartTime
                 });
                 
@@ -3255,7 +3553,7 @@
                 callInterval = null;
             }
             
-            if (currentCall && callStartTime && isOnline) {
+            if (currentCall && callStartTime) {
                 const endTime = new Date();
                 const duration = Math.floor((endTime - callStartTime) / 1000);
                 
@@ -3263,12 +3561,13 @@
                     callParticipants : 
                     [currentUser.uid, currentCall.targetId];
                 
-                await db.collection('calls').add({
+                // FEATURE 1: Save completed call to local storage
+                saveCallToLocalStorage({
                     participants: participants,
                     initiator: currentCall.group ? currentUser.uid : currentCall.initiator,
                     type: currentCallType,
                     status: 'completed',
-                    timestamp: firebase.firestore.FieldValue.serverTimestamp(),
+                    timestamp: new Date().toISOString(),
                     startTime: callStartTime,
                     endTime: endTime,
                     duration: duration,
@@ -3290,14 +3589,19 @@
             currentCallType = null;
             callParticipants = [];
             
-            loadAllCalls();
+            // Reload call history
+            if (isOnline) {
+                loadAllCalls();
+            } else {
+                loadCallsFromLocalStorage();
+            }
             
             showNotification('Call ended', 'success');
         }
         
         async function acceptCall(type = 'voice') {
             try {
-                // FEATURE 1: Check if offline before accepting call
+                // FEATURE 1 & 4: Check if offline before accepting call
                 if (!isOnline) {
                     showNotification('Cannot accept call while offline', 'error');
                     declineCall();
@@ -3360,12 +3664,13 @@
                     await db.collection('callInvitations').doc(incomingCall.metadata.callId).delete();
                 }
                 
-                await db.collection('calls').add({
+                // FEATURE 1: Save accepted call to local storage
+                saveCallToLocalStorage({
                     participants: [currentUser.uid, window.callerData.id],
                     initiator: window.callerData.id,
                     type: type,
                     status: 'completed',
-                    timestamp: firebase.firestore.FieldValue.serverTimestamp(),
+                    timestamp: new Date().toISOString(),
                     startTime: callStartTime
                 });
                 
@@ -3389,13 +3694,14 @@
                     console.error('Error closing incoming call:', e);
                 }
                 
-                if (window.callerData && isOnline) {
-                    await db.collection('calls').add({
+                if (window.callerData) {
+                    // FEATURE 1: Save missed call to local storage
+                    saveCallToLocalStorage({
                         participants: [currentUser.uid, window.callerData.id],
                         initiator: window.callerData.id,
                         type: window.callerData.type,
                         status: 'missed',
-                        timestamp: firebase.firestore.FieldValue.serverTimestamp()
+                        timestamp: new Date().toISOString()
                     });
                 }
                 
@@ -3503,29 +3809,9 @@
             try {
                 allCallsList.innerHTML = '<div class="loading-placeholder" style="text-align: center; padding: 40px 20px; color: var(--text-secondary);"><i class="fas fa-spinner fa-spin" style="font-size: 24px; margin-bottom: 15px;"></i><p>Loading call history...</p></div>';
                 
-                // If offline, load from localStorage or show empty state
+                // If offline, load from local storage
                 if (!isOnline) {
-                    allCallsList.innerHTML = `
-                        <div class="empty-state">
-                            <i class="fas fa-wifi-slash"></i>
-                            <p>Offline Mode</p>
-                            <p class="subtext">Call history unavailable while offline</p>
-                        </div>
-                    `;
-                    missedCallsList.innerHTML = `
-                        <div class="empty-state">
-                            <i class="fas fa-wifi-slash"></i>
-                            <p>Offline Mode</p>
-                            <p class="subtext">Missed calls unavailable while offline</p>
-                        </div>
-                    `;
-                    groupCallsList.innerHTML = `
-                        <div class="empty-state">
-                            <i class="fas fa-wifi-slash"></i>
-                            <p>Offline Mode</p>
-                            <p class="subtext">Group calls unavailable while offline</p>
-                        </div>
-                    `;
+                    loadCallsFromLocalStorage();
                     return;
                 }
                 
@@ -3534,6 +3820,20 @@
                     .orderBy('timestamp', 'desc')
                     .limit(50)
                     .get();
+                
+                // Save calls to local storage for offline access
+                const callsToSave = [];
+                callsSnapshot.forEach(doc => {
+                    const callData = doc.data();
+                    callsToSave.push({
+                        ...callData,
+                        id: doc.id,
+                        timestamp: callData.timestamp ? callData.timestamp.toDate().toISOString() : new Date().toISOString()
+                    });
+                });
+                
+                // Save to local storage
+                localStorage.setItem(`callHistory_${currentUser.uid}`, JSON.stringify(callsToSave));
                 
                 displayCalls(callsSnapshot, allCallsList, 'all');
                 
@@ -3544,6 +3844,9 @@
             } catch (error) {
                 console.error('Error loading all calls:', error);
                 showNotification('Failed to load call history', 'error');
+                
+                // Fall back to local storage
+                loadCallsFromLocalStorage();
             }
         }
         
@@ -3639,6 +3942,12 @@
                         const userData = userDoc.data();
                         displayName = userData.displayName || 'User';
                         avatar = userData.photoURL || '';
+                        
+                        // Save contact info to local storage for offline use
+                        localStorage.setItem(`contact_${otherParticipantIds[0]}_name`, userData.displayName || 'User');
+                        if (userData.photoURL) {
+                            localStorage.setItem(`contact_${otherParticipantIds[0]}_avatar`, userData.photoURL);
+                        }
                     } else {
                         displayName = 'Unknown';
                     }
@@ -3980,7 +4289,7 @@
             const contactsList = document.getElementById('contactsList');
             const groupContactsList = document.getElementById('groupContactsList');
             
-            // If offline, show offline message - FEATURE 2
+            // If offline, show offline message - FEATURE 2 & 4
             if (!isOnline) {
                 const offlineMessage = '<div style="text-align: center; padding: 40px 20px; color: var(--text-secondary);"><i class="fas fa-wifi-slash" style="font-size: 48px; margin-bottom: 15px; opacity: 0.5;"></i><p>Contacts unavailable while offline</p><p class="subtext">Calls require internet connection</p></div>';
                 contactsList.innerHTML = offlineMessage;
@@ -4143,7 +4452,7 @@
                 if (textElement) {
                     const originalText = textElement.textContent;
                     textElement.setAttribute('data-original-text', originalText);
-                    // FEATURE 2: Initially add offline warning if offline
+                    // FEATURE 2 & 4: Initially add offline warning if offline (but keep button visible)
                     if (!isOnline) {
                         textElement.innerHTML = originalText + '<div class="offline-warning-text">(Offline)</div>';
                     }
@@ -4166,7 +4475,7 @@
                 const button = document.getElementById(buttonId);
                 if (button && button.title) {
                     button.setAttribute('data-original-title', button.title);
-                    // FEATURE 1: Initially disable if offline
+                    // FEATURE 4: Initially disable if offline (but keep visible)
                     if (!isOnline) {
                         button.disabled = true;
                         button.classList.add('disabled-by-offline');
@@ -4239,7 +4548,7 @@
                 resetSettingsBtn.addEventListener('click', resetSettingsToDefault);
             }
             
-            // New call button - FEATURE 1: Disabled when offline
+            // New call button - FEATURE 4: Disabled when offline (but visible)
             document.getElementById('newCallBtn').addEventListener('click', () => {
                 if (!isOnline) {
                     showNotification('Cannot start call while offline', 'error');
@@ -4251,7 +4560,7 @@
                 selectedContacts = [];
             });
             
-            // Quick action buttons - FEATURE 1: Disabled when offline
+            // Quick action buttons - FEATURE 4: Disabled when offline (but visible)
             document.getElementById('voiceCallBtn').addEventListener('click', () => {
                 if (!isOnline) {
                     showNotification('Cannot start call while offline', 'error');
@@ -4314,7 +4623,7 @@
                 });
             });
             
-            // Start call button - FEATURE 1: Disabled when offline
+            // Start call button - FEATURE 4: Disabled when offline (but visible)
             document.getElementById('startCallBtn').addEventListener('click', async () => {
                 if (!isOnline) {
                     showNotification('Cannot start call while offline', 'error');
@@ -4354,7 +4663,7 @@
                 selectedContacts = [];
             });
             
-            // Incoming call buttons - FEATURE 1: Disabled when offline
+            // Incoming call buttons - FEATURE 4: Disabled when offline
             document.getElementById('declineCallBtn').addEventListener('click', function() {
                 this.disabled = true;
                 declineCall();
@@ -4460,7 +4769,7 @@
                 callSidePanel.classList.add('collapsed');
             });
             
-            // Panel tabs - FEATURE 1: Disable some tabs when offline
+            // Panel tabs - FEATURE 4: Disable some tabs when offline
             document.querySelectorAll('.panel-tab').forEach(tab => {
                 tab.addEventListener('click', function() {
                     const panelName = this.dataset.panel;
@@ -4513,7 +4822,7 @@
                 });
             });
             
-            // Add participants button - FEATURE 1: Disabled when offline
+            // Add participants button - FEATURE 4: Disabled when offline
             document.getElementById('addParticipantsBtn').addEventListener('click', () => {
                 if (!isOnline) {
                     showNotification('Cannot add participants while offline', 'error');
@@ -4650,7 +4959,7 @@
                 });
             });
             
-            // Category tabs
+            // Category tabs - FEATURE 2 & 3: Always visible and work offline
             document.getElementById('allTab').addEventListener('click', function() {
                 document.querySelectorAll('.category-btn').forEach(btn => {
                     btn.classList.remove('active');
@@ -4675,8 +4984,18 @@
                 missedCallsSection.classList.add('active');
                 
                 // Load missed calls if not already loaded
-                if (missedCallsList.children.length === 0 && isOnline) {
-                    loadMissedCalls();
+                if (missedCallsList.children.length === 0) {
+                    if (isOnline) {
+                        loadMissedCalls();
+                    } else {
+                        // FEATURE 2: Load missed calls from local storage when offline
+                        const storedCalls = localStorage.getItem(`callHistory_${currentUser.uid}`);
+                        if (storedCalls) {
+                            const calls = JSON.parse(storedCalls);
+                            const missedCalls = calls.filter(call => call.status === 'missed');
+                            displayCallsFromArray(missedCalls, missedCallsList, 'missed');
+                        }
+                    }
                 }
             });
             
@@ -4692,12 +5011,22 @@
                 groupCallsSection.classList.add('active');
                 
                 // Load group calls if not already loaded
-                if (groupCallsList.children.length === 0 && isOnline) {
-                    loadGroupCalls();
+                if (groupCallsList.children.length === 0) {
+                    if (isOnline) {
+                        loadGroupCalls();
+                    } else {
+                        // FEATURE 2: Load group calls from local storage when offline
+                        const storedCalls = localStorage.getItem(`callHistory_${currentUser.uid}`);
+                        if (storedCalls) {
+                            const calls = JSON.parse(storedCalls);
+                            const groupCalls = calls.filter(call => call.group === true || call.participants.length > 2);
+                            displayCallsFromArray(groupCalls, groupCallsList, 'group');
+                        }
+                    }
                 }
             });
             
-            // Window resize
+            // Window resize - FEATURE 6: Ensure responsive design
             window.addEventListener('resize', () => {
                 if (whiteboardCanvas) {
                     whiteboardCanvas.width = whiteboardCanvas.offsetWidth;

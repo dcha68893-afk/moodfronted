@@ -56,7 +56,7 @@ let currentTab = 'groups'; // Default to groups
 let isLoading = false;
 let isSidebarOpen = true;
 
-// FIREBASE AUTH STATE
+// FIREBASE AUTH STATE - SINGLE SOURCE OF TRUTH
 let currentUser = null;
 let firebaseInitialized = false;
 let authStateRestored = false;
@@ -66,7 +66,7 @@ let isOnline = navigator.onLine;
 let syncQueue = []; // Queue for messages to sync when online
 
 // ============================================================================
-// FIREBASE INITIALIZATION (ALWAYS RUNS - NO ONLINE/OFFLINE CONDITION)
+// FIREBASE INITIALIZATION (RUNS ONCE, WORKS OFFLINE)
 // ============================================================================
 
 function initializeFirebase() {
@@ -79,9 +79,11 @@ function initializeFirebase() {
   
   try {
     // Check if Firebase is available
-    if (typeof firebase === 'undefined' || !firebase.apps || !firebase.auth) {
-      console.warn('Firebase SDK not loaded yet, will retry on next page load');
-      setTimeout(initializeFirebase, 1000);
+    if (typeof firebase === 'undefined' || !firebase.apps) {
+      console.error('Firebase SDK not loaded');
+      // Set auth as restored even without Firebase for offline mode
+      authStateRestored = true;
+      broadcastAuthReady();
       return;
     }
 
@@ -92,7 +94,10 @@ function initializeFirebase() {
         firebase.initializeApp(window.firebaseConfig);
         console.log('Firebase app initialized');
       } else {
-        console.warn('Firebase config not found. Make sure firebaseConfig is defined globally.');
+        console.warn('Firebase config not found. Running in offline mode.');
+        // Continue without Firebase for offline functionality
+        authStateRestored = true;
+        broadcastAuthReady();
         return;
       }
     }
@@ -105,31 +110,59 @@ function initializeFirebase() {
       .then(() => {
         console.log('Auth persistence set to LOCAL');
         
-        // Try to restore user from localStorage first (fastest)
+        // FIRST: Restore from localStorage (immediate, works offline)
         restoreUserFromLocalStorage();
         
-        // Set up auth state observer (RUNS WITHOUT ONLINE/OFFLINE CONDITION)
-        auth.onAuthStateChanged((user) => {
+        // SECOND: Set up Firebase auth observer (works when online)
+        const unsubscribe = auth.onAuthStateChanged((user) => {
           console.log('Firebase auth state changed:', user ? 'User logged in' : 'No user');
-          handleAuthStateChange(user);
+          
+          // Only update if different from localStorage user
+          const storedUser = getStoredUserFromLocalStorage();
+          if (!user && storedUser) {
+            // Firebase says no user, but we have one stored - keep stored user
+            console.log('Keeping stored user despite Firebase state');
+            handleAuthStateChange(storedUser, true); // fromStorage flag
+          } else {
+            // Use Firebase user or null
+            handleAuthStateChange(user, false);
+          }
           
           // Mark auth as restored
-          authStateRestored = true;
-          
-          // Broadcast that auth is ready
-          broadcastAuthReady();
+          if (!authStateRestored) {
+            authStateRestored = true;
+            broadcastAuthReady();
+          }
         }, (error) => {
           console.error('Auth state observer error:', error);
-          authStateRestored = true;
-          broadcastAuthReady();
+          // Even if Firebase fails, restore from localStorage
+          if (!authStateRestored) {
+            restoreUserFromLocalStorage();
+            authStateRestored = true;
+            broadcastAuthReady();
+          }
         });
+        
+        // Store unsubscribe function for cleanup
+        window._firebaseAuthUnsubscribe = unsubscribe;
         
         firebaseInitialized = true;
         console.log('Firebase auth initialized successfully');
+        
+        // If auth state hasn't been restored within 3 seconds, force it
+        setTimeout(() => {
+          if (!authStateRestored) {
+            console.log('Forcing auth state restoration');
+            restoreUserFromLocalStorage();
+            authStateRestored = true;
+            broadcastAuthReady();
+          }
+        }, 3000);
       })
       .catch((error) => {
         console.error('Error setting auth persistence:', error);
-        // Even if persistence fails, continue with default behavior
+        // Continue with localStorage-based auth
+        restoreUserFromLocalStorage();
         firebaseInitialized = true;
         authStateRestored = true;
         broadcastAuthReady();
@@ -138,59 +171,73 @@ function initializeFirebase() {
   } catch (error) {
     console.error('Firebase initialization error:', error);
     // Don't prevent app from loading if Firebase fails
+    restoreUserFromLocalStorage();
     firebaseInitialized = true;
     authStateRestored = true;
     broadcastAuthReady();
   }
 }
 
-// Restore user from localStorage (fastest method)
-function restoreUserFromLocalStorage() {
+// Get stored user from localStorage
+function getStoredUserFromLocalStorage() {
   try {
     const storedAuth = localStorage.getItem('kynecta-auth-state');
     if (storedAuth) {
       const authData = JSON.parse(storedAuth);
       if (authData.user && authData.user.uid) {
-        console.log('Restoring user from localStorage:', authData.user.uid);
-        
-        // Create a minimal user object
-        const restoredUser = {
-          uid: authData.user.uid,
-          email: authData.user.email || '',
-          displayName: authData.user.displayName || 'User',
-          emailVerified: authData.user.emailVerified || false,
-          photoURL: authData.user.photoURL || null
-        };
-        
-        // Update global state immediately
-        currentUser = restoredUser;
-        updateGlobalAuthState(restoredUser);
-        
-        // Notify other components
-        broadcastAuthChange(restoredUser);
+        return authData.user;
       }
     }
   } catch (error) {
-    console.warn('Could not restore user from localStorage:', error);
+    console.warn('Could not get stored user:', error);
   }
+  return null;
+}
+
+// Restore user from localStorage (fastest method, works offline)
+function restoreUserFromLocalStorage() {
+  const storedUser = getStoredUserFromLocalStorage();
+  if (storedUser) {
+    console.log('Restoring user from localStorage:', storedUser.uid);
+    handleAuthStateChange(storedUser, true);
+    
+    // Update global state immediately
+    updateGlobalAuthState(storedUser);
+    
+    // Broadcast to other components
+    broadcastAuthChange(storedUser);
+    
+    return true;
+  }
+  return false;
 }
 
 // Handle auth state changes
-function handleAuthStateChange(user) {
-  currentUser = user;
+function handleAuthStateChange(user, fromStorage = false) {
+  // Only update if user is different
+  const userId = user ? user.uid : null;
+  const currentUserId = currentUser ? currentUser.uid : null;
   
-  // Update global auth state
-  updateGlobalAuthState(user);
-  
-  // Broadcast auth change to other components
-  broadcastAuthChange(user);
-  
-  // Store in localStorage for persistence and cross-tab communication
-  storeAuthInLocalStorage(user);
-  
-  // If user logged in and we're online, update user data
-  if (user && isOnline) {
-    updateUserProfile(user);
+  if (userId !== currentUserId) {
+    currentUser = user;
+    
+    // Update global auth state
+    updateGlobalAuthState(user);
+    
+    // Broadcast auth change to other components
+    broadcastAuthChange(user);
+    
+    // Store in localStorage for persistence (unless this came from storage)
+    if (!fromStorage) {
+      storeAuthInLocalStorage(user);
+    }
+    
+    // If user logged in and we're online, try to update user data
+    if (user && isOnline && firebaseInitialized && !fromStorage) {
+      updateUserProfile(user);
+    }
+    
+    console.log('Auth state updated:', user ? user.uid : 'No user');
   }
 }
 
@@ -212,7 +259,8 @@ function updateGlobalAuthState(user) {
     detail: { 
       user: user, 
       isAuthenticated: !!user,
-      isAuthReady: authStateRestored 
+      isAuthReady: authStateRestored,
+      fromStorage: false
     }
   });
   window.dispatchEvent(event);
@@ -227,7 +275,7 @@ function broadcastAuthChange(user) {
       email: user.email,
       displayName: user.displayName,
       photoURL: user.photoURL,
-      emailVerified: user.emailVerified
+      emailVerified: user.emailVerified || false
     } : null,
     isAuthenticated: !!user,
     timestamp: new Date().toISOString()
@@ -255,7 +303,7 @@ function storeAuthInLocalStorage(user) {
         email: user.email,
         displayName: user.displayName,
         photoURL: user.photoURL,
-        emailVerified: user.emailVerified
+        emailVerified: user.emailVerified || false
       } : null,
       timestamp: new Date().toISOString()
     }));
@@ -266,8 +314,13 @@ function storeAuthInLocalStorage(user) {
 
 // Update user profile (when online)
 function updateUserProfile(user) {
+  if (!user || !firebaseInitialized) return;
+  
   // This can be extended to fetch additional user data from Firestore
   console.log('User profile updated:', user.uid);
+  
+  // Update localStorage with latest user data
+  storeAuthInLocalStorage(user);
 }
 
 // Broadcast that auth is ready
@@ -275,10 +328,49 @@ function broadcastAuthReady() {
   const event = new CustomEvent('auth-ready', {
     detail: { 
       isReady: true,
-      timestamp: new Date().toISOString() 
+      timestamp: new Date().toISOString(),
+      user: currentUser
     }
   });
   window.dispatchEvent(event);
+  console.log('Auth ready broadcasted, user:', currentUser ? currentUser.uid : 'No user');
+}
+
+// ============================================================================
+// GLOBAL AUTH ACCESS FOR ALL PAGES
+// ============================================================================
+
+function setupGlobalAuthAccess() {
+  // Create global access methods for all pages
+  window.getCurrentUser = () => currentUser;
+  window.getCurrentUserId = () => currentUser ? currentUser.uid : null;
+  window.isAuthenticated = () => !!currentUser;
+  window.isAuthReady = () => authStateRestored;
+  window.waitForAuth = () => {
+    return new Promise((resolve) => {
+      if (authStateRestored) {
+        resolve(currentUser);
+      } else {
+        const listener = () => {
+          window.removeEventListener('auth-ready', listener);
+          resolve(currentUser);
+        };
+        window.addEventListener('auth-ready', listener);
+      }
+    });
+  };
+  
+  // Expose to window for immediate access
+  window.KYNECTA_AUTH = {
+    getCurrentUser: () => currentUser,
+    getUserId: () => currentUser ? currentUser.uid : null,
+    isAuthenticated: () => !!currentUser,
+    getUserEmail: () => currentUser ? currentUser.email : null,
+    getDisplayName: () => currentUser ? currentUser.displayName : null,
+    getPhotoURL: () => currentUser ? currentUser.photoURL : null,
+    isAuthReady: () => authStateRestored,
+    waitForAuth: window.waitForAuth
+  };
 }
 
 // ============================================================================
@@ -312,6 +404,16 @@ function handleOnline() {
   
   // BACKGROUND SYNC: Trigger sync when coming online
   triggerBackgroundSync();
+  
+  // If we have a stored user and Firebase is initialized, verify with Firebase
+  if (currentUser && firebaseInitialized) {
+    setTimeout(() => {
+      const auth = firebase.auth();
+      auth.currentUser?.reload().catch(error => {
+        console.log('User reload error (might be offline user):', error.message);
+      });
+    }, 1000);
+  }
 }
 
 // Handle offline event
@@ -916,13 +1018,6 @@ function exposeGlobalStateToIframes() {
     processQueuedMessages: processQueuedMessages,
     getQueuedItems: () => [...syncQueue]
   };
-  
-  // Also expose directly to window for backward compatibility
-  window.getCurrentUser = () => currentUser;
-  window.getCurrentUserId = () => currentUser ? currentUser.uid : null;
-  window.isAuthenticated = () => !!currentUser;
-  window.isOnline = () => isOnline;
-  window.isOffline = () => !isOnline;
 }
 
 // ============================================================================
@@ -1262,8 +1357,12 @@ function updateChatAreaVisibility(tabName) {
       chatArea.classList.add('hidden');
       chatListContainer.classList.remove('hidden');
       
-      if (inputArea) inputArea.classList.add('hidden');
-      if (chatHeader) chatHeader.classList.add('hidden');
+      if (inputArea) {
+        inputArea.classList.add('hidden');
+      }
+      if (chatHeader) {
+        chatHeader.classList.add('hidden');
+      }
     }
   } else {
     chatArea.classList.add('hidden');
@@ -1601,19 +1700,22 @@ function initializeApp() {
 
 function runInitialization() {
   try {
-    // CRITICAL: Initialize Firebase FIRST (always runs)
+    // STEP 1: Setup global auth access FIRST (before anything else)
+    setupGlobalAuthAccess();
+    
+    // STEP 2: Initialize Firebase ONCE (works offline/online)
     initializeFirebase();
     
-    // Expose global state to all pages
+    // STEP 3: Expose global state to all pages
     exposeGlobalStateToIframes();
     
-    // Setup cross-page communication
+    // STEP 4: Setup cross-page communication
     setupCrossPageCommunication();
     
-    // Setup event listeners
+    // STEP 5: Setup event listeners
     setupEventListeners();
     
-    // Initialize network detection (separate from auth)
+    // STEP 6: Initialize network detection (separate from auth)
     initializeNetworkDetection();
     
     // Ensure sidebar is properly initialized
@@ -1678,6 +1780,8 @@ function runInitialization() {
     injectStyles();
     
     console.log('Kynecta Application Shell initialized successfully');
+    console.log('Auth state:', currentUser ? `User ${currentUser.uid}` : 'No user');
+    console.log('Network:', isOnline ? 'Online' : 'Offline');
     
   } catch (error) {
     console.error('Error during app initialization:', error);
@@ -1861,22 +1965,7 @@ window.clearMessageQueue = function() {
 
 window.processQueuedMessages = processQueuedMessages;
 
-// AUTH HELPER FUNCTIONS
-window.getCurrentUser = function() {
-  return currentUser;
-};
-
-window.getCurrentUserId = function() {
-  return currentUser ? currentUser.uid : null;
-};
-
-window.isAuthenticated = function() {
-  return !!currentUser;
-};
-
-window.isAuthReady = function() {
-  return authStateRestored;
-};
+// AUTH HELPER FUNCTIONS (already set in setupGlobalAuthAccess)
 
 window.showChatArea = function() {
   const chatListContainer = document.getElementById('chatListContainer');

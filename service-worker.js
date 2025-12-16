@@ -1,21 +1,14 @@
 // Service Worker for Kynecta MoodChat - Firebase Web Application
-// Version: 1.3.0 - Enhanced Offline-First with Complete App Shell Caching
+// Version: 1.4.0 - Enhanced Offline-First with Permanent App Shell Availability
 // Project: kynecta-ee95c
 // Firebase: 9.22.1 (Compact)
 
-const APP_VERSION = '1.3.0';
-const CACHE_NAME = `kynecta-moodchat-cache-v${APP_VERSION}`;
-const CACHE_NAMES = {
-  static: `kynecta-moodchat-static-v${APP_VERSION}`,
-  dynamic: `kynecta-moodchat-dynamic-v${APP_VERSION}`,
-  firebase: `kynecta-moodchat-firebase-v${APP_VERSION}`,
-  app: `kynecta-moodchat-app-v${APP_VERSION}`,
-  moods: `kynecta-moodchat-moods-v${APP_VERSION}`
-};
+const APP_VERSION = '1.4.0';
+const CACHE_NAME = `kynecta-moodchat-permanent-v${APP_VERSION}`;
 
-// COMPLETE APP SHELL ASSETS - All files that exist in your app
+// COMPLETE APP SHELL ASSETS - PERMANENTLY CACHED FOR OFFLINE USE
 const APP_SHELL_ASSETS = [
-  // HTML Pages - ALL app pages
+  // HTML Pages - ALL app pages (MUST be available offline permanently)
   '/',
   '/index.html',
   '/chat.html',
@@ -24,14 +17,14 @@ const APP_SHELL_ASSETS = [
   '/status.html',
   '/call.html',
   
-  // CSS Files - ALL stylesheets
+  // CSS Files - ALL stylesheets (CRITICAL for layout)
   '/styles.css',
   '/css/styles.css',
   '/css/main.css',
   '/style.css',
   '/assets/css/app.css',
   
-  // JavaScript Files - ALL app logic
+  // JavaScript Files - ALL app logic (CRITICAL for functionality)
   '/js/app.js',
   '/js/chat.js',
   '/js/main.js',
@@ -56,7 +49,7 @@ const APP_SHELL_ASSETS = [
   '/offline.html'
 ];
 
-// Firebase SDK 9.22.1 - DO NOT CACHE - Network Only
+// Firebase SDK 9.22.1 - DO NOT CACHE - Network Only (EXCLUDE from all caching)
 const FIREBASE_SDK_URLS = [
   'https://www.gstatic.com/firebasejs/9.22.1/firebase-app-compat.js',
   'https://www.gstatic.com/firebasejs/9.22.1/firebase-auth-compat.js',
@@ -66,7 +59,7 @@ const FIREBASE_SDK_URLS = [
   'https://www.gstatic.com/firebasejs/9.22.1/firebase-performance-compat.js'
 ];
 
-// Firebase API Endpoints - DO NOT CACHE
+// Firebase API Endpoints - DO NOT CACHE (EXCLUDE from all caching)
 const FIREBASE_API_PATTERNS = [
   'firebase.googleapis.com',
   'firestore.googleapis.com',
@@ -77,52 +70,99 @@ const FIREBASE_API_PATTERNS = [
   '__/firebase'
 ];
 
-// Install Event - Cache ALL App Shell Assets
+// Install Event - PERMANENTLY Cache ALL App Shell Assets
 self.addEventListener('install', (event) => {
-  console.log(`[Kynecta MoodChat Service Worker] Installing version ${APP_VERSION} - Caching Complete App Shell`);
+  console.log(`[Kynecta MoodChat Service Worker] Installing version ${APP_VERSION} - PERMANENT App Shell Caching`);
   
-  // Force activation immediately
+  // Force immediate activation to replace old service worker
   self.skipWaiting();
   
   event.waitUntil(
-    // Cache ALL app shell assets
+    // Open permanent cache for app shell
     caches.open(CACHE_NAME)
       .then(cache => {
-        console.log('[Kynecta] Caching complete app shell:', APP_SHELL_ASSETS.length, 'assets');
+        console.log('[Kynecta] PERMANENTLY caching app shell:', APP_SHELL_ASSETS.length, 'assets');
         
-        // Cache all assets with error handling for missing files
+        // Cache all app shell assets with aggressive error handling
         return Promise.allSettled(
           APP_SHELL_ASSETS.map(asset => {
             return cache.add(asset).catch(err => {
               console.warn(`[Kynecta] Could not cache ${asset}:`, err.message);
-              return null; // Continue even if some files don't exist
+              // Don't fail installation if some assets can't be cached
+              return null;
             });
           })
         ).then(results => {
-          const successful = results.filter(r => r.status === 'fulfilled' && r.value !== null).length;
-          console.log(`[Kynecta] Successfully cached ${successful}/${APP_SHELL_ASSETS.length} app shell assets`);
+          const successful = results.filter(r => r.status === 'fulfilled' && r.value !== undefined).length;
+          console.log(`[Kynecta] PERMANENTLY cached ${successful}/${APP_SHELL_ASSETS.length} app shell assets`);
           
-          // Always cache index.html as fallback
-          return cache.add('/index.html').catch(() => {
-            return cache.add('/').catch(() => {
-              console.log('[Kynecta] Using default offline response');
-            });
-          });
+          // Ensure critical assets are cached
+          return ensureCriticalAssetsCached(cache);
         });
       })
       .then(() => {
-        console.log('[Kynecta] App shell caching completed');
+        console.log('[Kynecta] PERMANENT app shell caching completed');
         return initializeOfflineStorage();
       })
       .then(() => {
-        console.log('[Kynecta] Service Worker installed - App is fully offline-ready');
+        console.log('[Kynecta] Service Worker installed - App is PERMANENTLY offline-ready');
+        // Send message to all clients that new version is ready
+        return self.clients.matchAll();
+      })
+      .then(clients => {
+        clients.forEach(client => {
+          client.postMessage({
+            type: 'NEW_VERSION_READY',
+            version: APP_VERSION,
+            permanentOffline: true
+          });
+        });
       })
       .catch(error => {
-        console.error('[Kynecta] Installation error:', error);
-        // Continue installation even with errors
+        console.error('[Kynecta] PERMANENT installation error:', error);
+        // Installation must succeed even with errors
       })
   );
 });
+
+// Ensure critical assets are always cached with fallbacks
+async function ensureCriticalAssetsCached(cache) {
+  const criticalAssets = [
+    '/',
+    '/index.html',
+    '/styles.css',
+    '/js/app.js',
+    '/manifest.json'
+  ];
+  
+  for (const asset of criticalAssets) {
+    try {
+      await cache.add(asset);
+    } catch (error) {
+      console.warn(`[Kynecta] Critical asset ${asset} not available, will use cached version if exists`);
+    }
+  }
+  
+  // Always ensure offline.html is available
+  try {
+    await cache.add('/offline.html');
+  } catch (error) {
+    // Create minimal offline page if not exists
+    const minimalOffline = new Response(
+      `<!DOCTYPE html>
+      <html>
+      <head>
+        <meta charset="UTF-8">
+        <title>Kynecta Offline</title>
+        <style>body{font-family:sans-serif;padding:2rem;text-align:center}</style>
+      </head>
+      <body><h1>You're Offline</h1><p>App will load when back online.</p></body>
+      </html>`,
+      { headers: { 'Content-Type': 'text/html' } }
+    );
+    await cache.put('/offline.html', minimalOffline);
+  }
+}
 
 // Initialize IndexedDB for offline storage
 async function initializeOfflineStorage() {
@@ -157,7 +197,7 @@ async function initializeOfflineStorage() {
     };
     
     request.onsuccess = (event) => {
-      console.log('[Kynecta] Offline storage initialized');
+      console.log('[Kynecta] Offline storage initialized for PERMANENT caching');
       resolve(event.target.result);
     };
     
@@ -168,74 +208,95 @@ async function initializeOfflineStorage() {
   });
 }
 
-// Activate Event - Clean up ALL old caches
+// Activate Event - AGGRESSIVELY clean up ALL old caches
 self.addEventListener('activate', (event) => {
-  console.log('[Kynecta] Activating new version', APP_VERSION);
+  console.log('[Kynecta] Activating PERMANENT offline version', APP_VERSION);
   
   event.waitUntil(
     caches.keys().then(cacheNames => {
       const deletions = cacheNames.map(cacheName => {
         // Delete ALL old caches that don't match current version
+        // This prevents old broken layouts from being reused
         if ((cacheName.startsWith('uniconnect-') || cacheName.startsWith('kynecta-')) && 
-            cacheName !== CACHE_NAME && 
-            !Object.values(CACHE_NAMES).includes(cacheName)) {
-          console.log('[Kynecta] Deleting old cache:', cacheName);
+            cacheName !== CACHE_NAME) {
+          console.log('[Kynecta] DELETING old cache to prevent broken layouts:', cacheName);
           return caches.delete(cacheName);
         }
+        return Promise.resolve();
       });
       return Promise.all(deletions);
     }).then(() => {
-      console.log('[Kynecta] Cache cleanup completed');
-      // Take control of all clients immediately
+      console.log('[Kynecta] AGGRESSIVE cache cleanup completed - only v' + APP_VERSION + ' remains');
+      // Take control of ALL clients immediately
       return self.clients.claim();
+    }).then(() => {
+      // Verify permanent cache is working
+      return caches.open(CACHE_NAME).then(cache => {
+        return cache.keys().then(keys => {
+          console.log(`[Kynecta] PERMANENT cache contains ${keys.length} assets for offline use`);
+          
+          // Validate critical assets are present
+          const criticalUrls = ['/', '/index.html', '/offline.html'];
+          const missing = [];
+          
+          criticalUrls.forEach(url => {
+            const found = keys.some(key => {
+              const keyUrl = new URL(key.url);
+              return keyUrl.pathname === url || keyUrl.pathname + '.html' === url;
+            });
+            if (!found) {
+              missing.push(url);
+            }
+          });
+          
+          if (missing.length > 0) {
+            console.warn('[Kynecta] Missing critical assets:', missing);
+            // Re-cache missing critical assets
+            return cacheCriticalAssets();
+          }
+          
+          return Promise.resolve();
+        });
+      });
     })
   );
 });
 
-// Enhanced Fetch Event - Smart Caching Strategies
+// Cache missing critical assets
+async function cacheCriticalAssets() {
+  const cache = await caches.open(CACHE_NAME);
+  const criticalAssets = ['/', '/index.html', '/offline.html'];
+  
+  for (const asset of criticalAssets) {
+    try {
+      await cache.add(asset);
+      console.log(`[Kynecta] Re-cached critical asset: ${asset}`);
+    } catch (error) {
+      console.warn(`[Kynecta] Could not re-cache ${asset}:`, error.message);
+    }
+  }
+}
+
+// Enhanced Fetch Event - PERMANENT App Shell Availability
 self.addEventListener('fetch', (event) => {
   const { request } = event;
   const url = new URL(request.url);
   
-  // Skip non-GET requests
-  if (request.method !== 'GET') {
+  // Skip non-GET requests and chrome-extension requests
+  if (request.method !== 'GET' || url.protocol === 'chrome-extension:') {
     return;
   }
   
   // Check if this is a Firebase SDK or API request - NEVER CACHE
   if (isFirebaseRequest(url)) {
-    // Network Only for Firebase
+    // Network Only for Firebase - NEVER interfere with Firebase
     event.respondWith(handleFirebaseNetworkOnly(request));
     return;
   }
   
-  // HTML Pages - Cache First with Offline Fallback
-  if (request.destination === 'document' || url.pathname.endsWith('.html') || url.pathname === '/') {
-    event.respondWith(handleHtmlCacheFirst(request));
-    return;
-  }
-  
-  // CSS Files - Cache First
-  if (request.destination === 'style' || url.pathname.endsWith('.css')) {
-    event.respondWith(handleCssCacheFirst(request));
-    return;
-  }
-  
-  // JavaScript Files - Cache First
-  if (request.destination === 'script' || url.pathname.endsWith('.js')) {
-    event.respondWith(handleJsCacheFirst(request));
-    return;
-  }
-  
-  // Images and Icons - Cache First
-  if (request.destination === 'image' || url.pathname.includes('/icons/') || url.pathname.includes('/assets/')) {
-    event.respondWith(handleImageCacheFirst(request));
-    return;
-  }
-  
-  // Manifest - Cache First
-  if (url.pathname.endsWith('manifest.json')) {
-    event.respondWith(handleManifestCacheFirst(request));
+  // Check if this is an App Shell asset (PERMANENTLY CACHED)
+  if (isAppShellAsset(url)) {
+    event.respondWith(handlePermanentAppShell(request));
     return;
   }
   
@@ -245,11 +306,11 @@ self.addEventListener('fetch', (event) => {
     return;
   }
   
-  // Default: Network First with Cache Fallback
-  event.respondWith(handleDefaultNetworkFirst(request));
+  // Default: Cache First with Network Fallback
+  event.respondWith(handleDefaultCacheFirst(request));
 });
 
-// Check if request is to Firebase (Never Cache)
+// Check if request is to Firebase (NEVER CACHE - CRITICAL FOR AUTH)
 function isFirebaseRequest(url) {
   // Firebase SDK URLs
   if (url.hostname === 'www.gstatic.com' && url.pathname.includes('/firebasejs/')) {
@@ -262,75 +323,51 @@ function isFirebaseRequest(url) {
   );
 }
 
-// Firebase Handler - Network Only (Never Cache)
-async function handleFirebaseNetworkOnly(request) {
-  console.log('[Kynecta] Firebase request - Network Only:', request.url);
+// Check if asset is part of App Shell (PERMANENT CACHE)
+function isAppShellAsset(url) {
+  const path = url.pathname;
+  const isSameOrigin = url.origin === self.location.origin;
   
-  try {
-    // Always fetch from network
-    const networkResponse = await fetch(request);
-    return networkResponse;
-  } catch (error) {
-    console.log('[Kynecta] Firebase offline - returning offline response');
-    
-    // Return appropriate offline response based on request type
-    if (request.url.includes('firestore.googleapis.com')) {
-      return new Response(
-        JSON.stringify({
-          status: "offline",
-          message: "Firestore is offline. Changes will sync when back online.",
-          timestamp: Date.now()
-        }),
-        {
-          status: 200,
-          headers: { 'Content-Type': 'application/json' }
-        }
-      );
-    }
-    
-    if (request.url.includes('identitytoolkit.googleapis.com') || request.url.includes('securetoken.googleapis.com')) {
-      return new Response(
-        JSON.stringify({
-          error: {
-            code: 503,
-            message: "Service unavailable. You are offline.",
-            status: "UNAVAILABLE"
-          }
-        }),
-        {
-          status: 503,
-          headers: { 'Content-Type': 'application/json' }
-        }
-      );
-    }
-    
-    // Generic Firebase offline response
-    return new Response(
-      JSON.stringify({
-        status: "offline",
-        service: "firebase",
-        timestamp: Date.now()
-      }),
-      {
-        status: 200,
-        headers: { 'Content-Type': 'application/json' }
-      }
-    );
+  // Only cache same-origin assets for app shell
+  if (!isSameOrigin) {
+    return false;
   }
+  
+  // Cache based on file extensions and paths
+  if (path.endsWith('.html') || 
+      path.endsWith('.css') || 
+      path.endsWith('.js') || 
+      path.endsWith('.png') || 
+      path.endsWith('.jpg') || 
+      path.endsWith('.jpeg') || 
+      path.endsWith('.gif') || 
+      path.endsWith('.svg') || 
+      path.endsWith('.ico') || 
+      path.endsWith('.json') ||
+      path === '/' ||
+      path.includes('/icons/') ||
+      path.includes('/assets/') ||
+      path.includes('/css/') ||
+      path.includes('/js/')) {
+    return true;
+  }
+  
+  return false;
 }
 
-// HTML Handler - Cache First with Offline Fallback
-async function handleHtmlCacheFirst(request) {
-  console.log('[Kynecta] HTML request:', request.url);
+// PERMANENT App Shell Handler - Always available offline
+async function handlePermanentAppShell(request) {
+  console.log('[Kynecta] App Shell request (PERMANENT):', request.url);
   
-  // Try cache first
+  // ALWAYS try cache first for app shell assets
   const cachedResponse = await caches.match(request);
+  
   if (cachedResponse) {
-    console.log('[Kynecta] Serving HTML from cache:', request.url);
+    console.log('[Kynecta] Serving PERMANENT app shell from cache:', request.url);
     
-    // Update cache in background if online
+    // Update cache in background if online (silent refresh)
     if (navigator.onLine) {
-      updateCacheInBackground(request);
+      silentlyUpdateCache(request);
     }
     
     return cachedResponse;
@@ -340,54 +377,70 @@ async function handleHtmlCacheFirst(request) {
   try {
     const networkResponse = await fetch(request);
     
-    // Cache for future offline use
+    // Cache for PERMANENT offline use
     if (networkResponse.ok) {
       const cache = await caches.open(CACHE_NAME);
       await cache.put(request, networkResponse.clone());
-      console.log('[Kynecta] Cached HTML for offline:', request.url);
+      console.log('[Kynecta] Added to PERMANENT cache:', request.url);
     }
     
     return networkResponse;
   } catch (error) {
-    console.log('[Kynecta] Network failed, serving offline page');
+    console.log('[Kynecta] Network failed for app shell, serving robust fallback');
     
-    // Try to serve offline.html
-    const offlineResponse = await caches.match('/offline.html');
-    if (offlineResponse) {
-      return offlineResponse;
+    // Return appropriate fallback based on file type
+    return serveRobustFallback(request);
+  }
+}
+
+// Serve robust fallback for missing app shell assets
+async function serveRobustFallback(request) {
+  const url = new URL(request.url);
+  const path = url.pathname;
+  
+  // HTML fallback
+  if (path.endsWith('.html') || path === '/') {
+    console.log('[Kynecta] HTML unavailable, serving offline page');
+    
+    // Try to serve any cached HTML page
+    const cache = await caches.open(CACHE_NAME);
+    const keys = await cache.keys();
+    
+    // Find any HTML page in cache
+    for (const key of keys) {
+      const keyUrl = new URL(key.url);
+      if (keyUrl.pathname.endsWith('.html') || keyUrl.pathname === '/') {
+        const response = await cache.match(key);
+        if (response) {
+          console.log('[Kynecta] Serving cached HTML as fallback:', key.url);
+          return response;
+        }
+      }
     }
     
-    // Fallback to index.html
-    const indexResponse = await caches.match('/index.html') || 
-                         await caches.match('/');
-    if (indexResponse) {
-      return indexResponse;
-    }
-    
-    // Ultimate fallback - custom offline message
+    // Ultimate HTML fallback
     return new Response(
-      `
-      <!DOCTYPE html>
+      `<!DOCTYPE html>
       <html>
       <head>
         <meta charset="UTF-8">
         <meta name="viewport" content="width=device-width, initial-scale=1.0">
-        <title>Kynecta MoodChat - Offline</title>
+        <title>Kynecta MoodChat</title>
         <style>
           body {
             font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, sans-serif;
+            background: linear-gradient(135deg, #1a73e8, #0d47a1);
+            color: white;
+            height: 100vh;
+            margin: 0;
             display: flex;
             justify-content: center;
             align-items: center;
-            height: 100vh;
-            margin: 0;
-            background: linear-gradient(135deg, #1a73e8, #0d47a1);
-            color: white;
-          }
-          .offline-container {
             text-align: center;
-            padding: 2rem;
-            max-width: 400px;
+            padding: 20px;
+          }
+          .container {
+            max-width: 500px;
           }
           h1 {
             font-size: 2.5rem;
@@ -396,7 +449,6 @@ async function handleHtmlCacheFirst(request) {
           p {
             font-size: 1.1rem;
             line-height: 1.6;
-            margin-bottom: 2rem;
             opacity: 0.9;
           }
           .icon {
@@ -406,56 +458,42 @@ async function handleHtmlCacheFirst(request) {
         </style>
       </head>
       <body>
-        <div class="offline-container">
-          <div class="icon">📶</div>
-          <h1>You're Offline</h1>
-          <p>Kynecta MoodChat needs an internet connection to load this page. 
-             Basic features are available offline. Please check your connection and try again.</p>
-          <p>App will sync automatically when you're back online.</p>
+        <div class="container">
+          <div class="icon">⚡</div>
+          <h1>Kynecta MoodChat</h1>
+          <p>The app is fully loaded for offline use.</p>
+          <p>You're currently offline. Basic functionality is available.</p>
+          <p>The app will sync automatically when you're back online.</p>
         </div>
+        <script>
+          // Minimal JS to handle online detection
+          window.addEventListener('online', () => location.reload());
+        </script>
       </body>
-      </html>
-      `,
+      </html>`,
       {
         status: 200,
         headers: { 'Content-Type': 'text/html' }
       }
     );
   }
-}
-
-// CSS Handler - Cache First
-async function handleCssCacheFirst(request) {
-  // Try cache first
-  const cachedResponse = await caches.match(request);
-  if (cachedResponse) {
-    // Update in background if online
-    if (navigator.onLine) {
-      updateCacheInBackground(request);
-    }
-    return cachedResponse;
-  }
   
-  // If not in cache, try network
-  try {
-    const networkResponse = await fetch(request);
-    
-    // Cache for offline use
-    if (networkResponse.ok) {
-      const cache = await caches.open(CACHE_NAME);
-      await cache.put(request, networkResponse.clone());
-    }
-    
-    return networkResponse;
-  } catch (error) {
-    // Return minimal CSS to prevent layout breaks
+  // CSS fallback - prevent layout breaks
+  if (path.endsWith('.css')) {
+    console.log('[Kynecta] CSS unavailable, serving minimal styles');
     return new Response(
-      `/* Kynecta MoodChat - Offline CSS */
-      body {
-        visibility: visible !important;
+      `/* Kynecta MoodChat - Minimal Offline CSS */
+      * { box-sizing: border-box; }
+      body { 
+        margin: 0; 
+        padding: 0; 
+        font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+        min-height: 100vh;
       }
-      .offline-indicator {
-        display: none;
+      /* Ensure layout containers are visible */
+      .container, div, section, main, header, footer {
+        display: block;
+        visibility: visible !important;
       }`,
       {
         status: 200,
@@ -463,38 +501,17 @@ async function handleCssCacheFirst(request) {
       }
     );
   }
-}
-
-// JavaScript Handler - Cache First
-async function handleJsCacheFirst(request) {
-  // Try cache first
-  const cachedResponse = await caches.match(request);
-  if (cachedResponse) {
-    // Update in background if online
-    if (navigator.onLine) {
-      updateCacheInBackground(request);
-    }
-    return cachedResponse;
-  }
   
-  // If not in cache, try network
-  try {
-    const networkResponse = await fetch(request);
-    
-    // Cache for offline use
-    if (networkResponse.ok) {
-      const cache = await caches.open(CACHE_NAME);
-      await cache.put(request, networkResponse.clone());
-    }
-    
-    return networkResponse;
-  } catch (error) {
-    // Return minimal JS to prevent app crashes
+  // JavaScript fallback - prevent app crashes
+  if (path.endsWith('.js')) {
+    console.log('[Kynecta] JS unavailable, serving safe stub');
     return new Response(
-      `// Kynecta MoodChat - Offline JavaScript
-      console.log('App is running in offline mode');
+      `// Kynecta MoodChat - Safe JavaScript Stub
+      console.log('App running in enhanced offline mode');
       if (typeof window !== 'undefined') {
         window.isOffline = true;
+        window.appReady = true;
+        window.dispatchEvent(new Event('app-loaded'));
       }`,
       {
         status: 200,
@@ -502,63 +519,42 @@ async function handleJsCacheFirst(request) {
       }
     );
   }
-}
-
-// Image Handler - Cache First
-async function handleImageCacheFirst(request) {
-  // Try cache first
-  const cachedResponse = await caches.match(request);
-  if (cachedResponse) {
-    // Update in background if online
-    if (navigator.onLine) {
-      updateCacheInBackground(request);
-    }
-    return cachedResponse;
-  }
   
-  // If not in cache, try network
-  try {
-    const networkResponse = await fetch(request);
-    
-    // Cache for offline use
-    if (networkResponse.ok) {
-      const cache = await caches.open(CACHE_NAME);
-      await cache.put(request, networkResponse.clone());
-    }
-    
-    return networkResponse;
-  } catch (error) {
-    // Return placeholder image
+  // Image fallback
+  if (path.match(/\.(png|jpg|jpeg|gif|svg|ico)$/i)) {
+    console.log('[Kynecta] Image unavailable, serving placeholder');
+    // SVG placeholder
     return new Response(
-      'data:image/svg+xml;base64,PHN2ZyB3aWR0aD0iMTAwIiBoZWlnaHQ9IjEwMCIgdmlld0JveD0iMCAwIDEwMCAxMDAiPjxyZWN0IHdpZHRoPSIxMDAiIGhlaWdodD0iMTAwIiBmaWxsPSIjMWE3M2U4Ii8+PHRleHQgeD0iNTAiIHk9IjUwIiB0ZXh0LWFuY2hvcj0ibWlkZGxlIiBkeT0iLjNlbSIgZmlsbD0id2hpdGUiIGZvbnQtZmFtaWx5PSJBcmlhbCIgZm9udC1zaXplPSIxNCI+S0M8L3RleHQ+PC9zdmc+',
+      '<svg xmlns="http://www.w3.org/2000/svg" width="100" height="100" viewBox="0 0 100 100"><rect width="100" height="100" fill="#1a73e8"/><text x="50" y="50" text-anchor="middle" dy=".3em" fill="white" font-family="Arial" font-size="14">KC</text></svg>',
       {
         status: 200,
         headers: { 'Content-Type': 'image/svg+xml' }
       }
     );
   }
+  
+  // Default fallback
+  return new Response('', { status: 200 });
 }
 
-// Manifest Handler - Cache First
-async function handleManifestCacheFirst(request) {
-  const cachedResponse = await caches.match(request);
-  if (cachedResponse) {
-    return cachedResponse;
-  }
+// Firebase Handler - Network Only (NEVER CACHE - CRITICAL)
+async function handleFirebaseNetworkOnly(request) {
+  console.log('[Kynecta] Firebase request - Network Only (NEVER CACHE):', request.url);
   
   try {
-    return await fetch(request);
+    // ALWAYS fetch from network - never cache Firebase
+    const networkResponse = await fetch(request);
+    return networkResponse;
   } catch (error) {
-    // Return basic manifest
+    console.log('[Kynecta] Firebase offline - returning safe offline response');
+    
+    // Return safe responses that won't break the UI
     return new Response(
       JSON.stringify({
-        "name": "Kynecta MoodChat",
-        "short_name": "MoodChat",
-        "start_url": "/",
-        "display": "standalone",
-        "background_color": "#ffffff",
-        "theme_color": "#1a73e8",
-        "offline_enabled": true
+        status: "offline",
+        service: "firebase",
+        timestamp: Date.now(),
+        uiSafe: true
       }),
       {
         status: 200,
@@ -574,9 +570,9 @@ async function handleApiNetworkFirst(request) {
     // Try network first
     const networkResponse = await fetch(request);
     
-    // Cache GET responses for offline reading
+    // Cache GET responses for offline reading (optional)
     if (networkResponse.ok && request.method === 'GET') {
-      const cache = await caches.open(CACHE_NAMES.dynamic);
+      const cache = await caches.open(CACHE_NAME);
       await cache.put(request, networkResponse.clone());
     }
     
@@ -588,12 +584,13 @@ async function handleApiNetworkFirst(request) {
       return cachedResponse;
     }
     
-    // Return offline response
+    // Return safe offline response
     return new Response(
       JSON.stringify({
         status: "offline",
-        message: "API is unavailable offline",
-        timestamp: Date.now()
+        message: "API unavailable - working offline",
+        timestamp: Date.now(),
+        uiSafe: true
       }),
       {
         status: 200,
@@ -603,23 +600,33 @@ async function handleApiNetworkFirst(request) {
   }
 }
 
-// Default Handler - Network First with Cache Fallback
-async function handleDefaultNetworkFirst(request) {
-  try {
-    return await fetch(request);
-  } catch (error) {
-    const cachedResponse = await caches.match(request);
-    if (cachedResponse) {
-      return cachedResponse;
+// Default Handler - Cache First with Network Fallback
+async function handleDefaultCacheFirst(request) {
+  // Try cache first
+  const cachedResponse = await caches.match(request);
+  if (cachedResponse) {
+    // Update in background if online
+    if (navigator.onLine) {
+      silentlyUpdateCache(request);
     }
-    return new Response('', { status: 200 });
+    return cachedResponse;
+  }
+  
+  // If not in cache, try network
+  try {
+    const networkResponse = await fetch(request);
+    return networkResponse;
+  } catch (error) {
+    // Return empty but valid response to prevent UI breakage
+    return new Response('', { 
+      status: 200,
+      headers: { 'Content-Type': 'text/plain' }
+    });
   }
 }
 
-// Helper function to update cache in background
-async function updateCacheInBackground(request) {
-  if (!navigator.onLine) return;
-  
+// Silently update cache in background (no logging to avoid clutter)
+async function silentlyUpdateCache(request) {
   try {
     const networkResponse = await fetch(request);
     if (networkResponse.ok) {
@@ -627,30 +634,11 @@ async function updateCacheInBackground(request) {
       await cache.put(request, networkResponse.clone());
     }
   } catch (error) {
-    // Silently fail
+    // Silent fail - cache remains unchanged
   }
 }
 
-// Background Sync (Keep existing functionality)
-self.addEventListener('sync', (event) => {
-  console.log('[Kynecta] Background sync:', event.tag);
-  
-  if (event.tag === 'firebase-auth-sync') {
-    event.waitUntil(syncFirebaseAuth());
-  } else if (event.tag === 'firestore-sync') {
-    event.waitUntil(syncFirestoreData());
-  } else if (event.tag === 'kynecta-messages') {
-    event.waitUntil(syncPendingMessages());
-  } else if (event.tag === 'sync-mood-selections') {
-    event.waitUntil(syncOfflineMoodSelections());
-  } else if (event.tag === 'sync-interest-selections') {
-    event.waitUntil(syncOfflineInterestSelections());
-  } else if (event.tag === 'sync-offline-messages') {
-    event.waitUntil(syncOfflineMessages());
-  }
-});
-
-// Message Event - Keep all existing functionality
+// Enhanced Message Event with PERMANENT offline support
 self.addEventListener('message', (event) => {
   const { data } = event;
   
@@ -660,85 +648,181 @@ self.addEventListener('message', (event) => {
       break;
       
     case 'GET_VERSION':
-      event.ports[0]?.postMessage({ 
-        version: APP_VERSION,
-        cacheName: CACHE_NAME,
-        offlineReady: true
-      });
+      if (event.ports && event.ports[0]) {
+        event.ports[0].postMessage({ 
+          version: APP_VERSION,
+          cacheName: CACHE_NAME,
+          permanentOffline: true,
+          cacheStrategy: 'permanent-app-shell'
+        });
+      }
       break;
       
     case 'CHECK_OFFLINE_STATUS':
-      event.ports[0]?.postMessage({
-        offline: !navigator.onLine,
-        version: APP_VERSION,
-        cacheStatus: 'active'
-      });
+      if (event.ports && event.ports[0]) {
+        event.ports[0].postMessage({
+          offline: !navigator.onLine,
+          version: APP_VERSION,
+          permanentCache: true,
+          cacheStatus: 'active-permanent'
+        });
+      }
       break;
       
-    case 'CHECK_CACHE':
+    case 'VERIFY_APP_SHELL':
       caches.open(CACHE_NAME).then(cache => {
         cache.keys().then(keys => {
-          event.ports[0]?.postMessage({
-            cachedItems: keys.length,
-            cacheName: CACHE_NAME,
-            appShellCached: keys.some(k => k.url.includes('.html'))
+          const htmlFiles = keys.filter(k => {
+            const url = new URL(k.url);
+            return url.pathname.endsWith('.html') || url.pathname === '/';
           });
-        });
-      });
-      break;
-      
-    case 'CLEAR_CACHE':
-      caches.keys().then(cacheNames => {
-        cacheNames.forEach(cacheName => {
-          if (cacheName.startsWith('kynecta-')) {
-            caches.delete(cacheName);
+          const cssFiles = keys.filter(k => k.url.endsWith('.css'));
+          const jsFiles = keys.filter(k => k.url.endsWith('.js'));
+          
+          if (event.ports && event.ports[0]) {
+            event.ports[0].postMessage({
+              verified: true,
+              htmlCount: htmlFiles.length,
+              cssCount: cssFiles.length,
+              jsCount: jsFiles.length,
+              totalAssets: keys.length,
+              permanent: true
+            });
           }
         });
       });
-      event.ports[0]?.postMessage({ cleared: true });
+      break;
+      
+    case 'FORCE_CACHE_REFRESH':
+      // Re-cache app shell assets
+      caches.open(CACHE_NAME).then(cache => {
+        Promise.allSettled(
+          APP_SHELL_ASSETS.map(asset => {
+            return fetch(asset)
+              .then(response => {
+                if (response.ok) {
+                  return cache.put(asset, response);
+                }
+                return Promise.resolve();
+              })
+              .catch(() => Promise.resolve());
+          })
+        ).then(() => {
+          if (event.ports && event.ports[0]) {
+            event.ports[0].postMessage({ refreshed: true });
+          }
+        });
+      });
       break;
       
     // Keep all existing message handlers
     case 'SAVE_MESSAGE_OFFLINE':
       saveMessageOffline(data.payload);
-      event.ports[0]?.postMessage({ success: true });
+      if (event.ports && event.ports[0]) {
+        event.ports[0].postMessage({ success: true });
+      }
       break;
       
     case 'SAVE_MOOD_OFFLINE':
       saveMoodSelectionOffline(data.payload);
-      event.ports[0]?.postMessage({ success: true });
+      if (event.ports && event.ports[0]) {
+        event.ports[0].postMessage({ success: true });
+      }
       break;
       
     case 'SAVE_INTEREST_OFFLINE':
       saveInterestSelectionOffline(data.payload);
-      event.ports[0]?.postMessage({ success: true });
+      if (event.ports && event.ports[0]) {
+        event.ports[0].postMessage({ success: true });
+      }
       break;
       
     case 'GET_OFFLINE_DATA':
-      getOfflineData().then(data => {
-        event.ports[0]?.postMessage({ data });
+      getOfflineData().then(offlineData => {
+        if (event.ports && event.ports[0]) {
+          event.ports[0].postMessage({ data: offlineData });
+        }
       });
       break;
       
     case 'REGISTER_MESSAGE_SYNC':
       self.registration.sync.register('sync-offline-messages')
-        .then(() => event.ports[0]?.postMessage({ registered: true }))
-        .catch(err => event.ports[0]?.postMessage({ registered: false, error: err.message }));
+        .then(() => {
+          if (event.ports && event.ports[0]) {
+            event.ports[0].postMessage({ registered: true });
+          }
+        })
+        .catch(err => {
+          if (event.ports && event.ports[0]) {
+            event.ports[0].postMessage({ registered: false, error: err.message });
+          }
+        });
       break;
       
     case 'REGISTER_MOOD_SYNC':
       self.registration.sync.register('sync-mood-selections')
-        .then(() => event.ports[0]?.postMessage({ registered: true }))
-        .catch(err => event.ports[0]?.postMessage({ registered: false, error: err.message }));
+        .then(() => {
+          if (event.ports && event.ports[0]) {
+            event.ports[0].postMessage({ registered: true });
+          }
+        })
+        .catch(err => {
+          if (event.ports && event.ports[0]) {
+            event.ports[0].postMessage({ registered: false, error: err.message });
+          }
+        });
       break;
       
     case 'REGISTER_INTEREST_SYNC':
       self.registration.sync.register('sync-interest-selections')
-        .then(() => event.ports[0]?.postMessage({ registered: true }))
-        .catch(err => event.ports[0]?.postMessage({ registered: false, error: err.message }));
+        .then(() => {
+          if (event.ports && event.ports[0]) {
+            event.ports[0].postMessage({ registered: true });
+          }
+        })
+        .catch(err => {
+          if (event.ports && event.ports[0]) {
+            event.ports[0].postMessage({ registered: false, error: err.message });
+          }
+        });
+      break;
+      
+    case 'CHECK_CACHE_INTEGRITY':
+      verifyCacheIntegrity().then(result => {
+        if (event.ports && event.ports[0]) {
+          event.ports[0].postMessage(result);
+        }
+      });
       break;
   }
 });
+
+// Verify cache integrity
+async function verifyCacheIntegrity() {
+  const cache = await caches.open(CACHE_NAME);
+  const keys = await cache.keys();
+  
+  const criticalAssets = ['/', '/index.html', '/styles.css', '/js/app.js'];
+  const missing = [];
+  
+  for (const asset of criticalAssets) {
+    const found = keys.some(key => {
+      const url = new URL(key.url);
+      return url.pathname === asset || url.pathname === asset + '.html';
+    });
+    
+    if (!found) {
+      missing.push(asset);
+    }
+  }
+  
+  return {
+    integrity: missing.length === 0 ? 'healthy' : 'degraded',
+    totalCached: keys.length,
+    missingCritical: missing,
+    permanentCache: true
+  };
+}
 
 // Keep all existing helper functions exactly as they were
 async function saveMessageOffline(payload) {
@@ -817,7 +901,6 @@ async function getOfflineData() {
     request.onsuccess = (event) => {
       const db = event.target.result;
       
-      // Get all data from different stores
       const messageTx = db.transaction(['offlineMessages'], 'readonly');
       const messageStore = messageTx.objectStore('offlineMessages');
       const messages = messageStore.getAll();
@@ -840,47 +923,72 @@ async function getOfflineData() {
           messages: messageData,
           moods: moodData,
           interests: interestData,
-          lastUpdated: Date.now()
+          lastUpdated: Date.now(),
+          permanentStorage: true
         });
       });
     };
     
-    request.onerror = () => resolve({ messages: [], moods: [], interests: [], lastUpdated: Date.now() });
+    request.onerror = () => resolve({ 
+      messages: [], 
+      moods: [], 
+      interests: [], 
+      lastUpdated: Date.now() 
+    });
   });
 }
 
 // Keep all existing sync functions
 async function syncOfflineMessages() {
-  console.log('[Kynecta] Syncing offline messages...');
+  console.log('[Kynecta PERMANENT] Syncing offline messages...');
   // Existing implementation
 }
 
 async function syncOfflineMoodSelections() {
-  console.log('[Kynecta] Syncing offline mood selections...');
+  console.log('[Kynecta PERMANENT] Syncing offline mood selections...');
   // Existing implementation
 }
 
 async function syncOfflineInterestSelections() {
-  console.log('[Kynecta] Syncing offline interest selections...');
+  console.log('[Kynecta PERMANENT] Syncing offline interest selections...');
   // Existing implementation
 }
 
 async function syncFirebaseAuth() {
-  console.log('[Kynecta] Syncing Firebase Auth...');
+  console.log('[Kynecta PERMANENT] Syncing Firebase Auth...');
   // Existing implementation
 }
 
 async function syncFirestoreData() {
-  console.log('[Kynecta] Syncing Firestore data...');
+  console.log('[Kynecta PERMANENT] Syncing Firestore data...');
   // Existing implementation
 }
 
 async function syncPendingMessages() {
-  console.log('[Kynecta] Syncing pending messages...');
+  console.log('[Kynecta PERMANENT] Syncing pending messages...');
   // Existing implementation
 }
 
-// Push Notifications (Keep existing)
+// Background Sync (Keep existing functionality)
+self.addEventListener('sync', (event) => {
+  console.log('[Kynecta PERMANENT] Background sync:', event.tag);
+  
+  if (event.tag === 'firebase-auth-sync') {
+    event.waitUntil(syncFirebaseAuth());
+  } else if (event.tag === 'firestore-sync') {
+    event.waitUntil(syncFirestoreData());
+  } else if (event.tag === 'kynecta-messages') {
+    event.waitUntil(syncPendingMessages());
+  } else if (event.tag === 'sync-mood-selections') {
+    event.waitUntil(syncOfflineMoodSelections());
+  } else if (event.tag === 'sync-interest-selections') {
+    event.waitUntil(syncOfflineInterestSelections());
+  } else if (event.tag === 'sync-offline-messages') {
+    event.waitUntil(syncOfflineMessages());
+  }
+});
+
+// Keep existing push notification handlers
 self.addEventListener('push', (event) => {
   // Existing push notification implementation
 });
@@ -889,19 +997,6 @@ self.addEventListener('notificationclick', (event) => {
   // Existing notification click implementation
 });
 
-// Firebase performance monitoring (Keep existing)
-self.addEventListener('fetch', (event) => {
-  if (event.request.url.includes('firebasejs')) {
-    const startTime = Date.now();
-    
-    event.respondWith(
-      fetch(event.request).then(response => {
-        const loadTime = Date.now() - startTime;
-        console.log(`[Kynecta Performance] Firebase SDK loaded in ${loadTime}ms`);
-        return response;
-      })
-    );
-  }
-});
-
-console.log(`[Kynecta MoodChat Service Worker] v${APP_VERSION} loaded - Fully Offline Ready`);
+console.log(`[Kynecta MoodChat Service Worker] v${APP_VERSION} loaded - PERMANENT Offline Availability`);
+console.log(`[Kynecta] App Shell will ALWAYS load offline, even after 24+ hours without internet`);
+console.log(`[Kynecta] Firebase SDK/API requests are NEVER cached (auth-safe)`);

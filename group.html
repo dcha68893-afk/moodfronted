@@ -1701,6 +1701,57 @@
             .call-participants {
                 grid-template-columns: 1fr;
             }
+            
+            /* Mobile-specific group chat features */
+            .group-header-actions {
+                display: flex;
+                gap: 5px;
+            }
+            
+            .header-action-btn {
+                width: 35px;
+                height: 35px;
+                font-size: 16px;
+            }
+            
+            .chat-input-actions {
+                display: none; /* Hide on mobile, show in attach menu */
+            }
+            
+            .chat-action-btn {
+                width: 35px;
+                height: 35px;
+            }
+            
+            .group-details-panel {
+                position: fixed;
+                width: 100%;
+                height: 100%;
+                z-index: 1000;
+            }
+            
+            .details-header {
+                padding: 15px;
+            }
+            
+            .details-section {
+                padding: 15px;
+            }
+            
+            /* Mobile chat bubbles */
+            .message-bubble {
+                max-width: 85%;
+            }
+            
+            /* Hide group details panel by default on mobile */
+            .group-details-panel:not(.active) {
+                display: none;
+            }
+            
+            /* Mobile attach menu */
+            #attachMenuModal .modal-content {
+                max-width: 250px;
+            }
         }
         
         /* Utility Classes */
@@ -1783,6 +1834,120 @@
             padding: 2px 6px;
             border-radius: 10px;
         }
+        
+        /* Offline Disabled State */
+        .offline-disabled {
+            opacity: 0.6;
+            cursor: not-allowed;
+            position: relative;
+        }
+        
+        .offline-disabled::after {
+            content: " (Offline)";
+            font-size: 0.8em;
+            color: var(--warning-color);
+        }
+        
+        .offline-disabled-btn {
+            background-color: var(--text-secondary) !important;
+            cursor: not-allowed !important;
+        }
+        
+        .offline-disabled-btn:hover {
+            background-color: var(--text-secondary) !important;
+        }
+        
+        /* Mobile Group Features */
+        .mobile-group-features {
+            display: none;
+        }
+        
+        @media (max-width: 768px) {
+            .mobile-group-features {
+                display: flex;
+                flex-direction: column;
+                gap: 10px;
+                padding: 15px;
+                background-color: var(--bg-color);
+                border-top: 1px solid var(--border-color);
+            }
+            
+            .mobile-feature-btn {
+                display: flex;
+                align-items: center;
+                gap: 10px;
+                padding: 12px 15px;
+                background-color: var(--secondary-color);
+                border: none;
+                border-radius: 8px;
+                font-size: 14px;
+                color: var(--text-primary);
+                cursor: pointer;
+                transition: background-color 0.2s;
+            }
+            
+            .mobile-feature-btn:hover {
+                background-color: #e4e6e9;
+            }
+            
+            .mobile-feature-btn i {
+                width: 20px;
+                text-align: center;
+            }
+            
+            /* Hide desktop-only features on mobile */
+            .desktop-only {
+                display: none;
+            }
+        }
+        
+        @media (min-width: 769px) {
+            .mobile-only {
+                display: none;
+            }
+        }
+        
+        /* Offline Sync Indicator */
+        .sync-indicator {
+            position: fixed;
+            bottom: 20px;
+            left: 20px;
+            background-color: var(--kynecta-blue);
+            color: white;
+            padding: 8px 15px;
+            border-radius: 20px;
+            font-size: 12px;
+            z-index: 1000;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            box-shadow: var(--shadow);
+            display: none;
+        }
+        
+        .sync-indicator.active {
+            display: flex;
+            animation: pulse 2s infinite;
+        }
+        
+        @keyframes pulse {
+            0% { opacity: 1; }
+            50% { opacity: 0.7; }
+            100% { opacity: 1; }
+        }
+        
+        /* Cached Data Indicator */
+        .cached-data-indicator {
+            position: absolute;
+            top: 5px;
+            left: 5px;
+            background-color: var(--warning-color);
+            color: white;
+            font-size: 10px;
+            padding: 2px 6px;
+            border-radius: 10px;
+            z-index: 1;
+        }
     </style>
 </head>
 <body>
@@ -1790,6 +1955,12 @@
     <div id="offlineIndicator" class="offline-indicator hidden">
         <i class="fas fa-wifi-slash"></i>
         <span>Offline Mode - Using Cached Data</span>
+    </div>
+    
+    <!-- Sync Indicator -->
+    <div id="syncIndicator" class="sync-indicator">
+        <i class="fas fa-sync fa-spin"></i>
+        <span>Syncing offline data...</span>
     </div>
     
     <div class="app-container">
@@ -1902,9 +2073,28 @@
                 </div>
             </div>
             
+            <!-- Mobile Group Features Panel (Hidden on desktop) -->
+            <div class="mobile-group-features mobile-only" id="mobileGroupFeatures" style="display: none;">
+                <button class="mobile-feature-btn" id="mobileGroupInfoBtn">
+                    <i class="fas fa-info-circle"></i> Group Info
+                </button>
+                <button class="mobile-feature-btn" id="mobileGroupMediaBtn">
+                    <i class="fas fa-images"></i> Media & Files
+                </button>
+                <button class="mobile-feature-btn" id="mobileGroupParticipantsBtn">
+                    <i class="fas fa-users"></i> Participants
+                </button>
+                <button class="mobile-feature-btn" id="mobileGroupSettingsBtn">
+                    <i class="fas fa-cog"></i> Settings
+                </button>
+                <button class="mobile-feature-btn" id="mobileGroupStarredBtn">
+                    <i class="fas fa-star"></i> Starred Messages
+                </button>
+            </div>
+            
             <div class="chat-input-container" id="chatInputContainer" style="display: none;">
                 <div class="chat-input-wrapper">
-                    <div class="chat-input-actions">
+                    <div class="chat-input-actions desktop-only">
                         <button class="chat-action-btn" id="emojiBtn" title="Emoji">
                             <i class="far fa-smile"></i>
                         </button>
@@ -1915,7 +2105,7 @@
                     
                     <div class="chat-input-area">
                         <textarea class="message-input" id="messageInput" placeholder="Type a message..." rows="1"></textarea>
-                        <button class="emoji-btn" id="quickEmojiBtn">
+                        <button class="emoji-btn mobile-only" id="mobileEmojiBtn">
                             <i class="far fa-smile"></i>
                         </button>
                     </div>
@@ -2469,6 +2659,21 @@
     <!-- Emoji Picker Container -->
     <div id="emojiPickerContainer" style="display: none; position: absolute; bottom: 80px; right: 20px; z-index: 1000;"></div>
     
+    <!-- Mobile Media Gallery Modal -->
+    <div class="modal" id="mobileMediaModal">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h3>Group Media</h3>
+                <button class="modal-close" id="closeMobileMediaModal">
+                    <i class="fas fa-times"></i>
+                </button>
+            </div>
+            <div class="modal-body" id="mobileMediaContent">
+                <!-- Media content loaded here -->
+            </div>
+        </div>
+    </div>
+    
     <script>
         // Firebase Configuration
         const firebaseConfig = {
@@ -2522,6 +2727,7 @@
         let offlineActivitiesQueue = [];
         let pendingSyncOperations = [];
         let syncInProgress = false;
+        let isMobile = window.innerWidth <= 768;
 
         // DOM Elements
         const groupsList = document.getElementById('groupsList');
@@ -2548,6 +2754,10 @@
         const activityFeed = document.getElementById('activityFeed');
         const groupStats = document.getElementById('groupStats');
         const offlineIndicator = document.getElementById('offlineIndicator');
+        const syncIndicator = document.getElementById('syncIndicator');
+        const mobileGroupFeatures = document.getElementById('mobileGroupFeatures');
+        const mobileMediaModal = document.getElementById('mobileMediaModal');
+        const mobileMediaContent = document.getElementById('mobileMediaContent');
 
         // Initialize App
         document.addEventListener('DOMContentLoaded', initializeApp);
@@ -2560,13 +2770,25 @@
             auth.onAuthStateChanged(async (user) => {
                 if (user) {
                     currentUser = user;
-                    await loadUserData();
-                    setupEventListeners();
-                    setupRealTimeListeners();
+                    console.log('User authenticated:', user.uid);
                     
-                    // Load cached data on initial load
+                    // Load user data from localStorage first (offline support)
+                    await loadCachedUserData();
+                    
+                    // Then try to load fresh data from server
+                    await loadUserData();
+                    
+                    setupEventListeners();
+                    
+                    // Load cached groups immediately for offline access
                     await loadCachedGroups();
+                    
+                    // Setup real-time listeners only when online
+                    if (isOnline) {
+                        setupRealTimeListeners();
+                    }
                 } else {
+                    console.log('No user authenticated, redirecting to index.html');
                     window.location.href = 'index.html';
                 }
             });
@@ -2579,17 +2801,25 @@
             // Listen for online/offline events
             window.addEventListener('online', updateOnlineStatus);
             window.addEventListener('offline', updateOnlineStatus);
+            
+            // Listen for window resize to detect mobile/desktop
+            window.addEventListener('resize', () => {
+                isMobile = window.innerWidth <= 768;
+                updateUIForMobile();
+            });
         }
         
         function updateOnlineStatus() {
+            const wasOnline = isOnline;
             isOnline = navigator.onLine;
             
-            if (isOnline) {
-                // Hide offline indicator
+            if (isOnline && !wasOnline) {
+                // Just came online
                 offlineIndicator.classList.add('hidden');
-                
-                // Show online notification
                 showNotification('Back online. Syncing data...', 'success');
+                
+                // Enable group creation buttons
+                updateCreateGroupButtons();
                 
                 // Trigger sync when back online
                 setTimeout(() => {
@@ -2598,41 +2828,110 @@
                     }
                 }, 1000);
                 
-                // Enable group creation buttons
-                document.querySelectorAll('#newGroupBtn, #createFirstGroupBtn, #createGroupMainBtn').forEach(btn => {
-                    btn.disabled = false;
-                    btn.title = 'New Group';
-                });
-            } else {
-                // Show offline indicator
-                offlineIndicator.classList.remove('hidden');
+                // Setup real-time listeners now that we're online
+                setupRealTimeListeners();
                 
-                // Show offline notification
-                showNotification('You are offline. Some features may be limited.', 'warning');
+            } else if (!isOnline && wasOnline) {
+                // Just went offline
+                offlineIndicator.classList.remove('hidden');
+                showNotification('You are offline. Using cached data.', 'warning');
                 
                 // Disable group creation buttons
-                document.querySelectorAll('#newGroupBtn, #createFirstGroupBtn, #createGroupMainBtn').forEach(btn => {
-                    btn.disabled = true;
-                    btn.title = 'Offline - Group creation unavailable';
-                });
+                updateCreateGroupButtons();
+                
+                // Remove real-time listeners to save bandwidth
+                cleanupRealTimeListeners();
             }
             
             // Update UI elements based on online status
             updateUIForOnlineStatus();
         }
         
-        function updateUIForOnlineStatus() {
-            const createGroupBtn = document.getElementById('createGroupBtn');
-            if (createGroupBtn) {
-                if (!isOnline) {
-                    createGroupBtn.disabled = true;
-                    createGroupBtn.textContent = 'Offline - Cannot Create Group';
-                    createGroupBtn.title = 'Group creation requires internet connection';
-                } else {
-                    createGroupBtn.disabled = false;
-                    createGroupBtn.textContent = 'Create Group';
-                    createGroupBtn.title = '';
+        function updateCreateGroupButtons() {
+            const groupButtons = [
+                'newGroupBtn', 
+                'createFirstGroupBtn', 
+                'createGroupMainBtn',
+                'createGroupBtn'
+            ];
+            
+            groupButtons.forEach(btnId => {
+                const btn = document.getElementById(btnId);
+                if (btn) {
+                    if (!isOnline) {
+                        btn.disabled = true;
+                        btn.classList.add('offline-disabled-btn');
+                        if (btnId === 'createGroupBtn') {
+                            btn.innerHTML = '<i class="fas fa-wifi-slash"></i> Offline';
+                            btn.title = 'Group creation requires internet connection';
+                        }
+                    } else {
+                        btn.disabled = false;
+                        btn.classList.remove('offline-disabled-btn');
+                        if (btnId === 'createGroupBtn') {
+                            btn.innerHTML = 'Create Group';
+                            btn.title = '';
+                        }
+                    }
                 }
+            });
+        }
+        
+        function updateUIForOnlineStatus() {
+            updateCreateGroupButtons();
+            
+            // Update other UI elements that require online status
+            const onlineDependentElements = [
+                'groupCallBtn',
+                'joinGroupBtn',
+                'inviteLinkBtn'
+            ];
+            
+            onlineDependentElements.forEach(elementId => {
+                const element = document.getElementById(elementId);
+                if (element) {
+                    if (!isOnline) {
+                        element.disabled = true;
+                        element.classList.add('offline-disabled-btn');
+                    } else {
+                        element.disabled = false;
+                        element.classList.remove('offline-disabled-btn');
+                    }
+                }
+            });
+        }
+        
+        function updateUIForMobile() {
+            if (isMobile) {
+                // Show mobile features panel when a group is selected
+                if (currentGroup) {
+                    mobileGroupFeatures.style.display = 'flex';
+                }
+            } else {
+                // Hide mobile features panel on desktop
+                mobileGroupFeatures.style.display = 'none';
+            }
+        }
+
+        async function loadCachedUserData() {
+            try {
+                // Load user data from localStorage
+                const cachedUserData = localStorage.getItem(`kynecta_user_${currentUser.uid}`);
+                if (cachedUserData) {
+                    userData = JSON.parse(cachedUserData);
+                    updateUserUIFromCache();
+                    console.log('Loaded user data from cache');
+                }
+                
+                // Load cached friends
+                const cachedFriends = localStorage.getItem(`kynecta_friends_${currentUser.uid}`);
+                if (cachedFriends) {
+                    friends = JSON.parse(cachedFriends);
+                    console.log(`Loaded ${friends.length} friends from cache`);
+                }
+                
+            } catch (error) {
+                console.error('Error loading cached user data:', error);
             }
         }
 
@@ -2644,7 +2943,7 @@
                     userData = userDoc.data();
                     
                     // Cache user data for offline use
-                    await cacheUserData(userData);
+                    localStorage.setItem(`kynecta_user_${currentUser.uid}`, JSON.stringify(userData));
                     
                     // Update UI with user data using display-user-selections.js functionality
                     userName.textContent = userData.displayName || userData.email.split('@')[0];
@@ -2665,14 +2964,6 @@
                     // Load friends with offline fallback
                     await loadFriends();
                     
-                    // Load groups with offline fallback
-                    await loadGroups();
-                    
-                    // Load group settings
-                    await loadGroupSettings();
-                    
-                    // Update user status in real-time
-                    updateUserOnlineStatus();
                 } else {
                     // If no user data exists, create basic user data
                     userData = {
@@ -2685,18 +2976,12 @@
                     updateUserStatusDisplay();
                 }
             } catch (error) {
-                console.error('Error loading user data:', error);
+                console.error('Error loading user data from server:', error);
                 
-                // Fallback to cached data if online load fails
-                if (!userData) {
-                    const cachedUserData = await getCachedUserData();
-                    if (cachedUserData) {
-                        userData = cachedUserData;
-                        updateUserUIFromCache();
-                        showNotification('Using cached data (offline mode)', 'warning');
-                    } else {
-                        showNotification('Error loading user data', 'error');
-                    }
+                // If we're offline, use cached data
+                if (!isOnline && !userData) {
+                    await loadCachedUserData();
+                    showNotification('Using cached data (offline mode)', 'warning');
                 }
             }
         }
@@ -2733,84 +3018,51 @@
             }
         }
 
-        function updateUserOnlineStatus() {
-            if (!isOnline) return;
-            
-            // Set user as online
-            db.collection('users').doc(currentUser.uid).update({
-                isOnline: true,
-                lastSeen: firebase.firestore.FieldValue.serverTimestamp()
-            });
-            
-            // Handle window close/refresh
-            window.addEventListener('beforeunload', () => {
-                if (isOnline) {
-                    db.collection('users').doc(currentUser.uid).update({
-                        isOnline: false,
-                        lastSeen: firebase.firestore.FieldValue.serverTimestamp()
-                    });
-                }
-            });
-        }
-
         async function loadFriends() {
             try {
                 // Try to load friends from cache first
-                const cachedFriends = await getCachedFriends();
-                if (cachedFriends && cachedFriends.length > 0) {
-                    friends = cachedFriends;
+                const cachedFriends = localStorage.getItem(`kynecta_friends_${currentUser.uid}`);
+                if (cachedFriends) {
+                    friends = JSON.parse(cachedFriends);
                     console.log(`Loaded ${friends.length} friends from cache`);
                 }
                 
-                // Load friends from user's friend list
-                // First check if the user has a friends collection
-                const friendsRef = db.collection('users').doc(currentUser.uid).collection('friends');
-                const friendsSnapshot = await friendsRef.get();
-                
-                friends = [];
-                
-                for (const doc of friendsSnapshot.docs) {
-                    const friendData = doc.data();
+                // Only load from server if online
+                if (isOnline) {
+                    const friendsRef = db.collection('users').doc(currentUser.uid).collection('friends');
+                    const friendsSnapshot = await friendsRef.get();
                     
-                    // Get friend's user data with mood and interests
-                    const userDoc = await db.collection('users').doc(friendData.userId).get();
-                    if (userDoc.exists) {
-                        const userData = userDoc.data();
-                        const friend = {
-                            id: friendData.userId,
-                            name: userData.displayName || userData.email.split('@')[0],
-                            email: userData.email,
-                            photoURL: userData.photoURL || '',
-                            mood: userData.mood || '',
-                            interests: userData.interests || [],
-                            isOnline: userData.isOnline || false,
-                            lastSeen: userData.lastSeen
-                        };
-                        friends.push(friend);
+                    friends = [];
+                    
+                    for (const doc of friendsSnapshot.docs) {
+                        const friendData = doc.data();
                         
-                        // Cache friend data for offline use
-                        await cacheFriend(friend);
+                        // Get friend's user data with mood and interests
+                        const userDoc = await db.collection('users').doc(friendData.userId).get();
+                        if (userDoc.exists) {
+                            const userData = userDoc.data();
+                            const friend = {
+                                id: friendData.userId,
+                                name: userData.displayName || userData.email.split('@')[0],
+                                email: userData.email,
+                                photoURL: userData.photoURL || '',
+                                mood: userData.mood || '',
+                                interests: userData.interests || [],
+                                isOnline: userData.isOnline || false,
+                                lastSeen: userData.lastSeen
+                            };
+                            friends.push(friend);
+                        }
                     }
+                    
+                    console.log(`Loaded ${friends.length} friends from server`);
+                    
+                    // Cache friends list
+                    localStorage.setItem(`kynecta_friends_${currentUser.uid}`, JSON.stringify(friends));
                 }
-                
-                console.log(`Loaded ${friends.length} friends from server`);
-                
-                // Cache friends list
-                await cacheFriendsList(friends);
                 
             } catch (error) {
                 console.error('Error loading friends:', error);
-                
-                // Fallback to cached friends if online load fails
-                if (friends.length === 0) {
-                    const cachedFriends = await getCachedFriends();
-                    if (cachedFriends) {
-                        friends = cachedFriends;
-                        console.log(`Using ${friends.length} cached friends (offline mode)`);
-                    } else {
-                        friends = [];
-                    }
-                }
             }
         }
 
@@ -2821,92 +3073,82 @@
                 groupsSpinner.style.display = 'block';
                 
                 // Try to load groups from cache first
-                const cachedGroups = await getCachedGroups();
-                if (cachedGroups && cachedGroups.length > 0) {
-                    groups = cachedGroups;
-                    renderGroupsList();
-                    groupsSpinner.style.display = 'none';
-                    console.log(`Loaded ${groups.length} groups from cache`);
+                await loadCachedGroups();
+                
+                // Only load from server if online
+                if (isOnline) {
+                    const groupsSnapshot = await db.collection('groups')
+                        .where('participants', 'array-contains', currentUser.uid)
+                        .orderBy('updatedAt', 'desc')
+                        .get();
                     
-                    // If offline, don't try to fetch from server
-                    if (!isOnline) {
-                        emptyGroupsState.classList.toggle('hidden', groups.length > 0);
+                    groups = [];
+                    
+                    if (groupsSnapshot.empty) {
+                        emptyGroupsState.classList.remove('hidden');
+                        groupsSpinner.style.display = 'none';
+                        
+                        // Cache empty groups state
+                        localStorage.setItem(`kynecta_groups_${currentUser.uid}`, JSON.stringify(groups));
                         return;
                     }
-                }
-                
-                // Load groups where user is a participant
-                const groupsSnapshot = await db.collection('groups')
-                    .where('participants', 'array-contains', currentUser.uid)
-                    .orderBy('updatedAt', 'desc')
-                    .get();
-                
-                groups = [];
-                
-                if (groupsSnapshot.empty) {
-                    emptyGroupsState.classList.remove('hidden');
-                    groupsSpinner.style.display = 'none';
                     
-                    // Cache empty groups state
-                    await cacheGroups([]);
-                    return;
-                }
-                
-                emptyGroupsState.classList.add('hidden');
-                
-                for (const doc of groupsSnapshot.docs) {
-                    const group = { id: doc.id, ...doc.data() };
+                    emptyGroupsState.classList.add('hidden');
                     
-                    // Calculate unread count
-                    const lastRead = group.lastRead?.[currentUser.uid] || new Date(0);
-                    const messagesSnapshot = await db.collection('groups')
-                        .doc(group.id)
-                        .collection('messages')
-                        .where('timestamp', '>', lastRead)
-                        .where('senderId', '!=', currentUser.uid)
-                        .get();
-                    
-                    group.unreadCount = messagesSnapshot.size;
-                    
-                    // Get last message
-                    const lastMessageSnapshot = await db.collection('groups')
-                        .doc(group.id)
-                        .collection('messages')
-                        .orderBy('timestamp', 'desc')
-                        .limit(1)
-                        .get();
-                    
-                    if (!lastMessageSnapshot.empty) {
-                        const lastMessage = lastMessageSnapshot.docs[0].data();
-                        group.lastMessage = formatLastMessage(lastMessage);
-                        group.lastMessageTime = formatTime(lastMessage.timestamp?.toDate() || new Date());
-                        group.lastMessageSender = lastMessage.senderName || 'Unknown';
-                    } else {
-                        group.lastMessage = 'No messages yet';
-                        group.lastMessageTime = '';
-                        group.lastMessageSender = '';
+                    for (const doc of groupsSnapshot.docs) {
+                        const group = { id: doc.id, ...doc.data() };
+                        
+                        // Calculate unread count
+                        const lastRead = group.lastRead?.[currentUser.uid] || new Date(0);
+                        const messagesSnapshot = await db.collection('groups')
+                            .doc(group.id)
+                            .collection('messages')
+                            .where('timestamp', '>', lastRead)
+                            .where('senderId', '!=', currentUser.uid)
+                            .get();
+                        
+                        group.unreadCount = messagesSnapshot.size;
+                        
+                        // Get last message
+                        const lastMessageSnapshot = await db.collection('groups')
+                            .doc(group.id)
+                            .collection('messages')
+                            .orderBy('timestamp', 'desc')
+                            .limit(1)
+                            .get();
+                        
+                        if (!lastMessageSnapshot.empty) {
+                            const lastMessage = lastMessageSnapshot.docs[0].data();
+                            group.lastMessage = formatLastMessage(lastMessage);
+                            group.lastMessageTime = formatTime(lastMessage.timestamp?.toDate() || new Date());
+                            group.lastMessageSender = lastMessage.senderName || 'Unknown';
+                        } else {
+                            group.lastMessage = 'No messages yet';
+                            group.lastMessageTime = '';
+                            group.lastMessageSender = '';
+                        }
+                        
+                        // Load activity count
+                        const activitySnapshot = await db.collection('groups')
+                            .doc(group.id)
+                            .collection('activities')
+                            .where('timestamp', '>', new Date(Date.now() - 7 * 24 * 60 * 60 * 1000))
+                            .get();
+                        
+                        group.recentActivity = activitySnapshot.size;
+                        
+                        groups.push(group);
+                        
+                        // Cache group messages for offline access
+                        await cacheGroupMessages(group.id);
                     }
                     
-                    // Load activity count
-                    const activitySnapshot = await db.collection('groups')
-                        .doc(group.id)
-                        .collection('activities')
-                        .where('timestamp', '>', new Date(Date.now() - 7 * 24 * 60 * 60 * 1000))
-                        .get();
-                    
-                    group.recentActivity = activitySnapshot.size;
-                    
-                    groups.push(group);
-                    
-                    // Cache group messages for offline access
-                    await cacheGroupMessages(group.id);
+                    // Cache groups list
+                    localStorage.setItem(`kynecta_groups_${currentUser.uid}`, JSON.stringify(groups));
                 }
                 
                 renderGroupsList();
                 groupsSpinner.style.display = 'none';
-                
-                // Cache groups list
-                await cacheGroups(groups);
                 
             } catch (error) {
                 console.error('Error loading groups:', error);
@@ -2914,11 +3156,8 @@
                 
                 // Fallback to cached groups if online load fails
                 if (groups.length === 0) {
-                    const cachedGroups = await getCachedGroups();
-                    if (cachedGroups) {
-                        groups = cachedGroups;
-                        renderGroupsList();
-                        emptyGroupsState.classList.toggle('hidden', groups.length > 0);
+                    await loadCachedGroups();
+                    if (groups.length > 0) {
                         showNotification('Using cached groups (offline mode)', 'warning');
                     } else {
                         emptyGroupsState.classList.remove('hidden');
@@ -2931,20 +3170,18 @@
             try {
                 if (!currentUser) return;
                 
-                const cachedGroups = await getCachedGroups();
-                if (cachedGroups && cachedGroups.length > 0) {
-                    groups = cachedGroups;
-                    renderGroupsList();
-                    console.log(`Loaded ${groups.length} cached groups on initial load`);
+                const cachedGroups = localStorage.getItem(`kynecta_groups_${currentUser.uid}`);
+                if (cachedGroups) {
+                    groups = JSON.parse(cachedGroups);
+                    console.log(`Loaded ${groups.length} cached groups`);
                     
-                    // Also load cached messages for the first group if available
-                    if (groups.length > 0) {
-                        const firstGroup = groups[0];
-                        const cachedMessages = await getCachedGroupMessages(firstGroup.id);
-                        if (cachedMessages && cachedMessages.length > 0) {
-                            console.log(`Loaded ${cachedMessages.length} cached messages for group ${firstGroup.name}`);
-                        }
-                    }
+                    // Show cached data indicator
+                    document.querySelectorAll('.group-item').forEach(item => {
+                        const cachedIndicator = document.createElement('div');
+                        cachedIndicator.className = 'cached-data-indicator';
+                        cachedIndicator.innerHTML = '<i class="fas fa-database"></i>';
+                        item.querySelector('.group-avatar').appendChild(cachedIndicator);
+                    });
                 }
             } catch (error) {
                 console.error('Error loading cached groups:', error);
@@ -2991,7 +3228,11 @@
                 });
                 
                 // Cache group settings
-                await cacheGroupSettings(settingsSnapshot);
+                const settingsObj = {};
+                settingsSnapshot.forEach(doc => {
+                    settingsObj[doc.id] = doc.data();
+                });
+                localStorage.setItem(`kynecta_group_settings_${currentUser.uid}`, JSON.stringify(settingsObj));
             } catch (error) {
                 console.error('Error loading group settings:', error);
             }
@@ -3057,6 +3298,11 @@
                     badgeHTML += `<div class="offline-queue-badge">${pendingMessages.length}</div>`;
                 }
                 
+                // Add cached data indicator for offline groups
+                if (!isOnline) {
+                    badgeHTML += `<div class="cached-data-indicator"><i class="fas fa-database"></i></div>`;
+                }
+                
                 let lastMessagePreview = group.lastMessage;
                 if (group.lastMessageSender && group.lastMessage !== 'No messages yet') {
                     lastMessagePreview = `${group.lastMessageSender}: ${group.lastMessage}`;
@@ -3105,6 +3351,11 @@
                 // Show chat interface
                 emptyChatState.style.display = 'none';
                 chatInputContainer.style.display = 'block';
+                
+                // Show mobile features panel on mobile
+                if (isMobile) {
+                    mobileGroupFeatures.style.display = 'flex';
+                }
                 
                 // Load messages with offline fallback
                 await loadGroupMessages(group.id);
@@ -3167,10 +3418,11 @@
                 chatContainer.innerHTML = '<div class="spinner"></div>';
                 
                 // Try to load messages from cache first
-                const cachedMessages = await getCachedGroupMessages(groupId);
-                if (cachedMessages && cachedMessages.length > 0) {
-                    renderMessages(cachedMessages);
-                    console.log(`Loaded ${cachedMessages.length} cached messages for group ${groupId}`);
+                const cachedMessages = localStorage.getItem(`kynecta_group_messages_${groupId}`);
+                if (cachedMessages) {
+                    const messages = JSON.parse(cachedMessages);
+                    renderMessages(messages);
+                    console.log(`Loaded ${messages.length} cached messages for group ${groupId}`);
                     
                     // If offline, don't try to fetch from server
                     if (!isOnline) {
@@ -3187,42 +3439,46 @@
                     }
                 }
                 
-                const messagesSnapshot = await db.collection('groups')
-                    .doc(groupId)
-                    .collection('messages')
-                    .orderBy('timestamp', 'asc')
-                    .limit(100)
-                    .get();
-                
-                if (messagesSnapshot.empty) {
-                    chatContainer.innerHTML = `
-                        <div class="message-date">
-                            <div class="date-label">Today</div>
-                        </div>
-                        <div style="text-align: center; padding: 40px 20px; color: var(--text-secondary);">
-                            <p>No messages yet. Start the conversation!</p>
-                        </div>
-                    `;
-                    return;
+                // Only load from server if online
+                if (isOnline) {
+                    const messagesSnapshot = await db.collection('groups')
+                        .doc(groupId)
+                        .collection('messages')
+                        .orderBy('timestamp', 'asc')
+                        .limit(100)
+                        .get();
+                    
+                    if (messagesSnapshot.empty) {
+                        chatContainer.innerHTML = `
+                            <div class="message-date">
+                                <div class="date-label">Today</div>
+                            </div>
+                            <div style="text-align: center; padding: 40px 20px; color: var(--text-secondary);">
+                                <p>No messages yet. Start the conversation!</p>
+                            </div>
+                        `;
+                        return;
+                    }
+                    
+                    const messages = messagesSnapshot.docs.map(doc => ({
+                        id: doc.id,
+                        ...doc.data()
+                    }));
+                    
+                    renderMessages(messages);
+                    
+                    // Cache messages for offline access
+                    localStorage.setItem(`kynecta_group_messages_${groupId}`, JSON.stringify(messages));
                 }
-                
-                const messages = messagesSnapshot.docs.map(doc => ({
-                    id: doc.id,
-                    ...doc.data()
-                }));
-                
-                renderMessages(messages);
-                
-                // Cache messages for offline access
-                await cacheGroupMessagesData(groupId, messages);
                 
             } catch (error) {
                 console.error('Error loading messages:', error);
                 
                 // Fallback to cached messages
-                const cachedMessages = await getCachedGroupMessages(groupId);
-                if (cachedMessages && cachedMessages.length > 0) {
-                    renderMessages(cachedMessages);
+                const cachedMessages = localStorage.getItem(`kynecta_group_messages_${groupId}`);
+                if (cachedMessages) {
+                    const messages = JSON.parse(cachedMessages);
+                    renderMessages(messages);
                     
                     // Show offline indicator
                     const offlineMessage = document.createElement('div');
@@ -3564,12 +3820,12 @@
                     });
                     
                     // Cache the message locally for immediate display
-                    const cachedMessages = await getCachedGroupMessages(currentGroup.id) || [];
+                    const cachedMessages = JSON.parse(localStorage.getItem(`kynecta_group_messages_${currentGroup.id}`) || '[]');
                     cachedMessages.push(message);
-                    await cacheGroupMessagesData(currentGroup.id, cachedMessages);
+                    localStorage.setItem(`kynecta_group_messages_${currentGroup.id}`, JSON.stringify(cachedMessages));
                     
                     // Update UI immediately
-                    const messages = await getCachedGroupMessages(currentGroup.id);
+                    const messages = JSON.parse(localStorage.getItem(`kynecta_group_messages_${currentGroup.id}`) || '[]');
                     if (messages) {
                         renderMessages(messages);
                     }
@@ -3744,107 +4000,155 @@
 
         async function loadActivityFeed(groupId) {
             try {
-                const activitiesSnapshot = await db.collection('groups')
-                    .doc(groupId)
-                    .collection('activities')
-                    .orderBy('timestamp', 'desc')
-                    .limit(10)
-                    .get();
-                
-                activityFeed.innerHTML = '';
-                
-                if (activitiesSnapshot.empty) {
-                    activityFeed.innerHTML = '<p style="color: var(--text-secondary); text-align: center;">No recent activity</p>';
-                    return;
+                // Try to load from cache first
+                const cachedActivities = localStorage.getItem(`kynecta_activities_${groupId}`);
+                if (cachedActivities) {
+                    const activities = JSON.parse(cachedActivities);
+                    renderActivityFeed(activities);
                 }
                 
-                activitiesSnapshot.forEach(doc => {
-                    const activity = doc.data();
-                    const activityDate = activity.timestamp?.toDate() || new Date();
+                // Only load from server if online
+                if (isOnline) {
+                    const activitiesSnapshot = await db.collection('groups')
+                        .doc(groupId)
+                        .collection('activities')
+                        .orderBy('timestamp', 'desc')
+                        .limit(10)
+                        .get();
                     
-                    let icon = 'fas fa-comment';
-                    if (activity.type === 'member_added') icon = 'fas fa-user-plus';
-                    else if (activity.type === 'poll_created') icon = 'fas fa-chart-bar';
-                    else if (activity.type === 'task_created') icon = 'fas fa-tasks';
-                    else if (activity.type === 'event_created') icon = 'fas fa-calendar';
-                    
-                    const activityItem = document.createElement('div');
-                    activityItem.className = 'activity-item';
-                    activityItem.innerHTML = `
-                        <div class="activity-icon">
-                            <i class="${icon}"></i>
-                        </div>
-                        <div class="activity-content">
-                            <div class="activity-title">${activity.content}</div>
-                            <div class="activity-time">${formatTime(activityDate)}</div>
-                        </div>
-                    `;
-                    
-                    activityFeed.appendChild(activityItem);
-                });
+                    if (!activitiesSnapshot.empty) {
+                        const activities = activitiesSnapshot.docs.map(doc => ({
+                            id: doc.id,
+                            ...doc.data()
+                        }));
+                        
+                        renderActivityFeed(activities);
+                        
+                        // Cache activities
+                        localStorage.setItem(`kynecta_activities_${groupId}`, JSON.stringify(activities));
+                    }
+                }
                 
             } catch (error) {
                 console.error('Error loading activity feed:', error);
             }
         }
+        
+        function renderActivityFeed(activities) {
+            activityFeed.innerHTML = '';
+            
+            if (!activities || activities.length === 0) {
+                activityFeed.innerHTML = '<p style="color: var(--text-secondary); text-align: center;">No recent activity</p>';
+                return;
+            }
+            
+            activities.forEach(activity => {
+                const activityDate = activity.timestamp?.toDate() || new Date(activity.timestamp) || new Date();
+                
+                let icon = 'fas fa-comment';
+                if (activity.type === 'member_added') icon = 'fas fa-user-plus';
+                else if (activity.type === 'poll_created') icon = 'fas fa-chart-bar';
+                else if (activity.type === 'task_created') icon = 'fas fa-tasks';
+                else if (activity.type === 'event_created') icon = 'fas fa-calendar';
+                else if (activity.type === 'message') icon = 'fas fa-comment';
+                
+                const activityItem = document.createElement('div');
+                activityItem.className = 'activity-item';
+                activityItem.innerHTML = `
+                    <div class="activity-icon">
+                        <i class="${icon}"></i>
+                    </div>
+                    <div class="activity-content">
+                        <div class="activity-title">${activity.content}</div>
+                        <div class="activity-time">${formatTime(activityDate)}</div>
+                    </div>
+                `;
+                
+                activityFeed.appendChild(activityItem);
+            });
+        }
 
         async function loadGroupStatistics(groupId) {
             try {
-                // Get message count
-                const messagesSnapshot = await db.collection('groups')
-                    .doc(groupId)
-                    .collection('messages')
-                    .get();
+                // Try to load from cache first
+                const cachedStats = localStorage.getItem(`kynecta_stats_${groupId}`);
+                if (cachedStats) {
+                    const stats = JSON.parse(cachedStats);
+                    renderGroupStatistics(stats);
+                }
                 
-                const messageCount = messagesSnapshot.size;
-                
-                // Get participant count
-                const groupDoc = await db.collection('groups').doc(groupId).get();
-                const groupData = groupDoc.data();
-                const participantCount = groupData.participants?.length || 0;
-                
-                // Get today's messages
-                const today = new Date();
-                today.setHours(0, 0, 0, 0);
-                const todayMessagesSnapshot = await db.collection('groups')
-                    .doc(groupId)
-                    .collection('messages')
-                    .where('timestamp', '>', today)
-                    .get();
-                
-                const todayMessageCount = todayMessagesSnapshot.size;
-                
-                // Get media count
-                const mediaMessagesSnapshot = await db.collection('groups')
-                    .doc(groupId)
-                    .collection('messages')
-                    .where('type', 'in', ['image', 'video', 'audio', 'document'])
-                    .get();
-                
-                const mediaCount = mediaMessagesSnapshot.size;
-                
-                groupStats.innerHTML = `
-                    <div class="stat-card">
-                        <div class="stat-value">${messageCount}</div>
-                        <div class="stat-label">Total Messages</div>
-                    </div>
-                    <div class="stat-card">
-                        <div class="stat-value">${participantCount}</div>
-                        <div class="stat-label">Members</div>
-                    </div>
-                    <div class="stat-card">
-                        <div class="stat-value">${todayMessageCount}</div>
-                        <div class="stat-label">Today</div>
-                    </div>
-                    <div class="stat-card">
-                        <div class="stat-value">${mediaCount}</div>
-                        <div class="stat-label">Media Files</div>
-                    </div>
-                `;
+                // Only load from server if online
+                if (isOnline) {
+                    // Get message count
+                    const messagesSnapshot = await db.collection('groups')
+                        .doc(groupId)
+                        .collection('messages')
+                        .get();
+                    
+                    const messageCount = messagesSnapshot.size;
+                    
+                    // Get participant count
+                    const groupDoc = await db.collection('groups').doc(groupId).get();
+                    const groupData = groupDoc.data();
+                    const participantCount = groupData.participants?.length || 0;
+                    
+                    // Get today's messages
+                    const today = new Date();
+                    today.setHours(0, 0, 0, 0);
+                    const todayMessagesSnapshot = await db.collection('groups')
+                        .doc(groupId)
+                        .collection('messages')
+                        .where('timestamp', '>', today)
+                        .get();
+                    
+                    const todayMessageCount = todayMessagesSnapshot.size;
+                    
+                    // Get media count
+                    const mediaMessagesSnapshot = await db.collection('groups')
+                        .doc(groupId)
+                        .collection('messages')
+                        .where('type', 'in', ['image', 'video', 'audio', 'document'])
+                        .get();
+                    
+                    const mediaCount = mediaMessagesSnapshot.size;
+                    
+                    const stats = {
+                        messageCount,
+                        participantCount,
+                        todayMessageCount,
+                        mediaCount
+                    };
+                    
+                    renderGroupStatistics(stats);
+                    
+                    // Cache statistics
+                    localStorage.setItem(`kynecta_stats_${groupId}`, JSON.stringify(stats));
+                }
                 
             } catch (error) {
                 console.error('Error loading statistics:', error);
             }
+        }
+        
+        function renderGroupStatistics(stats) {
+            groupStats.innerHTML = `
+                <div class="stat-card">
+                    <div class="stat-value">${stats.messageCount || 0}</div>
+                    <div class="stat-label">Total Messages</div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-value">${stats.participantCount || 0}</div>
+                    <div class="stat-label">Members</div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-value">${stats.todayMessageCount || 0}</div>
+                    <div class="stat-label">Today</div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-value">${stats.mediaCount || 0}</div>
+                    <div class="stat-label">Media Files</div>
+                </div>
+            `;
         }
 
         async function addActivity(type, content) {
@@ -3920,63 +4224,93 @@
             
             participantsList.innerHTML = '';
             
-            for (const participantId of currentGroup.participants) {
-                try {
-                    const userDoc = await db.collection('users').doc(participantId).get();
-                    if (userDoc.exists) {
-                        const participantData = userDoc.data();
-                        const isAdmin = currentGroup.admins?.includes(participantId) || false;
-                        const isCurrentUser = participantId === currentUser.uid;
-                        
-                        const initials = (participantData.displayName || participantData.email.split('@')[0])
-                            .split(' ').map(w => w[0]).join('').toUpperCase().substring(0, 2);
-                        
-                        const participantItem = document.createElement('div');
-                        participantItem.className = 'participant-item';
-                        
-                        // Create status indicators
-                        let statusIndicators = '';
-                        if (participantData.mood) {
-                            statusIndicators += `<span class="mood-indicator">${participantData.mood}</span> `;
-                        }
-                        if (participantData.interests && participantData.interests.length > 0) {
-                            statusIndicators += `<span class="interest-indicator">${participantData.interests[0]}</span>`;
-                        }
-                        
-                        participantItem.innerHTML = `
-                            <div class="participant-avatar" ${participantData.photoURL ? `style="background-image: url('${participantData.photoURL}')"` : ''}>
-                                ${participantData.photoURL ? '' : `<span>${initials}</span>`}
-                                ${participantData.isOnline ? '<div class="online-indicator"></div>' : ''}
-                            </div>
-                            <div class="participant-info">
-                                <div class="participant-name">
-                                    ${participantData.displayName || participantData.email.split('@')[0]}
-                                    ${isCurrentUser ? ' (You)' : ''}
-                                    ${isAdmin ? '<span class="admin-badge">Admin</span>' : ''}
-                                </div>
-                                <div class="participant-status">
-                                    ${participantData.email}
-                                    ${statusIndicators}
-                                </div>
-                            </div>
-                            ${!isCurrentUser && currentGroup.admins?.includes(currentUser.uid) ? `
-                            <div class="participant-actions">
-                                <button class="participant-action-btn" data-action="admin" data-user-id="${participantId}" title="${isAdmin ? 'Remove admin' : 'Make admin'}">
-                                    <i class="fas ${isAdmin ? 'fa-user-minus' : 'fa-user-plus'}"></i>
-                                </button>
-                                <button class="participant-action-btn" data-action="remove" data-user-id="${participantId}" title="Remove">
-                                    <i class="fas fa-times"></i>
-                                </button>
-                            </div>
-                            ` : ''}
-                        `;
-                        
-                        participantsList.appendChild(participantItem);
-                    }
-                } catch (error) {
-                    console.error('Error loading participant:', error);
-                }
+            // Try to load from cache first
+            const cachedParticipants = localStorage.getItem(`kynecta_participants_${currentGroup.id}`);
+            if (cachedParticipants) {
+                const participants = JSON.parse(cachedParticipants);
+                renderParticipantsList(participants);
             }
+            
+            // Only load from server if online
+            if (isOnline) {
+                const participantsData = [];
+                
+                for (const participantId of currentGroup.participants) {
+                    try {
+                        const userDoc = await db.collection('users').doc(participantId).get();
+                        if (userDoc.exists) {
+                            const participantData = userDoc.data();
+                            const isAdmin = currentGroup.admins?.includes(participantId) || false;
+                            const isCurrentUser = participantId === currentUser.uid;
+                            
+                            participantsData.push({
+                                id: participantId,
+                                ...participantData,
+                                isAdmin,
+                                isCurrentUser
+                            });
+                        }
+                    } catch (error) {
+                        console.error('Error loading participant:', error);
+                    }
+                }
+                
+                renderParticipantsList(participantsData);
+                
+                // Cache participants
+                localStorage.setItem(`kynecta_participants_${currentGroup.id}`, JSON.stringify(participantsData));
+            }
+        }
+        
+        function renderParticipantsList(participantsData) {
+            participantsList.innerHTML = '';
+            
+            participantsData.forEach(participantData => {
+                const initials = (participantData.displayName || participantData.email.split('@')[0])
+                    .split(' ').map(w => w[0]).join('').toUpperCase().substring(0, 2);
+                
+                const participantItem = document.createElement('div');
+                participantItem.className = 'participant-item';
+                
+                // Create status indicators
+                let statusIndicators = '';
+                if (participantData.mood) {
+                    statusIndicators += `<span class="mood-indicator">${participantData.mood}</span> `;
+                }
+                if (participantData.interests && participantData.interests.length > 0) {
+                    statusIndicators += `<span class="interest-indicator">${participantData.interests[0]}</span>`;
+                }
+                
+                participantItem.innerHTML = `
+                    <div class="participant-avatar" ${participantData.photoURL ? `style="background-image: url('${participantData.photoURL}')"` : ''}>
+                        ${participantData.photoURL ? '' : `<span>${initials}</span>`}
+                        ${participantData.isOnline ? '<div class="online-indicator"></div>' : ''}
+                    </div>
+                    <div class="participant-info">
+                        <div class="participant-name">
+                            ${participantData.displayName || participantData.email.split('@')[0]}
+                            ${participantData.isCurrentUser ? ' (You)' : ''}
+                            ${participantData.isAdmin ? '<span class="admin-badge">Admin</span>' : ''}
+                        </div>
+                        <div class="participant-status">
+                            ${participantData.email}
+                            ${statusIndicators}
+                        </div>
+                    </div>
+                    ${!participantData.isCurrentUser && currentGroup.admins?.includes(currentUser.uid) ? `
+                    <div class="participant-actions">
+                        <button class="participant-action-btn" data-action="admin" data-user-id="${participantData.id}" title="${participantData.isAdmin ? 'Remove admin' : 'Make admin'}">
+                            <i class="fas ${participantData.isAdmin ? 'fa-user-minus' : 'fa-user-plus'}"></i>
+                        </button>
+                        <button class="participant-action-btn" data-action="remove" data-user-id="${participantData.id}" title="Remove">
+                            <i class="fas fa-times"></i>
+                        </button>
+                    </div>
+                    ` : ''}
+                `;
+                
+                participantsList.appendChild(participantItem);
+            });
             
             // Add event listeners
             document.querySelectorAll('[data-action="admin"]').forEach(btn => {
@@ -4027,9 +4361,22 @@
 
         async function getUserName(userId) {
             try {
-                const userDoc = await db.collection('users').doc(userId).get();
-                if (userDoc.exists) {
-                    return userDoc.data().displayName || userDoc.data().email.split('@')[0];
+                // Try cache first
+                const cachedParticipants = localStorage.getItem(`kynecta_participants_${currentGroup.id}`);
+                if (cachedParticipants) {
+                    const participants = JSON.parse(cachedParticipants);
+                    const participant = participants.find(p => p.id === userId);
+                    if (participant) {
+                        return participant.displayName || participant.email.split('@')[0];
+                    }
+                }
+                
+                // Fallback to server if online
+                if (isOnline) {
+                    const userDoc = await db.collection('users').doc(userId).get();
+                    if (userDoc.exists) {
+                        return userDoc.data().displayName || userDoc.data().email.split('@')[0];
+                    }
                 }
             } catch (error) {
                 console.error('Error getting user name:', error);
@@ -4255,7 +4602,7 @@
             document.getElementById('createGroupBtn').addEventListener('click', handleCreateGroup);
             
             // Update create group button based on online status
-            updateUIForOnlineStatus();
+            updateCreateGroupButtons();
             
             // Upload avatar
             document.getElementById('uploadAvatarBtn').addEventListener('click', () => {
@@ -4395,7 +4742,7 @@
             
             // Window click to close modals
             window.addEventListener('click', function(e) {
-                const modals = ['createGroupModal', 'editGroupModal', 'addParticipantsModal', 'inviteLinkModal', 'attachMenuModal', 'createPollModal', 'createTaskModal', 'createEventModal'];
+                const modals = ['createGroupModal', 'editGroupModal', 'addParticipantsModal', 'inviteLinkModal', 'attachMenuModal', 'createPollModal', 'createTaskModal', 'createEventModal', 'mobileMediaModal'];
                 modals.forEach(modalId => {
                     const modal = document.getElementById(modalId);
                     if (modal && e.target === modal) {
@@ -4417,6 +4764,7 @@
             
             // Attach menu
             document.getElementById('attachMenuBtn').addEventListener('click', showAttachMenu);
+            document.getElementById('attachBtn').addEventListener('click', showAttachMenu);
             
             // Attach buttons
             document.getElementById('attachDocumentBtn').addEventListener('click', attachDocument);
@@ -4439,6 +4787,31 @@
             document.getElementById('callMuteBtn').addEventListener('click', toggleMute);
             document.getElementById('callVideoBtn').addEventListener('click', toggleVideo);
             document.getElementById('callEndBtn').addEventListener('click', endCall);
+            
+            // Mobile features
+            document.getElementById('mobileGroupInfoBtn').addEventListener('click', () => {
+                if (!currentGroup) return;
+                groupDetailsPanel.classList.add('active');
+                updateGroupDetails();
+            });
+            
+            document.getElementById('mobileGroupMediaBtn').addEventListener('click', showMobileMediaGallery);
+            document.getElementById('mobileGroupParticipantsBtn').addEventListener('click', showMobileParticipants);
+            document.getElementById('mobileGroupSettingsBtn').addEventListener('click', showMobileSettings);
+            document.getElementById('mobileGroupStarredBtn').addEventListener('click', showMobileStarred);
+            
+            document.getElementById('mobileEmojiBtn').addEventListener('click', () => {
+                if (isMobile) {
+                    showAttachMenu();
+                }
+            });
+            
+            document.getElementById('closeMobileMediaModal').addEventListener('click', () => {
+                mobileMediaModal.classList.remove('active');
+            });
+            
+            // Initialize mobile UI
+            updateUIForMobile();
         }
 
         function showCreateGroupModal() {
@@ -5129,6 +5502,9 @@
                 chatInputContainer.style.display = 'none';
                 groupDetailsPanel.classList.remove('active');
                 
+                // Hide mobile features panel
+                mobileGroupFeatures.style.display = 'none';
+                
                 // Reload groups
                 await loadGroups();
                 
@@ -5174,6 +5550,7 @@
             // Create a simple emoji picker since the external one has issues
             const emojiBtn = document.getElementById('emojiBtn');
             const quickEmojiBtn = document.getElementById('quickEmojiBtn');
+            const mobileEmojiBtn = document.getElementById('mobileEmojiBtn');
             const messageInput = document.getElementById('messageInput');
             
             const emojis = ['😀', '😂', '🥰', '😎', '👍', '❤️', '🔥', '🎉', '🙏', '🤔', '😢', '😡', '👏', '💯', '✨', '🎶', '🍕', '☕', '⚡', '🌈'];
@@ -5223,7 +5600,7 @@
             
             let picker = null;
             
-            emojiBtn.addEventListener('click', () => {
+            const togglePicker = () => {
                 if (!picker) {
                     picker = createEmojiPicker();
                     document.body.appendChild(picker);
@@ -5234,19 +5611,14 @@
                 } else {
                     picker.style.display = 'none';
                 }
-            });
+            };
             
-            quickEmojiBtn.addEventListener('click', () => {
-                if (!picker) {
-                    picker = createEmojiPicker();
-                    document.body.appendChild(picker);
-                }
-                
-                if (picker.style.display === 'none' || picker.style.display === '') {
-                    picker.style.display = 'grid';
-                } else {
-                    picker.style.display = 'none';
-                }
+            emojiBtn.addEventListener('click', togglePicker);
+            quickEmojiBtn.addEventListener('click', togglePicker);
+            
+            // Mobile emoji button shows attach menu instead
+            mobileEmojiBtn.addEventListener('click', () => {
+                showAttachMenu();
             });
             
             // Close picker when clicking outside
@@ -5290,6 +5662,9 @@
             // Only setup real-time listeners when online
             if (!isOnline || !currentUser) return;
             
+            // Clean up previous listeners
+            cleanupRealTimeListeners();
+            
             // Listen for group updates
             const unsubscribeGroups = db.collection('groups')
                 .where('participants', 'array-contains', currentUser.uid)
@@ -5316,110 +5691,15 @@
                 });
             
             realTimeListeners.push(unsubscribeFriends);
-            
-            // Listen for activity updates
-            const unsubscribeActivities = db.collection('groups')
-                .where('participants', 'array-contains', currentUser.uid)
-                .onSnapshot(snapshot => {
-                    snapshot.docChanges().forEach(change => {
-                        if (change.type === 'modified') {
-                            const groupId = change.doc.id;
-                            if (currentGroup && currentGroup.id === groupId) {
-                                loadActivityFeed(groupId);
-                            }
-                        }
-                    });
-                });
-            
-            realTimeListeners.push(unsubscribeActivities);
+        }
+        
+        function cleanupRealTimeListeners() {
+            realTimeListeners.forEach(unsubscribe => unsubscribe());
+            realTimeListeners = [];
         }
         
         // Functions for offline data caching and sync
         
-        // Cache user data in localStorage
-        async function cacheUserData(userData) {
-            try {
-                localStorage.setItem(`kynecta_user_${currentUser.uid}`, JSON.stringify(userData));
-            } catch (error) {
-                console.error('Error caching user data:', error);
-            }
-        }
-        
-        // Get cached user data from localStorage
-        async function getCachedUserData() {
-            try {
-                if (!currentUser) return null;
-                const cached = localStorage.getItem(`kynecta_user_${currentUser.uid}`);
-                return cached ? JSON.parse(cached) : null;
-            } catch (error) {
-                console.error('Error getting cached user data:', error);
-                return null;
-            }
-        }
-        
-        // Cache friends list
-        async function cacheFriendsList(friends) {
-            try {
-                if (!currentUser) return;
-                localStorage.setItem(`kynecta_friends_${currentUser.uid}`, JSON.stringify(friends));
-            } catch (error) {
-                console.error('Error caching friends list:', error);
-            }
-        }
-        
-        // Get cached friends list
-        async function getCachedFriends() {
-            try {
-                if (!currentUser) return null;
-                const cached = localStorage.getItem(`kynecta_friends_${currentUser.uid}`);
-                return cached ? JSON.parse(cached) : null;
-            } catch (error) {
-                console.error('Error getting cached friends:', error);
-                return null;
-            }
-        }
-        
-        // Cache individual friend
-        async function cacheFriend(friend) {
-            try {
-                const friends = await getCachedFriends() || [];
-                const existingIndex = friends.findIndex(f => f.id === friend.id);
-                
-                if (existingIndex >= 0) {
-                    friends[existingIndex] = friend;
-                } else {
-                    friends.push(friend);
-                }
-                
-                await cacheFriendsList(friends);
-            } catch (error) {
-                console.error('Error caching friend:', error);
-            }
-        }
-        
-        // Cache groups list
-        async function cacheGroups(groups) {
-            try {
-                if (!currentUser) return;
-                localStorage.setItem(`kynecta_groups_${currentUser.uid}`, JSON.stringify(groups));
-            } catch (error) {
-                console.error('Error caching groups:', error);
-            }
-        }
-        
-        // Get cached groups list
-        async function getCachedGroups() {
-            try {
-                if (!currentUser) return null;
-                const cached = localStorage.getItem(`kynecta_groups_${currentUser.uid}`);
-                return cached ? JSON.parse(cached) : null;
-            } catch (error) {
-                console.error('Error getting cached groups:', error);
-                return null;
-            }
-        }
-        
-        // Cache group messages
         async function cacheGroupMessages(groupId) {
             if (!isOnline || !currentUser) return;
             
@@ -5442,46 +5722,12 @@
             }
         }
         
-        // Cache group messages data
-        async function cacheGroupMessagesData(groupId, messages) {
-            try {
-                localStorage.setItem(`kynecta_group_messages_${groupId}`, JSON.stringify(messages));
-            } catch (error) {
-                console.error('Error caching group messages data:', error);
-            }
-        }
-        
-        // Get cached group messages
-        async function getCachedGroupMessages(groupId) {
-            try {
-                const cached = localStorage.getItem(`kynecta_group_messages_${groupId}`);
-                return cached ? JSON.parse(cached) : null;
-            } catch (error) {
-                console.error('Error getting cached group messages:', error);
-                return null;
-            }
-        }
-        
-        // Cache group settings
-        async function cacheGroupSettings(settingsSnapshot) {
-            try {
-                if (!currentUser) return;
-                const settings = {};
-                settingsSnapshot.forEach(doc => {
-                    settings[doc.id] = doc.data();
-                });
-                localStorage.setItem(`kynecta_group_settings_${currentUser.uid}`, JSON.stringify(settings));
-            } catch (error) {
-                console.error('Error caching group settings:', error);
-            }
-        }
-        
         // Sync offline data when back online
         async function syncOfflineData() {
             if (syncInProgress || !isOnline || !currentUser) return;
             
             syncInProgress = true;
-            showNotification('Syncing offline data...', 'success');
+            syncIndicator.classList.add('active');
             
             try {
                 // Sync offline messages
@@ -5537,6 +5783,8 @@
                 if (currentGroup) {
                     await loadGroupMessages(currentGroup.id);
                     await loadActivityFeed(currentGroup.id);
+                    await loadGroupStatistics(currentGroup.id);
+                    await loadParticipantsList();
                 }
                 
                 // Clear any pending sync operations
@@ -5549,6 +5797,7 @@
                 showNotification('Error syncing some offline data', 'error');
             } finally {
                 syncInProgress = false;
+                syncIndicator.classList.remove('active');
             }
         }
 
@@ -6251,6 +6500,7 @@
                 return;
             }
             
+            // For now, we'll just send a text message with contact info
             const contactName = prompt('Enter contact name:');
             const contactPhone = prompt('Enter contact phone number:');
             
@@ -6258,7 +6508,7 @@
                 const message = {
                     senderId: currentUser.uid,
                     senderName: userData.displayName || currentUser.email.split('@')[0],
-                    content: `Contact: ${contactName}\nPhone: ${contactPhone}`,
+                    content: `📇 Contact: ${contactName}\n📞 ${contactPhone}`,
                     type: 'text',
                     timestamp: firebase.firestore.FieldValue.serverTimestamp(),
                     readBy: []
@@ -6272,54 +6522,115 @@
                 showNotification('Contact shared', 'success');
             }
         }
-
-        async function uploadGroupAvatar(previewId) {
-            const input = document.createElement('input');
-            input.type = 'file';
-            input.accept = 'image/*';
+        
+        // Mobile-specific functions
+        function showMobileMediaGallery() {
+            if (!currentGroup) return;
             
-            input.onchange = async (e) => {
-                const file = e.target.files[0];
-                if (!file) return;
-                
-                try {
-                    // Show loading
-                    const preview = document.getElementById(previewId);
-                    preview.innerHTML = '<div class="spinner" style="width: 20px; height: 20px;"></div>';
-                    
-                    // Upload to Firebase Storage
-                    const storageRef = storage.ref();
-                    const fileRef = storageRef.child(`group-avatars/${currentUser.uid}/${Date.now()}_${file.name}`);
-                    await fileRef.put(file);
-                    const downloadURL = await fileRef.getDownloadURL();
-                    
-                    // Update preview
-                    preview.style.backgroundImage = `url('${downloadURL}')`;
-                    preview.innerHTML = '';
-                    
-                    // Store URL for later use
-                    if (previewId === 'groupAvatarPreview') {
-                        preview.dataset.photoURL = downloadURL;
+            // Load cached media
+            const cachedMessages = localStorage.getItem(`kynecta_group_messages_${currentGroup.id}`);
+            if (!cachedMessages) {
+                mobileMediaContent.innerHTML = '<p style="text-align: center; color: var(--text-secondary); padding: 20px;">No media found</p>';
+                mobileMediaModal.classList.add('active');
+                return;
+            }
+            
+            const messages = JSON.parse(cachedMessages);
+            const mediaMessages = messages.filter(msg => 
+                msg.type === 'image' || msg.type === 'video' || msg.type === 'document'
+            );
+            
+            if (mediaMessages.length === 0) {
+                mobileMediaContent.innerHTML = '<p style="text-align: center; color: var(--text-secondary); padding: 20px;">No media found</p>';
+                mobileMediaModal.classList.add('active');
+                return;
+            }
+            
+            let mediaHTML = '<div class="media-grid" style="grid-template-columns: repeat(3, 1fr); gap: 10px;">';
+            
+            mediaMessages.forEach((msg, index) => {
+                if (index < 30) { // Limit to 30 items
+                    if (msg.type === 'image') {
+                        mediaHTML += `
+                            <div class="media-item" style="background-image: url('${msg.content}'); cursor: pointer;" onclick="window.viewImage('${msg.content}')">
+                                <div style="position: absolute; bottom: 5px; right: 5px; background: rgba(0,0,0,0.7); color: white; padding: 2px 5px; border-radius: 3px; font-size: 10px;">
+                                    <i class="fas fa-image"></i>
+                                </div>
+                            </div>
+                        `;
+                    } else if (msg.type === 'video') {
+                        mediaHTML += `
+                            <div class="media-item" style="background-color: var(--secondary-color); display: flex; align-items: center; justify-content: center; cursor: pointer;" onclick="window.open('${msg.content}', '_blank')">
+                                <i class="fas fa-video" style="font-size: 24px; color: var(--text-secondary);"></i>
+                                <div style="position: absolute; bottom: 5px; right: 5px; background: rgba(0,0,0,0.7); color: white; padding: 2px 5px; border-radius: 3px; font-size: 10px;">
+                                    <i class="fas fa-video"></i>
+                                </div>
+                            </div>
+                        `;
+                    } else if (msg.type === 'document') {
+                        mediaHTML += `
+                            <div class="media-item" style="background-color: var(--secondary-color); display: flex; align-items: center; justify-content: center; cursor: pointer;" onclick="window.open('${msg.content}', '_blank')">
+                                <i class="fas fa-file" style="font-size: 24px; color: var(--text-secondary);"></i>
+                                <div style="position: absolute; bottom: 5px; right: 5px; background: rgba(0,0,0,0.7); color: white; padding: 2px 5px; border-radius: 3px; font-size: 10px;">
+                                    <i class="fas fa-file"></i>
+                                </div>
+                            </div>
+                        `;
                     }
-                    
-                    showNotification('Photo uploaded successfully', 'success');
-                    
-                } catch (error) {
-                    console.error('Error uploading avatar:', error);
-                    showNotification('Error uploading photo', 'error');
-                    
-                    // Reset preview
-                    const preview = document.getElementById(previewId);
-                    preview.style.backgroundImage = '';
-                    preview.innerHTML = '<i class="fas fa-users"></i>';
                 }
-            };
+            });
             
-            input.click();
+            mediaHTML += '</div>';
+            
+            if (mediaMessages.length > 30) {
+                mediaHTML += `<p style="text-align: center; color: var(--text-secondary); margin-top: 15px;">+ ${mediaMessages.length - 30} more items</p>`;
+            }
+            
+            mobileMediaContent.innerHTML = mediaHTML;
+            mobileMediaModal.classList.add('active');
         }
         
-        // Initialize online status
-        updateOnlineStatus();
+        function showMobileParticipants() {
+            if (!currentGroup) return;
+            
+            // Show group details panel with participants section
+            groupDetailsPanel.classList.add('active');
+            updateGroupDetails();
+            
+            // Scroll to participants section
+            setTimeout(() => {
+                const participantsSection = document.querySelector('.details-section:nth-child(2)');
+                if (participantsSection) {
+                    participantsSection.scrollIntoView({ behavior: 'smooth' });
+                }
+            }, 100);
+        }
+        
+        function showMobileSettings() {
+            if (!currentGroup) return;
+            
+            // Show group details panel with settings section
+            groupDetailsPanel.classList.add('active');
+            updateGroupDetails();
+            
+            // Scroll to settings section
+            setTimeout(() => {
+                const settingsSection = document.querySelector('.details-section:nth-child(5)');
+                if (settingsSection) {
+                    settingsSection.scrollIntoView({ behavior: 'smooth' });
+                }
+            }, 100);
+        }
+        
+        function showMobileStarred() {
+            if (!currentGroup) return;
+            
+            // For now, just show a message
+            showNotification('Starred messages feature coming soon!', 'info');
+        }
+
+        // Initialize mobile UI
+        updateUIForMobile();
     </script>
 </body>
 </html>

@@ -1418,6 +1418,30 @@
             margin-top: 2px;
             font-weight: normal;
         }
+        
+        /* Local Storage Indicator */
+        .local-storage-indicator {
+            position: fixed;
+            bottom: 70px;
+            right: 20px;
+            background-color: var(--info-color);
+            color: white;
+            padding: 8px 16px;
+            border-radius: 20px;
+            font-size: 12px;
+            font-weight: 500;
+            z-index: 10000;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            box-shadow: var(--shadow);
+            animation: slideInRight 0.3s ease;
+            display: none;
+        }
+        
+        .local-storage-indicator.active {
+            display: flex;
+        }
     </style>
 </head>
 <body>
@@ -1437,6 +1461,12 @@
     <div class="offline-indicator" id="offlineIndicator">
         <i class="fas fa-wifi-slash"></i>
         <span>Offline</span>
+    </div>
+    
+    <!-- Local Storage Indicator -->
+    <div class="local-storage-indicator" id="localStorageIndicator">
+        <i class="fas fa-database"></i>
+        <span>Loaded from Local Storage</span>
     </div>
     
     <div class="app-container">
@@ -1806,6 +1836,7 @@
         let currentSearchTerm = '';
         let isOnline = navigator.onLine;
         let offlineCheckInterval = null;
+        let isLoadedFromLocalStorage = false;
         
         // Friend categories with colors and icons
         const friendCategories = {
@@ -1855,6 +1886,7 @@
         const notification = document.getElementById('notification');
         const offlineOverlay = document.getElementById('offlineOverlay');
         const offlineIndicator = document.getElementById('offlineIndicator');
+        const localStorageIndicator = document.getElementById('localStorageIndicator');
         
         // Friend sections
         const allFriendsSection = document.getElementById('allFriendsSection');
@@ -1870,6 +1902,16 @@
         const sentRequestsList = document.getElementById('sentRequestsList');
         const temporaryList = document.getElementById('temporaryList');
         
+        // Local Storage Keys
+        const LOCAL_STORAGE_KEYS = {
+            FRIENDS: 'knecta_friends',
+            CONTACTS: 'knecta_contacts',
+            REQUESTS: 'knecta_friend_requests',
+            SENT_REQUESTS: 'knecta_sent_requests',
+            TEMPORARY_FRIENDS: 'knecta_temporary_friends',
+            LAST_SYNC: 'knecta_friends_last_sync'
+        };
+        
         // Initialize the application
         document.addEventListener('DOMContentLoaded', function() {
             initializeApp();
@@ -1879,26 +1921,40 @@
             // Initialize offline detection
             initializeOfflineDetection();
             
-            // Check authentication
-            auth.onAuthStateChanged(async user => {
-                if (user) {
-                    currentUser = user;
-                    console.log('User detected:', currentUser.uid);
-                    await initializeUser();
-                    setupEventListeners();
-                    loadAllFriends();
-                    setupFriendRequestsListener();
-                    setupPresenceTracking();
-                    generateQRCode();
-                    
-                    // Show notification
-                    showNotification('Friends system ready', 'success');
-                    
-                } else {
-                    console.log('No user detected, redirecting to login');
-                    window.location.href = 'index.html';
-                }
-            });
+            // Get logged-in user from app.js global state
+            if (window.appState && window.appState.currentUser) {
+                currentUser = window.appState.currentUser;
+                console.log('User detected from app.js:', currentUser.uid);
+                await initializeUser();
+                setupEventListeners();
+                loadAllFriends();
+                setupFriendRequestsListener();
+                setupPresenceTracking();
+                generateQRCode();
+                
+                // Show notification
+                showNotification('Friends system ready', 'success');
+            } else {
+                // Fallback to Firebase auth if app.js not loaded
+                auth.onAuthStateChanged(async user => {
+                    if (user) {
+                        currentUser = user;
+                        console.log('User detected from Firebase:', currentUser.uid);
+                        await initializeUser();
+                        setupEventListeners();
+                        loadAllFriends();
+                        setupFriendRequestsListener();
+                        setupPresenceTracking();
+                        generateQRCode();
+                        
+                        // Show notification
+                        showNotification('Friends system ready', 'success');
+                    } else {
+                        console.log('No user detected, redirecting to login');
+                        window.location.href = 'index.html';
+                    }
+                });
+            }
         }
         
         function initializeOfflineDetection() {
@@ -1931,11 +1987,15 @@
                 updateUserPresence(true);
             }
             
-            // Reload friends data
-            loadAllFriends();
+            // Sync friends data from server
+            syncFriendsFromServer();
+            
+            // Hide local storage indicator
+            localStorageIndicator.classList.remove('active');
+            isLoadedFromLocalStorage = false;
             
             // Show notification
-            showNotification('You are back online', 'success');
+            showNotification('You are back online. Syncing friends...', 'success');
         }
         
         function handleOffline() {
@@ -1948,8 +2008,13 @@
                 updateUserPresence(false);
             }
             
+            // Show local storage indicator if loaded from local storage
+            if (isLoadedFromLocalStorage) {
+                localStorageIndicator.classList.add('active');
+            }
+            
             // Show notification
-            showNotification('You are offline. Some features may be limited.', 'warning');
+            showNotification('You are offline. Friends loaded from local storage.', 'warning');
         }
         
         function checkConnectivity() {
@@ -1974,9 +2039,11 @@
         
         function updateUIForConnectivity() {
             if (!isOnline) {
-                // Show offline overlay
-                offlineOverlay.classList.add('active');
+                // Show offline indicator
                 offlineIndicator.classList.add('active');
+                
+                // Hide full screen overlay - NEVER HIDE UI
+                offlineOverlay.classList.remove('active');
                 
                 // Disable buttons that require internet
                 const internetButtons = [
@@ -2009,7 +2076,7 @@
                     }
                 });
                 
-                // Close modals if open
+                // Close modals if open (but don't hide UI)
                 if (addFriendModal.classList.contains('active')) {
                     addFriendModal.classList.remove('active');
                     showNotification('Cannot add friends while offline', 'error');
@@ -2021,9 +2088,9 @@
                 }
                 
             } else {
-                // Hide offline overlay
-                offlineOverlay.classList.remove('active');
+                // Hide offline indicator
                 offlineIndicator.classList.remove('active');
+                localStorageIndicator.classList.remove('active');
                 
                 // Enable buttons
                 const internetButtons = [
@@ -2114,7 +2181,10 @@
                 
             } catch (error) {
                 console.error('Error initializing user:', error);
-                showNotification('Error loading user data', 'error');
+                // Don't show error notification if offline
+                if (isOnline) {
+                    showNotification('Error loading user data', 'error');
+                }
             }
         }
         
@@ -2180,7 +2250,7 @@
         }
         
         async function updateUserPresence(online) {
-            if (!currentUser) return;
+            if (!currentUser || !isOnline) return;
             
             try {
                 await db.collection('users').doc(currentUser.uid).update({
@@ -2201,22 +2271,52 @@
         
         async function loadAllFriends() {
             try {
+                // Always show loading initially
                 allFriendsList.innerHTML = '<div class="loading-placeholder" style="text-align: center; padding: 40px 20px; color: var(--text-secondary);"><i class="fas fa-spinner fa-spin" style="font-size: 24px; margin-bottom: 15px;"></i><p>Loading friends...</p></div>';
                 
-                if (!isOnline) {
-                    // Show offline message
-                    allFriendsList.innerHTML = `
-                        <div class="empty-state">
-                            <i class="fas fa-wifi-slash"></i>
-                            <p>Offline Mode</p>
-                            <p class="subtext">Friend list unavailable while offline</p>
-                        </div>
-                    `;
-                    updateFriendCounts(0, 0, 0, 0, 0);
-                    return;
+                // Try to load from server first if online
+                if (isOnline) {
+                    await syncFriendsFromServer();
+                } else {
+                    // Load from local storage when offline
+                    await loadFriendsFromLocalStorage();
+                    
+                    if (friends.length === 0 && contacts.length === 0 && friendRequests.length === 0) {
+                        // No data in local storage, show empty state
+                        showEmptyState();
+                    }
                 }
                 
-                // Load contacts (auto-added from phone)
+                // Update friend counts
+                updateFriendCounts();
+                
+                // Update UI based on current section
+                updateCurrentSection();
+                
+            } catch (error) {
+                console.error('Error loading friends:', error);
+                // Load from local storage as fallback
+                await loadFriendsFromLocalStorage();
+                
+                if (friends.length === 0) {
+                    showEmptyState();
+                }
+                
+                if (!isOnline) {
+                    showNotification('Loaded friends from local storage', 'info');
+                } else {
+                    showNotification('Failed to load friends from server', 'error');
+                }
+            }
+        }
+        
+        async function syncFriendsFromServer() {
+            if (!isOnline || !currentUser) return;
+            
+            try {
+                console.log('Syncing friends from server...');
+                
+                // Load contacts
                 await loadContacts();
                 
                 // Load approved friends
@@ -2231,24 +2331,147 @@
                 // Load temporary friends
                 await loadTemporaryFriends();
                 
-                // Update friend counts
-                updateFriendCounts();
+                // Save to local storage
+                saveFriendsToLocalStorage();
                 
-                // Update UI based on current section
-                updateCurrentSection();
+                // Update last sync timestamp
+                localStorage.setItem(LOCAL_STORAGE_KEYS.LAST_SYNC, Date.now().toString());
+                
+                console.log('Friends synced from server successfully');
                 
             } catch (error) {
-                console.error('Error loading friends:', error);
-                showNotification('Failed to load friends', 'error');
+                console.error('Error syncing friends from server:', error);
+                // Don't throw error, just log it
             }
+        }
+        
+        async function loadFriendsFromLocalStorage() {
+            try {
+                console.log('Loading friends from local storage...');
+                
+                // Load friends
+                const friendsData = localStorage.getItem(LOCAL_STORAGE_KEYS.FRIENDS);
+                if (friendsData) {
+                    friends = JSON.parse(friendsData);
+                    isLoadedFromLocalStorage = true;
+                }
+                
+                // Load contacts
+                const contactsData = localStorage.getItem(LOCAL_STORAGE_KEYS.CONTACTS);
+                if (contactsData) {
+                    contacts = JSON.parse(contactsData);
+                }
+                
+                // Load friend requests
+                const requestsData = localStorage.getItem(LOCAL_STORAGE_KEYS.REQUESTS);
+                if (requestsData) {
+                    friendRequests = JSON.parse(requestsData);
+                }
+                
+                // Load sent requests
+                const sentRequestsData = localStorage.getItem(LOCAL_STORAGE_KEYS.SENT_REQUESTS);
+                if (sentRequestsData) {
+                    sentRequests = JSON.parse(sentRequestsData);
+                }
+                
+                // Load temporary friends
+                const tempFriendsData = localStorage.getItem(LOCAL_STORAGE_KEYS.TEMPORARY_FRIENDS);
+                if (tempFriendsData) {
+                    temporaryFriends = JSON.parse(tempFriendsData);
+                }
+                
+                console.log(`Loaded from local storage: ${friends.length} friends, ${contacts.length} contacts, ${friendRequests.length} requests`);
+                
+                // Show local storage indicator if offline
+                if (!isOnline && isLoadedFromLocalStorage) {
+                    localStorageIndicator.classList.add('active');
+                    setTimeout(() => {
+                        localStorageIndicator.classList.remove('active');
+                    }, 5000);
+                }
+                
+            } catch (error) {
+                console.error('Error loading friends from local storage:', error);
+                friends = [];
+                contacts = [];
+                friendRequests = [];
+                sentRequests = [];
+                temporaryFriends = [];
+            }
+        }
+        
+        function saveFriendsToLocalStorage() {
+            try {
+                localStorage.setItem(LOCAL_STORAGE_KEYS.FRIENDS, JSON.stringify(friends));
+                localStorage.setItem(LOCAL_STORAGE_KEYS.CONTACTS, JSON.stringify(contacts));
+                localStorage.setItem(LOCAL_STORAGE_KEYS.REQUESTS, JSON.stringify(friendRequests));
+                localStorage.setItem(LOCAL_STORAGE_KEYS.SENT_REQUESTS, JSON.stringify(sentRequests));
+                localStorage.setItem(LOCAL_STORAGE_KEYS.TEMPORARY_FRIENDS, JSON.stringify(temporaryFriends));
+                console.log('Friends saved to local storage');
+            } catch (error) {
+                console.error('Error saving friends to local storage:', error);
+            }
+        }
+        
+        function showEmptyState() {
+            allFriendsList.innerHTML = `
+                <div class="empty-state">
+                    <i class="fas fa-user-friends"></i>
+                    <p>No friends yet</p>
+                    <p class="subtext">Add friends to start connecting</p>
+                </div>
+            `;
+            
+            contactsList.innerHTML = `
+                <div class="empty-state">
+                    <i class="fas fa-address-book"></i>
+                    <p>No contacts found</p>
+                    <p class="subtext">Sync your phone contacts to find friends</p>
+                </div>
+            `;
+            
+            friendsList.innerHTML = `
+                <div class="empty-state">
+                    <i class="fas fa-user-friends"></i>
+                    <p>No friends yet</p>
+                    <p class="subtext">Add friends to start connecting</p>
+                </div>
+            `;
+            
+            requestsList.innerHTML = `
+                <div class="empty-state">
+                    <i class="fas fa-inbox"></i>
+                    <p>No friend requests</p>
+                    <p class="subtext">When someone sends you a request, it will appear here</p>
+                </div>
+            `;
+            
+            sentRequestsList.innerHTML = `
+                <div class="empty-state">
+                    <i class="fas fa-paper-plane"></i>
+                    <p>No sent requests</p>
+                    <p class="subtext">Your sent friend requests will appear here</p>
+                </div>
+            `;
+            
+            temporaryList.innerHTML = `
+                <div class="empty-state">
+                    <i class="fas fa-clock"></i>
+                    <p>No temporary friends</p>
+                    <p class="subtext">Temporary friends expire after a set time</p>
+                </div>
+            `;
         }
         
         async function loadContacts() {
             try {
                 contactsList.innerHTML = '<div style="text-align: center; padding: 20px; color: var(--text-secondary);">Loading contacts...</div>';
                 
-                // In a real app, this would sync with phone contacts
-                // For demo, we'll show some example contacts
+                if (!isOnline) {
+                    // If offline, use already loaded contacts from local storage
+                    renderContacts();
+                    return;
+                }
                 
                 // Get users who might be contacts (excluding current user)
                 const usersSnapshot = await db.collection('users')
@@ -2284,11 +2507,10 @@
                             isContact: true,
                             type: 'contact'
                         });
-                        
-                        // Add to contacts list
-                        addFriendItem(contactData, contactsList, 'contact');
                     }
                 }
+                
+                renderContacts();
                 
                 // Update contacts count
                 document.getElementById('contactsCount').textContent = contacts.length;
@@ -2305,9 +2527,34 @@
             }
         }
         
+        function renderContacts() {
+            contactsList.innerHTML = '';
+            
+            if (contacts.length === 0) {
+                contactsList.innerHTML = `
+                    <div class="empty-state">
+                        <i class="fas fa-address-book"></i>
+                        <p>No contacts found</p>
+                        <p class="subtext">Sync your phone contacts to find friends</p>
+                    </div>
+                `;
+                return;
+            }
+            
+            contacts.forEach(contact => {
+                addFriendItem(contact, contactsList, 'contact');
+            });
+        }
+        
         async function loadApprovedFriends() {
             try {
                 friendsList.innerHTML = '<div style="text-align: center; padding: 20px; color: var(--text-secondary);">Loading friends...</div>';
+                
+                if (!isOnline) {
+                    // If offline, use already loaded friends from local storage
+                    renderFriends();
+                    return;
+                }
                 
                 // Get approved friendships where current user is involved
                 const friendshipsSnapshot = await db.collection('friendships')
@@ -2371,10 +2618,7 @@
                     return (a.displayName || '').localeCompare(b.displayName || '');
                 });
                 
-                // Add friend items to list
-                friends.forEach(friend => {
-                    addFriendItem(friend, friendsList, 'friend');
-                });
+                renderFriends();
                 
                 // Update friends count
                 document.getElementById('friendsCount').textContent = friends.length;
@@ -2391,9 +2635,34 @@
             }
         }
         
+        function renderFriends() {
+            friendsList.innerHTML = '';
+            
+            if (friends.length === 0) {
+                friendsList.innerHTML = `
+                    <div class="empty-state">
+                        <i class="fas fa-user-friends"></i>
+                        <p>No friends yet</p>
+                        <p class="subtext">Add friends to start connecting</p>
+                    </div>
+                `;
+                return;
+            }
+            
+            friends.forEach(friend => {
+                addFriendItem(friend, friendsList, 'friend');
+            });
+        }
+        
         async function loadFriendRequests() {
             try {
                 requestsList.innerHTML = '<div style="text-align: center; padding: 20px; color: var(--text-secondary);">Loading requests...</div>';
+                
+                if (!isOnline) {
+                    // If offline, use already loaded requests from local storage
+                    renderFriendRequests();
+                    return;
+                }
                 
                 // Get incoming friend requests
                 const requestsSnapshot = await db.collection('friendRequests')
@@ -2432,13 +2701,14 @@
                                         };
                                         
                                         friendRequests.push(requestWithUser);
-                                        addFriendRequestItem(requestWithUser, requestsList, 'incoming');
                                     }
                                 })
                         );
                     });
                     
                     await Promise.all(requestPromises);
+                    
+                    renderFriendRequests();
                 }
                 
                 // Update requests count
@@ -2451,9 +2721,34 @@
             }
         }
         
+        function renderFriendRequests() {
+            requestsList.innerHTML = '';
+            
+            if (friendRequests.length === 0) {
+                requestsList.innerHTML = `
+                    <div class="empty-state">
+                        <i class="fas fa-inbox"></i>
+                        <p>No friend requests</p>
+                        <p class="subtext">When someone sends you a request, it will appear here</p>
+                    </div>
+                `;
+                return;
+            }
+            
+            friendRequests.forEach(request => {
+                addFriendRequestItem(request, requestsList, 'incoming');
+            });
+        }
+        
         async function loadSentRequests() {
             try {
                 sentRequestsList.innerHTML = '<div style="text-align: center; padding: 20px; color: var(--text-secondary);">Loading sent requests...</div>';
+                
+                if (!isOnline) {
+                    // If offline, use already loaded sent requests from local storage
+                    renderSentRequests();
+                    return;
+                }
                 
                 // Get sent friend requests
                 const sentSnapshot = await db.collection('friendRequests')
@@ -2492,13 +2787,14 @@
                                         };
                                         
                                         sentRequests.push(requestWithUser);
-                                        addFriendRequestItem(requestWithUser, sentRequestsList, 'sent');
                                     }
                                 })
                         );
                     });
                     
                     await Promise.all(sentPromises);
+                    
+                    renderSentRequests();
                 }
                 
                 // Update sent requests count
@@ -2509,6 +2805,25 @@
             }
         }
         
+        function renderSentRequests() {
+            sentRequestsList.innerHTML = '';
+            
+            if (sentRequests.length === 0) {
+                sentRequestsList.innerHTML = `
+                    <div class="empty-state">
+                        <i class="fas fa-paper-plane"></i>
+                        <p>No sent requests</p>
+                        <p class="subtext">Your sent friend requests will appear here</p>
+                    </div>
+                `;
+                return;
+            }
+            
+            sentRequests.forEach(request => {
+                addFriendRequestItem(request, sentRequestsList, 'sent');
+            });
+        }
+        
         async function loadTemporaryFriends() {
             try {
                 temporaryList.innerHTML = '<div style="text-align: center; padding: 20px; color: var(--text-secondary);">Loading temporary friends...</div>';
@@ -2517,26 +2832,31 @@
                 const tempFriends = friends.filter(f => f.isTemporary && f.expiresAt);
                 
                 temporaryFriends = tempFriends;
-                temporaryList.innerHTML = '';
                 
-                if (tempFriends.length === 0) {
-                    temporaryList.innerHTML = `
-                        <div class="empty-state">
-                            <i class="fas fa-clock"></i>
-                            <p>No temporary friends</p>
-                            <p class="subtext">Temporary friends expire after a set time</p>
-                        </div>
-                    `;
-                } else {
-                    // Add temporary friend items
-                    tempFriends.forEach(friend => {
-                        addFriendItem(friend, temporaryList, 'temporary');
-                    });
-                }
+                renderTemporaryFriends();
                 
             } catch (error) {
                 console.error('Error loading temporary friends:', error);
             }
+        }
+        
+        function renderTemporaryFriends() {
+            temporaryList.innerHTML = '';
+            
+            if (temporaryFriends.length === 0) {
+                temporaryList.innerHTML = `
+                    <div class="empty-state">
+                        <i class="fas fa-clock"></i>
+                        <p>No temporary friends</p>
+                        <p class="subtext">Temporary friends expire after a set time</p>
+                    </div>
+                `;
+                return;
+            }
+            
+            temporaryFriends.forEach(friend => {
+                addFriendItem(friend, temporaryList, 'temporary');
+            });
         }
         
         function addFriendItem(friendData, container, type) {
@@ -2617,7 +2937,7 @@
                 </div>
                 <div class="friend-actions">
                     ${type === 'contact' ? `
-                        <button class="friend-action-btn success" data-action="add" title="Add as Friend">
+                        <button class="friend-action-btn success" data-action="add" title="Add as Friend" ${!isOnline ? 'disabled' : ''}>
                             <i class="fas fa-user-plus"></i>
                         </button>
                     ` : ''}
@@ -2635,25 +2955,25 @@
                     ` : ''}
                     
                     ${type === 'incoming_request' ? `
-                        <button class="friend-action-btn success" data-action="accept" title="Accept">
+                        <button class="friend-action-btn success" data-action="accept" title="Accept" ${!isOnline ? 'disabled' : ''}>
                             <i class="fas fa-check"></i>
                         </button>
-                        <button class="friend-action-btn danger" data-action="decline" title="Decline">
+                        <button class="friend-action-btn danger" data-action="decline" title="Decline" ${!isOnline ? 'disabled' : ''}>
                             <i class="fas fa-times"></i>
                         </button>
                     ` : ''}
                     
                     ${type === 'sent_request' ? `
-                        <button class="friend-action-btn danger" data-action="cancel" title="Cancel Request">
+                        <button class="friend-action-btn danger" data-action="cancel" title="Cancel Request" ${!isOnline ? 'disabled' : ''}>
                             <i class="fas fa-times"></i>
                         </button>
                     ` : ''}
                     
                     ${type === 'temporary' ? `
-                        <button class="friend-action-btn" data-action="extend" title="Extend">
+                        <button class="friend-action-btn" data-action="extend" title="Extend" ${!isOnline ? 'disabled' : ''}>
                             <i class="fas fa-clock"></i>
                         </button>
-                        <button class="friend-action-btn" data-action="make-permanent" title="Make Permanent">
+                        <button class="friend-action-btn" data-action="make-permanent" title="Make Permanent" ${!isOnline ? 'disabled' : ''}>
                             <i class="fas fa-infinity"></i>
                         </button>
                     ` : ''}
@@ -2685,7 +3005,7 @@
             requestItem.dataset.requestId = requestData.id;
             requestItem.dataset.type = type + '_request';
             
-            const userData = requestData.userData;
+            const userData = requestData.userData || requestData;
             const initials = userData.displayName ? 
                 userData.displayName.split(' ').map(word => word[0]).join('').toUpperCase().substring(0, 2) : 
                 'U';
@@ -2710,16 +3030,16 @@
                 </div>
                 <div class="friend-actions">
                     ${type === 'incoming' ? `
-                        <button class="friend-action-btn success" data-action="accept" title="Accept">
+                        <button class="friend-action-btn success" data-action="accept" title="Accept" ${!isOnline ? 'disabled' : ''}>
                             <i class="fas fa-check"></i>
                         </button>
-                        <button class="friend-action-btn danger" data-action="decline" title="Decline">
+                        <button class="friend-action-btn danger" data-action="decline" title="Decline" ${!isOnline ? 'disabled' : ''}>
                             <i class="fas fa-times"></i>
                         </button>
                     ` : ''}
                     
                     ${type === 'sent' ? `
-                        <button class="friend-action-btn danger" data-action="cancel" title="Cancel Request">
+                        <button class="friend-action-btn danger" data-action="cancel" title="Cancel Request" ${!isOnline ? 'disabled' : ''}>
                             <i class="fas fa-times"></i>
                         </button>
                     ` : ''}
@@ -2870,8 +3190,10 @@
                 
                 await db.collection('friendRequests').add(requestData);
                 
-                // Update UI
-                loadAllFriends();
+                // Update UI and local storage
+                await loadAllFriends();
+                saveFriendsToLocalStorage();
+                
                 showNotification('Friend request sent successfully', 'success');
                 
                 // Close modal if open
@@ -2915,8 +3237,10 @@
                 
                 await db.collection('friendships').add(friendshipData);
                 
-                // Update UI
-                loadAllFriends();
+                // Update UI and local storage
+                await loadAllFriends();
+                saveFriendsToLocalStorage();
+                
                 showNotification('Friend request accepted', 'success');
                 
                 // Close request modal if open
@@ -2943,8 +3267,10 @@
                     declinedAt: firebase.firestore.FieldValue.serverTimestamp()
                 });
                 
-                // Update UI
-                loadAllFriends();
+                // Update UI and local storage
+                await loadAllFriends();
+                saveFriendsToLocalStorage();
+                
                 showNotification('Friend request declined', 'success');
                 
                 // Close request modal if open
@@ -2968,8 +3294,10 @@
                 // Delete the request
                 await db.collection('friendRequests').doc(requestId).delete();
                 
-                // Update UI
-                loadAllFriends();
+                // Update UI and local storage
+                await loadAllFriends();
+                saveFriendsToLocalStorage();
+                
                 showNotification('Friend request cancelled', 'success');
                 
             } catch (error) {
@@ -3002,8 +3330,12 @@
                 
                 if (friendshipId) {
                     await db.collection('friendships').doc(friendshipId).delete();
+                    
+                    // Update UI and local storage
+                    await loadAllFriends();
+                    saveFriendsToLocalStorage();
+                    
                     showNotification('Friend removed successfully', 'success');
-                    loadAllFriends();
                 }
                 
             } catch (error) {
@@ -3040,8 +3372,11 @@
                         updatedAt: firebase.firestore.FieldValue.serverTimestamp()
                     });
                     
+                    // Update UI and local storage
+                    await loadAllFriends();
+                    saveFriendsToLocalStorage();
+                    
                     showNotification('Friend category updated', 'success');
-                    loadAllFriends();
                     
                     // Update details panel if open
                     if (selectedFriend && selectedFriend.uid === friendId) {
@@ -3082,6 +3417,13 @@
                         notes: notes,
                         updatedAt: firebase.firestore.FieldValue.serverTimestamp()
                     });
+                    
+                    // Update local storage
+                    const friendIndex = friends.findIndex(f => f.uid === friendId);
+                    if (friendIndex !== -1) {
+                        friends[friendIndex].notes = notes;
+                        saveFriendsToLocalStorage();
+                    }
                     
                     showNotification('Notes updated', 'success');
                     
@@ -3146,8 +3488,11 @@
                         updatedAt: firebase.firestore.FieldValue.serverTimestamp()
                     });
                     
+                    // Update UI and local storage
+                    await loadAllFriends();
+                    saveFriendsToLocalStorage();
+                    
                     showNotification(`Friendship extended for ${newDuration === '24h' ? '24 hours' : newDuration === '7d' ? '7 days' : '30 days'}`, 'success');
-                    loadAllFriends();
                 }
                 
             } catch (error) {
@@ -3185,8 +3530,11 @@
                         updatedAt: firebase.firestore.FieldValue.serverTimestamp()
                     });
                     
+                    // Update UI and local storage
+                    await loadAllFriends();
+                    saveFriendsToLocalStorage();
+                    
                     showNotification('Friend is now permanent', 'success');
-                    loadAllFriends();
                 }
                 
             } catch (error) {
@@ -3214,27 +3562,47 @@
             
             try {
                 // Get more detailed friend data
-                const friendDoc = await db.collection('users').doc(friendData.uid).get();
-                const detailedData = friendDoc.exists ? friendDoc.data() : friendData;
+                let detailedData = friendData;
+                
+                if (isOnline) {
+                    const friendDoc = await db.collection('users').doc(friendData.uid).get();
+                    detailedData = friendDoc.exists ? friendDoc.data() : friendData;
+                }
                 
                 // Get friendship details if it's a friend
                 let friendshipData = null;
                 if (type === 'friend') {
-                    const friendshipSnapshot = await db.collection('friendships')
-                        .where('participants', 'array-contains', currentUser.uid)
-                        .where('status', '==', 'approved')
-                        .get();
-                    
-                    friendshipSnapshot.forEach(doc => {
-                        const data = doc.data();
-                        if (data.participants.includes(friendData.uid)) {
-                            friendshipData = data;
+                    if (isOnline) {
+                        const friendshipSnapshot = await db.collection('friendships')
+                            .where('participants', 'array-contains', currentUser.uid)
+                            .where('status', '==', 'approved')
+                            .get();
+                        
+                        friendshipSnapshot.forEach(doc => {
+                            const data = doc.data();
+                            if (data.participants.includes(friendData.uid)) {
+                                friendshipData = data;
+                            }
+                        });
+                    } else {
+                        // Get from local friends data
+                        const friend = friends.find(f => f.uid === friendData.uid);
+                        if (friend) {
+                            friendshipData = {
+                                category: friend.category || 'friend',
+                                notes: friend.notes || '',
+                                isTemporary: friend.isTemporary || false,
+                                expiresAt: friend.expiresAt || null,
+                                isBusiness: friend.isBusiness || false,
+                                trustScore: friend.trustScore || 5,
+                                addedAt: friend.addedAt || new Date()
+                            };
                         }
-                    });
+                    }
                 }
                 
                 // Get mutual friends count
-                const mutualCount = await calculateDetailedMutualFriends(friendData.uid);
+                const mutualCount = isOnline ? await calculateDetailedMutualFriends(friendData.uid) : calculateMutualFriends(friendData);
                 
                 // Determine status
                 let statusClass = 'offline';
@@ -3354,7 +3722,7 @@
                             <span>Private Notes</span>
                         </div>
                         <textarea class="notes-textarea" id="friendNotesTextarea" placeholder="Add private notes about this friend...">${notes}</textarea>
-                        <button class="action-btn secondary" id="saveNotesBtn" style="width: 100%; margin-top: 10px;">
+                        <button class="action-btn secondary" id="saveNotesBtn" style="width: 100%; margin-top: 10px;" ${!isOnline ? 'disabled' : ''}>
                             <i class="fas fa-save"></i> Save Notes
                         </button>
                     </div>
@@ -3368,22 +3736,22 @@
                         <button class="action-btn primary" id="callFriendBtn">
                             <i class="fas fa-phone"></i> Call
                         </button>
-                        <button class="action-btn secondary" id="friendOptionsBtn">
+                        <button class="action-btn secondary" id="friendOptionsBtn" ${!isOnline ? 'disabled' : ''}>
                             <i class="fas fa-cog"></i> Options
                         </button>
                         ` : ''}
                         
                         ${type === 'contact' ? `
-                        <button class="action-btn primary" id="addContactBtn">
+                        <button class="action-btn primary" id="addContactBtn" ${!isOnline ? 'disabled' : ''}>
                             <i class="fas fa-user-plus"></i> Add as Friend
                         </button>
                         ` : ''}
                         
                         ${type === 'incoming_request' ? `
-                        <button class="action-btn success" id="acceptRequestDetailsBtn">
+                        <button class="action-btn success" id="acceptRequestDetailsBtn" ${!isOnline ? 'disabled' : ''}>
                             <i class="fas fa-check"></i> Accept
                         </button>
-                        <button class="action-btn danger" id="declineRequestDetailsBtn">
+                        <button class="action-btn danger" id="declineRequestDetailsBtn" ${!isOnline ? 'disabled' : ''}>
                             <i class="fas fa-times"></i> Decline
                         </button>
                         ` : ''}
@@ -3401,6 +3769,10 @@
                     });
                     
                     document.getElementById('friendOptionsBtn').addEventListener('click', () => {
+                        if (!isOnline) {
+                            showNotification('Friend options require internet connection', 'error');
+                            return;
+                        }
                         showFriendOptions(friendData);
                     });
                     
@@ -3650,7 +4022,7 @@
         }
         
         function setupFriendRequestsListener() {
-            if (!currentUser) return;
+            if (!currentUser || !isOnline) return;
             
             // Listen for new friend requests
             db.collection('friendRequests')
@@ -3798,22 +4170,32 @@
                             addFriendItem(friend, allFriendsList, 'temporary');
                         });
                         
+                        // Show empty state if no friends
+                        if (contacts.length === 0 && friends.length === 0 && temporaryFriends.length === 0) {
+                            allFriendsList.innerHTML = `
+                                <div class="empty-state">
+                                    <i class="fas fa-user-friends"></i>
+                                    <p>No friends yet</p>
+                                    <p class="subtext">Add friends to start connecting</p>
+                                </div>
+                            `;
+                        }
                         break;
                         
                     case 'contactsSection':
-                        // Already loaded
+                        // Already loaded via renderContacts()
                         break;
                         
                     case 'friendsSection':
-                        // Already loaded
+                        // Already loaded via renderFriends()
                         break;
                         
                     case 'requestsSection':
-                        // Already loaded
+                        // Already loaded via renderFriendRequests() and renderSentRequests()
                         break;
                         
                     case 'temporarySection':
-                        // Already loaded
+                        // Already loaded via renderTemporaryFriends()
                         break;
                 }
             }
@@ -3855,14 +4237,14 @@
         function generateQRCode() {
             try {
                 const qrContainer = document.getElementById('qrCodeContainer');
-                if (!qrContainer) return;
+                if (!qrContainer || !currentUser) return;
                 
                 // Create QR code data
                 const qrData = JSON.stringify({
                     type: 'knecta_friend',
                     userId: currentUser.uid,
-                    username: userData.username || '',
-                    displayName: userData.displayName || '',
+                    username: userData?.username || '',
+                    displayName: userData?.displayName || '',
                     timestamp: Date.now()
                 });
                 
@@ -4267,10 +4649,13 @@
                 if (offlineCheckInterval) {
                     clearInterval(offlineCheckInterval);
                 }
+                
+                // Save friends to local storage
+                saveFriendsToLocalStorage();
             });
         }
         
-        console.log('Friends system initialized successfully');
+        console.log('Friends system initialized successfully with offline support');
     </script>
 </body>
 </html>

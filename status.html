@@ -2414,6 +2414,8 @@
         
         // Initialize the application
         document.addEventListener('DOMContentLoaded', function() {
+            // Load current user from app.js or localStorage
+            loadCurrentUser();
             loadUserThemeAndMood();
             initializeApp();
             setupEventListeners();
@@ -2426,6 +2428,43 @@
             setupTouchGestures();
             setupOfflineSupport();
         });
+
+        // Load current user from app.js data
+        function loadCurrentUser() {
+            try {
+                // Check if user data is available from app.js
+                if (typeof window.currentUser !== 'undefined' && window.currentUser) {
+                    currentUser = window.currentUser;
+                    console.log('User loaded from app.js:', currentUser.uid);
+                } else {
+                    // Fallback to localStorage
+                    const userData = localStorage.getItem('currentUser');
+                    if (userData) {
+                        currentUser = JSON.parse(userData);
+                        console.log('User loaded from localStorage:', currentUser.uid);
+                    } else {
+                        // Check Firebase auth state
+                        auth.onAuthStateChanged(user => {
+                            if (user) {
+                                currentUser = user;
+                                localStorage.setItem('currentUser', JSON.stringify({
+                                    uid: user.uid,
+                                    displayName: user.displayName,
+                                    photoURL: user.photoURL,
+                                    email: user.email
+                                }));
+                                console.log('User loaded from Firebase auth:', user.uid);
+                            } else {
+                                console.log('No user found, redirecting to login');
+                                window.location.href = 'index.html';
+                            }
+                        });
+                    }
+                }
+            } catch (error) {
+                console.error('Error loading current user:', error);
+            }
+        }
         
         // OFFLINE SUPPORT FUNCTIONS - Enhanced
         function setupOfflineSupport() {
@@ -2499,7 +2538,13 @@
         
         function loadCachedStatuses() {
             try {
-                const cachedData = localStorage.getItem(`cachedStatuses_${currentUser?.uid}`);
+                if (!currentUser || !currentUser.uid) {
+                    console.log('No user ID available for loading cached statuses');
+                    cachedStatuses = [];
+                    return;
+                }
+                
+                const cachedData = localStorage.getItem(`cachedStatuses_${currentUser.uid}`);
                 if (cachedData) {
                     cachedStatuses = JSON.parse(cachedData);
                     
@@ -2512,7 +2557,7 @@
                     });
                     
                     // Save filtered cache back
-                    localStorage.setItem(`cachedStatuses_${currentUser?.uid}`, JSON.stringify(cachedStatuses));
+                    localStorage.setItem(`cachedStatuses_${currentUser.uid}`, JSON.stringify(cachedStatuses));
                     
                     console.log(`Loaded ${cachedStatuses.length} cached statuses`);
                 } else {
@@ -2526,6 +2571,11 @@
         
         function saveStatusToCache(status) {
             try {
+                if (!currentUser || !currentUser.uid) {
+                    console.log('No user ID available for saving cache');
+                    return;
+                }
+                
                 // Check if status already exists in cache
                 const existingIndex = cachedStatuses.findIndex(s => s.id === status.id || s.tempId === status.tempId);
                 
@@ -2543,7 +2593,7 @@
                 }
                 
                 // Save to localStorage
-                localStorage.setItem(`cachedStatuses_${currentUser?.uid}`, JSON.stringify(cachedStatuses));
+                localStorage.setItem(`cachedStatuses_${currentUser.uid}`, JSON.stringify(cachedStatuses));
                 
                 console.log(`Saved status to cache. Total cached: ${cachedStatuses.length}`);
                 
@@ -2586,6 +2636,8 @@
         function updateStatusList(statuses) {
             const recentStatusList = document.getElementById('recentStatusList');
             const sectionTitle = document.getElementById('sectionTitle');
+            
+            if (!recentStatusList || !sectionTitle) return;
             
             // Update section title
             switch(currentCategory) {
@@ -2787,7 +2839,13 @@
         
         function loadPendingUploads() {
             try {
-                const pendingData = localStorage.getItem(`pendingUploads_${currentUser?.uid}`);
+                if (!currentUser || !currentUser.uid) {
+                    console.log('No user ID available for loading pending uploads');
+                    pendingUploads = [];
+                    return;
+                }
+                
+                const pendingData = localStorage.getItem(`pendingUploads_${currentUser.uid}`);
                 if (pendingData) {
                     pendingUploads = JSON.parse(pendingData);
                     console.log(`Loaded ${pendingUploads.length} pending uploads`);
@@ -2802,6 +2860,11 @@
         
         function savePendingUpload(statusData) {
             try {
+                if (!currentUser || !currentUser.uid) {
+                    console.log('No user ID available for saving pending upload');
+                    return null;
+                }
+                
                 // Generate a temporary ID for offline status
                 const tempId = 'temp_' + Date.now() + '_' + Math.random().toString(36).substr(2, 9);
                 statusData.tempId = tempId;
@@ -2812,7 +2875,7 @@
                 pendingUploads.push(statusData);
                 
                 // Save to localStorage
-                localStorage.setItem(`pendingUploads_${currentUser?.uid}`, JSON.stringify(pendingUploads));
+                localStorage.setItem(`pendingUploads_${currentUser.uid}`, JSON.stringify(pendingUploads));
                 
                 // Also save to cache for immediate viewing
                 saveStatusToCache({
@@ -2834,12 +2897,17 @@
         
         function removePendingUpload(tempId) {
             try {
+                if (!currentUser || !currentUser.uid) {
+                    console.log('No user ID available for removing pending upload');
+                    return;
+                }
+                
                 pendingUploads = pendingUploads.filter(upload => upload.tempId !== tempId);
-                localStorage.setItem(`pendingUploads_${currentUser?.uid}`, JSON.stringify(pendingUploads));
+                localStorage.setItem(`pendingUploads_${currentUser.uid}`, JSON.stringify(pendingUploads));
                 
                 // Also remove from cache
                 cachedStatuses = cachedStatuses.filter(status => status.tempId !== tempId);
-                localStorage.setItem(`cachedStatuses_${currentUser?.uid}`, JSON.stringify(cachedStatuses));
+                localStorage.setItem(`cachedStatuses_${currentUser.uid}`, JSON.stringify(cachedStatuses));
                 
                 console.log(`Removed pending upload: ${tempId}`);
             } catch (error) {
@@ -3016,8 +3084,10 @@
         
         async function syncViewedStatuses() {
             try {
+                if (!currentUser || !currentUser.uid) return;
+                
                 // Get offline viewed statuses
-                const offlineViewed = localStorage.getItem(`offlineViewed_${currentUser?.uid}`);
+                const offlineViewed = localStorage.getItem(`offlineViewed_${currentUser.uid}`);
                 if (!offlineViewed) return;
                 
                 const viewedStatuses = JSON.parse(offlineViewed);
@@ -3039,7 +3109,7 @@
                 }
                 
                 // Clear offline viewed cache
-                localStorage.removeItem(`offlineViewed_${currentUser?.uid}`);
+                localStorage.removeItem(`offlineViewed_${currentUser.uid}`);
                 console.log('Synced offline viewed statuses');
                 
             } catch (error) {
@@ -3049,7 +3119,9 @@
         
         function syncOfflineReactions() {
             try {
-                const offlineReactions = localStorage.getItem(`offlineReactions_${currentUser?.uid}`);
+                if (!currentUser || !currentUser.uid) return;
+                
+                const offlineReactions = localStorage.getItem(`offlineReactions_${currentUser.uid}`);
                 if (!offlineReactions) return;
                 
                 const reactions = JSON.parse(offlineReactions);
@@ -3066,7 +3138,7 @@
                     }
                 });
                 
-                localStorage.removeItem(`offlineReactions_${currentUser?.uid}`);
+                localStorage.removeItem(`offlineReactions_${currentUser.uid}`);
                 console.log('Synced offline reactions');
                 
             } catch (error) {
@@ -3076,7 +3148,9 @@
         
         function syncOfflinePollVotes() {
             try {
-                const offlinePollVotes = localStorage.getItem(`offlinePollVotes_${currentUser?.uid}`);
+                if (!currentUser || !currentUser.uid) return;
+                
+                const offlinePollVotes = localStorage.getItem(`offlinePollVotes_${currentUser.uid}`);
                 if (!offlinePollVotes) return;
                 
                 const pollVotes = JSON.parse(offlinePollVotes);
@@ -3093,7 +3167,7 @@
                     }
                 });
                 
-                localStorage.removeItem(`offlinePollVotes_${currentUser?.uid}`);
+                localStorage.removeItem(`offlinePollVotes_${currentUser.uid}`);
                 console.log('Synced offline poll votes');
                 
             } catch (error) {
@@ -3103,7 +3177,9 @@
         
         function syncOfflineAnswers() {
             try {
-                const offlineAnswers = localStorage.getItem(`offlineAnswers_${currentUser?.uid}`);
+                if (!currentUser || !currentUser.uid) return;
+                
+                const offlineAnswers = localStorage.getItem(`offlineAnswers_${currentUser.uid}`);
                 if (!offlineAnswers) return;
                 
                 const answers = JSON.parse(offlineAnswers);
@@ -3125,7 +3201,7 @@
                     }
                 });
                 
-                localStorage.removeItem(`offlineAnswers_${currentUser?.uid}`);
+                localStorage.removeItem(`offlineAnswers_${currentUser.uid}`);
                 console.log('Synced offline answers');
                 
             } catch (error) {
@@ -3196,6 +3272,8 @@
         // Modified markStatusAsViewed function to handle offline mode
         async function markStatusAsViewed(statusId) {
             try {
+                if (!currentUser || !currentUser.uid) return;
+                
                 if (!viewedStatuses.includes(statusId)) {
                     viewedStatuses.push(statusId);
                     localStorage.setItem(`viewedStatuses_${currentUser.uid}`, JSON.stringify(viewedStatuses));
@@ -3237,6 +3315,12 @@
         // Modified loadStatusUpdates function to use cache when offline
         async function loadStatusUpdates() {
             try {
+                if (!currentUser || !currentUser.uid) {
+                    console.log('No user ID available for loading status updates');
+                    updateStatusListWithCache();
+                    return;
+                }
+                
                 if (!isOnline) {
                     // Load from cache when offline
                     console.log('Offline mode: Loading cached status updates');
@@ -3354,30 +3438,54 @@
         }
         
         function initializeApp() {
-            // Check if user is logged in
-            auth.onAuthStateChanged(user => {
-                if (user) {
-                    currentUser = user;
-                    loadUserData();
-                    loadMutedUsers();
-                    loadArchivedStatuses();
-                    loadHighlightedStatuses();
-                    loadUserGroups();
-                    loadStatusUpdates();
-                    
-                    // Initialize offline support after user is loaded
-                    setTimeout(() => {
+            // Check if user is loaded
+            if (!currentUser) {
+                loadCurrentUser();
+            }
+            
+            // Initialize with user data
+            if (currentUser && currentUser.uid) {
+                loadUserData();
+                loadMutedUsers();
+                loadArchivedStatuses();
+                loadHighlightedStatuses();
+                loadUserGroups();
+                loadStatusUpdates();
+                
+                // Initialize offline support after user is loaded
+                setTimeout(() => {
+                    setupOfflineSupport();
+                }, 1000);
+            } else {
+                // Wait for auth state
+                auth.onAuthStateChanged(user => {
+                    if (user) {
+                        currentUser = user;
+                        localStorage.setItem('currentUser', JSON.stringify({
+                            uid: user.uid,
+                            displayName: user.displayName,
+                            photoURL: user.photoURL,
+                            email: user.email
+                        }));
+                        loadUserData();
+                        loadMutedUsers();
+                        loadArchivedStatuses();
+                        loadHighlightedStatuses();
+                        loadUserGroups();
+                        loadStatusUpdates();
                         setupOfflineSupport();
-                    }, 1000);
-                } else {
-                    // Redirect to login page if not authenticated
-                    window.location.href = 'index.html';
-                }
-            });
+                    } else {
+                        // Redirect to login page if not authenticated
+                        window.location.href = 'index.html';
+                    }
+                });
+            }
         }
         
         async function loadMutedUsers() {
             try {
+                if (!currentUser || !currentUser.uid) return;
+                
                 const userPrefs = localStorage.getItem(`mutedUsers_${currentUser.uid}`);
                 if (userPrefs) {
                     mutedUsers = JSON.parse(userPrefs);
@@ -3392,6 +3500,8 @@
         
         function saveMutedUsers() {
             try {
+                if (!currentUser || !currentUser.uid) return;
+                
                 localStorage.setItem(`mutedUsers_${currentUser.uid}`, JSON.stringify(mutedUsers));
             } catch (error) {
                 console.error('Error saving muted users:', error);
@@ -3400,6 +3510,8 @@
         
         async function loadArchivedStatuses() {
             try {
+                if (!currentUser || !currentUser.uid) return;
+                
                 const archivedData = localStorage.getItem(`archivedStatuses_${currentUser.uid}`);
                 if (archivedData) {
                     archivedStatuses = JSON.parse(archivedData);
@@ -3414,6 +3526,8 @@
         
         async function loadHighlightedStatuses() {
             try {
+                if (!currentUser || !currentUser.uid) return;
+                
                 const highlightsData = localStorage.getItem(`highlightedStatuses_${currentUser.uid}`);
                 if (highlightsData) {
                     highlightedStatuses = JSON.parse(highlightsData);
@@ -3428,6 +3542,8 @@
         
         async function loadUserGroups() {
             try {
+                if (!currentUser || !currentUser.uid) return;
+                
                 // Load user's groups from Firestore
                 const groupsSnapshot = await db.collection('groups')
                     .where('members', 'array-contains', currentUser.uid)
@@ -3449,6 +3565,8 @@
         }
         
         function loadUserData() {
+            if (!currentUser) return;
+            
             const myStatusAvatar = document.getElementById('myStatusAvatar');
             const userInitials = currentUser.displayName ? 
                 currentUser.displayName.split(' ').map(n => n[0]).join('').toUpperCase().substring(0, 2) : 
@@ -3489,6 +3607,8 @@
         }
         
         async function updateMyStatusItem() {
+            if (!currentUser || !currentUser.uid) return;
+            
             const myStatuses = await getUserStatuses(currentUser.uid);
             const myStatusItem = document.getElementById('myStatusItem');
             const myStatusOptions = document.getElementById('myStatusOptions');
@@ -4917,8 +5037,8 @@
                 const highlightBtn = document.getElementById('highlightStatusBtn');
                 if (highlightBtn) {
                     highlightBtn.innerHTML = isAlreadyHighlighted ? 
-                        '<i class="fas fa-star"></i> Highlight' : 
-                        '<i class="fas fa-star"></i> Unhighlight';
+                        '<i class="fas fa-star"></i> Unhighlight' : 
+                        '<i class="fas fa-star"></i> Highlight';
                 }
                 
             } catch (error) {
