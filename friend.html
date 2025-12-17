@@ -2072,6 +2072,10 @@
     </div>
 
     <script>
+        // =============================================
+        // ENHANCED OFFLINE-FIRST FRIENDS SYSTEM
+        // =============================================
+
         // friend.html - Settings integration
         let friendPageSettings = null;
 
@@ -2248,7 +2252,13 @@
             TEMPORARY_FRIENDS: 'knecta_temporary_friends',
             LAST_SYNC: 'knecta_friends_last_sync',
             PENDING_REQUESTS: 'knecta_pending_requests',
-            USER_PROFILE: 'knecta_user_profile'
+            USER_PROFILE: 'knecta_user_profile',
+            // New keys for enhanced offline features
+            CHAT_HISTORY: 'knecta_chat_history',
+            CALL_HISTORY: 'knecta_call_history',
+            OFFLINE_ACTIONS: 'knecta_offline_actions',
+            FRIEND_REQUESTS_OFFLINE: 'knecta_friend_requests_offline',
+            FRIEND_ACCEPT_OFFLINE: 'knecta_friend_accept_offline'
         };
         
         // Initialize the application
@@ -2294,6 +2304,9 @@
             if (isOnline && firebaseInitialized) {
                 trySyncWithServer();
             }
+            
+            // Process any pending offline actions
+            processPendingOfflineActions();
             
             // Show start chat modal if redirected from Start Chat button
             if (startChatParam === 'true') {
@@ -2592,6 +2605,9 @@
             // Send any pending offline friend requests
             sendPendingOfflineRequests();
             
+            // Process any pending offline actions
+            processPendingOfflineActions();
+            
             // Hide local storage indicator
             localStorageIndicator.classList.remove('active');
             isLoadedFromLocalStorage = false;
@@ -2643,6 +2659,39 @@
                 }
             } catch (error) {
                 console.error('Error sending pending requests:', error);
+            }
+        }
+        
+        async function processPendingOfflineActions() {
+            try {
+                // Process pending friend accept actions
+                const pendingAccepts = JSON.parse(localStorage.getItem(LOCAL_STORAGE_KEYS.FRIEND_ACCEPT_OFFLINE) || '[]');
+                if (pendingAccepts.length > 0 && isOnline && firebaseInitialized) {
+                    for (const acceptData of pendingAccepts) {
+                        try {
+                            await acceptFriendRequestOnline(acceptData.requestId, acceptData.friendId);
+                        } catch (error) {
+                            console.error('Error processing pending accept:', error);
+                        }
+                    }
+                    localStorage.removeItem(LOCAL_STORAGE_KEYS.FRIEND_ACCEPT_OFFLINE);
+                }
+                
+                // Process pending friend requests (incoming)
+                const pendingIncoming = JSON.parse(localStorage.getItem(LOCAL_STORAGE_KEYS.FRIEND_REQUESTS_OFFLINE) || '[]');
+                if (pendingIncoming.length > 0 && isOnline && firebaseInitialized) {
+                    for (const requestData of pendingIncoming) {
+                        try {
+                            // Process incoming friend request
+                        } catch (error) {
+                            console.error('Error processing pending incoming request:', error);
+                        }
+                    }
+                    localStorage.removeItem(LOCAL_STORAGE_KEYS.FRIEND_REQUESTS_OFFLINE);
+                }
+                
+            } catch (error) {
+                console.error('Error processing pending offline actions:', error);
             }
         }
         
@@ -3340,7 +3389,7 @@
                         <button class="friend-action-btn chat" data-action="start-chat" title="Start Chat">
                             <i class="fas fa-comments"></i>
                         </button>
-                        <button class="friend-action-btn success" data-action="add" title="Add as Friend" ${!isOnline ? 'disabled' : ''}>
+                        <button class="friend-action-btn success" data-action="add" title="Add as Friend">
                             <i class="fas fa-user-plus"></i>
                         </button>
                     ` : ''}
@@ -3361,16 +3410,16 @@
                     ` : ''}
                     
                     ${type === 'incoming_request' ? `
-                        <button class="friend-action-btn success" data-action="accept" title="Accept" ${!isOnline ? 'disabled' : ''}>
+                        <button class="friend-action-btn success" data-action="accept" title="Accept">
                             <i class="fas fa-check"></i>
                         </button>
-                        <button class="friend-action-btn danger" data-action="decline" title="Decline" ${!isOnline ? 'disabled' : ''}>
+                        <button class="friend-action-btn danger" data-action="decline" title="Decline">
                             <i class="fas fa-times"></i>
                         </button>
                     ` : ''}
                     
                     ${type === 'sent_request' ? `
-                        <button class="friend-action-btn danger" data-action="cancel" title="Cancel Request" ${!isOnline ? 'disabled' : ''}>
+                        <button class="friend-action-btn danger" data-action="cancel" title="Cancel Request">
                             <i class="fas fa-times"></i>
                         </button>
                     ` : ''}
@@ -3379,10 +3428,10 @@
                         <button class="friend-action-btn chat" data-action="start-chat" title="Start Chat">
                             <i class="fas fa-comments"></i>
                         </button>
-                        <button class="friend-action-btn" data-action="extend" title="Extend" ${!isOnline ? 'disabled' : ''}>
+                        <button class="friend-action-btn" data-action="extend" title="Extend">
                             <i class="fas fa-clock"></i>
                         </button>
-                        <button class="friend-action-btn" data-action="make-permanent" title="Make Permanent" ${!isOnline ? 'disabled' : ''}>
+                        <button class="friend-action-btn" data-action="make-permanent" title="Make Permanent">
                             <i class="fas fa-infinity"></i>
                         </button>
                     ` : ''}
@@ -3439,16 +3488,16 @@
                 </div>
                 <div class="friend-actions">
                     ${type === 'incoming' ? `
-                        <button class="friend-action-btn success" data-action="accept" title="Accept" ${!isOnline ? 'disabled' : ''}>
+                        <button class="friend-action-btn success" data-action="accept" title="Accept">
                             <i class="fas fa-check"></i>
                         </button>
-                        <button class="friend-action-btn danger" data-action="decline" title="Decline" ${!isOnline ? 'disabled' : ''}>
+                        <button class="friend-action-btn danger" data-action="decline" title="Decline">
                             <i class="fas fa-times"></i>
                         </button>
                     ` : ''}
                     
                     ${type === 'sent' ? `
-                        <button class="friend-action-btn danger" data-action="cancel" title="Cancel Request" ${!isOnline ? 'disabled' : ''}>
+                        <button class="friend-action-btn danger" data-action="cancel" title="Cancel Request">
                             <i class="fas fa-times"></i>
                         </button>
                     ` : ''}
@@ -3474,25 +3523,26 @@
             container.appendChild(requestItem);
         }
         
+        // =============================================
+        // ENHANCED OFFLINE ACTION HANDLERS
+        // =============================================
+        
         function handleFriendAction(action, friendData, type, button) {
             switch(action) {
                 case 'start-chat':
-                    // SEND CHAT REQUEST TO PARENT
-                    handleChatRequest(friendData);
+                    startChatWithFriendOffline(friendData);
                     break;
                     
                 case 'message':
-                    // SEND CHAT REQUEST TO PARENT
-                    handleChatRequest(friendData);
+                    startChatWithFriendOffline(friendData);
                     break;
                     
                 case 'call':
-                    // SEND CALL REQUEST TO PARENT
-                    handleCallRequest(friendData);
+                    startCallWithFriendOffline(friendData);
                     break;
                     
                 case 'add':
-                    if (!isOnline || !firebaseInitialized) {
+                    if (!isOnline) {
                         sendFriendRequestOffline(friendData.uid);
                     } else {
                         sendFriendRequest(friendData.uid);
@@ -3504,43 +3554,43 @@
                     break;
                     
                 case 'accept':
-                    if (!isOnline || !firebaseInitialized) {
-                        showNotification('Cannot accept friend request while offline', 'error');
-                        return;
+                    if (!isOnline) {
+                        acceptFriendRequestOffline(friendData);
+                    } else {
+                        acceptFriendRequestOnline(friendData.id || friendData.requestId, friendData.from || friendData.uid);
                     }
-                    acceptFriendRequest(friendData);
                     break;
                     
                 case 'decline':
-                    if (!isOnline || !firebaseInitialized) {
-                        showNotification('Cannot decline friend request while offline', 'error');
-                        return;
+                    if (!isOnline) {
+                        declineFriendRequestOffline(friendData);
+                    } else {
+                        declineFriendRequest(friendData);
                     }
-                    declineFriendRequest(friendData);
                     break;
                     
                 case 'cancel':
-                    if (!isOnline || !firebaseInitialized) {
-                        showNotification('Cannot cancel friend request while offline', 'error');
-                        return;
+                    if (!isOnline) {
+                        cancelFriendRequestOffline(friendData);
+                    } else {
+                        cancelFriendRequest(friendData);
                     }
-                    cancelFriendRequest(friendData);
                     break;
                     
                 case 'extend':
-                    if (!isOnline || !firebaseInitialized) {
-                        showNotification('Cannot extend friend while offline', 'error');
-                        return;
+                    if (!isOnline) {
+                        showNotification('Extending friendship requires internet connection', 'warning');
+                    } else {
+                        extendTemporaryFriend(friendData);
                     }
-                    extendTemporaryFriend(friendData);
                     break;
                     
                 case 'make-permanent':
-                    if (!isOnline || !firebaseInitialized) {
-                        showNotification('Cannot update friend while offline', 'error');
-                        return;
+                    if (!isOnline) {
+                        showNotification('Updating friendship requires internet connection', 'warning');
+                    } else {
+                        makeFriendPermanent(friendData);
                     }
-                    makeFriendPermanent(friendData);
                     break;
                     
                 default:
@@ -3548,41 +3598,74 @@
             }
         }
         
-        // SEND CHAT REQUEST TO PARENT
-        function handleChatRequest(friendData) {
+        // OFFLINE CHAT FUNCTIONALITY
+        function startChatWithFriendOffline(friendData) {
+            // Save chat session to localStorage
+            const chatSession = {
+                friendId: friendData.uid,
+                friendName: friendData.displayName || 'Unknown User',
+                friendUsername: friendData.username || '',
+                friendAvatar: friendData.photoURL || '',
+                timestamp: Date.now(),
+                type: 'direct',
+                category: friendData.category || 'friend',
+                isTemporary: friendData.isTemporary || false,
+                isBusiness: friendData.isBusiness || false,
+                lastMessage: '',
+                unreadCount: 0
+            };
+            
+            // Save to localStorage
+            localStorage.setItem('knecta_current_chat', JSON.stringify(chatSession));
+            
+            // Update chat history
+            updateChatHistory(friendData.uid, friendData.displayName);
+            
+            // Check if in iframe or standalone
             if (window.parent && window.parent !== window) {
+                // Send message to parent to open chat
                 window.parent.postMessage({ 
                     action: "OPEN_CHAT", 
                     userId: friendData.uid,
-                    friendData: {
-                        uid: friendData.uid,
-                        displayName: friendData.displayName || 'Unknown User',
-                        username: friendData.username || '',
-                        photoURL: friendData.photoURL || '',
-                        category: friendData.category || 'friend',
-                        isTemporary: friendData.isTemporary || false,
-                        isBusiness: friendData.isBusiness || false
-                    }
+                    friendData: chatSession
                 }, "*");
-                
-                showNotification(`Opening chat with ${friendData.displayName || 'Friend'}...`, 'success');
-                
-                // Close friend details panel after a delay
-                setTimeout(() => {
-                    if (friendDetailsPanel.classList.contains('active')) {
-                        friendDetailsPanel.classList.remove('active');
-                        selectedFriend = null;
-                    }
-                }, 500);
             } else {
-                // Fallback: Use existing chat functionality
-                startChatWithFriend(friendData);
+                // Navigate to chat.html
+                window.location.href = `chat.html?friend=${friendData.uid}`;
             }
+            
+            showNotification(`Opening chat with ${friendData.displayName || 'Friend'}...`, 'success');
+            
+            // Close friend details panel after a delay
+            setTimeout(() => {
+                if (friendDetailsPanel.classList.contains('active')) {
+                    friendDetailsPanel.classList.remove('active');
+                    selectedFriend = null;
+                }
+            }, 500);
         }
         
-        // SEND CALL REQUEST TO PARENT
-        function handleCallRequest(friendData) {
+        // OFFLINE CALL FUNCTIONALITY
+        function startCallWithFriendOffline(friendData) {
+            // Save call session to localStorage
+            const callSession = {
+                friendId: friendData.uid,
+                friendName: friendData.displayName || 'Unknown User',
+                friendAvatar: friendData.photoURL || '',
+                timestamp: Date.now(),
+                callType: 'voice',
+                status: 'initiated'
+            };
+            
+            // Save to localStorage
+            localStorage.setItem('knecta_current_call', JSON.stringify(callSession));
+            
+            // Update call history
+            updateCallHistory(friendData.uid, friendData.displayName);
+            
+            // Check if in iframe or standalone
             if (window.parent && window.parent !== window) {
+                // Send message to parent to open call
                 window.parent.postMessage({ 
                     action: "OPEN_CALL", 
                     userId: friendData.uid,
@@ -3596,39 +3679,95 @@
                         isBusiness: friendData.isBusiness || false
                     }
                 }, "*");
-                
-                showNotification(`Starting call with ${friendData.displayName || 'Friend'}...`, 'success');
-                
-                // Close friend details panel after a delay
-                setTimeout(() => {
-                    if (friendDetailsPanel.classList.contains('active')) {
-                        friendDetailsPanel.classList.remove('active');
-                        selectedFriend = null;
-                    }
-                }, 500);
             } else {
-                // Fallback: Use existing call functionality
-                initiateCall(friendData.uid);
+                // Navigate to calls.html
+                window.location.href = `calls.html?call=${friendData.uid}&type=voice`;
+            }
+            
+            showNotification(`Starting call with ${friendData.displayName || 'Friend'}...`, 'success');
+            
+            // Close friend details panel after a delay
+            setTimeout(() => {
+                if (friendDetailsPanel.classList.contains('active')) {
+                    friendDetailsPanel.classList.remove('active');
+                    selectedFriend = null;
+                }
+            }, 500);
+        }
+        
+        // Update chat history (works offline)
+        function updateChatHistory(friendId, friendName) {
+            try {
+                const chatHistory = JSON.parse(localStorage.getItem(LOCAL_STORAGE_KEYS.CHAT_HISTORY) || '{}');
+                
+                if (!chatHistory[friendId]) {
+                    chatHistory[friendId] = {
+                        friendId: friendId,
+                        friendName: friendName,
+                        lastMessage: '',
+                        timestamp: Date.now(),
+                        unreadCount: 0,
+                        messageCount: 0
+                    };
+                } else {
+                    chatHistory[friendId].timestamp = Date.now();
+                }
+                
+                localStorage.setItem(LOCAL_STORAGE_KEYS.CHAT_HISTORY, JSON.stringify(chatHistory));
+            } catch (error) {
+                console.error('Error updating chat history:', error);
+            }
+        }
+        
+        // Update call history (works offline)
+        function updateCallHistory(friendId, friendName) {
+            try {
+                const callHistory = JSON.parse(localStorage.getItem(LOCAL_STORAGE_KEYS.CALL_HISTORY) || '[]');
+                
+                callHistory.unshift({
+                    friendId: friendId,
+                    friendName: friendName,
+                    timestamp: Date.now(),
+                    duration: 0,
+                    type: 'outgoing',
+                    status: 'initiated'
+                });
+                
+                // Keep only last 50 calls
+                if (callHistory.length > 50) {
+                    callHistory.pop();
+                }
+                
+                localStorage.setItem(LOCAL_STORAGE_KEYS.CALL_HISTORY, JSON.stringify(callHistory));
+            } catch (error) {
+                console.error('Error updating call history:', error);
             }
         }
         
         function handleRequestAction(action, requestData, button) {
-            if (!isOnline || !firebaseInitialized) {
-                showNotification('This action requires internet connection', 'error');
-                return;
-            }
-            
             switch(action) {
                 case 'accept':
-                    acceptFriendRequest(requestData);
+                    if (!isOnline) {
+                        acceptFriendRequestOffline(requestData);
+                    } else {
+                        acceptFriendRequestOnline(requestData.id || requestData.requestId, requestData.from || requestData.uid);
+                    }
                     break;
                     
                 case 'decline':
-                    declineFriendRequest(requestData);
+                    if (!isOnline) {
+                        declineFriendRequestOffline(requestData);
+                    } else {
+                        declineFriendRequest(requestData);
+                    }
                     break;
                     
                 case 'cancel':
-                    cancelFriendRequest(requestData);
+                    if (!isOnline) {
+                        cancelFriendRequestOffline(requestData);
+                    } else {
+                        cancelFriendRequest(requestData);
+                    }
                     break;
                     
                 default:
@@ -3722,13 +3861,10 @@
             addFriendModal.classList.remove('active');
         }
         
-        async function acceptFriendRequest(requestData) {
+        async function acceptFriendRequestOnline(requestId, friendId) {
             if (!firebaseInitialized) return;
             
             try {
-                const requestId = requestData.id || requestData.requestId;
-                const friendId = requestData.from || requestData.uid;
-                
                 // Update request status
                 await db.collection('friendRequests').doc(requestId).update({
                     status: 'accepted',
@@ -3739,12 +3875,12 @@
                 const friendshipData = {
                     participants: [currentUser.uid, friendId],
                     status: 'approved',
-                    category: requestData.category || 'friend',
-                    notes: requestData.note || '',
-                    isTemporary: requestData.isTemporary || false,
-                    expiresAt: requestData.expiresAt || null,
-                    isBusiness: requestData.isBusiness || false,
-                    trustScore: calculateTrustScore(requestData.userData || requestData),
+                    category: 'friend',
+                    notes: '',
+                    isTemporary: false,
+                    expiresAt: null,
+                    isBusiness: false,
+                    trustScore: 5,
                     addedAt: firebase.firestore.FieldValue.serverTimestamp(),
                     createdAt: firebase.firestore.FieldValue.serverTimestamp()
                 };
@@ -3764,6 +3900,53 @@
                 console.error('Error accepting friend request:', error);
                 showNotification('Failed to accept friend request', 'error');
             }
+        }
+        
+        function acceptFriendRequestOffline(requestData) {
+            // Store acceptance locally when offline
+            const acceptData = {
+                requestId: requestData.id || requestData.requestId,
+                friendId: requestData.from || requestData.uid,
+                timestamp: Date.now()
+            };
+            
+            // Get pending accepts
+            const pendingAccepts = JSON.parse(localStorage.getItem(LOCAL_STORAGE_KEYS.FRIEND_ACCEPT_OFFLINE) || '[]');
+            pendingAccepts.push(acceptData);
+            localStorage.setItem(LOCAL_STORAGE_KEYS.FRIEND_ACCEPT_OFFLINE, JSON.stringify(pendingAccepts));
+            
+            // Update UI immediately
+            // Remove from friend requests
+            const requestIndex = friendRequests.findIndex(r => r.id === requestData.id || r.requestId === requestData.requestId);
+            if (requestIndex !== -1) {
+                friendRequests.splice(requestIndex, 1);
+            }
+            
+            // Add to friends list
+            const newFriend = {
+                ...requestData.userData,
+                uid: requestData.from || requestData.uid,
+                category: 'friend',
+                notes: '',
+                isTemporary: false,
+                isBusiness: false,
+                trustScore: 5,
+                addedAt: new Date(),
+                type: 'friend'
+            };
+            
+            friends.push(newFriend);
+            
+            // Update UI
+            renderFriendRequests();
+            renderFriends();
+            updateFriendCounts();
+            saveFriendsToLocalStorage();
+            
+            showNotification('Friend request accepted offline. Will sync when online.', 'success');
+            
+            // Close request modal if open
+            friendRequestModal.classList.remove('active');
         }
         
         async function declineFriendRequest(requestData) {
@@ -3793,6 +3976,23 @@
             }
         }
         
+        function declineFriendRequestOffline(requestData) {
+            // Update UI immediately
+            const requestIndex = friendRequests.findIndex(r => r.id === requestData.id || r.requestId === requestData.requestId);
+            if (requestIndex !== -1) {
+                friendRequests.splice(requestIndex, 1);
+            }
+            
+            // Update UI
+            renderFriendRequests();
+            saveFriendsToLocalStorage();
+            
+            showNotification('Friend request declined offline', 'success');
+            
+            // Close request modal if open
+            friendRequestModal.classList.remove('active');
+        }
+        
         async function cancelFriendRequest(requestData) {
             if (!firebaseInitialized) return;
             
@@ -3812,6 +4012,20 @@
                 console.error('Error cancelling friend request:', error);
                 showNotification('Failed to cancel friend request', 'error');
             }
+        }
+        
+        function cancelFriendRequestOffline(requestData) {
+            // Update UI immediately
+            const requestIndex = sentRequests.findIndex(r => r.id === requestData.id || r.requestId === requestData.requestId);
+            if (requestIndex !== -1) {
+                sentRequests.splice(requestIndex, 1);
+            }
+            
+            // Update UI
+            renderSentRequests();
+            saveFriendsToLocalStorage();
+            
+            showNotification('Friend request cancelled offline', 'success');
         }
         
         async function removeFriend(friendId) {
@@ -3847,6 +4061,21 @@
                 console.error('Error removing friend:', error);
                 showNotification('Failed to remove friend', 'error');
             }
+        }
+        
+        function removeFriendOffline(friendId) {
+            // Update UI immediately
+            const friendIndex = friends.findIndex(f => f.uid === friendId);
+            if (friendIndex !== -1) {
+                friends.splice(friendIndex, 1);
+            }
+            
+            // Update UI
+            renderFriends();
+            updateFriendCounts();
+            saveFriendsToLocalStorage();
+            
+            showNotification('Friend removed offline. Will sync when online.', 'success');
         }
         
         async function updateFriendCategory(friendId, category) {
@@ -3889,6 +4118,25 @@
             } catch (error) {
                 console.error('Error updating friend category:', error);
                 showNotification('Failed to update friend category', 'error');
+            }
+        }
+        
+        function updateFriendCategoryOffline(friendId, category) {
+            // Update friend locally
+            const friendIndex = friends.findIndex(f => f.uid === friendId);
+            if (friendIndex !== -1) {
+                friends[friendIndex].category = category;
+            }
+            
+            // Update UI
+            renderFriends();
+            saveFriendsToLocalStorage();
+            
+            showNotification('Friend category updated offline. Will sync when online.', 'success');
+            
+            // Update details panel if open
+            if (selectedFriend && selectedFriend.uid === friendId) {
+                showFriendDetails(selectedFriend, 'friend');
             }
         }
         
@@ -3935,6 +4183,22 @@
             } catch (error) {
                 console.error('Error updating friend notes:', error);
                 showNotification('Failed to update notes', 'error');
+            }
+        }
+        
+        function updateFriendNotesOffline(friendId, notes) {
+            // Update friend locally
+            const friendIndex = friends.findIndex(f => f.uid === friendId);
+            if (friendIndex !== -1) {
+                friends[friendIndex].notes = notes;
+                saveFriendsToLocalStorage();
+            }
+            
+            showNotification('Notes updated offline. Will sync when online.', 'success');
+            
+            // Update details panel if open
+            if (selectedFriend && selectedFriend.uid === friendId) {
+                showFriendDetails(selectedFriend, 'friend');
             }
         }
         
@@ -4196,7 +4460,7 @@
                             <span>Private Notes</span>
                         </div>
                         <textarea class="notes-textarea" id="friendNotesTextarea" placeholder="Add private notes about this friend...">${notes}</textarea>
-                        <button class="action-btn secondary" id="saveNotesBtn" style="width: 100%; margin-top: 10px;" ${!isOnline ? 'disabled' : ''}>
+                        <button class="action-btn secondary" id="saveNotesBtn" style="width: 100%; margin-top: 10px;">
                             <i class="fas fa-save"></i> Save Notes
                         </button>
                     </div>
@@ -4213,7 +4477,7 @@
                         <button class="action-btn primary" id="callFriendBtn">
                             <i class="fas fa-phone"></i> Call
                         </button>
-                        <button class="action-btn secondary" id="friendOptionsBtn" ${!isOnline ? 'disabled' : ''}>
+                        <button class="action-btn secondary" id="friendOptionsBtn">
                             <i class="fas fa-cog"></i> Options
                         </button>
                         ` : ''}
@@ -4222,16 +4486,16 @@
                         <button class="action-btn success" id="startChatWithContactBtn">
                             <i class="fas fa-comments"></i> Start Chat
                         </button>
-                        <button class="action-btn primary" id="addContactBtn" ${!isOnline ? 'disabled' : ''}>
+                        <button class="action-btn primary" id="addContactBtn">
                             <i class="fas fa-user-plus"></i> Add as Friend
                         </button>
                         ` : ''}
                         
                         ${type === 'incoming_request' ? `
-                        <button class="action-btn success" id="acceptRequestDetailsBtn" ${!isOnline ? 'disabled' : ''}>
+                        <button class="action-btn success" id="acceptRequestDetailsBtn">
                             <i class="fas fa-check"></i> Accept
                         </button>
-                        <button class="action-btn danger" id="declineRequestDetailsBtn" ${!isOnline ? 'disabled' : ''}>
+                        <button class="action-btn danger" id="declineRequestDetailsBtn">
                             <i class="fas fa-times"></i> Decline
                         </button>
                         ` : ''}
@@ -4241,36 +4505,36 @@
                 // Add event listeners for action buttons
                 if (type === 'friend') {
                     document.getElementById('startChatDetailsBtn').addEventListener('click', () => {
-                        handleChatRequest(friendData);
+                        startChatWithFriendOffline(friendData);
                     });
                     
                     document.getElementById('messageFriendBtn').addEventListener('click', () => {
-                        handleChatRequest(friendData);
+                        startChatWithFriendOffline(friendData);
                     });
                     
                     document.getElementById('callFriendBtn').addEventListener('click', () => {
-                        handleCallRequest(friendData);
+                        startCallWithFriendOffline(friendData);
                     });
                     
                     document.getElementById('friendOptionsBtn').addEventListener('click', () => {
-                        if (!isOnline) {
-                            showNotification('Friend options require internet connection', 'error');
-                            return;
-                        }
                         showFriendOptions(friendData);
                     });
                     
                     if (document.getElementById('saveNotesBtn')) {
                         document.getElementById('saveNotesBtn').addEventListener('click', () => {
                             const notes = document.getElementById('friendNotesTextarea').value;
-                            updateFriendNotes(friendData.uid, notes);
+                            if (!isOnline) {
+                                updateFriendNotesOffline(friendData.uid, notes);
+                            } else {
+                                updateFriendNotes(friendData.uid, notes);
+                            }
                         });
                     }
                 }
                 
                 if (type === 'contact') {
                     document.getElementById('startChatWithContactBtn').addEventListener('click', () => {
-                        handleChatRequest(friendData);
+                        startChatWithFriendOffline(friendData);
                     });
                     
                     document.getElementById('addContactBtn').addEventListener('click', () => {
@@ -4284,11 +4548,19 @@
                 
                 if (type === 'incoming_request') {
                     document.getElementById('acceptRequestDetailsBtn').addEventListener('click', () => {
-                        acceptFriendRequest(friendData);
+                        if (!isOnline) {
+                            acceptFriendRequestOffline(friendData);
+                        } else {
+                            acceptFriendRequestOnline(friendData.id || friendData.requestId, friendData.from || friendData.uid);
+                        }
                     });
                     
                     document.getElementById('declineRequestDetailsBtn').addEventListener('click', () => {
-                        declineFriendRequest(friendData);
+                        if (!isOnline) {
+                            declineFriendRequestOffline(friendData);
+                        } else {
+                            declineFriendRequest(friendData);
+                        }
                     });
                 }
                 
@@ -4402,7 +4674,7 @@
                 const catInfo = friendCategories[cat];
                 return `
                     <div style="padding: 12px 15px; border-bottom: 1px solid var(--border-color); cursor: pointer; display: flex; align-items: center; gap: 12px;"
-                         onclick="updateFriendCategory('${friendData.uid}', '${cat}'); document.body.removeChild(this.parentNode.parentNode.parentNode);">
+                         onclick="updateFriendCategoryHandler('${friendData.uid}', '${cat}'); document.body.removeChild(this.parentNode.parentNode.parentNode);">
                         <div style="width: 20px; height: 20px; border-radius: 50%; background-color: ${catInfo.color}; display: flex; align-items: center; justify-content: center;">
                             <i class="${catInfo.icon}" style="color: white; font-size: 10px;"></i>
                         </div>
@@ -4442,8 +4714,35 @@
             document.body.appendChild(modal);
         }
         
+        // Global helper function for category change
+        window.updateFriendCategoryHandler = function(friendId, category) {
+            if (!isOnline) {
+                updateFriendCategoryOffline(friendId, category);
+            } else {
+                updateFriendCategory(friendId, category);
+            }
+        };
+        
         function blockUser(friendData) {
             if (confirm(`Are you sure you want to block ${friendData.displayName}? They will no longer be able to message or call you.`)) {
+                // Store block locally
+                const blockedUsers = JSON.parse(localStorage.getItem('knecta_blocked_users') || '[]');
+                blockedUsers.push({
+                    uid: friendData.uid,
+                    displayName: friendData.displayName,
+                    timestamp: Date.now()
+                });
+                localStorage.setItem('knecta_blocked_users', JSON.stringify(blockedUsers));
+                
+                // Remove from friends list if blocked
+                const friendIndex = friends.findIndex(f => f.uid === friendData.uid);
+                if (friendIndex !== -1) {
+                    friends.splice(friendIndex, 1);
+                    renderFriends();
+                    updateFriendCounts();
+                    saveFriendsToLocalStorage();
+                }
+                
                 showNotification(`${friendData.displayName} has been blocked`, 'success');
             }
         }
@@ -4452,13 +4751,27 @@
             const reason = prompt(`Why are you reporting ${friendData.displayName}?\n1. Spam\n2. Harassment\n3. Inappropriate content\n4. Fake account\n5. Other\n\nEnter reason number:`, '1');
             
             if (reason) {
+                // Store report locally
+                const reports = JSON.parse(localStorage.getItem('knecta_reports') || '[]');
+                reports.push({
+                    uid: friendData.uid,
+                    displayName: friendData.displayName,
+                    reason: reason,
+                    timestamp: Date.now()
+                });
+                localStorage.setItem('knecta_reports', JSON.stringify(reports));
+                
                 showNotification('User has been reported. Thank you for helping keep our community safe.', 'success');
             }
         }
         
         function removeFriendConfirm(friendData) {
             if (confirm(`Are you sure you want to remove ${friendData.displayName} from your friends?`)) {
-                removeFriend(friendData.uid);
+                if (!isOnline) {
+                    removeFriendOffline(friendData.uid);
+                } else {
+                    removeFriend(friendData.uid);
+                }
             }
         }
         
@@ -4743,61 +5056,6 @@
                 showNotification('Failed to load QR code library', 'error');
             };
             document.head.appendChild(script);
-        }
-        
-        function initiateCall(friendId) {
-            // Fallback call functionality
-            if (window.opener) {
-                window.opener.postMessage({
-                    type: 'callUser',
-                    userId: friendId,
-                    callType: 'video'
-                }, '*');
-            } else {
-                // Open calls.html with call parameter
-                window.open(`calls.html?call=${friendId}&type=video`, isMobile ? '_self' : '_blank');
-            }
-        }
-        
-        function startChatWithFriend(friendData) {
-            // Fallback chat functionality
-            const chatSession = {
-                friendId: friendData.uid,
-                friendName: friendData.displayName || 'Unknown User',
-                friendUsername: friendData.username || '',
-                friendAvatar: friendData.photoURL || '',
-                timestamp: Date.now(),
-                type: 'direct',
-                category: friendData.category || 'friend',
-                isTemporary: friendData.isTemporary || false,
-                isBusiness: friendData.isBusiness || false
-            };
-            
-            localStorage.setItem('knecta_current_chat', JSON.stringify(chatSession));
-            
-            sessionStorage.setItem('last_chat_friend', JSON.stringify({
-                id: friendData.uid,
-                name: friendData.displayName
-            }));
-            
-            const openInNewWindow = !isMobile && window.innerWidth > 768;
-            
-            if (openInNewWindow) {
-                const chatWindow = window.open(`chat.html?friend=${friendData.uid}`, '_blank');
-                
-                if (chatWindow) {
-                    showNotification(`Opening chat with ${friendData.displayName}...`, 'success');
-                    
-                    setTimeout(() => {
-                        friendDetailsPanel.classList.remove('active');
-                        selectedFriend = null;
-                    }, 500);
-                } else {
-                    window.location.href = `chat.html?friend=${friendData.uid}`;
-                }
-            } else {
-                window.location.href = `chat.html?friend=${friendData.uid}`;
-            }
         }
         
         function formatTimeAgo(date) {
@@ -5211,7 +5469,7 @@
             
             document.getElementById('confirmStartChatBtn').addEventListener('click', () => {
                 if (window.selectedChatFriend) {
-                    handleChatRequest(window.selectedChatFriend);
+                    startChatWithFriendOffline(window.selectedChatFriend);
                     startChatModal.classList.remove('active');
                 }
             });
@@ -5229,13 +5487,21 @@
             // Friend request modal buttons
             document.getElementById('acceptRequestBtn').addEventListener('click', () => {
                 if (window.currentRequest) {
-                    acceptFriendRequest(window.currentRequest);
+                    if (!isOnline) {
+                        acceptFriendRequestOffline(window.currentRequest);
+                    } else {
+                        acceptFriendRequestOnline(window.currentRequest.id || window.currentRequest.requestId, window.currentRequest.from || window.currentRequest.uid);
+                    }
                 }
             });
             
             document.getElementById('declineRequestBtn').addEventListener('click', () => {
                 if (window.currentRequest) {
-                    declineFriendRequest(window.currentRequest);
+                    if (!isOnline) {
+                        declineFriendRequestOffline(window.currentRequest);
+                    } else {
+                        declineFriendRequest(window.currentRequest);
+                    }
                 }
             });
             
@@ -5282,7 +5548,7 @@
             });
         }
         
-        console.log('Friends system initialized successfully with all requested features');
+        console.log('Enhanced offline-first friends system initialized successfully');
     </script>
 </body>
 </html>

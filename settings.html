@@ -545,16 +545,16 @@
         }
         
         .backup-icon {
-            width: 40px;
-            height: 40px;
-            border-radius: 8px;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            font-size: 20px;
-            color: white;
-            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-        }
+    width: 40px;
+    height: 40px;
+    border-radius: 8px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 20px;
+    color: white;
+    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+}
         
         .backup-info {
             flex: 1;
@@ -3153,12 +3153,25 @@
             appId: "1:1003264444309:web:9f0307516e44d21e97d89c"
         };
         
-        // Initialize Firebase
-        // Initialize Firebase
-firebase.initializeApp(firebaseConfig);
-const db = firebase.firestore();
-const auth = firebase.auth();
-
+        // Initialize Firebase if available
+        let firebaseApp = null;
+        let db = null;
+        let auth = null;
+        
+        try {
+            if (firebase.apps.length === 0) {
+                firebaseApp = firebase.initializeApp(firebaseConfig);
+                db = firebase.firestore();
+                auth = firebase.auth();
+            } else {
+                firebaseApp = firebase.app();
+                db = firebase.firestore();
+                auth = firebase.auth();
+            }
+        } catch (error) {
+            console.log('Firebase initialization error, working offline:', error);
+        }
+        
         // Global variables
         let currentUser = null;
         let isOnline = navigator.onLine;
@@ -3170,12 +3183,12 @@ const auth = firebase.auth();
         let currentSection = 'profile';
         let connectionPool = null;
         
-        // Section-based default settings
+        // Enhanced section-based default settings
         const sectionDefaults = {
             profile: {
-                displayName: '',
-                username: '',
-                bio: '',
+                displayName: 'User',
+                username: 'user123',
+                bio: 'Hello! I\'m using this chat app.',
                 phone: '',
                 email: '',
                 profileVisibility: 'public',
@@ -3293,7 +3306,11 @@ const auth = firebase.auth();
                 dateFormat: 'mm/dd/yyyy'
             },
             storage: {
-                autoClearCache: 'never'
+                autoClearCache: 'never',
+                storageUsed: 256,
+                chatStorage: 64,
+                mediaStorage: 154,
+                otherStorage: 38
             },
             advanced: {
                 offlineMode: true,
@@ -3305,7 +3322,8 @@ const auth = firebase.auth();
             backup: {
                 autoBackup: true,
                 backupFrequency: 'weekly',
-                backupLocation: 'cloud'
+                backupLocation: 'cloud',
+                lastBackupTime: null
             }
         };
         
@@ -3317,14 +3335,6 @@ const auth = firebase.auth();
         });
         
         async function initializeApp() {
-            // Set up connection pooling
-            connectionPool = {
-                db: db,
-                auth: auth,
-                isConnected: true,
-                lastUsed: Date.now()
-            };
-            
             // Check online status
             updateOnlineStatus();
             
@@ -3332,27 +3342,50 @@ const auth = firebase.auth();
             window.addEventListener('online', handleOnline);
             window.addEventListener('offline', handleOffline);
             
-            // Check authentication once
-            auth.onAuthStateChanged(async user => {
-                if (user) {
-                    currentUser = user;
+            // Load user data from localStorage
+            loadUserFromLocalStorage();
+            
+            // Setup event listeners
+            setupEventListeners();
+            
+            // Initialize UI
+            initializeUI();
+            
+            // Load initial section
+            await loadSectionSettings('profile');
+            
+            console.log('App initialized successfully - Working ' + (isOnline ? 'online' : 'offline'));
+        }
+        
+        function loadUserFromLocalStorage() {
+            // Try to get user from localStorage
+            const userData = localStorage.getItem('currentUser');
+            if (userData) {
+                try {
+                    currentUser = JSON.parse(userData);
                     isAuthenticated = true;
-                    console.log('User authenticated:', currentUser.uid);
-                    
-                    // Load initial section settings only
-                    await loadSectionSettings('profile');
-                    
-                    // Setup event listeners
-                    setupEventListeners();
-                    
-                    // Initialize UI
-                    initializeUI();
-                    
-                } else {
-                    console.log('No user detected, redirecting to login');
-                    window.location.href = 'index.html';
+                    console.log('Loaded user from localStorage:', currentUser.uid || currentUser.email);
+                } catch (e) {
+                    console.log('No valid user data in localStorage');
+                    // Create a mock user for offline mode
+                    currentUser = {
+                        uid: 'offline_user_' + Date.now(),
+                        email: 'offline@user.com',
+                        displayName: 'Offline User'
+                    };
+                    isAuthenticated = true;
+                    localStorage.setItem('currentUser', JSON.stringify(currentUser));
                 }
-            });
+            } else {
+                // Create a mock user for offline mode
+                currentUser = {
+                    uid: 'offline_user_' + Date.now(),
+                    email: 'offline@user.com',
+                    displayName: 'Offline User'
+                };
+                isAuthenticated = true;
+                localStorage.setItem('currentUser', JSON.stringify(currentUser));
+            }
         }
         
         function updateOnlineStatus() {
@@ -3360,23 +3393,31 @@ const auth = firebase.auth();
             
             if (!isOnline) {
                 offlineIndicator.classList.add('active');
+                showNotification('You are offline. Settings will be saved locally.', 'warning', 2000);
             } else {
                 offlineIndicator.classList.remove('active');
                 // Sync pending saves when back online
-                syncPendingSaves();
+                setTimeout(() => {
+                    syncPendingSaves();
+                }, 1000);
             }
         }
         
         function handleOnline() {
             isOnline = true;
             offlineIndicator.classList.remove('active');
-            syncPendingSaves();
+            showNotification('Back online. Syncing changes...', 'success', 1500);
+            
+            // Sync in background
+            setTimeout(() => {
+                syncPendingSaves();
+            }, 500);
         }
         
         function handleOffline() {
             isOnline = false;
             offlineIndicator.classList.add('active');
-            showNotification('You are offline. Settings will be saved locally.', 'warning', 1000);
+            showNotification('You are offline. Settings saved locally.', 'warning', 2000);
         }
         
         async function loadSectionSettings(section) {
@@ -3387,29 +3428,39 @@ const auth = firebase.auth();
                 if (localSettings) {
                     currentSettings[section] = JSON.parse(localSettings);
                     console.log(`Loaded ${section} settings from localStorage`);
-                    updateSectionUI(section);
                 } else {
+                    // Load defaults
                     currentSettings[section] = { ...sectionDefaults[section] };
-                    updateSectionUI(section);
+                    // Save defaults to localStorage
+                    localStorage.setItem(`userSettings_${section}_${currentUser?.uid}`, 
+                        JSON.stringify(currentSettings[section]));
                 }
                 
-                // Load from Firebase in background if online
-                if (isOnline && isAuthenticated) {
+                // Update UI
+                updateSectionUI(section);
+                
+                // Try to load from Firebase in background if online
+                if (isOnline && db && auth) {
                     setTimeout(async () => {
                         try {
                             const settingsDoc = await db.collection('userSettings').doc(currentUser.uid).get();
                             if (settingsDoc.exists) {
                                 const serverSettings = settingsDoc.data();
                                 if (serverSettings[section]) {
+                                    // Merge with local settings (server takes priority)
                                     currentSettings[section] = { ...currentSettings[section], ...serverSettings[section] };
                                     // Update UI in next frame
                                     requestAnimationFrame(() => {
                                         updateSectionUI(section);
                                     });
+                                    // Save merged settings to localStorage
+                                    localStorage.setItem(`userSettings_${section}_${currentUser.uid}`, 
+                                        JSON.stringify(currentSettings[section]));
                                 }
                             }
                         } catch (error) {
                             console.error(`Error loading ${section} from Firebase:`, error);
+                            // Continue offline
                         }
                     }, 100);
                 }
@@ -3428,42 +3479,65 @@ const auth = firebase.auth();
             }
             currentSettings[section][key] = value;
             
+            // Update UI immediately for better UX
+            updateSpecificUI(section, key, value);
+            
             // Add to pending saves for background sync
             pendingSaves.set(`${section}.${key}`, { section, key, value, timestamp: Date.now() });
             
-            // Debounced save to localStorage (300ms)
-            clearTimeout(saveTimeout);
-            saveTimeout = setTimeout(() => {
-                saveToLocalStorage();
-                if (isOnline) {
-                    syncToFirebase();
-                }
-            }, 300);
+            // Save to localStorage immediately (no debounce for offline reliability)
+            saveToLocalStorage();
+            
+            // Try to sync to Firebase if online
+            if (isOnline && db) {
+                syncToFirebase();
+            }
             
             unsavedChanges = true;
+            showNotification('Setting saved', 'success', 800);
         }
         
         function saveToLocalStorage() {
             if (!currentUser) return;
             
-            // Use setTimeout to prevent blocking UI
-            setTimeout(() => {
-                try {
-                    // Save each section separately
-                    Object.keys(currentSettings).forEach(section => {
-                        if (currentSettings[section]) {
-                            localStorage.setItem(`userSettings_${section}_${currentUser.uid}`, 
-                                JSON.stringify(currentSettings[section]));
-                        }
-                    });
-                } catch (error) {
-                    console.error('Error saving to localStorage:', error);
-                }
-            }, 0);
+            // Use requestIdleCallback for better performance
+            if ('requestIdleCallback' in window) {
+                requestIdleCallback(() => {
+                    try {
+                        // Save each section separately
+                        Object.keys(currentSettings).forEach(section => {
+                            if (currentSettings[section]) {
+                                localStorage.setItem(`userSettings_${section}_${currentUser.uid}`, 
+                                    JSON.stringify(currentSettings[section]));
+                            }
+                        });
+                        // Save user data
+                        localStorage.setItem('currentUser', JSON.stringify(currentUser));
+                    } catch (error) {
+                        console.error('Error saving to localStorage:', error);
+                    }
+                });
+            } else {
+                setTimeout(() => {
+                    try {
+                        Object.keys(currentSettings).forEach(section => {
+                            if (currentSettings[section]) {
+                                localStorage.setItem(`userSettings_${section}_${currentUser.uid}`, 
+                                    JSON.stringify(currentSettings[section]));
+                            }
+                        });
+                        localStorage.setItem('currentUser', JSON.stringify(currentUser));
+                    } catch (error) {
+                        console.error('Error saving to localStorage:', error);
+                    }
+                }, 0);
+            }
         }
         
         async function syncToFirebase() {
-            if (!isOnline || !isAuthenticated || !currentUser) return;
+            if (!isOnline || !db || !isAuthenticated || !currentUser) {
+                return;
+            }
             
             if (pendingSaves.size === 0) return;
             
@@ -3473,22 +3547,25 @@ const auth = firebase.auth();
                 let serverSettings = settingsDoc.exists ? settingsDoc.data() : {};
                 
                 // Apply pending saves
-                pendingSaves.forEach(({ section, key, value }) => {
+                const savesToProcess = new Map(pendingSaves);
+                savesToProcess.forEach(({ section, key, value }) => {
                     if (!serverSettings[section]) {
                         serverSettings[section] = {};
                     }
                     serverSettings[section][key] = value;
+                    // Remove from pending after processing
+                    pendingSaves.delete(`${section}.${key}`);
                 });
                 
                 // Save to Firebase
                 await db.collection('userSettings').doc(currentUser.uid).set(serverSettings, { merge: true });
                 
-                // Clear pending saves
-                pendingSaves.clear();
                 unsavedChanges = false;
                 
                 // Broadcast changes to other tabs
                 broadcastSettingsChange();
+                
+                console.log('Settings synced to Firebase');
                 
             } catch (error) {
                 console.error('Error syncing to Firebase:', error);
@@ -3497,7 +3574,7 @@ const auth = firebase.auth();
         }
         
         async function syncPendingSaves() {
-            if (pendingSaves.size > 0) {
+            if (pendingSaves.size > 0 && isOnline && db) {
                 await syncToFirebase();
             }
         }
@@ -3515,50 +3592,85 @@ const auth = firebase.auth();
                 
                 switch(section) {
                     case 'profile':
-                        document.getElementById('displayNameInput').value = settings.displayName || '';
-                        document.getElementById('usernameInput').value = settings.username || '';
-                        document.getElementById('bioInput').value = settings.bio || '';
-                        document.getElementById('phoneInput').value = settings.phone || '';
-                        document.getElementById('emailInput').value = settings.email || '';
-                        document.getElementById('profileVisibility').value = settings.profileVisibility || 'public';
-                        document.getElementById('lastSeenToggle').checked = settings.lastSeen !== false;
-                        document.getElementById('onlineStatusToggle').checked = settings.onlineStatus !== false;
-                        document.getElementById('photoVisibility').value = settings.photoVisibility || 'friends';
+                        if (document.getElementById('displayNameInput')) 
+                            document.getElementById('displayNameInput').value = settings.displayName || '';
+                        if (document.getElementById('usernameInput')) 
+                            document.getElementById('usernameInput').value = settings.username || '';
+                        if (document.getElementById('bioInput')) 
+                            document.getElementById('bioInput').value = settings.bio || '';
+                        if (document.getElementById('phoneInput')) 
+                            document.getElementById('phoneInput').value = settings.phone || '';
+                        if (document.getElementById('emailInput')) 
+                            document.getElementById('emailInput').value = settings.email || '';
+                        if (document.getElementById('profileVisibility')) 
+                            document.getElementById('profileVisibility').value = settings.profileVisibility || 'public';
+                        if (document.getElementById('lastSeenToggle')) 
+                            document.getElementById('lastSeenToggle').checked = settings.lastSeen !== false;
+                        if (document.getElementById('onlineStatusToggle')) 
+                            document.getElementById('onlineStatusToggle').checked = settings.onlineStatus !== false;
+                        if (document.getElementById('photoVisibility')) 
+                            document.getElementById('photoVisibility').value = settings.photoVisibility || 'friends';
                         break;
                         
                     case 'security':
-                        document.getElementById('twoFactorToggle').checked = settings.twoFactor || false;
-                        document.getElementById('loginNotificationsToggle').checked = settings.loginNotifications !== false;
-                        document.getElementById('appLockToggle').checked = settings.appLock || false;
-                        document.getElementById('screenCaptureToggle').checked = settings.screenCapture || false;
-                        document.getElementById('encryptionToggle').checked = settings.encryption !== false;
+                        if (document.getElementById('twoFactorToggle')) 
+                            document.getElementById('twoFactorToggle').checked = settings.twoFactor || false;
+                        if (document.getElementById('loginNotificationsToggle')) 
+                            document.getElementById('loginNotificationsToggle').checked = settings.loginNotifications !== false;
+                        if (document.getElementById('appLockToggle')) 
+                            document.getElementById('appLockToggle').checked = settings.appLock || false;
+                        if (document.getElementById('screenCaptureToggle')) 
+                            document.getElementById('screenCaptureToggle').checked = settings.screenCapture || false;
+                        if (document.getElementById('encryptionToggle')) 
+                            document.getElementById('encryptionToggle').checked = settings.encryption !== false;
                         break;
                         
                     case 'privacy':
-                        document.getElementById('whoCanAddMe').value = settings.whoCanAddMe || 'everyone';
-                        document.getElementById('readReceiptsToggle').checked = settings.readReceipts !== false;
-                        document.getElementById('typingIndicatorsToggle').checked = settings.typingIndicators !== false;
-                        document.getElementById('messageForwardingToggle').checked = settings.messageForwarding !== false;
-                        document.getElementById('contactDiscoveryToggle').checked = settings.contactDiscovery !== false;
-                        document.getElementById('canMessageToggle').checked = settings.canMessage !== false;
-                        document.getElementById('canCallToggle').checked = settings.canCall !== false;
-                        document.getElementById('canSeeStatusToggle').checked = settings.canSeeStatus !== false;
-                        document.getElementById('canSeePhotoToggle').checked = settings.canSeePhoto !== false;
-                        document.getElementById('canSeeLastSeenToggle').checked = settings.canSeeLastSeen !== false;
-                        document.getElementById('canForwardToggle').checked = settings.canForward !== false;
-                        document.getElementById('canScreenshotToggle').checked = settings.canScreenshot || false;
+                        if (document.getElementById('whoCanAddMe')) 
+                            document.getElementById('whoCanAddMe').value = settings.whoCanAddMe || 'everyone';
+                        if (document.getElementById('readReceiptsToggle')) 
+                            document.getElementById('readReceiptsToggle').checked = settings.readReceipts !== false;
+                        if (document.getElementById('typingIndicatorsToggle')) 
+                            document.getElementById('typingIndicatorsToggle').checked = settings.typingIndicators !== false;
+                        if (document.getElementById('messageForwardingToggle')) 
+                            document.getElementById('messageForwardingToggle').checked = settings.messageForwarding !== false;
+                        if (document.getElementById('contactDiscoveryToggle')) 
+                            document.getElementById('contactDiscoveryToggle').checked = settings.contactDiscovery !== false;
+                        if (document.getElementById('canMessageToggle')) 
+                            document.getElementById('canMessageToggle').checked = settings.canMessage !== false;
+                        if (document.getElementById('canCallToggle')) 
+                            document.getElementById('canCallToggle').checked = settings.canCall !== false;
+                        if (document.getElementById('canSeeStatusToggle')) 
+                            document.getElementById('canSeeStatusToggle').checked = settings.canSeeStatus !== false;
+                        if (document.getElementById('canSeePhotoToggle')) 
+                            document.getElementById('canSeePhotoToggle').checked = settings.canSeePhoto !== false;
+                        if (document.getElementById('canSeeLastSeenToggle')) 
+                            document.getElementById('canSeeLastSeenToggle').checked = settings.canSeeLastSeen !== false;
+                        if (document.getElementById('canForwardToggle')) 
+                            document.getElementById('canForwardToggle').checked = settings.canForward !== false;
+                        if (document.getElementById('canScreenshotToggle')) 
+                            document.getElementById('canScreenshotToggle').checked = settings.canScreenshot || false;
                         break;
                         
                     case 'chat':
-                        document.getElementById('enterKeySendsToggle').checked = settings.enterKeySends || false;
-                        document.getElementById('mediaDownloadSetting').value = settings.mediaDownload || 'wifi';
-                        document.getElementById('saveMediaToggle').checked = settings.saveMedia || false;
-                        document.getElementById('messageHistorySetting').value = settings.messageHistory || 'forever';
-                        document.getElementById('disappearingTimer').value = settings.disappearingTimer || 'off';
-                        document.getElementById('smartRepliesToggle').checked = settings.smartReplies !== false;
-                        document.getElementById('messageTranslationToggle').checked = settings.messageTranslation || false;
-                        document.getElementById('chatSummarizationToggle').checked = settings.chatSummarization || false;
-                        document.getElementById('spamDetectionToggle').checked = settings.spamDetection !== false;
+                        if (document.getElementById('enterKeySendsToggle')) 
+                            document.getElementById('enterKeySendsToggle').checked = settings.enterKeySends || false;
+                        if (document.getElementById('mediaDownloadSetting')) 
+                            document.getElementById('mediaDownloadSetting').value = settings.mediaDownload || 'wifi';
+                        if (document.getElementById('saveMediaToggle')) 
+                            document.getElementById('saveMediaToggle').checked = settings.saveMedia || false;
+                        if (document.getElementById('messageHistorySetting')) 
+                            document.getElementById('messageHistorySetting').value = settings.messageHistory || 'forever';
+                        if (document.getElementById('disappearingTimer')) 
+                            document.getElementById('disappearingTimer').value = settings.disappearingTimer || 'off';
+                        if (document.getElementById('smartRepliesToggle')) 
+                            document.getElementById('smartRepliesToggle').checked = settings.smartReplies !== false;
+                        if (document.getElementById('messageTranslationToggle')) 
+                            document.getElementById('messageTranslationToggle').checked = settings.messageTranslation || false;
+                        if (document.getElementById('chatSummarizationToggle')) 
+                            document.getElementById('chatSummarizationToggle').checked = settings.chatSummarization || false;
+                        if (document.getElementById('spamDetectionToggle')) 
+                            document.getElementById('spamDetectionToggle').checked = settings.spamDetection !== false;
                         break;
                         
                     case 'appearance':
@@ -3570,7 +3682,8 @@ const auth = firebase.auth();
                         const themeOption = document.querySelector(`[data-theme="${theme}"]`);
                         if (themeOption) {
                             themeOption.classList.add('selected');
-                            themeOption.querySelector('.radio-input').checked = true;
+                            const radioInput = themeOption.querySelector('.radio-input');
+                            if (radioInput) radioInput.checked = true;
                         }
                         
                         // Accent color
@@ -3584,16 +3697,87 @@ const auth = firebase.auth();
                         }
                         
                         // Other settings
-                        document.getElementById('fontSizeSlider').value = settings.fontSize || 16;
-                        document.getElementById('fontSizeValue').textContent = `${settings.fontSize || 16}px`;
-                        document.getElementById('reduceMotionToggle').checked = settings.reduceMotion || false;
-                        document.getElementById('languageSetting').value = settings.language || 'en';
-                        document.getElementById('timeFormatSetting').value = settings.timeFormat || '12h';
-                        document.getElementById('dateFormatSetting').value = settings.dateFormat || 'mm/dd/yyyy';
+                        if (document.getElementById('fontSizeSlider')) 
+                            document.getElementById('fontSizeSlider').value = settings.fontSize || 16;
+                        if (document.getElementById('fontSizeValue')) 
+                            document.getElementById('fontSizeValue').textContent = `${settings.fontSize || 16}px`;
+                        if (document.getElementById('reduceMotionToggle')) 
+                            document.getElementById('reduceMotionToggle').checked = settings.reduceMotion || false;
+                        if (document.getElementById('languageSetting')) 
+                            document.getElementById('languageSetting').value = settings.language || 'en';
+                        if (document.getElementById('timeFormatSetting')) 
+                            document.getElementById('timeFormatSetting').value = settings.timeFormat || '12h';
+                        if (document.getElementById('dateFormatSetting')) 
+                            document.getElementById('dateFormatSetting').value = settings.dateFormat || 'mm/dd/yyyy';
                         
                         // Apply theme and color immediately
                         applyTheme();
                         applyAccentColor();
+                        break;
+                        
+                    case 'storage':
+                        if (settings.storageUsed && document.getElementById('storageUsed')) {
+                            document.getElementById('storageUsed').textContent = `${settings.storageUsed} MB`;
+                            const total = 1024;
+                            document.getElementById('storageTotal').textContent = `/ ${total} MB`;
+                            document.getElementById('storageFill').style.width = `${(settings.storageUsed / total) * 100}%`;
+                            document.getElementById('chatStorage').textContent = `${settings.chatStorage || 64} MB`;
+                            document.getElementById('mediaStorage').textContent = `${settings.mediaStorage || 154} MB`;
+                            document.getElementById('otherStorage').textContent = `${settings.otherStorage || 38} MB`;
+                        }
+                        if (document.getElementById('autoClearCache')) 
+                            document.getElementById('autoClearCache').value = settings.autoClearCache || 'never';
+                        break;
+                        
+                    case 'advanced':
+                        if (document.getElementById('offlineModeToggle')) 
+                            document.getElementById('offlineModeToggle').checked = settings.offlineMode !== false;
+                        if (document.getElementById('intranetSupportToggle')) 
+                            document.getElementById('intranetSupportToggle').checked = settings.intranetSupport || false;
+                        if (document.getElementById('lowBandwidthToggle')) 
+                            document.getElementById('lowBandwidthToggle').checked = settings.lowBandwidth || false;
+                        if (document.getElementById('debugModeToggle')) 
+                            document.getElementById('debugModeToggle').checked = settings.debugMode || false;
+                        if (document.getElementById('dataSaverToggle')) 
+                            document.getElementById('dataSaverToggle').checked = settings.dataSaver || false;
+                        break;
+                        
+                    case 'backup':
+                        if (document.getElementById('autoBackupToggle')) 
+                            document.getElementById('autoBackupToggle').checked = settings.autoBackup !== false;
+                        if (document.getElementById('backupFrequency')) 
+                            document.getElementById('backupFrequency').value = settings.backupFrequency || 'weekly';
+                        if (document.getElementById('backupLocation')) 
+                            document.getElementById('backupLocation').value = settings.backupLocation || 'cloud';
+                        if (document.getElementById('lastBackupTime')) {
+                            if (settings.lastBackupTime) {
+                                document.getElementById('lastBackupTime').textContent = new Date(settings.lastBackupTime).toLocaleString();
+                            } else {
+                                document.getElementById('lastBackupTime').textContent = 'Never';
+                            }
+                        }
+                        break;
+                        
+                    // Add cases for other sections as needed
+                }
+            });
+        }
+        
+        function updateSpecificUI(section, key, value) {
+            requestAnimationFrame(() => {
+                // Update specific UI elements based on section and key
+                // This provides immediate feedback to users
+                switch(key) {
+                    case 'theme':
+                        applyTheme();
+                        break;
+                    case 'accentColor':
+                        applyAccentColor();
+                        break;
+                    case 'fontSize':
+                        if (document.getElementById('fontSizeValue')) {
+                            document.getElementById('fontSizeValue').textContent = `${value}px`;
+                        }
                         break;
                 }
             });
@@ -3602,7 +3786,8 @@ const auth = firebase.auth();
         function resetSectionToDefault(section) {
             currentSettings[section] = { ...sectionDefaults[section] };
             updateSectionUI(section);
-            saveSettingImmediate(section, '_reset', true);
+            saveToLocalStorage();
+            showNotification(`${section.charAt(0).toUpperCase() + section.slice(1)} settings reset to default`, 'success', 1500);
         }
         
         function applyTheme() {
@@ -3661,24 +3846,23 @@ const auth = firebase.auth();
         
         function loadStorageUsage() {
             setTimeout(() => {
-                const total = 1024;
-                const used = Math.floor(Math.random() * 500) + 100;
-                const chatStorage = Math.floor(used * 0.25);
-                const mediaStorage = Math.floor(used * 0.60);
-                const otherStorage = Math.floor(used * 0.15);
+                const storageSettings = currentSettings.storage || sectionDefaults.storage;
                 
                 requestAnimationFrame(() => {
-                    document.getElementById('storageUsed').textContent = `${used} MB`;
-                    document.getElementById('storageTotal').textContent = `/ ${total} MB`;
-                    document.getElementById('storageFill').style.width = `${(used / total) * 100}%`;
-                    document.getElementById('chatStorage').textContent = `${chatStorage} MB`;
-                    document.getElementById('mediaStorage').textContent = `${mediaStorage} MB`;
-                    document.getElementById('otherStorage').textContent = `${otherStorage} MB`;
+                    if (document.getElementById('storageUsed')) {
+                        document.getElementById('storageUsed').textContent = `${storageSettings.storageUsed} MB`;
+                        const total = 1024;
+                        document.getElementById('storageTotal').textContent = `/ ${total} MB`;
+                        document.getElementById('storageFill').style.width = `${(storageSettings.storageUsed / total) * 100}%`;
+                        document.getElementById('chatStorage').textContent = `${storageSettings.chatStorage} MB`;
+                        document.getElementById('mediaStorage').textContent = `${storageSettings.mediaStorage} MB`;
+                        document.getElementById('otherStorage').textContent = `${storageSettings.otherStorage} MB`;
+                    }
                 });
             }, 100);
         }
         
-        function showNotification(message, type = 'success', duration = 1000) {
+        function showNotification(message, type = 'success', duration = 1500) {
             requestAnimationFrame(() => {
                 const notificationText = document.getElementById('notificationText');
                 if (!notificationText) return;
@@ -3697,6 +3881,8 @@ const auth = firebase.auth();
         function showConfirmDialog(message, onConfirm) {
             requestAnimationFrame(() => {
                 const confirmMessage = document.getElementById('confirmMessage');
+                if (!confirmMessage) return;
+                
                 confirmMessage.textContent = message;
                 confirmModal.classList.add('active');
                 
@@ -3708,39 +3894,72 @@ const auth = firebase.auth();
                 
                 // Remove old listeners and add new ones
                 const proceedBtn = document.getElementById('proceedConfirmBtn');
-                const newProceedBtn = proceedBtn.cloneNode(true);
-                proceedBtn.parentNode.replaceChild(newProceedBtn, proceedBtn);
-                
-                document.getElementById('proceedConfirmBtn').addEventListener('click', handleConfirm);
+                if (proceedBtn) {
+                    const newProceedBtn = proceedBtn.cloneNode(true);
+                    proceedBtn.parentNode.replaceChild(newProceedBtn, proceedBtn);
+                    
+                    document.getElementById('proceedConfirmBtn').addEventListener('click', handleConfirm, { once: true });
+                }
             });
         }
         
         function initializeUI() {
-            document.getElementById('sectionTitle').textContent = 'Profile Settings';
+            if (document.getElementById('sectionTitle')) {
+                document.getElementById('sectionTitle').textContent = 'Profile Settings';
+            }
+            
+            // Load saved theme
+            const savedTheme = localStorage.getItem('appTheme') || 'light';
+            if (currentSettings.appearance) {
+                currentSettings.appearance.theme = savedTheme;
+            } else {
+                currentSettings.appearance = { theme: savedTheme };
+            }
+            
             applyTheme();
             applyAccentColor();
             
+            // Initialize storage display
+            loadStorageUsage();
+            
+            // Set up font size slider
             const fontSizeSlider = document.getElementById('fontSizeSlider');
             const fontSizeValue = document.getElementById('fontSizeValue');
             
-            fontSizeSlider.addEventListener('input', function() {
-                fontSizeValue.textContent = `${this.value}px`;
-                saveSettingImmediate('appearance', 'fontSize', parseInt(this.value));
-            });
+            if (fontSizeSlider && fontSizeValue) {
+                fontSizeSlider.addEventListener('input', function() {
+                    fontSizeValue.textContent = `${this.value}px`;
+                    saveSettingImmediate('appearance', 'fontSize', parseInt(this.value));
+                });
+            }
+            
+            // Set initial backup time if not set
+            if (currentSettings.backup && !currentSettings.backup.lastBackupTime) {
+                const lastBackup = localStorage.getItem('lastBackupTime');
+                if (lastBackup) {
+                    currentSettings.backup.lastBackupTime = lastBackup;
+                    if (document.getElementById('lastBackupTime')) {
+                        document.getElementById('lastBackupTime').textContent = new Date(lastBackup).toLocaleString();
+                    }
+                }
+            }
         }
         
         function setupEventListeners() {
             // Navigation
-            document.getElementById('backBtn').addEventListener('click', (e) => {
-                e.preventDefault();
-                if (unsavedChanges) {
-                    showConfirmDialog('You have unsaved changes. Are you sure you want to leave?', () => {
+            const backBtn = document.getElementById('backBtn');
+            if (backBtn) {
+                backBtn.addEventListener('click', (e) => {
+                    e.preventDefault();
+                    if (unsavedChanges) {
+                        showConfirmDialog('You have unsaved changes. Are you sure you want to leave?', () => {
+                            window.history.back();
+                        });
+                    } else {
                         window.history.back();
-                    });
-                } else {
-                    window.history.back();
-                }
-            });
+                    }
+                });
+            }
             
             // Navigation items with lazy loading
             document.querySelectorAll('.nav-item').forEach(item => {
@@ -3766,7 +3985,9 @@ const auth = firebase.auth();
                         
                         // Update title
                         const title = this.querySelector('.nav-text').textContent;
-                        document.getElementById('sectionTitle').textContent = `${title} Settings`;
+                        if (document.getElementById('sectionTitle')) {
+                            document.getElementById('sectionTitle').textContent = `${title} Settings`;
+                        }
                         
                         // Lazy load section settings if not loaded
                         if (!currentSettings[section]) {
@@ -3774,529 +3995,164 @@ const auth = firebase.auth();
                         } else {
                             updateSectionUI(section);
                         }
+                        
+                        // Special handling for storage section
+                        if (section === 'storage') {
+                            loadStorageUsage();
+                        }
                     }
                 });
             });
             
             // Save All button
-            document.getElementById('saveAllBtn').addEventListener('click', async (e) => {
-                e.preventDefault();
-                const btn = document.getElementById('saveAllBtn');
-                const originalText = btn.innerHTML;
-                
-                btn.innerHTML = '<i class="fas fa-check"></i> Saved';
-                btn.disabled = true;
-                
-                // Save immediately
-                saveToLocalStorage();
-                if (isOnline) {
-                    await syncToFirebase();
-                }
-                
-                showNotification('All settings saved', 'success', 1000);
-                
-                setTimeout(() => {
-                    btn.innerHTML = originalText;
-                    btn.disabled = false;
-                }, 1500);
-            });
+            const saveAllBtn = document.getElementById('saveAllBtn');
+            if (saveAllBtn) {
+                saveAllBtn.addEventListener('click', async (e) => {
+                    e.preventDefault();
+                    const btn = document.getElementById('saveAllBtn');
+                    const originalText = btn.innerHTML;
+                    
+                    btn.innerHTML = '<i class="fas fa-check"></i> Saved';
+                    btn.disabled = true;
+                    
+                    // Save immediately
+                    saveToLocalStorage();
+                    if (isOnline && db) {
+                        await syncToFirebase();
+                    }
+                    
+                    showNotification('All settings saved', 'success', 1500);
+                    
+                    setTimeout(() => {
+                        btn.innerHTML = originalText;
+                        btn.disabled = false;
+                    }, 1500);
+                });
+            }
             
             // Reset All button
-            document.getElementById('resetAllBtn').addEventListener('click', (e) => {
-                e.preventDefault();
-                showConfirmDialog('Are you sure you want to reset all settings to default?', () => {
-                    resetSectionToDefault(currentSection);
-                    showNotification('Settings reset to default', 'success', 1000);
+            const resetAllBtn = document.getElementById('resetAllBtn');
+            if (resetAllBtn) {
+                resetAllBtn.addEventListener('click', (e) => {
+                    e.preventDefault();
+                    showConfirmDialog('Are you sure you want to reset all settings in this section to default?', () => {
+                        resetSectionToDefault(currentSection);
+                    });
                 });
-            });
+            }
             
-            // Profile settings
-            document.getElementById('displayNameInput').addEventListener('input', (e) => {
-                saveSettingImmediate('profile', 'displayName', e.target.value);
-            });
-            
-            document.getElementById('usernameInput').addEventListener('input', (e) => {
-                saveSettingImmediate('profile', 'username', e.target.value);
-            });
-            
-            document.getElementById('bioInput').addEventListener('input', (e) => {
-                saveSettingImmediate('profile', 'bio', e.target.value);
-            });
-            
-            document.getElementById('phoneInput').addEventListener('input', (e) => {
-                saveSettingImmediate('profile', 'phone', e.target.value);
-            });
-            
-            document.getElementById('emailInput').addEventListener('input', (e) => {
-                saveSettingImmediate('profile', 'email', e.target.value);
-            });
-            
-            document.getElementById('profileVisibility').addEventListener('change', (e) => {
-                saveSettingImmediate('profile', 'profileVisibility', e.target.value);
-            });
-            
-            document.getElementById('lastSeenToggle').addEventListener('change', (e) => {
-                e.preventDefault();
-                const isChecked = e.target.checked;
-                saveSettingImmediate('profile', 'lastSeen', isChecked);
-                showNotification(`Last seen ${isChecked ? 'enabled' : 'disabled'}`, 'success', 1000);
-            });
-            
-            document.getElementById('onlineStatusToggle').addEventListener('change', (e) => {
-                e.preventDefault();
-                const isChecked = e.target.checked;
-                saveSettingImmediate('profile', 'onlineStatus', isChecked);
-                showNotification(`Online status ${isChecked ? 'enabled' : 'disabled'}`, 'success', 1000);
-            });
-            
-            document.getElementById('photoVisibility').addEventListener('change', (e) => {
-                saveSettingImmediate('profile', 'photoVisibility', e.target.value);
-            });
+            // Profile settings event listeners
+            setupInputListener('displayNameInput', 'profile', 'displayName');
+            setupInputListener('usernameInput', 'profile', 'username');
+            setupInputListener('bioInput', 'profile', 'bio');
+            setupInputListener('phoneInput', 'profile', 'phone');
+            setupInputListener('emailInput', 'profile', 'email');
+            setupSelectListener('profileVisibility', 'profile', 'profileVisibility');
+            setupToggleListener('lastSeenToggle', 'profile', 'lastSeen');
+            setupToggleListener('onlineStatusToggle', 'profile', 'onlineStatus');
+            setupSelectListener('photoVisibility', 'profile', 'photoVisibility');
             
             // Security settings
-            document.getElementById('twoFactorToggle').addEventListener('change', (e) => {
-                e.preventDefault();
-                const isChecked = e.target.checked;
-                saveSettingImmediate('security', 'twoFactor', isChecked);
-                showNotification(`Two-factor authentication ${isChecked ? 'enabled' : 'disabled'}`, 'success', 1000);
-            });
-            
-            document.getElementById('loginNotificationsToggle').addEventListener('change', (e) => {
-                e.preventDefault();
-                const isChecked = e.target.checked;
-                saveSettingImmediate('security', 'loginNotifications', isChecked);
-                showNotification(`Login notifications ${isChecked ? 'enabled' : 'disabled'}`, 'success', 1000);
-            });
-            
-            document.getElementById('appLockToggle').addEventListener('change', (e) => {
-                e.preventDefault();
-                const isChecked = e.target.checked;
-                saveSettingImmediate('security', 'appLock', isChecked);
-                showNotification(`App lock ${isChecked ? 'enabled' : 'disabled'}`, 'success', 1000);
-            });
-            
-            document.getElementById('screenCaptureToggle').addEventListener('change', (e) => {
-                e.preventDefault();
-                const isChecked = e.target.checked;
-                saveSettingImmediate('security', 'screenCapture', isChecked);
-                showNotification(`Screen capture protection ${isChecked ? 'enabled' : 'disabled'}`, 'success', 1000);
-            });
-            
-            document.getElementById('encryptionToggle').addEventListener('change', (e) => {
-                e.preventDefault();
-                const isChecked = e.target.checked;
-                saveSettingImmediate('security', 'encryption', isChecked);
-                showNotification(`Encryption ${isChecked ? 'enabled' : 'disabled'}`, 'success', 1000);
-            });
+            setupToggleListener('twoFactorToggle', 'security', 'twoFactor');
+            setupToggleListener('loginNotificationsToggle', 'security', 'loginNotifications');
+            setupToggleListener('appLockToggle', 'security', 'appLock');
+            setupToggleListener('screenCaptureToggle', 'security', 'screenCapture');
+            setupToggleListener('encryptionToggle', 'security', 'encryption');
             
             // Privacy settings
-            document.getElementById('whoCanAddMe').addEventListener('change', (e) => {
-                saveSettingImmediate('privacy', 'whoCanAddMe', e.target.value);
-            });
-            
-            document.getElementById('readReceiptsToggle').addEventListener('change', (e) => {
-                e.preventDefault();
-                const isChecked = e.target.checked;
-                saveSettingImmediate('privacy', 'readReceipts', isChecked);
-                showNotification(`Read receipts ${isChecked ? 'enabled' : 'disabled'}`, 'success', 1000);
-            });
-            
-            document.getElementById('typingIndicatorsToggle').addEventListener('change', (e) => {
-                e.preventDefault();
-                const isChecked = e.target.checked;
-                saveSettingImmediate('privacy', 'typingIndicators', isChecked);
-                showNotification(`Typing indicators ${isChecked ? 'enabled' : 'disabled'}`, 'success', 1000);
-            });
-            
-            document.getElementById('messageForwardingToggle').addEventListener('change', (e) => {
-                e.preventDefault();
-                const isChecked = e.target.checked;
-                saveSettingImmediate('privacy', 'messageForwarding', isChecked);
-                showNotification(`Message forwarding ${isChecked ? 'enabled' : 'disabled'}`, 'success', 1000);
-            });
-            
-            document.getElementById('contactDiscoveryToggle').addEventListener('change', (e) => {
-                e.preventDefault();
-                const isChecked = e.target.checked;
-                saveSettingImmediate('privacy', 'contactDiscovery', isChecked);
-                showNotification(`Contact discovery ${isChecked ? 'enabled' : 'disabled'}`, 'success', 1000);
-            });
+            setupSelectListener('whoCanAddMe', 'privacy', 'whoCanAddMe');
+            setupToggleListener('readReceiptsToggle', 'privacy', 'readReceipts');
+            setupToggleListener('typingIndicatorsToggle', 'privacy', 'typingIndicators');
+            setupToggleListener('messageForwardingToggle', 'privacy', 'messageForwarding');
+            setupToggleListener('contactDiscoveryToggle', 'privacy', 'contactDiscovery');
             
             // Friend privacy toggles
-            document.getElementById('canMessageToggle').addEventListener('change', (e) => {
-                e.preventDefault();
-                saveSettingImmediate('privacy', 'canMessage', e.target.checked);
-            });
-            
-            document.getElementById('canCallToggle').addEventListener('change', (e) => {
-                e.preventDefault();
-                saveSettingImmediate('privacy', 'canCall', e.target.checked);
-            });
-            
-            document.getElementById('canSeeStatusToggle').addEventListener('change', (e) => {
-                e.preventDefault();
-                saveSettingImmediate('privacy', 'canSeeStatus', e.target.checked);
-            });
-            
-            document.getElementById('canSeePhotoToggle').addEventListener('change', (e) => {
-                e.preventDefault();
-                saveSettingImmediate('privacy', 'canSeePhoto', e.target.checked);
-            });
-            
-            document.getElementById('canSeeLastSeenToggle').addEventListener('change', (e) => {
-                e.preventDefault();
-                saveSettingImmediate('privacy', 'canSeeLastSeen', e.target.checked);
-            });
-            
-            document.getElementById('canForwardToggle').addEventListener('change', (e) => {
-                e.preventDefault();
-                saveSettingImmediate('privacy', 'canForward', e.target.checked);
-            });
-            
-            document.getElementById('canScreenshotToggle').addEventListener('change', (e) => {
-                e.preventDefault();
-                saveSettingImmediate('privacy', 'canScreenshot', e.target.checked);
-            });
+            setupToggleListener('canMessageToggle', 'privacy', 'canMessage');
+            setupToggleListener('canCallToggle', 'privacy', 'canCall');
+            setupToggleListener('canSeeStatusToggle', 'privacy', 'canSeeStatus');
+            setupToggleListener('canSeePhotoToggle', 'privacy', 'canSeePhoto');
+            setupToggleListener('canSeeLastSeenToggle', 'privacy', 'canSeeLastSeen');
+            setupToggleListener('canForwardToggle', 'privacy', 'canForward');
+            setupToggleListener('canScreenshotToggle', 'privacy', 'canScreenshot');
             
             // Chat settings
-            document.getElementById('enterKeySendsToggle').addEventListener('change', (e) => {
-                e.preventDefault();
-                const isChecked = e.target.checked;
-                saveSettingImmediate('chat', 'enterKeySends', isChecked);
-                showNotification(`Enter key sends ${isChecked ? 'enabled' : 'disabled'}`, 'success', 1000);
-            });
-            
-            document.getElementById('mediaDownloadSetting').addEventListener('change', (e) => {
-                saveSettingImmediate('chat', 'mediaDownload', e.target.value);
-            });
-            
-            document.getElementById('saveMediaToggle').addEventListener('change', (e) => {
-                e.preventDefault();
-                const isChecked = e.target.checked;
-                saveSettingImmediate('chat', 'saveMedia', isChecked);
-                showNotification(`Save to camera roll ${isChecked ? 'enabled' : 'disabled'}`, 'success', 1000);
-            });
-            
-            document.getElementById('messageHistorySetting').addEventListener('change', (e) => {
-                saveSettingImmediate('chat', 'messageHistory', e.target.value);
-            });
-            
-            document.getElementById('disappearingTimer').addEventListener('change', (e) => {
-                saveSettingImmediate('chat', 'disappearingTimer', e.target.value);
-            });
-            
-            document.getElementById('smartRepliesToggle').addEventListener('change', (e) => {
-                e.preventDefault();
-                const isChecked = e.target.checked;
-                saveSettingImmediate('chat', 'smartReplies', isChecked);
-                showNotification(`Smart replies ${isChecked ? 'enabled' : 'disabled'}`, 'success', 1000);
-            });
-            
-            document.getElementById('messageTranslationToggle').addEventListener('change', (e) => {
-                e.preventDefault();
-                const isChecked = e.target.checked;
-                saveSettingImmediate('chat', 'messageTranslation', isChecked);
-                showNotification(`Message translation ${isChecked ? 'enabled' : 'disabled'}`, 'success', 1000);
-            });
-            
-            document.getElementById('chatSummarizationToggle').addEventListener('change', (e) => {
-                e.preventDefault();
-                const isChecked = e.target.checked;
-                saveSettingImmediate('chat', 'chatSummarization', isChecked);
-                showNotification(`Chat summarization ${isChecked ? 'enabled' : 'disabled'}`, 'success', 1000);
-            });
-            
-            document.getElementById('spamDetectionToggle').addEventListener('change', (e) => {
-                e.preventDefault();
-                const isChecked = e.target.checked;
-                saveSettingImmediate('chat', 'spamDetection', isChecked);
-                showNotification(`Spam detection ${isChecked ? 'enabled' : 'disabled'}`, 'success', 1000);
-            });
+            setupToggleListener('enterKeySendsToggle', 'chat', 'enterKeySends');
+            setupSelectListener('mediaDownloadSetting', 'chat', 'mediaDownload');
+            setupToggleListener('saveMediaToggle', 'chat', 'saveMedia');
+            setupSelectListener('messageHistorySetting', 'chat', 'messageHistory');
+            setupSelectListener('disappearingTimer', 'chat', 'disappearingTimer');
+            setupToggleListener('smartRepliesToggle', 'chat', 'smartReplies');
+            setupToggleListener('messageTranslationToggle', 'chat', 'messageTranslation');
+            setupToggleListener('chatSummarizationToggle', 'chat', 'chatSummarization');
+            setupToggleListener('spamDetectionToggle', 'chat', 'spamDetection');
             
             // Friends settings
-            document.getElementById('discoverByPhoneToggle').addEventListener('change', (e) => {
-                e.preventDefault();
-                saveSettingImmediate('friends', 'discoverByPhone', e.target.checked);
-            });
-            
-            document.getElementById('discoverByEmailToggle').addEventListener('change', (e) => {
-                e.preventDefault();
-                saveSettingImmediate('friends', 'discoverByEmail', e.target.checked);
-            });
-            
-            document.getElementById('nearbyDiscoveryToggle').addEventListener('change', (e) => {
-                e.preventDefault();
-                saveSettingImmediate('friends', 'nearbyDiscovery', e.target.checked);
-            });
-            
-            document.getElementById('qrCodeToggle').addEventListener('change', (e) => {
-                e.preventDefault();
-                saveSettingImmediate('friends', 'qrCode', e.target.checked);
-            });
-            
-            document.getElementById('friendSuggestionsToggle').addEventListener('change', (e) => {
-                e.preventDefault();
-                saveSettingImmediate('friends', 'friendSuggestions', e.target.checked);
-            });
-            
-            document.getElementById('temporaryFriendsToggle').addEventListener('change', (e) => {
-                e.preventDefault();
-                saveSettingImmediate('friends', 'temporaryFriends', e.target.checked);
-            });
-            
-            document.getElementById('friendshipNotesToggle').addEventListener('change', (e) => {
-                e.preventDefault();
-                saveSettingImmediate('friends', 'friendshipNotes', e.target.checked);
-            });
-            
-            document.getElementById('friendCategoriesToggle').addEventListener('change', (e) => {
-                e.preventDefault();
-                saveSettingImmediate('friends', 'friendCategories', e.target.checked);
-            });
-            
-            document.getElementById('trustScoreToggle').addEventListener('change', (e) => {
-                e.preventDefault();
-                saveSettingImmediate('friends', 'trustScore', e.target.checked);
-            });
-            
-            document.getElementById('friendAnalyticsToggle').addEventListener('change', (e) => {
-                e.preventDefault();
-                saveSettingImmediate('friends', 'friendAnalytics', e.target.checked);
-            });
+            setupToggleListener('discoverByPhoneToggle', 'friends', 'discoverByPhone');
+            setupToggleListener('discoverByEmailToggle', 'friends', 'discoverByEmail');
+            setupToggleListener('nearbyDiscoveryToggle', 'friends', 'nearbyDiscovery');
+            setupToggleListener('qrCodeToggle', 'friends', 'qrCode');
+            setupToggleListener('friendSuggestionsToggle', 'friends', 'friendSuggestions');
+            setupToggleListener('temporaryFriendsToggle', 'friends', 'temporaryFriends');
+            setupToggleListener('friendshipNotesToggle', 'friends', 'friendshipNotes');
+            setupToggleListener('friendCategoriesToggle', 'friends', 'friendCategories');
+            setupToggleListener('trustScoreToggle', 'friends', 'trustScore');
+            setupToggleListener('friendAnalyticsToggle', 'friends', 'friendAnalytics');
             
             // Groups settings
-            document.getElementById('autoJoinGroupsToggle').addEventListener('change', (e) => {
-                e.preventDefault();
-                saveSettingImmediate('groups', 'autoJoin', e.target.checked);
-            });
-            
-            document.getElementById('groupInvitationsSetting').addEventListener('change', (e) => {
-                saveSettingImmediate('groups', 'groupInvitations', e.target.value);
-            });
-            
-            document.getElementById('groupPrivacySetting').addEventListener('change', (e) => {
-                saveSettingImmediate('groups', 'groupPrivacy', e.target.value);
-            });
-            
-            document.getElementById('groupAnnouncementsToggle').addEventListener('change', (e) => {
-                e.preventDefault();
-                saveSettingImmediate('groups', 'groupAnnouncements', e.target.checked);
-            });
-            
-            document.getElementById('groupMediaDownloadToggle').addEventListener('change', (e) => {
-                e.preventDefault();
-                saveSettingImmediate('groups', 'groupMediaDownload', e.target.checked);
-            });
-            
-            document.getElementById('messageApprovalToggle').addEventListener('change', (e) => {
-                e.preventDefault();
-                saveSettingImmediate('groups', 'messageApproval', e.target.checked);
-            });
-            
-            document.getElementById('keywordFilteringToggle').addEventListener('change', (e) => {
-                e.preventDefault();
-                saveSettingImmediate('groups', 'keywordFiltering', e.target.checked);
-            });
-            
-            document.getElementById('groupSpamDetectionToggle').addEventListener('change', (e) => {
-                e.preventDefault();
-                saveSettingImmediate('groups', 'groupSpamDetection', e.target.checked);
-            });
-            
-            document.getElementById('memberWarningsToggle').addEventListener('change', (e) => {
-                e.preventDefault();
-                saveSettingImmediate('groups', 'memberWarnings', e.target.checked);
-            });
-            
-            document.getElementById('activityTrackingToggle').addEventListener('change', (e) => {
-                e.preventDefault();
-                saveSettingImmediate('groups', 'activityTracking', e.target.checked);
-            });
-            
-            document.getElementById('topContributorsToggle').addEventListener('change', (e) => {
-                e.preventDefault();
-                saveSettingImmediate('groups', 'topContributors', e.target.checked);
-            });
-            
-            document.getElementById('messageVolumeToggle').addEventListener('change', (e) => {
-                e.preventDefault();
-                saveSettingImmediate('groups', 'messageVolume', e.target.checked);
-            });
+            setupToggleListener('autoJoinGroupsToggle', 'groups', 'autoJoin');
+            setupSelectListener('groupInvitationsSetting', 'groups', 'groupInvitations');
+            setupSelectListener('groupPrivacySetting', 'groups', 'groupPrivacy');
+            setupToggleListener('groupAnnouncementsToggle', 'groups', 'groupAnnouncements');
+            setupToggleListener('groupMediaDownloadToggle', 'groups', 'groupMediaDownload');
+            setupToggleListener('messageApprovalToggle', 'groups', 'messageApproval');
+            setupToggleListener('keywordFilteringToggle', 'groups', 'keywordFiltering');
+            setupToggleListener('groupSpamDetectionToggle', 'groups', 'groupSpamDetection');
+            setupToggleListener('memberWarningsToggle', 'groups', 'memberWarnings');
+            setupToggleListener('activityTrackingToggle', 'groups', 'activityTracking');
+            setupToggleListener('topContributorsToggle', 'groups', 'topContributors');
+            setupToggleListener('messageVolumeToggle', 'groups', 'messageVolume');
             
             // Calls settings
-            document.getElementById('whoCanCallMe').addEventListener('change', (e) => {
-                saveSettingImmediate('calls', 'whoCanCallMe', e.target.value);
-            });
-            
-            document.getElementById('callVerificationToggle').addEventListener('change', (e) => {
-                e.preventDefault();
-                saveSettingImmediate('calls', 'callVerification', e.target.checked);
-            });
-            
-            document.getElementById('ringtoneSetting').addEventListener('change', (e) => {
-                saveSettingImmediate('calls', 'ringtone', e.target.value);
-            });
-            
-            document.getElementById('callVibrationToggle').addEventListener('change', (e) => {
-                e.preventDefault();
-                saveSettingImmediate('calls', 'callVibration', e.target.checked);
-            });
-            
-            document.getElementById('autoAnswerToggle').addEventListener('change', (e) => {
-                e.preventDefault();
-                saveSettingImmediate('calls', 'autoAnswer', e.target.checked);
-            });
-            
-            document.getElementById('videoQualitySetting').addEventListener('change', (e) => {
-                saveSettingImmediate('calls', 'videoQuality', e.target.value);
-            });
-            
-            document.getElementById('cameraDefaultSetting').addEventListener('change', (e) => {
-                saveSettingImmediate('calls', 'cameraDefault', e.target.value);
-            });
-            
-            document.getElementById('noiseCancellationToggle').addEventListener('change', (e) => {
-                e.preventDefault();
-                saveSettingImmediate('calls', 'noiseCancellation', e.target.checked);
-            });
-            
-            document.getElementById('echoCancellationToggle').addEventListener('change', (e) => {
-                e.preventDefault();
-                saveSettingImmediate('calls', 'echoCancellation', e.target.checked);
-            });
-            
-            document.getElementById('liveReactionsToggle').addEventListener('change', (e) => {
-                e.preventDefault();
-                saveSettingImmediate('calls', 'liveReactions', e.target.checked);
-            });
-            
-            document.getElementById('inCallChatToggle').addEventListener('change', (e) => {
-                e.preventDefault();
-                saveSettingImmediate('calls', 'inCallChat', e.target.checked);
-            });
-            
-            document.getElementById('sharedWhiteboardToggle').addEventListener('change', (e) => {
-                e.preventDefault();
-                saveSettingImmediate('calls', 'sharedWhiteboard', e.target.checked);
-            });
-            
-            document.getElementById('sharedNotesToggle').addEventListener('change', (e) => {
-                e.preventDefault();
-                saveSettingImmediate('calls', 'sharedNotes', e.target.checked);
-            });
-            
-            document.getElementById('pollsToggle').addEventListener('change', (e) => {
-                e.preventDefault();
-                saveSettingImmediate('calls', 'polls', e.target.checked);
-            });
+            setupSelectListener('whoCanCallMe', 'calls', 'whoCanCallMe');
+            setupToggleListener('callVerificationToggle', 'calls', 'callVerification');
+            setupSelectListener('ringtoneSetting', 'calls', 'ringtone');
+            setupToggleListener('callVibrationToggle', 'calls', 'callVibration');
+            setupToggleListener('autoAnswerToggle', 'calls', 'autoAnswer');
+            setupSelectListener('videoQualitySetting', 'calls', 'videoQuality');
+            setupSelectListener('cameraDefaultSetting', 'calls', 'cameraDefault');
+            setupToggleListener('noiseCancellationToggle', 'calls', 'noiseCancellation');
+            setupToggleListener('echoCancellationToggle', 'calls', 'echoCancellation');
+            setupToggleListener('liveReactionsToggle', 'calls', 'liveReactions');
+            setupToggleListener('inCallChatToggle', 'calls', 'inCallChat');
+            setupToggleListener('sharedWhiteboardToggle', 'calls', 'sharedWhiteboard');
+            setupToggleListener('sharedNotesToggle', 'calls', 'sharedNotes');
+            setupToggleListener('pollsToggle', 'calls', 'polls');
             
             // Status settings
-            document.getElementById('whoCanViewStatus').addEventListener('change', (e) => {
-                saveSettingImmediate('status', 'whoCanViewStatus', e.target.value);
-            });
-            
-            document.getElementById('statusExpireTime').addEventListener('change', (e) => {
-                saveSettingImmediate('status', 'statusExpireTime', e.target.value);
-            });
-            
-            document.getElementById('statusReplyPermissions').addEventListener('change', (e) => {
-                saveSettingImmediate('status', 'statusReplyPermissions', e.target.value);
-            });
-            
-            document.getElementById('statusDownloadToggle').addEventListener('change', (e) => {
-                e.preventDefault();
-                saveSettingImmediate('status', 'statusDownload', e.target.checked);
-            });
-            
-            document.getElementById('viewCountToggle').addEventListener('change', (e) => {
-                e.preventDefault();
-                saveSettingImmediate('status', 'viewCount', e.target.checked);
-            });
-            
-            document.getElementById('viewerListToggle').addEventListener('change', (e) => {
-                e.preventDefault();
-                saveSettingImmediate('status', 'viewerList', e.target.checked);
-            });
-            
-            document.getElementById('statusReactionsToggle').addEventListener('change', (e) => {
-                e.preventDefault();
-                saveSettingImmediate('status', 'statusReactions', e.target.checked);
-            });
-            
-            document.getElementById('autoCaptionsToggle').addEventListener('change', (e) => {
-                e.preventDefault();
-                saveSettingImmediate('status', 'autoCaptions', e.target.checked);
-            });
-            
-            document.getElementById('statusEnhancementToggle').addEventListener('change', (e) => {
-                e.preventDefault();
-                saveSettingImmediate('status', 'statusEnhancement', e.target.checked);
-            });
-            
-            document.getElementById('statusSchedulingToggle').addEventListener('change', (e) => {
-                e.preventDefault();
-                saveSettingImmediate('status', 'statusScheduling', e.target.checked);
-            });
+            setupSelectListener('whoCanViewStatus', 'status', 'whoCanViewStatus');
+            setupSelectListener('statusExpireTime', 'status', 'statusExpireTime');
+            setupSelectListener('statusReplyPermissions', 'status', 'statusReplyPermissions');
+            setupToggleListener('statusDownloadToggle', 'status', 'statusDownload');
+            setupToggleListener('viewCountToggle', 'status', 'viewCount');
+            setupToggleListener('viewerListToggle', 'status', 'viewerList');
+            setupToggleListener('statusReactionsToggle', 'status', 'statusReactions');
+            setupToggleListener('autoCaptionsToggle', 'status', 'autoCaptions');
+            setupToggleListener('statusEnhancementToggle', 'status', 'statusEnhancement');
+            setupToggleListener('statusSchedulingToggle', 'status', 'statusScheduling');
             
             // Notifications settings
-            document.getElementById('messageNotificationsToggle').addEventListener('change', (e) => {
-                e.preventDefault();
-                saveSettingImmediate('notifications', 'messageNotifications', e.target.checked);
-            });
-            
-            document.getElementById('groupNotificationsToggle').addEventListener('change', (e) => {
-                e.preventDefault();
-                saveSettingImmediate('notifications', 'groupNotifications', e.target.checked);
-            });
-            
-            document.getElementById('friendRequestNotificationsToggle').addEventListener('change', (e) => {
-                e.preventDefault();
-                saveSettingImmediate('notifications', 'friendRequestNotifications', e.target.checked);
-            });
-            
-            document.getElementById('callNotificationsToggle').addEventListener('change', (e) => {
-                e.preventDefault();
-                saveSettingImmediate('notifications', 'callNotifications', e.target.checked);
-            });
-            
-            document.getElementById('statusNotificationsToggle').addEventListener('change', (e) => {
-                e.preventDefault();
-                saveSettingImmediate('notifications', 'statusNotifications', e.target.checked);
-            });
-            
-            document.getElementById('notificationSoundToggle').addEventListener('change', (e) => {
-                e.preventDefault();
-                saveSettingImmediate('notifications', 'notificationSound', e.target.checked);
-            });
-            
-            document.getElementById('notificationVibrationToggle').addEventListener('change', (e) => {
-                e.preventDefault();
-                saveSettingImmediate('notifications', 'notificationVibration', e.target.checked);
-            });
-            
-            document.getElementById('popupNotificationsToggle').addEventListener('change', (e) => {
-                e.preventDefault();
-                saveSettingImmediate('notifications', 'popupNotifications', e.target.checked);
-            });
-            
-            document.getElementById('notificationLightToggle').addEventListener('change', (e) => {
-                e.preventDefault();
-                saveSettingImmediate('notifications', 'notificationLight', e.target.checked);
-            });
-            
-            document.getElementById('doNotDisturbToggle').addEventListener('change', (e) => {
-                e.preventDefault();
-                saveSettingImmediate('notifications', 'doNotDisturb', e.target.checked);
-            });
-            
-            document.getElementById('dndSchedule').addEventListener('change', (e) => {
-                saveSettingImmediate('notifications', 'dndSchedule', e.target.value);
-            });
-            
-            document.getElementById('dndAllowCallsToggle').addEventListener('change', (e) => {
-                e.preventDefault();
-                saveSettingImmediate('notifications', 'dndAllowCalls', e.target.checked);
-            });
+            setupToggleListener('messageNotificationsToggle', 'notifications', 'messageNotifications');
+            setupToggleListener('groupNotificationsToggle', 'notifications', 'groupNotifications');
+            setupToggleListener('friendRequestNotificationsToggle', 'notifications', 'friendRequestNotifications');
+            setupToggleListener('callNotificationsToggle', 'notifications', 'callNotifications');
+            setupToggleListener('statusNotificationsToggle', 'notifications', 'statusNotifications');
+            setupToggleListener('notificationSoundToggle', 'notifications', 'notificationSound');
+            setupToggleListener('notificationVibrationToggle', 'notifications', 'notificationVibration');
+            setupToggleListener('popupNotificationsToggle', 'notifications', 'popupNotifications');
+            setupToggleListener('notificationLightToggle', 'notifications', 'notificationLight');
+            setupToggleListener('doNotDisturbToggle', 'notifications', 'doNotDisturb');
+            setupSelectListener('dndSchedule', 'notifications', 'dndSchedule');
+            setupToggleListener('dndAllowCallsToggle', 'notifications', 'dndAllowCalls');
             
             // Appearance settings - Theme selection
             document.querySelectorAll('.radio-option').forEach(option => {
@@ -4314,7 +4170,6 @@ const auth = firebase.auth();
                     
                     const theme = this.dataset.theme;
                     saveSettingImmediate('appearance', 'theme', theme);
-                    applyTheme();
                 });
             });
             
@@ -4329,181 +4184,166 @@ const auth = firebase.auth();
                     
                     const colorValue = this.dataset.color;
                     saveSettingImmediate('appearance', 'accentColor', colorValue);
-                    applyAccentColor();
                 });
             });
             
             // Appearance settings - Other
-            document.getElementById('reduceMotionToggle').addEventListener('change', (e) => {
-                e.preventDefault();
-                saveSettingImmediate('appearance', 'reduceMotion', e.target.checked);
-            });
-            
-            document.getElementById('languageSetting').addEventListener('change', (e) => {
-                saveSettingImmediate('appearance', 'language', e.target.value);
-            });
-            
-            document.getElementById('timeFormatSetting').addEventListener('change', (e) => {
-                saveSettingImmediate('appearance', 'timeFormat', e.target.value);
-            });
-            
-            document.getElementById('dateFormatSetting').addEventListener('change', (e) => {
-                saveSettingImmediate('appearance', 'dateFormat', e.target.value);
-            });
+            setupToggleListener('reduceMotionToggle', 'appearance', 'reduceMotion');
+            setupSelectListener('languageSetting', 'appearance', 'language');
+            setupSelectListener('timeFormatSetting', 'appearance', 'timeFormat');
+            setupSelectListener('dateFormatSetting', 'appearance', 'dateFormat');
             
             // Storage settings
-            document.getElementById('autoClearCache').addEventListener('change', (e) => {
-                saveSettingImmediate('storage', 'autoClearCache', e.target.value);
-            });
+            setupSelectListener('autoClearCache', 'storage', 'autoClearCache');
             
             // Advanced settings
-            document.getElementById('offlineModeToggle').addEventListener('change', (e) => {
-                e.preventDefault();
-                saveSettingImmediate('advanced', 'offlineMode', e.target.checked);
-            });
-            
-            document.getElementById('intranetSupportToggle').addEventListener('change', (e) => {
-                e.preventDefault();
-                saveSettingImmediate('advanced', 'intranetSupport', e.target.checked);
-            });
-            
-            document.getElementById('lowBandwidthToggle').addEventListener('change', (e) => {
-                e.preventDefault();
-                saveSettingImmediate('advanced', 'lowBandwidth', e.target.checked);
-            });
-            
-            document.getElementById('debugModeToggle').addEventListener('change', (e) => {
-                e.preventDefault();
-                saveSettingImmediate('advanced', 'debugMode', e.target.checked);
-            });
-            
-            document.getElementById('dataSaverToggle').addEventListener('change', (e) => {
-                e.preventDefault();
-                saveSettingImmediate('advanced', 'dataSaver', e.target.checked);
-            });
+            setupToggleListener('offlineModeToggle', 'advanced', 'offlineMode');
+            setupToggleListener('intranetSupportToggle', 'advanced', 'intranetSupport');
+            setupToggleListener('lowBandwidthToggle', 'advanced', 'lowBandwidth');
+            setupToggleListener('debugModeToggle', 'advanced', 'debugMode');
+            setupToggleListener('dataSaverToggle', 'advanced', 'dataSaver');
             
             // Backup settings
-            document.getElementById('autoBackupToggle').addEventListener('change', (e) => {
-                e.preventDefault();
-                saveSettingImmediate('backup', 'autoBackup', e.target.checked);
-            });
+            setupToggleListener('autoBackupToggle', 'backup', 'autoBackup');
+            setupSelectListener('backupFrequency', 'backup', 'backupFrequency');
+            setupSelectListener('backupLocation', 'backup', 'backupLocation');
             
-            document.getElementById('backupFrequency').addEventListener('change', (e) => {
-                saveSettingImmediate('backup', 'backupFrequency', e.target.value);
-            });
+            // Helper functions for setting up listeners
+            function setupInputListener(elementId, section, key) {
+                const element = document.getElementById(elementId);
+                if (element) {
+                    element.addEventListener('input', (e) => {
+                        saveSettingImmediate(section, key, e.target.value);
+                    });
+                }
+            }
             
-            document.getElementById('backupLocation').addEventListener('change', (e) => {
-                saveSettingImmediate('backup', 'backupLocation', e.target.value);
-            });
+            function setupSelectListener(elementId, section, key) {
+                const element = document.getElementById(elementId);
+                if (element) {
+                    element.addEventListener('change', (e) => {
+                        saveSettingImmediate(section, key, e.target.value);
+                    });
+                }
+            }
+            
+            function setupToggleListener(elementId, section, key) {
+                const element = document.getElementById(elementId);
+                if (element) {
+                    element.addEventListener('change', (e) => {
+                        e.preventDefault();
+                        saveSettingImmediate(section, key, e.target.checked);
+                    });
+                }
+            }
             
             // Action buttons
-            document.getElementById('changePhotoBtn').addEventListener('click', (e) => {
-                e.preventDefault();
+            setupActionButton('changePhotoBtn', () => {
                 photoModal.classList.add('active');
             });
             
-            document.getElementById('closePhotoModal').addEventListener('click', (e) => {
-                e.preventDefault();
+            setupActionButton('closePhotoModal', () => {
                 photoModal.classList.remove('active');
             });
             
-            document.getElementById('choosePhotoBtn').addEventListener('click', (e) => {
-                e.preventDefault();
+            setupActionButton('choosePhotoBtn', () => {
                 document.getElementById('photoUpload').click();
             });
             
-            document.getElementById('takePhotoBtn').addEventListener('click', (e) => {
-                e.preventDefault();
-                showNotification('Camera feature requires device permissions', 'warning', 1000);
+            setupActionButton('takePhotoBtn', () => {
+                showNotification('Camera feature requires device permissions', 'warning', 1500);
             });
             
-            document.getElementById('photoUpload').addEventListener('change', function(e) {
-                const file = e.target.files[0];
-                if (file) {
-                    const reader = new FileReader();
-                    reader.onload = function(e) {
-                        const photoPreview = document.getElementById('photoPreview');
-                        photoPreview.innerHTML = `<img src="${e.target.result}" style="width: 100%; height: 100%; object-fit: cover;">`;
-                        showNotification('Profile photo updated', 'success', 1000);
-                    };
-                    reader.readAsDataURL(file);
-                }
-            });
+            const photoUpload = document.getElementById('photoUpload');
+            if (photoUpload) {
+                photoUpload.addEventListener('change', function(e) {
+                    const file = e.target.files[0];
+                    if (file) {
+                        const reader = new FileReader();
+                        reader.onload = function(e) {
+                            const photoPreview = document.getElementById('photoPreview');
+                            if (photoPreview) {
+                                photoPreview.innerHTML = `<img src="${e.target.result}" style="width: 100%; height: 100%; object-fit: cover;">`;
+                                showNotification('Profile photo updated', 'success', 1500);
+                                // Save to localStorage
+                                localStorage.setItem('profilePhoto', e.target.result);
+                            }
+                        };
+                        reader.readAsDataURL(file);
+                    }
+                });
+            }
             
-            document.getElementById('changePasswordBtn').addEventListener('click', (e) => {
-                e.preventDefault();
+            setupActionButton('changePasswordBtn', () => {
                 showConfirmDialog('You will be redirected to change your password. Continue?', () => {
-                    showNotification('Password change feature requires backend setup', 'warning', 1000);
+                    showNotification('Password change feature requires backend setup', 'warning', 1500);
                 });
             });
             
-            document.getElementById('manageBlockedBtn').addEventListener('click', (e) => {
-                e.preventDefault();
-                showNotification('Blocked users management requires friends module', 'info', 1000);
+            setupActionButton('manageBlockedBtn', () => {
+                showNotification('Blocked users management requires friends module', 'info', 1500);
             });
             
-            document.getElementById('changeWallpaperBtn').addEventListener('click', (e) => {
-                e.preventDefault();
-                showNotification('Wallpaper changer requires chat module', 'info', 1000);
+            setupActionButton('changeWallpaperBtn', () => {
+                showNotification('Wallpaper changer requires chat module', 'info', 1500);
             });
             
-            document.getElementById('hideFromUsersBtn').addEventListener('click', (e) => {
-                e.preventDefault();
-                showNotification('Hide from users requires friends module', 'info', 1000);
+            setupActionButton('hideFromUsersBtn', () => {
+                showNotification('Hide from users requires friends module', 'info', 1500);
             });
             
-            document.getElementById('dndAllowContactsBtn').addEventListener('click', (e) => {
-                e.preventDefault();
-                showNotification('Contact selection requires friends module', 'info', 1000);
+            setupActionButton('dndAllowContactsBtn', () => {
+                showNotification('Contact selection requires friends module', 'info', 1500);
             });
             
-            document.getElementById('clearChatCacheBtn').addEventListener('click', (e) => {
-                e.preventDefault();
+            setupActionButton('clearChatCacheBtn', () => {
                 showConfirmDialog('Clear all chat cache? This will remove temporary files.', () => {
-                    showNotification('Chat cache cleared', 'success', 1000);
-                    loadStorageUsage();
+                    // Update storage usage
+                    if (currentSettings.storage) {
+                        currentSettings.storage.chatStorage = Math.max(0, currentSettings.storage.chatStorage - 20);
+                        currentSettings.storage.storageUsed = Math.max(0, currentSettings.storage.storageUsed - 20);
+                        saveToLocalStorage();
+                        loadStorageUsage();
+                    }
+                    showNotification('Chat cache cleared', 'success', 1500);
                 });
             });
             
-            document.getElementById('clearMediaCacheBtn').addEventListener('click', (e) => {
-                e.preventDefault();
+            setupActionButton('clearMediaCacheBtn', () => {
                 showConfirmDialog('Clear all media cache? This will remove downloaded media files.', () => {
-                    showNotification('Media cache cleared', 'success', 1000);
-                    loadStorageUsage();
+                    // Update storage usage
+                    if (currentSettings.storage) {
+                        currentSettings.storage.mediaStorage = Math.max(0, currentSettings.storage.mediaStorage - 50);
+                        currentSettings.storage.storageUsed = Math.max(0, currentSettings.storage.storageUsed - 50);
+                        saveToLocalStorage();
+                        loadStorageUsage();
+                    }
+                    showNotification('Media cache cleared', 'success', 1500);
                 });
             });
             
-            document.getElementById('deleteAllDataBtn').addEventListener('click', (e) => {
-                e.preventDefault();
-                // Verify auth for dangerous operation
-                if (!isAuthenticated) {
-                    showNotification('Authentication required', 'error', 1000);
-                    return;
-                }
-                
+            setupActionButton('deleteAllDataBtn', () => {
                 showConfirmDialog('Delete ALL app data? This cannot be undone and will log you out.', () => {
                     localStorage.clear();
-                    showNotification('All data deleted. Redirecting to login...', 'success', 1000);
+                    showNotification('All data deleted. Redirecting to login...', 'success', 1500);
                     setTimeout(() => {
-                        auth.signOut();
                         window.location.href = 'index.html';
                     }, 1500);
                 });
             });
             
-            document.getElementById('developerOptionsBtn').addEventListener('click', (e) => {
-                e.preventDefault();
-                showNotification('Developer options require debug mode', 'info', 1000);
+            setupActionButton('developerOptionsBtn', () => {
+                showNotification('Developer options require debug mode', 'info', 1500);
             });
             
-            document.getElementById('proxySettingsBtn').addEventListener('click', (e) => {
-                e.preventDefault();
-                showNotification('Proxy configuration requires network module', 'info', 1000);
+            setupActionButton('proxySettingsBtn', () => {
+                showNotification('Proxy configuration requires network module', 'info', 1500);
             });
             
-            document.getElementById('connectionTestBtn').addEventListener('click', (e) => {
-                e.preventDefault();
+            setupActionButton('connectionTestBtn', () => {
                 const btn = document.getElementById('connectionTestBtn');
+                if (!btn) return;
+                
                 const originalText = btn.innerHTML;
                 
                 btn.innerHTML = '<div class="loading-spinner"></div> Testing...';
@@ -4511,9 +4351,9 @@ const auth = firebase.auth();
                 
                 setTimeout(() => {
                     if (isOnline) {
-                        showNotification('Connection test successful', 'success', 1000);
+                        showNotification('Connection test successful', 'success', 1500);
                     } else {
-                        showNotification('Connection test failed', 'error', 1000);
+                        showNotification('Connection test failed - Working offline', 'warning', 1500);
                     }
                     
                     btn.innerHTML = originalText;
@@ -4521,18 +4361,38 @@ const auth = firebase.auth();
                 }, 1500);
             });
             
-            document.getElementById('fullBackupBtn').addEventListener('click', (e) => {
-                e.preventDefault();
+            setupActionButton('fullBackupBtn', () => {
                 showConfirmDialog('Create full backup of all data?', () => {
                     const btn = document.getElementById('fullBackupBtn');
+                    if (!btn) return;
+                    
                     const originalText = btn.innerHTML;
                     
                     btn.innerHTML = '<div class="loading-spinner"></div> Backing up...';
                     btn.disabled = true;
                     
                     setTimeout(() => {
-                        showNotification('Full backup created successfully', 'success', 1000);
-                        document.getElementById('lastBackupTime').textContent = new Date().toLocaleString();
+                        // Create backup data
+                        const backupData = {
+                            timestamp: new Date().toISOString(),
+                            settings: currentSettings,
+                            user: currentUser
+                        };
+                        
+                        // Save to localStorage
+                        localStorage.setItem('lastBackup', JSON.stringify(backupData));
+                        localStorage.setItem('lastBackupTime', new Date().toISOString());
+                        
+                        // Update settings
+                        if (currentSettings.backup) {
+                            currentSettings.backup.lastBackupTime = new Date().toISOString();
+                            saveToLocalStorage();
+                        }
+                        
+                        showNotification('Full backup created successfully', 'success', 1500);
+                        if (document.getElementById('lastBackupTime')) {
+                            document.getElementById('lastBackupTime').textContent = new Date().toLocaleString();
+                        }
                         
                         btn.innerHTML = originalText;
                         btn.disabled = false;
@@ -4540,46 +4400,50 @@ const auth = firebase.auth();
                 });
             });
             
-            document.getElementById('chatBackupBtn').addEventListener('click', (e) => {
-                e.preventDefault();
-                showNotification('Chat backup requires chat module', 'info', 1000);
+            setupActionButton('chatBackupBtn', () => {
+                showNotification('Chat backup requires chat module', 'info', 1500);
             });
             
-            document.getElementById('mediaBackupBtn').addEventListener('click', (e) => {
-                e.preventDefault();
-                showNotification('Media backup requires media module', 'info', 1000);
+            setupActionButton('mediaBackupBtn', () => {
+                showNotification('Media backup requires media module', 'info', 1500);
             });
             
-            document.getElementById('restoreBackupBtn').addEventListener('click', (e) => {
-                e.preventDefault();
-                showConfirmDialog('Restore from backup? This will overwrite current data.', () => {
-                    showNotification('Backup restoration requires backup file', 'warning', 1000);
+            setupActionButton('restoreBackupBtn', () => {
+                showConfirmDialog('Restore from backup? This will overwrite current settings.', () => {
+                    const backupData = localStorage.getItem('lastBackup');
+                    if (backupData) {
+                        try {
+                            const parsed = JSON.parse(backupData);
+                            currentSettings = parsed.settings || {};
+                            saveToLocalStorage();
+                            // Reload current section
+                            loadSectionSettings(currentSection);
+                            showNotification('Backup restored successfully', 'success', 1500);
+                        } catch (e) {
+                            showNotification('Error restoring backup', 'error', 1500);
+                        }
+                    } else {
+                        showNotification('No backup found', 'warning', 1500);
+                    }
                 });
             });
             
-            document.getElementById('clearAllChatsBtn').addEventListener('click', (e) => {
-                e.preventDefault();
+            setupActionButton('clearAllChatsBtn', () => {
                 showConfirmDialog('Clear ALL chats? This cannot be undone.', () => {
-                    showNotification('All chats cleared', 'success', 1000);
+                    showNotification('All chats cleared', 'success', 1500);
                 });
             });
             
-            document.getElementById('deleteAccountBtn').addEventListener('click', (e) => {
-                e.preventDefault();
-                // Verify auth for dangerous operation
-                if (!isAuthenticated) {
-                    showNotification('Authentication required', 'error', 1000);
-                    return;
-                }
-                
+            setupActionButton('deleteAccountBtn', () => {
                 showConfirmDialog('Permanently delete your account? This cannot be undone.', () => {
-                    showNotification('Account deletion requires backend confirmation', 'warning', 1000);
+                    showNotification('Account deletion requires backend confirmation', 'warning', 1500);
                 });
             });
             
-            document.getElementById('exportDataBtn').addEventListener('click', (e) => {
-                e.preventDefault();
+            setupActionButton('exportDataBtn', () => {
                 const btn = document.getElementById('exportDataBtn');
+                if (!btn) return;
+                
                 const originalText = btn.innerHTML;
                 
                 btn.innerHTML = '<div class="loading-spinner"></div> Exporting...';
@@ -4588,7 +4452,11 @@ const auth = firebase.auth();
                 setTimeout(() => {
                     // Export data in background
                     setTimeout(() => {
-                        const dataStr = JSON.stringify(currentSettings, null, 2);
+                        const dataStr = JSON.stringify({
+                            settings: currentSettings,
+                            user: currentUser,
+                            exportDate: new Date().toISOString()
+                        }, null, 2);
                         const dataBlob = new Blob([dataStr], { type: 'application/json' });
                         const downloadUrl = URL.createObjectURL(dataBlob);
                         const a = document.createElement('a');
@@ -4599,7 +4467,7 @@ const auth = firebase.auth();
                         document.body.removeChild(a);
                         URL.revokeObjectURL(downloadUrl);
                         
-                        showNotification('Data exported successfully', 'success', 1000);
+                        showNotification('Data exported successfully', 'success', 1500);
                     }, 0);
                     
                     btn.innerHTML = originalText;
@@ -4607,20 +4475,28 @@ const auth = firebase.auth();
                 }, 1500);
             });
             
+            function setupActionButton(buttonId, handler) {
+                const button = document.getElementById(buttonId);
+                if (button) {
+                    button.addEventListener('click', (e) => {
+                        e.preventDefault();
+                        handler();
+                    });
+                }
+            }
+            
             // Modal close buttons
-            document.getElementById('closeConfirmModal').addEventListener('click', (e) => {
-                e.preventDefault();
+            setupActionButton('closeConfirmModal', () => {
                 confirmModal.classList.remove('active');
             });
             
-            document.getElementById('cancelConfirmBtn').addEventListener('click', (e) => {
-                e.preventDefault();
+            setupActionButton('cancelConfirmBtn', () => {
                 confirmModal.classList.remove('active');
             });
             
             // Listen for settings changes from other tabs
             window.addEventListener('storage', function(event) {
-                if (event.key === `settingsUpdated_${currentUser?.uid}`) {
+                if (event.key && event.key.startsWith('settingsUpdated_')) {
                     // Reload current section
                     loadSectionSettings(currentSection);
                 }
@@ -4631,15 +4507,24 @@ const auth = firebase.auth();
             
             // Before unload warning
             window.addEventListener('beforeunload', function(event) {
-                if (unsavedChanges) {
+                if (unsavedChanges && pendingSaves.size > 0) {
                     event.preventDefault();
                     event.returnValue = 'You have unsaved changes. Are you sure you want to leave?';
                     return event.returnValue;
                 }
             });
+            
+            // Load profile photo if exists
+            const savedPhoto = localStorage.getItem('profilePhoto');
+            if (savedPhoto) {
+                const photoPreview = document.getElementById('photoPreview');
+                if (photoPreview) {
+                    photoPreview.innerHTML = `<img src="${savedPhoto}" style="width: 100%; height: 100%; object-fit: cover;">`;
+                }
+            }
         }
         
-        console.log('Optimized settings system initialized successfully');
+        console.log('Enhanced offline settings system initialized successfully');
     </script>
 </body>
 </html>
