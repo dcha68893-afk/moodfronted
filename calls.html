@@ -63,83 +63,34 @@
             position: relative;
         }
         
-        /* Offline Overlay */
-        .offline-overlay {
+        /* Simplified Offline Indicator */
+        .offline-banner {
             position: fixed;
             top: 0;
             left: 0;
-            width: 100%;
-            height: 100%;
-            background-color: var(--offline-overlay);
-            z-index: 9999;
-            display: none;
-            flex-direction: column;
-            align-items: center;
-            justify-content: center;
-            text-align: center;
-            padding: 20px;
-            animation: fadeIn 0.3s ease;
-        }
-        
-        .offline-overlay.active {
-            display: flex;
-        }
-        
-        .offline-icon {
-            font-size: 64px;
-            color: var(--text-secondary);
-            margin-bottom: 20px;
-            opacity: 0.7;
-        }
-        
-        .offline-title {
-            font-size: 24px;
-            font-weight: 600;
-            color: var(--text-primary);
-            margin-bottom: 10px;
-        }
-        
-        .offline-message {
-            font-size: 16px;
-            color: var(--text-secondary);
-            margin-bottom: 30px;
-            max-width: 400px;
-            line-height: 1.5;
-        }
-        
-        .offline-submessage {
-            font-size: 14px;
-            color: var(--text-secondary);
-            opacity: 0.8;
-            max-width: 400px;
-            margin-top: 20px;
-            padding: 15px;
-            background-color: var(--secondary-color);
-            border-radius: 12px;
-            border-left: 4px solid var(--warning-color);
-        }
-        
-        .offline-indicator {
-            position: fixed;
-            top: 20px;
-            right: 20px;
+            right: 0;
             background-color: var(--warning-color);
             color: white;
-            padding: 8px 16px;
-            border-radius: 20px;
+            padding: 8px 20px;
             font-size: 14px;
             font-weight: 500;
-            z-index: 10000;
-            display: flex;
-            align-items: center;
-            gap: 8px;
-            box-shadow: var(--shadow);
-            animation: slideInRight 0.3s ease;
+            text-align: center;
+            z-index: 9999;
             display: none;
+            align-items: center;
+            justify-content: center;
+            gap: 10px;
+            box-shadow: 0 2px 5px rgba(0,0,0,0.1);
         }
         
-        .offline-indicator.active {
+        .offline-banner.active {
             display: flex;
+            animation: slideDown 0.3s ease;
+        }
+        
+        @keyframes slideDown {
+            from { transform: translateY(-100%); }
+            to { transform: translateY(0); }
         }
         
         /* Sidebar Styles */
@@ -1434,13 +1385,6 @@
                 z-index: 200;
             }
             
-            .offline-indicator {
-                top: 10px;
-                right: 10px;
-                font-size: 12px;
-                padding: 6px 12px;
-            }
-            
             /* Fix call history display for mobile */
             .call-list {
                 display: flex;
@@ -1552,93 +1496,27 @@
             animation: fadeIn 0.3s ease;
         }
         
-        @keyframes slideInRight {
-            from { transform: translateX(100%); opacity: 0; }
-            to { transform: translateX(0); opacity: 1; }
+        /* Simplified offline styles - matching Status page */
+        .offline-ui {
+            opacity: 0.7;
         }
         
-        /* Offline-specific styles */
-        .call-button-disabled {
-            position: relative;
-        }
-        
-        .call-button-disabled::after {
-            content: " (Offline)";
-            font-size: 12px;
-            opacity: 0.8;
-        }
-        
-        .call-list-offline {
-            position: relative;
-        }
-        
-        .call-list-offline::before {
-            content: "";
-            position: absolute;
-            top: 0;
-            left: 0;
-            right: 0;
-            bottom: 0;
-            background-color: rgba(255, 255, 255, 0.8);
-            z-index: 10;
-            display: none;
-        }
-        
-        .offline-message-small {
-            position: absolute;
-            top: 50%;
-            left: 50%;
-            transform: translate(-50%, -50%);
-            background-color: var(--warning-color);
-            color: white;
-            padding: 8px 16px;
-            border-radius: 20px;
-            font-size: 14px;
-            z-index: 11;
-            display: none;
-            white-space: nowrap;
-        }
-        
-        /* Offline button styles */
-        .button-offline {
-            position: relative;
-        }
-        
-        .button-offline::after {
-            content: " (Offline)";
-            font-size: 10px;
-            opacity: 0.8;
-            color: var(--warning-color);
-        }
-        
-        .offline-warning-text {
-            color: var(--warning-color);
-            font-size: 11px;
-            margin-top: 2px;
-            font-weight: normal;
-        }
-        
-        .disabled-by-offline {
-            opacity: 0.6;
+        .offline-ui .quick-action-btn,
+        .offline-ui .new-call-btn,
+        .offline-ui .control-btn:not(#endCallBtn),
+        .offline-ui .call-action-btn,
+        .offline-ui .notes-btn:not(#resetSettingsBtn),
+        .offline-ui .panel-tab:not(.active) {
+            opacity: 0.5;
             cursor: not-allowed;
-            position: relative;
         }
         
-        .disabled-by-offline::before {
-            content: "";
-            position: absolute;
-            top: 0;
-            left: 0;
-            right: 0;
-            bottom: 0;
-            background: rgba(255, 255, 255, 0.5);
-            z-index: 1;
-            border-radius: inherit;
-        }
-        
-        .disabled-by-offline > * {
-            position: relative;
-            z-index: 2;
+        .offline-ui .quick-action-btn:hover:not(:disabled),
+        .offline-ui .new-call-btn:hover:not(:disabled),
+        .offline-ui .control-btn:hover:not(:disabled),
+        .offline-ui .call-action-btn:hover:not(:disabled) {
+            background-color: inherit;
+            transform: none;
         }
         
         /* Call history offline badge */
@@ -1653,7 +1531,7 @@
             vertical-align: middle;
         }
         
-        /* Offline contacts styling */
+        /* Offline contacts message */
         .offline-contacts-message {
             text-align: center;
             padding: 30px 20px;
@@ -1666,19 +1544,7 @@
             opacity: 0.5;
         }
         
-        /* Always visible buttons */
-        .always-visible {
-            display: flex !important;
-            visibility: visible !important;
-            opacity: 1 !important;
-        }
-        
-        .button-visible-offline {
-            pointer-events: auto !important;
-            display: flex !important;
-        }
-        
-        /* Offline call screen placeholder */
+        /* Offline call placeholder */
         .offline-call-placeholder {
             flex: 1;
             display: flex;
@@ -1708,54 +1574,13 @@
             max-width: 400px;
             line-height: 1.5;
         }
-        
-        /* Enhanced offline UI states */
-        .offline-ui-active .control-btn:not(#endCallBtn) {
-            background: rgba(255, 255, 255, 0.05) !important;
-        }
-        
-        .offline-ui-active .control-btn:not(#endCallBtn):hover {
-            background: rgba(255, 255, 255, 0.1) !important;
-        }
-        
-        .offline-ui-active .call-controls {
-            background: linear-gradient(to top, rgba(0,0,0,0.9) 0%, rgba(0,0,0,0.4) 100%);
-        }
-        
-        .offline-ui-active .call-header {
-            background: linear-gradient(to bottom, rgba(0,0,0,0.9) 0%, rgba(0,0,0,0.4) 100%);
-        }
-        
-        /* Offline video placeholder */
-        .offline-video-placeholder {
-            width: 100%;
-            height: 100%;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            background: linear-gradient(135deg, #2a2a2a 0%, #1a1a1a 100%);
-            color: rgba(255, 255, 255, 0.5);
-            font-size: 14px;
-        }
     </style>
 </head>
 <body>
-    <!-- Offline Overlay -->
-    <div class="offline-overlay" id="offlineOverlay">
-        <div class="offline-icon">
-            <i class="fas fa-wifi-slash"></i>
-        </div>
-        <div class="offline-title">You're Offline</div>
-        <div class="offline-message">Calls require internet connection to work properly.</div>
-        <div class="offline-submessage">
-            <i class="fas fa-info-circle"></i> You can still view your call history, but making or receiving calls requires an active internet connection.
-        </div>
-    </div>
-    
-    <!-- Offline Indicator -->
-    <div class="offline-indicator" id="offlineIndicator">
+    <!-- Simple Offline Banner -->
+    <div class="offline-banner" id="offlineBanner">
         <i class="fas fa-wifi-slash"></i>
-        <span>Offline</span>
+        <span>You are currently offline. Calls will work when connection is restored.</span>
     </div>
     
     <div class="app-container">
@@ -1763,32 +1588,32 @@
         <div class="sidebar">
             <div class="sidebar-header">
                 <h2>Calls</h2>
-                <button class="new-call-btn always-visible" id="newCallBtn" title="Start new call">
+                <button class="new-call-btn" id="newCallBtn" title="Start new call">
                     <i class="fas fa-phone-alt"></i>
                 </button>
             </div>
             
             <div class="call-categories">
-                <button class="category-btn active always-visible" id="allTab">All</button>
-                <button class="category-btn always-visible" id="missedTab">Missed</button>
-                <button class="category-btn always-visible" id="groupsTab">Groups</button>
+                <button class="category-btn active" id="allTab">All</button>
+                <button class="category-btn" id="missedTab">Missed</button>
+                <button class="category-btn" id="groupsTab">Groups</button>
             </div>
             
             <div class="call-list">
                 <div class="quick-actions">
-                    <button class="quick-action-btn always-visible button-visible-offline" id="voiceCallBtn" title="Start voice call">
+                    <button class="quick-action-btn" id="voiceCallBtn" title="Start voice call">
                         <div class="quick-action-icon">
                             <i class="fas fa-phone"></i>
                         </div>
                         <div class="quick-action-text">Voice Call</div>
                     </button>
-                    <button class="quick-action-btn always-visible button-visible-offline" id="videoCallBtn" title="Start video call">
+                    <button class="quick-action-btn" id="videoCallBtn" title="Start video call">
                         <div class="quick-action-icon">
                             <i class="fas fa-video"></i>
                         </div>
                         <div class="quick-action-text">Video Call</div>
                     </button>
-                    <button class="quick-action-btn always-visible button-visible-offline" id="groupCallBtn" title="Start group call">
+                    <button class="quick-action-btn" id="groupCallBtn" title="Start group call">
                         <div class="quick-action-icon">
                             <i class="fas fa-users"></i>
                         </div>
@@ -1798,7 +1623,7 @@
                 
                 <!-- Call Settings Panel -->
                 <div class="call-settings">
-                    <div class="settings-toggle always-visible" id="settingsToggle">
+                    <div class="settings-toggle" id="settingsToggle">
                         <div class="settings-toggle-title">
                             <i class="fas fa-cog settings-toggle-icon"></i>
                             <span>Call Settings</span>
@@ -1863,7 +1688,7 @@
                         </div>
                         
                         <div class="settings-item">
-                            <button class="notes-btn always-visible" id="resetSettingsBtn" style="width: 100%; margin-top: 10px;">
+                            <button class="notes-btn" id="resetSettingsBtn" style="width: 100%; margin-top: 10px;">
                                 <i class="fas fa-undo"></i> Reset to Default Settings
                             </button>
                         </div>
@@ -1922,58 +1747,57 @@
                     <i class="fas fa-wifi-slash"></i>
                     <h3>Offline Mode</h3>
                     <p>You are currently offline. Call features require internet connection.</p>
-                    <p style="font-size: 14px; opacity: 0.6;">All call controls remain visible for exploration.</p>
                 </div>
             </div>
             
-            <div class="reactions-container always-visible" id="reactionsContainer">
-                <div class="reaction-btn always-visible" data-reaction="👍">👍</div>
-                <div class="reaction-btn always-visible" data-reaction="👏">👏</div>
-                <div class="reaction-btn always-visible" data-reaction="😂">😂</div>
-                <div class="reaction-btn always-visible" data-reaction="❤">❤</div>
-                <div class="reaction-btn always-visible" data-reaction="🔥">🔥</div>
+            <div class="reactions-container" id="reactionsContainer">
+                <div class="reaction-btn" data-reaction="👍">👍</div>
+                <div class="reaction-btn" data-reaction="👏">👏</div>
+                <div class="reaction-btn" data-reaction="😂">😂</div>
+                <div class="reaction-btn" data-reaction="❤">❤</div>
+                <div class="reaction-btn" data-reaction="🔥">🔥</div>
             </div>
             
-            <div class="call-controls always-visible">
-                <button class="control-btn always-visible" id="muteBtn" title="Mute">
+            <div class="call-controls">
+                <button class="control-btn" id="muteBtn" title="Mute">
                     <i class="fas fa-microphone"></i>
                 </button>
-                <button class="control-btn always-visible" id="videoBtn" title="Video">
+                <button class="control-btn" id="videoBtn" title="Video">
                     <i class="fas fa-video"></i>
                 </button>
-                <button class="control-btn always-visible" id="speakerBtn" title="Speaker">
+                <button class="control-btn" id="speakerBtn" title="Speaker">
                     <i class="fas fa-volume-up"></i>
                 </button>
-                <button class="control-btn always-visible" id="screenShareBtn" title="Share Screen">
+                <button class="control-btn" id="screenShareBtn" title="Share Screen">
                     <i class="fas fa-desktop"></i>
                 </button>
-                <button class="control-btn always-visible" id="effectsBtn" title="Effects">
+                <button class="control-btn" id="effectsBtn" title="Effects">
                     <i class="fas fa-magic"></i>
                 </button>
-                <button class="control-btn always-visible" id="moreBtn" title="More Options">
+                <button class="control-btn" id="moreBtn" title="More Options">
                     <i class="fas fa-ellipsis-h"></i>
                 </button>
-                <button class="control-btn danger always-visible" id="endCallBtn" title="End Call">
+                <button class="control-btn danger" id="endCallBtn" title="End Call">
                     <i class="fas fa-phone-slash"></i>
                 </button>
             </div>
         </div>
         
         <!-- Call Side Panel -->
-        <div class="call-side-panel collapsed always-visible" id="callSidePanel">
+        <div class="call-side-panel collapsed" id="callSidePanel">
             <div class="panel-header">
                 <h3 id="panelTitle">Call Controls</h3>
-                <button class="call-action-btn always-visible" id="closePanelBtn">
+                <button class="call-action-btn" id="closePanelBtn">
                     <i class="fas fa-times"></i>
                 </button>
             </div>
             
-            <div class="panel-tabs always-visible" id="panelTabs">
-                <button class="panel-tab active always-visible" data-panel="participants">Participants</button>
-                <button class="panel-tab always-visible" data-panel="chat">Chat</button>
-                <button class="panel-tab always-visible" data-panel="whiteboard">Whiteboard</button>
-                <button class="panel-tab always-visible" data-panel="notes">Notes</button>
-                <button class="panel-tab always-visible" data-panel="polls">Polls</button>
+            <div class="panel-tabs" id="panelTabs">
+                <button class="panel-tab active" data-panel="participants">Participants</button>
+                <button class="panel-tab" data-panel="chat">Chat</button>
+                <button class="panel-tab" data-panel="whiteboard">Whiteboard</button>
+                <button class="panel-tab" data-panel="notes">Notes</button>
+                <button class="panel-tab" data-panel="polls">Polls</button>
             </div>
             
             <div class="panel-content" id="panelContent">
@@ -1983,7 +1807,7 @@
                         <!-- Participants will be listed here -->
                     </div>
                     <div style="margin-top: 20px;">
-                        <button class="notes-btn always-visible" id="addParticipantsBtn" style="width: 100%;">
+                        <button class="notes-btn" id="addParticipantsBtn" style="width: 100%;">
                             <i class="fas fa-user-plus"></i> Add Participants
                         </button>
                     </div>
@@ -1994,9 +1818,9 @@
                     <div class="chat-messages" id="chatMessages">
                         <!-- Chat messages will be shown here -->
                     </div>
-                    <div class="chat-input always-visible">
-                        <input type="text" class="chat-input-field always-visible" id="chatInput" placeholder="Type a message...">
-                        <button class="video-action-btn always-visible" id="sendChatBtn">
+                    <div class="chat-input">
+                        <input type="text" class="chat-input-field" id="chatInput" placeholder="Type a message...">
+                        <button class="video-action-btn" id="sendChatBtn">
                             <i class="fas fa-paper-plane"></i>
                         </button>
                     </div>
@@ -2004,26 +1828,26 @@
                 
                 <!-- Whiteboard Panel -->
                 <div class="panel-section" id="whiteboardPanel">
-                    <div class="whiteboard-container always-visible">
+                    <div class="whiteboard-container">
                         <canvas id="whiteboardCanvas"></canvas>
                     </div>
-                    <div class="whiteboard-tools always-visible">
-                        <button class="notes-btn always-visible" data-tool="pencil">
+                    <div class="whiteboard-tools">
+                        <button class="notes-btn" data-tool="pencil">
                             <i class="fas fa-pencil-alt"></i> Pencil
                         </button>
-                        <button class="notes-btn always-visible" data-tool="line">
+                        <button class="notes-btn" data-tool="line">
                             <i class="fas fa-minus"></i> Line
                         </button>
-                        <button class="notes-btn always-visible" data-tool="rectangle">
+                        <button class="notes-btn" data-tool="rectangle">
                             <i class="fas fa-square"></i> Rectangle
                         </button>
-                        <button class="notes-btn always-visible" data-tool="circle">
+                        <button class="notes-btn" data-tool="circle">
                             <i class="fas fa-circle"></i> Circle
                         </button>
-                        <button class="notes-btn always-visible" data-tool="text">
+                        <button class="notes-btn" data-tool="text">
                             <i class="fas fa-font"></i> Text
                         </button>
-                        <button class="notes-btn always-visible" id="clearWhiteboardBtn">
+                        <button class="notes-btn" id="clearWhiteboardBtn">
                             <i class="fas fa-trash"></i> Clear
                         </button>
                     </div>
@@ -2032,19 +1856,19 @@
                 <!-- Notes Panel -->
                 <div class="panel-section" id="notesPanel">
                     <div class="notes-editor">
-                        <div class="notes-toolbar always-visible">
-                            <button class="notes-btn always-visible" id="saveNoteBtn">
+                        <div class="notes-toolbar">
+                            <button class="notes-btn" id="saveNoteBtn">
                                 <i class="fas fa-save"></i> Save
                             </button>
-                            <button class="notes-btn always-visible" id="shareNoteBtn">
+                            <button class="notes-btn" id="shareNoteBtn">
                                 <i class="fas fa-share"></i> Share
                             </button>
-                            <button class="notes-btn always-visible" id="loadNotesBtn">
+                            <button class="notes-btn" id="loadNotesBtn">
                                 <i class="fas fa-history"></i> Load Previous
                             </button>
                         </div>
-                        <textarea class="notes-input always-visible" id="notesInput" placeholder="Take notes during the call..."></textarea>
-                        <div class="notes-preview always-visible" id="notesPreview">
+                        <textarea class="notes-input" id="notesInput" placeholder="Take notes during the call..."></textarea>
+                        <div class="notes-preview" id="notesPreview">
                             <!-- Notes preview will appear here -->
                         </div>
                     </div>
@@ -2057,7 +1881,7 @@
                             <!-- Active poll will be shown here -->
                         </div>
                         <div style="margin-top: 20px;">
-                            <button class="notes-btn always-visible" id="createPollBtn" style="width: 100%;">
+                            <button class="notes-btn" id="createPollBtn" style="width: 100%;">
                                 <i class="fas fa-plus"></i> Create New Poll
                             </button>
                         </div>
@@ -2072,22 +1896,22 @@
         <div class="new-call-container">
             <div class="new-call-header">
                 <h3>Start New Call</h3>
-                <button class="new-call-btn always-visible" id="closeNewCallModal">
+                <button class="new-call-btn" id="closeNewCallModal">
                     <i class="fas fa-times"></i>
                 </button>
             </div>
             
-            <div class="new-call-tabs always-visible">
-                <button class="new-call-tab active always-visible" data-tab="contacts">Contacts</button>
-                <button class="new-call-tab always-visible" data-tab="group">Group Call</button>
-                <button class="new-call-tab always-visible" data-tab="link">Call Link</button>
+            <div class="new-call-tabs">
+                <button class="new-call-tab active" data-tab="contacts">Contacts</button>
+                <button class="new-call-tab" data-tab="group">Group Call</button>
+                <button class="new-call-tab" data-tab="link">Call Link</button>
             </div>
             
             <div class="new-call-content">
                 <!-- Contacts Tab -->
                 <div class="new-call-tab-content active" id="contactsTab">
                     <div class="contact-search">
-                        <input type="text" class="search-input always-visible" id="contactSearch" placeholder="Search contacts...">
+                        <input type="text" class="search-input" id="contactSearch" placeholder="Search contacts...">
                     </div>
                     <div class="contacts-list" id="contactsList">
                         <!-- Contacts will be loaded here -->
@@ -2097,13 +1921,13 @@
                 <!-- Group Call Tab -->
                 <div class="new-call-tab-content" id="groupTab">
                     <div class="group-call-options">
-                        <div class="option-item always-visible" data-type="instant">
+                        <div class="option-item" data-type="instant">
                             <div class="option-title">
                                 <i class="fas fa-bolt"></i> Instant Group Call
                             </div>
                             <div class="option-desc">Start a call and add participants as you go</div>
                         </div>
-                        <div class="option-item always-visible" data-type="scheduled">
+                        <div class="option-item" data-type="scheduled">
                             <div class="option-title">
                                 <i class="fas fa-calendar"></i> Schedule Group Call
                             </div>
@@ -2129,10 +1953,10 @@
                             Create a shareable link for anyone to join your call
                         </p>
                         <div style="display: flex; gap: 10px; margin-bottom: 20px;">
-                            <button class="notes-btn always-visible" id="createVoiceLinkBtn">
+                            <button class="notes-btn" id="createVoiceLinkBtn">
                                 <i class="fas fa-phone"></i> Voice Call Link
                             </button>
-                            <button class="notes-btn always-visible" id="createVideoLinkBtn">
+                            <button class="notes-btn" id="createVideoLinkBtn">
                                 <i class="fas fa-video"></i> Video Call Link
                             </button>
                         </div>
@@ -2141,10 +1965,10 @@
                                 <input type="text" id="callLinkInput" readonly style="width: 100%; padding: 10px; border: 1px solid var(--border-color); border-radius: 8px;">
                             </div>
                             <div style="display: flex; gap: 10px;">
-                                <button class="notes-btn always-visible" id="copyLinkBtn">
+                                <button class="notes-btn" id="copyLinkBtn">
                                     <i class="fas fa-copy"></i> Copy Link
                                 </button>
-                                <button class="notes-btn always-visible" id="shareLinkBtn">
+                                <button class="notes-btn" id="shareLinkBtn">
                                     <i class="fas fa-share"></i> Share
                                 </button>
                             </div>
@@ -2154,8 +1978,8 @@
             </div>
             
             <div style="padding: 20px; border-top: 1px solid var(--border-color); display: flex; justify-content: space-between;">
-                <button class="notes-btn always-visible" id="cancelNewCallBtn">Cancel</button>
-                <button class="notes-btn always-visible" id="startCallBtn" style="background-color: var(--primary-color); color: white;">Start Call</button>
+                <button class="notes-btn" id="cancelNewCallBtn">Cancel</button>
+                <button class="notes-btn" id="startCallBtn" style="background-color: var(--primary-color); color: white;">Start Call</button>
             </div>
         </div>
     </div>
@@ -2169,13 +1993,13 @@
             <div class="incoming-call-name" id="incomingCallName">John Doe</div>
             <div class="incoming-call-type" id="incomingCallType">Incoming Video Call</div>
             <div class="incoming-call-actions">
-                <button class="control-btn danger pulsing always-visible" id="declineCallBtn">
+                <button class="control-btn danger pulsing" id="declineCallBtn">
                     <i class="fas fa-phone-slash"></i>
                 </button>
-                <button class="control-btn active pulsing always-visible" id="acceptCallBtn">
+                <button class="control-btn active pulsing" id="acceptCallBtn">
                     <i class="fas fa-phone"></i>
                 </button>
-                <button class="control-btn always-visible" id="acceptVideoCallBtn">
+                <button class="control-btn" id="acceptVideoCallBtn">
                     <i class="fas fa-video"></i>
                 </button>
             </div>
@@ -2192,10 +2016,10 @@
     <div class="pip-container" id="pipContainer">
         <video class="pip-video" id="pipVideo" autoplay muted></video>
         <div class="pip-controls">
-            <button class="video-action-btn always-visible" id="pipExpandBtn">
+            <button class="video-action-btn" id="pipExpandBtn">
                 <i class="fas fa-expand"></i>
             </button>
-            <button class="video-action-btn danger always-visible" id="pipEndBtn">
+            <button class="video-action-btn danger" id="pipEndBtn">
                 <i class="fas fa-phone-slash"></i>
             </button>
         </div>
@@ -2260,7 +2084,7 @@
         let reactionsChannel = null;
         let chatChannel = null;
         
-        // Offline state management - FEATURE 1: Detect offline state
+        // Offline state management - simplified to match Status page
         let isOnline = navigator.onLine;
         let offlineCheckInterval = null;
         
@@ -2292,8 +2116,7 @@
         const pipContainer = document.getElementById('pipContainer');
         const settingsPanel = document.getElementById('settingsPanel');
         const settingsToggle = document.getElementById('settingsToggle');
-        const offlineOverlay = document.getElementById('offlineOverlay');
-        const offlineIndicator = document.getElementById('offlineIndicator');
+        const offlineBanner = document.getElementById('offlineBanner');
         const offlineCallPlaceholder = document.getElementById('offlineCallPlaceholder');
         
         // Call sections
@@ -2310,10 +2133,9 @@
         });
         
         async function initializeApp() {
-            // FEATURE 1: Initialize offline detection
+            // Initialize offline detection
             initializeOfflineDetection();
             
-            // FEATURE 5: Detect logged-in user via app.js (or Firebase auth)
             // First try to get user from localStorage for immediate UI
             const cachedUser = localStorage.getItem('currentUser');
             if (cachedUser) {
@@ -2364,12 +2186,12 @@
                         setupEventListeners();
                         initializeWhiteboard();
                         
-                        // FEATURE 1 & 2: Load calls from local storage when offline
+                        // Load calls from local storage when offline
                         if (isOnline) {
                             loadAllCalls();
                             setupPresenceTracking();
                             
-                            // FEATURE 5: Only initialize PeerJS if online
+                            // Only initialize PeerJS if online
                             setTimeout(() => {
                                 initializePeerJS();
                             }, 1000);
@@ -2443,35 +2265,8 @@
             // Start periodic connectivity check
             offlineCheckInterval = setInterval(checkConnectivity, 30000);
             
-            // Initial UI update - FEATURE 2: Show "Calls require internet" message
+            // Initial UI update
             updateUIForConnectivity();
-            
-            // Ensure all buttons are visible
-            ensureButtonsVisible();
-        }
-        
-        function ensureButtonsVisible() {
-            // Make sure all buttons are visible regardless of online status
-            const allButtons = document.querySelectorAll('button, .quick-action-btn, .call-action-btn, .control-btn, .video-action-btn, .notes-btn, .panel-tab, .new-call-tab, .category-btn, .reaction-btn');
-            allButtons.forEach(button => {
-                button.classList.add('always-visible');
-                button.style.display = 'flex';
-                button.style.visibility = 'visible';
-                button.style.opacity = '1';
-            });
-            
-            // Make sure call history sections are visible
-            const callSections = document.querySelectorAll('.calls-section, .call-list, .call-item');
-            callSections.forEach(section => {
-                section.classList.add('always-visible');
-                section.style.display = 'flex';
-            });
-            
-            // Ensure call container UI elements are visible
-            const callUIElements = document.querySelectorAll('.call-controls, .call-header, .reactions-container, .video-grid');
-            callUIElements.forEach(element => {
-                element.classList.add('always-visible');
-            });
         }
         
         function updateOnlineStatus() {
@@ -2484,7 +2279,7 @@
             isOnline = true;
             updateUIForConnectivity();
             
-            // FEATURE 5: Try to reinitialize PeerJS when network is restored
+            // Try to reinitialize PeerJS when network is restored
             if (!peer && currentUser) {
                 setTimeout(() => {
                     initializePeerJS();
@@ -2505,11 +2300,8 @@
             // Reload calls data from server
             loadAllCalls();
             
-            // Ensure buttons are visible
-            ensureButtonsVisible();
-            
             // Remove offline UI state
-            callContainer.classList.remove('offline-ui-active');
+            document.body.classList.remove('offline-ui');
             
             // Hide offline placeholder if showing
             if (offlineCallPlaceholder.style.display !== 'none') {
@@ -2522,8 +2314,8 @@
             isOnline = false;
             updateUIForConnectivity();
             
-            // FEATURE 2: Show "Calls require internet" message
-            showNotification('You are offline. Calls require internet connection.', 'warning');
+            // Show notification - simplified message like Status page
+            showNotification('You are offline. Call features unavailable.', 'warning');
             
             // End any active calls gracefully
             if (currentCall) {
@@ -2538,14 +2330,11 @@
                 });
             }
             
-            // FEATURE 1: Load calls from local storage when offline
+            // Load calls from local storage when offline
             loadCallsFromLocalStorage();
             
-            // Ensure buttons are visible
-            ensureButtonsVisible();
-            
             // Add offline UI state for visual indication
-            callContainer.classList.add('offline-ui-active');
+            document.body.classList.add('offline-ui');
             
             // Show offline placeholder in video grid if call container is active
             if (callContainer.classList.contains('active')) {
@@ -2575,11 +2364,10 @@
         
         function updateUIForConnectivity() {
             if (!isOnline) {
-                // Show offline overlay - FEATURE 2
-                offlineOverlay.classList.add('active');
-                offlineIndicator.classList.add('active');
+                // Show offline banner - simple like Status page
+                offlineBanner.classList.add('active');
                 
-                // FEATURE 4: Disable call buttons when offline (but keep them visible)
+                // Disable call buttons when offline
                 const callButtons = [
                     'newCallBtn',
                     'voiceCallBtn',
@@ -2596,22 +2384,6 @@
                     if (button) {
                         button.disabled = true;
                         button.title = 'Calls require internet connection';
-                        button.classList.add('disabled-by-offline');
-                        // Still keep it visible
-                        button.classList.add('always-visible');
-                        button.style.display = 'flex';
-                    }
-                });
-                
-                // Update button texts to indicate offline - FEATURE 2
-                const quickActionButtons = document.querySelectorAll('.quick-action-btn');
-                quickActionButtons.forEach(button => {
-                    if (button.disabled) {
-                        const textElement = button.querySelector('.quick-action-text');
-                        if (textElement) {
-                            const originalText = textElement.getAttribute('data-original-text') || textElement.textContent;
-                            textElement.innerHTML = originalText + '<div class="offline-warning-text">(Offline)</div>';
-                        }
                     }
                 });
                 
@@ -2620,9 +2392,6 @@
                 callbackButtons.forEach(button => {
                     button.disabled = true;
                     button.title = 'Calls require internet connection';
-                    button.classList.add('disabled-by-offline');
-                    // Still keep it visible
-                    button.classList.add('always-visible');
                 });
                 
                 // Disable contact checkboxes in new call modal
@@ -2643,19 +2412,14 @@
                     showNotification('Cannot accept calls while offline', 'error');
                 }
                 
-                // Disable panel tabs that require internet (but keep visible)
+                // Disable panel tabs that require internet
                 const panelTabs = document.querySelectorAll('.panel-tab');
                 panelTabs.forEach(tab => {
                     if (tab.dataset.panel !== 'participants') {
                         tab.disabled = true;
                         tab.title = 'Feature unavailable offline';
-                        // Still keep it visible
-                        tab.classList.add('always-visible');
                     }
                 });
-                
-                // Ensure all UI elements are visible
-                ensureButtonsVisible();
                 
                 // Update call status to show offline state
                 if (callContainer.classList.contains('active')) {
@@ -2665,11 +2429,10 @@
                 }
                 
             } else {
-                // Hide offline overlay
-                offlineOverlay.classList.remove('active');
-                offlineIndicator.classList.remove('active');
+                // Hide offline banner
+                offlineBanner.classList.remove('active');
                 
-                // FEATURE 4: Enable call buttons when online
+                // Enable call buttons when online
                 const callButtons = [
                     'newCallBtn',
                     'voiceCallBtn',
@@ -2686,18 +2449,6 @@
                     if (button) {
                         button.disabled = false;
                         button.title = button.getAttribute('data-original-title') || '';
-                        button.classList.remove('disabled-by-offline');
-                        button.classList.add('always-visible');
-                    }
-                });
-                
-                // Restore original button texts
-                const quickActionButtons = document.querySelectorAll('.quick-action-btn');
-                quickActionButtons.forEach(button => {
-                    const textElement = button.querySelector('.quick-action-text');
-                    if (textElement) {
-                        const originalText = textElement.getAttribute('data-original-text') || textElement.textContent;
-                        textElement.innerHTML = originalText;
                     }
                 });
                 
@@ -2706,8 +2457,6 @@
                 callbackButtons.forEach(button => {
                     button.disabled = false;
                     button.title = 'Call Back';
-                    button.classList.remove('disabled-by-offline');
-                    button.classList.add('always-visible');
                 });
                 
                 // Enable contact checkboxes
@@ -2721,14 +2470,10 @@
                 panelTabs.forEach(tab => {
                     tab.disabled = false;
                     tab.title = '';
-                    tab.classList.add('always-visible');
                 });
                 
-                // Ensure all UI elements are visible
-                ensureButtonsVisible();
-                
                 // Remove offline UI state
-                callContainer.classList.remove('offline-ui-active');
+                document.body.classList.remove('offline-ui');
                 
                 // Hide offline placeholder
                 offlineCallPlaceholder.style.display = 'none';
@@ -2741,12 +2486,12 @@
             }
         }
         
-        // FEATURE 1: Enhanced localStorage management for calls
+        // Enhanced localStorage management for calls
         function getLocalStorageKey(key) {
             return currentUser ? `calls_${currentUser.uid}_${key}` : `calls_${key}`;
         }
         
-        // FEATURE 1: Save calls to local storage with better structure
+        // Save calls to local storage with better structure
         function saveCallToLocalStorage(callData) {
             try {
                 if (!currentUser) return;
@@ -2794,7 +2539,7 @@
             }
         }
         
-        // FEATURE 1: Load calls from local storage with better error handling
+        // Load calls from local storage with better error handling
         function loadCallsFromLocalStorage() {
             console.log('Loading calls from local storage (offline mode)');
             
@@ -2878,7 +2623,7 @@
             return sampleCalls;
         }
         
-        // FEATURE 1: Display calls from array (enhanced for offline mode)
+        // Display calls from array (enhanced for offline mode)
         function displayCallsFromArray(callsArray, container, type) {
             if (!container) return;
             
@@ -2887,7 +2632,7 @@
                 switch(type) {
                     case 'missed':
                         emptyMessage = `
-                            <div class="empty-state always-visible">
+                            <div class="empty-state">
                                 <i class="fas fa-phone-slash"></i>
                                 <p>No missed calls</p>
                                 <p class="subtext">All calls have been answered</p>
@@ -2896,7 +2641,7 @@
                         break;
                     case 'group':
                         emptyMessage = `
-                            <div class="empty-state always-visible">
+                            <div class="empty-state">
                                 <i class="fas fa-users"></i>
                                 <p>No group calls</p>
                                 <p class="subtext">Start your first group call</p>
@@ -2905,7 +2650,7 @@
                         break;
                     default:
                         emptyMessage = `
-                            <div class="empty-state always-visible">
+                            <div class="empty-state">
                                 <i class="fas fa-phone"></i>
                                 <p>No recent calls</p>
                                 <p class="subtext">Start your first call with the button above</p>
@@ -2931,15 +2676,9 @@
                 const minHeight = itemHeight * Math.min(5, callItems.length);
                 container.style.minHeight = minHeight + 'px';
             }
-            
-            // Ensure all items are visible
-            callItems.forEach(item => {
-                item.classList.add('always-visible');
-                item.style.display = 'flex';
-            });
         }
         
-        // FEATURE 1: Display call item from data (enhanced for offline mode)
+        // Display call item from data (enhanced for offline mode)
         function displayCallItemFromData(callData, container) {
             let displayName = callData.displayName || 'Unknown';
             let otherParticipantIds = [];
@@ -2984,9 +2723,8 @@
             }
             
             const callItem = document.createElement('div');
-            callItem.className = 'call-item always-visible';
+            callItem.className = 'call-item';
             callItem.dataset.callId = callData.id || `local_${Date.now()}`;
-            callItem.style.display = 'flex';
             
             let statusIconClass = '';
             let statusIcon = '';
@@ -3006,25 +2744,25 @@
             const avatarUrl = callData.avatar || localStorage.getItem(`contact_${otherParticipantIds[0]}_avatar`) || '';
             
             callItem.innerHTML = `
-                <div class="call-avatar always-visible" ${avatarUrl ? `style="background-image: url('${avatarUrl}')"` : ''}>
+                <div class="call-avatar" ${avatarUrl ? `style="background-image: url('${avatarUrl}')"` : ''}>
                     ${avatarUrl ? '' : `<span>${initials}</span>`}
-                    <div class="call-status-icon ${statusIconClass} always-visible">
+                    <div class="call-status-icon ${statusIconClass}">
                         <i class="${statusIcon}"></i>
                     </div>
                 </div>
                 <div class="call-info">
-                    <div class="call-name always-visible">
+                    <div class="call-name">
                         <span>${displayName}</span>
-                        <span class="call-time always-visible">${callTime}</span>
+                        <span class="call-time">${callTime}</span>
                     </div>
-                    <div class="call-details always-visible">
+                    <div class="call-details">
                         <i class="fas fa-${callType === 'video' ? 'video' : 'phone'}"></i>
                         <span>${isMissed ? 'Missed' : (isOutgoing ? 'Outgoing' : 'Incoming')}</span>
                         ${durationText ? `<span>• ${durationText}</span>` : ''}
                         ${callData.isLocal ? '<span class="offline-history-badge" style="font-size: 10px; padding: 1px 6px;">Offline</span>' : ''}
                     </div>
                 </div>
-                <button class="call-action-btn always-visible" title="Call Back" ${!isOnline ? 'disabled' : ''} style="display: flex;">
+                <button class="call-action-btn" title="Call Back" ${!isOnline ? 'disabled' : ''}>
                     <i class="fas fa-phone"></i>
                 </button>
             `;
@@ -3056,7 +2794,7 @@
             window.addEventListener('message', function(event) {
                 console.log('Message received from friends.html:', event.data);
                 
-                // FEATURE 1: Check if offline before processing call requests
+                // Check if offline before processing call requests
                 if (!isOnline) {
                     showNotification('Cannot start call while offline', 'error');
                     return;
@@ -3123,7 +2861,7 @@
         async function initializeUser() {
             // Only initialize user if online and Firebase is available
             if (!isOnline || !db) {
-                // FEATURE 5: Get user info from app.js context or local storage
+                // Get user info from app.js context or local storage
                 const userInfo = localStorage.getItem(`userInfo_${currentUser.uid}`);
                 if (userInfo) {
                     const userData = JSON.parse(userInfo);
@@ -3448,7 +3186,7 @@
         async function startCall(userId, type = 'video') {
             console.log('Starting call to:', userId, 'type:', type);
             
-            // FEATURE 1 & 4: Check if offline before starting call
+            // Check if offline before starting call
             if (!isOnline) {
                 showNotification('Cannot start call while offline', 'error');
                 
@@ -3477,7 +3215,7 @@
             if (!status.online) {
                 showNotification('User is offline. They will see missed call when back online.', 'warning');
                 
-                // FEATURE 1: Save missed call to local storage
+                // Save missed call to local storage
                 saveCallToLocalStorage({
                     participants: [currentUser.uid, userId],
                     initiator: currentUser.uid,
@@ -3544,7 +3282,7 @@
                         console.log('Call timeout - no answer');
                         showNotification('No answer. Call ended.', 'warning');
                         
-                        // FEATURE 1: Save missed call to local storage
+                        // Save missed call to local storage
                         saveCallToLocalStorage({
                             participants: [currentUser.uid, userId],
                             initiator: currentUser.uid,
@@ -3615,7 +3353,7 @@
                         db.collection('callInvitations').doc(callId).delete();
                     }
                     
-                    // FEATURE 1: Save connected call to local storage
+                    // Save connected call to local storage
                     saveCallToLocalStorage({
                         participants: [currentUser.uid, userId],
                         initiator: currentUser.uid,
@@ -3789,7 +3527,7 @@
         async function startGroupCall(userIds) {
             console.log('Starting group call with:', userIds);
             
-            // FEATURE 1 & 4: Check if offline
+            // Check if offline
             if (!isOnline) {
                 showNotification('Cannot start call while offline', 'error');
                 
@@ -3869,7 +3607,7 @@
                 startCallTimer();
                 if (currentCall) currentCall.status = 'connected';
                 
-                // FEATURE 1: Save group call to local storage
+                // Save group call to local storage
                 saveCallToLocalStorage({
                     participants: callParticipants,
                     initiator: currentUser.uid,
@@ -3899,7 +3637,7 @@
             }
             
             const videoContainer = document.createElement('div');
-            videoContainer.className = 'video-container fade-in always-visible';
+            videoContainer.className = 'video-container fade-in';
             videoContainer.dataset.userId = userId;
             
             if (isLocal) {
@@ -3907,7 +3645,7 @@
             }
             
             const video = document.createElement('video');
-            video.className = 'video-element always-visible';
+            video.className = 'video-element';
             video.srcObject = stream;
             video.autoplay = true;
             video.muted = isLocal;
@@ -3951,17 +3689,17 @@
             }
             
             const videoOverlay = document.createElement('div');
-            videoOverlay.className = 'video-overlay always-visible';
+            videoOverlay.className = 'video-overlay';
             videoOverlay.innerHTML = `
-                <div class="video-name always-visible">
+                <div class="video-name">
                     <i class="fas fa-${isLocal ? 'user' : 'user-friends'}"></i>
                     <span>${userName}</span>
                 </div>
-                <div class="video-actions always-visible">
-                    <button class="video-action-btn always-visible" data-action="pin" title="Pin">
+                <div class="video-actions">
+                    <button class="video-action-btn" data-action="pin" title="Pin">
                         <i class="fas fa-thumbtack"></i>
                     </button>
-                    <button class="video-action-btn always-visible" data-action="spotlight" title="Spotlight">
+                    <button class="video-action-btn" data-action="spotlight" title="Spotlight">
                         <i class="fas fa-star"></i>
                     </button>
                 </div>
@@ -4083,7 +3821,7 @@
                     callParticipants : 
                     [currentUser.uid, currentCall.targetId];
                 
-                // FEATURE 1: Save completed call to local storage
+                // Save completed call to local storage
                 saveCallToLocalStorage({
                     participants: participants,
                     initiator: currentCall.group ? currentUser.uid : currentCall.initiator,
@@ -4124,7 +3862,7 @@
         
         async function acceptCall(type = 'voice') {
             try {
-                // FEATURE 1 & 4: Check if offline before accepting call
+                // Check if offline before accepting call
                 if (!isOnline) {
                     showNotification('Cannot accept call while offline', 'error');
                     declineCall();
@@ -4187,7 +3925,7 @@
                     await db.collection('callInvitations').doc(incomingCall.metadata.callId).delete();
                 }
                 
-                // FEATURE 1: Save accepted call to local storage
+                // Save accepted call to local storage
                 saveCallToLocalStorage({
                     participants: [currentUser.uid, window.callerData.id],
                     initiator: window.callerData.id,
@@ -4219,7 +3957,7 @@
                 }
                 
                 if (window.callerData) {
-                    // FEATURE 1: Save missed call to local storage
+                    // Save missed call to local storage
                     saveCallToLocalStorage({
                         participants: [currentUser.uid, window.callerData.id],
                         initiator: window.callerData.id,
@@ -4265,7 +4003,7 @@
                     }
                 }
                 
-                // Update UI toggles
+                // Update UI toggles and apply settings immediately
                 updateSettingsUI();
                 applyUserSettings();
                 
@@ -4277,18 +4015,27 @@
         }
         
         function updateSettingsUI() {
-            document.getElementById('reactionsToggle').checked = userSettings.reactions;
-            document.getElementById('chatToggle').checked = userSettings.chat;
-            document.getElementById('whiteboardToggle').checked = userSettings.whiteboard;
-            document.getElementById('pollsToggle').checked = userSettings.polls;
-            document.getElementById('notesToggle').checked = userSettings.notes;
+            const reactionsToggle = document.getElementById('reactionsToggle');
+            const chatToggle = document.getElementById('chatToggle');
+            const whiteboardToggle = document.getElementById('whiteboardToggle');
+            const pollsToggle = document.getElementById('pollsToggle');
+            const notesToggle = document.getElementById('notesToggle');
+            
+            if (reactionsToggle) reactionsToggle.checked = userSettings.reactions;
+            if (chatToggle) chatToggle.checked = userSettings.chat;
+            if (whiteboardToggle) whiteboardToggle.checked = userSettings.whiteboard;
+            if (pollsToggle) pollsToggle.checked = userSettings.polls;
+            if (notesToggle) notesToggle.checked = userSettings.notes;
         }
         
         function saveUserSettings() {
             if (!currentUser) return;
             
-            // Always save to localStorage (works offline)
+            // Always save to localStorage (works offline) - immediate effect
             localStorage.setItem(`userSettings_${currentUser.uid}`, JSON.stringify(userSettings));
+            
+            // Apply settings immediately
+            applyUserSettings();
             
             // Try to save to Firebase if online
             if (isOnline && db) {
@@ -4296,13 +4043,18 @@
                     db.collection('userSettings').doc(currentUser.uid).set(userSettings, { merge: true })
                         .then(() => {
                             console.log('Settings saved to Firebase');
+                            showNotification('Settings updated', 'success');
                         })
                         .catch(error => {
                             console.error('Error saving user settings to Firebase:', error);
+                            showNotification('Settings saved locally', 'warning');
                         });
                 } catch (error) {
                     console.error('Error saving user settings:', error);
+                    showNotification('Settings saved locally', 'warning');
                 }
+            } else {
+                showNotification('Settings saved locally', 'success');
             }
         }
         
@@ -4318,7 +4070,6 @@
             const reactionsContainer = document.getElementById('reactionsContainer');
             if (reactionsContainer) {
                 reactionsContainer.style.display = userSettings.reactions ? 'flex' : 'none';
-                reactionsContainer.classList.add('always-visible');
             }
             
             const panelTabs = document.querySelectorAll('.panel-tab');
@@ -4339,17 +4090,21 @@
                         tab.style.display = userSettings.polls ? 'flex' : 'none';
                         break;
                 }
-                
-                // Always keep tab visible if setting is enabled
-                if (tab.style.display !== 'none') {
-                    tab.classList.add('always-visible');
-                }
             });
+            
+            // If active tab is now hidden, switch to participants tab
+            const activeTab = document.querySelector('.panel-tab.active');
+            if (activeTab && activeTab.style.display === 'none') {
+                const participantsTab = document.querySelector('.panel-tab[data-panel="participants"]');
+                if (participantsTab) {
+                    participantsTab.click();
+                }
+            }
         }
         
         async function loadAllCalls() {
             try {
-                allCallsList.innerHTML = '<div class="loading-placeholder always-visible" style="text-align: center; padding: 40px 20px; color: var(--text-secondary);"><i class="fas fa-spinner fa-spin" style="font-size: 24px; margin-bottom: 15px;"></i><p>Loading call history...</p></div>';
+                allCallsList.innerHTML = '<div class="loading-placeholder" style="text-align: center; padding: 40px 20px; color: var(--text-secondary);"><i class="fas fa-spinner fa-spin" style="font-size: 24px; margin-bottom: 15px;"></i><p>Loading call history...</p></div>';
                 
                 // If offline, load from local storage
                 if (!isOnline || !db) {
@@ -4453,16 +4208,15 @@
                 switch(type) {
                     case 'missed':
                         emptyMessage = `
-                            <div class="empty-state always-visible">
+                            <div class="empty-state">
                                 <i class="fas fa-phone-slash"></i>
                                 <p>No missed calls</p>
                                 <p class="subtext">All calls have been answered</p>
-                            </div>
                         `;
                         break;
                     case 'group':
                         emptyMessage = `
-                            <div class="empty-state always-visible">
+                            <div class="empty-state">
                                 <i class="fas fa-users"></i>
                                 <p>No group calls</p>
                                 <p class="subtext">Start your first group call</p>
@@ -4471,7 +4225,7 @@
                         break;
                     default:
                         emptyMessage = `
-                            <div class="empty-state always-visible">
+                            <div class="empty-state">
                                 <i class="fas fa-phone"></i>
                                 <p>No recent calls</p>
                                 <p class="subtext">Start your first call with the button above</p>
@@ -4503,12 +4257,6 @@
                     const minHeight = itemHeight * 5;
                     container.style.minHeight = minHeight + 'px';
                 }
-                
-                // Ensure all items are visible
-                callItems.forEach(item => {
-                    item.classList.add('always-visible');
-                    item.style.display = 'flex';
-                });
             }, 100);
         }
         
@@ -4566,9 +4314,8 @@
             }
             
             const callItem = document.createElement('div');
-            callItem.className = 'call-item always-visible';
+            callItem.className = 'call-item';
             callItem.dataset.callId = callId;
-            callItem.style.display = 'flex';
             
             let statusIconClass = '';
             let statusIcon = '';
@@ -4587,24 +4334,24 @@
             const initials = displayName.split(' ').map(word => word[0]).join('').toUpperCase().substring(0, 2);
             
             callItem.innerHTML = `
-                <div class="call-avatar always-visible" ${avatar ? `style="background-image: url('${avatar}')"` : ''}>
+                <div class="call-avatar" ${avatar ? `style="background-image: url('${avatar}')"` : ''}>
                     ${avatar ? '' : `<span>${initials}</span>`}
-                    <div class="call-status-icon ${statusIconClass} always-visible">
+                    <div class="call-status-icon ${statusIconClass}">
                         <i class="${statusIcon}"></i>
                     </div>
                 </div>
                 <div class="call-info">
-                    <div class="call-name always-visible">
+                    <div class="call-name">
                         <span>${displayName}</span>
-                        <span class="call-time always-visible">${callTime}</span>
+                        <span class="call-time">${callTime}</span>
                     </div>
-                    <div class="call-details always-visible">
+                    <div class="call-details">
                         <i class="fas fa-${callType === 'video' ? 'video' : 'phone'}"></i>
                         <span>${isMissed ? 'Missed' : (isOutgoing ? 'Outgoing' : 'Incoming')}</span>
                         ${durationText ? `<span>• ${durationText}</span>` : ''}
                     </div>
                 </div>
-                <button class="call-action-btn always-visible" title="Call Back" ${!isOnline ? 'disabled' : ''} style="display: flex;">
+                <button class="call-action-btn" title="Call Back" ${!isOnline ? 'disabled' : ''}>
                     <i class="fas fa-phone"></i>
                 </button>
             `;
@@ -4871,26 +4618,25 @@
             if (!participantsList) return;
             
             const participantItem = document.createElement('div');
-            participantItem.className = 'participant-item always-visible';
+            participantItem.className = 'participant-item';
             participantItem.dataset.userId = userId;
-            participantItem.style.display = 'flex';
             
             const initials = name.split(' ').map(word => word[0]).join('').toUpperCase().substring(0, 2);
             
             participantItem.innerHTML = `
-                <div class="participant-avatar always-visible" ${avatar ? `style="background-image: url('${avatar}')"` : ''}>
+                <div class="participant-avatar" ${avatar ? `style="background-image: url('${avatar}')"` : ''}>
                     ${avatar ? '' : `<span>${initials}</span>`}
                 </div>
                 <div class="participant-info">
-                    <div class="participant-name always-visible">${name}</div>
-                    <div class="participant-status ${isOnline ? 'active' : 'offline'} always-visible">
+                    <div class="participant-name">${name}</div>
+                    <div class="participant-status ${isOnline ? 'active' : 'offline'}">
                         <i class="fas fa-circle"></i>
                         ${isLocal ? 'You' : (isOnline ? 'Connected' : 'Offline')}
                     </div>
                 </div>
                 ${!isLocal ? `
-                <div class="participant-actions always-visible">
-                    <button class="video-action-btn always-visible" data-action="pin-user" title="Pin">
+                <div class="participant-actions">
+                    <button class="video-action-btn" data-action="pin-user" title="Pin">
                         <i class="fas fa-thumbtack"></i>
                     </button>
                 </div>
@@ -4904,16 +4650,16 @@
             const contactsList = document.getElementById('contactsList');
             const groupContactsList = document.getElementById('groupContactsList');
             
-            // If offline, show offline message - FEATURE 2 & 4
+            // If offline, show offline message
             if (!isOnline) {
-                const offlineMessage = '<div class="offline-contacts-message always-visible"><i class="fas fa-wifi-slash"></i><p>Contacts unavailable while offline</p><p class="subtext">Calls require internet connection</p></div>';
+                const offlineMessage = '<div class="offline-contacts-message"><i class="fas fa-wifi-slash"></i><p>Contacts unavailable while offline</p><p class="subtext">Calls require internet connection</p></div>';
                 contactsList.innerHTML = offlineMessage;
                 groupContactsList.innerHTML = offlineMessage;
                 return;
             }
             
-            contactsList.innerHTML = '<div style="text-align: center; padding: 20px; color: var(--text-secondary);" class="always-visible">Loading contacts...</div>';
-            groupContactsList.innerHTML = '<div style="text-align: center; padding: 20px; color: var(--text-secondary);" class="always-visible">Loading contacts...</div>';
+            contactsList.innerHTML = '<div style="text-align: center; padding: 20px; color: var(--text-secondary);">Loading contacts...</div>';
+            groupContactsList.innerHTML = '<div style="text-align: center; padding: 20px; color: var(--text-secondary);">Loading contacts...</div>';
             
             try {
                 if (!db) {
@@ -4929,7 +4675,7 @@
                 groupContactsList.innerHTML = '';
                 
                 if (usersSnapshot.empty) {
-                    const emptyMessage = '<div class="offline-contacts-message always-visible"><i class="fas fa-users"></i><p>No contacts found</p></div>';
+                    const emptyMessage = '<div class="offline-contacts-message"><i class="fas fa-users"></i><p>No contacts found</p></div>';
                     contactsList.innerHTML = emptyMessage;
                     groupContactsList.innerHTML = emptyMessage;
                     return;
@@ -4950,7 +4696,7 @@
                 showNotification('Failed to load contacts', 'error');
                 
                 // Show offline message
-                const offlineMessage = '<div class="offline-contacts-message always-visible"><i class="fas fa-wifi-slash"></i><p>Contacts unavailable while offline</p><p class="subtext">Calls require internet connection</p></div>';
+                const offlineMessage = '<div class="offline-contacts-message"><i class="fas fa-wifi-slash"></i><p>Contacts unavailable while offline</p><p class="subtext">Calls require internet connection</p></div>';
                 contactsList.innerHTML = offlineMessage;
                 groupContactsList.innerHTML = offlineMessage;
             }
@@ -4958,9 +4704,8 @@
         
         function addContactItem(userData, container) {
             const contactItem = document.createElement('div');
-            contactItem.className = 'contact-item always-visible';
+            contactItem.className = 'contact-item';
             contactItem.dataset.userId = userData.uid;
-            contactItem.style.display = 'flex';
             
             const initials = userData.displayName ? 
                 userData.displayName.split(' ').map(word => word[0]).join('').toUpperCase().substring(0, 2) : 
@@ -4972,18 +4717,18 @@
                 `${Math.floor(userData.lastOnline / 60)}h ago`;
             
             contactItem.innerHTML = `
-                <input type="checkbox" class="contact-checkbox always-visible" id="contact_${userData.uid}" ${!isOnline ? 'disabled' : ''}>
-                <div class="call-avatar always-visible" ${userData.photoURL ? `style="background-image: url('${userData.photoURL}')"` : ''}>
+                <input type="checkbox" class="contact-checkbox" id="contact_${userData.uid}" ${!isOnline ? 'disabled' : ''}>
+                <div class="call-avatar" ${userData.photoURL ? `style="background-image: url('${userData.photoURL}')"` : ''}>
                     ${userData.photoURL ? '' : `<span>${initials}</span>`}
-                    <div class="call-status-icon ${userData.online ? 'incoming' : 'missed'} always-visible" style="width: 12px; height: 12px;">
+                    <div class="call-status-icon ${userData.online ? 'incoming' : 'missed'}" style="width: 12px; height: 12px;">
                         <i class="fas fa-circle" style="font-size: 6px;"></i>
                     </div>
                 </div>
                 <div class="call-info" style="flex: 1;">
-                    <div class="call-name always-visible">
+                    <div class="call-name">
                         <span>${userData.displayName || 'User'}</span>
                     </div>
-                    <div class="call-details always-visible">
+                    <div class="call-details">
                         <span style="color: ${userData.online ? 'var(--success-color)' : 'var(--text-secondary)'}">
                             ${statusText}
                         </span>
@@ -5016,7 +4761,7 @@
             if (!chatMessages) return;
             
             const messageDiv = document.createElement('div');
-            messageDiv.className = `chat-message ${isSent ? 'sent' : 'received'} always-visible`;
+            messageDiv.className = `chat-message ${isSent ? 'sent' : 'received'}`;
             
             let senderName = 'Unknown';
             if (senderId === currentUser.uid) {
@@ -5054,8 +4799,8 @@
             }
             
             messageDiv.innerHTML = `
-                <div class="message-sender always-visible">${senderName}</div>
-                <div class="message-content always-visible">${message}</div>
+                <div class="message-sender">${senderName}</div>
+                <div class="message-content">${message}</div>
             `;
             
             chatMessages.appendChild(messageDiv);
@@ -5090,21 +4835,6 @@
         }
         
         function setupEventListeners() {
-            // Store original button texts for restoration when online
-            const quickActionButtons = document.querySelectorAll('.quick-action-btn');
-            quickActionButtons.forEach(button => {
-                const textElement = button.querySelector('.quick-action-text');
-                if (textElement) {
-                    const originalText = textElement.textContent;
-                    textElement.setAttribute('data-original-text', originalText);
-                    // FEATURE 2 & 4: Initially add offline warning if offline (but keep button visible)
-                    if (!isOnline) {
-                        textElement.innerHTML = originalText + '<div class="offline-warning-text">(Offline)</div>';
-                    }
-                    button.classList.add('always-visible');
-                }
-            });
-            
             // Store original button titles
             const callButtons = [
                 'newCallBtn',
@@ -5119,16 +4849,8 @@
             
             callButtons.forEach(buttonId => {
                 const button = document.getElementById(buttonId);
-                if (button) {
-                    if (button.title) {
-                        button.setAttribute('data-original-title', button.title);
-                    }
-                    // FEATURE 4: Initially disable if offline (but keep visible)
-                    if (!isOnline) {
-                        button.disabled = true;
-                        button.classList.add('disabled-by-offline');
-                    }
-                    button.classList.add('always-visible');
+                if (button && button.title) {
+                    button.setAttribute('data-original-title', button.title);
                 }
             });
             
@@ -5144,7 +4866,7 @@
                 }
             });
             
-            // Settings toggles
+            // Settings toggles - with immediate effect
             const reactionsToggle = document.getElementById('reactionsToggle');
             const chatToggle = document.getElementById('chatToggle');
             const whiteboardToggle = document.getElementById('whiteboardToggle');
@@ -5154,40 +4876,40 @@
             if (reactionsToggle) {
                 reactionsToggle.addEventListener('change', function() {
                     userSettings.reactions = this.checked;
-                    applyUserSettings();
-                    saveUserSettings();
+                    applyUserSettings(); // Immediate effect
+                    saveUserSettings(); // Save immediately
                 });
             }
             
             if (chatToggle) {
                 chatToggle.addEventListener('change', function() {
                     userSettings.chat = this.checked;
-                    applyUserSettings();
-                    saveUserSettings();
+                    applyUserSettings(); // Immediate effect
+                    saveUserSettings(); // Save immediately
                 });
             }
             
             if (whiteboardToggle) {
                 whiteboardToggle.addEventListener('change', function() {
                     userSettings.whiteboard = this.checked;
-                    applyUserSettings();
-                    saveUserSettings();
+                    applyUserSettings(); // Immediate effect
+                    saveUserSettings(); // Save immediately
                 });
             }
             
             if (pollsToggle) {
                 pollsToggle.addEventListener('change', function() {
                     userSettings.polls = this.checked;
-                    applyUserSettings();
-                    saveUserSettings();
+                    applyUserSettings(); // Immediate effect
+                    saveUserSettings(); // Save immediately
                 });
             }
             
             if (notesToggle) {
                 notesToggle.addEventListener('change', function() {
                     userSettings.notes = this.checked;
-                    applyUserSettings();
-                    saveUserSettings();
+                    applyUserSettings(); // Immediate effect
+                    saveUserSettings(); // Save immediately
                 });
             }
             
@@ -5195,10 +4917,9 @@
             const resetSettingsBtn = document.getElementById('resetSettingsBtn');
             if (resetSettingsBtn) {
                 resetSettingsBtn.addEventListener('click', resetSettingsToDefault);
-                resetSettingsBtn.classList.add('always-visible');
             }
             
-            // New call button - FEATURE 4: Disabled when offline (but visible)
+            // New call button
             document.getElementById('newCallBtn').addEventListener('click', () => {
                 if (!isOnline) {
                     showNotification('Cannot start call while offline', 'error');
@@ -5210,7 +4931,7 @@
                 selectedContacts = [];
             });
             
-            // Quick action buttons - FEATURE 4: Disabled when offline (but visible)
+            // Quick action buttons
             document.getElementById('voiceCallBtn').addEventListener('click', () => {
                 if (!isOnline) {
                     showNotification('Cannot start call while offline', 'error');
@@ -5273,7 +4994,7 @@
                 });
             });
             
-            // Start call button - FEATURE 4: Disabled when offline (but visible)
+            // Start call button
             document.getElementById('startCallBtn').addEventListener('click', async () => {
                 if (!isOnline) {
                     showNotification('Cannot start call while offline', 'error');
@@ -5313,7 +5034,7 @@
                 selectedContacts = [];
             });
             
-            // Incoming call buttons - FEATURE 4: Disabled when offline
+            // Incoming call buttons
             document.getElementById('declineCallBtn').addEventListener('click', function() {
                 this.disabled = true;
                 declineCall();
@@ -5329,7 +5050,7 @@
                 acceptCall('video');
             });
             
-            // Call control buttons - FEATURE 3: Always visible, even when offline
+            // Call control buttons
             document.getElementById('muteBtn').addEventListener('click', function() {
                 if (localStream) {
                     const audioTrack = localStream.getAudioTracks()[0];
@@ -5440,13 +5161,9 @@
                 shareScreen();
             });
             
-            // More button - FEATURE 3: Always visible, opens side panel
+            // More button
             document.getElementById('moreBtn').addEventListener('click', function() {
                 callSidePanel.classList.toggle('collapsed');
-                // Show offline message if offline
-                if (!isOnline && callSidePanel.classList.contains('collapsed')) {
-                    showNotification('Call features panel opened (offline mode)', 'info');
-                }
             });
             
             document.getElementById('endCallBtn').addEventListener('click', function() {
@@ -5459,7 +5176,7 @@
                 callSidePanel.classList.add('collapsed');
             });
             
-            // Panel tabs - FEATURE 4: Disable some tabs when offline (but keep visible)
+            // Panel tabs
             document.querySelectorAll('.panel-tab').forEach(tab => {
                 tab.addEventListener('click', function() {
                     const panelName = this.dataset.panel;
@@ -5512,7 +5229,7 @@
                 });
             });
             
-            // Add participants button - FEATURE 4: Disabled when offline
+            // Add participants button
             document.getElementById('addParticipantsBtn').addEventListener('click', () => {
                 if (!isOnline) {
                     showNotification('Cannot add participants while offline', 'error');
@@ -5639,7 +5356,7 @@
                 document.getElementById('notesPreview').innerHTML = html;
             });
             
-            // Reactions - FEATURE 3: Work offline for UI exploration
+            // Reactions
             document.querySelectorAll('.reaction-btn').forEach(reactionBtn => {
                 reactionBtn.addEventListener('click', function() {
                     if (!userSettings.reactions) {
@@ -5664,7 +5381,7 @@
                 });
             });
             
-            // Category tabs - FEATURE 2 & 3: Always visible and work offline
+            // Category tabs
             document.getElementById('allTab').addEventListener('click', function() {
                 document.querySelectorAll('.category-btn').forEach(btn => {
                     btn.classList.remove('active');
@@ -5696,7 +5413,7 @@
                     if (isOnline) {
                         loadMissedCalls();
                     } else {
-                        // FEATURE 2: Load missed calls from local storage when offline
+                        // Load missed calls from local storage when offline
                         const storedCalls = localStorage.getItem(getLocalStorageKey('history'));
                         if (storedCalls) {
                             const calls = JSON.parse(storedCalls);
@@ -5726,7 +5443,7 @@
                     if (isOnline) {
                         loadGroupCalls();
                     } else {
-                        // FEATURE 2: Load group calls from local storage when offline
+                        // Load group calls from local storage when offline
                         const storedCalls = localStorage.getItem(getLocalStorageKey('history'));
                         if (storedCalls) {
                             const calls = JSON.parse(storedCalls);
@@ -5740,7 +5457,7 @@
                 setTimeout(fixMobileLayout, 10);
             });
             
-            // Window resize - FEATURE 6: Ensure responsive design
+            // Window resize
             window.addEventListener('resize', () => {
                 if (whiteboardCanvas) {
                     whiteboardCanvas.width = whiteboardCanvas.offsetWidth;
@@ -5778,7 +5495,6 @@
                 document.getElementById('callParticipants').textContent = 'Offline Mode';
                 document.getElementById('callStatus').textContent = 'Call features require internet connection';
                 offlineCallPlaceholder.style.display = 'flex';
-                callContainer.classList.add('offline-ui-active');
             }
         }
         
@@ -5821,80 +5537,5 @@
         console.log('Video call system initialized successfully');
         showNotification('Video call system ready', 'success');
     </script>
-    <script>
-    // Settings integration for [Page Name]
-    let pageSettings = null;
-    
-    function initializePageSettings() {
-        if (window.KYNECTA_SETTINGS) {
-            window.KYNECTA_SETTINGS.registerPageCallback('[page-name]-page', applyPageSettings);
-            pageSettings = window.KYNECTA_SETTINGS.currentSettings;
-            applyPageSettings(pageSettings);
-        }
-    }
-    
-    function applyPageSettings(settings) {
-        console.log('[Page] applying settings:', settings);
-        pageSettings = settings;
-        
-        // Apply theme
-        const container = document.getElementById('mainContainer') || document.body;
-        container.className = container.className.replace(/theme-\S+/g, '');
-        if (settings.appearance.theme) {
-            container.classList.add(`theme-${settings.appearance.theme}`);
-        }
-        
-        // Apply font size
-        container.className = container.className.replace(/font-\S+/g, '');
-        if (settings.appearance.fontSize) {
-            container.classList.add(`font-${settings.appearance.fontSize}`);
-        }
-        
-        // Apply privacy settings
-        if (settings.privacy) {
-            // Example: Hide last seen based on privacy settings
-            const lastSeenElements = document.querySelectorAll('.last-seen');
-            lastSeenElements.forEach(el => {
-                if (settings.privacy.lastSeenVisibility === 'nobody') {
-                    el.textContent = 'Last seen hidden';
-                }
-            });
-        }
-        
-        // Apply notification settings
-        if (settings.notifications) {
-            // Enable/disable notification sounds
-            window.notificationSoundsEnabled = settings.notifications.sound;
-        }
-        
-        // Apply chat settings
-        if (settings.chat && document.getElementById('messageInput')) {
-            // Set enter to send behavior
-            const messageInput = document.getElementById('messageInput');
-            messageInput.addEventListener('keydown', function(e) {
-                if (e.key === 'Enter') {
-                    if (settings.chat.enterToSend && !e.shiftKey) {
-                        e.preventDefault();
-                        sendMessage();
-                    }
-                }
-            });
-        }
-    }
-    
-    // Cleanup on page unload
-    window.addEventListener('beforeunload', () => {
-        if (window.KYNECTA_SETTINGS) {
-            window.KYNECTA_SETTINGS.unregisterPageCallback('[page-name]-page');
-        }
-    });
-    
-    // Initialize
-    if (document.readyState === 'loading') {
-        document.addEventListener('DOMContentLoaded', initializePageSettings);
-    } else {
-        setTimeout(initializePageSettings, 100);
-    }
-</script>
 </body>
 </html>

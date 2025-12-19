@@ -334,8 +334,6 @@
                 font-size: 18px; /* Increased from 16px */
             }
             
-            /* Settings container height for mobile - REMOVED */
-            
             /* Mobile Navigation Bar - UPDATED: Added call icon and removed settings */
             .mobile-nav-bar {
                 position: fixed !important;
@@ -1016,6 +1014,149 @@
             box-shadow: 0 4px 12px rgba(0, 0, 0, 0.2);
         }
         
+        /* ====== OFFLINE CHAT ENHANCEMENTS ====== */
+        .message-input-enabled {
+            background-color: #ffffff;
+            border: 2px solid #667eea;
+        }
+        
+        .message-input-disabled {
+            background-color: #f3f4f6;
+            border: 2px solid #e5e7eb;
+        }
+        
+        .send-btn-enabled {
+            opacity: 1 !important;
+            transform: scale(1);
+        }
+        
+        .send-btn-disabled {
+            opacity: 0.5 !important;
+            transform: scale(0.95);
+        }
+        
+        .offline-queue-indicator {
+            position: absolute;
+            bottom: -20px;
+            left: 0;
+            font-size: 10px;
+            color: #6b7280;
+            background: #f3f4f6;
+            padding: 2px 6px;
+            border-radius: 10px;
+            display: none;
+        }
+        
+        .offline-queue-indicator.show {
+            display: block;
+        }
+        
+        .chat-history-cached {
+            border-left: 4px solid #34d399;
+        }
+        
+        /* ====== SETTINGS INTEGRATION STYLES ====== */
+        .theme-dark {
+            background-color: #1f2937;
+            color: #f9fafb;
+        }
+        
+        .theme-dark .message-bubble.received {
+            background-color: #374151;
+            color: #f9fafb;
+        }
+        
+        .theme-dark .chat-item {
+            background-color: #374151;
+            color: #f9fafb;
+        }
+        
+        .theme-dark .chat-item:hover {
+            background-color: #4b5563;
+        }
+        
+        .theme-dark .bg-white {
+            background-color: #374151 !important;
+            color: #f9fafb !important;
+        }
+        
+        .theme-dark .bg-gray-50 {
+            background-color: #1f2937 !important;
+        }
+        
+        .theme-dark .text-gray-700 {
+            color: #d1d5db !important;
+        }
+        
+        .theme-dark .border-gray-200 {
+            border-color: #4b5563 !important;
+        }
+        
+        .font-size-small .message-text {
+            font-size: 0.875rem !important;
+        }
+        
+        .font-size-medium .message-text {
+            font-size: 1rem !important;
+        }
+        
+        .font-size-large .message-text {
+            font-size: 1.125rem !important;
+        }
+        
+        .font-size-xlarge .message-text {
+            font-size: 1.25rem !important;
+        }
+        
+        .chat-wallpaper-default {
+            background: #f9fafb !important;
+        }
+        
+        .chat-wallpaper-gradient1 {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%) !important;
+            background-attachment: fixed !important;
+        }
+        
+        .chat-wallpaper-gradient2 {
+            background: linear-gradient(135deg, #f093fb 0%, #f5576c 100%) !important;
+            background-attachment: fixed !important;
+        }
+        
+        .chat-wallpaper-pattern1 {
+            background: url('data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" width="100" height="100" viewBox="0 0 100 100"><circle cx="50" cy="50" r="2" fill="%23667eea" opacity="0.1"/></svg>') repeat !important;
+            background-color: #f9fafb !important;
+        }
+        
+        /* ====== CROSS-SCREEN COMMUNICATION STYLES ====== */
+        .incoming-call-alert {
+            position: fixed;
+            top: 20px;
+            right: 20px;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            padding: 15px 20px;
+            border-radius: 12px;
+            box-shadow: 0 10px 25px rgba(0,0,0,0.2);
+            z-index: 9999;
+            animation: slideInRight 0.3s ease;
+            max-width: 300px;
+        }
+        
+        .cross-screen-notification {
+            position: fixed;
+            top: 80px;
+            right: 20px;
+            background: white;
+            color: #374151;
+            padding: 12px 16px;
+            border-radius: 10px;
+            box-shadow: 0 5px 15px rgba(0,0,0,0.1);
+            z-index: 9998;
+            border-left: 4px solid #667eea;
+            animation: fadeIn 0.3s ease;
+            max-width: 300px;
+        }
+        
         /* ====== CRITICAL FIXES - END ====== */
     </style>
 </head>
@@ -1031,6 +1172,28 @@
 
     <!-- Call Notifications Container -->
     <div id="callNotificationContainer" class="fixed top-4 left-4 z-50 space-y-2"></div>
+    
+    <!-- Cross-screen incoming call alert -->
+    <div id="crossScreenCallAlert" class="incoming-call-alert hidden">
+        <div class="flex items-center justify-between">
+            <div>
+                <i class="fas fa-phone mr-2"></i>
+                <span id="crossScreenCallerName">Unknown</span> is calling
+            </div>
+            <button id="crossScreenAcceptCall" class="bg-green-500 text-white px-3 py-1 rounded-lg text-sm ml-4">Accept</button>
+        </div>
+    </div>
+    
+    <!-- Cross-screen chat notification -->
+    <div id="crossScreenChatNotification" class="cross-screen-notification hidden">
+        <div class="flex items-center">
+            <i class="fas fa-comment-alt mr-3 text-purple-500"></i>
+            <div>
+                <div class="font-medium" id="crossScreenChatSender">New message</div>
+                <div class="text-sm text-gray-600 truncate" id="crossScreenChatPreview">Loading...</div>
+            </div>
+        </div>
+    </div>
 
     <div id="loadingScreen" class="fixed inset-0 bg-white z-50 flex items-center justify-center">
         <div class="text-center">
@@ -2300,190 +2463,47 @@
             </div>
         </div>
     </div>
-   
 
-   <script>
-    // ====== CRITICAL FIXES - START ======
-    
-    // chat.html - Settings integration
-    let currentSettings = null;
-    
-    // Register this page with the settings service
-    function initializeSettingsIntegration() {
-      if (window.KYNECTA_SETTINGS) {
-        window.KYNECTA_SETTINGS.registerPageCallback('chat-page', applyPageSettings);
-        
-        // Get initial settings
-        currentSettings = window.KYNECTA_SETTINGS.getSetting('', {});
-        
-        // Apply initial settings
-        applyPageSettings(currentSettings);
-      } else {
-        // If settings service isn't ready yet, wait for it
-        window.addEventListener('load', function() {
-          if (window.KYNECTA_SETTINGS) {
-            window.KYNECTA_SETTINGS.registerPageCallback('chat-page', applyPageSettings);
-            currentSettings = window.KYNECTA_SETTINGS.getSetting('', {});
-            applyPageSettings(currentSettings);
-          }
-        });
-      }
-    }
-    
-    // Apply settings to the chat page
-    function applyPageSettings(settings) {
-      console.log('Chat page applying settings:', settings);
-      currentSettings = settings;
-      
-      // 1. Apply theme to chat-specific elements
-      applyChatTheme(settings.theme);
-      
-      // 2. Apply font size to chat elements
-      applyChatFontSize(settings.fontSize);
-      
-      // 3. Apply notification settings
-      applyNotificationSettings(settings.notifications);
-      
-      // 4. Apply privacy settings
-      applyPrivacySettings(settings.privacy);
-      
-      // 5. Apply chat-specific settings
-      applyChatSpecificSettings(settings);
-    }
-    
-    // Theme application for chat
-    function applyChatTheme(theme) {
-      const chatContainer = document.getElementById('chatArea') || document.querySelector('.message-list');
-      if (!chatContainer) return;
-      
-      // Remove existing theme classes
-      chatContainer.classList.remove('chat-theme-dark', 'chat-theme-light', 'chat-theme-auto');
-      
-      // Apply theme class
-      if (theme === 'auto') {
-        const prefersDark = window.matchMedia('(prefers-color-scheme: dark)').matches;
-        chatContainer.classList.add(prefersDark ? 'chat-theme-dark' : 'chat-theme-light');
-      } else if (theme === 'dark' || theme === 'light') {
-        chatContainer.classList.add(`chat-theme-${theme}`);
-      }
-      
-      // Update chat bubble colors based on theme
-      document.querySelectorAll('.message-bubble').forEach(bubble => {
-        if (theme === 'dark') {
-          bubble.style.backgroundColor = '#374151';
-          bubble.style.color = '#ffffff';
-        } else if (theme === 'light') {
-          bubble.style.backgroundColor = '#f3f4f6';
-          bubble.style.color = '#111827';
-        }
-      });
-    }
-    
-    // Font size application for chat
-    function applyChatFontSize(fontSize) {
-      const chatContainer = document.getElementById('chatArea') || document.querySelector('.message-list');
-      if (!chatContainer) return;
-      
-      // Remove existing font size classes
-      chatContainer.classList.remove('chat-font-small', 'chat-font-medium', 'chat-font-large', 'chat-font-xlarge');
-      
-      // Apply font size class
-      if (fontSize) {
-        chatContainer.classList.add(`chat-font-${fontSize}`);
-      }
-      
-      // Adjust specific elements
-      document.querySelectorAll('.message-text').forEach(text => {
-        switch(fontSize) {
-          case 'small':
-            text.style.fontSize = '0.875rem';
-            break;
-          case 'large':
-            text.style.fontSize = '1.125rem';
-            break;
-          case 'xlarge':
-            text.style.fontSize = '1.25rem';
-            break;
-          default: // medium
-            text.style.fontSize = '1rem';
-        }
-      });
-    }
-    
-    // Notification settings for chat
-    function applyNotificationSettings(notifications) {
-      if (!notifications) return;
-      
-      // Disable notification sounds if turned off
-      if (!notifications.sound) {
-        window.chatNotificationSoundEnabled = false;
-      }
-      
-      // Update UI indicators
-      const notificationIcon = document.getElementById('notificationStatus');
-      if (notificationIcon) {
-        notificationIcon.textContent = notifications.messages ? '🔔' : '🔕';
-        notificationIcon.title = notifications.messages ? 
-          'Message notifications enabled' : 'Message notifications disabled';
-      }
-    }
-    
-    // Privacy settings for chat
-    function applyPrivacySettings(privacy) {
-      if (!privacy) return;
-      
-      // Show/hide read receipts
-      document.querySelectorAll('.read-receipt').forEach(receipt => {
-        receipt.style.display = privacy.readReceipts ? 'inline-block' : 'none';
-      });
-      
-      // Show/hide typing indicators
-      const typingIndicator = document.getElementById('typingIndicator');
-      if (typingIndicator) {
-        typingIndicator.style.display = privacy.typingIndicators ? 'block' : 'none';
-      }
-    }
-    
-    // Chat-specific settings
-    function applyChatSpecificSettings(settings) {
-      // Apply chat wallpaper
-      if (settings.chatWallpaper) {
-        const chatArea = document.getElementById('chatArea') || document.querySelector('.message-list');
-        if (chatArea) {
-          // Remove existing wallpaper classes
-          chatArea.classList.remove(
-            'chat-wallpaper-default',
-            'chat-wallpaper-gradient1',
-            'chat-wallpaper-gradient2',
-            'chat-wallpaper-pattern1'
-          );
-          
-          if (settings.chatWallpaper !== 'default') {
-            chatArea.classList.add(`chat-wallpaper-${settings.chatWallpaper}`);
-          }
-          
-          // Apply custom wallpaper if set
-          if (settings.chatWallpaper === 'custom' && settings.customWallpaper) {
-            chatArea.style.backgroundImage = `url('${settings.customWallpaper}')`;
-            chatArea.style.backgroundSize = 'cover';
-          }
-        }
-      }
-    }
-    
-    // Clean up when page unloads
-    window.addEventListener('beforeunload', () => {
-      if (window.KYNECTA_SETTINGS) {
-        window.KYNECTA_SETTINGS.unregisterPageCallback('chat-page');
-      }
-    });
-    
-    // Initialize settings integration when DOM is ready
-    if (document.readyState === 'loading') {
-      document.addEventListener('DOMContentLoaded', initializeSettingsIntegration);
-    } else {
-      setTimeout(initializeSettingsIntegration, 100);
-    }
+    <!-- Offline Queue Status Modal -->
+    <div id="offlineQueueModal" class="hidden fixed inset-0 bg-black bg-opacity-50 z-50 flex items-center justify-center p-4">
+        <div class="bg-white rounded-2xl w-full max-w-md max-h-[80vh] overflow-hidden">
+            <div class="kynecta-header p-6">
+                <div class="flex items-center justify-between">
+                    <h3 class="text-xl font-semibold text-white flex items-center">
+                        <i class="fas fa-wifi-slash mr-2"></i>
+                        Offline Messages
+                    </h3>
+                    <button id="closeOfflineQueue" class="text-white/80 hover:text-white transition-colors" onclick="closeModal('offlineQueueModal')">
+                        <i class="fas fa-times text-xl"></i>
+                    </button>
+                </div>
+            </div>
+            
+            <div class="overflow-y-auto max-h-[50vh] custom-scrollbar p-6">
+                <div id="offlineQueueList" class="space-y-3">
+                    <!-- Offline messages will be listed here -->
+                </div>
+                
+                <div id="noOfflineMessages" class="text-center py-8 text-gray-500">
+                    <i class="fas fa-check-circle text-4xl mb-3 text-green-400 block"></i>
+                    <p>No offline messages</p>
+                    <p class="text-sm mt-1">All messages are sent</p>
+                </div>
+            </div>
+            
+            <div class="p-4 border-t border-gray-200">
+                <button id="retryAllOffline" class="w-full bg-gradient-to-r from-purple-500 to-green-500 text-white py-3 rounded-xl font-semibold hover:opacity-90 transition-opacity mb-2">
+                    Retry All Messages
+                </button>
+                <button id="clearOfflineQueue" class="w-full bg-gray-200 text-gray-700 py-3 rounded-xl font-semibold hover:bg-gray-300 transition-colors">
+                    Clear Queue
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <script>
+    // ====== ENHANCED OFFLINE CHAT SYSTEM ======
     
     // Firebase configuration
     const firebaseConfig = {
@@ -2527,8 +2547,7 @@
     
     window.tailwindConfig = { ignoreCDNWarning: true };
     
-    // ====== CRITICAL FIX 1: Chat filter buttons NOT responding ======
-    // Enhanced navigation state management with offline-first approach
+    // ====== ENHANCED STATE MANAGEMENT ======
     let currentPage = 'chats';
     let lastChatState = null;
     let selectedFriendForChat = null;
@@ -2551,198 +2570,1465 @@
     };
     let crossScreenListeners = {};
     let iframesLoaded = {}; // Track iframes that are already loaded
+    let chatSettings = null; // Store chat-specific settings
+    let crossScreenCallHandler = null; // For incoming calls from other screens
     
-    // ====== CRITICAL FIX: Initialize cross-screen notification system ======
-    function initializeCrossScreenNotifications() {
-        // Listen for notifications from other screens
+    // ====== OFFLINE QUEUE MANAGEMENT ======
+    class OfflineQueue {
+        constructor() {
+            this.queue = this.loadQueue();
+            this.maxQueueSize = 100; // Maximum messages to store offline
+        }
+        
+        loadQueue() {
+            try {
+                const queue = localStorage.getItem('kynecta_offline_queue');
+                return queue ? JSON.parse(queue) : [];
+            } catch (e) {
+                console.error('Error loading offline queue:', e);
+                return [];
+            }
+        }
+        
+        saveQueue() {
+            try {
+                localStorage.setItem('kynecta_offline_queue', JSON.stringify(this.queue));
+            } catch (e) {
+                console.error('Error saving offline queue:', e);
+            }
+        }
+        
+        addMessage(message) {
+            // Add timestamp if not present
+            if (!message.timestamp) {
+                message.timestamp = new Date().toISOString();
+            }
+            
+            // Add local ID if not present
+            if (!message.localId) {
+                message.localId = 'local_' + Date.now() + '_' + Math.random().toString(36).substr(2, 9);
+            }
+            
+            // Mark as pending
+            message.status = 'pending';
+            
+            // Add to queue
+            this.queue.push(message);
+            
+            // Limit queue size
+            if (this.queue.length > this.maxQueueSize) {
+                this.queue = this.queue.slice(-this.maxQueueSize);
+            }
+            
+            this.saveQueue();
+            this.updateOfflineIndicator();
+            
+            return message.localId;
+        }
+        
+        removeMessage(localId) {
+            const initialLength = this.queue.length;
+            this.queue = this.queue.filter(msg => msg.localId !== localId);
+            
+            if (this.queue.length !== initialLength) {
+                this.saveQueue();
+                this.updateOfflineIndicator();
+                return true;
+            }
+            return false;
+        }
+        
+        getMessages() {
+            return this.queue;
+        }
+        
+        clearQueue() {
+            this.queue = [];
+            this.saveQueue();
+            this.updateOfflineIndicator();
+        }
+        
+        updateOfflineIndicator() {
+            const offlineIndicator = document.getElementById('offlineIndicator');
+            const offlineMessageCount = document.getElementById('offlineMessageCount');
+            
+            if (offlineIndicator && offlineMessageCount) {
+                if (this.queue.length > 0) {
+                    offlineMessageCount.textContent = `${this.queue.length} message${this.queue.length !== 1 ? 's' : ''} pending`;
+                } else {
+                    offlineMessageCount.textContent = '';
+                }
+            }
+        }
+        
+        async retryAll() {
+            if (!isOnline) return false;
+            
+            const messagesToRetry = [...this.queue];
+            let successCount = 0;
+            
+            for (const message of messagesToRetry) {
+                try {
+                    await sendMessageToFirebase(message);
+                    this.removeMessage(message.localId);
+                    successCount++;
+                } catch (error) {
+                    console.error('Failed to retry message:', error);
+                }
+            }
+            
+            return successCount;
+        }
+    }
+    
+    // Initialize offline queue
+    const offlineQueue = new OfflineQueue();
+    
+    // ====== CHAT HISTORY CACHE ======
+    class ChatHistoryCache {
+        constructor() {
+            this.maxMessagesPerChat = 100;
+        }
+        
+        saveChatHistory(friendId, messages) {
+            try {
+                const key = `kynecta_chat_history_${friendId}`;
+                // Limit number of messages stored
+                const limitedMessages = messages.slice(-this.maxMessagesPerChat);
+                localStorage.setItem(key, JSON.stringify(limitedMessages));
+                return true;
+            } catch (e) {
+                console.error('Error saving chat history:', e);
+                return false;
+            }
+        }
+        
+        loadChatHistory(friendId) {
+            try {
+                const key = `kynecta_chat_history_${friendId}`;
+                const history = localStorage.getItem(key);
+                return history ? JSON.parse(history) : [];
+            } catch (e) {
+                console.error('Error loading chat history:', e);
+                return [];
+            }
+        }
+        
+        addMessage(friendId, message) {
+            const history = this.loadChatHistory(friendId);
+            history.push(message);
+            return this.saveChatHistory(friendId, history);
+        }
+        
+        clearChatHistory(friendId) {
+            try {
+                const key = `kynecta_chat_history_${friendId}`;
+                localStorage.removeItem(key);
+                return true;
+            } catch (e) {
+                console.error('Error clearing chat history:', e);
+                return false;
+            }
+        }
+        
+        getRecentChats() {
+            const recentChats = [];
+            const prefix = 'kynecta_chat_history_';
+            
+            for (let i = 0; i < localStorage.length; i++) {
+                const key = localStorage.key(i);
+                if (key.startsWith(prefix)) {
+                    const friendId = key.replace(prefix, '');
+                    try {
+                        const messages = JSON.parse(localStorage.getItem(key));
+                        if (messages && messages.length > 0) {
+                            // Get last message
+                            const lastMessage = messages[messages.length - 1];
+                            recentChats.push({
+                                friendId: friendId,
+                                lastMessage: lastMessage.text || '📎 Attachment',
+                                timestamp: lastMessage.timestamp,
+                                unread: false // This would need to be tracked separately
+                            });
+                        }
+                    } catch (e) {
+                        console.error('Error parsing chat history:', e);
+                    }
+                }
+            }
+            
+            // Sort by timestamp
+            return recentChats.sort((a, b) => new Date(b.timestamp) - new Date(a.timestamp));
+        }
+    }
+    
+    // Initialize chat history cache
+    const chatHistoryCache = new ChatHistoryCache();
+    
+    // ====== SETTINGS INTEGRATION ======
+    function initializeSettingsIntegration() {
+        // Load saved settings
+        chatSettings = loadChatSettings();
+        
+        // Apply initial settings
+        applyChatSettings(chatSettings);
+        
+        // Listen for settings changes from settings page
         window.addEventListener('message', function(event) {
-            if (event.data && event.data.type === 'kynecta_notification') {
-                handleCrossScreenNotification(event.data);
+            if (event.data && event.data.type === 'kynecta_settings_update') {
+                updateChatSettings(event.data.settings);
             }
         });
         
-        // Setup real-time listeners for Firebase notifications
-        setupFirebaseNotificationListeners();
+        // Listen for storage events (for cross-tab settings sync)
+        window.addEventListener('storage', function(event) {
+            if (event.key === 'kynecta_chat_settings') {
+                chatSettings = loadChatSettings();
+                applyChatSettings(chatSettings);
+            }
+        });
     }
     
-    // Handle notifications from other screens
-    function handleCrossScreenNotification(notification) {
-        switch(notification.event) {
+    function loadChatSettings() {
+        try {
+            const settings = localStorage.getItem('kynecta_chat_settings');
+            return settings ? JSON.parse(settings) : getDefaultChatSettings();
+        } catch (e) {
+            console.error('Error loading chat settings:', e);
+            return getDefaultChatSettings();
+        }
+    }
+    
+    function getDefaultChatSettings() {
+        return {
+            theme: localStorage.getItem('kynecta_theme') || 'light',
+            fontSize: 'medium',
+            wallpaper: 'default',
+            enterToSend: true,
+            showReadReceipts: true,
+            showTypingIndicator: true,
+            notificationSound: true,
+            notificationVibrate: true,
+            privacy: {
+                lastSeen: 'everyone',
+                profilePhoto: 'everyone',
+                status: 'everyone'
+            },
+            chat: {
+                saveToCameraRoll: true,
+                mediaAutoDownload: 'wifi',
+                fontSize: 'medium'
+            }
+        };
+    }
+    
+    function saveChatSettings(settings) {
+        try {
+            localStorage.setItem('kynecta_chat_settings', JSON.stringify(settings));
+            return true;
+        } catch (e) {
+            console.error('Error saving chat settings:', e);
+            return false;
+        }
+    }
+    
+    function updateChatSettings(newSettings) {
+        chatSettings = { ...chatSettings, ...newSettings };
+        saveChatSettings(chatSettings);
+        applyChatSettings(chatSettings);
+    }
+    
+    function applyChatSettings(settings) {
+        if (!settings) return;
+        
+        // Apply theme
+        applyTheme(settings.theme);
+        
+        // Apply font size
+        applyFontSize(settings.fontSize);
+        
+        // Apply wallpaper
+        applyWallpaper(settings.wallpaper);
+        
+        // Apply chat-specific settings
+        applyChatSpecificSettings(settings);
+        
+        // Update UI based on settings
+        updateUIBasedOnSettings(settings);
+    }
+    
+    function applyTheme(theme) {
+        const body = document.body;
+        body.setAttribute('data-theme', theme);
+        
+        // Update theme toggle icons
+        const themeIcons = [
+            document.getElementById('themeIcon'),
+            document.getElementById('mobileThemeIcon'),
+            document.getElementById('themeIconTools'),
+            document.getElementById('mobileThemeIconTools')
+        ];
+        
+        themeIcons.forEach(icon => {
+            if (icon) {
+                icon.className = theme === 'dark' ? 'fas fa-sun' : 'fas fa-moon';
+            }
+        });
+        
+        // Save theme preference
+        localStorage.setItem('kynecta_theme', theme);
+    }
+    
+    function applyFontSize(fontSize) {
+        const chatArea = document.getElementById('chatArea');
+        const messagesContainer = document.getElementById('messagesContainer');
+        
+        if (chatArea) {
+            // Remove existing font size classes
+            chatArea.classList.remove('font-size-small', 'font-size-medium', 'font-size-large', 'font-size-xlarge');
+            // Add new font size class
+            chatArea.classList.add(`font-size-${fontSize}`);
+        }
+        
+        // Apply to message bubbles
+        document.querySelectorAll('.message-bubble').forEach(bubble => {
+            switch(fontSize) {
+                case 'small':
+                    bubble.style.fontSize = '0.875rem';
+                    break;
+                case 'large':
+                    bubble.style.fontSize = '1.125rem';
+                    break;
+                case 'xlarge':
+                    bubble.style.fontSize = '1.25rem';
+                    break;
+                default: // medium
+                    bubble.style.fontSize = '1rem';
+            }
+        });
+    }
+    
+    function applyWallpaper(wallpaper) {
+        const chatArea = document.getElementById('chatArea');
+        if (!chatArea) return;
+        
+        // Remove existing wallpaper classes
+        chatArea.classList.remove(
+            'chat-wallpaper-default',
+            'chat-wallpaper-gradient1',
+            'chat-wallpaper-gradient2',
+            'chat-wallpaper-pattern1'
+        );
+        
+        // Add new wallpaper class
+        if (wallpaper !== 'default') {
+            chatArea.classList.add(`chat-wallpaper-${wallpaper}`);
+        }
+        
+        // Apply custom wallpaper if set
+        if (wallpaper === 'custom' && chatSettings.customWallpaper) {
+            chatArea.style.backgroundImage = `url('${chatSettings.customWallpaper}')`;
+            chatArea.style.backgroundSize = 'cover';
+            chatArea.style.backgroundAttachment = 'fixed';
+        } else {
+            chatArea.style.backgroundImage = '';
+        }
+    }
+    
+    function applyChatSpecificSettings(settings) {
+        // Apply enter to send behavior
+        const messageInput = document.getElementById('messageInput');
+        if (messageInput) {
+            messageInput.removeEventListener('keydown', handleEnterKey);
+            messageInput.addEventListener('keydown', handleEnterKey);
+        }
+        
+        // Apply read receipts visibility
+        const readReceipts = document.querySelectorAll('.message-status.read');
+        readReceipts.forEach(receipt => {
+            receipt.style.display = settings.showReadReceipts ? 'inline-block' : 'none';
+        });
+        
+        // Apply typing indicator visibility
+        const typingIndicator = document.getElementById('typingIndicator');
+        if (typingIndicator) {
+            typingIndicator.style.display = settings.showTypingIndicator ? 'flex' : 'none';
+        }
+    }
+    
+    function handleEnterKey(e) {
+        if (e.key === 'Enter') {
+            if (chatSettings.enterToSend && !e.shiftKey) {
+                e.preventDefault();
+                if (currentChatId && !document.getElementById('messageInput').disabled) {
+                    sendMessage();
+                }
+            }
+        }
+    }
+    
+    function updateUIBasedOnSettings(settings) {
+        // Update notification sound setting
+        window.notificationSoundEnabled = settings.notificationSound;
+        
+        // Update vibration setting
+        window.vibrationEnabled = settings.notificationVibrate;
+        
+        // Update privacy indicators
+        updatePrivacyIndicators(settings.privacy);
+    }
+    
+    function updatePrivacyIndicators(privacy) {
+        // Update last seen visibility
+        const lastSeenElements = document.querySelectorAll('.last-seen');
+        lastSeenElements.forEach(el => {
+            if (privacy.lastSeen === 'nobody') {
+                el.textContent = 'Last seen hidden';
+            }
+        });
+    }
+    
+    // ====== CROSS-SCREEN COMMUNICATION ======
+    function initializeCrossScreenCommunication() {
+        // Listen for messages from other screens
+        window.addEventListener('message', function(event) {
+            if (event.data && event.data.type === 'kynecta_cross_screen') {
+                handleCrossScreenMessage(event.data);
+            }
+        });
+        
+        // Listen for incoming calls from Firebase
+        setupIncomingCallListener();
+        
+        // Listen for new messages from Firebase
+        setupNewMessageListener();
+        
+        // Listen for friend requests
+        setupFriendRequestListener();
+    }
+    
+    function handleCrossScreenMessage(data) {
+        switch(data.action) {
             case 'incoming_call':
-                showCallNotification(notification.data);
+                showCrossScreenCallAlert(data.callerName, data.callType, data.callId);
                 break;
-            case 'new_friend_request':
-                showToast(`New friend request from ${notification.data.name}`, 'info');
-                updateNotificationBadge('friends', notificationCounts.friends + 1);
+            case 'new_message':
+                showCrossScreenChatNotification(data.senderName, data.message, data.chatId);
                 break;
-            case 'group_message':
-                showToast(`New message in ${notification.data.groupName}`, 'info');
-                updateNotificationBadge('groups', notificationCounts.groups + 1);
+            case 'friend_request':
+                showCrossScreenFriendRequest(data.requesterName, data.requestId);
                 break;
             case 'status_update':
-                showToast(`${notification.data.name} posted a new status`, 'info');
-                updateNotificationBadge('status', notificationCounts.status + 1);
+                showCrossScreenStatusUpdate(data.userName, data.status);
                 break;
         }
     }
     
-    // Setup Firebase notification listeners
-    function setupFirebaseNotificationListeners() {
+    function showCrossScreenCallAlert(callerName, callType, callId) {
+        const alert = document.getElementById('crossScreenCallAlert');
+        const callerNameEl = document.getElementById('crossScreenCallerName');
+        const acceptBtn = document.getElementById('crossScreenAcceptCall');
+        
+        if (alert && callerNameEl && acceptBtn) {
+            callerNameEl.textContent = callerName;
+            alert.classList.remove('hidden');
+            
+            // Setup accept button
+            acceptBtn.onclick = function() {
+                acceptIncomingCall({
+                    callerName: callerName,
+                    type: callType,
+                    callId: callId
+                });
+                alert.classList.add('hidden');
+            };
+            
+            // Auto-dismiss after 30 seconds
+            setTimeout(() => {
+                if (!alert.classList.contains('hidden')) {
+                    alert.classList.add('hidden');
+                }
+            }, 30000);
+        }
+    }
+    
+    function showCrossScreenChatNotification(senderName, message, chatId) {
+        const notification = document.getElementById('crossScreenChatNotification');
+        const senderEl = document.getElementById('crossScreenChatSender');
+        const previewEl = document.getElementById('crossScreenChatPreview');
+        
+        if (notification && senderEl && previewEl) {
+            senderEl.textContent = senderName;
+            previewEl.textContent = message.length > 50 ? message.substring(0, 50) + '...' : message;
+            notification.classList.remove('hidden');
+            
+            // Make clickable to open chat
+            notification.onclick = function() {
+                // Find friend by chatId and open chat
+                const friend = friendsList.find(f => f.id === chatId);
+                if (friend) {
+                    openChatWithFriend(friend);
+                }
+                notification.classList.add('hidden');
+            };
+            
+            // Auto-dismiss after 10 seconds
+            setTimeout(() => {
+                if (!notification.classList.contains('hidden')) {
+                    notification.classList.add('hidden');
+                }
+            }, 10000);
+        }
+    }
+    
+    function setupIncomingCallListener() {
         const currentUser = firebase.auth().currentUser;
         if (!currentUser) return;
         
         const db = firebase.firestore();
-        
-        // Listen for incoming calls
-        db.collection('calls').where('receiverId', '==', currentUser.uid)
+        db.collection('calls')
+            .where('receiverId', '==', currentUser.uid)
             .where('status', '==', 'ringing')
             .onSnapshot(snapshot => {
                 snapshot.docChanges().forEach(change => {
                     if (change.type === 'added') {
                         const callData = change.doc.data();
+                        callData.callId = change.doc.id;
                         showIncomingCallPopup(callData);
                     }
                 });
             });
+    }
+    
+    function setupNewMessageListener() {
+        const currentUser = firebase.auth().currentUser;
+        if (!currentUser) return;
         
-        // Listen for friend requests
-        db.collection('friendRequests').where('receiverId', '==', currentUser.uid)
+        // This would be implemented with Firebase real-time listeners
+        // For now, we'll use a polling mechanism for offline-first approach
+        setInterval(() => {
+            if (isOnline) {
+                checkForNewMessages();
+            }
+        }, 30000); // Check every 30 seconds
+    }
+    
+    async function checkForNewMessages() {
+        const currentUser = firebase.auth().currentUser;
+        if (!currentUser) return;
+        
+        try {
+            const db = firebase.firestore();
+            
+            for (const friend of friendsList) {
+                if (friend.id === currentChatId) continue; // Skip current chat
+                
+                const chatId = [currentUser.uid, friend.id].sort().join('_');
+                const messagesRef = db.collection('chats').doc(chatId).collection('messages')
+                    .orderBy('timestamp', 'desc')
+                    .limit(1);
+                
+                const snapshot = await messagesRef.get();
+                if (!snapshot.empty) {
+                    const message = snapshot.docs[0].data();
+                    // Check if this is a new message (not already cached)
+                    const cachedHistory = chatHistoryCache.loadChatHistory(friend.id);
+                    const isNew = !cachedHistory.some(msg => msg.id === snapshot.docs[0].id);
+                    
+                    if (isNew && message.senderId !== currentUser.uid) {
+                        // Show notification
+                        showToast(`New message from ${friend.displayName}`, 'info');
+                        
+                        // Update badge
+                        updateNotificationBadge('chats', notificationCounts.chats + 1);
+                    }
+                }
+            }
+        } catch (error) {
+            console.error('Error checking for new messages:', error);
+        }
+    }
+    
+    function setupFriendRequestListener() {
+        const currentUser = firebase.auth().currentUser;
+        if (!currentUser) return;
+        
+        const db = firebase.firestore();
+        db.collection('friendRequests')
+            .where('receiverId', '==', currentUser.uid)
             .where('status', '==', 'pending')
             .onSnapshot(snapshot => {
                 updateNotificationBadge('friends', snapshot.size);
             });
     }
     
-    // Show incoming call popup
-    function showIncomingCallPopup(callData) {
-        const incomingCallPopup = document.getElementById('incomingCallPopup');
-        const incomingCallerName = document.getElementById('incomingCallerName');
-        const incomingCallType = document.getElementById('incomingCallType');
+    // ====== ENHANCED OFFLINE CHAT FUNCTIONS ======
+    function updateOnlineStatus() {
+        const wasOnline = isOnline;
+        isOnline = navigator.onLine;
+        const offlineIndicator = document.getElementById('offlineIndicator');
         
-        if (incomingCallPopup && incomingCallerName && incomingCallType) {
-            incomingCallerName.textContent = callData.callerName || 'Unknown';
-            incomingCallType.textContent = callData.type === 'video' ? 'Video Call' : 'Voice Call';
-            incomingCallPopup.classList.remove('hidden');
-            
-            // Setup accept/reject buttons
-            document.getElementById('acceptCallBtn').onclick = () => acceptIncomingCall(callData);
-            document.getElementById('rejectCallBtn').onclick = () => rejectIncomingCall(callData.callId);
+        if (offlineIndicator) {
+            if (!isOnline) {
+                offlineIndicator.classList.add('show');
+                offlineQueue.updateOfflineIndicator();
+                showToast('You are now offline. Messages will be sent when connected.', 'info');
+            } else {
+                offlineIndicator.classList.remove('show');
+                if (!wasOnline && isOnline) {
+                    showToast('Connection restored. Sending queued messages...', 'success');
+                    // Retry sending queued messages
+                    offlineQueue.retryAll().then(successCount => {
+                        if (successCount > 0) {
+                            showToast(`${successCount} message(s) sent successfully`, 'success');
+                        }
+                    });
+                }
+            }
+        }
+        
+        // Update send button state
+        updateSendButtonState();
+        
+        // Update message input state
+        updateMessageInputState();
+    }
+    
+    function updateMessageInputState() {
+        const messageInput = document.getElementById('messageInput');
+        const sendBtn = document.getElementById('sendBtn');
+        
+        if (messageInput && sendBtn) {
+            if (currentChatId) {
+                // Always enable input when chat is selected (works offline)
+                messageInput.disabled = false;
+                messageInput.classList.remove('message-input-disabled');
+                messageInput.classList.add('message-input-enabled');
+                
+                // Send button works offline too (queues messages)
+                sendBtn.disabled = false;
+                sendBtn.classList.remove('send-btn-disabled');
+                sendBtn.classList.add('send-btn-enabled');
+            } else {
+                messageInput.disabled = true;
+                messageInput.classList.remove('message-input-enabled');
+                messageInput.classList.add('message-input-disabled');
+                
+                sendBtn.disabled = true;
+                sendBtn.classList.remove('send-btn-enabled');
+                sendBtn.classList.add('send-btn-disabled');
+            }
         }
     }
     
-    // Show call notification
-    function showCallNotification(callData) {
-        const notificationContainer = document.getElementById('callNotificationContainer');
-        if (!notificationContainer) return;
+    function loadCachedChatHistory(friendId) {
+        console.log('Loading cached chat history for:', friendId);
+        const messagesList = document.getElementById('messagesList');
+        const noMessagesMessage = document.getElementById('noMessagesMessage');
         
-        const notification = document.createElement('div');
-        notification.className = 'call-notification';
-        notification.innerHTML = `
-            <div class="flex items-center mb-2">
-                <i class="fas fa-phone text-green-500 mr-2"></i>
-                <h4 class="font-semibold">Incoming Call</h4>
+        if (!messagesList) return [];
+        
+        // Load from cache
+        const cachedHistory = chatHistoryCache.loadChatHistory(friendId);
+        
+        if (cachedHistory.length === 0) {
+            if (noMessagesMessage) {
+                noMessagesMessage.classList.remove('hidden');
+            }
+            return [];
+        }
+        
+        // Clear current messages
+        messagesList.innerHTML = '';
+        
+        // Display cached messages
+        displayCachedMessages(cachedHistory, friendId);
+        
+        // Hide "no messages" message
+        if (noMessagesMessage) {
+            noMessagesMessage.classList.add('hidden');
+        }
+        
+        return cachedHistory;
+    }
+    
+    function displayCachedMessages(messages, friendId) {
+        const messagesList = document.getElementById('messagesList');
+        const currentUser = firebase.auth().currentUser;
+        
+        if (!messagesList || !currentUser) return;
+        
+        // Sort messages by timestamp
+        messages.sort((a, b) => new Date(a.timestamp) - new Date(b.timestamp));
+        
+        messages.forEach(message => {
+            // Skip if already displayed
+            if (message.localId && document.querySelector(`[data-local-id="${message.localId}"]`)) {
+                return;
+            }
+            
+            const messageDiv = document.createElement('div');
+            const isSent = message.senderId === currentUser.uid;
+            const status = message.status || 'sent';
+            
+            messageDiv.className = `message-bubble ${isSent ? 'sent' : 'received'} ${status === 'pending' ? 'offline' : ''} fade-in`;
+            
+            if (message.localId) {
+                messageDiv.dataset.localId = message.localId;
+            }
+            if (message.id) {
+                messageDiv.dataset.messageId = message.id;
+            }
+            
+            let statusHtml = '';
+            if (isSent) {
+                statusHtml = `<span class="message-status ${status}">
+                    ${status === 'pending' ? '🕒' : 
+                      status === 'sent' ? '✓' : 
+                      status === 'delivered' ? '✓✓' : 
+                      status === 'read' ? '✓✓' : '✓'}
+                </span>`;
+            }
+            
+            // Format message content
+            let messageContent = message.text || '';
+            if (message.type === 'file' && message.fileUrl) {
+                messageContent = `📎 ${message.fileName || 'File'}\n${message.fileUrl}`;
+            }
+            
+            messageDiv.innerHTML = `
+                <div class="message-text">${messageContent}</div>
+                <div class="text-xs opacity-70 mt-1 text-right">
+                    ${formatTime(message.timestamp)}
+                    ${statusHtml}
+                </div>
+                ${status === 'pending' ? '<div class="message-offline-indicator">Waiting for connection...</div>' : ''}
+            `;
+            
+            messagesList.appendChild(messageDiv);
+        });
+        
+        // Scroll to bottom
+        setTimeout(() => {
+            const messagesContainer = document.getElementById('messagesContainer');
+            if (messagesContainer) {
+                messagesContainer.scrollTop = messagesContainer.scrollHeight;
+            }
+        }, 100);
+    }
+    
+    async function loadChatMessages(friendId) {
+        console.log('Loading messages for:', friendId);
+        
+        // Load cached history first (instant display)
+        const cachedHistory = loadCachedChatHistory(friendId);
+        
+        // If online, load from Firebase and update cache
+        if (isOnline) {
+            try {
+                await loadMessagesFromFirebase(friendId);
+            } catch (error) {
+                console.error('Error loading messages from Firebase:', error);
+                // Continue with cached data
+            }
+        }
+        
+        // Load pending messages from offline queue
+        const pendingMessages = offlineQueue.getMessages().filter(msg => msg.receiverId === friendId);
+        if (pendingMessages.length > 0) {
+            displayCachedMessages(pendingMessages, friendId);
+        }
+        
+        // Update message input state
+        updateMessageInputState();
+    }
+    
+    async function loadMessagesFromFirebase(friendId) {
+        try {
+            const currentUser = firebase.auth().currentUser;
+            if (!currentUser) return;
+            
+            const db = firebase.firestore();
+            const chatId = [currentUser.uid, friendId].sort().join('_');
+            const messagesRef = db.collection('chats').doc(chatId).collection('messages')
+                .orderBy('timestamp', 'asc')
+                .limit(50);
+            
+            const snapshot = await messagesRef.get();
+            const messages = [];
+            
+            snapshot.forEach(doc => {
+                const messageData = doc.data();
+                messageData.id = doc.id;
+                messages.push(messageData);
+            });
+            
+            // Update cache
+            chatHistoryCache.saveChatHistory(friendId, messages);
+            
+            // Update UI
+            updateMessagesUI(messages, friendId);
+            
+            return messages;
+        } catch (error) {
+            console.error('Error loading messages from Firebase:', error);
+            throw error;
+        }
+    }
+    
+    function updateMessagesUI(messages, friendId) {
+        const messagesList = document.getElementById('messagesList');
+        if (!messagesList) return;
+        
+        const currentUser = firebase.auth().currentUser;
+        let hasNewMessages = false;
+        
+        messages.forEach(message => {
+            // Skip if this message is already displayed (check by ID or localId)
+            const existingById = message.id && document.querySelector(`[data-message-id="${message.id}"]`);
+            const existingByLocalId = message.localId && document.querySelector(`[data-local-id="${message.localId}"]`);
+            
+            if (existingById || existingByLocalId) {
+                return;
+            }
+            
+            hasNewMessages = true;
+            const messageDiv = document.createElement('div');
+            const isSent = message.senderId === currentUser?.uid;
+            messageDiv.className = `message-bubble ${isSent ? 'sent' : 'received'} fade-in`;
+            
+            if (message.id) {
+                messageDiv.dataset.messageId = message.id;
+            }
+            
+            let statusHtml = '';
+            if (isSent) {
+                const status = message.status || 'sent';
+                statusHtml = `<span class="message-status ${status}">
+                    ${status === 'pending' ? '🕒' : 
+                      status === 'sent' ? '✓' : 
+                      status === 'delivered' ? '✓✓' : 
+                      status === 'read' ? '✓✓' : '✓'}
+                </span>`;
+            }
+            
+            // Format message content
+            let messageContent = message.text || '';
+            if (message.type === 'file' && message.fileUrl) {
+                messageContent = `📎 ${message.fileName || 'File'}\n${message.fileUrl}`;
+            }
+            
+            messageDiv.innerHTML = `
+                <div class="message-text">${messageContent}</div>
+                <div class="text-xs opacity-70 mt-1 text-right">
+                    ${formatTime(message.timestamp)}
+                    ${statusHtml}
+                </div>
+            `;
+            
+            messagesList.appendChild(messageDiv);
+        });
+        
+        // Scroll to bottom if new messages were added
+        if (hasNewMessages) {
+            setTimeout(() => {
+                const messagesContainer = document.getElementById('messagesContainer');
+                if (messagesContainer) {
+                    messagesContainer.scrollTop = messagesContainer.scrollHeight;
+                }
+            }, 100);
+        }
+    }
+    
+    async function sendMessage() {
+        const messageInput = document.getElementById('messageInput');
+        const text = messageInput.value.trim();
+        
+        if (!text || !currentChatId) return;
+        
+        const currentUser = firebase.auth().currentUser;
+        if (!currentUser) {
+            showToast('Please log in to send messages', 'error');
+            return;
+        }
+        
+        // Create message data
+        const messageData = {
+            text: text,
+            senderId: currentUser.uid,
+            receiverId: currentChatId,
+            timestamp: new Date().toISOString(),
+            type: 'text'
+        };
+        
+        // Add to offline queue (works both online and offline)
+        const localId = offlineQueue.addMessage(messageData);
+        
+        // Display message immediately
+        displayQueuedMessage({
+            ...messageData,
+            localId: localId,
+            status: 'pending'
+        });
+        
+        // Clear input
+        messageInput.value = '';
+        messageInput.style.height = 'auto';
+        messageInput.style.height = Math.min(messageInput.scrollHeight, 150) + 'px';
+        
+        // Update send button
+        updateSendButtonState();
+        
+        // If online, send immediately
+        if (isOnline) {
+            try {
+                await sendMessageToFirebase(messageData, localId);
+            } catch (error) {
+                console.error('Failed to send message:', error);
+                // Message remains in queue for retry
+                showToast('Failed to send message. Will retry when possible.', 'error');
+            }
+        } else {
+            showToast('Message saved offline. Will send when connected.', 'info');
+        }
+    }
+    
+    function displayQueuedMessage(messageData) {
+        const messagesList = document.getElementById('messagesList');
+        const noMessagesMessage = document.getElementById('noMessagesMessage');
+        const currentUser = firebase.auth().currentUser;
+        
+        if (!messagesList || !currentUser) return;
+        
+        // Hide "no messages" message
+        if (noMessagesMessage && !noMessagesMessage.classList.contains('hidden')) {
+            noMessagesMessage.classList.add('hidden');
+        }
+        
+        const messageDiv = document.createElement('div');
+        const isSent = messageData.senderId === currentUser.uid;
+        const status = messageData.status || 'pending';
+        
+        messageDiv.className = `message-bubble ${isSent ? 'sent' : 'received'} ${status === 'pending' ? 'offline' : ''} fade-in`;
+        messageDiv.dataset.localId = messageData.localId;
+        
+        let statusHtml = '';
+        if (isSent) {
+            statusHtml = `<span class="message-status ${status}">
+                ${status === 'pending' ? '🕒' : 
+                  status === 'sent' ? '✓' : 
+                  status === 'delivered' ? '✓✓' : 
+                  status === 'read' ? '✓✓' : '✓'}
+            </span>`;
+        }
+        
+        messageDiv.innerHTML = `
+            <div class="message-text">${messageData.text || ''}</div>
+            <div class="text-xs opacity-70 mt-1 text-right">
+                ${formatTime(messageData.timestamp)}
+                ${statusHtml}
             </div>
-            <p>From: <strong>${callData.callerName}</strong></p>
-            <p>Type: ${callData.type === 'video' ? 'Video Call' : 'Voice Call'}</p>
-            <div class="flex space-x-2 mt-3">
-                <button class="flex-1 bg-green-500 text-white py-1 rounded text-sm accept-call-btn">Accept</button>
-                <button class="flex-1 bg-red-500 text-white py-1 rounded text-sm reject-call-btn">Reject</button>
-            </div>
+            ${status === 'pending' ? '<div class="message-offline-indicator">Waiting for connection...</div>' : ''}
         `;
         
-        notificationContainer.appendChild(notification);
+        messagesList.appendChild(messageDiv);
         
-        // Setup buttons
-        notification.querySelector('.accept-call-btn').onclick = () => {
-            acceptIncomingCall(callData);
-            notification.remove();
-        };
+        // Add to chat history cache
+        chatHistoryCache.addMessage(currentChatId, messageData);
         
-        notification.querySelector('.reject-call-btn').onclick = () => {
-            rejectIncomingCall(callData.callId);
-            notification.remove();
-        };
-        
-        // Auto-remove after 30 seconds
+        // Scroll to bottom
         setTimeout(() => {
-            if (notification.parentNode) {
-                notification.remove();
+            const messagesContainer = document.getElementById('messagesContainer');
+            if (messagesContainer) {
+                messagesContainer.scrollTop = messagesContainer.scrollHeight;
             }
-        }, 30000);
+        }, 100);
     }
     
-    // Update notification badges
-    function updateNotificationBadge(type, count) {
-        notificationCounts[type] = count;
-        
-        // Update sidebar badges
-        const sidebarBadge = document.getElementById(`sidebar${type.charAt(0).toUpperCase() + type.slice(1)}Badge`);
-        if (sidebarBadge) {
-            if (count > 0) {
-                sidebarBadge.textContent = count > 99 ? '99+' : count;
-                sidebarBadge.classList.remove('hidden');
-            } else {
-                sidebarBadge.classList.add('hidden');
+    async function sendMessageToFirebase(messageData, localId) {
+        try {
+            const currentUser = firebase.auth().currentUser;
+            if (!currentUser) {
+                throw new Error('User not logged in');
             }
-        }
-        
-        // Update mobile badges
-        const mobileBadge = document.getElementById(`mobile${type.charAt(0).toUpperCase() + type.slice(1)}Badge`);
-        if (mobileBadge) {
-            if (count > 0) {
-                mobileBadge.textContent = count > 99 ? '99+' : count;
-                mobileBadge.classList.remove('hidden');
-            } else {
-                mobileBadge.classList.add('hidden');
-            }
-        }
-        
-        // Update filter badges
-        if (type === 'chats') {
-            updateFilterBadges();
+            
+            const db = firebase.firestore();
+            const chatId = [currentUser.uid, messageData.receiverId].sort().join('_');
+            
+            // Remove localId from data before sending to Firebase
+            const { localId: lid, ...firebaseData } = messageData;
+            
+            // Add message to Firebase
+            const messageRef = await db.collection('chats').doc(chatId).collection('messages').add({
+                ...firebaseData,
+                status: 'sent',
+                timestamp: firebase.firestore.FieldValue.serverTimestamp()
+            });
+            
+            // Update UI to show message as sent
+            updateMessageStatus(localId, 'sent');
+            
+            // Remove from offline queue
+            offlineQueue.removeMessage(localId);
+            
+            // Update chat history cache
+            chatHistoryCache.addMessage(messageData.receiverId, {
+                ...firebaseData,
+                id: messageRef.id,
+                status: 'sent',
+                timestamp: new Date().toISOString()
+            });
+            
+            return messageRef.id;
+            
+        } catch (error) {
+            console.error('Error sending message to Firebase:', error);
+            // Update UI to show failure
+            updateMessageStatus(localId, 'pending');
+            throw error;
         }
     }
     
-    // ====== CRITICAL FIX 1: Update filter badges with offline support ======
-    function updateFilterBadges() {
-        const filters = ['all', 'sent', 'received', 'unread'];
-        filters.forEach(filter => {
-            const badge = document.getElementById(`filter${filter.charAt(0).toUpperCase() + filter.slice(1)}Badge`);
-            const mobileBadge = document.getElementById(`mobileFilter${filter.charAt(0).toUpperCase() + filter.slice(1)}Badge`);
-            
-            let count = 0;
-            switch(filter) {
-                case 'all': count = allChats.length; break;
-                case 'sent': count = sentChatsCount; break;
-                case 'received': count = receivedChatsCount; break;
-                case 'unread': count = unreadChatsCount; break;
+    function updateMessageStatus(localId, status) {
+        const messageElement = document.querySelector(`[data-local-id="${localId}"]`);
+        if (messageElement) {
+            // Update status indicator
+            const statusSpan = messageElement.querySelector('.message-status');
+            if (statusSpan) {
+                statusSpan.className = `message-status ${status}`;
+                statusSpan.innerHTML = status === 'pending' ? '🕒' : 
+                                    status === 'sent' ? '✓' : 
+                                    status === 'delivered' ? '✓✓' : 
+                                    status === 'read' ? '✓✓' : '✓';
             }
             
-            if (badge) {
-                if (count > 0) {
-                    badge.textContent = count > 99 ? '99+' : count;
-                    badge.classList.remove('hidden');
-                } else {
-                    badge.classList.add('hidden');
+            // Update offline indicator
+            const offlineIndicator = messageElement.querySelector('.message-offline-indicator');
+            if (offlineIndicator) {
+                offlineIndicator.style.display = status === 'pending' ? 'block' : 'none';
+            }
+            
+            // Update bubble styling
+            if (status === 'pending') {
+                messageElement.classList.add('offline');
+            } else {
+                messageElement.classList.remove('offline');
+            }
+        }
+    }
+    
+    // ====== FILE ATTACHMENT OFFLINE SUPPORT ======
+    function setupAttachButton() {
+        const attachBtn = document.getElementById('attachBtn');
+        const fileUploadInput = document.getElementById('fileUploadInput');
+        
+        if (attachBtn && fileUploadInput) {
+            attachBtn.addEventListener('click', function(e) {
+                if (e.target !== fileUploadInput) {
+                    fileUploadInput.click();
                 }
-            }
+            });
             
-            if (mobileBadge) {
-                if (count > 0) {
-                    mobileBadge.textContent = count > 99 ? '99+' : count;
-                    mobileBadge.classList.remove('hidden');
-                } else {
-                    mobileBadge.classList.add('hidden');
+            fileUploadInput.addEventListener('change', function(e) {
+                const files = e.target.files;
+                if (files.length > 0) {
+                    const file = files[0];
+                    handleFileAttachment(file);
                 }
-            }
+            });
+        }
+    }
+    
+    function handleFileAttachment(file) {
+        // Show file preview
+        showFilePreview(file);
+        
+        if (isOnline) {
+            // Upload immediately if online
+            uploadFileToCloudinary(file);
+        } else {
+            // Save file for offline upload
+            saveFileForOfflineUpload(file);
+        }
+    }
+    
+    function showFilePreview(file) {
+        const filePreview = document.getElementById('filePreview');
+        const fileName = document.getElementById('fileName');
+        const fileSize = document.getElementById('fileSize');
+        
+        if (filePreview && fileName && fileSize) {
+            filePreview.classList.remove('hidden');
+            fileName.textContent = file.name;
+            fileSize.textContent = formatFileSize(file.size);
+        }
+    }
+    
+    function formatFileSize(bytes) {
+        if (bytes === 0) return '0 Bytes';
+        const k = 1024;
+        const sizes = ['Bytes', 'KB', 'MB', 'GB'];
+        const i = Math.floor(Math.log(bytes) / Math.log(k));
+        return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i];
+    }
+    
+    function saveFileForOfflineUpload(file) {
+        const reader = new FileReader();
+        reader.onload = function(e) {
+            // Save file data to localStorage
+            const offlineFiles = JSON.parse(localStorage.getItem('kynecta_offline_files') || '[]');
+            offlineFiles.push({
+                name: file.name,
+                type: file.type,
+                size: file.size,
+                data: e.target.result,
+                timestamp: new Date().toISOString(),
+                localId: 'file_' + Date.now() + '_' + Math.random().toString(36).substr(2, 9)
+            });
+            localStorage.setItem('kynecta_offline_files', JSON.stringify(offlineFiles));
+            
+            showToast('File saved offline. Will upload when connected.', 'info');
+            
+            // Queue file message
+            queueFileMessage(file);
+        };
+        reader.readAsDataURL(file);
+    }
+    
+    function queueFileMessage(file) {
+        if (!currentChatId) {
+            showToast('Please select a chat first', 'error');
+            return;
+        }
+        
+        const currentUser = firebase.auth().currentUser;
+        if (!currentUser) return;
+        
+        // Determine file type icon
+        let fileIcon = '📎';
+        if (file.type.startsWith('image/')) fileIcon = '🖼️';
+        else if (file.type.startsWith('video/')) fileIcon = '🎬';
+        else if (file.type.startsWith('audio/')) fileIcon = '🎵';
+        else if (file.type.includes('pdf')) fileIcon = '📄';
+        else if (file.type.includes('document') || file.type.includes('word')) fileIcon = '📝';
+        
+        const messageData = {
+            text: `${fileIcon} ${file.name} (Offline - will upload when connected)`,
+            senderId: currentUser.uid,
+            receiverId: currentChatId,
+            timestamp: new Date().toISOString(),
+            type: 'file',
+            fileName: file.name,
+            fileType: file.type,
+            fileSize: file.size,
+            status: 'pending'
+        };
+        
+        // Add to offline queue
+        const localId = offlineQueue.addMessage(messageData);
+        
+        // Display immediately
+        displayQueuedMessage({
+            ...messageData,
+            localId: localId
         });
+        
+        // Hide preview after 3 seconds
+        setTimeout(() => {
+            const filePreview = document.getElementById('filePreview');
+            if (filePreview) {
+                filePreview.classList.add('hidden');
+            }
+            // Reset file input
+            const fileUploadInput = document.getElementById('fileUploadInput');
+            if (fileUploadInput) {
+                fileUploadInput.value = '';
+            }
+        }, 3000);
     }
     
-    // ====== CRITICAL FIX 1: Enhanced chat filter setup with offline support ======
+    async function uploadFileToCloudinary(file) {
+        const uploadProgressBar = document.getElementById('uploadProgressBar');
+        const filePreview = document.getElementById('filePreview');
+        
+        try {
+            const formData = new FormData();
+            formData.append('file', file);
+            formData.append('upload_preset', CLOUDINARY_UPLOAD_PRESET);
+            formData.append('cloud_name', CLOUDINARY_CLOUD_NAME);
+            
+            // Show upload progress
+            let progress = 0;
+            const progressInterval = setInterval(() => {
+                progress += 5;
+                if (progress > 90) clearInterval(progressInterval);
+                if (uploadProgressBar) {
+                    uploadProgressBar.style.width = progress + '%';
+                }
+            }, 200);
+            
+            // Upload to Cloudinary
+            const response = await fetch(`https://api.cloudinary.com/v1_1/${CLOUDINARY_CLOUD_NAME}/auto/upload`, {
+                method: 'POST',
+                body: formData
+            });
+            
+            clearInterval(progressInterval);
+            
+            if (!response.ok) {
+                throw new Error('Upload failed');
+            }
+            
+            const data = await response.json();
+            
+            // Update progress to 100%
+            if (uploadProgressBar) {
+                uploadProgressBar.style.width = '100%';
+            }
+            
+            // Send file as message
+            sendFileMessage(file.name, data.secure_url, file.type);
+            
+            // Hide preview after 3 seconds
+            setTimeout(() => {
+                if (filePreview) {
+                    filePreview.classList.add('hidden');
+                }
+                // Reset file input
+                const fileUploadInput = document.getElementById('fileUploadInput');
+                if (fileUploadInput) {
+                    fileUploadInput.value = '';
+                }
+            }, 3000);
+            
+        } catch (error) {
+            console.error('Error uploading file:', error);
+            showToast('Failed to upload file. Saved offline for later.', 'error');
+            
+            // Save file for offline upload
+            saveFileForOfflineUpload(file);
+            
+            // Reset progress
+            if (uploadProgressBar) {
+                uploadProgressBar.style.width = '0%';
+            }
+        }
+    }
+    
+    function sendFileMessage(fileName, fileUrl, fileType) {
+        if (!currentChatId) {
+            showToast('Please select a chat first', 'error');
+            return;
+        }
+        
+        const currentUser = firebase.auth().currentUser;
+        if (!currentUser) {
+            showToast('Please log in to send messages', 'error');
+            return;
+        }
+        
+        // Determine file type icon
+        let fileIcon = '📎';
+        if (fileType.startsWith('image/')) fileIcon = '🖼️';
+        else if (fileType.startsWith('video/')) fileIcon = '🎬';
+        else if (fileType.startsWith('audio/')) fileIcon = '🎵';
+        else if (fileType.includes('pdf')) fileIcon = '📄';
+        else if (fileType.includes('document') || fileType.includes('word')) fileIcon = '📝';
+        
+        const messageData = {
+            text: `${fileIcon} ${fileName}\n${fileUrl}`,
+            senderId: currentUser.uid,
+            receiverId: currentChatId,
+            timestamp: new Date().toISOString(),
+            type: 'file',
+            fileUrl: fileUrl,
+            fileName: fileName,
+            fileType: fileType
+        };
+        
+        // Add to offline queue (will send immediately if online)
+        const localId = offlineQueue.addMessage(messageData);
+        
+        // Display message immediately
+        displayQueuedMessage({
+            ...messageData,
+            localId: localId,
+            status: isOnline ? 'sent' : 'pending'
+        });
+        
+        // Send to Firebase if online
+        if (isOnline) {
+            sendMessageToFirebase(messageData, localId).catch(error => {
+                console.error('Failed to send file message:', error);
+            });
+        }
+    }
+    
+    // ====== INITIALIZATION ======
+    document.addEventListener('DOMContentLoaded', function() {
+        console.log('DOM loaded, initializing enhanced chat system...');
+        
+        // Show loading screen initially
+        showLoading();
+        
+        // Initialize systems
+        initializeSettingsIntegration();
+        initializeCrossScreenCommunication();
+        
+        // Setup theme toggle
+        setupThemeToggle();
+        
+        // Setup attach button
+        setupAttachButton();
+        
+        // Setup chat filters
+        setupChatFilters();
+        
+        // Setup mobile group icon
+        setupMobileGroupIcon();
+        
+        // Setup online/offline event listeners
+        window.addEventListener('online', updateOnlineStatus);
+        window.addEventListener('offline', updateOnlineStatus);
+        
+        // Pre-load iframes
+        preloadIframes();
+        
+        // Load cached user data immediately
+        loadCachedUserData();
+        
+        // Check auth state with offline support
+        checkAuthState();
+        
+        // Setup navigation
+        document.querySelectorAll('.nav-icon, .mobile-nav-icon, .mobile-group-icon').forEach(icon => {
+            icon.addEventListener('click', function() {
+                const page = this.dataset.page;
+                if (page) {
+                    switchPage(page);
+                }
+            });
+        });
+        
+        // Setup new chat buttons
+        const startNewChatBtn = document.getElementById('startNewChatBtn');
+        const mobileNewChatBtn = document.getElementById('mobileNewChatBtn');
+        const startFirstChatBtn = document.getElementById('startFirstChatBtn');
+        
+        if (startNewChatBtn) {
+            startNewChatBtn.addEventListener('click', function() {
+                const startNewChatSection = document.getElementById('startNewChatSection');
+                if (startNewChatSection) {
+                    startNewChatSection.classList.remove('hidden');
+                }
+            });
+        }
+        
+        if (mobileNewChatBtn) {
+            mobileNewChatBtn.addEventListener('click', function() {
+                const startNewChatSection = document.getElementById('startNewChatSection');
+                if (startNewChatSection) {
+                    startNewChatSection.classList.remove('hidden');
+                }
+            });
+        }
+        
+        if (startFirstChatBtn) {
+            startFirstChatBtn.addEventListener('click', function() {
+                const startNewChatSection = document.getElementById('startNewChatSection');
+                if (startNewChatSection) {
+                    startNewChatSection.classList.remove('hidden');
+                }
+            });
+        }
+        
+        // Setup cancel new chat button
+        const cancelNewChat = document.getElementById('cancelNewChat');
+        if (cancelNewChat) {
+            cancelNewChat.addEventListener('click', function() {
+                const startNewChatSection = document.getElementById('startNewChatSection');
+                if (startNewChatSection) {
+                    startNewChatSection.classList.add('hidden');
+                }
+            });
+        }
+        
+        // Setup confirm start chat button
+        const confirmStartChatBtn = document.getElementById('confirmStartChat');
+        if (confirmStartChatBtn) {
+            confirmStartChatBtn.addEventListener('click', startNewChat);
+        }
+        
+        // Setup message input
+        const messageInput = document.getElementById('messageInput');
+        if (messageInput) {
+            // Auto-resize textarea
+            messageInput.addEventListener('input', function() {
+                this.style.height = 'auto';
+                this.style.height = Math.min(this.scrollHeight, 150) + 'px';
+                updateSendButtonState();
+            });
+        }
+        
+        // Setup send button
+        const sendBtn = document.getElementById('sendBtn');
+        if (sendBtn) {
+            sendBtn.addEventListener('click', sendMessage);
+        }
+        
+        // Setup call buttons
+        document.querySelectorAll('.friend-call-btn').forEach(btn => {
+            btn.addEventListener('click', function() {
+                const friendId = this.dataset.id;
+                const friendName = this.dataset.name;
+                if (friendId && friendName) {
+                    startCall(friendId, friendName, 'audio');
+                }
+            });
+        });
+        
+        document.querySelectorAll('.friend-video-call-btn').forEach(btn => {
+            btn.addEventListener('click', function() {
+                const friendId = this.dataset.id;
+                const friendName = this.dataset.name;
+                if (friendId && friendName) {
+                    startCall(friendId, friendName, 'video');
+                }
+            });
+        });
+        
+        // Setup back to chats button for mobile
+        const backToChats = document.getElementById('backToChats');
+        if (backToChats) {
+            backToChats.addEventListener('click', showChatList);
+        }
+        
+        // Show mobile nav bar on mobile devices
+        if (window.innerWidth < 768) {
+            const mobileNavBar = document.getElementById('mobileNavBar');
+            if (mobileNavBar) {
+                mobileNavBar.classList.remove('hidden');
+                console.log('Mobile nav bar shown');
+            }
+        }
+        
+        // Initial online status check
+        updateOnlineStatus();
+        
+        // Hide loading screen after a short delay
+        setTimeout(() => {
+            hideLoading();
+            // Default to chats page
+            switchPage('chats');
+            console.log('Enhanced chat system initialization complete');
+        }, 1000);
+    });
+    
+    // ====== HELPER FUNCTIONS ======
+    
     function setupChatFilters() {
         console.log('Setting up chat filters...');
         
-        // Function to apply filter with offline support
         function applyFilter(filterType) {
             console.log('Applying filter:', filterType);
             currentFilter = filterType;
@@ -2808,7 +4094,6 @@
         console.log('Chat filter setup complete with saved filter:', savedFilter);
     }
     
-    // ====== CRITICAL FIX 1: Enhanced applyChatFilter with offline support ======
     function applyChatFilter() {
         console.log('Applying chat filter:', currentFilter);
         
@@ -2906,334 +4191,8 @@
         updateFilterBadges();
     }
     
-    // ====== CRITICAL FIX 2: Offline & online behavior consistency ======
-    function updateOnlineStatus() {
-        const wasOnline = isOnline;
-        isOnline = navigator.onLine;
-        const offlineIndicator = document.getElementById('offlineIndicator');
-        
-        if (offlineIndicator) {
-            if (!isOnline) {
-                offlineIndicator.classList.add('show');
-                // Update send button state
-                updateSendButtonState();
-                console.log('App is now offline');
-            } else {
-                offlineIndicator.classList.remove('show');
-                // Update send button state when back online
-                updateSendButtonState();
-                console.log('App is now online');
-                // Try to send pending messages when back online
-                if (!wasOnline && isOnline && pendingMessages.length > 0) {
-                    sendPendingMessages();
-                }
-            }
-        }
-    }
-    
-    // ====== CRITICAL FIX 2: Load cached chats immediately (offline-first) ======
-    function loadCachedChats() {
-        console.log('Loading cached chats...');
-        const chatList = document.getElementById('chatList');
-        if (!chatList) return;
-        
-        try {
-            // Try to load from localStorage first
-            const cachedChats = localStorage.getItem('kynecta_cached_chats');
-            if (cachedChats) {
-                const chats = JSON.parse(cachedChats);
-                if (chats.length > 0) {
-                    // Display cached chats
-                    displayCachedChats(chats);
-                    console.log('Loaded', chats.length, 'cached chats');
-                    return true;
-                }
-            }
-        } catch (error) {
-            console.error('Error loading cached chats:', error);
-        }
-        
-        return false;
-    }
-    
-    function displayCachedChats(chats) {
-        const chatList = document.getElementById('chatList');
-        const noChatsMessage = document.getElementById('noChatsMessage');
-        
-        if (!chatList) return;
-        
-        // Clear existing content
-        chatList.innerHTML = '';
-        
-        if (chats.length === 0) {
-            if (noChatsMessage) noChatsMessage.classList.remove('hidden');
-            return;
-        }
-        
-        // Hide no chats message
-        if (noChatsMessage) noChatsMessage.classList.add('hidden');
-        
-        // Reset counters
-        sentChatsCount = 0;
-        receivedChatsCount = 0;
-        unreadChatsCount = 0;
-        allChats = [];
-        
-        chats.forEach(chat => {
-            const chatItem = document.createElement('div');
-            chatItem.className = `chat-item p-3 rounded-lg mb-2 flex items-center cursor-pointer hover:bg-gray-50 transition-colors`;
-            chatItem.dataset.chatId = chat.id;
-            chatItem.dataset.friendId = chat.id;
-            
-            // Set message type classes for filtering
-            if (chat.isSent) {
-                chatItem.classList.add('sent');
-                chatItem.dataset.messageType = 'sent';
-                sentChatsCount++;
-            } else if (chat.isReceived) {
-                chatItem.classList.add('received');
-                chatItem.dataset.messageType = 'received';
-                receivedChatsCount++;
-            }
-            
-            // Mark as unread if needed
-            if (chat.isUnread) {
-                chatItem.classList.add('unread');
-                chatItem.dataset.unread = 'true';
-                unreadChatsCount++;
-            }
-            
-            // Format time
-            const timeAgo = chat.lastMessageTime ? getTimeAgo(new Date(chat.lastMessageTime)) : 'Just now';
-            
-            chatItem.innerHTML = `
-                <div class="flex items-center flex-1">
-                    <div class="w-12 h-12 rounded-full bg-gradient-to-r from-purple-500 to-green-500 flex items-center justify-center text-white font-semibold mr-3 overflow-hidden relative">
-                        ${chat.friend.profilePicture ? 
-                            `<img src="${chat.friend.profilePicture}" alt="${chat.friend.displayName}" class="w-full h-full object-cover">` :
-                            `<span>${chat.friend.displayName?.charAt(0) || 'F'}</span>`
-                        }
-                        ${chat.isUnread ? '<div class="unread-indicator"></div>' : ''}
-                    </div>
-                    <div class="flex-1">
-                        <div class="font-medium flex justify-between">
-                            <span>${chat.friend.displayName || 'Friend'}</span>
-                            <span class="text-xs text-gray-500">${timeAgo}</span>
-                        </div>
-                        <div class="text-sm text-gray-500 truncate">
-                            ${chat.lastMessage || 'Start a conversation...'}
-                        </div>
-                    </div>
-                </div>
-            `;
-            
-            chatItem.addEventListener('click', function() {
-                // Use cached friend data
-                openChatWithFriend(chat.friend);
-            });
-            
-            chatList.appendChild(chatItem);
-            allChats.push(chat);
-        });
-        
-        // Update notification badge for chats
-        updateNotificationBadge('chats', unreadChatsCount);
-        
-        // Update filter badges
-        updateFilterBadges();
-        
-        // Apply current filter
-        setTimeout(() => {
-            applyChatFilter();
-        }, 100);
-    }
-    
-    // ====== CRITICAL FIX 2: Enhanced loadRealChats with offline support ======
-    async function loadRealChats() {
-        console.log('Loading real chats (offline-first)...');
-        const chatList = document.getElementById('chatList');
-        if (!chatList) return;
-        
-        // Try to load cached chats first (instant display)
-        const hasCachedChats = loadCachedChats();
-        
-        // Show loading state only if no cached chats
-        if (!hasCachedChats) {
-            // Clear any existing content
-            chatList.innerHTML = '';
-            
-            // Show loading skeleton
-            const loadingDiv = document.createElement('div');
-            loadingDiv.className = 'space-y-2 p-4';
-            loadingDiv.innerHTML = `
-                <div class="chat-skeleton w-full h-16 rounded-lg"></div>
-                <div class="chat-skeleton w-full h-16 rounded-lg"></div>
-                <div class="chat-skeleton w-full h-16 rounded-lg"></div>
-            `;
-            chatList.appendChild(loadingDiv);
-        }
-        
-        try {
-            const currentUser = firebase.auth().currentUser;
-            if (!currentUser) {
-                console.log('No user logged in, using cached data only');
-                // If we have cached chats, they're already displayed
-                if (!hasCachedChats) {
-                    const noChatsMessage = document.getElementById('noChatsMessage');
-                    if (noChatsMessage) {
-                        noChatsMessage.classList.remove('hidden');
-                    }
-                }
-                return;
-            }
-            
-            // If online, try to load from Firebase
-            if (isOnline) {
-                await loadChatsFromFirebase();
-            } else {
-                console.log('Offline mode - using cached data only');
-                // Offline mode: ensure we have at least cached data displayed
-                if (!hasCachedChats) {
-                    const noChatsMessage = document.getElementById('noChatsMessage');
-                    if (noChatsMessage) {
-                        noChatsMessage.classList.remove('hidden');
-                    }
-                }
-            }
-            
-        } catch (error) {
-            console.error('Error loading chats:', error);
-            
-            // Even if there's an error, ensure UI is usable
-            if (!hasCachedChats) {
-                const noChatsMessage = document.getElementById('noChatsMessage');
-                if (noChatsMessage) {
-                    noChatsMessage.innerHTML = `
-                        <i class="fas fa-wifi-slash text-4xl mb-3 text-gray-300 block"></i>
-                        <p>Offline Mode</p>
-                        <p class="text-sm mt-1">Using cached data. Connect for latest chats.</p>
-                    `;
-                    noChatsMessage.classList.remove('hidden');
-                }
-            }
-        }
-    }
-    
-    async function loadChatsFromFirebase() {
-        try {
-            const currentUser = firebase.auth().currentUser;
-            if (!currentUser) return;
-            
-            const db = firebase.firestore();
-            
-            // First, let's check if we have any friends to chat with
-            if (friendsList.length === 0) {
-                console.log('No friends found, showing empty state');
-                // Show no chats message
-                const noChatsMessage = document.getElementById('noChatsMessage');
-                if (noChatsMessage) {
-                    noChatsMessage.classList.remove('hidden');
-                }
-                
-                // Also show the "Start First Chat" button
-                const startFirstChatBtn = document.getElementById('startFirstChatBtn');
-                if (startFirstChatBtn) {
-                    startFirstChatBtn.addEventListener('click', function() {
-                        const startNewChatSection = document.getElementById('startNewChatSection');
-                        if (startNewChatSection) {
-                            startNewChatSection.classList.remove('hidden');
-                        }
-                    });
-                }
-                
-                updateFilterBadges();
-                return;
-            }
-            
-            // Reset counters
-            sentChatsCount = 0;
-            receivedChatsCount = 0;
-            unreadChatsCount = 0;
-            allChats = [];
-            
-            const cachedChats = [];
-            
-            // For each friend, check if there are actual messages
-            for (const friend of friendsList) {
-                // Skip system accounts unless they have actual conversations
-                if (friend.isSystem && friend.id !== 'kynecta_system') continue;
-                
-                // Check if there are messages with this friend
-                const chatId = [currentUser.uid, friend.id].sort().join('_');
-                const messagesRef = db.collection('chats').doc(chatId).collection('messages')
-                    .orderBy('timestamp', 'desc')
-                    .limit(1);
-                
-                let lastMessage = '';
-                let lastMessageTime = new Date();
-                let hasUnread = false;
-                let isSentMessage = false;
-                let isReceivedMessage = false;
-                
-                try {
-                    const snapshot = await messagesRef.get();
-                    if (!snapshot.empty) {
-                        const messageData = snapshot.docs[0].data();
-                        lastMessage = messageData.text || '📎 Attachment';
-                        lastMessageTime = messageData.timestamp ? messageData.timestamp.toDate() : new Date();
-                        
-                        // Check if message is sent or received
-                        isSentMessage = messageData.senderId === currentUser.uid;
-                        isReceivedMessage = !isSentMessage;
-                        
-                        // Check if message is unread (simplified for demo)
-                        hasUnread = isReceivedMessage && Math.random() > 0.5;
-                    }
-                } catch (error) {
-                    console.error('Error checking messages for friend:', friend.id, error);
-                }
-                
-                // Create chat object for caching
-                const chatObj = {
-                    id: friend.id,
-                    friend: friend,
-                    lastMessage: lastMessage,
-                    lastMessageTime: lastMessageTime,
-                    isUnread: hasUnread,
-                    isSent: isSentMessage,
-                    isReceived: isReceivedMessage
-                };
-                
-                cachedChats.push(chatObj);
-                
-                // Update counters
-                if (isSentMessage) sentChatsCount++;
-                if (isReceivedMessage) receivedChatsCount++;
-                if (hasUnread) unreadChatsCount++;
-            }
-            
-            // Cache the chats for offline use
-            localStorage.setItem('kynecta_cached_chats', JSON.stringify(cachedChats));
-            allChats = cachedChats;
-            
-            // Update UI with new data
-            displayCachedChats(cachedChats);
-            
-            // Update notification badge for chats
-            updateNotificationBadge('chats', unreadChatsCount);
-            
-        } catch (error) {
-            console.error('Error loading chats from Firebase:', error);
-            throw error;
-        }
-    }
-    
-    // ====== CRITICAL FIX 3: Mobile view icon missing (Group icon) ======
     function setupMobileGroupIcon() {
         console.log('Setting up mobile group icon...');
-        
-        // Mobile group icon already added to header in HTML
-        // Just need to ensure event listeners are attached
         
         const mobileGroupIcons = document.querySelectorAll('.mobile-group-icon');
         mobileGroupIcons.forEach(icon => {
@@ -3257,7 +4216,6 @@
         console.log('Mobile group icon setup complete');
     }
     
-    // ====== CRITICAL FIX 5 & 6: Screen switching delay & iframe navigation reliability ======
     function preloadIframes() {
         console.log('Preloading iframes...');
         
@@ -3304,7 +4262,6 @@
         });
     }
     
-    // ====== CRITICAL FIX 5: Smooth screen switching ======
     function switchPage(pageName) {
         console.log('Switching to page:', pageName);
         currentPage = pageName;
@@ -3412,7 +4369,6 @@
         }
     }
     
-    // ====== CRITICAL FIX 7: Auth & global state handling ======
     function checkAuthState() {
         // Try to get user from localStorage first for instant display
         const cachedUser = localStorage.getItem('kynecta_user_data');
@@ -3448,8 +4404,6 @@
             });
         });
     }
-    
-    // ====== Helper functions (keep existing but ensure they work offline) ======
     
     function updateActiveNavIcon(pageName) {
         const navIcons = document.querySelectorAll('.nav-icon');
@@ -3603,546 +4557,6 @@
         }
     }
     
-    // ====== Initialize the app when DOM is loaded ======
-    document.addEventListener('DOMContentLoaded', function() {
-        console.log('DOM loaded, initializing app with critical fixes...');
-        
-        // Show loading screen initially
-        showLoading();
-        
-        // ====== Apply all critical fixes ======
-        
-        // 1. Setup theme toggle
-        setupThemeToggle();
-        
-        // 2. Setup attach button
-        setupAttachButton();
-        
-        // 3. CRITICAL FIX 1: Setup chat filters with offline support
-        setupChatFilters();
-        
-        // 4. CRITICAL FIX 3: Setup mobile group icon
-        setupMobileGroupIcon();
-        
-        // 5. Setup cross-screen notifications
-        initializeCrossScreenNotifications();
-        
-        // 6. Setup online/offline event listeners
-        window.addEventListener('online', updateOnlineStatus);
-        window.addEventListener('offline', updateOnlineStatus);
-        
-        // 7. CRITICAL FIX 5 & 6: Pre-load iframes with smooth transitions
-        preloadIframes();
-        
-        // 8. Load cached user data immediately (offline-first)
-        loadCachedUserData();
-        
-        // 9. CRITICAL FIX 7: Check auth state with offline support
-        checkAuthState();
-        
-        // 10. Setup navigation with smooth transitions
-        document.querySelectorAll('.nav-icon, .mobile-nav-icon, .mobile-group-icon').forEach(icon => {
-            icon.addEventListener('click', function() {
-                const page = this.dataset.page;
-                if (page) {
-                    switchPage(page);
-                }
-            });
-        });
-        
-        // 11. Setup new chat buttons
-        const startNewChatBtn = document.getElementById('startNewChatBtn');
-        const mobileNewChatBtn = document.getElementById('mobileNewChatBtn');
-        const startFirstChatBtn = document.getElementById('startFirstChatBtn');
-        
-        if (startNewChatBtn) {
-            startNewChatBtn.addEventListener('click', function() {
-                const startNewChatSection = document.getElementById('startNewChatSection');
-                if (startNewChatSection) {
-                    startNewChatSection.classList.remove('hidden');
-                }
-            });
-        }
-        
-        if (mobileNewChatBtn) {
-            mobileNewChatBtn.addEventListener('click', function() {
-                const startNewChatSection = document.getElementById('startNewChatSection');
-                if (startNewChatSection) {
-                    startNewChatSection.classList.remove('hidden');
-                }
-            });
-        }
-        
-        if (startFirstChatBtn) {
-            startFirstChatBtn.addEventListener('click', function() {
-                const startNewChatSection = document.getElementById('startNewChatSection');
-                if (startNewChatSection) {
-                    startNewChatSection.classList.remove('hidden');
-                }
-            });
-        }
-        
-        // 12. Setup cancel new chat button
-        const cancelNewChat = document.getElementById('cancelNewChat');
-        if (cancelNewChat) {
-            cancelNewChat.addEventListener('click', function() {
-                const startNewChatSection = document.getElementById('startNewChatSection');
-                if (startNewChatSection) {
-                    startNewChatSection.classList.add('hidden');
-                }
-            });
-        }
-        
-        // 13. Setup confirm start chat button
-        const confirmStartChatBtn = document.getElementById('confirmStartChat');
-        if (confirmStartChatBtn) {
-            confirmStartChatBtn.addEventListener('click', startNewChat);
-        }
-        
-        // 14. Setup message input
-        const messageInput = document.getElementById('messageInput');
-        if (messageInput) {
-            // Auto-resize textarea
-            messageInput.addEventListener('input', function() {
-                this.style.height = 'auto';
-                this.style.height = Math.min(this.scrollHeight, 150) + 'px';
-                
-                // Update send button state
-                updateSendButtonState();
-            });
-            
-            // Send message on Enter (but allow Shift+Enter for new line)
-            messageInput.addEventListener('keydown', function(e) {
-                if (e.key === 'Enter' && !e.shiftKey) {
-                    e.preventDefault();
-                    if (!this.disabled && this.value.trim()) {
-                        sendMessage();
-                    }
-                }
-            });
-        }
-        
-        // 15. Setup send button
-        const sendBtn = document.getElementById('sendBtn');
-        if (sendBtn) {
-            sendBtn.addEventListener('click', sendMessage);
-        }
-        
-        // 16. Setup call buttons
-        document.querySelectorAll('.friend-call-btn').forEach(btn => {
-            btn.addEventListener('click', function() {
-                const friendId = this.dataset.id;
-                const friendName = this.dataset.name;
-                if (friendId && friendName) {
-                    startCall(friendId, friendName, 'audio');
-                }
-            });
-        });
-        
-        document.querySelectorAll('.friend-video-call-btn').forEach(btn => {
-            btn.addEventListener('click', function() {
-                const friendId = this.dataset.id;
-                const friendName = this.dataset.name;
-                if (friendId && friendName) {
-                    startCall(friendId, friendName, 'video');
-                }
-            });
-        });
-        
-        // 17. Setup back to chats button for mobile
-        const backToChats = document.getElementById('backToChats');
-        if (backToChats) {
-            backToChats.addEventListener('click', showChatList);
-        }
-        
-        // 18. Show mobile nav bar on mobile devices
-        if (window.innerWidth < 768) {
-            const mobileNavBar = document.getElementById('mobileNavBar');
-            if (mobileNavBar) {
-                mobileNavBar.classList.remove('hidden');
-                console.log('Mobile nav bar shown');
-            }
-        }
-        
-        // 19. Initial online status check
-        updateOnlineStatus();
-        
-        // 20. Hide loading screen after a short delay
-        setTimeout(() => {
-            hideLoading();
-            // Default to chats page
-            switchPage('chats');
-            console.log('App initialization complete with all critical fixes applied');
-        }, 1000);
-    });
-    
-    // ====== Keep existing helper functions (updated for offline support) ======
-    
-    function setupAttachButton() {
-        const attachBtn = document.getElementById('attachBtn');
-        const fileUploadInput = document.getElementById('fileUploadInput');
-        
-        if (attachBtn && fileUploadInput) {
-            attachBtn.addEventListener('click', function(e) {
-                if (e.target !== fileUploadInput) {
-                    fileUploadInput.click();
-                }
-            });
-            
-            fileUploadInput.addEventListener('change', function(e) {
-                const files = e.target.files;
-                if (files.length > 0) {
-                    const file = files[0];
-                    showFilePreview(file);
-                }
-            });
-        }
-    }
-    
-    function showFilePreview(file) {
-        const filePreview = document.getElementById('filePreview');
-        const fileName = document.getElementById('fileName');
-        const fileSize = document.getElementById('fileSize');
-        
-        if (filePreview && fileName && fileSize) {
-            filePreview.classList.remove('hidden');
-            fileName.textContent = file.name;
-            fileSize.textContent = formatFileSize(file.size);
-            
-            // Upload file to Cloudinary if online, otherwise save offline
-            if (isOnline) {
-                uploadFileToCloudinary(file);
-            } else {
-                showToast('File saved offline. Will upload when connected.', 'info');
-                // Store file reference for later upload
-                storeOfflineFile(file);
-            }
-        }
-    }
-    
-    function formatFileSize(bytes) {
-        if (bytes === 0) return '0 Bytes';
-        const k = 1024;
-        const sizes = ['Bytes', 'KB', 'MB', 'GB'];
-        const i = Math.floor(Math.log(bytes) / Math.log(k));
-        return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i];
-    }
-    
-    async function uploadFileToCloudinary(file) {
-        const uploadProgressBar = document.getElementById('uploadProgressBar');
-        const filePreview = document.getElementById('filePreview');
-        
-        try {
-            const formData = new FormData();
-            formData.append('file', file);
-            formData.append('upload_preset', CLOUDINARY_UPLOAD_PRESET);
-            formData.append('cloud_name', CLOUDINARY_CLOUD_NAME);
-            
-            // Show upload progress
-            let progress = 0;
-            const progressInterval = setInterval(() => {
-                progress += 5;
-                if (progress > 90) clearInterval(progressInterval);
-                if (uploadProgressBar) {
-                    uploadProgressBar.style.width = progress + '%';
-                }
-            }, 200);
-            
-            // Upload to Cloudinary
-            const response = await fetch(`https://api.cloudinary.com/v1_1/${CLOUDINARY_CLOUD_NAME}/auto/upload`, {
-                method: 'POST',
-                body: formData
-            });
-            
-            clearInterval(progressInterval);
-            
-            if (!response.ok) {
-                throw new Error('Upload failed');
-            }
-            
-            const data = await response.json();
-            
-            // Update progress to 100%
-            if (uploadProgressBar) {
-                uploadProgressBar.style.width = '100%';
-            }
-            
-            // Show success message
-            showToast('File uploaded successfully', 'success');
-            
-            // Get the file URL
-            const fileUrl = data.secure_url;
-            
-            // Send file as message
-            sendFileMessage(file.name, fileUrl, file.type);
-            
-            // Hide preview after 3 seconds
-            setTimeout(() => {
-                if (filePreview) {
-                    filePreview.classList.add('hidden');
-                }
-                // Reset file input
-                const fileUploadInput = document.getElementById('fileUploadInput');
-                if (fileUploadInput) {
-                    fileUploadInput.value = '';
-                }
-            }, 3000);
-            
-        } catch (error) {
-            console.error('Error uploading file:', error);
-            showToast('Failed to upload file. Saved offline for later.', 'error');
-            
-            // Save file for offline upload
-            storeOfflineFile(file);
-            
-            // Reset progress
-            if (uploadProgressBar) {
-                uploadProgressBar.style.width = '0%';
-            }
-        }
-    }
-    
-    function storeOfflineFile(file) {
-        // Store file reference for later upload
-        const reader = new FileReader();
-        reader.onload = function(e) {
-            const offlineFiles = JSON.parse(localStorage.getItem('kynecta_offline_files') || '[]');
-            offlineFiles.push({
-                name: file.name,
-                type: file.type,
-                size: file.size,
-                data: e.target.result,
-                timestamp: new Date().toISOString()
-            });
-            localStorage.setItem('kynecta_offline_files', JSON.stringify(offlineFiles));
-        };
-        reader.readAsDataURL(file);
-    }
-    
-    function sendFileMessage(fileName, fileUrl, fileType) {
-        if (!currentChatId) {
-            showToast('Please select a chat first', 'error');
-            return;
-        }
-        
-        const currentUser = firebase.auth().currentUser;
-        if (!currentUser) {
-            showToast('Please log in to send messages', 'error');
-            return;
-        }
-        
-        // Determine file type icon
-        let fileIcon = '📎';
-        if (fileType.startsWith('image/')) fileIcon = '🖼️';
-        else if (fileType.startsWith('video/')) fileIcon = '🎬';
-        else if (fileType.startsWith('audio/')) fileIcon = '🎵';
-        else if (fileType.includes('pdf')) fileIcon = '📄';
-        else if (fileType.includes('document') || fileType.includes('word')) fileIcon = '📝';
-        
-        const localId = generateLocalId();
-        const messageData = {
-            text: `${fileIcon} ${fileName}\n${fileUrl}`,
-            senderId: currentUser.uid,
-            receiverId: currentChatId,
-            timestamp: new Date(),
-            localId: localId,
-            type: 'file',
-            fileUrl: fileUrl,
-            fileName: fileName
-        };
-        
-        // Display message immediately
-        displayOfflineMessage(messageData, currentChatId);
-        
-        // Send to Firebase if online
-        if (isOnline) {
-            sendMessageToFirebase(messageData);
-        } else {
-            // Store as pending message
-            storePendingMessage(currentChatId, messageData);
-            showToast('File saved offline. Will send when connected.', 'info');
-        }
-    }
-    
-    function updateSendButtonState() {
-        const sendBtn = document.getElementById('sendBtn');
-        const messageInput = document.getElementById('messageInput');
-        
-        if (sendBtn && messageInput) {
-            const hasText = messageInput.value.trim().length > 0;
-            
-            if (currentChatId && hasText) {
-                sendBtn.disabled = false;
-                sendBtn.classList.remove('opacity-50');
-            } else {
-                sendBtn.disabled = true;
-                sendBtn.classList.add('opacity-50');
-            }
-        }
-    }
-    
-    async function sendPendingMessages() {
-        if (pendingMessages.length > 0 && isOnline) {
-            const messagesToSend = [...pendingMessages];
-            
-            for (const message of messagesToSend) {
-                try {
-                    await sendMessageToFirebase(message);
-                    // Remove from pending array after successful send
-                    const index = pendingMessages.findIndex(m => m.localId === message.localId);
-                    if (index > -1) {
-                        pendingMessages.splice(index, 1);
-                    }
-                    // Remove from local storage
-                    removePendingMessage(message.receiverId, message.localId);
-                } catch (error) {
-                    console.error('Failed to send pending message:', error);
-                }
-            }
-            
-            // Update offline indicator
-            const offlineIndicator = document.getElementById('offlineIndicator');
-            if (offlineIndicator && pendingMessages.length === 0) {
-                offlineIndicator.classList.remove('show');
-            }
-        }
-    }
-    
-    function updateOfflineMessageStatus(localMessageId, status) {
-        const messageElement = document.querySelector(`[data-local-id="${localMessageId}"]`);
-        if (messageElement) {
-            const statusSpan = messageElement.querySelector('.message-status');
-            if (statusSpan) {
-                // Remove all status classes
-                statusSpan.classList.remove('pending', 'sent', 'delivered', 'read');
-                // Add new status class
-                statusSpan.classList.add(status);
-                
-                // Update icon based on status
-                switch(status) {
-                    case 'pending':
-                        statusSpan.innerHTML = '🕒';
-                        statusSpan.title = 'Pending';
-                        messageElement.classList.add('offline');
-                        break;
-                    case 'sent':
-                        statusSpan.innerHTML = '✓';
-                        statusSpan.title = 'Sent';
-                        messageElement.classList.remove('offline');
-                        break;
-                    case 'delivered':
-                        statusSpan.innerHTML = '✓✓';
-                        statusSpan.title = 'Delivered';
-                        messageElement.classList.remove('offline');
-                        break;
-                    case 'read':
-                        statusSpan.innerHTML = '✓✓';
-                        statusSpan.style.color = '#10b981';
-                        statusSpan.title = 'Read';
-                        messageElement.classList.remove('offline');
-                        break;
-                }
-            }
-            
-            // Remove offline indicator if message is sent
-            if (status !== 'pending') {
-                const offlineIndicator = messageElement.querySelector('.message-offline-indicator');
-                if (offlineIndicator) {
-                    offlineIndicator.remove();
-                }
-            }
-        }
-    }
-    
-    function generateLocalId() {
-        return 'local_' + Date.now() + '_' + Math.random().toString(36).substr(2, 9);
-    }
-    
-    function displayOfflineMessage(messageData, friendId) {
-        const messagesList = document.getElementById('messagesList');
-        const noMessagesMessage = document.getElementById('noMessagesMessage');
-        const currentUser = firebase.auth().currentUser;
-        
-        if (!messagesList || !currentUser) return;
-        
-        // Hide "no messages" message if showing
-        if (noMessagesMessage && !noMessagesMessage.classList.contains('hidden')) {
-            noMessagesMessage.classList.add('hidden');
-        }
-        
-        const messageDiv = document.createElement('div');
-        const isSent = messageData.senderId === currentUser.uid;
-        const status = !isOnline && isSent ? 'pending' : (messageData.status || 'sent');
-        
-        messageDiv.className = `message-bubble ${isSent ? 'sent' : 'received'} ${status === 'pending' ? 'offline' : ''} fade-in`;
-        messageDiv.dataset.localId = messageData.localId;
-        
-        let statusHtml = '';
-        if (isSent) {
-            statusHtml = `<span class="message-status ${status}">
-                ${status === 'pending' ? '🕒' : 
-                  status === 'sent' ? '✓' : 
-                  status === 'delivered' ? '✓✓' : 
-                  status === 'read' ? '✓✓' : '✓'}
-            </span>`;
-        }
-        
-        // Add offline indicator for pending messages
-        let offlineIndicator = '';
-        if (status === 'pending' && !isOnline) {
-            offlineIndicator = '<div class="message-offline-indicator">Waiting for connection...</div>';
-        }
-        
-        messageDiv.innerHTML = `
-            <div>${messageData.text || ''}</div>
-            <div class="text-xs opacity-70 mt-1 text-right">
-                ${formatTime(messageData.timestamp || new Date())}
-                ${statusHtml}
-            </div>
-            ${offlineIndicator}
-        `;
-        
-        messagesList.appendChild(messageDiv);
-        
-        // Scroll to bottom
-        setTimeout(() => {
-            const messagesContainer = document.getElementById('messagesContainer');
-            if (messagesContainer) {
-                messagesContainer.scrollTop = messagesContainer.scrollHeight;
-            }
-        }, 100);
-        
-        // If offline and sent, add to pending messages
-        if (!isOnline && isSent && status === 'pending') {
-            pendingMessages.push({
-                ...messageData,
-                status: 'pending'
-            });
-            
-            // Store in local storage for persistence
-            storePendingMessage(friendId, messageData);
-        }
-    }
-    
-    function storePendingMessage(friendId, messageData) {
-        const key = `kynecta_pending_${friendId}`;
-        const pending = JSON.parse(localStorage.getItem(key) || '[]');
-        pending.push(messageData);
-        localStorage.setItem(key, JSON.stringify(pending));
-    }
-    
-    function loadPendingMessages(friendId) {
-        const key = `kynecta_pending_${friendId}`;
-        return JSON.parse(localStorage.getItem(key) || '[]');
-    }
-    
-    function removePendingMessage(friendId, localId) {
-        const key = `kynecta_pending_${friendId}`;
-        const pending = JSON.parse(localStorage.getItem(key) || '[]');
-        const filtered = pending.filter(msg => msg.localId !== localId);
-        localStorage.setItem(key, JSON.stringify(filtered));
-    }
-    
     function displayFriendsList() {
         const friendsListForChat = document.getElementById('friendsListForChat');
         if (!friendsListForChat) return;
@@ -4281,16 +4695,6 @@
         // Show chat area
         showChatArea();
         
-        // Clear previous messages and show loading
-        const messagesList = document.getElementById('messagesList');
-        const noMessagesMessage = document.getElementById('noMessagesMessage');
-        if (messagesList) {
-            messagesList.innerHTML = '';
-        }
-        if (noMessagesMessage) {
-            noMessagesMessage.classList.remove('hidden');
-        }
-        
         // Load messages for this chat (works offline)
         await loadChatMessages(friend.id);
         
@@ -4298,375 +4702,16 @@
         markChatAsRead(friend.id);
         
         // Enable message input
+        updateMessageInputState();
+        
+        // Focus on message input
         const messageInput = document.getElementById('messageInput');
         if (messageInput) {
-            messageInput.disabled = false;
             messageInput.focus();
         }
         
         // Update send button state
         updateSendButtonState();
-    }
-    
-    async function loadChatMessages(friendId) {
-        const messagesList = document.getElementById('messagesList');
-        const noMessagesMessage = document.getElementById('noMessagesMessage');
-        
-        if (!messagesList) return;
-        
-        // Clear current messages
-        messagesList.innerHTML = '';
-        
-        // Show loading state
-        const loadingDiv = document.createElement('div');
-        loadingDiv.className = 'text-center py-8 text-gray-500';
-        loadingDiv.innerHTML = `
-            <div class="chat-skeleton w-16 h-16 rounded-2xl mx-auto mb-4"></div>
-            <div class="chat-skeleton w-32 h-4 mx-auto mb-2"></div>
-            <div class="chat-skeleton w-48 h-3 mx-auto"></div>
-        `;
-        messagesList.appendChild(loadingDiv);
-        
-        try {
-            // Load cached messages first (offline-first)
-            const cachedMessages = localStorage.getItem(`kynecta_chat_${friendId}`);
-            let messages = [];
-            
-            if (cachedMessages) {
-                try {
-                    messages = JSON.parse(cachedMessages);
-                } catch (e) {
-                    console.error('Error parsing cached messages:', e);
-                }
-            }
-            
-            // Load pending messages
-            const pendingMessages = loadPendingMessages(friendId);
-            
-            // Remove loading
-            loadingDiv.remove();
-            
-            if (messages.length === 0 && pendingMessages.length === 0) {
-                // No messages at all
-                if (noMessagesMessage) {
-                    noMessagesMessage.classList.remove('hidden');
-                }
-                return;
-            }
-            
-            // Display cached messages
-            if (messages.length > 0) {
-                displayMessages(messages, friendId);
-                if (noMessagesMessage) {
-                    noMessagesMessage.classList.add('hidden');
-                }
-            }
-            
-            // Display pending messages
-            if (pendingMessages.length > 0) {
-                pendingMessages.forEach(message => {
-                    displayOfflineMessage(message, friendId);
-                });
-                if (noMessagesMessage) {
-                    noMessagesMessage.classList.add('hidden');
-                }
-            }
-            
-            // Load from Firebase if online
-            if (isOnline) {
-                await loadMessagesFromFirebase(friendId);
-            }
-            
-        } catch (error) {
-            console.error('Error loading messages:', error);
-            loadingDiv.remove();
-            if (noMessagesMessage) {
-                noMessagesMessage.classList.remove('hidden');
-            }
-            showToast('Failed to load messages', 'error');
-        }
-    }
-    
-    async function loadMessagesFromFirebase(friendId) {
-        try {
-            const currentUser = firebase.auth().currentUser;
-            if (!currentUser) return;
-            
-            const db = firebase.firestore();
-            const chatId = [currentUser.uid, friendId].sort().join('_');
-            const messagesRef = db.collection('chats').doc(chatId).collection('messages')
-                .orderBy('timestamp', 'desc')
-                .limit(50);
-            
-            const snapshot = await messagesRef.get();
-            const messages = [];
-            
-            snapshot.forEach(doc => {
-                const messageData = doc.data();
-                messageData.id = doc.id;
-                messages.unshift(messageData);
-            });
-            
-            // Cache messages for offline viewing
-            localStorage.setItem(`kynecta_chat_${friendId}`, JSON.stringify(messages));
-            
-            // Update UI with new messages
-            updateMessagesUI(messages, friendId);
-            
-            // Hide no messages message if there are messages
-            const noMessagesMessage = document.getElementById('noMessagesMessage');
-            if (messages.length > 0 && noMessagesMessage) {
-                noMessagesMessage.classList.add('hidden');
-            }
-            
-        } catch (error) {
-            console.error('Error loading messages from Firebase:', error);
-            // Don't show error for offline users
-            if (isOnline) {
-                showToast('Failed to load latest messages', 'error');
-            }
-        }
-    }
-    
-    function updateMessagesUI(messages, friendId) {
-        const messagesList = document.getElementById('messagesList');
-        if (!messagesList) return;
-        
-        const currentUser = firebase.auth().currentUser;
-        let hasNewMessages = false;
-        
-        messages.forEach(message => {
-            // Skip if this is a pending message (already displayed)
-            if (message.localId && document.querySelector(`[data-local-id="${message.localId}"]`)) {
-                return;
-            }
-            
-            // Skip if message already exists in DOM
-            const existingMessage = document.querySelector(`[data-message-id="${message.id}"]`);
-            if (existingMessage) {
-                return;
-            }
-            
-            hasNewMessages = true;
-            const messageDiv = document.createElement('div');
-            const isSent = message.senderId === currentUser?.uid;
-            messageDiv.className = `message-bubble ${isSent ? 'sent' : 'received'} fade-in`;
-            messageDiv.dataset.messageId = message.id;
-            
-            let statusHtml = '';
-            if (isSent) {
-                const status = message.status || 'sent';
-                statusHtml = `<span class="message-status ${status}">
-                    ${status === 'pending' ? '🕒' : 
-                      status === 'sent' ? '✓' : 
-                      status === 'delivered' ? '✓✓' : 
-                      status === 'read' ? '✓✓' : '✓'}
-                </span>`;
-            }
-            
-            messageDiv.innerHTML = `
-                <div>${message.text || ''}</div>
-                <div class="text-xs opacity-70 mt-1 text-right">
-                    ${formatTime(message.timestamp)}
-                    ${statusHtml}
-                </div>
-            `;
-            
-            messagesList.appendChild(messageDiv);
-        });
-        
-        // Scroll to bottom if new messages were added
-        if (hasNewMessages) {
-            setTimeout(() => {
-                const messagesContainer = document.getElementById('messagesContainer');
-                if (messagesContainer) {
-                    messagesContainer.scrollTop = messagesContainer.scrollHeight;
-                }
-            }, 100);
-        }
-    }
-    
-    function displayMessages(messages, friendId) {
-        const messagesList = document.getElementById('messagesList');
-        if (!messagesList) return;
-        
-        const currentUser = firebase.auth().currentUser;
-        
-        messages.forEach(message => {
-            // Skip if this is a pending message (already displayed)
-            if (message.localId && document.querySelector(`[data-local-id="${message.localId}"]`)) {
-                return;
-            }
-            
-            const messageDiv = document.createElement('div');
-            const isSent = message.senderId === currentUser?.uid;
-            messageDiv.className = `message-bubble ${isSent ? 'sent' : 'received'} fade-in`;
-            if (message.id) {
-                messageDiv.dataset.messageId = message.id;
-            }
-            
-            let statusHtml = '';
-            if (isSent) {
-                const status = message.status || 'sent';
-                statusHtml = `<span class="message-status ${status}">
-                    ${status === 'pending' ? '🕒' : 
-                      status === 'sent' ? '✓' : 
-                      status === 'delivered' ? '✓✓' : 
-                      status === 'read' ? '✓✓' : '✓'}
-                </span>`;
-            }
-            
-            messageDiv.innerHTML = `
-                <div>${message.text || ''}</div>
-                <div class="text-xs opacity-70 mt-1 text-right">
-                    ${formatTime(message.timestamp)}
-                    ${statusHtml}
-                </div>
-            `;
-            
-            messagesList.appendChild(messageDiv);
-        });
-    }
-    
-    async function sendMessageToFirebase(messageData) {
-        try {
-            const currentUser = firebase.auth().currentUser;
-            if (!currentUser) {
-                throw new Error('User not logged in');
-            }
-            
-            const db = firebase.firestore();
-            const chatId = [currentUser.uid, messageData.receiverId].sort().join('_');
-            
-            // Remove localId from data before sending to Firebase
-            const { localId, ...firebaseData } = messageData;
-            
-            // Add message
-            const messageRef = await db.collection('chats').doc(chatId).collection('messages').add({
-                ...firebaseData,
-                status: 'sent',
-                timestamp: firebase.firestore.FieldValue.serverTimestamp()
-            });
-            
-            // Update UI and remove from pending storage
-            updateOfflineMessageStatus(localId, 'sent');
-            removePendingMessage(messageData.receiverId, localId);
-            
-            // Update local cache
-            updateLocalChatCache(messageData.receiverId, {
-                ...firebaseData,
-                id: messageRef.id,
-                status: 'sent',
-                timestamp: new Date()
-            });
-            
-            return messageRef.id;
-            
-        } catch (error) {
-            console.error('Error sending message:', error);
-            throw error;
-        }
-    }
-    
-    function updateLocalChatCache(friendId, messageData) {
-        const key = `kynecta_chat_${friendId}`;
-        const cachedMessages = JSON.parse(localStorage.getItem(key) || '[]');
-        cachedMessages.push(messageData);
-        localStorage.setItem(key, JSON.stringify(cachedMessages));
-    }
-    
-    async function sendMessage() {
-        const messageInput = document.getElementById('messageInput');
-        const text = messageInput.value.trim();
-        
-        if (!text || !currentChatId) return;
-        
-        const currentUser = firebase.auth().currentUser;
-        if (!currentUser) {
-            showToast('Please log in to send messages', 'error');
-            return;
-        }
-        
-        // Create message data
-        const localId = generateLocalId();
-        const messageData = {
-            text: text,
-            senderId: currentUser.uid,
-            receiverId: currentChatId,
-            timestamp: new Date(),
-            localId: localId
-        };
-        
-        // Display message immediately
-        displayOfflineMessage(messageData, currentChatId);
-        
-        // Clear input
-        messageInput.value = '';
-        updateSendButtonState();
-        
-        // Auto-resize textarea
-        messageInput.style.height = 'auto';
-        messageInput.style.height = Math.min(messageInput.scrollHeight, 150) + 'px';
-        
-        // Send to Firebase if online
-        if (isOnline) {
-            try {
-                await sendMessageToFirebase(messageData);
-            } catch (error) {
-                console.error('Failed to send message:', error);
-                // Keep message as pending
-                showToast('Failed to send message. Will retry when online.', 'error');
-            }
-        } else {
-            // Show offline notification
-            showToast('Message saved offline. Will send when connected.', 'info');
-        }
-    }
-    
-    function showToast(message, type = 'info') {
-        const notificationContainer = document.getElementById('notificationContainer');
-        if (!notificationContainer) return;
-        
-        const toast = document.createElement('div');
-        toast.className = `p-3 rounded-lg shadow-lg text-white ${
-            type === 'error' ? 'bg-red-500' : 
-            type === 'success' ? 'bg-green-500' : 
-            'bg-blue-500'
-        }`;
-        toast.innerHTML = `
-            <div class="flex items-center">
-                <i class="fas fa-${type === 'error' ? 'exclamation-circle' : type === 'success' ? 'check-circle' : 'info-circle'} mr-2"></i>
-                <span>${message}</span>
-            </div>
-        `;
-        
-        notificationContainer.appendChild(toast);
-        
-        // Auto-remove after 3 seconds
-        setTimeout(() => {
-            toast.remove();
-        }, 3000);
-    }
-    
-    function formatTime(timestamp) {
-        if (!timestamp) return '';
-        
-        const date = timestamp.toDate ? timestamp.toDate() : new Date(timestamp);
-        return date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
-    }
-    
-    function showLoading() {
-        const loadingScreen = document.getElementById('loadingScreen');
-        if (loadingScreen) {
-            loadingScreen.classList.remove('hidden');
-        }
-    }
-    
-    function hideLoading() {
-        const loadingScreen = document.getElementById('loadingScreen');
-        if (loadingScreen) {
-            loadingScreen.classList.add('hidden');
-        }
     }
     
     function showChatArea() {
@@ -4706,6 +4751,25 @@
         }
     }
     
+    function updateSendButtonState() {
+        const sendBtn = document.getElementById('sendBtn');
+        const messageInput = document.getElementById('messageInput');
+        
+        if (sendBtn && messageInput) {
+            const hasText = messageInput.value.trim().length > 0;
+            
+            if (currentChatId && hasText) {
+                sendBtn.disabled = false;
+                sendBtn.classList.remove('send-btn-disabled');
+                sendBtn.classList.add('send-btn-enabled');
+            } else {
+                sendBtn.disabled = true;
+                sendBtn.classList.remove('send-btn-enabled');
+                sendBtn.classList.add('send-btn-disabled');
+            }
+        }
+    }
+    
     function markChatAsRead(friendId) {
         // Mark chat as read in UI
         const chatItem = document.querySelector(`[data-friend-id="${friendId}"]`);
@@ -4726,6 +4790,400 @@
         updateFilterBadges();
     }
     
+    function updateNotificationBadge(type, count) {
+        notificationCounts[type] = count;
+        
+        // Update sidebar badges
+        const sidebarBadge = document.getElementById(`sidebar${type.charAt(0).toUpperCase() + type.slice(1)}Badge`);
+        if (sidebarBadge) {
+            if (count > 0) {
+                sidebarBadge.textContent = count > 99 ? '99+' : count;
+                sidebarBadge.classList.remove('hidden');
+            } else {
+                sidebarBadge.classList.add('hidden');
+            }
+        }
+        
+        // Update mobile badges
+        const mobileBadge = document.getElementById(`mobile${type.charAt(0).toUpperCase() + type.slice(1)}Badge`);
+        if (mobileBadge) {
+            if (count > 0) {
+                mobileBadge.textContent = count > 99 ? '99+' : count;
+                mobileBadge.classList.remove('hidden');
+            } else {
+                mobileBadge.classList.add('hidden');
+            }
+        }
+        
+        // Update filter badges
+        if (type === 'chats') {
+            updateFilterBadges();
+        }
+    }
+    
+    function updateFilterBadges() {
+        const filters = ['all', 'sent', 'received', 'unread'];
+        filters.forEach(filter => {
+            const badge = document.getElementById(`filter${filter.charAt(0).toUpperCase() + filter.slice(1)}Badge`);
+            const mobileBadge = document.getElementById(`mobileFilter${filter.charAt(0).toUpperCase() + filter.slice(1)}Badge`);
+            
+            let count = 0;
+            switch(filter) {
+                case 'all': count = allChats.length; break;
+                case 'sent': count = sentChatsCount; break;
+                case 'received': count = receivedChatsCount; break;
+                case 'unread': count = unreadChatsCount; break;
+            }
+            
+            if (badge) {
+                if (count > 0) {
+                    badge.textContent = count > 99 ? '99+' : count;
+                    badge.classList.remove('hidden');
+                } else {
+                    badge.classList.add('hidden');
+                }
+            }
+            
+            if (mobileBadge) {
+                if (count > 0) {
+                    mobileBadge.textContent = count > 99 ? '99+' : count;
+                    mobileBadge.classList.remove('hidden');
+                } else {
+                    mobileBadge.classList.add('hidden');
+                }
+            }
+        });
+    }
+    
+    async function loadRealChats() {
+        console.log('Loading real chats (offline-first)...');
+        const chatList = document.getElementById('chatList');
+        if (!chatList) return;
+        
+        // Try to load cached chats first (instant display)
+        const hasCachedChats = loadCachedChats();
+        
+        // Show loading state only if no cached chats
+        if (!hasCachedChats) {
+            // Clear any existing content
+            chatList.innerHTML = '';
+            
+            // Show loading skeleton
+            const loadingDiv = document.createElement('div');
+            loadingDiv.className = 'space-y-2 p-4';
+            loadingDiv.innerHTML = `
+                <div class="chat-skeleton w-full h-16 rounded-lg"></div>
+                <div class="chat-skeleton w-full h-16 rounded-lg"></div>
+                <div class="chat-skeleton w-full h-16 rounded-lg"></div>
+            `;
+            chatList.appendChild(loadingDiv);
+        }
+        
+        try {
+            const currentUser = firebase.auth().currentUser;
+            if (!currentUser) {
+                console.log('No user logged in, using cached data only');
+                // If we have cached chats, they're already displayed
+                if (!hasCachedChats) {
+                    const noChatsMessage = document.getElementById('noChatsMessage');
+                    if (noChatsMessage) {
+                        noChatsMessage.classList.remove('hidden');
+                    }
+                }
+                return;
+            }
+            
+            // If online, try to load from Firebase
+            if (isOnline) {
+                await loadChatsFromFirebase();
+            } else {
+                console.log('Offline mode - using cached data only');
+                // Offline mode: ensure we have at least cached data displayed
+                if (!hasCachedChats) {
+                    const noChatsMessage = document.getElementById('noChatsMessage');
+                    if (noChatsMessage) {
+                        noChatsMessage.classList.remove('hidden');
+                    }
+                }
+            }
+            
+        } catch (error) {
+            console.error('Error loading chats:', error);
+            
+            // Even if there's an error, ensure UI is usable
+            if (!hasCachedChats) {
+                const noChatsMessage = document.getElementById('noChatsMessage');
+                if (noChatsMessage) {
+                    noChatsMessage.innerHTML = `
+                        <i class="fas fa-wifi-slash text-4xl mb-3 text-gray-300 block"></i>
+                        <p>Offline Mode</p>
+                        <p class="text-sm mt-1">Using cached data. Connect for latest chats.</p>
+                    `;
+                    noChatsMessage.classList.remove('hidden');
+                }
+            }
+        }
+    }
+    
+    function loadCachedChats() {
+        console.log('Loading cached chats...');
+        const chatList = document.getElementById('chatList');
+        if (!chatList) return false;
+        
+        try {
+            // Try to load from localStorage first
+            const cachedChats = localStorage.getItem('kynecta_cached_chats');
+            if (cachedChats) {
+                const chats = JSON.parse(cachedChats);
+                if (chats.length > 0) {
+                    // Display cached chats
+                    displayCachedChats(chats);
+                    console.log('Loaded', chats.length, 'cached chats');
+                    return true;
+                }
+            }
+        } catch (error) {
+            console.error('Error loading cached chats:', error);
+        }
+        
+        return false;
+    }
+    
+    function displayCachedChats(chats) {
+        const chatList = document.getElementById('chatList');
+        const noChatsMessage = document.getElementById('noChatsMessage');
+        
+        if (!chatList) return;
+        
+        // Clear existing content
+        chatList.innerHTML = '';
+        
+        if (chats.length === 0) {
+            if (noChatsMessage) noChatsMessage.classList.remove('hidden');
+            return;
+        }
+        
+        // Hide no chats message
+        if (noChatsMessage) noChatsMessage.classList.add('hidden');
+        
+        // Reset counters
+        sentChatsCount = 0;
+        receivedChatsCount = 0;
+        unreadChatsCount = 0;
+        allChats = [];
+        
+        chats.forEach(chat => {
+            const chatItem = document.createElement('div');
+            chatItem.className = `chat-item p-3 rounded-lg mb-2 flex items-center cursor-pointer hover:bg-gray-50 transition-colors`;
+            chatItem.dataset.chatId = chat.id;
+            chatItem.dataset.friendId = chat.id;
+            
+            // Set message type classes for filtering
+            if (chat.isSent) {
+                chatItem.classList.add('sent');
+                chatItem.dataset.messageType = 'sent';
+                sentChatsCount++;
+            } else if (chat.isReceived) {
+                chatItem.classList.add('received');
+                chatItem.dataset.messageType = 'received';
+                receivedChatsCount++;
+            }
+            
+            // Mark as unread if needed
+            if (chat.isUnread) {
+                chatItem.classList.add('unread');
+                chatItem.dataset.unread = 'true';
+                unreadChatsCount++;
+            }
+            
+            // Format time
+            const timeAgo = chat.lastMessageTime ? getTimeAgo(new Date(chat.lastMessageTime)) : 'Just now';
+            
+            chatItem.innerHTML = `
+                <div class="flex items-center flex-1">
+                    <div class="w-12 h-12 rounded-full bg-gradient-to-r from-purple-500 to-green-500 flex items-center justify-center text-white font-semibold mr-3 overflow-hidden relative">
+                        ${chat.friend.profilePicture ? 
+                            `<img src="${chat.friend.profilePicture}" alt="${chat.friend.displayName}" class="w-full h-full object-cover">` :
+                            `<span>${chat.friend.displayName?.charAt(0) || 'F'}</span>`
+                        }
+                        ${chat.isUnread ? '<div class="unread-indicator"></div>' : ''}
+                    </div>
+                    <div class="flex-1">
+                        <div class="font-medium flex justify-between">
+                            <span>${chat.friend.displayName || 'Friend'}</span>
+                            <span class="text-xs text-gray-500">${timeAgo}</span>
+                        </div>
+                        <div class="text-sm text-gray-500 truncate">
+                            ${chat.lastMessage || 'Start a conversation...'}
+                        </div>
+                    </div>
+                </div>
+            `;
+            
+            chatItem.addEventListener('click', function() {
+                // Use cached friend data
+                openChatWithFriend(chat.friend);
+            });
+            
+            chatList.appendChild(chatItem);
+            allChats.push(chat);
+        });
+        
+        // Update notification badge for chats
+        updateNotificationBadge('chats', unreadChatsCount);
+        
+        // Update filter badges
+        updateFilterBadges();
+        
+        // Apply current filter
+        setTimeout(() => {
+            applyChatFilter();
+        }, 100);
+    }
+    
+    async function loadChatsFromFirebase() {
+        try {
+            const currentUser = firebase.auth().currentUser;
+            if (!currentUser) return;
+            
+            const db = firebase.firestore();
+            
+            // First, let's check if we have any friends to chat with
+            if (friendsList.length === 0) {
+                console.log('No friends found, showing empty state');
+                // Show no chats message
+                const noChatsMessage = document.getElementById('noChatsMessage');
+                if (noChatsMessage) {
+                    noChatsMessage.classList.remove('hidden');
+                }
+                
+                // Also show the "Start First Chat" button
+                const startFirstChatBtn = document.getElementById('startFirstChatBtn');
+                if (startFirstChatBtn) {
+                    startFirstChatBtn.addEventListener('click', function() {
+                        const startNewChatSection = document.getElementById('startNewChatSection');
+                        if (startNewChatSection) {
+                            startNewChatSection.classList.remove('hidden');
+                        }
+                    });
+                }
+                
+                updateFilterBadges();
+                return;
+            }
+            
+            // Reset counters
+            sentChatsCount = 0;
+            receivedChatsCount = 0;
+            unreadChatsCount = 0;
+            allChats = [];
+            
+            const cachedChats = [];
+            
+            // For each friend, check if there are actual messages
+            for (const friend of friendsList) {
+                // Skip system accounts unless they have actual conversations
+                if (friend.isSystem && friend.id !== 'kynecta_system') continue;
+                
+                // Check if there are messages with this friend
+                const chatId = [currentUser.uid, friend.id].sort().join('_');
+                const messagesRef = db.collection('chats').doc(chatId).collection('messages')
+                    .orderBy('timestamp', 'desc')
+                    .limit(1);
+                
+                let lastMessage = '';
+                let lastMessageTime = new Date();
+                let hasUnread = false;
+                let isSentMessage = false;
+                let isReceivedMessage = false;
+                
+                try {
+                    const snapshot = await messagesRef.get();
+                    if (!snapshot.empty) {
+                        const messageData = snapshot.docs[0].data();
+                        lastMessage = messageData.text || '📎 Attachment';
+                        lastMessageTime = messageData.timestamp ? messageData.timestamp.toDate() : new Date();
+                        
+                        // Check if message is sent or received
+                        isSentMessage = messageData.senderId === currentUser.uid;
+                        isReceivedMessage = !isSentMessage;
+                        
+                        // Check if message is unread (simplified for demo)
+                        hasUnread = isReceivedMessage && Math.random() > 0.5;
+                    }
+                } catch (error) {
+                    console.error('Error checking messages for friend:', friend.id, error);
+                }
+                
+                // Create chat object for caching
+                const chatObj = {
+                    id: friend.id,
+                    friend: friend,
+                    lastMessage: lastMessage,
+                    lastMessageTime: lastMessageTime,
+                    isUnread: hasUnread,
+                    isSent: isSentMessage,
+                    isReceived: isReceivedMessage
+                };
+                
+                cachedChats.push(chatObj);
+                
+                // Update counters
+                if (isSentMessage) sentChatsCount++;
+                if (isReceivedMessage) receivedChatsCount++;
+                if (hasUnread) unreadChatsCount++;
+            }
+            
+            // Cache the chats for offline use
+            localStorage.setItem('kynecta_cached_chats', JSON.stringify(cachedChats));
+            allChats = cachedChats;
+            
+            // Update UI with new data
+            displayCachedChats(cachedChats);
+            
+            // Update notification badge for chats
+            updateNotificationBadge('chats', unreadChatsCount);
+            
+        } catch (error) {
+            console.error('Error loading chats from Firebase:', error);
+            throw error;
+        }
+    }
+    
+    function setupThemeToggle() {
+        const themeToggle = document.getElementById('themeToggle');
+        const themeIcon = document.getElementById('themeIcon');
+        const mobileThemeToggle = document.getElementById('mobileThemeToggle');
+        const mobileThemeIcon = document.getElementById('mobileThemeIcon');
+        const themeToggleTools = document.getElementById('themeToggleTools');
+        const themeIconTools = document.getElementById('themeIconTools');
+        const mobileThemeToggleTools = document.getElementById('mobileThemeToggleTools');
+        const mobileThemeIconTools = document.getElementById('mobileThemeIconTools');
+        
+        function toggleTheme() {
+            const currentTheme = chatSettings.theme;
+            const newTheme = currentTheme === 'light' ? 'dark' : 'light';
+            
+            // Update settings
+            chatSettings.theme = newTheme;
+            saveChatSettings(chatSettings);
+            applyTheme(newTheme);
+        }
+        
+        // Add event listeners to all theme toggles
+        if (themeToggle) themeToggle.addEventListener('click', toggleTheme);
+        if (mobileThemeToggle) mobileThemeToggle.addEventListener('click', toggleTheme);
+        if (themeToggleTools) themeToggleTools.addEventListener('click', toggleTheme);
+        if (mobileThemeToggleTools) mobileThemeToggleTools.addEventListener('click', toggleTheme);
+    }
+    
+    function formatTime(timestamp) {
+        if (!timestamp) return '';
+        
+        const date = timestamp.toDate ? timestamp.toDate() : new Date(timestamp);
+        return date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+    }
+    
     function getTimeAgo(date) {
         if (!date) return '';
         
@@ -4741,6 +5199,45 @@
         if (diffDays < 7) return `${diffDays}d ago`;
         
         return date.toLocaleDateString();
+    }
+    
+    function showToast(message, type = 'info') {
+        const notificationContainer = document.getElementById('notificationContainer');
+        if (!notificationContainer) return;
+        
+        const toast = document.createElement('div');
+        toast.className = `p-3 rounded-lg shadow-lg text-white ${
+            type === 'error' ? 'bg-red-500' : 
+            type === 'success' ? 'bg-green-500' : 
+            'bg-blue-500'
+        }`;
+        toast.innerHTML = `
+            <div class="flex items-center">
+                <i class="fas fa-${type === 'error' ? 'exclamation-circle' : type === 'success' ? 'check-circle' : 'info-circle'} mr-2"></i>
+                <span>${message}</span>
+            </div>
+        `;
+        
+        notificationContainer.appendChild(toast);
+        
+        // Auto-remove after 3 seconds
+        setTimeout(() => {
+            toast.remove();
+        }, 3000);
+    }
+    
+    function showLoading() {
+        const loadingScreen = document.getElementById('loadingScreen');
+        if (loadingScreen) {
+            loadingScreen.classList.remove('hidden');
+        }
+    }
+    
+    function hideLoading() {
+        const loadingScreen = document.getElementById('loadingScreen');
+        if (loadingScreen) {
+            loadingScreen.classList.add('hidden');
+        }
     }
     
     function closeModal(modalId) {
@@ -4840,130 +5337,23 @@
         }
     }
     
-    function setupThemeToggle() {
-        const themeToggle = document.getElementById('themeToggle');
-        const themeIcon = document.getElementById('themeIcon');
-        const mobileThemeToggle = document.getElementById('mobileThemeToggle');
-        const mobileThemeIcon = document.getElementById('mobileThemeIcon');
-        const themeToggleTools = document.getElementById('themeToggleTools');
-        const themeIconTools = document.getElementById('themeIconTools');
-        const mobileThemeToggleTools = document.getElementById('mobileThemeToggleTools');
-        const mobileThemeIconTools = document.getElementById('mobileThemeIconTools');
+    function showIncomingCallPopup(callData) {
+        const incomingCallPopup = document.getElementById('incomingCallPopup');
+        const incomingCallerName = document.getElementById('incomingCallerName');
+        const incomingCallType = document.getElementById('incomingCallType');
         
-        function toggleTheme() {
-            const body = document.body;
-            const currentTheme = body.getAttribute('data-theme');
-            const newTheme = currentTheme === 'light' ? 'dark' : 'light';
+        if (incomingCallPopup && incomingCallerName && incomingCallType) {
+            incomingCallerName.textContent = callData.callerName || 'Unknown';
+            incomingCallType.textContent = callData.type === 'video' ? 'Video Call' : 'Voice Call';
+            incomingCallPopup.classList.remove('hidden');
             
-            body.setAttribute('data-theme', newTheme);
-            localStorage.setItem('kynecta_theme', newTheme);
-            
-            // Update all theme icons
-            const icons = [themeIcon, mobileThemeIcon, themeIconTools, mobileThemeIconTools];
-            icons.forEach(icon => {
-                if (icon) {
-                    icon.className = newTheme === 'dark' ? 'fas fa-sun' : 'fas fa-moon';
-                }
-            });
+            // Setup accept/reject buttons
+            document.getElementById('acceptCallBtn').onclick = () => acceptIncomingCall(callData);
+            document.getElementById('rejectCallBtn').onclick = () => rejectIncomingCall(callData.callId);
         }
-        
-        // Add event listeners to all theme toggles
-        if (themeToggle) themeToggle.addEventListener('click', toggleTheme);
-        if (mobileThemeToggle) mobileThemeToggle.addEventListener('click', toggleTheme);
-        if (themeToggleTools) themeToggleTools.addEventListener('click', toggleTheme);
-        if (mobileThemeToggleTools) mobileThemeToggleTools.addEventListener('click', toggleTheme);
-        
-        // Load saved theme
-        const savedTheme = localStorage.getItem('kynecta_theme') || 'light';
-        document.body.setAttribute('data-theme', savedTheme);
-        
-        // Update icons based on saved theme
-        const icons = [themeIcon, mobileThemeIcon, themeIconTools, mobileThemeIconTools];
-        icons.forEach(icon => {
-            if (icon) {
-                icon.className = savedTheme === 'dark' ? 'fas fa-sun' : 'fas fa-moon';
-            }
-        });
     }
     
-    // ====== CRITICAL FIXES COMPLETE ======
-    console.log('Critical fixes implementation complete');
-    
+    console.log('Enhanced offline chat system loaded successfully');
     </script>
-    <script>
-    // Settings integration for [Page Name]
-    let pageSettings = null;
-    
-    function initializePageSettings() {
-        if (window.KYNECTA_SETTINGS) {
-            window.KYNECTA_SETTINGS.registerPageCallback('[page-name]-page', applyPageSettings);
-            pageSettings = window.KYNECTA_SETTINGS.currentSettings;
-            applyPageSettings(pageSettings);
-        }
-    }
-    
-    function applyPageSettings(settings) {
-        console.log('[Page] applying settings:', settings);
-        pageSettings = settings;
-        
-        // Apply theme
-        const container = document.getElementById('mainContainer') || document.body;
-        container.className = container.className.replace(/theme-\S+/g, '');
-        if (settings.appearance.theme) {
-            container.classList.add(`theme-${settings.appearance.theme}`);
-        }
-        
-        // Apply font size
-        container.className = container.className.replace(/font-\S+/g, '');
-        if (settings.appearance.fontSize) {
-            container.classList.add(`font-${settings.appearance.fontSize}`);
-        }
-        
-        // Apply privacy settings
-        if (settings.privacy) {
-            // Example: Hide last seen based on privacy settings
-            const lastSeenElements = document.querySelectorAll('.last-seen');
-            lastSeenElements.forEach(el => {
-                if (settings.privacy.lastSeenVisibility === 'nobody') {
-                    el.textContent = 'Last seen hidden';
-                }
-            });
-        }
-        
-        // Apply notification settings
-        if (settings.notifications) {
-            // Enable/disable notification sounds
-            window.notificationSoundsEnabled = settings.notifications.sound;
-        }
-        
-        // Apply chat settings
-        if (settings.chat && document.getElementById('messageInput')) {
-            // Set enter to send behavior
-            const messageInput = document.getElementById('messageInput');
-            messageInput.addEventListener('keydown', function(e) {
-                if (e.key === 'Enter') {
-                    if (settings.chat.enterToSend && !e.shiftKey) {
-                        e.preventDefault();
-                        sendMessage();
-                    }
-                }
-            });
-        }
-    }
-    
-    // Cleanup on page unload
-    window.addEventListener('beforeunload', () => {
-        if (window.KYNECTA_SETTINGS) {
-            window.KYNECTA_SETTINGS.unregisterPageCallback('[page-name]-page');
-        }
-    });
-    
-    // Initialize
-    if (document.readyState === 'loading') {
-        document.addEventListener('DOMContentLoaded', initializePageSettings);
-    } else {
-        setTimeout(initializePageSettings, 100);
-    }
-</script>
 </body>
 </html>

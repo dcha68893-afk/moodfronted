@@ -1,14 +1,18 @@
 <!DOCTYPE html>
 <html lang="en" class="h-full">
 <head>
- <link rel="manifest" href="../manifest.json">
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=5.0, user-scalable=yes">
+    <title>kynecta - Connect & Chat Globally</title>
+    
+    <!-- PWA Manifest and Icons -->
+    <link rel="manifest" href="../manifest.json">
     <meta name="theme-color" content="#4F46E5">
     <link rel="icon" href="../icons/moodchat-192.png">
     <link rel="icon" href="../icons/moodchat-512.png">
     <meta name="theme-color" content="#000000">
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=5.0, user-scalable=yes">
-    <title>kynecta - Connect & Chat Globally</title>
+    
+    <!-- External Libraries -->
     <script src="https://cdn.tailwindcss.com"></script>
     <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css" rel="stylesheet">
     
@@ -17,1166 +21,11 @@
     <script src="https://www.gstatic.com/firebasejs/9.22.1/firebase-auth-compat.js"></script>
     <script src="https://www.gstatic.com/firebasejs/9.22.1/firebase-firestore-compat.js"></script>
     
-    <style>
-        /* CSS Variables for Dynamic Colors */
-        :root {
-            --primary-color: #3B82F6;
-            --secondary-color: #8B5CF6;
-            --accent-color: #60A5FA;
-        }
-        
-        /* Improved responsive base sizes */
-        html {
-            font-size: 14px;
-        }
-        
-        @media (min-width: 768px) {
-            html {
-                font-size: 16px;
-            }
-        }
-        
-        .section {
-            transition: all 0.4s ease-in-out;
-            width: 100%;
-            position: absolute;
-            top: 0;
-            left: 0;
-            opacity: 0;
-            transform: translateX(50px);
-            pointer-events: none;
-            overflow: hidden;
-            height: 0;
-        }
-        
-        .section-hidden {
-            opacity: 0;
-            transform: translateX(50px);
-            pointer-events: none;
-            position: absolute;
-            top: 0;
-            left: 0;
-            width: 100%;
-            height: 0;
-            overflow: hidden;
-        }
-        
-        .section-active {
-            opacity: 1;
-            transform: translateX(0);
-            pointer-events: all;
-            position: relative;
-            height: auto;
-            overflow: visible;
-        }
-        
-        .glass-effect {
-            background: rgba(255, 255, 255, 0.1);
-            backdrop-filter: blur(20px);
-            border: 1px solid rgba(255, 255, 255, 0.2);
-        }
-        
-        .cyber-gradient {
-            background: linear-gradient(135deg, var(--primary-color) 0%, var(--secondary-color) 100%) !important;
-        }
-        
-        .quantum-glow {
-            box-shadow: 0 0 30px rgba(59, 130, 246, 0.4);
-        }
-        
-        .neon-text {
-            text-shadow: 0 0 10px rgba(59, 130, 246, 0.7),
-                         0 0 20px rgba(59, 130, 246, 0.5),
-                         0 0 30px rgba(59, 130, 246, 0.3);
-        }
-        
-        .loading-spinner {
-            border: 2px solid rgba(255, 255, 255, 0.3);
-            border-radius: 50%;
-            border-top: 2px solid var(--primary-color);
-            width: 16px;
-            height: 16px;
-            animation: spin 1s linear infinite;
-            display: inline-block;
-            margin-left: 8px;
-        }
-        
-        @keyframes spin {
-            0% { transform: rotate(0deg); }
-            100% { transform: rotate(360deg); }
-        }
-        
-        .shake {
-            animation: shake 0.5s ease-in-out;
-        }
-        
-        @keyframes shake {
-            0%, 100% { transform: translateX(0); }
-            25% { transform: translateX(-5px); }
-            75% { transform: translateX(5px); }
-        }
-        
-        .input-error {
-            border-color: #ef4444 !important;
-            box-shadow: 0 0 0 3px rgba(239, 68, 68, 0.1) !important;
-        }
-        
-        .input-success {
-            border-color: #10b981 !important;
-            box-shadow: 0 0 0 3px rgba(16, 185, 129, 0.1) !important;
-        }
-        
-        .error-message {
-            background: rgba(239, 68, 68, 0.1);
-            border: 1px solid rgba(239, 68, 68, 0.3);
-            color: #fca5a5;
-            padding: 0.75rem;
-            border-radius: 0.5rem;
-            margin-bottom: 1rem;
-        }
-        
-        .success-message {
-            background: rgba(34, 197, 94, 0.1);
-            border: 1px solid rgba(34, 197, 94, 0.3);
-            color: #86efac;
-            padding: 0.75rem;
-            border-radius: 0.5rem;
-            margin-bottom: 1rem;
-        }
-        
-        .security-badge {
-            display: inline-flex;
-            align-items: center;
-            background: rgba(16, 185, 129, 0.1);
-            border: 1px solid rgba(16, 185, 129, 0.3);
-            color: #86efac;
-            padding: 0.25rem 0.5rem;
-            border-radius: 1rem;
-            font-size: 0.75rem;
-            margin-right: 0.5rem;
-            margin-bottom: 0.5rem;
-        }
-        
-        .connection-status {
-            position: fixed;
-            top: 10px;
-            right: 10px;
-            padding: 8px 16px;
-            border-radius: 20px;
-            font-size: 0.8rem;
-            z-index: 1000;
-            transition: all 0.3s;
-        }
-        
-        .connection-status.connected {
-            background: rgba(34, 197, 94, 0.8);
-            color: white;
-        }
-        
-        .connection-status.connecting {
-            background: rgba(245, 158, 11, 0.8);
-            color: white;
-        }
-        
-        .connection-status.disconnected {
-            background: rgba(239, 68, 68, 0.8);
-            color: white;
-        }
-        
-        /* Offline Mode Indicator */
-        .connection-status.offline {
-            background: rgba(107, 114, 128, 0.8);
-            color: white;
-        }
-        
-        /* Toast Styles */
-        #toastContainer {
-            position: fixed;
-            top: 1rem;
-            right: 1rem;
-            z-index: 1000;
-        }
-        
-        .toast {
-            opacity: 0;
-            transform: translateX(100%);
-            transition: all 0.3s ease-out;
-            margin-bottom: 0.5rem;
-            padding: 0.75rem 1rem;
-            border-radius: 0.5rem;
-            box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -2px rgba(0, 0, 0, 0.1);
-            color: white;
-            min-width: 250px;
-        }
-        
-        .toast.show {
-            opacity: 1;
-            transform: translateX(0);
-        }
-        
-        .toast.success { background-color: #10B981; }
-        .toast.error { background-color: #EF4444; }
-        .toast.warning { background-color: #F59E0B; }
-        .toast.info { background-color: #3B82F6; }
-        
-        /* Cookie Consent Banner */
-        .cookie-banner {
-            position: fixed;
-            bottom: 0;
-            left: 0;
-            right: 0;
-            background: linear-gradient(135deg, #1e3a8a 0%, #3730a3 100%);
-            color: white;
-            padding: 1.5rem;
-            box-shadow: 0 -4px 20px rgba(0, 0, 0, 0.3);
-            z-index: 10000;
-            transform: translateY(100%);
-            transition: transform 0.5s ease-in-out;
-        }
-        
-        .cookie-banner.show {
-            transform: translateY(0);
-        }
-        
-        /* Attractive Advertisement Styles */
-        .feature-highlight {
-            background: linear-gradient(135deg, rgba(59, 130, 246, 0.1), rgba(139, 92, 246, 0.1));
-            border: 1px solid rgba(59, 130, 246, 0.3);
-            transition: all 0.3s ease;
-        }
-        
-        .feature-highlight:hover {
-            transform: translateY(-5px);
-            box-shadow: 0 20px 40px rgba(59, 130, 246, 0.2);
-        }
-        
-        .pulse-glow {
-            animation: pulse-glow 2s infinite;
-        }
-        
-        @keyframes pulse-glow {
-            0%, 100% { box-shadow: 0 0 20px rgba(59, 130, 246, 0.4); }
-            50% { box-shadow: 0 0 40px rgba(59, 130, 246, 0.8); }
-        }
-        
-        .floating {
-            animation: floating 3s ease-in-out infinite;
-        }
-        
-        @keyframes floating {
-            0%, 100% { transform: translateY(0); }
-            50% { transform: translateY(-10px); }
-        }
-        
-        .gradient-text {
-            background: linear-gradient(135deg, var(--primary-color), var(--secondary-color), #f472b6);
-            -webkit-background-clip: text;
-            -webkit-text-fill-color: transparent;
-            background-clip: text;
-        }
-        
-        .stats-counter {
-            font-size: 1.5rem;
-            font-weight: bold;
-            background: linear-gradient(135deg, var(--primary-color), var(--secondary-color));
-            -webkit-background-clip: text;
-            -webkit-text-fill-color: transparent;
-            background-clip: text;
-        }
-        
-        @media (min-width: 768px) {
-            .stats-counter {
-                font-size: 2.5rem;
-            }
-        }
-        
-        /* Unified Dashboard Layout */
-        .dashboard-container {
-            min-height: 100vh;
-            background: linear-gradient(135deg, #0f172a 0%, #1e1b4b 50%, #0f172a 100%);
-            transition: all 0.5s ease-in-out;
-        }
-        
-        .content-area {
-            transition: all 0.5s ease-in-out;
-            position: relative;
-            min-height: 500px;
-        }
-        
-        .form-container {
-            max-width: 400px;
-            margin: 0 auto;
-        }
-        
-        /* Background Patterns */
-        .bg-grid-pattern {
-            background-image: 
-                linear-gradient(rgba(99, 102, 241, 0.1) 1px, transparent 1px),
-                linear-gradient(90deg, rgba(99, 102, 241, 0.1) 1px, transparent 1px);
-            background-size: 50px 50px;
-        }
-        
-        /* Mood Theme Colors */
-        .theme-calm {
-            --primary-color: #3B82F6;
-            --secondary-color: #8B5CF6;
-            --accent-color: #60A5FA;
-            background: linear-gradient(135deg, #0f172a 0%, #1e3a8a 50%, #0f172a 100%) !important;
-        }
-        
-        .theme-energetic {
-            --primary-color: #DC2626;
-            --secondary-color: #EA580C;
-            --accent-color: #F97316;
-            background: linear-gradient(135deg, #431407 0%, #9a3412 50%, #431407 100%) !important;
-        }
-        
-        .theme-creative {
-            --primary-color: #7C3AED;
-            --secondary-color: #DB2777;
-            --accent-color: #A855F7;
-            background: linear-gradient(135deg, #1e1b4b 0%, #7e22ce 50%, #1e1b4b 100%) !important;
-        }
-        
-        .theme-chill {
-            --primary-color: #059669;
-            --secondary-color: #10B981;
-            --accent-color: #34D399;
-            background: linear-gradient(135deg, #064e3b 0%, #059669 50%, #064e3b 100%) !important;
-        }
-        
-        .theme-romantic {
-            --primary-color: #DB2777;
-            --secondary-color: #BE185D;
-            --accent-color: #EC4899;
-            background: linear-gradient(135deg, #831843 0%, #db2777 50%, #831843 100%) !important;
-        }
-        
-        /* Mood Selector */
-        .mood-selector {
-            position: fixed;
-            top: 10px;
-            left: 10px;
-            z-index: 1000;
-        }
-        
-        .mood-btn {
-            background: rgba(255, 255, 255, 0.1);
-            backdrop-filter: blur(10px);
-            border: 1px solid rgba(255, 255, 255, 0.2);
-            color: white;
-            padding: 8px 12px;
-            border-radius: 20px;
-            cursor: pointer;
-            transition: all 0.3s ease;
-        }
-        
-        .mood-btn:hover {
-            background: rgba(255, 255, 255, 0.2);
-            transform: scale(1.05);
-        }
-        
-        .mood-options {
-            position: absolute;
-            top: 100%;
-            left: 0;
-            background: rgba(0, 0, 0, 0.9);
-            backdrop-filter: blur(20px);
-            border: 1px solid rgba(255, 255, 255, 0.2);
-            border-radius: 10px;
-            padding: 10px;
-            display: none;
-            grid-template-columns: repeat(3, 1fr);
-            gap: 5px;
-            min-width: 150px;
-        }
-        
-        .mood-options.show {
-            display: grid;
-        }
-        
-        .mood-option {
-            width: 40px;
-            height: 40px;
-            border-radius: 50%;
-            border: 2px solid transparent;
-            cursor: pointer;
-            transition: all 0.3s ease;
-        }
-        
-        .mood-option:hover {
-            transform: scale(1.1);
-            border-color: white;
-        }
-        
-        .mood-calm { background: linear-gradient(135deg, #3B82F6, #8B5CF6); }
-        .mood-energetic { background: linear-gradient(135deg, #DC2626, #EA580C); }
-        .mood-creative { background: linear-gradient(135deg, #7C3AED, #DB2777); }
-        .mood-chill { background: linear-gradient(135deg, #059669, #10B981); }
-        .mood-romantic { background: linear-gradient(135deg, #DB2777, #BE185D); }
-        .mood-default { background: linear-gradient(135deg, #6B7280, #4B5563); }
-        
-        /* Mobile Mood Selector */
-        .mobile-mood-selector {
-            position: fixed;
-            bottom: 20px;
-            left: 20px;
-            z-index: 1000;
-        }
-        
-        .mobile-mood-btn {
-            width: 50px;
-            height: 50px;
-            border-radius: 50%;
-            background: rgba(255, 255, 255, 0.1);
-            backdrop-filter: blur(10px);
-            border: 1px solid rgba(255, 255, 255, 0.2);
-            color: white;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            cursor: pointer;
-            transition: all 0.3s ease;
-            box-shadow: 0 4px 15px rgba(0, 0, 0, 0.3);
-        }
-        
-        .mobile-mood-btn:hover {
-            background: rgba(255, 255, 255, 0.2);
-            transform: scale(1.1);
-        }
-        
-        .mobile-mood-options {
-            position: absolute;
-            bottom: 60px;
-            left: 0;
-            background: rgba(0, 0, 0, 0.95);
-            backdrop-filter: blur(20px);
-            border: 1px solid rgba(255, 255, 255, 0.2);
-            border-radius: 16px;
-            padding: 12px;
-            display: none;
-            grid-template-columns: repeat(3, 1fr);
-            gap: 8px;
-            min-width: 160px;
-            box-shadow: 0 10px 30px rgba(0, 0, 0, 0.5);
-        }
-        
-        .mobile-mood-options.show {
-            display: grid;
-        }
-        
-        .mobile-mood-option {
-            width: 44px;
-            height: 44px;
-            border-radius: 50%;
-            border: 2px solid transparent;
-            cursor: pointer;
-            transition: all 0.3s ease;
-        }
-        
-        .mobile-mood-option:hover {
-            transform: scale(1.1);
-            border-color: white;
-        }
-        
-        .mobile-mood-option.active {
-            border-color: white;
-            box-shadow: 0 0 10px rgba(255, 255, 255, 0.5);
-        }
-        
-        /* Forgot Password Modal Styles */
-        .forgot-password-modal {
-            position: fixed;
-            top: 0;
-            left: 0;
-            width: 100%;
-            height: 100%;
-            background: rgba(0, 0, 0, 0.7);
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            z-index: 10000;
-            opacity: 0;
-            visibility: hidden;
-            transition: all 0.3s ease;
-        }
-        
-        .forgot-password-modal.show {
-            opacity: 1;
-            visibility: visible;
-        }
-        
-        .forgot-password-content {
-            width: 90%;
-            max-width: 500px;
-            background: linear-gradient(135deg, #0f172a 0%, #1e293b 100%);
-            border-radius: 20px;
-            padding: 1.5rem;
-            box-shadow: 0 20px 40px rgba(0, 0, 0, 0.5);
-            transform: translateY(20px);
-            transition: transform 0.3s ease;
-        }
-        
-        .forgot-password-modal.show .forgot-password-content {
-            transform: translateY(0);
-        }
-        
-        .recovery-option-card {
-            transition: transform 0.2s, box-shadow 0.2s, border-color 0.2s;
-            cursor: pointer;
-            border: 2px solid transparent;
-        }
-        
-        .recovery-option-card:hover {
-            transform: translateY(-4px);
-            box-shadow: 0 10px 20px rgba(0, 0, 0, 0.2);
-            border-color: #3b82f6;
-        }
-
-        /* Improved responsive text sizes */
-        .responsive-text {
-            font-size: clamp(1rem, 4vw, 1.5rem);
-        }
-        
-        .responsive-heading {
-            font-size: clamp(1.5rem, 6vw, 2.5rem);
-        }
-        
-        .responsive-subheading {
-            font-size: clamp(1rem, 3vw, 1.25rem);
-        }
-
-        /* Better mobile layout */
-        @media (max-width: 767px) {
-            .mobile-padding {
-                padding: 1rem;
-            }
-            
-            .mobile-margin {
-                margin-bottom: 1.5rem;
-            }
-            
-            .mobile-text-center {
-                text-align: center;
-            }
-            
-            .mobile-stack {
-                flex-direction: column;
-            }
-            
-            .mobile-space-y > * + * {
-                margin-top: 1rem;
-            }
-            
-            .forgot-password-content {
-                padding: 1rem;
-            }
-        }
-        
-        @media (min-width: 768px) {
-            .forgot-password-content {
-                padding: 2rem;
-            }
-        }
-
-        /* New Platform Feature Styles */
-        .platform-feature {
-            background: linear-gradient(135deg, rgba(59, 130, 246, 0.05), rgba(139, 92, 246, 0.05));
-            border: 1px solid rgba(59, 130, 246, 0.2);
-            border-radius: 16px;
-            padding: 1.5rem;
-            transition: all 0.3s ease;
-        }
-        
-        .platform-feature:hover {
-            transform: translateY(-5px);
-            box-shadow: 0 15px 30px rgba(59, 130, 246, 0.2);
-            border-color: rgba(59, 130, 246, 0.4);
-        }
-        
-        .feature-icon {
-            width: 60px;
-            height: 60px;
-            border-radius: 16px;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            margin-bottom: 1rem;
-            font-size: 1.5rem;
-        }
-        
-        .mood-tag {
-            display: inline-block;
-            padding: 0.25rem 0.75rem;
-            border-radius: 20px;
-            font-size: 0.75rem;
-            font-weight: 500;
-            margin-right: 0.5rem;
-            margin-bottom: 0.5rem;
-        }
-        
-        .mood-tag.calm { background: rgba(59, 130, 246, 0.2); color: #93c5fd; }
-        .mood-tag.energetic { background: rgba(239, 68, 68, 0.2); color: #fca5a5; }
-        .mood-tag.creative { background: rgba(168, 85, 247, 0.2); color: #d8b4fe; }
-        .mood-tag.chill { background: rgba(16, 185, 129, 0.2); color: #86efac; }
-        .mood-tag.romantic { background: rgba(236, 72, 153, 0.2); color: #f9a8d4; }
-        
-        .interest-badge {
-            display: inline-flex;
-            align-items: center;
-            background: rgba(99, 102, 241, 0.1);
-            border: 1px solid rgba(99, 102, 241, 0.3);
-            color: #a5b4fc;
-            padding: 0.25rem 0.75rem;
-            border-radius: 1rem;
-            font-size: 0.75rem;
-            margin-right: 0.5rem;
-            margin-bottom: 0.5rem;
-        }
-        
-        .payment-badge {
-            display: inline-flex;
-            align-items: center;
-            background: rgba(16, 185, 129, 0.1);
-            border: 1px solid rgba(16, 185, 129, 0.3);
-            color: #86efac;
-            padding: 0.25rem 0.75rem;
-            border-radius: 1rem;
-            font-size: 0.75rem;
-            margin-right: 0.5rem;
-            margin-bottom: 0.5rem;
-        }
-        
-        /* Mood Customizer Styles */
-        .mood-customizer {
-            position: fixed;
-            top: 10px;
-            right: 10px;
-            z-index: 1000;
-        }
-        
-        .mood-customizer-btn {
-            background: rgba(255, 255, 255, 0.1);
-            backdrop-filter: blur(10px);
-            border: 1px solid rgba(255, 255, 255, 0.2);
-            color: white;
-            padding: 8px 12px;
-            border-radius: 20px;
-            cursor: pointer;
-            transition: all 0.3s ease;
-        }
-        
-        .mood-customizer-btn:hover {
-            background: rgba(255, 255, 255, 0.2);
-            transform: scale(1.05);
-        }
-        
-        .mood-customizer-modal {
-            position: fixed;
-            top: 0;
-            left: 0;
-            width: 100%;
-            height: 100%;
-            background: rgba(0, 0, 0, 0.7);
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            z-index: 10000;
-            opacity: 0;
-            visibility: hidden;
-            transition: all 0.3s ease;
-        }
-        
-        .mood-customizer-modal.show {
-            opacity: 1;
-            visibility: visible;
-        }
-        
-        .mood-customizer-content {
-            width: 90%;
-            max-width: 600px;
-            background: linear-gradient(135deg, #0f172a 0%, #1e293b 100%);
-            border-radius: 20px;
-            padding: 1.5rem;
-            box-shadow: 0 20px 40px rgba(0, 0, 0, 0.5);
-            transform: translateY(20px);
-            transition: transform 0.3s ease;
-        }
-        
-        .mood-customizer-modal.show .mood-customizer-content {
-            transform: translateY(0);
-        }
-        
-        .color-palette {
-            display: grid;
-            grid-template-columns: repeat(5, 1fr);
-            gap: 10px;
-            margin-bottom: 1.5rem;
-        }
-        
-        .color-option {
-            width: 100%;
-            aspect-ratio: 1;
-            border-radius: 10px;
-            cursor: pointer;
-            transition: all 0.3s ease;
-            border: 2px solid transparent;
-        }
-        
-        .color-option:hover {
-            transform: scale(1.1);
-        }
-        
-        .color-option.active {
-            border-color: white;
-            box-shadow: 0 0 15px rgba(255, 255, 255, 0.5);
-        }
-        
-        .custom-color-input {
-            display: flex;
-            align-items: center;
-            gap: 10px;
-            margin-top: 1rem;
-        }
-        
-        .custom-color-preview {
-            width: 40px;
-            height: 40px;
-            border-radius: 10px;
-            border: 2px solid rgba(255, 255, 255, 0.3);
-        }
-        
-        .intensity-slider {
-            width: 100%;
-            margin: 1rem 0;
-        }
-        
-        .mood-preview {
-            width: 100%;
-            height: 100px;
-            border-radius: 10px;
-            margin-top: 1rem;
-            background: linear-gradient(135deg, var(--primary-color), var(--secondary-color));
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            color: white;
-            font-weight: bold;
-            transition: all 0.3s ease;
-        }
-        
-        /* Mobile-specific styles for mood customizer */
-        @media (max-width: 767px) {
-            .mood-customizer {
-                position: fixed;
-                bottom: 20px;
-                right: 20px;
-                top: auto;
-                left: auto;
-                z-index: 1000;
-            }
-            
-            .mood-customizer-btn {
-                width: 50px;
-                height: 50px;
-                border-radius: 50%;
-                display: flex;
-                align-items: center;
-                justify-content: center;
-                padding: 0;
-            }
-            
-            .mood-customizer-btn span {
-                display: none;
-            }
-            
-            .mood-customizer-content {
-                padding: 1rem;
-                max-height: 80vh;
-                overflow-y: auto;
-            }
-            
-            .color-palette {
-                grid-template-columns: repeat(3, 1fr);
-                gap: 8px;
-            }
-            
-            .custom-color-input {
-                flex-direction: column;
-                gap: 10px;
-            }
-        }
-
-        /* Security protection styles */
-        .protected-content {
-            -webkit-user-select: none;
-            -moz-user-select: none;
-            -ms-user-select: none;
-            user-select: none;
-            -webkit-touch-callout: none;
-            -webkit-tap-highlight-color: transparent;
-        }
-        
-        .no-screenshot {
-            -webkit-touch-callout: none;
-            -webkit-user-select: none;
-            -khtml-user-select: none;
-            -moz-user-select: none;
-            -ms-user-select: none;
-            user-select: none;
-        }
-        
-        /* Hide context menu */
-        .no-context-menu {
-            -webkit-context-menu: none;
-            -moz-context-menu: none;
-            -ms-context-menu: none;
-            context-menu: none;
-        }
-        
-        /* Combined Interest & Language Selection Styles */
-        .selection-card {
-            background: rgba(255, 255, 255, 0.05);
-            border: 2px solid rgba(255, 255, 255, 0.1);
-            border-radius: 16px;
-            padding: 1rem;
-            transition: all 0.3s ease;
-            cursor: pointer;
-            position: relative;
-            overflow: hidden;
-            height: 120px;
-            display: flex;
-            flex-direction: column;
-            justify-content: center;
-            align-items: center;
-        }
-        
-        .selection-card:hover {
-            transform: translateY(-5px);
-            border-color: rgba(59, 130, 246, 0.5);
-            box-shadow: 0 10px 25px rgba(59, 130, 246, 0.2);
-        }
-        
-        .selection-card.selected {
-            border-color: #3b82f6;
-            background: rgba(59, 130, 246, 0.1);
-            box-shadow: 0 0 20px rgba(59, 130, 246, 0.3);
-        }
-        
-        .selection-card.selected::after {
-            content: '✓';
-            position: absolute;
-            top: 10px;
-            right: 10px;
-            width: 24px;
-            height: 24px;
-            background: #3b82f6;
-            border-radius: 50%;
-            display: flex;
-                align-items: center;
-                justify-content: center;
-                color: white;
-                font-weight: bold;
-                font-size: 12px;
-        }
-        
-        .selection-icon {
-            width: 40px;
-            height: 40px;
-            border-radius: 12px;
-            display: flex;
-                align-items: center;
-                justify-content: center;
-                margin-bottom: 0.5rem;
-                font-size: 1rem;
-        }
-        
-        .selection-counter {
-            position: fixed;
-            bottom: 20px;
-            right: 20px;
-            background: linear-gradient(135deg, #3B82F6, #8B5CF6);
-            color: white;
-            padding: 12px 20px;
-            border-radius: 25px;
-            font-weight: bold;
-            box-shadow: 0 4px 15px rgba(59, 130, 246, 0.3);
-            z-index: 1000;
-        }
-        
-        .selection-progress {
-            height: 4px;
-            background: rgba(255, 255, 255, 0.1);
-            border-radius: 2px;
-            overflow: hidden;
-            margin: 1.5rem 0;
-        }
-        
-        .selection-progress-bar {
-            height: 100%;
-            background: linear-gradient(90deg, #3B82F6, #8B5CF6);
-            transition: width 0.3s ease;
-        }
-        
-        .selection-next-btn {
-            width: 100%;
-            background: linear-gradient(135deg, #3B82F6, #8B5CF6);
-            color: white;
-            padding: 14px;
-            border-radius: 12px;
-            font-weight: bold;
-            font-size: 1rem;
-            border: none;
-            cursor: pointer;
-            transition: all 0.3s ease;
-            margin-top: 1rem;
-        }
-        
-        .selection-next-btn:hover:not(:disabled) {
-            transform: translateY(-2px);
-            box-shadow: 0 10px 20px rgba(59, 130, 246, 0.3);
-        }
-        
-        .selection-next-btn:disabled {
-            opacity: 0.5;
-            cursor: not-allowed;
-        }
-        
-        .selection-title {
-            font-size: 1.75rem;
-            font-weight: bold;
-            background: linear-gradient(135deg, #3B82F6, #8B5CF6);
-            -webkit-background-clip: text;
-            -webkit-text-fill-color: transparent;
-            background-clip: text;
-            margin-bottom: 0.5rem;
-        }
-        
-        .selection-subtitle {
-            color: #94a3b8;
-            margin-bottom: 2rem;
-        }
-        
-        .combined-selection-grid {
-            display: grid;
-            grid-template-columns: repeat(auto-fill, minmax(120px, 1fr));
-            gap: 0.75rem;
-            margin-bottom: 2rem;
-        }
-        
-        @media (max-width: 640px) {
-            .combined-selection-grid {
-                grid-template-columns: repeat(auto-fill, minmax(100px, 1fr));
-                gap: 0.5rem;
-            }
-            
-            .selection-card {
-                height: 100px;
-                padding: 0.75rem;
-            }
-            
-            .selection-icon {
-                width: 32px;
-                height: 32px;
-                font-size: 0.875rem;
-            }
-        }
-        
-        @media (min-width: 768px) {
-            .combined-selection-grid {
-                grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
-            }
-        }
-
-        /* Skip Selection Button */
-        .skip-selection-btn {
-            background: rgba(255, 255, 255, 0.05);
-            color: #94a3b8;
-            padding: 10px 20px;
-            border-radius: 8px;
-            border: 1px solid rgba(255, 255, 255, 0.1);
-            cursor: pointer;
-            transition: all 0.3s ease;
-            margin-top: 1rem;
-        }
-        
-        .skip-selection-btn:hover {
-            background: rgba(255, 255, 255, 0.1);
-            color: white;
-        }
-        
-        /* Combined category label */
-        .category-label {
-            position: absolute;
-            top: 5px;
-            left: 5px;
-            font-size: 0.6rem;
-            padding: 2px 6px;
-            border-radius: 10px;
-            background: rgba(0, 0, 0, 0.5);
-            color: white;
-        }
-        
-        /* Auto-login indicator */
-        .auto-login-badge {
-            position: fixed;
-            bottom: 20px;
-            left: 20px;
-            background: rgba(34, 197, 94, 0.2);
-            border: 1px solid rgba(34, 197, 94, 0.3);
-            color: #86efac;
-            padding: 8px 12px;
-            border-radius: 20px;
-            font-size: 0.75rem;
-            z-index: 1000;
-            display: flex;
-            align-items: center;
-            gap: 5px;
-        }
-        
-        /* App Store Promo Styles */
-        .app-promo-card {
-            background: linear-gradient(135deg, rgba(139, 92, 246, 0.1), rgba(59, 130, 246, 0.1));
-            border: 2px solid rgba(139, 92, 246, 0.3);
-            border-radius: 20px;
-            padding: 1.5rem;
-            margin: 1.5rem 0;
-            position: relative;
-            overflow: hidden;
-        }
-        
-        .app-promo-card::before {
-            content: '';
-            position: absolute;
-            top: 0;
-            left: 0;
-            right: 0;
-            height: 4px;
-            background: linear-gradient(90deg, #8B5CF6, #3B82F6);
-        }
-        
-        .download-badge {
-            display: inline-flex;
-            align-items: center;
-            background: linear-gradient(135deg, #3B82F6, #8B5CF6);
-            color: white;
-            padding: 0.75rem 1.5rem;
-            border-radius: 12px;
-            font-weight: bold;
-            text-decoration: none;
-            transition: all 0.3s ease;
-            margin: 0.5rem;
-        }
-        
-        .download-badge:hover {
-            transform: translateY(-2px);
-            box-shadow: 0 10px 20px rgba(59, 130, 246, 0.3);
-        }
-        
-        /* Feature highlight with coming soon badge */
-        .coming-soon-badge {
-            position: absolute;
-            top: 10px;
-            right: 10px;
-            background: rgba(245, 158, 11, 0.2);
-            border: 1px solid rgba(245, 158, 11, 0.3);
-            color: #fbbf24;
-            padding: 4px 8px;
-            border-radius: 12px;
-            font-size: 0.7rem;
-            font-weight: bold;
-        }
-        
-        /* Chat-focused feature styles */
-        .chat-feature {
-            background: linear-gradient(135deg, rgba(59, 130, 246, 0.08), rgba(139, 92, 246, 0.08));
-            border: 1px solid rgba(59, 130, 246, 0.25);
-            border-radius: 16px;
-            padding: 1.25rem;
-            transition: all 0.3s ease;
-        }
-        
-        .chat-feature:hover {
-            transform: translateY(-3px);
-            box-shadow: 0 10px 25px rgba(59, 130, 246, 0.2);
-        }
-        
-        /* Quick login button */
-        .quick-login-btn {
-            background: rgba(34, 197, 94, 0.1);
-            border: 1px solid rgba(34, 197, 94, 0.3);
-            color: #86efac;
-            padding: 10px 20px;
-            border-radius: 10px;
-            cursor: pointer;
-            transition: all 0.3s ease;
-            display: flex;
-            align-items: center;
-            gap: 8px;
-            font-weight: 500;
-        }
-        
-        .quick-login-btn:hover {
-            background: rgba(34, 197, 94, 0.2);
-            transform: scale(1.05);
-        }
-        
-        /* Interest tags */
-        .interest-tag {
-            display: inline-block;
-            padding: 0.25rem 0.75rem;
-            border-radius: 20px;
-            font-size: 0.75rem;
-            font-weight: 500;
-            margin-right: 0.5rem;
-            margin-bottom: 0.5rem;
-        }
-        
-        .interest-tag.tech { background: rgba(59, 130, 246, 0.2); color: #93c5fd; }
-        .interest-tag.music { background: rgba(168, 85, 247, 0.2); color: #d8b4fe; }
-        .interest-tag.sports { background: rgba(16, 185, 129, 0.2); color: #86efac; }
-        .interest-tag.gaming { background: rgba(239, 68, 68, 0.2); color: #fca5a5; }
-        .interest-tag.art { background: rgba(245, 158, 11, 0.2); color: #fcd34d; }
-        .interest-tag.travel { background: rgba(236, 72, 153, 0.2); color: #f9a8d4; }
-        
-        /* Language tags */
-        .language-tag {
-            display: inline-block;
-            padding: 0.25rem 0.75rem;
-            border-radius: 20px;
-            font-size: 0.75rem;
-            font-weight: 500;
-            margin-right: 0.5rem;
-            margin-bottom: 0.5rem;
-            background: rgba(99, 102, 241, 0.2);
-            color: #a5b4fc;
-        }
-        
-        /* DEFENSIVE: Offline mode indicator */
-        .offline-mode-indicator {
-            position: fixed;
-            top: 60px;
-            right: 10px;
-            background: rgba(107, 114, 128, 0.9);
-            color: white;
-            padding: 6px 12px;
-            border-radius: 15px;
-            font-size: 0.7rem;
-            z-index: 999;
-            display: flex;
-            align-items: center;
-            gap: 5px;
-            animation: fadeIn 0.3s ease;
-        }
-        
-        @keyframes fadeIn {
-            from { opacity: 0; transform: translateY(-10px); }
-            to { opacity: 1; transform: translateY(0); }
-        }
-    </style>
+    <!-- Main Layout CSS -->
+    <link rel="stylesheet" href="layout.css">
 </head>
-<body class="h-full dashboard-container bg-grid-pattern theme-calm protected-content no-screenshot no-context-menu">
-    <!-- DEFENSIVE: Offline mode indicator (hidden by default) -->
+<body class="h-full dashboard-container bg-grid-pattern theme-calm protected-content no-screenshot no-context-menu kynecta-auth-page">
+    <!-- Offline Mode Indicator (hidden by default) -->
     <div id="offlineModeIndicator" class="offline-mode-indicator hidden">
         <i class="fas fa-wifi-slash"></i>
         <span>Offline Mode</span>
@@ -1190,7 +39,7 @@
 
     <!-- Mood Theme Selector (Desktop) -->
     <div class="mood-selector hidden lg:block">
-        <button class="mood-btn flex items-center space-x-2">
+        <button class="mood-btn">
             <i class="fas fa-palette"></i>
             <span class="hidden sm:inline">Theme</span>
         </button>
@@ -1230,20 +79,20 @@
 
     <!-- Cookie Consent Banner -->
     <div id="cookieBanner" class="cookie-banner">
-        <div class="max-w-4xl mx-auto">
-            <div class="flex flex-col md:flex-row items-center justify-between">
-                <div class="flex-1 mb-4 md:mb-0">
-                    <h3 class="text-xl font-bold mb-2">🍪 We Value Your Privacy</h3>
-                    <p class="text-blue-200 text-sm md:text-base">
+        <div class="cookie-content">
+            <div class="cookie-content-wrapper">
+                <div class="cookie-text">
+                    <h3 class="cookie-title">🍪 We Value Your Privacy</h3>
+                    <p class="cookie-description">
                         We use cookies to enhance your chat experience, analyze traffic, and personalize content. 
                         By continuing to use kynecta Chat, you agree to our use of cookies and our Privacy Policy.
                     </p>
                 </div>
-                <div class="flex flex-col sm:flex-row space-y-2 sm:space-y-0 sm:space-x-4">
-                    <button id="cookieReject" class="px-4 py-2 border border-blue-400 text-blue-400 rounded-lg hover:bg-blue-400 hover:text-white transition text-sm md:text-base">
+                <div class="cookie-buttons">
+                    <button id="cookieReject" class="cookie-reject-btn">
                         Reject Non-Essential
                     </button>
-                    <button id="cookieAccept" class="px-4 py-2 bg-blue-500 text-white rounded-lg hover:bg-blue-600 transition pulse-glow text-sm md:text-base">
+                    <button id="cookieAccept" class="cookie-accept-btn">
                         Accept All
                     </button>
                 </div>
@@ -1254,13 +103,13 @@
     <!-- Forgot Password Modal -->
     <div id="forgotPasswordModal" class="forgot-password-modal">
         <div class="forgot-password-content">
-            <div class="flex items-center justify-between mb-6">
-                <div class="flex items-center space-x-3">
-                    <i class="fas fa-lock text-2xl text-blue-400"></i>
-                    <h2 class="text-xl md:text-2xl font-bold text-white">Account Recovery</h2>
+            <div class="forgot-password-header">
+                <div class="forgot-password-title">
+                    <i class="forgot-password-icon fas fa-lock"></i>
+                    <h2 class="forgot-password-heading">Account Recovery</h2>
                 </div>
-                <button id="closeForgotPassword" class="text-gray-400 hover:text-white transition">
-                    <i class="fas fa-times text-xl"></i>
+                <button id="closeForgotPassword" class="close-forgot-password">
+                    <i class="fas fa-times"></i>
                 </button>
             </div>
 
@@ -1288,31 +137,31 @@
                 <p class="text-gray-300 mb-6 text-sm md:text-base">
                     Select how you'd like to receive your password reset instructions.
                 </p>
-                <div class="space-y-4">
+                <div class="recovery-options">
                     <!-- Option 1: Email Link (Firebase Default) -->
-                    <div onclick="selectRecoveryMethod('email')" class="recovery-option-card glass-effect p-4 rounded-xl flex items-center space-x-4">
-                        <i class="fas fa-envelope text-xl md:text-2xl text-green-400"></i>
-                        <div>
-                            <h3 class="font-bold text-base md:text-lg">Email Link</h3>
-                            <p class="text-xs md:text-sm text-gray-400">Send a password reset link to your registered email.</p>
+                    <div onclick="selectRecoveryMethod('email')" class="recovery-option-card">
+                        <i class="recovery-option-icon fas fa-envelope text-green-400"></i>
+                        <div class="recovery-option-content">
+                            <h3 class="recovery-option-title">Email Link</h3>
+                            <p class="recovery-option-description">Send a password reset link to your registered email.</p>
                         </div>
                     </div>
 
                     <!-- Option 2: Phone Number (Code) -->
-                    <div onclick="selectRecoveryMethod('phone')" class="recovery-option-card glass-effect p-4 rounded-xl flex items-center space-x-4">
-                        <i class="fas fa-mobile-alt text-xl md:text-2xl text-yellow-400"></i>
-                        <div>
-                            <h3 class="font-bold text-base md:text-lg">Phone Number (SMS Code)</h3>
-                            <p class="text-xs md:text-sm text-gray-400">Receive a one-time code via SMS to reset your password.</p>
+                    <div onclick="selectRecoveryMethod('phone')" class="recovery-option-card">
+                        <i class="recovery-option-icon fas fa-mobile-alt text-yellow-400"></i>
+                        <div class="recovery-option-content">
+                            <h3 class="recovery-option-title">Phone Number (SMS Code)</h3>
+                            <p class="recovery-option-description">Receive a one-time code via SMS to reset your password.</p>
                         </div>
                     </div>
 
                     <!-- Option 3: Voice Call -->
-                    <div onclick="selectRecoveryMethod('voice')" class="recovery-option-card glass-effect p-4 rounded-xl flex items-center space-x-4">
-                        <i class="fas fa-phone-volume text-xl md:text-2xl text-red-400"></i>
-                        <div>
-                            <h3 class="font-bold text-base md:text-lg">Voice Call</h3>
-                            <p class="text-xs md:text-sm text-gray-400">Receive an automated voice call with a verification code.</p>
+                    <div onclick="selectRecoveryMethod('voice')" class="recovery-option-card">
+                        <i class="recovery-option-icon fas fa-phone-volume text-red-400"></i>
+                        <div class="recovery-option-content">
+                            <h3 class="recovery-option-title">Voice Call</h3>
+                            <p class="recovery-option-description">Receive an automated voice call with a verification code.</p>
                         </div>
                     </div>
                 </div>
@@ -1321,10 +170,10 @@
     </div>
 
     <!-- Loading Modal -->
-    <div id="loadingModal" class="fixed inset-0 bg-black bg-opacity-70 flex items-center justify-center hidden z-50">
-        <div class="flex flex-col items-center p-8 rounded-xl glass-effect mx-4">
-            <i class="fas fa-spinner fa-spin text-4xl text-blue-400 mb-4"></i>
-            <p class="text-lg font-medium text-gray-100 text-center" id="loadingText">Processing...</p>
+    <div id="loadingModal" class="loading-modal">
+        <div class="loading-content">
+            <i class="loading-icon fas fa-spinner fa-spin"></i>
+            <p class="loading-text" id="loadingText">Processing...</p>
         </div>
     </div>
 
@@ -1338,40 +187,40 @@
     <!-- Main Dashboard Container -->
     <div class="min-h-screen flex flex-col lg:flex-row" id="mainAppContainer">
         <!-- Left Side - Advertisement Section (Hidden on mobile) -->
-        <div class="hidden lg:flex flex-1 p-4 md:p-8 items-center justify-center">
-            <div class="max-w-2xl w-full">
+        <div class="hidden lg:flex advertisement-section">
+            <div class="advertisement-content">
                 <!-- Header -->
-                <div class="text-center mb-6 md:mb-8">
-                    <div class="flex items-center justify-center space-x-3 md:space-x-4 mb-4 md:mb-6">
-                        <div class="w-16 h-16 md:w-20 md:h-20 cyber-gradient rounded-xl md:rounded-2xl flex items-center justify-center quantum-glow floating">
-                            <i class="fas fa-comments text-white text-2xl md:text-3xl"></i>
+                <div class="text-center mb-8">
+                    <div class="flex items-center justify-center space-x-4 mb-6">
+                        <div class="w-20 h-20 cyber-gradient rounded-2xl flex items-center justify-center quantum-glow floating">
+                            <i class="fas fa-comments text-white text-3xl"></i>
                         </div>
                         <div>
-                            <span class="text-3xl md:text-5xl font-bold text-transparent bg-clip-text bg-gradient-to-r from-blue-400 to-purple-400 neon-text">
+                            <span class="text-5xl font-bold text-transparent bg-clip-text bg-gradient-to-r from-blue-400 to-purple-400 neon-text">
                                 kynecta Chat
                             </span>
-                            <p class="text-blue-300 text-sm md:text-lg mt-1 md:mt-2">Global Chat Platform</p>
+                            <p class="text-blue-300 text-lg mt-2">Global Chat Platform</p>
                         </div>
                     </div>
                 </div>
 
                 <!-- Attractive Advertisement Content -->
-                <div class="space-y-6 md:space-y-8">
+                <div class="space-y-8">
                     <div class="text-center">
-                        <h2 class="text-2xl md:text-4xl font-bold gradient-text mb-3 md:mb-4 responsive-heading">Join 2,000,000+ Chatters!</h2>
-                        <p class="text-blue-200 text-base md:text-xl mb-4 md:mb-6 responsive-subheading">The world's most connected chat platform is waiting for you</p>
+                        <h2 class="text-4xl font-bold gradient-text mb-4 responsive-heading">Join 2,000,000+ Chatters!</h2>
+                        <p class="text-blue-200 text-xl mb-6 responsive-subheading">The world's most connected chat platform is waiting for you</p>
                     </div>
 
                     <!-- Chat-Focused Features -->
-                    <div class="grid grid-cols-1 gap-4 md:gap-6 mb-6 md:mb-8">
+                    <div class="grid grid-cols-1 gap-6 mb-8">
                         <div class="chat-feature">
                             <div class="flex items-start space-x-4">
                                 <div class="feature-icon bg-gradient-to-br from-blue-500 to-purple-600 text-white">
                                     <i class="fas fa-globe"></i>
                                 </div>
                                 <div class="flex-1">
-                                    <h3 class="text-lg md:text-xl font-bold text-white mb-2">Global Chat Rooms</h3>
-                                    <p class="text-blue-300 text-sm md:text-base mb-3">Connect with people worldwide in topic-based chat rooms. From casual conversations to deep discussions.</p>
+                                    <h3 class="text-xl font-bold text-white mb-2">Global Chat Rooms</h3>
+                                    <p class="text-blue-300 text-base mb-3">Connect with people worldwide in topic-based chat rooms. From casual conversations to deep discussions.</p>
                                     <div class="flex flex-wrap">
                                         <span class="interest-tag tech">Technology</span>
                                         <span class="interest-tag music">Music</span>
@@ -1389,8 +238,8 @@
                                     <i class="fas fa-lock"></i>
                                 </div>
                                 <div class="flex-1">
-                                    <h3 class="text-lg md:text-xl font-bold text-white mb-2">Private & Group Chats</h3>
-                                    <p class="text-blue-300 text-sm md:text-base mb-3">Secure private messaging and group chats with end-to-end encryption. Share files, images, and voice messages.</p>
+                                    <h3 class="text-xl font-bold text-white mb-2">Private & Group Chats</h3>
+                                    <p class="text-blue-300 text-base mb-3">Secure private messaging and group chats with end-to-end encryption. Share files, images, and voice messages.</p>
                                     <div class="flex flex-wrap">
                                         <span class="interest-badge"><i class="fas fa-lock mr-1"></i> Encrypted</span>
                                         <span class="interest-badge"><i class="fas fa-users mr-1"></i> Group Chats</span>
@@ -1407,8 +256,8 @@
                                     <i class="fas fa-language"></i>
                                 </div>
                                 <div class="flex-1">
-                                    <h3 class="text-lg md:text-xl font-bold text-white mb-2">Real-time Translation</h3>
-                                    <p class="text-blue-300 text-sm md:text-base mb-3">Chat with anyone in any language with our real-time translation feature. Break language barriers instantly.</p>
+                                    <h3 class="text-xl font-bold text-white mb-2">Real-time Translation</h3>
+                                    <p class="text-blue-300 text-base mb-3">Chat with anyone in any language with our real-time translation feature. Break language barriers instantly.</p>
                                     <div class="flex flex-wrap">
                                         <span class="language-tag">English</span>
                                         <span class="language-tag">Spanish</span>
@@ -1424,13 +273,13 @@
                     <!-- App Store Promo Section -->
                     <div class="app-promo-card">
                         <div class="text-center mb-4">
-                            <h3 class="text-xl md:text-2xl font-bold text-white mb-2">🚀 Want More Features?</h3>
-                            <p class="text-blue-300 text-sm md:text-base mb-4">
+                            <h3 class="text-2xl font-bold text-white mb-2">🚀 Want More Features?</h3>
+                            <p class="text-blue-300 text-base mb-4">
                                 Discover our full suite of kynecta apps for an enhanced experience!
                             </p>
                         </div>
                         
-                        <div class="grid grid-cols-1 md:grid-cols-2 gap-4 mb-6">
+                        <div class="grid grid-cols-2 gap-4 mb-6">
                             <div class="platform-feature relative">
                                 <div class="coming-soon-badge">Already Available</div>
                                 <div class="flex items-start space-x-4">
@@ -1505,45 +354,45 @@
                     </div>
 
                     <!-- Live Stats Counter -->
-                    <div class="grid grid-cols-2 gap-4 md:gap-6 mb-6 md:mb-8">
+                    <div class="grid grid-cols-4 gap-6 mb-8">
                         <div class="text-center">
                             <div class="stats-counter" id="onlineCount">2M+</div>
-                            <div class="text-blue-300 text-xs md:text-sm">Active Chatters</div>
+                            <div class="text-blue-300 text-sm">Active Chatters</div>
                         </div>
                         <div class="text-center">
                             <div class="stats-counter" id="countryCount">200+</div>
-                            <div class="text-blue-300 text-xs md:text-sm">Countries</div>
+                            <div class="text-blue-300 text-sm">Countries</div>
                         </div>
                         <div class="text-center">
                             <div class="stats-counter" id="languageCount">50+</div>
-                            <div class="text-blue-300 text-xs md:text-sm">Languages</div>
+                            <div class="text-blue-300 text-sm">Languages</div>
                         </div>
                         <div class="text-center">
                             <div class="stats-counter" id="communityCount">100K+</div>
-                            <div class="text-blue-300 text-xs md:text-sm">Chat Rooms</div>
+                            <div class="text-blue-300 text-sm">Chat Rooms</div>
                         </div>
                     </div>
 
                     <!-- Success Stories -->
-                    <div class="bg-black/30 rounded-xl p-4 md:p-6 border border-purple-500/30">
-                        <h3 class="text-lg md:text-xl font-bold text-center text-white mb-4 md:mb-6">💬 Success Stories</h3>
-                        <div class="space-y-3 md:space-y-4">
+                    <div class="bg-black/30 rounded-xl p-6 border border-purple-500/30">
+                        <h3 class="text-xl font-bold text-center text-white mb-6">💬 Success Stories</h3>
+                        <div class="space-y-4">
                             <div class="flex items-start space-x-3">
-                                <div class="w-10 h-10 md:w-12 md:h-12 bg-gradient-to-br from-blue-500 to-purple-600 rounded-full flex items-center justify-center flex-shrink-0">
+                                <div class="w-12 h-12 bg-gradient-to-br from-blue-500 to-purple-600 rounded-full flex items-center justify-center flex-shrink-0">
                                     <span class="text-white font-bold text-sm">J</span>
                                 </div>
                                 <div>
-                                    <p class="text-white font-semibold text-sm md:text-base">"Found my international business partners through kynecta Chat! The real-time translation feature is amazing."</p>
-                                    <p class="text-blue-300 text-xs md:text-sm">- Jessica, USA</p>
+                                    <p class="text-white font-semibold text-base">"Found my international business partners through kynecta Chat! The real-time translation feature is amazing."</p>
+                                    <p class="text-blue-300 text-sm">- Jessica, USA</p>
                                 </div>
                             </div>
                             <div class="flex items-start space-x-3">
-                                <div class="w-10 h-10 md:w-12 md:h-12 bg-gradient-to-br from-green-500 to-blue-600 rounded-full flex items-center justify-center flex-shrink-0">
+                                <div class="w-12 h-12 bg-gradient-to-br from-green-500 to-blue-600 rounded-full flex items-center justify-center flex-shrink-0">
                                     <span class="text-white font-bold text-sm">M</span>
                                 </div>
                                 <div>
-                                    <p class="text-white font-semibold text-sm md:text-base">"Made friends from 10 different countries! kynecta Chat helped me learn about different cultures."</p>
-                                    <p class="text-blue-300 text-xs md:text-sm">- Miguel, Spain</p>
+                                    <p class="text-white font-semibold text-base">"Made friends from 10 different countries! kynecta Chat helped me learn about different cultures."</p>
+                                    <p class="text-blue-300 text-sm">- Miguel, Spain</p>
                                 </div>
                             </div>
                         </div>
@@ -1552,42 +401,42 @@
             </div>
         </div>
 
-        <!-- Right Side - Content Area (All Sections) -->
-        <div class="flex-1 flex items-center justify-center p-4 md:p-8">
-            <div class="w-full max-w-4xl relative">
+        <!-- Right Side - Authentication Section -->
+        <div class="auth-section">
+            <div class="auth-content-wrapper">
                 <!-- Mobile Header -->
-                <div class="lg:hidden text-center mb-6 md:mb-8 mobile-margin">
-                    <div class="flex items-center justify-center space-x-3 mb-4 md:mb-6">
-                        <div class="w-12 h-12 md:w-16 md:h-16 cyber-gradient rounded-xl flex items-center justify-center quantum-glow">
-                            <i class="fas fa-comments text-white text-xl md:text-2xl"></i>
+                <div class="mobile-header lg:hidden">
+                    <div class="flex items-center justify-center space-x-3 mb-6">
+                        <div class="w-16 h-16 cyber-gradient rounded-xl flex items-center justify-center quantum-glow">
+                            <i class="fas fa-comments text-white text-2xl"></i>
                         </div>
                         <div>
-                            <span class="text-2xl md:text-3xl font-bold text-transparent bg-clip-text bg-gradient-to-r from-blue-400 to-purple-400 neon-text">
+                            <span class="text-3xl font-bold text-transparent bg-clip-text bg-gradient-to-r from-blue-400 to-purple-400 neon-text">
                                 kynecta Chat
                             </span>
-                            <p class="text-blue-300 text-xs md:text-sm">Global Chat Platform</p>
+                            <p class="text-blue-300 text-sm">Global Chat Platform</p>
                         </div>
                     </div>
                 </div>
 
                 <!-- Error/Success Messages -->
-                <div id="messageContainer"></div>
+                <div id="messageContainer" class="message-container"></div>
 
                 <!-- Security Status -->
-                <div id="securityStatus" class="glass-effect border border-blue-700 rounded-2xl p-3 md:p-4 mb-4 md:mb-6 hidden">
-                    <div class="flex items-center justify-between">
-                        <div class="flex items-center space-x-2 md:space-x-3">
-                            <i class="fas fa-shield-check text-green-400 text-base md:text-lg"></i>
-                            <div>
-                                <span class="text-xs md:text-sm font-medium text-green-400">Secure Connection Established</span>
-                                <p class="text-xs text-blue-300 mt-1">All data is encrypted and secure</p>
+                <div id="securityStatus" class="security-status">
+                    <div class="security-status-content">
+                        <div class="security-info">
+                            <i class="security-icon fas fa-shield-check"></i>
+                            <div class="security-text">
+                                <span class="security-title">Secure Connection Established</span>
+                                <p class="security-subtitle">All data is encrypted and secure</p>
                             </div>
                         </div>
-                        <div class="flex space-x-1">
-                            <span class="security-badge text-xs">
+                        <div class="security-badges">
+                            <span class="security-badge">
                                 <i class="fas fa-lock mr-1"></i> HTTPS
                             </span>
-                            <span class="security-badge text-xs">
+                            <span class="security-badge">
                                 <i class="fas fa-shield-alt mr-1"></i> Encrypted
                             </span>
                         </div>
@@ -1595,7 +444,7 @@
                 </div>
 
                 <!-- All Content Sections Container -->
-                <div class="content-area relative min-h-[600px]">
+                <div class="content-area">
                     <!-- Combined Interest & Language Selection Section -->
                     <div id="selectionSection" class="section section-active">
                         <!-- Progress Counter -->
@@ -1603,11 +452,11 @@
                             <span id="selectedCount">0</span>/3 selected
                         </div>
 
-                        <div class="min-h-screen flex flex-col items-center justify-center p-4 md:p-8">
+                        <div class="min-h-screen flex flex-col items-center justify-center p-8">
                             <div class="w-full max-w-4xl">
                                 <!-- Combined Selection Step -->
                                 <div id="combinedSelectionStep">
-                                    <div class="text-center mb-8 md:mb-12">
+                                    <div class="text-center mb-12">
                                         <h1 class="selection-title">Welcome to kynecta Chat! 💬</h1>
                                         <p class="selection-subtitle">Choose up to 3 interests & languages to personalize your chat experience</p>
                                     </div>
@@ -1623,7 +472,7 @@
                                     </div>
 
                                     <!-- Navigation Buttons -->
-                                    <div class="flex flex-col sm:flex-row gap-4 mt-8">
+                                    <div class="selection-button-container">
                                         <button id="skipSelection" class="skip-selection-btn">
                                             Skip for now <i class="fas fa-forward ml-2"></i>
                                         </button>
@@ -1638,28 +487,24 @@
 
                     <!-- Landing Section -->
                     <div id="landingSection" class="section section-hidden">
-                        <div class="text-center mb-8">
-                            <h2 class="text-2xl md:text-3xl font-bold text-white mb-3 md:mb-4 responsive-heading">Your Global Connection Starts Here</h2>
-                            <p class="text-blue-300 mb-6 md:mb-8 text-sm md:text-base responsive-text">
+                        <div class="landing-content">
+                            <h2 class="text-3xl font-bold text-white mb-4 responsive-heading">Your Global Connection Starts Here</h2>
+                            <p class="text-blue-300 mb-8 text-base responsive-text">
                                 Join millions who have transformed how they connect and communicate with people from every corner of the world.
                             </p>
                             
                             <!-- Quick Login for Returning Users -->
-                            <div id="quickLoginSection" class="hidden mb-6">
-                                <div class="glass-effect border border-green-700 rounded-2xl p-4 mb-4">
-                                    <div class="flex items-center justify-between mb-3">
-                                        <div class="flex items-center space-x-3">
-                                            <div class="w-10 h-10 bg-gradient-to-br from-blue-500 to-purple-600 rounded-full flex items-center justify-center">
-                                                <span id="userInitial" class="text-white font-bold"></span>
-                                            </div>
-                                            <div>
-                                                <h4 class="text-white font-bold text-sm md:text-base" id="userDisplayName"></h4>
-                                                <p class="text-blue-300 text-xs" id="userEmail"></p>
-                                            </div>
+                            <div id="quickLoginSection" class="quick-login-section hidden">
+                                <div class="quick-login-card">
+                                    <div class="quick-login-user-info">
+                                        <div class="user-avatar" id="userInitial"></div>
+                                        <div class="user-details">
+                                            <h4 class="user-name" id="userDisplayName"></h4>
+                                            <p class="user-email" id="userEmail"></p>
                                         </div>
                                         <i class="fas fa-check-circle text-green-400 text-xl"></i>
                                     </div>
-                                    <button id="quickLoginBtn" class="quick-login-btn w-full justify-center">
+                                    <button id="quickLoginBtn" class="quick-login-btn">
                                         <i class="fas fa-bolt"></i>
                                         Quick Login to Chat
                                     </button>
@@ -1667,34 +512,34 @@
                                 <p class="text-blue-300 text-xs mb-6">Not <span id="quickLoginUserName"></span>? <button id="switchAccountBtn" class="text-purple-400 hover:text-purple-300">Switch account</button></p>
                             </div>
                             
-                            <div class="space-y-3 md:space-y-4">
-                                <button id="showLoginBtn" class="w-full cyber-gradient text-white py-3 md:py-4 px-4 md:px-6 rounded-xl text-base md:text-lg font-semibold hover:scale-105 transition focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-cyan-400 quantum-glow pulse-glow">
-                                    <i class="fas fa-sign-in-alt mr-2"></i>Continue to Chat
+                            <div class="landing-button-group">
+                                <button id="showLoginBtn" class="primary-action-btn">
+                                    <i class="fas fa-sign-in-alt"></i>Continue to Chat
                                 </button>
-                                <button id="showRegisterBtn" class="w-full glass-effect text-white py-3 md:py-4 px-4 md:px-6 rounded-xl text-base md:text-lg font-semibold hover:scale-105 transition focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-cyan-400 border border-blue-700 hover:border-cyan-500">
-                                    <i class="fas fa-user-plus mr-2"></i>Start Chatting Now
+                                <button id="showRegisterBtn" class="secondary-action-btn">
+                                    <i class="fas fa-user-plus"></i>Start Chatting Now
                                 </button>
                             </div>
                             
-                            <div class="mt-6 md:mt-8 flex justify-center space-x-4 md:space-x-6 text-xs md:text-sm text-blue-300 flex-wrap gap-2">
-                                <div class="flex items-center">
-                                    <i class="fas fa-bolt text-yellow-400 mr-1 md:mr-2"></i>
+                            <div class="feature-highlights">
+                                <div class="feature-item">
+                                    <i class="fas fa-bolt text-yellow-400"></i>
                                     <span>Instant Setup</span>
                                 </div>
-                                <div class="flex items-center">
-                                    <i class="fas fa-globe text-green-400 mr-1 md:mr-2"></i>
+                                <div class="feature-item">
+                                    <i class="fas fa-globe text-green-400"></i>
                                     <span>Global Connections</span>
                                 </div>
-                                <div class="flex items-center">
-                                    <i class="fas fa-language text-pink-400 mr-1 md:mr-2"></i>
+                                <div class="feature-item">
+                                    <i class="fas fa-language text-pink-400"></i>
                                     <span>Real-time Translation</span>
                                 </div>
                             </div>
                         </div>
 
                         <!-- Mobile Feature Highlights -->
-                        <div class="lg:hidden mt-6 md:mt-8">
-                            <h3 class="text-lg md:text-xl font-bold text-center text-white mb-4">Discover kynecta Chat</h3>
+                        <div class="lg:hidden mt-8">
+                            <h3 class="text-xl font-bold text-center text-white mb-4">Discover kynecta Chat</h3>
                             <div class="grid grid-cols-1 gap-4">
                                 <div class="chat-feature">
                                     <div class="flex items-start space-x-4">
@@ -1762,40 +607,40 @@
                             </div>
                             
                             <!-- Mobile Stats -->
-                            <div class="mt-4 md:mt-6 grid grid-cols-4 gap-2 md:gap-4">
+                            <div class="mt-6 grid grid-cols-4 gap-4">
                                 <div class="text-center">
-                                    <div class="text-lg md:text-xl font-bold text-blue-400">2M+</div>
+                                    <div class="text-xl font-bold text-blue-400">2M+</div>
                                     <div class="text-blue-300 text-xs">Chatters</div>
                                 </div>
                                 <div class="text-center">
-                                    <div class="text-lg md:text-xl font-bold text-blue-400">200+</div>
+                                    <div class="text-xl font-bold text-blue-400">200+</div>
                                     <div class="text-blue-300 text-xs">Countries</div>
                                 </div>
                                 <div class="text-center">
-                                    <div class="text-lg md:text-xl font-bold text-blue-400">50+</div>
+                                    <div class="text-xl font-bold text-blue-400">50+</div>
                                     <div class="text-blue-300 text-xs">Languages</div>
                                 </div>
                                 <div class="text-center">
-                                    <div class="text-lg md:text-xl font-bold text-blue-400">100K+</div>
+                                    <div class="text-xl font-bold text-blue-400">100K+</div>
                                     <div class="text-blue-300 text-xs">Chat Rooms</div>
                                 </div>
                             </div>
                         </div>
 
                         <!-- Security Features -->
-                        <div class="glass-effect border border-blue-700 rounded-2xl p-4 md:p-6 mt-6 md:mt-8">
-                            <h3 class="text-xs md:text-sm font-medium text-cyan-400 mb-2 md:mb-3">Why Choose kynecta Chat?</h3>
-                            <ul class="text-xs md:text-sm text-blue-400 space-y-1 md:space-y-2">
-                                <li class="flex items-center">
-                                    <i class="fas fa-check-circle text-green-400 mr-1 md:mr-2 text-xs"></i>
+                        <div class="security-features">
+                            <h3 class="security-title">Why Choose kynecta Chat?</h3>
+                            <ul class="security-list">
+                                <li class="security-list-item">
+                                    <i class="fas fa-check-circle text-green-400"></i>
                                     <span>Real-time translation for 50+ languages</span>
                                 </li>
-                                <li class="flex items-center">
-                                    <i class="fas fa-check-circle text-green-400 mr-1 md:mr-2 text-xs"></i>
+                                <li class="security-list-item">
+                                    <i class="fas fa-check-circle text-green-400"></i>
                                     <span>End-to-end encrypted private chats</span>
                                 </li>
-                                <li class="flex items-center">
-                                    <i class="fas fa-check-circle text-green-400 mr-1 md:mr-2 text-xs"></i>
+                                <li class="security-list-item">
+                                    <i class="fas fa-check-circle text-green-400"></i>
                                     <span>Auto-login like premium chat platforms</span>
                                 </li>
                             </ul>
@@ -1804,203 +649,181 @@
 
                     <!-- Login Section -->
                     <div id="loginSection" class="section section-hidden">
-                        <div class="text-center mb-4 md:mb-6">
-                            <h2 class="text-2xl md:text-3xl font-bold text-white mb-1 md:mb-2 responsive-heading">Welcome Back</h2>
-                            <p class="text-blue-300 text-sm md:text-base responsive-text">
-                                Continue your conversations with kynecta Chat
-                            </p>
-                        </div>
+                        <div class="login-container">
+                            <div class="login-header">
+                                <h2 class="text-3xl font-bold text-white mb-2 responsive-heading">Welcome Back</h2>
+                                <p class="text-blue-300 text-base responsive-text">
+                                    Continue your conversations with kynecta Chat
+                                </p>
+                            </div>
 
-                        <!-- Password Login Form -->
-                        <div class="space-y-4 md:space-y-6">
-                            <form class="space-y-4 md:space-y-6" id="loginForm">
-                                <div>
-                                    <label for="loginEmail" class="block text-xs md:text-sm font-medium text-cyan-400 mb-1 md:mb-2">
+                            <!-- Password Login Form -->
+                            <form class="login-form" id="loginForm">
+                                <div class="form-field">
+                                    <label for="loginEmail" class="form-label">
                                         Email address
-                                        <span class="text-red-400 ml-1">*</span>
+                                        <span class="required-star">*</span>
                                     </label>
-                                    <div class="relative">
+                                    <div class="input-container">
                                         <input id="loginEmail" name="email" type="email" autocomplete="off" required 
-                                               class="glass-effect appearance-none block w-full px-3 md:px-4 py-2 md:py-3 border border-blue-700 rounded-xl placeholder-blue-400 focus:outline-none focus:ring-2 focus:ring-cyan-400 focus:border-cyan-400 text-white pl-10 md:pl-12 transition text-sm md:text-base"
+                                               class="form-input"
                                                placeholder="Enter your email">
-                                        <div class="absolute left-3 md:left-4 top-1/2 transform -translate-y-1/2 text-blue-400">
-                                            <i class="fas fa-envelope text-sm md:text-base"></i>
-                                        </div>
+                                        <i class="input-icon fas fa-envelope"></i>
                                     </div>
-                                    <div id="loginEmailError" class="text-red-400 text-xs mt-1 hidden"></div>
+                                    <div id="loginEmailError" class="error-message hidden"></div>
                                 </div>
 
-                                <div>
-                                    <label for="loginPassword" class="block text-xs md:text-sm font-medium text-blue-400 mb-1 md:mb-2">
+                                <div class="form-field">
+                                    <label for="loginPassword" class="form-label">
                                         Password
-                                        <span class="text-red-400 ml-1">*</span>
+                                        <span class="required-star">*</span>
                                     </label>
-                                    <div class="relative">
+                                    <div class="input-container">
                                         <input id="loginPassword" name="password" type="password" autocomplete="off" required 
-                                               class="glass-effect appearance-none block w-full px-3 md:px-4 py-2 md:py-3 border border-blue-700 rounded-xl placeholder-blue-400 focus:outline-none focus:ring-2 focus:ring-blue-400 focus:border-blue-400 text-white pl-10 md:pl-12 pr-10 md:pr-12 transition text-sm md:text-base"
+                                               class="form-input"
                                                placeholder="Enter your password">
-                                        <div class="absolute left-3 md:left-4 top-1/2 transform -translate-y-1/2 text-blue-400">
-                                            <i class="fas fa-lock text-sm md:text-base"></i>
-                                        </div>
-                                        <button type="button" id="toggleLoginPassword" class="absolute right-3 md:right-4 top-1/2 transform -translate-y-1/2 text-blue-400 hover:text-cyan-400 transition">
-                                            <i class="fas fa-eye text-sm md:text-base"></i>
+                                        <i class="input-icon fas fa-lock"></i>
+                                        <button type="button" id="toggleLoginPassword" class="password-toggle">
+                                            <i class="fas fa-eye"></i>
                                         </button>
                                     </div>
-                                    <div id="loginPasswordError" class="text-red-400 text-xs mt-1 hidden"></div>
+                                    <div id="loginPasswordError" class="error-message hidden"></div>
                                 </div>
 
-                                <div class="flex items-center justify-between text-xs md:text-sm">
-                                    <div class="flex items-center">
+                                <div class="form-options">
+                                    <div class="remember-me">
                                         <input id="remember-me" name="remember-me" type="checkbox" 
-                                               class="h-3 w-3 md:h-4 md:w-4 text-cyan-400 focus:ring-cyan-400 border-blue-700 rounded glass-effect" checked>
-                                        <label for="remember-me" class="ml-2 block text-blue-300">Remember me (Auto-login)</label>
+                                               class="remember-checkbox" checked>
+                                        <label for="remember-me" class="remember-label">Remember me (Auto-login)</label>
                                     </div>
                                     <div>
-                                        <button type="button" id="forgotPasswordBtn" class="font-medium text-purple-400 hover:text-purple-300 transition">Forgot password?</button>
+                                        <button type="button" id="forgotPasswordBtn" class="forgot-password">Forgot password?</button>
                                     </div>
                                 </div>
 
-                                <div>
-                                    <button type="submit" id="loginBtn"
-                                            class="w-full cyber-gradient text-white py-2 md:py-3 px-4 rounded-xl text-base md:text-lg font-semibold hover:scale-105 transition focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-cyan-400 quantum-glow disabled:opacity-50 disabled:cursor-not-allowed">
-                                        <span id="loginBtnText" class="text-sm md:text-base">Sign In & Auto-login</span>
-                                        <div id="loginSpinner" class="loading-spinner hidden"></div>
-                                    </button>
-                                </div>
-                            </form>
-                        </div>
-
-                        <!-- Switch to Register -->
-                        <div class="mt-4 md:mt-6 text-center">
-                            <p class="text-blue-300 text-xs md:text-sm">
-                                Don't have an account?{' '}
-                                <button id="switchToRegisterFromLogin" class="font-medium text-purple-400 hover:text-purple-300 transition">
-                                    Create one now
+                                <button type="submit" id="loginBtn" class="submit-btn">
+                                    <span id="loginBtnText">Sign In & Auto-login</span>
+                                    <div id="loginSpinner" class="loading-spinner hidden"></div>
                                 </button>
-                            </p>
-                        </div>
+                            </form>
 
-                        <!-- Back Button -->
-                        <div class="mt-3 md:mt-4 text-center">
-                            <button id="backToLandingFromLogin" class="text-blue-400 hover:text-cyan-400 transition text-xs md:text-sm">
-                                <i class="fas fa-arrow-left mr-1 md:mr-2"></i> Back to Home
-                            </button>
+                            <!-- Auth Navigation -->
+                            <div class="auth-navigation">
+                                <p class="text-blue-300 text-sm">
+                                    Don't have an account?{' '}
+                                    <button id="switchToRegisterFromLogin" class="switch-auth-link">
+                                        Create one now
+                                    </button>
+                                </p>
+                                <button id="backToLandingFromLogin" class="back-button">
+                                    <i class="fas fa-arrow-left"></i> Back to Home
+                                </button>
+                            </div>
                         </div>
                     </div>
 
                     <!-- Register Section -->
                     <div id="registerSection" class="section section-hidden">
-                        <div class="text-center mb-4 md:mb-6">
-                            <h2 class="text-2xl md:text-3xl font-bold text-white mb-1 md:mb-2 responsive-heading">Join kynecta Chat</h2>
-                            <p class="text-blue-300 text-sm md:text-base responsive-text">
-                                Start connecting with people worldwide today
-                            </p>
-                        </div>
+                        <div class="register-container">
+                            <div class="register-header">
+                                <h2 class="text-3xl font-bold text-white mb-2 responsive-heading">Join kynecta Chat</h2>
+                                <p class="text-blue-300 text-base responsive-text">
+                                    Start connecting with people worldwide today
+                                </p>
+                            </div>
 
-                        <!-- Registration Form -->
-                        <form id="registration-form" class="space-y-4 md:space-y-6">
-                            <div>
-                                <label for="displayName" class="block text-xs md:text-sm font-medium text-cyan-400 mb-1 md:mb-2">
-                                    Username
-                                    <span class="text-red-400 ml-1">*</span>
-                                </label>
-                                <div class="relative">
-                                    <input type="text" id="displayName" name="displayName" required autocomplete="off"
-                                           class="glass-effect appearance-none block w-full px-3 md:px-4 py-2 md:py-3 border border-blue-700 rounded-xl placeholder-blue-400 focus:outline-none focus:ring-2 focus:ring-cyan-400 focus:border-cyan-400 text-white pl-10 md:pl-12 transition text-sm md:text-base"
-                                           placeholder="Enter your username">
-                                    <div class="absolute left-3 md:left-4 top-1/2 transform -translate-y-1/2 text-blue-400">
-                                        <i class="fas fa-user text-sm md:text-base"></i>
+                            <!-- Registration Form -->
+                            <form id="registration-form" class="registration-form">
+                                <div class="form-field">
+                                    <label for="displayName" class="form-label">
+                                        Username
+                                        <span class="required-star">*</span>
+                                    </label>
+                                    <div class="input-container">
+                                        <input type="text" id="displayName" name="displayName" required autocomplete="off"
+                                               class="form-input"
+                                               placeholder="Enter your username">
+                                        <i class="input-icon fas fa-user"></i>
                                     </div>
+                                    <div id="displayNameError" class="error-message hidden"></div>
                                 </div>
-                                <div id="displayNameError" class="text-red-400 text-xs mt-1 hidden"></div>
-                            </div>
-                            
-                            <div>
-                                <label for="registerEmail" class="block text-xs md:text-sm font-medium text-cyan-400 mb-1 md:mb-2">
-                                    Email Address
-                                    <span class="text-red-400 ml-1">*</span>
-                                </label>
-                                <div class="relative">
-                                    <input type="email" id="registerEmail" name="email" required autocomplete="off"
-                                           class="glass-effect appearance-none block w-full px-3 md:px-4 py-2 md:py-3 border border-blue-700 rounded-xl placeholder-blue-400 focus:outline-none focus:ring-2 focus:ring-cyan-400 focus:border-cyan-400 text-white pl-10 md:pl-12 transition text-sm md:text-base"
-                                           placeholder="Enter your email">
-                                    <div class="absolute left-3 md:left-4 top-1/2 transform -translate-y-1/2 text-blue-400">
-                                        <i class="fas fa-envelope text-sm md:text-base"></i>
+                                
+                                <div class="form-field">
+                                    <label for="registerEmail" class="form-label">
+                                        Email Address
+                                        <span class="required-star">*</span>
+                                    </label>
+                                    <div class="input-container">
+                                        <input type="email" id="registerEmail" name="email" required autocomplete="off"
+                                               class="form-input"
+                                               placeholder="Enter your email">
+                                        <i class="input-icon fas fa-envelope"></i>
                                     </div>
+                                    <div id="registerEmailError" class="error-message hidden"></div>
                                 </div>
-                                <div id="registerEmailError" class="text-red-400 text-xs mt-1 hidden"></div>
-                            </div>
-                            
-                            <div>
-                                <label for="registerPassword" class="block text-xs md:text-sm font-medium text-blue-400 mb-1 md:mb-2">
-                                    Password (6+ characters)
-                                    <span class="text-red-400 ml-1">*</span>
-                                </label>
-                                <div class="relative">
-                                    <input type="password" id="registerPassword" name="password" required autocomplete="off"
-                                           class="glass-effect appearance-none block w-full px-3 md:px-4 py-2 md:py-3 border border-blue-700 rounded-xl placeholder-blue-400 focus:outline-none focus:ring-2 focus:ring-blue-400 focus:border-blue-400 text-white pl-10 md:pl-12 pr-10 md:pr-12 transition text-sm md:text-base"
-                                           placeholder="Enter your password">
-                                        <div class="absolute left-3 md:left-4 top-1/2 transform -translate-y-1/2 text-blue-400">
-                                            <i class="fas fa-lock text-sm md:text-base"></i>
-                                        </div>
-                                        <button type="button" id="toggleRegisterPassword" class="absolute right-3 md:right-4 top-1/2 transform -translate-y-1/2 text-blue-400 hover:text-cyan-400 transition">
-                                            <i class="fas fa-eye text-sm md:text-base"></i>
+                                
+                                <div class="form-field">
+                                    <label for="registerPassword" class="form-label">
+                                        Password (6+ characters)
+                                        <span class="required-star">*</span>
+                                    </label>
+                                    <div class="input-container">
+                                        <input type="password" id="registerPassword" name="password" required autocomplete="off"
+                                               class="form-input"
+                                               placeholder="Enter your password">
+                                        <i class="input-icon fas fa-lock"></i>
+                                        <button type="button" id="toggleRegisterPassword" class="password-toggle">
+                                            <i class="fas fa-eye"></i>
                                         </button>
+                                    </div>
+                                    <div id="registerPasswordError" class="error-message hidden"></div>
                                 </div>
-                                <div id="registerPasswordError" class="text-red-400 text-xs mt-1 hidden"></div>
-                            </div>
-                            
-                            <div>
-                                <label for="confirmPassword" class="block text-xs md:text-sm font-medium text-blue-400 mb-1 md:mb-2">
-                                    Confirm Password
-                                    <span class="text-red-400 ml-1">*</span>
-                                </label>
-                                <div class="relative">
-                                    <input type="password" id="confirmPassword" name="confirmPassword" required autocomplete="off"
-                                           class="glass-effect appearance-none block w-full px-3 md:px-4 py-2 md:py-3 border border-blue-700 rounded-xl placeholder-blue-400 focus:outline-none focus:ring-2 focus:ring-blue-400 focus:border-blue-400 text-white pl-10 md:pl-12 pr-10 md:pr-12 transition text-sm md:text-base"
-                                           placeholder="Confirm your password">
-                                        <div class="absolute left-3 md:left-4 top-1/2 transform -translate-y-1/2 text-blue-400">
-                                            <i class="fas fa-lock text-sm md:text-base"></i>
-                                        </div>
-                                        <button type="button" id="toggleConfirmPassword" class="absolute right-3 md:right-4 top-1/2 transform -translate-y-1/2 text-blue-400 hover:text-cyan-400 transition">
-                                            <i class="fas fa-eye text-sm md:text-base"></i>
+                                
+                                <div class="form-field">
+                                    <label for="confirmPassword" class="form-label">
+                                        Confirm Password
+                                        <span class="required-star">*</span>
+                                    </label>
+                                    <div class="input-container">
+                                        <input type="password" id="confirmPassword" name="confirmPassword" required autocomplete="off"
+                                               class="form-input"
+                                               placeholder="Confirm your password">
+                                        <i class="input-icon fas fa-lock"></i>
+                                        <button type="button" id="toggleConfirmPassword" class="password-toggle">
+                                            <i class="fas fa-eye"></i>
                                         </button>
+                                    </div>
+                                    <div id="confirmPasswordError" class="error-message hidden"></div>
                                 </div>
-                                <div id="confirmPasswordError" class="text-red-400 text-xs mt-1 hidden"></div>
-                            </div>
 
-                            <!-- Terms Agreement -->
-                            <div class="flex items-start space-x-2 md:space-x-3 text-xs md:text-sm">
-                                <input type="checkbox" id="termsAgreement" required
-                                       class="h-3 w-3 md:h-4 md:w-4 text-cyan-400 focus:ring-cyan-400 border-blue-700 rounded glass-effect mt-0.5" checked>
-                                <label for="termsAgreement" class="text-blue-300">
-                                    I agree to the <a href="#" class="text-purple-400 hover:text-purple-300">Terms of Service</a> and <a href="#" class="text-purple-400 hover:text-purple-300">Privacy Policy</a>
-                                </label>
-                            </div>
-                            <div id="termsError" class="text-red-400 text-xs hidden">Please accept the terms and conditions</div>
+                                <!-- Terms Agreement -->
+                                <div class="terms-agreement">
+                                    <input type="checkbox" id="termsAgreement" required
+                                           class="terms-checkbox" checked>
+                                    <label for="termsAgreement" class="terms-label">
+                                        I agree to the <a href="#" class="terms-link">Terms of Service</a> and <a href="#" class="terms-link">Privacy Policy</a>
+                                    </label>
+                                </div>
+                                <div id="termsError" class="terms-error hidden">Please accept the terms and conditions</div>
 
-                            <button type="submit" id="registerBtn"
-                                    class="w-full cyber-gradient text-white py-2 md:py-3 px-4 rounded-xl text-base md:text-lg font-semibold hover:scale-105 transition focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-cyan-400 quantum-glow disabled:opacity-50 disabled:cursor-not-allowed">
-                                <span id="registerBtnText" class="text-sm md:text-base">Create Account & Auto-login</span>
-                                <div id="registerSpinner" class="loading-spinner hidden"></div>
-                            </button>
-                        </form>
-
-                        <!-- Switch to Login -->
-                        <div class="mt-4 md:mt-6 text-center">
-                            <p class="text-blue-300 text-xs md:text-sm">
-                                Already have an account?{' '}
-                                <button id="switchToLoginFromRegister" class="font-medium text-purple-400 hover:text-purple-300 transition">
-                                    Sign in here
+                                <button type="submit" id="registerBtn" class="submit-btn">
+                                    <span id="registerBtnText">Create Account & Auto-login</span>
+                                    <div id="registerSpinner" class="loading-spinner hidden"></div>
                                 </button>
-                            </p>
-                        </div>
+                            </form>
 
-                        <!-- Back Button -->
-                        <div class="mt-3 md:mt-4 text-center">
-                            <button id="backToLandingFromRegister" class="text-blue-400 hover:text-cyan-400 transition text-xs md:text-sm">
-                                <i class="fas fa-arrow-left mr-1 md:mr-2"></i> Back to Home
-                            </button>
+                            <!-- Auth Navigation -->
+                            <div class="auth-navigation">
+                                <p class="text-blue-300 text-sm">
+                                    Already have an account?{' '}
+                                    <button id="switchToLoginFromRegister" class="switch-auth-link">
+                                        Sign in here
+                                    </button>
+                                </p>
+                                <button id="backToLandingFromRegister" class="back-button">
+                                    <i class="fas fa-arrow-left"></i> Back to Home
+                                </button>
+                            </div>
                         </div>
                     </div>
                 </div>
@@ -2135,10 +958,10 @@
             showSecurityStatus() {
                 const securityStatus = document.getElementById('securityStatus');
                 if (securityStatus) {
-                    securityStatus.classList.remove('hidden');
+                    securityStatus.classList.add('visible');
                     // Auto-hide after 2 seconds
                     setTimeout(() => {
-                        securityStatus.classList.add('hidden');
+                        securityStatus.classList.remove('visible');
                     }, 2000);
                 }
             }
@@ -3713,7 +2536,6 @@
                 
                 if (field && errorElement) {
                     field.classList.add('input-error');
-                    field.classList.remove('input-success');
                     errorElement.textContent = message;
                     errorElement.classList.remove('hidden');
                 }
@@ -3848,7 +2670,7 @@
                 
                 if (loadingModal && loadingText) {
                     loadingText.textContent = text;
-                    loadingModal.classList.remove('hidden');
+                    loadingModal.classList.add('show');
                 }
             }
 
@@ -3858,7 +2680,7 @@
             hideLoading() {
                 const loadingModal = document.getElementById('loadingModal');
                 if (loadingModal) {
-                    loadingModal.classList.add('hidden');
+                    loadingModal.classList.remove('show');
                 }
             }
 
@@ -3993,6 +2815,6 @@
                     console.log("Service Worker registration failed:", error);
                 });
         }
-    </script> 
+    </script>
 </body>
 </html>

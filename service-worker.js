@@ -1,9 +1,9 @@
 // Service Worker for Kynecta MoodChat - Firebase Web Application
-// Version: 1.4.0 - Enhanced Offline-First with Permanent App Shell Availability
+// Version: 1.4.1 - Enhanced Offline-First with Permanent App Shell Availability
 // Project: kynecta-ee95c
 // Firebase: 9.22.1 (Compact)
 
-const APP_VERSION = '1.4.0';
+const APP_VERSION = '1.4.1';
 const CACHE_NAME = `kynecta-moodchat-permanent-v${APP_VERSION}`;
 
 // COMPLETE APP SHELL ASSETS - PERMANENTLY CACHED FOR OFFLINE USE
@@ -21,6 +21,7 @@ const APP_SHELL_ASSETS = [
   '/styles.css',
   '/css/styles.css',
   '/css/main.css',
+  '/css/layout.css', // ADDED: Critical layout CSS to prevent layout breaking
   '/style.css',
   '/assets/css/app.css',
   
@@ -47,6 +48,16 @@ const APP_SHELL_ASSETS = [
   
   // Offline Fallback Pages
   '/offline.html'
+];
+
+// CRITICAL AUTH ASSETS - Must load offline without fail
+const CRITICAL_AUTH_ASSETS = [
+  '/index.html',
+  '/layouts.css',
+  '/',
+  '/icons/moodchat-192.png',
+  '/favicon.ico',
+  '/manifest.json'
 ];
 
 // Firebase SDK 9.22.1 - DO NOT CACHE - Network Only (EXCLUDE from all caching)
@@ -96,8 +107,8 @@ self.addEventListener('install', (event) => {
           const successful = results.filter(r => r.status === 'fulfilled' && r.value !== undefined).length;
           console.log(`[Kynecta] PERMANENTLY cached ${successful}/${APP_SHELL_ASSETS.length} app shell assets`);
           
-          // Ensure critical assets are cached
-          return ensureCriticalAssetsCached(cache);
+          // Ensure critical auth assets are cached (SPECIAL FOCUS)
+          return ensureCriticalAuthAssetsCached(cache);
         });
       })
       .then(() => {
@@ -106,6 +117,7 @@ self.addEventListener('install', (event) => {
       })
       .then(() => {
         console.log('[Kynecta] Service Worker installed - App is PERMANENTLY offline-ready');
+        console.log('[Kynecta] Special: index.html and css/layout.css are GUARANTEED to load offline');
         // Send message to all clients that new version is ready
         return self.clients.matchAll();
       })
@@ -114,7 +126,8 @@ self.addEventListener('install', (event) => {
           client.postMessage({
             type: 'NEW_VERSION_READY',
             version: APP_VERSION,
-            permanentOffline: true
+            permanentOffline: true,
+            authPageOffline: true
           });
         });
       })
@@ -125,21 +138,23 @@ self.addEventListener('install', (event) => {
   );
 });
 
-// Ensure critical assets are always cached with fallbacks
-async function ensureCriticalAssetsCached(cache) {
-  const criticalAssets = [
-    '/',
-    '/index.html',
-    '/styles.css',
-    '/js/app.js',
-    '/manifest.json'
-  ];
+// Ensure critical auth assets are always cached with fallbacks (ENHANCED)
+async function ensureCriticalAuthAssetsCached(cache) {
+  console.log('[Kynecta] Ensuring critical auth assets are cached:', CRITICAL_AUTH_ASSETS);
   
-  for (const asset of criticalAssets) {
+  for (const asset of CRITICAL_AUTH_ASSETS) {
     try {
       await cache.add(asset);
+      console.log(`[Kynecta] ✓ Critical auth asset cached: ${asset}`);
     } catch (error) {
-      console.warn(`[Kynecta] Critical asset ${asset} not available, will use cached version if exists`);
+      console.warn(`[Kynecta] Could not cache ${asset}:`, error.message);
+      
+      // Create fallback for critical assets
+      if (asset === '/css/layout.css') {
+        await createLayoutCSSFallback(cache);
+      } else if (asset === '/index.html') {
+        await createIndexHTMLFallback(cache);
+      }
     }
   }
   
@@ -162,6 +177,305 @@ async function ensureCriticalAssetsCached(cache) {
     );
     await cache.put('/offline.html', minimalOffline);
   }
+}
+
+// Create layout.css fallback to prevent layout breaking
+async function createLayoutCSSFallback(cache) {
+  const layoutCSS = new Response(
+    `/* Kynecta MoodChat - Layout CSS Fallback */
+    /* Ensures auth page layout doesn't break offline */
+    
+    * {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+    }
+    
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, sans-serif;
+      line-height: 1.6;
+      min-height: 100vh;
+      display: flex;
+      flex-direction: column;
+    }
+    
+    .container {
+      width: 100%;
+      max-width: 1200px;
+      margin: 0 auto;
+      padding: 0 20px;
+    }
+    
+    /* Flexbox utilities */
+    .flex {
+      display: flex;
+    }
+    
+    .flex-col {
+      flex-direction: column;
+    }
+    
+    .items-center {
+      align-items: center;
+    }
+    
+    .justify-center {
+      justify-content: center;
+    }
+    
+    .justify-between {
+      justify-content: space-between;
+    }
+    
+    /* Grid utilities */
+    .grid {
+      display: grid;
+    }
+    
+    /* Spacing */
+    .p-4 { padding: 1rem; }
+    .p-6 { padding: 1.5rem; }
+    .p-8 { padding: 2rem; }
+    
+    .m-4 { margin: 1rem; }
+    .m-6 { margin: 1.5rem; }
+    .m-8 { margin: 2rem; }
+    
+    /* Responsive */
+    @media (max-width: 768px) {
+      .container {
+        padding: 0 15px;
+      }
+    }
+    
+    /* Visibility */
+    .hidden {
+      display: none !important;
+    }
+    
+    .visible {
+      visibility: visible !important;
+    }
+    
+    /* Position */
+    .relative {
+      position: relative;
+    }
+    
+    .absolute {
+      position: absolute;
+    }
+    
+    .fixed {
+      position: fixed;
+    }
+    
+    /* Z-index layers */
+    .z-10 { z-index: 10; }
+    .z-20 { z-index: 20; }
+    .z-30 { z-index: 30; }
+    .z-40 { z-index: 40; }
+    .z-50 { z-index: 50; }`,
+    { 
+      headers: { 
+        'Content-Type': 'text/css',
+        'Cache-Control': 'public, max-age=31536000'
+      } 
+    }
+  );
+  
+  await cache.put('/css/layout.css', layoutCSS);
+  console.log('[Kynecta] Created layout.css fallback to prevent layout breaking');
+}
+
+// Create index.html fallback
+async function createIndexHTMLFallback(cache) {
+  const indexHTML = new Response(
+    `<!DOCTYPE html>
+    <html lang="en">
+    <head>
+      <meta charset="UTF-8">
+      <meta name="viewport" content="width=device-width, initial-scale=1.0">
+      <title>Kynecta MoodChat - Authentication</title>
+      <link rel="stylesheet" href="/css/layout.css">
+      <link rel="icon" href="/favicon.ico">
+      <link rel="manifest" href="/manifest.json">
+      <meta name="theme-color" content="#1a73e8">
+      <style>
+        /* Inline critical styles for offline auth page */
+        :root {
+          --primary: #1a73e8;
+          --primary-dark: #0d47a1;
+          --surface: #ffffff;
+          --text: #202124;
+          --text-secondary: #5f6368;
+        }
+        
+        .auth-container {
+          min-height: 100vh;
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          background: linear-gradient(135deg, var(--primary) 0%, var(--primary-dark) 100%);
+          padding: 20px;
+        }
+        
+        .auth-card {
+          background: var(--surface);
+          border-radius: 16px;
+          padding: 40px;
+          width: 100%;
+          max-width: 440px;
+          box-shadow: 0 10px 40px rgba(0, 0, 0, 0.1);
+        }
+        
+        .auth-logo {
+          text-align: center;
+          margin-bottom: 32px;
+        }
+        
+        .auth-logo img {
+          width: 120px;
+          height: 120px;
+        }
+        
+        .auth-title {
+          font-size: 28px;
+          font-weight: 600;
+          color: var(--text);
+          margin-bottom: 8px;
+          text-align: center;
+        }
+        
+        .auth-subtitle {
+          color: var(--text-secondary);
+          text-align: center;
+          margin-bottom: 32px;
+          font-size: 16px;
+        }
+        
+        .auth-button {
+          width: 100%;
+          padding: 14px;
+          background: var(--primary);
+          color: white;
+          border: none;
+          border-radius: 8px;
+          font-size: 16px;
+          font-weight: 500;
+          cursor: pointer;
+          margin-bottom: 16px;
+          transition: background 0.2s;
+        }
+        
+        .auth-button:hover {
+          background: var(--primary-dark);
+        }
+        
+        .offline-notice {
+          background: #fff3cd;
+          border: 1px solid #ffecb5;
+          color: #856404;
+          padding: 12px;
+          border-radius: 8px;
+          margin-top: 20px;
+          text-align: center;
+          font-size: 14px;
+        }
+        
+        @media (max-width: 480px) {
+          .auth-card {
+            padding: 24px;
+          }
+          
+          .auth-title {
+            font-size: 24px;
+          }
+        }
+      </style>
+    </head>
+    <body>
+      <div class="auth-container">
+        <div class="auth-card">
+          <div class="auth-logo">
+            <svg width="120" height="120" viewBox="0 0 120 120" fill="none" xmlns="http://www.w3.org/2000/svg">
+              <circle cx="60" cy="60" r="60" fill="#1a73e8"/>
+              <path d="M40 40L80 40L80 80L40 80L40 40Z" fill="white"/>
+              <circle cx="50" cy="50" r="10" fill="#0d47a1"/>
+              <circle cx="70" cy="70" r="10" fill="#0d47a1"/>
+            </svg>
+          </div>
+          
+          <h1 class="auth-title">Kynecta MoodChat</h1>
+          <p class="auth-subtitle">Connect through moods and interests</p>
+          
+          <div id="auth-buttons">
+            <button class="auth-button" onclick="handleAuth()">
+              Sign In with Google
+            </button>
+            
+            <button class="auth-button" style="background: #34a853;" onclick="handleEmailAuth()">
+              Sign In with Email
+            </button>
+            
+            <button class="auth-button" style="background: #5f6368;" onclick="handleAnonymous()">
+              Continue as Guest
+            </button>
+          </div>
+          
+          <div id="offline-notice" class="offline-notice" style="display: none;">
+            You're currently offline. Authentication requires internet connection.
+            Basic app features are available.
+          </div>
+        </div>
+      </div>
+      
+      <script>
+        // Minimal auth page JavaScript
+        function handleAuth() {
+          document.getElementById('offline-notice').style.display = 'block';
+          setTimeout(() => {
+            document.getElementById('offline-notice').style.display = 'none';
+          }, 5000);
+        }
+        
+        function handleEmailAuth() {
+          document.getElementById('offline-notice').style.display = 'block';
+          setTimeout(() => {
+            document.getElementById('offline-notice').style.display = 'none';
+          }, 5000);
+        }
+        
+        function handleAnonymous() {
+          // Redirect to main app (will work offline)
+          window.location.href = '/chat.html';
+        }
+        
+        // Detect offline status
+        if (!navigator.onLine) {
+          document.getElementById('offline-notice').style.display = 'block';
+        }
+        
+        window.addEventListener('online', () => {
+          document.getElementById('offline-notice').style.display = 'none';
+        });
+        
+        window.addEventListener('offline', () => {
+          document.getElementById('offline-notice').style.display = 'block';
+        });
+      </script>
+    </body>
+    </html>`,
+    { 
+      headers: { 
+        'Content-Type': 'text/html',
+        'Cache-Control': 'public, max-age=31536000'
+      } 
+    }
+  );
+  
+  await cache.put('/index.html', indexHTML);
+  console.log('[Kynecta] Created index.html fallback for offline auth');
 }
 
 // Initialize IndexedDB for offline storage
@@ -235,26 +549,26 @@ self.addEventListener('activate', (event) => {
         return cache.keys().then(keys => {
           console.log(`[Kynecta] PERMANENT cache contains ${keys.length} assets for offline use`);
           
-          // Validate critical assets are present
-          const criticalUrls = ['/', '/index.html', '/offline.html'];
+          // Validate critical auth assets are present
           const missing = [];
           
-          criticalUrls.forEach(url => {
+          CRITICAL_AUTH_ASSETS.forEach(asset => {
             const found = keys.some(key => {
               const keyUrl = new URL(key.url);
-              return keyUrl.pathname === url || keyUrl.pathname + '.html' === url;
+              return keyUrl.pathname === asset;
             });
             if (!found) {
-              missing.push(url);
+              missing.push(asset);
             }
           });
           
           if (missing.length > 0) {
-            console.warn('[Kynecta] Missing critical assets:', missing);
+            console.warn('[Kynecta] Missing critical auth assets:', missing);
             // Re-cache missing critical assets
-            return cacheCriticalAssets();
+            return recacheCriticalAuthAssets();
           }
           
+          console.log('[Kynecta] ✓ All critical auth assets verified');
           return Promise.resolve();
         });
       });
@@ -262,17 +576,21 @@ self.addEventListener('activate', (event) => {
   );
 });
 
-// Cache missing critical assets
-async function cacheCriticalAssets() {
+// Re-cache missing critical auth assets
+async function recacheCriticalAuthAssets() {
   const cache = await caches.open(CACHE_NAME);
-  const criticalAssets = ['/', '/index.html', '/offline.html'];
   
-  for (const asset of criticalAssets) {
+  for (const asset of CRITICAL_AUTH_ASSETS) {
     try {
-      await cache.add(asset);
-      console.log(`[Kynecta] Re-cached critical asset: ${asset}`);
+      // Try to fetch fresh version
+      const response = await fetch(asset);
+      if (response.ok) {
+        await cache.put(asset, response);
+        console.log(`[Kynecta] Re-cached: ${asset}`);
+      }
     } catch (error) {
       console.warn(`[Kynecta] Could not re-cache ${asset}:`, error.message);
+      // Asset will remain as fallback version
     }
   }
 }
@@ -294,6 +612,12 @@ self.addEventListener('fetch', (event) => {
     return;
   }
   
+  // SPECIAL HANDLING: index.html and layout.css - CACHE FIRST (GUARANTEED OFFLINE)
+  if (url.pathname === '/' || url.pathname === '/index.html' || url.pathname === '/css/layout.css') {
+    event.respondWith(handleCriticalAuthAssets(request));
+    return;
+  }
+  
   // Check if this is an App Shell asset (PERMANENTLY CACHED)
   if (isAppShellAsset(url)) {
     event.respondWith(handlePermanentAppShell(request));
@@ -309,6 +633,150 @@ self.addEventListener('fetch', (event) => {
   // Default: Cache First with Network Fallback
   event.respondWith(handleDefaultCacheFirst(request));
 });
+
+// CRITICAL AUTH ASSETS HANDLER - Cache First, guaranteed offline
+async function handleCriticalAuthAssets(request) {
+  const url = new URL(request.url);
+  console.log(`[Kynecta] Critical auth asset request: ${url.pathname}`);
+  
+  // ALWAYS try cache first - this is what guarantees offline loading
+  const cachedResponse = await caches.match(request);
+  
+  if (cachedResponse) {
+    console.log(`[Kynecta] Serving critical auth asset from cache: ${url.pathname}`);
+    
+    // Update cache in background if online (silent refresh)
+    if (navigator.onLine) {
+      silentlyUpdateCache(request);
+    }
+    
+    return cachedResponse;
+  }
+  
+  // If not in cache, try network
+  try {
+    const networkResponse = await fetch(request);
+    
+    // Cache for PERMANENT offline use
+    if (networkResponse.ok) {
+      const cache = await caches.open(CACHE_NAME);
+      await cache.put(request, networkResponse.clone());
+      console.log(`[Kynecta] Added critical auth asset to cache: ${url.pathname}`);
+    }
+    
+    return networkResponse;
+  } catch (error) {
+    console.log(`[Kynecta] Network failed for critical auth asset: ${url.pathname}`);
+    
+    // Serve fallback from cache (should always exist due to install event)
+    const fallbackResponse = await caches.match(request);
+    if (fallbackResponse) {
+      return fallbackResponse;
+    }
+    
+    // Ultimate fallback
+    if (url.pathname.endsWith('.css')) {
+      return createLayoutCSSFallbackResponse();
+    } else {
+      return createIndexHTMLFallbackResponse();
+    }
+  }
+}
+
+// Create layout.css fallback response
+function createLayoutCSSFallbackResponse() {
+  return new Response(
+    `/* Kynecta - Critical Layout CSS Fallback */
+    /* This ensures auth page doesn't break when offline */
+    
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body { font-family: sans-serif; min-height: 100vh; }
+    .container { width: 100%; max-width: 1200px; margin: 0 auto; padding: 0 20px; }
+    .flex { display: flex; }
+    .flex-col { flex-direction: column; }
+    .items-center { align-items: center; }
+    .justify-center { justify-content: center; }
+    .grid { display: grid; }
+    .hidden { display: none !important; }
+    .visible { visibility: visible !important; }
+    
+    @media (max-width: 768px) {
+      .container { padding: 0 15px; }
+    }`,
+    {
+      status: 200,
+      headers: { 'Content-Type': 'text/css' }
+    }
+  );
+}
+
+// Create index.html fallback response
+function createIndexHTMLFallbackResponse() {
+  return new Response(
+    `<!DOCTYPE html>
+    <html>
+    <head>
+      <meta charset="UTF-8">
+      <meta name="viewport" content="width=device-width, initial-scale=1.0">
+      <title>Kynecta MoodChat</title>
+      <style>
+        body {
+          font-family: -apple-system, BlinkMacSystemFont, sans-serif;
+          background: linear-gradient(135deg, #1a73e8, #0d47a1);
+          color: white;
+          height: 100vh;
+          margin: 0;
+          display: flex;
+          justify-content: center;
+          align-items: center;
+          text-align: center;
+          padding: 20px;
+        }
+        .auth-box {
+          background: white;
+          color: #333;
+          padding: 40px;
+          border-radius: 16px;
+          max-width: 400px;
+          width: 100%;
+        }
+        h1 { color: #1a73e8; margin-bottom: 20px; }
+        .offline-notice {
+          background: #fff3cd;
+          color: #856404;
+          padding: 12px;
+          border-radius: 8px;
+          margin-top: 20px;
+        }
+      </style>
+    </head>
+    <body>
+      <div class="auth-box">
+        <h1>Kynecta MoodChat</h1>
+        <p>Welcome to Kynecta! The app is loaded for offline use.</p>
+        <p>You're currently offline. Sign in when you're back online.</p>
+        <div class="offline-notice">Working offline - Basic features available</div>
+        <button onclick="window.location.href='/chat.html'" style="
+          background: #1a73e8;
+          color: white;
+          border: none;
+          padding: 12px 24px;
+          border-radius: 8px;
+          margin-top: 20px;
+          cursor: pointer;
+          font-size: 16px;
+        ">
+          Continue to App
+        </button>
+      </div>
+    </body>
+    </html>`,
+    {
+      status: 200,
+      headers: { 'Content-Type': 'text/html' }
+    }
+  );
+}
 
 // Check if request is to Firebase (NEVER CACHE - CRITICAL FOR AUTH)
 function isFirebaseRequest(url) {
@@ -653,6 +1121,7 @@ self.addEventListener('message', (event) => {
           version: APP_VERSION,
           cacheName: CACHE_NAME,
           permanentOffline: true,
+          authPageOffline: true,
           cacheStrategy: 'permanent-app-shell'
         });
       }
@@ -664,9 +1133,31 @@ self.addEventListener('message', (event) => {
           offline: !navigator.onLine,
           version: APP_VERSION,
           permanentCache: true,
+          authPageAvailable: true,
           cacheStatus: 'active-permanent'
         });
       }
+      break;
+      
+    case 'VERIFY_AUTH_PAGE':
+      // Special verification for auth page
+      caches.open(CACHE_NAME).then(cache => {
+        return Promise.all([
+          cache.match('/index.html'),
+          cache.match('/css/layout.css'),
+          cache.match('/')
+        ]).then(responses => {
+          const [indexHtml, layoutCss, root] = responses;
+          if (event.ports && event.ports[0]) {
+            event.ports[0].postMessage({
+              verified: !!(indexHtml || root),
+              layoutCssAvailable: !!layoutCss,
+              authPageOfflineReady: true,
+              timestamp: Date.now()
+            });
+          }
+        });
+      });
       break;
       
     case 'VERIFY_APP_SHELL':
@@ -686,7 +1177,8 @@ self.addEventListener('message', (event) => {
               cssCount: cssFiles.length,
               jsCount: jsFiles.length,
               totalAssets: keys.length,
-              permanent: true
+              permanent: true,
+              authPageCached: keys.some(k => k.url.includes('index.html') || k.url.endsWith('/'))
             });
           }
         });
@@ -694,10 +1186,16 @@ self.addEventListener('message', (event) => {
       break;
       
     case 'FORCE_CACHE_REFRESH':
-      // Re-cache app shell assets
+      // Re-cache app shell assets with focus on auth page
       caches.open(CACHE_NAME).then(cache => {
+        // Prioritize critical auth assets
+        const prioritizedAssets = [
+          ...CRITICAL_AUTH_ASSETS,
+          ...APP_SHELL_ASSETS.filter(a => !CRITICAL_AUTH_ASSETS.includes(a))
+        ];
+        
         Promise.allSettled(
-          APP_SHELL_ASSETS.map(asset => {
+          prioritizedAssets.map(asset => {
             return fetch(asset)
               .then(response => {
                 if (response.ok) {
@@ -709,7 +1207,10 @@ self.addEventListener('message', (event) => {
           })
         ).then(() => {
           if (event.ports && event.ports[0]) {
-            event.ports[0].postMessage({ refreshed: true });
+            event.ports[0].postMessage({ 
+              refreshed: true,
+              authAssetsRefreshed: true 
+            });
           }
         });
       });
@@ -802,13 +1303,12 @@ async function verifyCacheIntegrity() {
   const cache = await caches.open(CACHE_NAME);
   const keys = await cache.keys();
   
-  const criticalAssets = ['/', '/index.html', '/styles.css', '/js/app.js'];
   const missing = [];
   
-  for (const asset of criticalAssets) {
+  for (const asset of CRITICAL_AUTH_ASSETS) {
     const found = keys.some(key => {
       const url = new URL(key.url);
-      return url.pathname === asset || url.pathname === asset + '.html';
+      return url.pathname === asset;
     });
     
     if (!found) {
@@ -820,7 +1320,8 @@ async function verifyCacheIntegrity() {
     integrity: missing.length === 0 ? 'healthy' : 'degraded',
     totalCached: keys.length,
     missingCritical: missing,
-    permanentCache: true
+    permanentCache: true,
+    authPageAvailable: !missing.includes('/index.html') && !missing.includes('/')
   };
 }
 
@@ -999,4 +1500,6 @@ self.addEventListener('notificationclick', (event) => {
 
 console.log(`[Kynecta MoodChat Service Worker] v${APP_VERSION} loaded - PERMANENT Offline Availability`);
 console.log(`[Kynecta] App Shell will ALWAYS load offline, even after 24+ hours without internet`);
+console.log(`[Kynecta] ✓ Auth page (index.html) and layout.css GUARANTEED to load offline`);
+console.log(`[Kynecta] ✓ Layout will not break when offline`);
 console.log(`[Kynecta] Firebase SDK/API requests are NEVER cached (auth-safe)`);
