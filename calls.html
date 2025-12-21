@@ -69,7 +69,7 @@
             position: relative;
         }
         
-        /* Simplified Offline Indicator - Matching Friends Page */
+        /* Improved Offline Indicator */
         .offline-banner {
             position: fixed;
             top: 0;
@@ -405,7 +405,7 @@
             min-height: 200px;
         }
         
-        /* Offline State - Matching Friends Page */
+        /* Improved Offline State */
         .offline-state {
             flex: 1;
             display: flex;
@@ -1700,7 +1700,7 @@
             cursor: not-allowed;
         }
         
-        /* Offline Call Container */
+        /* Improved Offline Call Container */
         .offline-call-placeholder {
             flex: 1;
             display: flex;
@@ -1772,13 +1772,35 @@
             font-weight: 600;
             z-index: 1;
         }
+        
+        /* Loading Spinner */
+        .loading-placeholder {
+            text-align: center;
+            padding: 40px 20px;
+            color: var(--text-secondary);
+        }
+        
+        .loading-spinner {
+            display: inline-block;
+            width: 24px;
+            height: 24px;
+            border: 3px solid rgba(0, 132, 255, 0.3);
+            border-radius: 50%;
+            border-top-color: var(--primary-color);
+            animation: spin 1s ease-in-out infinite;
+            margin-bottom: 15px;
+        }
+        
+        @keyframes spin {
+            to { transform: rotate(360deg); }
+        }
     </style>
 </head>
 <body>
     <!-- Simple Offline Banner -->
     <div class="offline-banner" id="offlineBanner">
         <i class="fas fa-wifi-slash"></i>
-        <span> offline.</span>
+        <span>You are currently offline. Call features will be available when connection is restored.</span>
     </div>
     
     <div class="app-container">
@@ -1908,8 +1930,8 @@
                         <!-- All Calls Section -->
                         <div class="calls-section active" id="allCallsSection">
                             <div class="calls-list" id="allCallsList">
-                                <div class="loading-placeholder" style="text-align: center; padding: 40px 20px; color: var(--text-secondary);">
-                                    <i class="fas fa-spinner fa-spin" style="font-size: 24px; margin-bottom: 15px;"></i>
+                                <div class="loading-placeholder">
+                                    <div class="loading-spinner"></div>
                                     <p>Loading call history...</p>
                                 </div>
                             </div>
@@ -1953,8 +1975,8 @@
                 <div class="offline-call-placeholder" id="offlineCallPlaceholder" style="display: none;">
                     <i class="fas fa-wifi-slash"></i>
                     <h3>Offline Mode</h3>
-                    <p>offline</p>
-                    <p class="subtext" style="font-size: 14px; opacity: 0.6;">Calls will work when connection is restored</p>
+                    <p>You are currently offline. Call features require internet connection.</p>
+                    <p class="subtext">Call history is available for viewing only. Calls will work when connection is restored.</p>
                 </div>
             </div>
             
@@ -2334,11 +2356,11 @@
         let reactionsChannel = null;
         let chatChannel = null;
         
-        // Offline state management - matching friends page
+        // Offline state management
         let isOnline = navigator.onLine;
         let offlineCheckInterval = null;
         
-        // User settings with default values
+        // User settings with default values - NOW LOADS FROM APP-WIDE SETTINGS
         let userSettings = {
             reactions: true,
             chat: true,
@@ -2407,6 +2429,9 @@
             // Initialize offline detection
             initializeOfflineDetection();
             
+            // Listen for settings changes from settings.html
+            setupSettingsSync();
+            
             // First try to get user from localStorage for immediate UI
             const cachedUser = localStorage.getItem('currentUser');
             if (cachedUser) {
@@ -2416,7 +2441,7 @@
                     
                     // Initialize UI immediately with cached user
                     await initializeUser();
-                    await loadUserSettings();
+                    await loadAppWideSettings(); // Load from app-wide settings
                     await loadUserSubscription();
                     setupEventListeners();
                     initializeWhiteboard();
@@ -2454,7 +2479,7 @@
                         }));
                         
                         await initializeUser();
-                        await loadUserSettings();
+                        await loadAppWideSettings(); // Load from app-wide settings
                         await loadUserSubscription();
                         setupEventListeners();
                         initializeWhiteboard();
@@ -2471,7 +2496,7 @@
                         } else {
                             console.log('Offline: Loading call history from local storage');
                             loadCallsFromLocalStorage();
-                            showNotification('Offline: Call features unavailable', 'warning');
+                            showNotification('You are offline. Call features will be available when connection is restored.', 'warning');
                         }
                         
                         // Listen for incoming calls from friends.html
@@ -2560,7 +2585,7 @@
             }
             
             // Show notification
-            showNotification('You are back online', 'success');
+            showNotification('You are back online. Call features are now available.', 'success');
             
             // Update user presence
             if (userPresenceRef && currentUser) {
@@ -2593,8 +2618,8 @@
             isOnline = false;
             updateUIForConnectivity();
             
-            // Show notification - simplified message like friends page
-            showNotification('offline.', 'warning');
+            // Show notification - professional message
+            showNotification('You are offline. Call features will be available when connection is restored.', 'warning');
 
             // End any active calls gracefully
             if (currentCall) {
@@ -2644,8 +2669,12 @@
         
         function updateUIForConnectivity() {
             if (!isOnline) {
-                // Show offline banner - matching friends page style
+                // Show offline banner - professional message
                 offlineBanner.classList.add('active');
+                offlineBanner.innerHTML = `
+                    <i class="fas fa-wifi-slash"></i>
+                    <span>You are currently offline. Call features will be available when connection is restored.</span>
+                `;
                 
                 // Disable call buttons when offline
                 const callButtons = [
@@ -2663,7 +2692,7 @@
                     const button = document.getElementById(buttonId);
                     if (button) {
                         button.disabled = true;
-                        button.title = 'Calls require internet connection';
+                        button.title = 'Call features require internet connection';
                     }
                 });
                 
@@ -2671,7 +2700,7 @@
                 const callbackButtons = document.querySelectorAll('.call-action-btn');
                 callbackButtons.forEach(button => {
                     button.disabled = true;
-                    button.title = 'Calls require internet connection';
+                    button.title = 'Call features require internet connection';
                 });
                 
                 // Disable contact checkboxes in new call modal
@@ -2683,19 +2712,19 @@
                 // Close new call modal if open
                 if (newCallModal.classList.contains('active')) {
                     newCallModal.classList.remove('active');
-                    showNotification('Cannot start call while offline', 'error');
+                    showNotification('Call features require internet connection', 'warning');
                 }
                 
                 // Close incoming call modal if open
                 if (incomingCallModal.classList.contains('active')) {
                     incomingCallModal.classList.remove('active');
-                    showNotification('Cannot accept calls while offline', 'error');
+                    showNotification('Cannot accept calls while offline', 'warning');
                 }
                 
                 // Close payment modal if open
                 if (paymentModal.classList.contains('active')) {
                     paymentModal.classList.remove('active');
-                    showNotification('Payment requires internet connection', 'error');
+                    showNotification('Payment requires internet connection', 'warning');
                 }
                 
                 // Disable panel tabs that require internet
@@ -2785,7 +2814,7 @@
                     <div class="offline-contacts-message">
                         <i class="fas fa-wifi-slash"></i>
                         <p>Contacts unavailable while offline</p>
-                        <p class="subtext">Calls require internet connection</p>
+                        <p class="subtext">Call features require internet connection</p>
                     </div>
                 `;
             }
@@ -2795,10 +2824,112 @@
                     <div class="offline-contacts-message">
                         <i class="fas fa-wifi-slash"></i>
                         <p>Contacts unavailable while offline</p>
-                        <p class="subtext">Calls require internet connection</p>
+                        <p class="subtext">Call features require internet connection</p>
                     </div>
                 `;
             }
+        }
+        
+        // NEW: Load settings from app-wide settings storage
+        function loadAppWideSettings() {
+            try {
+                // Check if there's a global settings object from settings.html
+                if (window.appSettings) {
+                    console.log('Loading settings from app-wide settings:', window.appSettings);
+                    
+                    // Map app-wide settings to call-specific settings
+                    userSettings = {
+                        reactions: window.appSettings.liveReactions !== false,
+                        chat: window.appSettings.inCallChat !== false,
+                        whiteboard: window.appSettings.sharedWhiteboard !== false,
+                        polls: window.appSettings.polls !== false,
+                        notes: window.appSettings.sharedNotes !== false
+                    };
+                    
+                    // Save to localStorage for offline use
+                    if (currentUser) {
+                        localStorage.setItem(`userSettings_${currentUser.uid}`, JSON.stringify(userSettings));
+                    }
+                    
+                    // Update UI immediately
+                    updateSettingsUI();
+                    applyUserSettings();
+                    
+                    console.log('Call settings loaded from app-wide settings:', userSettings);
+                    return;
+                }
+                
+                // Fallback to local storage
+                if (currentUser) {
+                    const localSettings = localStorage.getItem(`userSettings_${currentUser.uid}`);
+                    if (localSettings) {
+                        userSettings = JSON.parse(localSettings);
+                        updateSettingsUI();
+                        applyUserSettings();
+                        console.log('Call settings loaded from localStorage:', userSettings);
+                        return;
+                    }
+                }
+                
+                // Use defaults
+                updateSettingsUI();
+                applyUserSettings();
+                console.log('Using default call settings');
+                
+            } catch (error) {
+                console.error('Error loading app-wide settings:', error);
+                updateSettingsUI();
+                applyUserSettings();
+            }
+        }
+        
+        // NEW: Listen for settings changes from settings.html
+        function setupSettingsSync() {
+            // Listen for storage events (when settings.html changes localStorage)
+            window.addEventListener('storage', function(event) {
+                if (event.key === 'appSettings' || event.key?.startsWith('userSettings_')) {
+                    console.log('Settings changed detected, reloading...');
+                    loadAppWideSettings();
+                    showNotification('Settings updated', 'success');
+                }
+            });
+            
+            // Also listen for messages from other tabs
+            window.addEventListener('message', function(event) {
+                if (event.data && event.data.type === 'settingsUpdated') {
+                    console.log('Settings updated message received');
+                    loadAppWideSettings();
+                    showNotification('Settings updated', 'success');
+                }
+            });
+            
+            // Check for settings every 5 seconds (for real-time sync)
+            setInterval(() => {
+                const latestSettings = localStorage.getItem('appSettings');
+                if (latestSettings) {
+                    try {
+                        const parsed = JSON.parse(latestSettings);
+                        // Map to call settings
+                        const newCallSettings = {
+                            reactions: parsed.liveReactions !== false,
+                            chat: parsed.inCallChat !== false,
+                            whiteboard: parsed.sharedWhiteboard !== false,
+                            polls: parsed.polls !== false,
+                            notes: parsed.sharedNotes !== false
+                        };
+                        
+                        // Check if settings changed
+                        if (JSON.stringify(userSettings) !== JSON.stringify(newCallSettings)) {
+                            userSettings = newCallSettings;
+                            updateSettingsUI();
+                            applyUserSettings();
+                            console.log('Call settings synced from app-wide settings');
+                        }
+                    } catch (e) {
+                        console.error('Error parsing settings:', e);
+                    }
+                }
+            }, 5000);
         }
         
         // Enhanced localStorage management for calls
@@ -2873,9 +3004,7 @@
                     console.log(`Loaded ${calls.length} calls from local storage`);
                 } else {
                     console.log('No calls found in local storage');
-                    // Create some sample data for demo purposes
-                    calls = generateSampleCalls();
-                    localStorage.setItem(storageKey, JSON.stringify(calls));
+                    return;
                 }
                 
                 // Display calls in all sections
@@ -2892,39 +3021,16 @@
             } catch (error) {
                 console.error('Error loading calls from local storage:', error);
                 showNotification('Failed to load offline call history', 'error');
-            }
-        }
-        
-        // Generate sample calls for demo purposes
-        function generateSampleCalls() {
-            const sampleCalls = [];
-            const now = new Date();
-            
-            // Add some sample calls
-            const sampleParticipants = ['user1', 'user2', 'user3'];
-            const sampleNames = ['John Doe', 'Jane Smith', 'Mike Johnson', 'Sarah Wilson', 'Alex Brown'];
-            
-            for (let i = 0; i < 5; i++) {
-                const callDate = new Date(now.getTime() - (i * 3600000 * 24)); // 1 day apart
-                const isMissed = i === 1;
-                const isGroup = i === 4;
                 
-                sampleCalls.push({
-                    id: `sample_${i}`,
-                    participants: isGroup ? ['user1', 'user2', 'user3'] : ['user1', sampleParticipants[i % 3]],
-                    initiator: i % 2 === 0 ? 'user1' : sampleParticipants[i % 3],
-                    type: i % 2 === 0 ? 'video' : 'voice',
-                    status: isMissed ? 'missed' : 'completed',
-                    timestamp: callDate.toISOString(),
-                    savedAt: callDate.toISOString(),
-                    duration: isMissed ? 0 : Math.floor(Math.random() * 600) + 30,
-                    group: isGroup,
-                    isLocal: true,
-                    displayName: isGroup ? 'Group Call (3)' : sampleNames[i]
-                });
+                // Show empty state
+                allCallsList.innerHTML = `
+                    <div class="offline-state">
+                        <i class="fas fa-phone"></i>
+                        <p>No call history available offline</p>
+                        <p class="subtext">Call history will sync when you're back online</p>
+                    </div>
+                `;
             }
-            
-            return sampleCalls;
         }
         
         // Display calls from array (enhanced for offline mode)
@@ -2984,6 +3090,7 @@
         
         // Display call item from data (enhanced for offline mode)
         function displayCallItemFromData(callData, container) {
+            // Get contact names from localStorage to avoid "Unknown"
             let displayName = callData.displayName || 'Unknown';
             let otherParticipantIds = [];
             
@@ -2994,9 +3101,9 @@
                 
                 if (!displayName || displayName === 'Unknown') {
                     if (otherParticipantIds.length === 1) {
-                        // Try to get name from local storage
-                        const contactName = localStorage.getItem(`contact_${otherParticipantIds[0]}_name`);
-                        displayName = contactName || 'Unknown';
+                        // Try to get name from contacts cache
+                        const contactName = getContactName(otherParticipantIds[0]);
+                        displayName = contactName || 'Contact';
                     } else if (otherParticipantIds.length > 1) {
                         displayName = `Group Call (${callData.participants.length})`;
                     }
@@ -3045,7 +3152,7 @@
             }
             
             const initials = displayName.split(' ').map(word => word[0]).join('').toUpperCase().substring(0, 2);
-            const avatarUrl = callData.avatar || localStorage.getItem(`contact_${otherParticipantIds[0]}_avatar`) || '';
+            const avatarUrl = callData.avatar || getContactAvatar(otherParticipantIds[0]) || '';
             
             callItem.innerHTML = `
                 <div class="call-avatar" ${avatarUrl ? `style="background-image: url('${avatarUrl}')"` : ''}>
@@ -3075,7 +3182,7 @@
             callbackBtn.addEventListener('click', (e) => {
                 e.stopPropagation();
                 if (!isOnline) {
-                    showNotification('Cannot start call while offline', 'error');
+                    showNotification('Call features require internet connection', 'error');
                     return;
                 }
                 
@@ -3093,6 +3200,30 @@
             container.appendChild(callItem);
         }
         
+        // Helper function to get contact name from cache
+        function getContactName(userId) {
+            if (!userId) return null;
+            
+            // Check multiple storage locations
+            const contactName = localStorage.getItem(`contact_${userId}_name`) ||
+                              localStorage.getItem(`userInfo_${userId}_displayName`) ||
+                              localStorage.getItem(`friend_${userId}_name`);
+            
+            return contactName;
+        }
+        
+        // Helper function to get contact avatar from cache
+        function getContactAvatar(userId) {
+            if (!userId) return null;
+            
+            // Check multiple storage locations
+            const contactAvatar = localStorage.getItem(`contact_${userId}_avatar`) ||
+                                 localStorage.getItem(`userInfo_${userId}_photoURL`) ||
+                                 localStorage.getItem(`friend_${userId}_avatar`);
+            
+            return contactAvatar;
+        }
+        
         function listenForExternalCalls() {
             // Listen for messages from other tabs (like friends.html)
             window.addEventListener('message', function(event) {
@@ -3100,7 +3231,7 @@
                 
                 // Check if offline before processing call requests
                 if (!isOnline) {
-                    showNotification('Cannot start call while offline', 'error');
+                    showNotification('Call features require internet connection', 'error');
                     return;
                 }
                 
@@ -3140,6 +3271,12 @@
                         }
                     }
                 }
+                
+                // Handle settings updates
+                if (event.data && event.data.type === 'settingsUpdated') {
+                    console.log('Settings updated from friends.html');
+                    loadAppWideSettings();
+                }
             });
             
             // Also check for URL parameters (in case the call was initiated via URL)
@@ -3153,7 +3290,7 @@
                     if (isOnline) {
                         startCall(callUserId, callType);
                     } else {
-                        showNotification('Cannot start call while offline', 'error');
+                        showNotification('Call features require internet connection', 'error');
                     }
                 }, 2000);
                 
@@ -3609,12 +3746,12 @@
                         // Fallback to basic info
                         if (!callerData) {
                             callerData = {
-                                displayName: 'Unknown',
+                                displayName: 'Contact',
                                 photoURL: ''
                             };
                         }
                         
-                        document.getElementById('incomingCallName').textContent = callerData.displayName || 'Unknown';
+                        document.getElementById('incomingCallName').textContent = callerData.displayName || 'Contact';
                         document.getElementById('incomingCallType').textContent = 
                             metadata.type === 'video' ? 'Incoming Video Call' : 'Incoming Voice Call';
                         
@@ -3625,7 +3762,7 @@
                         } else {
                             const initials = callerData.displayName ? 
                                 callerData.displayName.split(' ').map(word => word[0]).join('').toUpperCase().substring(0, 2) : 
-                                'U';
+                                'C';
                             incomingCallAvatar.innerHTML = `<span style="color: white; font-size: 24px;">${initials}</span>`;
                         }
                         
@@ -3706,7 +3843,7 @@
             
             // Check if offline before starting call
             if (!isOnline) {
-                showNotification('Cannot start call while offline', 'error');
+                showNotification('Call features require internet connection', 'error');
                 
                 // Save as missed call attempt to local storage
                 saveCallToLocalStorage({
@@ -3716,7 +3853,7 @@
                     status: 'missed',
                     timestamp: new Date().toISOString(),
                     missedReason: 'offline_attempt',
-                    displayName: 'Unknown'
+                    displayName: getContactName(userId) || 'Contact'
                 });
                 
                 return;
@@ -3731,7 +3868,7 @@
             console.log('User status:', status);
             
             if (!status.online) {
-                showNotification('User is offline. They will see missed call when back online.', 'warning');
+                showNotification('Contact is offline. They will see missed call when back online.', 'warning');
                 
                 // Save missed call to local storage
                 saveCallToLocalStorage({
@@ -3741,14 +3878,14 @@
                     status: 'missed',
                     timestamp: new Date().toISOString(),
                     missedReason: 'user_offline',
-                    displayName: 'Unknown'
+                    displayName: getContactName(userId) || 'Contact'
                 });
                 
                 return;
             }
             
             if (!status.peerId) {
-                showNotification('User is not connected to call server', 'error');
+                showNotification('Contact is not connected to call server', 'error');
                 return;
             }
             
@@ -3808,7 +3945,7 @@
                             status: 'missed',
                             timestamp: new Date().toISOString(),
                             duration: 0,
-                            displayName: 'Unknown'
+                            displayName: getContactName(userId) || 'Contact'
                         });
                         
                         endCall();
@@ -3879,7 +4016,7 @@
                         status: 'connected',
                         timestamp: new Date().toISOString(),
                         startTime: callStartTime,
-                        displayName: 'Unknown'
+                        displayName: getContactName(userId) || 'Contact'
                     });
                     
                     setupDataConnection(userId);
@@ -4047,7 +4184,7 @@
             
             // Check if offline
             if (!isOnline) {
-                showNotification('Cannot start call while offline', 'error');
+                showNotification('Call features require internet connection', 'error');
                 
                 // Save group call attempt to local storage
                 saveCallToLocalStorage({
@@ -4095,12 +4232,12 @@
             }
             
             if (onlineUsers.length === 0) {
-                showNotification('All selected users are offline', 'warning');
+                showNotification('All selected contacts are offline', 'warning');
                 return;
             }
             
             if (offlineUsers.length > 0) {
-                showNotification(`${offlineUsers.length} user(s) offline and won't join the call`, 'warning');
+                showNotification(`${offlineUsers.length} contact(s) offline and won't join the call`, 'warning');
             }
             
             try {
@@ -4189,7 +4326,7 @@
             video.muted = isLocal;
             video.playsInline = true;
             
-            let userName = isLocal ? 'You' : 'User';
+            let userName = isLocal ? 'You' : 'Contact';
             let userAvatar = '';
             
             if (isLocal) {
@@ -4203,17 +4340,14 @@
                             const userDoc = await db.collection('users').doc(userId).get();
                             if (userDoc.exists) {
                                 const userData = userDoc.data();
-                                userName = userData.displayName || 'User';
+                                userName = userData.displayName || 'Contact';
                                 userAvatar = userData.photoURL || '';
                             }
                         } else {
                             // Check localStorage
-                            const cachedUser = localStorage.getItem(`userInfo_${userId}`);
-                            if (cachedUser) {
-                                const userData = JSON.parse(cachedUser);
-                                userName = userData.displayName || 'User';
-                                userAvatar = userData.photoURL || '';
-                            }
+                            const contactName = getContactName(userId);
+                            userName = contactName || 'Contact';
+                            userAvatar = getContactAvatar(userId) || '';
                         }
                     } catch (error) {
                         console.error('Error getting user info:', error);
@@ -4370,7 +4504,7 @@
                     endTime: endTime,
                     duration: duration,
                     group: currentCall.group || false,
-                    displayName: currentCall.group ? `Group Call (${participants.length})` : 'Unknown'
+                    displayName: currentCall.group ? `Group Call (${participants.length})` : getContactName(currentCall.targetId) || 'Contact'
                 });
             }
             
@@ -4402,7 +4536,7 @@
             try {
                 // Check if offline before accepting call
                 if (!isOnline) {
-                    showNotification('Cannot accept call while offline', 'error');
+                    showNotification('Call features require internet connection', 'error');
                     declineCall();
                     return;
                 }
@@ -4514,44 +4648,7 @@
             showNotification('Call declined', 'success');
         }
         
-        async function loadUserSettings() {
-            try {
-                // Try to load from localStorage first (works offline)
-                const localSettings = localStorage.getItem(`userSettings_${currentUser.uid}`);
-                if (localSettings) {
-                    userSettings = JSON.parse(localSettings);
-                }
-                
-                // Only try Firebase if online
-                if (isOnline && db) {
-                    const settingsDoc = await db.collection('userSettings').doc(currentUser.uid).get();
-                    
-                    if (settingsDoc.exists) {
-                        const savedSettings = settingsDoc.data();
-                        userSettings = {
-                            reactions: savedSettings.reactions !== undefined ? savedSettings.reactions : true,
-                            chat: savedSettings.chat !== undefined ? savedSettings.chat : true,
-                            whiteboard: savedSettings.whiteboard !== undefined ? savedSettings.whiteboard : true,
-                            polls: savedSettings.polls !== undefined ? savedSettings.polls : true,
-                            notes: savedSettings.notes !== undefined ? savedSettings.notes : true
-                        };
-                        
-                        // Save to localStorage for offline use
-                        localStorage.setItem(`userSettings_${currentUser.uid}`, JSON.stringify(userSettings));
-                    }
-                }
-                
-                // Update UI toggles and apply settings immediately
-                updateSettingsUI();
-                applyUserSettings();
-                
-            } catch (error) {
-                console.error('Error loading user settings:', error);
-                updateSettingsUI();
-                applyUserSettings();
-            }
-        }
-        
+        // Updated to sync with app-wide settings
         function updateSettingsUI() {
             const reactionsToggle = document.getElementById('reactionsToggle');
             const chatToggle = document.getElementById('chatToggle');
@@ -4566,10 +4663,23 @@
             if (notesToggle) notesToggle.checked = userSettings.notes;
         }
         
+        // Updated to save to app-wide settings
         function saveUserSettings() {
             if (!currentUser) return;
             
-            // Always save to localStorage (works offline) - immediate effect
+            // Save to app-wide settings
+            if (window.appSettings) {
+                window.appSettings.liveReactions = userSettings.reactions;
+                window.appSettings.inCallChat = userSettings.chat;
+                window.appSettings.sharedWhiteboard = userSettings.whiteboard;
+                window.appSettings.polls = userSettings.polls;
+                window.appSettings.sharedNotes = userSettings.notes;
+                
+                // Save to localStorage for other tabs
+                localStorage.setItem('appSettings', JSON.stringify(window.appSettings));
+            }
+            
+            // Also save to call-specific storage
             localStorage.setItem(`userSettings_${currentUser.uid}`, JSON.stringify(userSettings));
             
             // Apply settings immediately
@@ -4642,7 +4752,7 @@
         
         async function loadAllCalls() {
             try {
-                allCallsList.innerHTML = '<div class="loading-placeholder" style="text-align: center; padding: 40px 20px; color: var(--text-secondary);"><i class="fas fa-spinner fa-spin" style="font-size: 24px; margin-bottom: 15px;"></i><p>Loading call history...</p></div>';
+                allCallsList.innerHTML = '<div class="loading-placeholder"><div class="loading-spinner"></div><p>Loading call history...</p></div>';
                 
                 // If offline, load from local storage
                 if (!isOnline || !db) {
@@ -4750,6 +4860,7 @@
                                 <i class="fas fa-phone-slash"></i>
                                 <p>No missed calls</p>
                                 <p class="subtext">All calls have been answered</p>
+                            </div>
                         `;
                         break;
                     case 'group':
@@ -4800,35 +4911,33 @@
         
         async function displayCallItem(callData, callId, container) {
             const otherParticipantIds = callData.participants ? callData.participants.filter(id => id !== currentUser.uid) : [];
-            let displayName = callData.displayName || 'Unknown';
+            let displayName = callData.displayName || 'Contact';
             let avatar = '';
             
             if (otherParticipantIds.length === 1 && !displayName) {
-                try {
-                    // Try Firebase first
-                    if (db) {
+                // Use cached contact name instead of "Unknown"
+                const contactName = getContactName(otherParticipantIds[0]);
+                displayName = contactName || 'Contact';
+                avatar = getContactAvatar(otherParticipantIds[0]) || '';
+                
+                // If still no name, try Firebase
+                if (!contactName && db && isOnline) {
+                    try {
                         const userDoc = await db.collection('users').doc(otherParticipantIds[0]).get();
                         if (userDoc.exists) {
                             const userData = userDoc.data();
-                            displayName = userData.displayName || 'User';
+                            displayName = userData.displayName || 'Contact';
                             avatar = userData.photoURL || '';
                             
                             // Save contact info to local storage for offline use
-                            localStorage.setItem(`contact_${otherParticipantIds[0]}_name`, userData.displayName || 'User');
+                            localStorage.setItem(`contact_${otherParticipantIds[0]}_name`, userData.displayName || 'Contact');
                             if (userData.photoURL) {
                                 localStorage.setItem(`contact_${otherParticipantIds[0]}_avatar`, userData.photoURL);
                             }
                         }
-                    } else {
-                        // Check localStorage
-                        const contactName = localStorage.getItem(`contact_${otherParticipantIds[0]}_name`);
-                        if (contactName) {
-                            displayName = contactName;
-                            avatar = localStorage.getItem(`contact_${otherParticipantIds[0]}_avatar`) || '';
-                        }
+                    } catch (error) {
+                        console.error('Error fetching user data:', error);
                     }
-                } catch (error) {
-                    console.error('Error fetching user data:', error);
                 }
             } else if (otherParticipantIds.length > 1 && !displayName) {
                 displayName = `Group Call (${callData.participants.length})`;
@@ -4898,7 +5007,7 @@
             callbackBtn.addEventListener('click', (e) => {
                 e.stopPropagation();
                 if (!isOnline) {
-                    showNotification('Cannot start call while offline', 'error');
+                    showNotification('Call features require internet connection', 'error');
                     return;
                 }
                 
@@ -5123,27 +5232,13 @@
                 // Try to get user info
                 const getUserInfo = async () => {
                     try {
-                        let userData = null;
+                        const contactName = getContactName(userId);
+                        const contactAvatar = getContactAvatar(userId);
                         
-                        if (db) {
-                            const userDoc = await db.collection('users').doc(userId).get();
-                            if (userDoc.exists) {
-                                userData = userDoc.data();
-                            }
-                        }
-                        
-                        if (!userData) {
-                            const cachedUser = localStorage.getItem(`userInfo_${userId}`);
-                            if (cachedUser) {
-                                userData = JSON.parse(cachedUser);
-                            }
-                        }
-                        
-                        addParticipantItem(userId, userData ? userData.displayName || 'User' : 'User', 
-                                          userData ? userData.photoURL || '' : '', false, true);
+                        addParticipantItem(userId, contactName || 'Contact', contactAvatar || '', false, true);
                     } catch (error) {
                         console.error('Error getting participant info:', error);
-                        addParticipantItem(userId, 'User', '', false, true);
+                        addParticipantItem(userId, 'Contact', '', false, true);
                     }
                 };
                 
@@ -5190,7 +5285,7 @@
             
             // If offline, show offline message
             if (!isOnline) {
-                const offlineMessage = '<div class="offline-contacts-message"><i class="fas fa-wifi-slash"></i><p>Contacts unavailable while offline</p><p class="subtext">Calls require internet connection</p></div>';
+                const offlineMessage = '<div class="offline-contacts-message"><i class="fas fa-wifi-slash"></i><p>Contacts unavailable while offline</p><p class="subtext">Call features require internet connection</p></div>';
                 contactsList.innerHTML = offlineMessage;
                 groupContactsList.innerHTML = offlineMessage;
                 return;
@@ -5234,7 +5329,7 @@
                 showNotification('Failed to load contacts', 'error');
                 
                 // Show offline message
-                const offlineMessage = '<div class="offline-contacts-message"><i class="fas fa-wifi-slash"></i><p>Contacts unavailable while offline</p><p class="subtext">Calls require internet connection</p></div>';
+                const offlineMessage = '<div class="offline-contacts-message"><i class="fas fa-wifi-slash"></i><p>Contacts unavailable while offline</p><p class="subtext">Call features require internet connection</p></div>';
                 contactsList.innerHTML = offlineMessage;
                 groupContactsList.innerHTML = offlineMessage;
             }
@@ -5247,7 +5342,7 @@
             
             const initials = userData.displayName ? 
                 userData.displayName.split(' ').map(word => word[0]).join('').toUpperCase().substring(0, 2) : 
-                'U';
+                'C';
             
             let statusText = userData.online ? 'Online now' : 
                 userData.lastOnline < 5 ? 'Just now' :
@@ -5264,7 +5359,7 @@
                 </div>
                 <div class="call-info" style="flex: 1;">
                     <div class="call-name">
-                        <span>${userData.displayName || 'User'}</span>
+                        <span>${userData.displayName || 'Contact'}</span>
                     </div>
                     <div class="call-details">
                         <span style="color: ${userData.online ? 'var(--success-color)' : 'var(--text-secondary)'}">
@@ -5301,39 +5396,13 @@
             const messageDiv = document.createElement('div');
             messageDiv.className = `chat-message ${isSent ? 'sent' : 'received'}`;
             
-            let senderName = 'Unknown';
+            let senderName = 'Contact';
             if (senderId === currentUser.uid) {
                 senderName = 'You';
             } else {
-                // Try to get sender name
-                const getUserName = async () => {
-                    try {
-                        let userData = null;
-                        
-                        if (db) {
-                            const userDoc = await db.collection('users').doc(senderId).get();
-                            if (userDoc.exists) {
-                                userData = userDoc.data();
-                            }
-                        }
-                        
-                        if (!userData) {
-                            const cachedUser = localStorage.getItem(`userInfo_${senderId}`);
-                            if (cachedUser) {
-                                userData = JSON.parse(cachedUser);
-                            }
-                        }
-                        
-                        const nameElement = messageDiv.querySelector('.message-sender');
-                        if (nameElement && userData) {
-                            nameElement.textContent = userData.displayName || 'User';
-                        }
-                    } catch (error) {
-                        console.error('Error getting sender name:', error);
-                    }
-                };
-                
-                getUserName();
+                // Try to get sender name from cache
+                const contactName = getContactName(senderId);
+                senderName = contactName || 'Contact';
             }
             
             messageDiv.innerHTML = `
@@ -5460,7 +5529,7 @@
             // New call button
             document.getElementById('newCallBtn').addEventListener('click', () => {
                 if (!isOnline) {
-                    showNotification('Cannot start call while offline', 'error');
+                    showNotification('Call features require internet connection', 'error');
                     return;
                 }
                 
@@ -5472,7 +5541,7 @@
             // Quick action buttons
             document.getElementById('voiceCallBtn').addEventListener('click', () => {
                 if (!isOnline) {
-                    showNotification('Cannot start call while offline', 'error');
+                    showNotification('Call features require internet connection', 'error');
                     return;
                 }
                 
@@ -5482,7 +5551,7 @@
             
             document.getElementById('videoCallBtn').addEventListener('click', () => {
                 if (!isOnline) {
-                    showNotification('Cannot start call while offline', 'error');
+                    showNotification('Call features require internet connection', 'error');
                     return;
                 }
                 
@@ -5492,7 +5561,7 @@
             
             document.getElementById('groupCallBtn').addEventListener('click', () => {
                 if (!isOnline) {
-                    showNotification('Cannot start call while offline', 'error');
+                    showNotification('Call features require internet connection', 'error');
                     return;
                 }
                 
@@ -5535,7 +5604,7 @@
             // Start call button
             document.getElementById('startCallBtn').addEventListener('click', async () => {
                 if (!isOnline) {
-                    showNotification('Cannot start call while offline', 'error');
+                    showNotification('Call features require internet connection', 'error');
                     return;
                 }
                 

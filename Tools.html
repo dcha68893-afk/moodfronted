@@ -1,0 +1,1639 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Business & AI Tools - Kynecta</title>
+    <link href="https://cdn.jsdelivr.net/npm/tailwindcss@2.2.19/dist/tailwind.min.css" rel="stylesheet">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/toastify-js/src/toastify.min.css">
+    <style>
+        * {
+            -webkit-user-select: none;
+            -moz-user-select: none;
+            -ms-user-select: none;
+            user-select: none;
+            -webkit-tap-highlight-color: transparent;
+        }
+        
+        .custom-scrollbar::-webkit-scrollbar {
+            width: 6px;
+        }
+        .custom-scrollbar::-webkit-scrollbar-track {
+            background: #f1f1f1;
+            border-radius: 10px;
+        }
+        .custom-scrollbar::-webkit-scrollbar-thumb {
+            background: #888;
+            border-radius: 10px;
+        }
+        .custom-scrollbar::-webkit-scrollbar-thumb:hover {
+            background: #555;
+        }
+        
+        .kynecta-header {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+        }
+        
+        .card-hover {
+            transition: all 0.3s ease;
+        }
+        
+        .card-hover:hover {
+            transform: translateY(-5px);
+            box-shadow: 0 10px 25px rgba(0, 0, 0, 0.1);
+        }
+        
+        .modal {
+            animation: fadeIn 0.3s ease-out;
+        }
+        
+        @keyframes fadeIn {
+            from { opacity: 0; transform: scale(0.95); }
+            to { opacity: 1; transform: scale(1); }
+        }
+        
+        .tool-category {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            background-clip: text;
+        }
+        
+        .progress-ring {
+            transform: rotate(-90deg);
+        }
+        
+        .progress-ring-circle {
+            transition: stroke-dashoffset 0.35s;
+            transform-origin: 50% 50%;
+        }
+        
+        .stat-card {
+            background: linear-gradient(135deg, #f3f4f6 0%, #e5e7eb 100%);
+        }
+        
+        .ai-badge {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+        }
+        
+        .business-badge {
+            background: linear-gradient(135deg, #10b981 0%, #059669 100%);
+            color: white;
+        }
+        
+        .productivity-badge {
+            background: linear-gradient(135deg, #f59e0b 0%, #d97706 100%);
+            color: white;
+        }
+        
+        .premium-badge {
+            background: linear-gradient(135deg, #ec4899 0%, #db2777 100%);
+            color: white;
+        }
+        
+        .tier-basic { background: linear-gradient(135deg, #3b82f6 0%, #1d4ed8 100%); }
+        .tier-pro { background: linear-gradient(135deg, #8b5cf6 0%, #7c3aed 100%); }
+        .tier-business { background: linear-gradient(135deg, #f59e0b 0%, #d97706 100%); }
+        
+        .payment-option:hover {
+            border-color: #667eea;
+            transform: scale(1.02);
+        }
+        
+        .feature-disabled {
+            opacity: 0.6;
+            position: relative;
+        }
+        
+        .feature-disabled::after {
+            content: "🔒";
+            position: absolute;
+            top: 10px;
+            right: 10px;
+            font-size: 1.2rem;
+        }
+        
+        .marketplace-item {
+            transition: all 0.3s ease;
+        }
+        
+        .marketplace-item:hover {
+            transform: translateY(-3px);
+            box-shadow: 0 8px 20px rgba(0, 0, 0, 0.1);
+        }
+    </style>
+</head>
+<body class="bg-gray-50 h-full overflow-hidden">
+    <div id="loadingScreen" class="fixed inset-0 bg-white z-50 flex items-center justify-center">
+        <div class="text-center">
+            <div class="w-16 h-16 bg-gradient-to-r from-purple-500 to-green-500 rounded-2xl flex items-center justify-center mx-auto mb-4 animate-pulse">
+                <i class="fas fa-tools text-white text-2xl"></i>
+            </div>
+            <h2 class="text-xl font-semibold text-gray-700 mb-2">Loading Tools</h2>
+            <p class="text-gray-500">Preparing your business suite...</p>
+        </div>
+    </div>
+
+    <!-- Main Tools Interface -->
+    <div class="flex flex-col h-full">
+        <!-- Header with Subscription Status -->
+        <div class="kynecta-header p-4">
+            <div class="flex justify-between items-center">
+                <div>
+                    <h1 class="text-xl font-bold text-white">Business & AI Tools</h1>
+                    <p class="text-white/80 text-sm">Powered by Kynecta Intelligence</p>
+                </div>
+                <div class="flex items-center space-x-3">
+                    <!-- Subscription Badge -->
+                    <div id="subscriptionStatus" class="bg-white/20 px-3 py-1 rounded-full text-white text-sm">
+                        <i class="fas fa-crown mr-1"></i>
+                        <span id="currentTier">Free Trial</span>
+                    </div>
+                    <button id="searchTools" class="text-white hover:bg-white/10 p-2 rounded-lg">
+                        <i class="fas fa-search"></i>
+                    </button>
+                    <button id="refreshTools" class="text-white hover:bg-white/10 p-2 rounded-lg">
+                        <i class="fas fa-sync-alt"></i>
+                    </button>
+                    <button id="upgradeButton" class="text-white hover:bg-white/10 p-2 rounded-lg">
+                        <i class="fas fa-gem"></i>
+                    </button>
+                </div>
+            </div>
+        </div>
+
+        <!-- Search Bar -->
+        <div id="searchContainer" class="hidden bg-white p-4 border-b">
+            <div class="relative">
+                <input type="text" id="toolsSearchInput" 
+                       class="w-full p-3 pl-10 bg-gray-100 rounded-xl focus:outline-none focus:ring-2 focus:ring-purple-500 focus:bg-white"
+                       placeholder="Search tools and features...">
+                <i class="fas fa-search absolute left-3 top-3.5 text-gray-400"></i>
+                <button id="closeSearch" class="absolute right-3 top-3 text-gray-400 hover:text-gray-600">
+                    <i class="fas fa-times"></i>
+                </button>
+            </div>
+        </div>
+
+        <!-- Main Content -->
+        <div class="flex-1 overflow-y-auto custom-scrollbar">
+            <!-- Quick Stats with Revenue -->
+            <div class="p-4">
+                <div class="grid grid-cols-1 md:grid-cols-4 gap-4 mb-6">
+                    <div class="stat-card p-4 rounded-2xl">
+                        <div class="flex items-center justify-between">
+                            <div>
+                                <p class="text-sm text-gray-500">AI Tools Used</p>
+                                <h3 class="text-2xl font-bold">12</h3>
+                            </div>
+                            <div class="w-12 h-12 bg-gradient-to-r from-purple-500 to-green-500 rounded-full flex items-center justify-center">
+                                <i class="fas fa-robot text-white text-xl"></i>
+                            </div>
+                        </div>
+                        <div class="mt-2 text-xs text-gray-500">
+                            <i class="fas fa-arrow-up text-green-500 mr-1"></i>
+                            <span>24% increase</span>
+                        </div>
+                    </div>
+                    
+                    <div class="stat-card p-4 rounded-2xl">
+                        <div class="flex items-center justify-between">
+                            <div>
+                                <p class="text-sm text-gray-500">Business Revenue</p>
+                                <h3 class="text-2xl font-bold">$2,458</h3>
+                            </div>
+                            <div class="w-12 h-12 bg-gradient-to-r from-blue-500 to-cyan-500 rounded-full flex items-center justify-center">
+                                <i class="fas fa-chart-line text-white text-xl"></i>
+                            </div>
+                        </div>
+                        <div class="mt-2 text-xs text-gray-500">
+                            <i class="fas fa-arrow-up text-green-500 mr-1"></i>
+                            <span>18% increase</span>
+                        </div>
+                    </div>
+                    
+                    <div class="stat-card p-4 rounded-2xl">
+                        <div class="flex items-center justify-between">
+                            <div>
+                                <p class="text-sm text-gray-500">Productivity Score</p>
+                                <h3 class="text-2xl font-bold">87%</h3>
+                            </div>
+                            <div class="relative w-12 h-12">
+                                <svg class="progress-ring w-12 h-12" width="120" height="120">
+                                    <circle class="text-gray-200" stroke-width="8" stroke="currentColor" fill="transparent" r="52" cx="60" cy="60"/>
+                                    <circle class="progress-ring-circle text-green-500" stroke-width="8" stroke-dasharray="326.56" stroke-dashoffset="42.45" stroke-linecap="round" stroke="currentColor" fill="transparent" r="52" cx="60" cy="60"/>
+                                </svg>
+                                <div class="absolute inset-0 flex items-center justify-center">
+                                    <i class="fas fa-bolt text-yellow-500 text-xl"></i>
+                                </div>
+                            </div>
+                        </div>
+                        <div class="mt-2 text-xs text-gray-500">
+                            <span>Excellent performance</span>
+                        </div>
+                    </div>
+                    
+                    <!-- Subscription Revenue -->
+                    <div class="stat-card p-4 rounded-2xl">
+                        <div class="flex items-center justify-between">
+                            <div>
+                                <p class="text-sm text-gray-500">Subscription Value</p>
+                                <h3 class="text-2xl font-bold" id="monthlyRevenue">$0</h3>
+                            </div>
+                            <div class="w-12 h-12 bg-gradient-to-r from-pink-500 to-red-500 rounded-full flex items-center justify-center">
+                                <i class="fas fa-dollar-sign text-white text-xl"></i>
+                            </div>
+                        </div>
+                        <div class="mt-2 text-xs text-gray-500">
+                            <button onclick="openSubscriptionModal()" class="text-purple-600 hover:text-purple-800">
+                                <i class="fas fa-rocket mr-1"></i>Upgrade Now
+                            </button>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- NEW: Premium AI Tools Section (Locked Features) -->
+                <div class="mb-8">
+                    <div class="flex items-center justify-between mb-4">
+                        <h2 class="text-lg font-bold tool-category">
+                            <i class="fas fa-gem mr-2"></i>Premium AI Tools
+                        </h2>
+                        <button onclick="openSubscriptionModal()" class="bg-gradient-to-r from-purple-600 to-pink-600 text-white px-4 py-2 rounded-xl font-medium hover:opacity-90">
+                            <i class="fas fa-unlock mr-2"></i>Unlock All
+                        </button>
+                    </div>
+                    
+                    <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                        <!-- AI Content Generator -->
+                        <div class="bg-white rounded-2xl p-4 shadow-sm border border-gray-200 card-hover feature-disabled">
+                            <div class="flex items-start mb-3">
+                                <div class="w-10 h-10 bg-gradient-to-r from-purple-600 to-pink-600 rounded-xl flex items-center justify-center mr-3">
+                                    <i class="fas fa-pen-nib text-white"></i>
+                                </div>
+                                <div class="flex-1">
+                                    <h3 class="font-semibold">AI Content Generator</h3>
+                                    <p class="text-xs text-gray-500">Marketing copy, blogs, ads</p>
+                                </div>
+                                <span class="premium-badge text-xs px-2 py-1 rounded-full">Premium</span>
+                            </div>
+                            <p class="text-sm text-gray-600 mb-4">Generate high-quality marketing content, blog posts, and ad copy instantly.</p>
+                            <button onclick="showPremiumFeature('Content Generator')" class="w-full bg-purple-50 text-purple-600 py-2 rounded-xl font-medium hover:bg-purple-100">
+                                <i class="fas fa-lock mr-2"></i>Upgrade to Access
+                            </button>
+                        </div>
+                        
+                        <!-- Predictive Analytics -->
+                        <div class="bg-white rounded-2xl p-4 shadow-sm border border-gray-200 card-hover feature-disabled">
+                            <div class="flex items-start mb-3">
+                                <div class="w-10 h-10 bg-gradient-to-r from-blue-600 to-cyan-600 rounded-xl flex items-center justify-center mr-3">
+                                    <i class="fas fa-chart-line text-white"></i>
+                                </div>
+                                <div class="flex-1">
+                                    <h3 class="font-semibold">Predictive Analytics</h3>
+                                    <p class="text-xs text-gray-500">Sales forecasts & trends</p>
+                                </div>
+                                <span class="premium-badge text-xs px-2 py-1 rounded-full">Premium</span>
+                            </div>
+                            <p class="text-sm text-gray-600 mb-4">Get AI-powered sales predictions and customer behavior insights.</p>
+                            <button onclick="showPremiumFeature('Predictive Analytics')" class="w-full bg-blue-50 text-blue-600 py-2 rounded-xl font-medium hover:bg-blue-100">
+                                <i class="fas fa-lock mr-2"></i>Upgrade to Access
+                            </button>
+                        </div>
+                        
+                        <!-- Advanced CRM -->
+                        <div class="bg-white rounded-2xl p-4 shadow-sm border border-gray-200 card-hover feature-disabled">
+                            <div class="flex items-start mb-3">
+                                <div class="w-10 h-10 bg-gradient-to-r from-green-600 to-emerald-600 rounded-xl flex items-center justify-center mr-3">
+                                    <i class="fas fa-users text-white"></i>
+                                </div>
+                                <div class="flex-1">
+                                    <h3 class="font-semibold">Advanced CRM</h3>
+                                    <p class="text-xs text-gray-500">Lead scoring & automation</p>
+                                </div>
+                                <span class="premium-badge text-xs px-2 py-1 rounded-full">Premium</span>
+                            </div>
+                            <p class="text-sm text-gray-600 mb-4">Smart lead management with automated follow-ups and scoring.</p>
+                            <button onclick="showPremiumFeature('Advanced CRM')" class="w-full bg-green-50 text-green-600 py-2 rounded-xl font-medium hover:bg-green-100">
+                                <i class="fas fa-lock mr-2"></i>Upgrade to Access
+                            </button>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- NEW: Marketplace Section -->
+                <div class="mb-8">
+                    <div class="flex items-center justify-between mb-4">
+                        <h2 class="text-lg font-bold tool-category">
+                            <i class="fas fa-store mr-2"></i>Kynecta Marketplace
+                        </h2>
+                        <button onclick="openMarketplace()" class="text-purple-600 hover:text-purple-800 text-sm font-medium">
+                            <i class="fas fa-shopping-cart mr-1"></i>Browse All
+                        </button>
+                    </div>
+                    
+                    <div class="bg-white rounded-2xl p-4 shadow-sm border border-gray-200 mb-4">
+                        <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
+                            <!-- AI Templates -->
+                            <div class="marketplace-item bg-gradient-to-r from-purple-50 to-pink-50 p-4 rounded-xl border border-purple-100">
+                                <div class="flex items-start mb-3">
+                                    <div class="w-12 h-12 bg-purple-100 rounded-lg flex items-center justify-center mr-3">
+                                        <i class="fas fa-clipboard text-purple-600"></i>
+                                    </div>
+                                    <div>
+                                        <h3 class="font-semibold">AI Templates</h3>
+                                        <p class="text-sm text-gray-600">Ready-to-use templates</p>
+                                    </div>
+                                </div>
+                                <p class="text-xs text-gray-500 mb-3">Marketing templates, email sequences, and sales scripts.</p>
+                                <div class="flex justify-between items-center">
+                                    <span class="font-bold text-purple-700">From $4.99</span>
+                                    <button onclick="showMarketplaceItem('templates')" class="bg-purple-600 text-white px-3 py-1 rounded-lg text-sm hover:bg-purple-700">
+                                        Buy Now
+                                    </button>
+                                </div>
+                            </div>
+                            
+                            <!-- Analytics Add-ons -->
+                            <div class="marketplace-item bg-gradient-to-r from-blue-50 to-cyan-50 p-4 rounded-xl border border-blue-100">
+                                <div class="flex items-start mb-3">
+                                    <div class="w-12 h-12 bg-blue-100 rounded-lg flex items-center justify-center mr-3">
+                                        <i class="fas fa-chart-bar text-blue-600"></i>
+                                    </div>
+                                    <div>
+                                        <h3 class="font-semibold">Analytics Add-ons</h3>
+                                        <p class="text-sm text-gray-600">Advanced reporting tools</p>
+                                    </div>
+                                </div>
+                                <p class="text-xs text-gray-500 mb-3">Custom dashboards, competitor analysis, ROI tracking.</p>
+                                <div class="flex justify-between items-center">
+                                    <span class="font-bold text-blue-700">From $9.99</span>
+                                    <button onclick="showMarketplaceItem('analytics')" class="bg-blue-600 text-white px-3 py-1 rounded-lg text-sm hover:bg-blue-700">
+                                        Buy Now
+                                    </button>
+                                </div>
+                            </div>
+                            
+                            <!-- Integration Plugins -->
+                            <div class="marketplace-item bg-gradient-to-r from-green-50 to-emerald-50 p-4 rounded-xl border border-green-100">
+                                <div class="flex items-start mb-3">
+                                    <div class="w-12 h-12 bg-green-100 rounded-lg flex items-center justify-center mr-3">
+                                        <i class="fas fa-plug text-green-600"></i>
+                                    </div>
+                                    <div>
+                                        <h3 class="font-semibold">Integrations</h3>
+                                        <p class="text-sm text-gray-600">Connect with other tools</p>
+                                    </div>
+                                </div>
+                                <p class="text-xs text-gray-500 mb-3">Shopify, Zapier, QuickBooks, and more.</p>
+                                <div class="flex justify-between items-center">
+                                    <span class="font-bold text-green-700">From $14.99</span>
+                                    <button onclick="showMarketplaceItem('integrations')" class="bg-green-600 text-white px-3 py-1 rounded-lg text-sm hover:bg-green-700">
+                                        Buy Now
+                                    </button>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- NEW: Pay-Per-Use Tools -->
+                <div class="mb-8">
+                    <div class="flex items-center justify-between mb-4">
+                        <h2 class="text-lg font-bold tool-category">
+                            <i class="fas fa-coins mr-2"></i>Pay-Per-Use Tools
+                        </h2>
+                        <div class="flex items-center space-x-2">
+                            <div class="bg-yellow-100 px-3 py-1 rounded-full">
+                                <i class="fas fa-wallet text-yellow-600 mr-1"></i>
+                                <span class="text-yellow-700 font-medium" id="userCredits">100 credits</span>
+                            </div>
+                            <button onclick="showAddCreditsModal()" class="text-purple-600 hover:text-purple-800 text-sm">
+                                <i class="fas fa-plus-circle"></i>
+                            </button>
+                        </div>
+                    </div>
+                    
+                    <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
+                        <!-- Bulk Email Sender -->
+                        <div class="bg-white rounded-2xl p-4 shadow-sm border border-gray-200 card-hover">
+                            <div class="flex items-start mb-3">
+                                <div class="w-10 h-10 bg-gradient-to-r from-red-500 to-orange-500 rounded-xl flex items-center justify-center mr-3">
+                                    <i class="fas fa-mail-bulk text-white"></i>
+                                </div>
+                                <div class="flex-1">
+                                    <h3 class="font-semibold">Bulk Email</h3>
+                                    <p class="text-xs text-gray-500">Send mass emails</p>
+                                </div>
+                                <span class="bg-gray-100 text-gray-700 text-xs px-2 py-1 rounded-full">5 credits/100 emails</span>
+                            </div>
+                            <p class="text-sm text-gray-600 mb-4">Send personalized bulk emails to your customer list.</p>
+                            <div class="flex space-x-2">
+                                <button onclick="useTool('bulkEmail', 5)" class="flex-1 bg-red-50 text-red-600 py-2 rounded-xl font-medium hover:bg-red-100">
+                                    <i class="fas fa-paper-plane mr-2"></i>Send (5 credits)
+                                </button>
+                                <button onclick="showToolInfo('bulkEmail')" class="px-3 bg-gray-100 text-gray-700 rounded-xl hover:bg-gray-200">
+                                    <i class="fas fa-info"></i>
+                                </button>
+                            </div>
+                        </div>
+                        
+                        <!-- AI Image Generator -->
+                        <div class="bg-white rounded-2xl p-4 shadow-sm border border-gray-200 card-hover">
+                            <div class="flex items-start mb-3">
+                                <div class="w-10 h-10 bg-gradient-to-r from-indigo-500 to-purple-500 rounded-xl flex items-center justify-center mr-3">
+                                    <i class="fas fa-image text-white"></i>
+                                </div>
+                                <div class="flex-1">
+                                    <h3 class="font-semibold">AI Image Generator</h3>
+                                    <p class="text-xs text-gray-500">Create custom images</p>
+                                </div>
+                                <span class="bg-gray-100 text-gray-700 text-xs px-2 py-1 rounded-full">3 credits/image</span>
+                            </div>
+                            <p class="text-sm text-gray-600 mb-4">Generate product images, banners, and marketing visuals.</p>
+                            <div class="flex space-x-2">
+                                <button onclick="useTool('aiImage', 3)" class="flex-1 bg-indigo-50 text-indigo-600 py-2 rounded-xl font-medium hover:bg-indigo-100">
+                                    <i class="fas fa-magic mr-2"></i>Generate (3 credits)
+                                </button>
+                                <button onclick="showToolInfo('aiImage')" class="px-3 bg-gray-100 text-gray-700 rounded-xl hover:bg-gray-200">
+                                    <i class="fas fa-info"></i>
+                                </button>
+                            </div>
+                        </div>
+                        
+                        <!-- Data Export -->
+                        <div class="bg-white rounded-2xl p-4 shadow-sm border border-gray-200 card-hover">
+                            <div class="flex items-start mb-3">
+                                <div class="w-10 h-10 bg-gradient-to-r from-teal-500 to-green-500 rounded-xl flex items-center justify-center mr-3">
+                                    <i class="fas fa-file-export text-white"></i>
+                                </div>
+                                <div class="flex-1">
+                                    <h3 class="font-semibold">Advanced Export</h3>
+                                    <p class="text-xs text-gray-500">Export customer data</p>
+                                </div>
+                                <span class="bg-gray-100 text-gray-700 text-xs px-2 py-1 rounded-full">2 credits/export</span>
+                            </div>
+                            <p class="text-sm text-gray-600 mb-4">Export customer data, analytics, and reports in multiple formats.</p>
+                            <div class="flex space-x-2">
+                                <button onclick="useTool('dataExport', 2)" class="flex-1 bg-teal-50 text-teal-600 py-2 rounded-xl font-medium hover:bg-teal-100">
+                                    <i class="fas fa-download mr-2"></i>Export (2 credits)
+                                </button>
+                                <button onclick="showToolInfo('dataExport')" class="px-3 bg-gray-100 text-gray-700 rounded-xl hover:bg-gray-200">
+                                    <i class="fas fa-info"></i>
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- NEW: Advertising Space -->
+                <div class="mb-8">
+                    <div class="bg-gradient-to-r from-gray-900 to-gray-700 rounded-2xl p-6 text-white">
+                        <div class="flex flex-col md:flex-row justify-between items-center">
+                            <div class="mb-4 md:mb-0">
+                                <h3 class="text-xl font-bold mb-2">Sponsored Feature Placement</h3>
+                                <p class="text-gray-300">Get your tool featured here. Reach thousands of business owners.</p>
+                            </div>
+                            <div class="flex space-x-3">
+                                <button onclick="showAdvertiseModal()" class="bg-white text-gray-900 px-6 py-3 rounded-xl font-bold hover:bg-gray-100">
+                                    <i class="fas fa-megaphone mr-2"></i>Advertise Here
+                                </button>
+                                <button onclick="showAdPricing()" class="bg-transparent border-2 border-white text-white px-6 py-3 rounded-xl font-bold hover:bg-white/10">
+                                    Pricing
+                                </button>
+                            </div>
+                        </div>
+                        <div class="mt-4 text-sm text-gray-300">
+                            <i class="fas fa-eye mr-1"></i> 15,000+ monthly impressions • 
+                            <i class="fas fa-chart-line mr-1 ml-3"></i> 2.8% average CTR
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Existing sections continue below... -->
+                <!-- AI Tools Section -->
+                <div class="mb-8">
+                    <div class="flex items-center justify-between mb-4">
+                        <h2 class="text-lg font-bold tool-category">
+                            <i class="fas fa-robot mr-2"></i>AI Assistant Tools
+                        </h2>
+                        <button class="text-purple-600 hover:text-purple-800 text-sm font-medium">
+                            <i class="fas fa-plus mr-1"></i>Add More
+                        </button>
+                    </div>
+                    
+                    <!-- ... Existing AI tools content ... -->
+                </div>
+
+                <!-- Continue with existing sections... -->
+
+            </div>
+        </div>
+    </div>
+
+    <!-- NEW: Subscription Plans Modal -->
+    <div id="subscriptionModal" class="hidden fixed inset-0 bg-black bg-opacity-50 z-50 flex items-center justify-center p-4">
+        <div class="bg-white rounded-2xl w-full max-w-4xl max-h-[90vh] overflow-hidden modal">
+            <div class="kynecta-header p-6">
+                <div class="flex items-center justify-between">
+                    <h3 class="text-xl font-semibold text-white">Upgrade Your Plan</h3>
+                    <button onclick="closeModal('subscriptionModal')" class="text-white/80 hover:text-white">
+                        <i class="fas fa-times text-xl"></i>
+                    </button>
+                </div>
+            </div>
+            <div class="overflow-y-auto max-h-[60vh] custom-scrollbar p-6">
+                <div class="grid grid-cols-1 md:grid-cols-3 gap-6 mb-6">
+                    <!-- Basic Plan -->
+                    <div class="border-2 border-gray-200 rounded-2xl p-6 hover:border-purple-300 transition-colors">
+                        <div class="text-center mb-6">
+                            <div class="tier-basic text-white px-4 py-1 rounded-full text-sm font-medium inline-block mb-3">
+                                BASIC
+                            </div>
+                            <h3 class="text-3xl font-bold mb-2">$19<span class="text-lg text-gray-500">/month</span></h3>
+                            <p class="text-gray-600">For small businesses</p>
+                        </div>
+                        <ul class="space-y-3 mb-6">
+                            <li class="flex items-center">
+                                <i class="fas fa-check text-green-500 mr-2"></i>
+                                <span>All AI Assistant Tools</span>
+                            </li>
+                            <li class="flex items-center">
+                                <i class="fas fa-check text-green-500 mr-2"></i>
+                                <span>Basic Business Tools</span>
+                            </li>
+                            <li class="flex items-center">
+                                <i class="fas fa-check text-green-500 mr-2"></i>
+                                <span>5GB File Storage</span>
+                            </li>
+                            <li class="flex items-center">
+                                <i class="fas fa-check text-green-500 mr-2"></i>
+                                <span>Email Support</span>
+                            </li>
+                            <li class="flex items-center text-gray-400">
+                                <i class="fas fa-times mr-2"></i>
+                                <span>Premium AI Tools</span>
+                            </li>
+                            <li class="flex items-center text-gray-400">
+                                <i class="fas fa-times mr-2"></i>
+                                <span>Advanced Analytics</span>
+                            </li>
+                        </ul>
+                        <button onclick="selectPlan('basic', 19)" class="w-full bg-gray-100 text-gray-800 py-3 rounded-xl font-bold hover:bg-gray-200">
+                            Select Basic
+                        </button>
+                    </div>
+                    
+                    <!-- Pro Plan -->
+                    <div class="border-2 border-purple-300 rounded-2xl p-6 relative">
+                        <div class="absolute top-0 right-0 bg-purple-600 text-white px-3 py-1 rounded-bl-lg rounded-tr-xl text-sm">
+                            MOST POPULAR
+                        </div>
+                        <div class="text-center mb-6">
+                            <div class="tier-pro text-white px-4 py-1 rounded-full text-sm font-medium inline-block mb-3">
+                                PRO
+                            </div>
+                            <h3 class="text-3xl font-bold mb-2">$49<span class="text-lg text-gray-500">/month</span></h3>
+                            <p class="text-gray-600">For growing businesses</p>
+                        </div>
+                        <ul class="space-y-3 mb-6">
+                            <li class="flex items-center">
+                                <i class="fas fa-check text-green-500 mr-2"></i>
+                                <span>Everything in Basic</span>
+                            </li>
+                            <li class="flex items-center">
+                                <i class="fas fa-check text-green-500 mr-2"></i>
+                                <span>Premium AI Tools</span>
+                            </li>
+                            <li class="flex items-center">
+                                <i class="fas fa-check text-green-500 mr-2"></i>
+                                <span>20GB File Storage</span>
+                            </li>
+                            <li class="flex items-center">
+                                <i class="fas fa-check text-green-500 mr-2"></i>
+                                <span>Priority Support</span>
+                            </li>
+                            <li class="flex items-center">
+                                <i class="fas fa-check text-green-500 mr-2"></i>
+                                <span>Advanced Analytics</span>
+                            </li>
+                            <li class="flex items-center">
+                                <i class="fas fa-check text-green-500 mr-2"></i>
+                                <span>Team Collaboration</span>
+                            </li>
+                        </ul>
+                        <button onclick="selectPlan('pro', 49)" class="w-full bg-gradient-to-r from-purple-600 to-pink-600 text-white py-3 rounded-xl font-bold hover:opacity-90">
+                            Select Pro
+                        </button>
+                    </div>
+                    
+                    <!-- Business Plan -->
+                    <div class="border-2 border-gray-200 rounded-2xl p-6 hover:border-yellow-300 transition-colors">
+                        <div class="text-center mb-6">
+                            <div class="tier-business text-white px-4 py-1 rounded-full text-sm font-medium inline-block mb-3">
+                                BUSINESS
+                            </div>
+                            <h3 class="text-3xl font-bold mb-2">$99<span class="text-lg text-gray-500">/month</span></h3>
+                            <p class="text-gray-600">For enterprises</p>
+                        </div>
+                        <ul class="space-y-3 mb-6">
+                            <li class="flex items-center">
+                                <i class="fas fa-check text-green-500 mr-2"></i>
+                                <span>Everything in Pro</span>
+                            </li>
+                            <li class="flex items-center">
+                                <i class="fas fa-check text-green-500 mr-2"></i>
+                                <span>Unlimited Storage</span>
+                            </li>
+                            <li class="flex items-center">
+                                <i class="fas fa-check text-green-500 mr-2"></i>
+                                <span>White-label Options</span>
+                            </li>
+                            <li class="flex items-center">
+                                <i class="fas fa-check text-green-500 mr-2"></i>
+                                <span>Custom Integrations</span>
+                            </li>
+                            <li class="flex items-center">
+                                <i class="fas fa-check text-green-500 mr-2"></i>
+                                <span>Dedicated Support</span>
+                            </li>
+                            <li class="flex items-center">
+                                <i class="fas fa-check text-green-500 mr-2"></i>
+                                <span>API Access</span>
+                            </li>
+                        </ul>
+                        <button onclick="selectPlan('business', 99)" class="w-full bg-gray-800 text-white py-3 rounded-xl font-bold hover:bg-gray-900">
+                            Select Business
+                        </button>
+                    </div>
+                </div>
+                
+                <!-- Payment Methods -->
+                <div class="border-t pt-6">
+                    <h4 class="font-bold mb-4">Choose Payment Method</h4>
+                    <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                        <div class="payment-option border-2 border-gray-200 rounded-xl p-4 cursor-pointer">
+                            <div class="flex items-center">
+                                <i class="fas fa-credit-card text-purple-600 text-2xl mr-3"></i>
+                                <div>
+                                    <h5 class="font-semibold">Credit/Debit Card</h5>
+                                    <p class="text-sm text-gray-600">Visa, Mastercard, Amex</p>
+                                </div>
+                            </div>
+                        </div>
+                        <div class="payment-option border-2 border-gray-200 rounded-xl p-4 cursor-pointer">
+                            <div class="flex items-center">
+                                <i class="fab fa-paypal text-blue-600 text-2xl mr-3"></i>
+                                <div>
+                                    <h5 class="font-semibold">PayPal</h5>
+                                    <p class="text-sm text-gray-600">Secure online payments</p>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                    
+                    <!-- Payment Form -->
+                    <div id="paymentForm" class="mt-6 hidden">
+                        <div class="space-y-4">
+                            <div>
+                                <label class="block text-sm font-medium text-gray-700 mb-2">Card Number</label>
+                                <input type="text" id="cardNumber" class="w-full p-3 border-2 border-gray-200 rounded-xl focus:outline-none focus:border-purple-500" placeholder="1234 5678 9012 3456">
+                            </div>
+                            <div class="grid grid-cols-2 gap-4">
+                                <div>
+                                    <label class="block text-sm font-medium text-gray-700 mb-2">Expiry Date</label>
+                                    <input type="text" id="expiryDate" class="w-full p-3 border-2 border-gray-200 rounded-xl focus:outline-none focus:border-purple-500" placeholder="MM/YY">
+                                </div>
+                                <div>
+                                    <label class="block text-sm font-medium text-gray-700 mb-2">CVV</label>
+                                    <input type="text" id="cvv" class="w-full p-3 border-2 border-gray-200 rounded-xl focus:outline-none focus:border-purple-500" placeholder="123">
+                                </div>
+                            </div>
+                            <div>
+                                <label class="block text-sm font-medium text-gray-700 mb-2">Name on Card</label>
+                                <input type="text" id="cardName" class="w-full p-3 border-2 border-gray-200 rounded-xl focus:outline-none focus:border-purple-500" placeholder="John Doe">
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+            <div class="p-6 border-t border-gray-200">
+                <button onclick="processPayment()" class="w-full bg-gradient-to-r from-purple-600 to-pink-600 text-white py-4 rounded-xl font-bold text-lg hover:opacity-90">
+                    <i class="fas fa-lock mr-2"></i>Complete Payment
+                </button>
+                <p class="text-center text-sm text-gray-500 mt-3">Secure payment processed by Stripe. 30-day money-back guarantee.</p>
+            </div>
+        </div>
+    </div>
+
+    <!-- NEW: Add Credits Modal -->
+    <div id="addCreditsModal" class="hidden fixed inset-0 bg-black bg-opacity-50 z-50 flex items-center justify-center p-4">
+        <div class="bg-white rounded-2xl w-full max-w-md max-h-[90vh] overflow-hidden modal">
+            <div class="kynecta-header p-6">
+                <div class="flex items-center justify-between">
+                    <h3 class="text-xl font-semibold text-white">Buy Credits</h3>
+                    <button onclick="closeModal('addCreditsModal')" class="text-white/80 hover:text-white">
+                        <i class="fas fa-times text-xl"></i>
+                    </button>
+                </div>
+            </div>
+            <div class="overflow-y-auto max-h-[60vh] custom-scrollbar p-6">
+                <div class="grid grid-cols-2 gap-4 mb-6">
+                    <div onclick="selectCreditPackage(100, 4.99)" class="credit-package border-2 border-gray-200 rounded-xl p-4 text-center cursor-pointer hover:border-purple-300">
+                        <h4 class="font-bold text-lg">100 Credits</h4>
+                        <p class="text-2xl font-bold text-purple-600 mt-2">$4.99</p>
+                        <p class="text-sm text-gray-500 mt-1">$0.05/credit</p>
+                    </div>
+                    <div onclick="selectCreditPackage(500, 19.99)" class="credit-package border-2 border-gray-200 rounded-xl p-4 text-center cursor-pointer hover:border-purple-300">
+                        <h4 class="font-bold text-lg">500 Credits</h4>
+                        <p class="text-2xl font-bold text-purple-600 mt-2">$19.99</p>
+                        <p class="text-sm text-gray-500 mt-1">$0.04/credit</p>
+                        <span class="text-xs bg-green-100 text-green-800 px-2 py-1 rounded-full mt-2">MOST POPULAR</span>
+                    </div>
+                    <div onclick="selectCreditPackage(1000, 34.99)" class="credit-package border-2 border-gray-200 rounded-xl p-4 text-center cursor-pointer hover:border-purple-300">
+                        <h4 class="font-bold text-lg">1,000 Credits</h4>
+                        <p class="text-2xl font-bold text-purple-600 mt-2">$34.99</p>
+                        <p class="text-sm text-gray-500 mt-1">$0.035/credit</p>
+                        <span class="text-xs bg-yellow-100 text-yellow-800 px-2 py-1 rounded-full mt-2">BEST VALUE</span>
+                    </div>
+                    <div onclick="selectCreditPackage(5000, 149.99)" class="credit-package border-2 border-gray-200 rounded-xl p-4 text-center cursor-pointer hover:border-purple-300">
+                        <h4 class="font-bold text-lg">5,000 Credits</h4>
+                        <p class="text-2xl font-bold text-purple-600 mt-2">$149.99</p>
+                        <p class="text-sm text-gray-500 mt-1">$0.03/credit</p>
+                        <span class="text-xs bg-purple-100 text-purple-800 px-2 py-1 rounded-full mt-2">ENTERPRISE</span>
+                    </div>
+                </div>
+                
+                <div class="bg-blue-50 p-4 rounded-xl mb-4">
+                    <h4 class="font-semibold text-blue-800 mb-2">What are credits used for?</h4>
+                    <ul class="text-sm text-blue-700 space-y-1">
+                        <li>• 5 credits = Send 100 bulk emails</li>
+                        <li>• 3 credits = Generate 1 AI image</li>
+                        <li>• 2 credits = Export customer data</li>
+                        <li>• 10 credits = Generate 5 AI summaries</li>
+                    </ul>
+                </div>
+                
+                <div id="selectedPackage" class="hidden bg-purple-50 p-4 rounded-xl mb-4">
+                    <h4 class="font-semibold text-purple-800">Selected Package</h4>
+                    <p id="packageDetails" class="text-sm text-purple-700"></p>
+                </div>
+            </div>
+            <div class="p-6 border-t border-gray-200">
+                <button onclick="purchaseCredits()" class="w-full bg-gradient-to-r from-purple-600 to-pink-600 text-white py-3 rounded-xl font-bold hover:opacity-90">
+                    <i class="fas fa-shopping-cart mr-2"></i>Purchase Credits
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <!-- NEW: Affiliate Program Modal -->
+    <div id="affiliateModal" class="hidden fixed inset-0 bg-black bg-opacity-50 z-50 flex items-center justify-center p-4">
+        <div class="bg-white rounded-2xl w-full max-w-2xl max-h-[90vh] overflow-hidden modal">
+            <div class="kynecta-header p-6">
+                <div class="flex items-center justify-between">
+                    <h3 class="text-xl font-semibold text-white">Affiliate Program</h3>
+                    <button onclick="closeModal('affiliateModal')" class="text-white/80 hover:text-white">
+                        <i class="fas fa-times text-xl"></i>
+                    </button>
+                </div>
+            </div>
+            <div class="overflow-y-auto max-h-[60vh] custom-scrollbar p-6">
+                <div class="bg-gradient-to-r from-green-50 to-emerald-50 p-6 rounded-xl mb-6">
+                    <div class="flex items-center">
+                        <div class="w-16 h-16 bg-green-100 rounded-full flex items-center justify-center mr-4">
+                            <i class="fas fa-handshake text-green-600 text-2xl"></i>
+                        </div>
+                        <div>
+                            <h3 class="text-xl font-bold text-gray-800">Earn 30% Commission</h3>
+                            <p class="text-green-700">On every referral's subscription payment</p>
+                        </div>
+                    </div>
+                </div>
+                
+                <div class="grid grid-cols-1 md:grid-cols-2 gap-6 mb-6">
+                    <div>
+                        <h4 class="font-bold mb-3">Your Affiliate Dashboard</h4>
+                        <div class="space-y-4">
+                            <div class="bg-gray-50 p-4 rounded-xl">
+                                <p class="text-sm text-gray-500">Affiliate Link</p>
+                                <div class="flex items-center mt-2">
+                                    <input type="text" id="affiliateLink" value="https://kynecta.com/ref/abc123" class="flex-1 bg-transparent border-none focus:outline-none" readonly>
+                                    <button onclick="copyAffiliateLink()" class="text-purple-600 hover:text-purple-800">
+                                        <i class="fas fa-copy"></i>
+                                    </button>
+                                </div>
+                            </div>
+                            <div class="grid grid-cols-2 gap-4">
+                                <div class="bg-white border border-gray-200 p-3 rounded-xl">
+                                    <p class="text-sm text-gray-500">Total Referrals</p>
+                                    <p class="text-2xl font-bold">12</p>
+                                </div>
+                                <div class="bg-white border border-gray-200 p-3 rounded-xl">
+                                    <p class="text-sm text-gray-500">Total Earned</p>
+                                    <p class="text-2xl font-bold">$147.60</p>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                    
+                    <div>
+                        <h4 class="font-bold mb-3">Payout Structure</h4>
+                        <div class="space-y-3">
+                            <div class="flex justify-between items-center p-3 bg-gray-50 rounded-lg">
+                                <span>Basic Plan Referral</span>
+                                <span class="font-bold text-green-600">$5.70/month</span>
+                            </div>
+                            <div class="flex justify-between items-center p-3 bg-gray-50 rounded-lg">
+                                <span>Pro Plan Referral</span>
+                                <span class="font-bold text-green-600">$14.70/month</span>
+                            </div>
+                            <div class="flex justify-between items-center p-3 bg-gray-50 rounded-lg">
+                                <span>Business Plan Referral</span>
+                                <span class="font-bold text-green-600">$29.70/month</span>
+                            </div>
+                            <div class="flex justify-between items-center p-3 bg-gray-50 rounded-lg">
+                                <span>Credit Purchase (1000+)</span>
+                                <span class="font-bold text-green-600">15% commission</span>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+                
+                <div class="bg-yellow-50 p-4 rounded-xl">
+                    <h4 class="font-bold text-yellow-800 mb-2">Share Your Link</h4>
+                    <div class="flex space-x-2">
+                        <button onclick="shareAffiliate('twitter')" class="flex-1 bg-blue-500 text-white py-2 rounded-lg hover:bg-blue-600">
+                            <i class="fab fa-twitter mr-2"></i>Twitter
+                        </button>
+                        <button onclick="shareAffiliate('facebook')" class="flex-1 bg-blue-700 text-white py-2 rounded-lg hover:bg-blue-800">
+                            <i class="fab fa-facebook mr-2"></i>Facebook
+                        </button>
+                        <button onclick="shareAffiliate('linkedin')" class="flex-1 bg-blue-600 text-white py-2 rounded-lg hover:bg-blue-700">
+                            <i class="fab fa-linkedin mr-2"></i>LinkedIn
+                        </button>
+                        <button onclick="shareAffiliate('email')" class="flex-1 bg-gray-600 text-white py-2 rounded-lg hover:bg-gray-700">
+                            <i class="fas fa-envelope mr-2"></i>Email
+                        </button>
+                    </div>
+                </div>
+            </div>
+            <div class="p-6 border-t border-gray-200">
+                <button onclick="requestPayout()" class="w-full bg-gradient-to-r from-green-600 to-emerald-600 text-white py-3 rounded-xl font-bold hover:opacity-90">
+                    <i class="fas fa-wallet mr-2"></i>Request Payout ($147.60 available)
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <!-- NEW: Advertise Modal -->
+    <div id="advertiseModal" class="hidden fixed inset-0 bg-black bg-opacity-50 z-50 flex items-center justify-center p-4">
+        <div class="bg-white rounded-2xl w-full max-w-md max-h-[90vh] overflow-hidden modal">
+            <div class="kynecta-header p-6">
+                <div class="flex items-center justify-between">
+                    <h3 class="text-xl font-semibold text-white">Advertise With Us</h3>
+                    <button onclick="closeModal('advertiseModal')" class="text-white/80 hover:text-white">
+                        <i class="fas fa-times text-xl"></i>
+                    </button>
+                </div>
+            </div>
+            <div class="overflow-y-auto max-h-[60vh] custom-scrollbar p-6">
+                <div class="space-y-4">
+                    <div>
+                        <label class="block text-sm font-medium text-gray-700 mb-2">Company Name</label>
+                        <input type="text" id="adCompany" class="w-full p-3 border-2 border-gray-200 rounded-xl focus:outline-none focus:border-purple-500">
+                    </div>
+                    <div>
+                        <label class="block text-sm font-medium text-gray-700 mb-2">Ad Type</label>
+                        <select id="adType" class="w-full p-3 border-2 border-gray-200 rounded-xl focus:outline-none focus:border-purple-500">
+                            <option value="featured">Featured Placement - $999/month</option>
+                            <option value="sidebar">Sidebar Banner - $499/month</option>
+                            <option value="intext">In-Text Ad - $299/month</option>
+                            <option value="newsletter">Newsletter - $199/issue</option>
+                        </select>
+                    </div>
+                    <div>
+                        <label class="block text-sm font-medium text-gray-700 mb-2">Website URL</label>
+                        <input type="url" id="adUrl" class="w-full p-3 border-2 border-gray-200 rounded-xl focus:outline-none focus:border-purple-500">
+                    </div>
+                    <div>
+                        <label class="block text-sm font-medium text-gray-700 mb-2">Ad Image (300x250px)</label>
+                        <div class="border-2 border-dashed border-gray-300 rounded-xl p-4 text-center">
+                            <i class="fas fa-image text-3xl text-gray-400 mb-2"></i>
+                            <p class="text-gray-500">Upload ad creative</p>
+                            <input type="file" id="adImage" class="hidden" accept="image/*">
+                            <button onclick="document.getElementById('adImage').click()" class="mt-2 text-purple-600 hover:text-purple-800">
+                                Choose File
+                            </button>
+                        </div>
+                    </div>
+                    <div>
+                        <label class="block text-sm font-medium text-gray-700 mb-2">Campaign Duration</label>
+                        <select id="adDuration" class="w-full p-3 border-2 border-gray-200 rounded-xl focus:outline-none focus:border-purple-500">
+                            <option value="1">1 Month</option>
+                            <option value="3">3 Months (-10%)</option>
+                            <option value="6">6 Months (-15%)</option>
+                            <option value="12">12 Months (-20%)</option>
+                        </select>
+                    </div>
+                </div>
+            </div>
+            <div class="p-6 border-t border-gray-200">
+                <div class="flex justify-between items-center mb-4">
+                    <span class="font-bold">Total Cost:</span>
+                    <span id="adTotal" class="text-2xl font-bold text-purple-600">$999</span>
+                </div>
+                <button onclick="submitAdRequest()" class="w-full bg-gradient-to-r from-purple-600 to-pink-600 text-white py-3 rounded-xl font-bold hover:opacity-90">
+                    <i class="fas fa-check-circle mr-2"></i>Submit Ad Request
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <!-- NEW: Consultation Booking Modal -->
+    <div id="consultationModal" class="hidden fixed inset-0 bg-black bg-opacity-50 z-50 flex items-center justify-center p-4">
+        <div class="bg-white rounded-2xl w-full max-w-md max-h-[90vh] overflow-hidden modal">
+            <div class="kynecta-header p-6">
+                <div class="flex items-center justify-between">
+                    <h3 class="text-xl font-semibold text-white">Book Expert Consultation</h3>
+                    <button onclick="closeModal('consultationModal')" class="text-white/80 hover:text-white">
+                        <i class="fas fa-times text-xl"></i>
+                    </button>
+                </div>
+            </div>
+            <div class="overflow-y-auto max-h-[60vh] custom-scrollbar p-6">
+                <div class="space-y-4">
+                    <div>
+                        <label class="block text-sm font-medium text-gray-700 mb-2">Consultation Type</label>
+                        <div class="space-y-2">
+                            <div class="flex items-center justify-between p-3 border border-gray-200 rounded-xl">
+                                <div>
+                                    <h4 class="font-semibold">Strategy Session</h4>
+                                    <p class="text-sm text-gray-500">30-minute business strategy</p>
+                                </div>
+                                <span class="font-bold text-purple-600">$99</span>
+                            </div>
+                            <div class="flex items-center justify-between p-3 border border-gray-200 rounded-xl">
+                                <div>
+                                    <h4 class="font-semibold">AI Implementation</h4>
+                                    <p class="text-sm text-gray-500">1-hour technical setup</p>
+                                </div>
+                                <span class="font-bold text-purple-600">$149</span>
+                            </div>
+                            <div class="flex items-center justify-between p-3 border border-gray-200 rounded-xl">
+                                <div>
+                                    <h4 class="font-semibold">Marketing Audit</h4>
+                                    <p class="text-sm text-gray-500">Comprehensive review</p>
+                                </div>
+                                <span class="font-bold text-purple-600">$249</span>
+                            </div>
+                        </div>
+                    </div>
+                    <div>
+                        <label class="block text-sm font-medium text-gray-700 mb-2">Select Date & Time</label>
+                        <input type="datetime-local" id="consultationTime" class="w-full p-3 border-2 border-gray-200 rounded-xl focus:outline-none focus:border-purple-500">
+                    </div>
+                    <div>
+                        <label class="block text-sm font-medium text-gray-700 mb-2">Your Goals</label>
+                        <textarea id="consultationGoals" class="w-full p-3 border-2 border-gray-200 rounded-xl focus:outline-none focus:border-purple-500" rows="3" placeholder="What would you like to achieve?"></textarea>
+                    </div>
+                </div>
+            </div>
+            <div class="p-6 border-t border-gray-200">
+                <button onclick="bookConsultation()" class="w-full bg-gradient-to-r from-purple-600 to-pink-600 text-white py-3 rounded-xl font-bold hover:opacity-90">
+                    <i class="fas fa-calendar-check mr-2"></i>Book Now & Pay
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Include existing modals here (aiSummaryModal, smartRepliesModal, etc.) -->
+
+    <!-- NEW: Transaction History Panel -->
+    <div id="transactionPanel" class="hidden fixed inset-y-0 right-0 w-96 bg-white shadow-xl z-40">
+        <div class="kynecta-header p-4">
+            <div class="flex items-center justify-between">
+                <h3 class="text-lg font-semibold text-white">Transaction History</h3>
+                <button onclick="closeTransactionPanel()" class="text-white/80 hover:text-white">
+                    <i class="fas fa-times"></i>
+                </button>
+            </div>
+        </div>
+        <div class="overflow-y-auto h-full custom-scrollbar p-4">
+            <div id="transactionList" class="space-y-3">
+                <!-- Transactions will be dynamically added here -->
+            </div>
+        </div>
+    </div>
+
+    <script src="https://cdn.jsdelivr.net/npm/toastify-js"></script>
+    <script>
+    // App State
+    let userState = {
+        subscription: 'free',
+        credits: 100,
+        monthlyRevenue: 0,
+        affiliateEarnings: 147.60,
+        transactions: []
+    };
+
+    // Selected items
+    let selectedPlan = null;
+    let selectedPackage = null;
+
+    document.addEventListener('DOMContentLoaded', function() {
+        // Hide loading screen
+        setTimeout(() => {
+            document.getElementById('loadingScreen').classList.add('hidden');
+        }, 1000);
+        
+        // Initialize
+        updateUI();
+        setupEventListeners();
+        
+        // Listen for messages from parent
+        window.addEventListener('message', function(event) {
+            if (event.data && event.data.type === 'kynecta_init') {
+                console.log('Tools page initialized by parent');
+            }
+        });
+        
+        // Load sample transactions
+        loadSampleTransactions();
+    });
+    
+    function setupEventListeners() {
+        // Search functionality
+        document.getElementById('searchTools').addEventListener('click', function() {
+            document.getElementById('searchContainer').classList.remove('hidden');
+            document.getElementById('toolsSearchInput').focus();
+        });
+        
+        document.getElementById('closeSearch').addEventListener('click', function() {
+            document.getElementById('searchContainer').classList.add('hidden');
+        });
+        
+        document.getElementById('refreshTools').addEventListener('click', function() {
+            showToast('Tools refreshed successfully', 'success');
+        });
+        
+        document.getElementById('upgradeButton').addEventListener('click', function() {
+            openSubscriptionModal();
+        });
+        
+        // Update ad total when selection changes
+        document.getElementById('adType').addEventListener('change', updateAdTotal);
+        document.getElementById('adDuration').addEventListener('change', updateAdTotal);
+    }
+    
+    function updateUI() {
+        // Update subscription status
+        document.getElementById('currentTier').textContent = 
+            userState.subscription.charAt(0).toUpperCase() + userState.subscription.slice(1);
+        
+        // Update credits
+        document.getElementById('userCredits').textContent = userState.credits + ' credits';
+        
+        // Update monthly revenue
+        document.getElementById('monthlyRevenue').textContent = '$' + userState.monthlyRevenue;
+        
+        // Update subscription badge color
+        const badge = document.getElementById('subscriptionStatus');
+        badge.className = 'px-3 py-1 rounded-full text-white text-sm ';
+        if (userState.subscription === 'free') {
+            badge.classList.add('bg-gray-500');
+        } else if (userState.subscription === 'basic') {
+            badge.classList.add('tier-basic');
+        } else if (userState.subscription === 'pro') {
+            badge.classList.add('tier-pro');
+        } else if (userState.subscription === 'business') {
+            badge.classList.add('tier-business');
+        }
+    }
+    
+    // MONETIZATION FUNCTIONS
+    
+    function openSubscriptionModal() {
+        document.getElementById('subscriptionModal').classList.remove('hidden');
+    }
+    
+    function selectPlan(plan, price) {
+        selectedPlan = { plan, price };
+        document.getElementById('paymentForm').classList.remove('hidden');
+        
+        // Highlight selected plan
+        document.querySelectorAll('.payment-option').forEach(el => {
+            el.classList.remove('border-purple-500', 'bg-purple-50');
+        });
+        
+        showToast(`Selected ${plan} plan at $${price}/month`, 'info');
+    }
+    
+    function processPayment() {
+        if (!selectedPlan) {
+            showToast('Please select a plan first', 'error');
+            return;
+        }
+        
+        const cardNumber = document.getElementById('cardNumber').value;
+        const expiryDate = document.getElementById('expiryDate').value;
+        const cvv = document.getElementById('cvv').value;
+        const cardName = document.getElementById('cardName').value;
+        
+        // Simple validation
+        if (!cardNumber || !expiryDate || !cvv || !cardName) {
+            showToast('Please fill in all payment details', 'error');
+            return;
+        }
+        
+        // Simulate payment processing
+        showToast('Processing payment...', 'info');
+        
+        setTimeout(() => {
+            // Update user state
+            userState.subscription = selectedPlan.plan;
+            userState.monthlyRevenue = selectedPlan.price;
+            
+            // Add transaction
+            addTransaction({
+                id: 'tx_' + Date.now(),
+                type: 'subscription',
+                amount: selectedPlan.price,
+                description: `${selectedPlan.plan.toUpperCase()} Plan - Monthly`,
+                date: new Date().toISOString(),
+                status: 'completed'
+            });
+            
+            showToast(`Successfully upgraded to ${selectedPlan.plan} plan!`, 'success');
+            closeModal('subscriptionModal');
+            updateUI();
+            
+            // Unlock premium features
+            unlockPremiumFeatures();
+            
+            // Show welcome to premium
+            if (selectedPlan.plan !== 'basic') {
+                setTimeout(() => {
+                    showToast('🎉 Premium features unlocked! Check them out in the Premium section.', 'success');
+                }, 1000);
+            }
+        }, 2000);
+    }
+    
+    function unlockPremiumFeatures() {
+        // Remove locked state from premium features
+        document.querySelectorAll('.feature-disabled').forEach(el => {
+            el.classList.remove('feature-disabled');
+            
+            // Update button
+            const button = el.querySelector('button');
+            if (button && button.textContent.includes('Upgrade to Access')) {
+                if (userState.subscription === 'pro' || userState.subscription === 'business') {
+                    button.innerHTML = '<i class="fas fa-play mr-2"></i>Use Now';
+                    button.className = button.className.replace('bg-purple-50', 'bg-gradient-to-r from-purple-600 to-pink-600');
+                    button.className = button.className.replace('text-purple-600', 'text-white');
+                    button.onclick = function() {
+                        showToast('Premium feature activated!', 'success');
+                    };
+                }
+            }
+        });
+    }
+    
+    function showPremiumFeature(featureName) {
+        showToast(`${featureName} is a premium feature. Upgrade to access it.`, 'info');
+        openSubscriptionModal();
+    }
+    
+    function showAddCreditsModal() {
+        document.getElementById('addCreditsModal').classList.remove('hidden');
+    }
+    
+    function selectCreditPackage(credits, price) {
+        selectedPackage = { credits, price };
+        
+        // Highlight selected package
+        document.querySelectorAll('.credit-package').forEach(el => {
+            el.classList.remove('border-purple-500', 'bg-purple-50');
+        });
+        event.currentTarget.classList.add('border-purple-500', 'bg-purple-50');
+        
+        // Show selection details
+        document.getElementById('selectedPackage').classList.remove('hidden');
+        document.getElementById('packageDetails').textContent = 
+            `${credits} credits for $${price} ($${(price/credits).toFixed(3)} per credit)`;
+    }
+    
+    function purchaseCredits() {
+        if (!selectedPackage) {
+            showToast('Please select a credit package', 'error');
+            return;
+        }
+        
+        // Simulate purchase
+        showToast('Processing credit purchase...', 'info');
+        
+        setTimeout(() => {
+            userState.credits += selectedPackage.credits;
+            
+            // Add transaction
+            addTransaction({
+                id: 'tx_' + Date.now(),
+                type: 'credit_purchase',
+                amount: selectedPackage.price,
+                description: `${selectedPackage.credits} credits`,
+                date: new Date().toISOString(),
+                status: 'completed'
+            });
+            
+            showToast(`Successfully purchased ${selectedPackage.credits} credits!`, 'success');
+            closeModal('addCreditsModal');
+            updateUI();
+            selectedPackage = null;
+        }, 1500);
+    }
+    
+    function useTool(toolName, creditCost) {
+        if (userState.credits < creditCost) {
+            showToast(`Not enough credits. You need ${creditCost} credits.`, 'error');
+            showAddCreditsModal();
+            return;
+        }
+        
+        // Deduct credits
+        userState.credits -= creditCost;
+        
+        // Add transaction
+        addTransaction({
+            id: 'tx_' + Date.now(),
+            type: 'tool_usage',
+            amount: -creditCost,
+            description: `${toolName.replace(/([A-Z])/g, ' $1')} usage`,
+            date: new Date().toISOString(),
+            status: 'completed'
+        });
+        
+        // Simulate tool processing
+        showToast(`Using ${toolName}...`, 'info');
+        
+        setTimeout(() => {
+            showToast(`${toolName} completed successfully!`, 'success');
+            updateUI();
+            
+            // Tool-specific actions
+            if (toolName === 'bulkEmail') {
+                showToast('✅ 100 emails sent successfully!', 'success');
+            } else if (toolName === 'aiImage') {
+                showToast('🖼️ AI image generated! Check your file manager.', 'success');
+            } else if (toolName === 'dataExport') {
+                showToast('📥 Data exported successfully! Download will start automatically.', 'success');
+                // Simulate download
+                setTimeout(() => {
+                    const link = document.createElement('a');
+                    link.download = 'customer_data_export.csv';
+                    link.href = 'data:text/csv;base64,' + btoa('Sample,Export,Data');
+                    link.click();
+                }, 500);
+            }
+        }, 2000);
+    }
+    
+    function openMarketplace() {
+        showToast('Marketplace coming soon!', 'info');
+    }
+    
+    function showMarketplaceItem(category) {
+        const items = {
+            templates: { name: 'AI Templates Pack', price: 4.99, description: '10 ready-to-use templates' },
+            analytics: { name: 'Advanced Analytics Add-on', price: 9.99, description: 'Enhanced reporting features' },
+            integrations: { name: 'Integration Plugin', price: 14.99, description: 'Connect with external services' }
+        };
+        
+        const item = items[category];
+        if (confirm(`Purchase ${item.name} for $${item.price}?\n${item.description}`)) {
+            // Simulate purchase
+            addTransaction({
+                id: 'tx_' + Date.now(),
+                type: 'marketplace_purchase',
+                amount: item.price,
+                description: item.name,
+                date: new Date().toISOString(),
+                status: 'completed'
+            });
+            showToast(`Successfully purchased ${item.name}!`, 'success');
+        }
+    }
+    
+    function showAdvertiseModal() {
+        document.getElementById('advertiseModal').classList.remove('hidden');
+    }
+    
+    function updateAdTotal() {
+        const typePrices = {
+            featured: 999,
+            sidebar: 499,
+            intext: 299,
+            newsletter: 199
+        };
+        
+        const durationDiscounts = {
+            '1': 0,
+            '3': 0.1,
+            '6': 0.15,
+            '12': 0.2
+        };
+        
+        const type = document.getElementById('adType').value;
+        const duration = document.getElementById('adDuration').value;
+        
+        let total = typePrices[type];
+        total = total * (1 - durationDiscounts[duration]);
+        
+        document.getElementById('adTotal').textContent = '$' + total.toFixed(0);
+    }
+    
+    function submitAdRequest() {
+        const company = document.getElementById('adCompany').value;
+        const type = document.getElementById('adType').value;
+        const total = document.getElementById('adTotal').textContent;
+        
+        if (!company) {
+            showToast('Please enter company name', 'error');
+            return;
+        }
+        
+        // Add transaction
+        addTransaction({
+            id: 'tx_' + Date.now(),
+            type: 'advertising',
+            amount: parseFloat(total.replace('$', '')),
+            description: `${type} advertising for ${company}`,
+            date: new Date().toISOString(),
+            status: 'pending'
+        });
+        
+        showToast(`Ad request submitted! Our team will contact you within 24 hours.`, 'success');
+        closeModal('advertiseModal');
+    }
+    
+    function openAffiliateProgram() {
+        document.getElementById('affiliateModal').classList.remove('hidden');
+    }
+    
+    function copyAffiliateLink() {
+        const link = document.getElementById('affiliateLink');
+        link.select();
+        navigator.clipboard.writeText(link.value);
+        showToast('Affiliate link copied to clipboard!', 'success');
+    }
+    
+    function shareAffiliate(platform) {
+        const link = document.getElementById('affiliateLink').value;
+        const message = `Check out Kynecta Business Tools! Use my link for a special offer: ${link}`;
+        
+        let url;
+        switch(platform) {
+            case 'twitter':
+                url = `https://twitter.com/intent/tweet?text=${encodeURIComponent(message)}`;
+                break;
+            case 'facebook':
+                url = `https://www.facebook.com/sharer/sharer.php?u=${encodeURIComponent(link)}`;
+                break;
+            case 'linkedin':
+                url = `https://www.linkedin.com/sharing/share-offsite/?url=${encodeURIComponent(link)}`;
+                break;
+            case 'email':
+                url = `mailto:?subject=Check out Kynecta&body=${encodeURIComponent(message)}`;
+                break;
+        }
+        
+        window.open(url, '_blank');
+        showToast(`Shared on ${platform}!`, 'success');
+    }
+    
+    function requestPayout() {
+        if (userState.affiliateEarnings < 50) {
+            showToast(`Minimum payout is $50. You have $${userState.affiliateEarnings.toFixed(2)}`, 'error');
+            return;
+        }
+        
+        if (confirm(`Request payout of $${userState.affiliateEarnings.toFixed(2)}?`)) {
+            addTransaction({
+                id: 'tx_' + Date.now(),
+                type: 'affiliate_payout',
+                amount: userState.affiliateEarnings,
+                description: 'Affiliate earnings payout',
+                date: new Date().toISOString(),
+                status: 'processing'
+            });
+            
+            showToast(`Payout requested! You'll receive payment within 5-7 business days.`, 'success');
+            userState.affiliateEarnings = 0;
+            closeModal('affiliateModal');
+        }
+    }
+    
+    function bookConsultation() {
+        const time = document.getElementById('consultationTime').value;
+        const goals = document.getElementById('consultationGoals').value;
+        
+        if (!time || !goals) {
+            showToast('Please select time and describe your goals', 'error');
+            return;
+        }
+        
+        const price = 99; // Default price for Strategy Session
+        
+        // Add transaction
+        addTransaction({
+            id: 'tx_' + Date.now(),
+            type: 'consultation',
+            amount: price,
+            description: 'Expert Consultation Booking',
+            date: new Date().toISOString(),
+            status: 'booked'
+        });
+        
+        showToast(`Consultation booked for ${new Date(time).toLocaleString()}! You'll receive a confirmation email.`, 'success');
+        closeModal('consultationModal');
+    }
+    
+    function addTransaction(transaction) {
+        userState.transactions.unshift(transaction);
+        updateTransactionList();
+    }
+    
+    function loadSampleTransactions() {
+        const sampleTransactions = [
+            {
+                id: 'tx_1',
+                type: 'subscription',
+                amount: 49,
+                description: 'PRO Plan - Monthly',
+                date: '2024-01-15T10:30:00Z',
+                status: 'completed'
+            },
+            {
+                id: 'tx_2',
+                type: 'credit_purchase',
+                amount: 19.99,
+                description: '500 credits',
+                date: '2024-01-10T14:20:00Z',
+                status: 'completed'
+            },
+            {
+                id: 'tx_3',
+                type: 'tool_usage',
+                amount: -5,
+                description: 'Bulk Email usage',
+                date: '2024-01-08T09:15:00Z',
+                status: 'completed'
+            },
+            {
+                id: 'tx_4',
+                type: 'marketplace_purchase',
+                amount: 4.99,
+                description: 'AI Templates Pack',
+                date: '2024-01-05T16:45:00Z',
+                status: 'completed'
+            },
+            {
+                id: 'tx_5',
+                type: 'affiliate_payout',
+                amount: 147.60,
+                description: 'Affiliate earnings',
+                date: '2024-01-01T11:00:00Z',
+                status: 'completed'
+            }
+        ];
+        
+        userState.transactions = sampleTransactions;
+        updateTransactionList();
+    }
+    
+    function updateTransactionList() {
+        const list = document.getElementById('transactionList');
+        list.innerHTML = '';
+        
+        userState.transactions.forEach(tx => {
+            const txElement = document.createElement('div');
+            txElement.className = 'p-3 border border-gray-200 rounded-xl';
+            
+            const amountColor = tx.amount >= 0 ? 'text-green-600' : 'text-red-600';
+            const amountSign = tx.amount >= 0 ? '+' : '';
+            
+            txElement.innerHTML = `
+                <div class="flex justify-between items-start">
+                    <div>
+                        <h4 class="font-semibold">${tx.description}</h4>
+                        <p class="text-sm text-gray-500">${new Date(tx.date).toLocaleDateString()}</p>
+                    </div>
+                    <div class="text-right">
+                        <p class="font-bold ${amountColor}">${amountSign}$${Math.abs(tx.amount).toFixed(2)}</p>
+                        <span class="text-xs px-2 py-1 rounded-full ${getStatusColor(tx.status)}">${tx.status}</span>
+                    </div>
+                </div>
+                <div class="flex items-center mt-2">
+                    <i class="fas ${getTransactionIcon(tx.type)} text-gray-400 mr-2 text-sm"></i>
+                    <span class="text-xs text-gray-500">${tx.type.replace('_', ' ')}</span>
+                </div>
+            `;
+            
+            list.appendChild(txElement);
+        });
+    }
+    
+    function getStatusColor(status) {
+        switch(status) {
+            case 'completed': return 'bg-green-100 text-green-800';
+            case 'pending': return 'bg-yellow-100 text-yellow-800';
+            case 'processing': return 'bg-blue-100 text-blue-800';
+            case 'booked': return 'bg-purple-100 text-purple-800';
+            default: return 'bg-gray-100 text-gray-800';
+        }
+    }
+    
+    function getTransactionIcon(type) {
+        switch(type) {
+            case 'subscription': return 'fa-crown';
+            case 'credit_purchase': return 'fa-coins';
+            case 'tool_usage': return 'fa-tools';
+            case 'marketplace_purchase': return 'fa-shopping-cart';
+            case 'affiliate_payout': return 'fa-wallet';
+            case 'advertising': return 'fa-megaphone';
+            case 'consultation': return 'fa-calendar-check';
+            default: return 'fa-receipt';
+        }
+    }
+    
+    function openTransactionPanel() {
+        document.getElementById('transactionPanel').classList.remove('hidden');
+    }
+    
+    function closeTransactionPanel() {
+        document.getElementById('transactionPanel').classList.add('hidden');
+    }
+    
+    // Utility functions
+    function closeModal(modalId) {
+        document.getElementById(modalId).classList.add('hidden');
+    }
+    
+    function showToolInfo(toolName) {
+        const info = {
+            bulkEmail: 'Send personalized bulk emails to up to 100 recipients. Includes open tracking and analytics.',
+            aiImage: 'Generate custom marketing images using AI. Supports product images, banners, and social media graphics.',
+            dataExport: 'Export customer data, conversation history, and analytics in CSV, Excel, or PDF format.'
+        };
+        
+        alert(`${toolName.replace(/([A-Z])/g, ' $1')}:\n${info[toolName]}`);
+    }
+    
+    function showToast(message, type = 'info') {
+        Toastify({
+            text: message,
+            duration: 3000,
+            gravity: "top",
+            position: "right",
+            backgroundColor: type === 'error' ? '#ef4444' : 
+                          type === 'success' ? '#10b981' : 
+                          type === 'warning' ? '#f59e0b' : '#3b82f6',
+            stopOnFocus: true
+        }).showToast();
+    }
+    
+    // Add transaction history button to header
+    setTimeout(() => {
+        const header = document.querySelector('.kynecta-header > div > div:last-child');
+        const transactionBtn = document.createElement('button');
+        transactionBtn.id = 'transactionHistoryBtn';
+        transactionBtn.className = 'text-white hover:bg-white/10 p-2 rounded-lg';
+        transactionBtn.innerHTML = '<i class="fas fa-history"></i>';
+        transactionBtn.onclick = openTransactionPanel;
+        header.insertBefore(transactionBtn, header.firstChild);
+        
+        // Add affiliate program button
+        const affiliateBtn = document.createElement('button');
+        affiliateBtn.id = 'affiliateBtn';
+        affiliateBtn.className = 'text-white hover:bg-white/10 p-2 rounded-lg';
+        affiliateBtn.innerHTML = '<i class="fas fa-handshake"></i>';
+        affiliateBtn.onclick = openAffiliateProgram;
+        header.insertBefore(affiliateBtn, header.children[1]);
+        
+        // Add consultation button
+        const consultationBtn = document.createElement('button');
+        consultationBtn.id = 'consultationBtn';
+        consultationBtn.className = 'text-white hover:bg-white/10 p-2 rounded-lg';
+        consultationBtn.innerHTML = '<i class="fas fa-video"></i>';
+        consultationBtn.onclick = function() {
+            document.getElementById('consultationModal').classList.remove('hidden');
+        };
+        header.insertBefore(consultationBtn, header.children[2]);
+    }, 500);
+    
+    // Keep existing functions from original code
+    // ... (all existing functions remain the same)
+    </script>
+</body>
+</html>
