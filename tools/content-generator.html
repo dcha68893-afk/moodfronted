@@ -1,0 +1,354 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>AI Content Generator | MoodChat</title>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; }
+        :root {
+            --primary: #6366f1; --dark: #4f46e5; --light: #f8fafc; --text: #1e293b; --text-light: #64748b;
+        }
+        body { background: linear-gradient(135deg, #f8fafc 0%, #f1f5f9 100%); min-height: 100vh; padding: 20px; }
+        .container { max-width: 1200px; margin: 0 auto; }
+        .header { 
+            background: white; border-radius: 15px; padding: 25px; margin-bottom: 25px;
+            box-shadow: 0 4px 6px rgba(0,0,0,0.07); display: flex; justify-content: space-between; align-items: center;
+        }
+        .header h1 { font-size: 28px; background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); -webkit-background-clip: text; background-clip: text; color: transparent; }
+        .back-btn { padding: 10px 20px; background: var(--primary); color: white; border: none; border-radius: 8px; cursor: pointer; }
+        .main { display: grid; grid-template-columns: 1fr 1fr; gap: 25px; }
+        .panel { background: white; border-radius: 15px; padding: 25px; box-shadow: 0 4px 6px rgba(0,0,0,0.07); }
+        .panel h2 { margin-bottom: 20px; color: var(--text); }
+        .input-group { margin-bottom: 20px; }
+        label { display: block; margin-bottom: 8px; font-weight: 500; color: var(--text); }
+        textarea, select, input { width: 100%; padding: 12px 15px; border: 1px solid #e2e8f0; border-radius: 8px; font-size: 14px; }
+        textarea { min-height: 150px; resize: vertical; }
+        .tones { display: flex; gap: 10px; flex-wrap: wrap; }
+        .tone-btn { padding: 8px 16px; border: 1px solid #e2e8f0; border-radius: 20px; background: white; cursor: pointer; }
+        .tone-btn.active { background: var(--primary); color: white; border-color: var(--primary); }
+        .action-btn { 
+            padding: 14px 28px; background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); 
+            color: white; border: none; border-radius: 8px; cursor: pointer; font-weight: 600; 
+            display: flex; align-items: center; gap: 10px; margin-top: 20px;
+        }
+        .loading { display: none; align-items: center; gap: 10px; margin-top: 20px; }
+        .loading i { animation: spin 1s linear infinite; }
+        @keyframes spin { 100% { transform: rotate(360deg); } }
+        .result { margin-top: 20px; padding: 20px; background: #f8fafc; border-radius: 10px; border-left: 4px solid var(--primary); }
+        .toolbar { display: flex; gap: 10px; margin-top: 15px; }
+        .toolbar button { padding: 8px 15px; border: 1px solid #e2e8f0; background: white; border-radius: 6px; cursor: pointer; }
+        .templates { display: grid; grid-template-columns: repeat(2, 1fr); gap: 15px; margin-top: 20px; }
+        .template { padding: 15px; border: 1px solid #e2e8f0; border-radius: 10px; cursor: pointer; transition: all 0.2s; }
+        .template:hover { border-color: var(--primary); transform: translateY(-2px); }
+        .word-count { font-size: 12px; color: var(--text-light); margin-top: 5px; }
+        @media (max-width: 768px) { .main { grid-template-columns: 1fr; } }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <h1><i class="fas fa-pen-alt"></i> AI Content Generator</h1>
+            <button class="back-btn" onclick="window.history.back()">
+                <i class="fas fa-arrow-left"></i> Back to Dashboard
+            </button>
+        </div>
+        
+        <div class="main">
+            <div class="panel">
+                <h2>Generate Content</h2>
+                
+                <div class="input-group">
+                    <label>Content Type</label>
+                    <select id="contentType">
+                        <option value="blog">Blog Post</option>
+                        <option value="ad">Advertisement Copy</option>
+                        <option value="social">Social Media Post</option>
+                        <option value="email">Email Newsletter</option>
+                        <option value="product">Product Description</option>
+                        <option value="seo">SEO Article</option>
+                    </select>
+                </div>
+                
+                <div class="input-group">
+                    <label>Topic / Keywords</label>
+                    <textarea id="topic" placeholder="E.g., Sustainable fashion trends for 2024..."></textarea>
+                    <div class="word-count" id="topicCount">0 words</div>
+                </div>
+                
+                <div class="input-group">
+                    <label>Tone of Voice</label>
+                    <div class="tones">
+                        <button class="tone-btn active" data-tone="professional">Professional</button>
+                        <button class="tone-btn" data-tone="casual">Casual</button>
+                        <button class="tone-btn" data-tone="persuasive">Persuasive</button>
+                        <button class="tone-btn" data-tone="friendly">Friendly</button>
+                        <button class="tone-btn" data-tone="formal">Formal</button>
+                    </div>
+                </div>
+                
+                <div class="input-group">
+                    <label>Target Audience</label>
+                    <input type="text" id="audience" placeholder="E.g., Small business owners, age 25-40">
+                </div>
+                
+                <div class="input-group">
+                    <label>Word Count</label>
+                    <input type="range" id="wordCount" min="100" max="2000" value="500">
+                    <div class="word-count" id="countDisplay">500 words</div>
+                </div>
+                
+                <button class="action-btn" id="generateBtn">
+                    <i class="fas fa-magic"></i> Generate Content
+                </button>
+                
+                <div class="loading" id="loading">
+                    <i class="fas fa-spinner"></i>
+                    <span>AI is generating your content... (10-20 seconds)</span>
+                </div>
+            </div>
+            
+            <div class="panel">
+                <h2>Result</h2>
+                <div class="result" id="result">
+                    <p style="color: var(--text-light); text-align: center; padding: 40px 20px;">
+                        Your generated content will appear here...
+                    </p>
+                </div>
+                
+                <div class="toolbar">
+                    <button onclick="copyContent()"><i class="fas fa-copy"></i> Copy</button>
+                    <button onclick="downloadContent()"><i class="fas fa-download"></i> Download</button>
+                    <button onclick="shareContent()"><i class="fas fa-share"></i> Share</button>
+                    <button onclick="regenerateContent()"><i class="fas fa-redo"></i> Regenerate</button>
+                </div>
+                
+                <h2 style="margin-top: 30px;">Quick Templates</h2>
+                <div class="templates">
+                    <div class="template" onclick="loadTemplate('instagram')">
+                        <strong>Instagram Caption</strong>
+                        <p class="word-count">For lifestyle brands</p>
+                    </div>
+                    <div class="template" onclick="loadTemplate('linkedin')">
+                        <strong>LinkedIn Article</strong>
+                        <p class="word-count">Professional audience</p>
+                    </div>
+                    <div class="template" onclick="loadTemplate('product')">
+                        <strong>Product Launch</strong>
+                        <p class="word-count">E-commerce focus</p>
+                    </div>
+                    <div class="template" onclick="loadTemplate('newsletter')">
+                        <strong>Weekly Newsletter</strong>
+                        <p class="word-count">Email marketing</p>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // Initialize
+        document.addEventListener('DOMContentLoaded', function() {
+            // Tone buttons
+            document.querySelectorAll('.tone-btn').forEach(btn => {
+                btn.addEventListener('click', function() {
+                    document.querySelectorAll('.tone-btn').forEach(b => b.classList.remove('active'));
+                    this.classList.add('active');
+                });
+            });
+            
+            // Word count slider
+            const wordCountSlider = document.getElementById('wordCount');
+            const countDisplay = document.getElementById('countDisplay');
+            wordCountSlider.addEventListener('input', function() {
+                countDisplay.textContent = `${this.value} words`;
+            });
+            
+            // Topic word count
+            const topicInput = document.getElementById('topic');
+            const topicCount = document.getElementById('topicCount');
+            topicInput.addEventListener('input', function() {
+                const words = this.value.trim().split(/\s+/).filter(w => w.length > 0);
+                topicCount.textContent = `${words.length} words`;
+            });
+            
+            // Generate button
+            document.getElementById('generateBtn').addEventListener('click', generateContent);
+        });
+        
+        // Generate content using AI (simulated or real API)
+        async function generateContent() {
+            const contentType = document.getElementById('contentType').value;
+            const topic = document.getElementById('topic').value;
+            const tone = document.querySelector('.tone-btn.active').dataset.tone;
+            const audience = document.getElementById('audience').value;
+            const wordCount = document.getElementById('wordCount').value;
+            
+            if (!topic.trim()) {
+                alert('Please enter a topic or keywords');
+                return;
+            }
+            
+            // Show loading
+            document.getElementById('loading').style.display = 'flex';
+            document.getElementById('result').innerHTML = '<p>Generating...</p>';
+            
+            try {
+                // SIMULATION: Replace with real API call
+                const content = await simulateAIContentGeneration(contentType, topic, tone, audience, wordCount);
+                
+                // Display result
+                document.getElementById('result').innerHTML = `
+                    <h3 style="margin-bottom: 15px; color: var(--text);">${getContentTypeName(contentType)}</h3>
+                    <div style="line-height: 1.6; color: var(--text);">
+                        ${content}
+                    </div>
+                    <div style="margin-top: 20px; padding-top: 15px; border-top: 1px solid #e2e8f0; font-size: 14px; color: var(--text-light);">
+                        <i class="fas fa-info-circle"></i> Tone: ${tone} | Word count: ${wordCount} | Audience: ${audience || 'General'}
+                    </div>
+                `;
+                
+            } catch (error) {
+                document.getElementById('result').innerHTML = `
+                    <p style="color: #ef4444;">
+                        <i class="fas fa-exclamation-circle"></i> Error generating content. Please try again.
+                    </p>
+                `;
+                console.error('Content generation error:', error);
+            } finally {
+                document.getElementById('loading').style.display = 'none';
+            }
+        }
+        
+        // Simulate AI content generation (REPLACE WITH REAL API)
+        function simulateAIContentGeneration(type, topic, tone, audience, wordCount) {
+            return new Promise((resolve) => {
+                setTimeout(() => {
+                    const templates = {
+                        blog: `# ${topic}\n\n**Introduction**\nIn today's rapidly evolving landscape, ${topic.toLowerCase()} has become increasingly important for businesses and individuals alike. This comprehensive guide explores the key aspects, benefits, and practical applications.\n\n**Key Benefits**\n1. **Increased Efficiency**: Streamline your workflow\n2. **Enhanced Creativity**: Unlock new possibilities\n3. **Better Results**: Achieve measurable outcomes\n\n**Practical Implementation**\nTo implement ${topic.toLowerCase()} effectively, start with a clear strategy. Focus on measurable goals and regular assessment.`,
+                        
+                        ad: `🚀 **ATTENTION**: Discover the Secret to ${topic.toUpperCase()}!\n\nAre you struggling with ${topic.toLowerCase()}? Our revolutionary solution delivers:\n\n✅ 3x Faster Results\n✅ 95% Success Rate\n✅ Money-Back Guarantee\n\n👉 LIMITED TIME OFFER: Get started today and receive exclusive bonuses!\n\n💡 Perfect for: ${audience || "Forward-thinking professionals"}`,
+                        
+                        social: `🌟 Exciting News about ${topic}!\n\nJust discovered some amazing insights about ${topic.toLowerCase()} that I have to share:\n\n🔹 Key finding #1\n🔹 Important update #2\n🔹 Actionable tip #3\n\nWhat's your experience with ${topic.toLowerCase()}? Share in the comments! 👇\n\n#${topic.replace(/\s+/g, '')} #BusinessTips #Innovation`,
+                        
+                        email: `Subject: Important Update: ${topic}\n\nDear ${audience || "Valued Customer"},\n\nI'm writing to share exciting developments regarding ${topic.toLowerCase()}. As part of our ongoing commitment to excellence, we've implemented significant improvements.\n\n**What This Means for You:**\n• Enhanced features and capabilities\n• Improved user experience\n• Better results and outcomes\n\n**Next Steps:**\n1. Review the attached documentation\n2. Schedule a consultation if needed\n3. Provide feedback on your experience\n\nBest regards,\nThe Team`
+                    };
+                    
+                    const content = templates[type] || templates.blog;
+                    resolve(content);
+                }, 2000); // Simulate API delay
+            });
+        }
+        
+        function getContentTypeName(type) {
+            const names = {
+                blog: 'Blog Post',
+                ad: 'Advertisement Copy',
+                social: 'Social Media Post',
+                email: 'Email Newsletter',
+                product: 'Product Description',
+                seo: 'SEO Article'
+            };
+            return names[type] || 'Content';
+        }
+        
+        // Utility functions
+        function copyContent() {
+            const text = document.getElementById('result').innerText;
+            navigator.clipboard.writeText(text);
+            alert('Content copied to clipboard!');
+        }
+        
+        function downloadContent() {
+            const text = document.getElementById('result').innerText;
+            const blob = new Blob([text], { type: 'text/plain' });
+            const url = window.URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = `content-${Date.now()}.txt`;
+            a.click();
+        }
+        
+        function shareContent() {
+            if (navigator.share) {
+                navigator.share({
+                    title: 'AI Generated Content',
+                    text: document.getElementById('result').innerText.substring(0, 100) + '...',
+                    url: window.location.href
+                });
+            } else {
+                alert('Share feature not supported in this browser');
+            }
+        }
+        
+        function regenerateContent() {
+            generateContent();
+        }
+        
+        function loadTemplate(template) {
+            const templates = {
+                instagram: {
+                    type: 'social',
+                    topic: 'Sustainable Fashion Tips',
+                    tone: 'casual',
+                    audience: 'Eco-conscious consumers'
+                },
+                linkedin: {
+                    type: 'blog',
+                    topic: 'Digital Transformation Strategies',
+                    tone: 'professional',
+                    audience: 'Business executives'
+                },
+                product: {
+                    type: 'product',
+                    topic: 'Premium Coffee Subscription',
+                    tone: 'persuasive',
+                    audience: 'Coffee enthusiasts'
+                },
+                newsletter: {
+                    type: 'email',
+                    topic: 'Weekly Industry Insights',
+                    tone: 'friendly',
+                    audience: 'Subscribers'
+                }
+            };
+            
+            const t = templates[template];
+            if (t) {
+                document.getElementById('contentType').value = t.type;
+                document.getElementById('topic').value = t.topic;
+                document.getElementById('audience').value = t.audience;
+                document.querySelectorAll('.tone-btn').forEach(btn => {
+                    btn.classList.toggle('active', btn.dataset.tone === t.tone);
+                });
+                
+                // Trigger word count update
+                document.getElementById('topic').dispatchEvent(new Event('input'));
+            }
+        }
+        
+        // REAL API INTEGRATION EXAMPLE (Uncomment and add your API key)
+        /*
+        async function generateWithOpenAI(prompt) {
+            const response = await fetch('https://api.openai.com/v1/completions', {
+                method: 'POST',
+                headers: {
+                    'Authorization': 'Bearer YOUR_API_KEY',
+                    'Content-Type': 'application/json'
+                },
+                body: JSON.stringify({
+                    model: 'gpt-3.5-turbo',
+                    prompt: prompt,
+                    max_tokens: 1000,
+                    temperature: 0.7
+                })
+            });
+            
+            const data = await response.json();
+            return data.choices[0].text;
+        }
+        */
+    </script>
+</body>
+</html>

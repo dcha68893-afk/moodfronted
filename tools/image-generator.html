@@ -1,0 +1,412 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>AI Image Generator | MoodChat</title>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; }
+        :root {
+            --primary: #6366f1; --dark: #4f46e5; --gradient: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            --light: #f8fafc; --text: #1e293b; --text-light: #64748b;
+        }
+        body { background: linear-gradient(135deg, #f8fafc 0%, #f1f5f9 100%); min-height: 100vh; padding: 20px; }
+        .container { max-width: 1400px; margin: 0 auto; }
+        .header { 
+            background: white; border-radius: 15px; padding: 25px; margin-bottom: 25px;
+            box-shadow: 0 4px 6px rgba(0,0,0,0.07); display: flex; justify-content: space-between; align-items: center;
+        }
+        .header h1 { font-size: 28px; background: var(--gradient); -webkit-background-clip: text; background-clip: text; color: transparent; }
+        .back-btn { padding: 10px 20px; background: var(--primary); color: white; border: none; border-radius: 8px; cursor: pointer; }
+        .main { display: grid; grid-template-columns: 400px 1fr; gap: 25px; }
+        .panel { background: white; border-radius: 15px; padding: 25px; box-shadow: 0 4px 6px rgba(0,0,0,0.07); }
+        .panel h2 { margin-bottom: 20px; color: var(--text); }
+        .input-group { margin-bottom: 20px; }
+        label { display: block; margin-bottom: 8px; font-weight: 500; color: var(--text); }
+        textarea, select, input { width: 100%; padding: 12px 15px; border: 1px solid #e2e8f0; border-radius: 8px; font-size: 14px; }
+        textarea { min-height: 120px; resize: vertical; }
+        .styles { display: grid; grid-template-columns: repeat(2, 1fr); gap: 10px; margin-top: 10px; }
+        .style-btn { padding: 10px; border: 2px solid #e2e8f0; border-radius: 8px; background: white; cursor: pointer; text-align: center; }
+        .style-btn.active { border-color: var(--primary); background: linear-gradient(135deg, rgba(99, 102, 241, 0.1) 0%, rgba(139, 92, 246, 0.1) 100%); }
+        .style-btn i { font-size: 20px; margin-bottom: 5px; display: block; }
+        .size-options { display: flex; gap: 10px; margin-top: 10px; }
+        .size-btn { flex: 1; padding: 10px; border: 2px solid #e2e8f0; border-radius: 8px; background: white; cursor: pointer; text-align: center; }
+        .size-btn.active { border-color: var(--primary); }
+        .action-btn { 
+            padding: 14px 28px; background: var(--gradient); 
+            color: white; border: none; border-radius: 8px; cursor: pointer; font-weight: 600; 
+            display: flex; align-items: center; justify-content: center; gap: 10px; width: 100%; margin-top: 20px;
+        }
+        .loading { display: none; align-items: center; justify-content: center; gap: 10px; margin: 20px 0; }
+        .loading i { animation: spin 1s linear infinite; }
+        @keyframes spin { 100% { transform: rotate(360deg); } }
+        .gallery { display: grid; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); gap: 20px; }
+        .image-card { border-radius: 12px; overflow: hidden; box-shadow: 0 4px 6px rgba(0,0,0,0.07); background: white; }
+        .image-card img { width: 100%; height: 250px; object-fit: cover; display: block; }
+        .image-actions { padding: 15px; display: flex; justify-content: space-between; }
+        .image-actions button { padding: 8px 15px; border: none; border-radius: 6px; cursor: pointer; }
+        .prompt-examples { margin-top: 20px; }
+        .example { padding: 10px 15px; background: #f8fafc; border-radius: 8px; margin-bottom: 10px; cursor: pointer; font-size: 14px; }
+        .example:hover { background: #e2e8f0; }
+        .generated-images { max-height: 600px; overflow-y: auto; padding-right: 10px; }
+        @media (max-width: 1024px) { .main { grid-template-columns: 1fr; } }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <h1><i class="fas fa-image"></i> AI Image Generator</h1>
+            <button class="back-btn" onclick="window.history.back()">
+                <i class="fas fa-arrow-left"></i> Back to Dashboard
+            </button>
+        </div>
+        
+        <div class="main">
+            <div class="panel">
+                <h2>Create Image</h2>
+                
+                <div class="input-group">
+                    <label>Image Prompt</label>
+                    <textarea id="prompt" placeholder="Describe the image you want to create..."></textarea>
+                    <div style="font-size: 12px; color: var(--text-light); margin-top: 5px;">
+                        Be descriptive: Include subject, style, colors, lighting, mood
+                    </div>
+                </div>
+                
+                <div class="input-group">
+                    <label>Style</label>
+                    <div class="styles">
+                        <button class="style-btn active" data-style="realistic">
+                            <i class="fas fa-camera"></i> Realistic
+                        </button>
+                        <button class="style-btn" data-style="digital-art">
+                            <i class="fas fa-paint-brush"></i> Digital Art
+                        </button>
+                        <button class="style-btn" data-style="3d">
+                            <i class="fas fa-cube"></i> 3D Render
+                        </button>
+                        <button class="style-btn" data-style="anime">
+                            <i class="fas fa-gamepad"></i> Anime
+                        </button>
+                        <button class="style-btn" data-style="watercolor">
+                            <i class="fas fa-palette"></i> Watercolor
+                        </button>
+                        <button class="style-btn" data-style="minimal">
+                            <i class="fas fa-bezier-curve"></i> Minimal
+                        </button>
+                    </div>
+                </div>
+                
+                <div class="input-group">
+                    <label>Image Size</label>
+                    <div class="size-options">
+                        <button class="size-btn active" data-size="512x512">512×512</button>
+                        <button class="size-btn" data-size="768x768">768×768</button>
+                        <button class="size-btn" data-size="1024x1024">1024×1024</button>
+                    </div>
+                </div>
+                
+                <div class="input-group">
+                    <label>Number of Images</label>
+                    <input type="range" id="imageCount" min="1" max="4" value="1">
+                    <div style="text-align: center; margin-top: 5px; font-size: 14px;">
+                        <span id="countDisplay">1 image</span> (uses 1 credit per image)
+                    </div>
+                </div>
+                
+                <button class="action-btn" id="generateBtn">
+                    <i class="fas fa-magic"></i> Generate Images (1 credit each)
+                </button>
+                
+                <div class="loading" id="loading">
+                    <i class="fas fa-spinner"></i>
+                    <span>AI is creating your images... (15-30 seconds)</span>
+                </div>
+                
+                <div class="prompt-examples">
+                    <h3 style="margin-bottom: 15px;">Prompt Examples</h3>
+                    <div class="example" onclick="loadExample(0)">
+                        A cyberpunk cityscape at night with neon lights, flying cars, and rain reflections
+                    </div>
+                    <div class="example" onclick="loadExample(1)">
+                        A peaceful landscape with mountains, lake, cherry blossoms, soft morning light
+                    </div>
+                    <div class="example" onclick="loadExample(2)">
+                        A futuristic astronaut exploring alien jungle with bioluminescent plants
+                    </div>
+                    <div class="example" onclick="loadExample(3)">
+                        A minimalist logo design for a tech startup, geometric shapes, blue gradient
+                    </div>
+                </div>
+            </div>
+            
+            <div class="panel">
+                <h2>Generated Images</h2>
+                <div class="generated-images" id="gallery">
+                    <div style="text-align: center; padding: 60px 20px; color: var(--text-light);">
+                        <i class="fas fa-image" style="font-size: 64px; margin-bottom: 20px; opacity: 0.3;"></i>
+                        <h3>No images generated yet</h3>
+                        <p>Create your first AI-generated image using the controls on the left</p>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // Sample images for simulation (replace with real API)
+        const sampleImages = [
+            'https://images.unsplash.com/photo-1518709268805-4e9042af2176?w=800&q=80',
+            'https://images.unsplash.com/photo-1519681393784-d120267933ba?w-800&q=80',
+            'https://images.unsplash.com/photo-1518834103328-77d8529d6250?w=800&q=80',
+            'https://images.unsplash.com/photo-1506905925346-21bda4d32df4?w=800&q=80'
+        ];
+        
+        const promptExamples = [
+            "A cyberpunk cityscape at night with neon lights, flying cars, and rain reflections",
+            "A peaceful landscape with mountains, lake, cherry blossoms, soft morning light",
+            "A futuristic astronaut exploring alien jungle with bioluminescent plants",
+            "A minimalist logo design for a tech startup, geometric shapes, blue gradient"
+        ];
+        
+        // Initialize
+        document.addEventListener('DOMContentLoaded', function() {
+            // Style buttons
+            document.querySelectorAll('.style-btn').forEach(btn => {
+                btn.addEventListener('click', function() {
+                    document.querySelectorAll('.style-btn').forEach(b => b.classList.remove('active'));
+                    this.classList.add('active');
+                });
+            });
+            
+            // Size buttons
+            document.querySelectorAll('.size-btn').forEach(btn => {
+                btn.addEventListener('click', function() {
+                    document.querySelectorAll('.size-btn').forEach(b => b.classList.remove('active'));
+                    this.classList.add('active');
+                });
+            });
+            
+            // Image count slider
+            const countSlider = document.getElementById('imageCount');
+            const countDisplay = document.getElementById('countDisplay');
+            countSlider.addEventListener('input', function() {
+                countDisplay.textContent = `${this.value} image${this.value > 1 ? 's' : ''}`;
+            });
+            
+            // Generate button
+            document.getElementById('generateBtn').addEventListener('click', generateImages);
+            
+            // Load saved images from localStorage
+            loadSavedImages();
+        });
+        
+        // Generate images using AI
+        async function generateImages() {
+            const prompt = document.getElementById('prompt').value.trim();
+            const style = document.querySelector('.style-btn.active').dataset.style;
+            const size = document.querySelector('.size-btn.active').dataset.size;
+            const count = parseInt(document.getElementById('imageCount').value);
+            
+            if (!prompt) {
+                alert('Please enter an image prompt');
+                return;
+            }
+            
+            // Check credits (simulated)
+            if (!confirm(`This will use ${count} credit${count > 1 ? 's' : ''}. Continue?`)) {
+                return;
+            }
+            
+            // Show loading
+            document.getElementById('loading').style.display = 'flex';
+            document.getElementById('generateBtn').disabled = true;
+            
+            try {
+                // SIMULATION: Replace with real API call (Stable Diffusion, DALL-E, etc.)
+                const images = await simulateAIImageGeneration(prompt, style, size, count);
+                
+                // Display images
+                displayImages(images, prompt, style);
+                
+                // Save to localStorage
+                saveImages(images, prompt, style);
+                
+            } catch (error) {
+                alert('Error generating images: ' + error.message);
+                console.error('Image generation error:', error);
+            } finally {
+                document.getElementById('loading').style.display = 'none';
+                document.getElementById('generateBtn').disabled = false;
+            }
+        }
+        
+        // Simulate AI image generation (REPLACE WITH REAL API)
+        function simulateAIImageGeneration(prompt, style, size, count) {
+            return new Promise((resolve) => {
+                setTimeout(() => {
+                    // Generate simulated image URLs
+                    const images = [];
+                    for (let i = 0; i < count; i++) {
+                        // In real implementation, this would be the API response URL
+                        const randomImage = sampleImages[Math.floor(Math.random() * sampleImages.length)];
+                        images.push({
+                            url: randomImage,
+                            prompt: prompt,
+                            style: style,
+                            size: size,
+                            timestamp: new Date().toISOString()
+                        });
+                    }
+                    resolve(images);
+                }, 3000); // Simulate API delay
+            });
+        }
+        
+        // Display generated images
+        function displayImages(images, prompt, style) {
+            const gallery = document.getElementById('gallery');
+            
+            if (images.length === 0) {
+                gallery.innerHTML = `
+                    <div style="text-align: center; padding: 40px 20px; color: var(--text-light);">
+                        <i class="fas fa-exclamation-circle"></i>
+                        <p>No images were generated</p>
+                    </div>
+                `;
+                return;
+            }
+            
+            gallery.innerHTML = '';
+            
+            images.forEach((img, index) => {
+                const card = document.createElement('div');
+                card.className = 'image-card';
+                card.innerHTML = `
+                    <img src="${img.url}" alt="AI Generated Image" id="img-${index}">
+                    <div class="image-actions">
+                        <button onclick="downloadImage('img-${index}', '${prompt.replace(/'/g, "\\'")}')" 
+                                style="background: var(--primary); color: white;">
+                            <i class="fas fa-download"></i> Download
+                        </button>
+                        <button onclick="copyImageLink('${img.url}')" style="background: #f8fafc;">
+                            <i class="fas fa-link"></i> Copy Link
+                        </button>
+                        <button onclick="shareImage('${img.url}', '${prompt.replace(/'/g, "\\'")}')" 
+                                style="background: #10b981; color: white;">
+                            <i class="fas fa-share"></i> Share
+                        </button>
+                    </div>
+                `;
+                gallery.appendChild(card);
+            });
+            
+            // Add generation info
+            const info = document.createElement('div');
+            info.style.marginTop = '20px';
+            info.style.padding = '15px';
+            info.style.background = '#f8fafc';
+            info.style.borderRadius = '10px';
+            info.style.fontSize = '14px';
+            info.innerHTML = `
+                <strong>Generation Details:</strong><br>
+                Prompt: "${prompt.substring(0, 100)}${prompt.length > 100 ? '...' : ''}"<br>
+                Style: ${style} | Size: ${images[0].size} | Generated: ${new Date().toLocaleTimeString()}
+            `;
+            gallery.appendChild(info);
+        }
+        
+        // Save images to localStorage
+        function saveImages(images, prompt, style) {
+            try {
+                const saved = JSON.parse(localStorage.getItem('ai_generated_images') || '[]');
+                images.forEach(img => {
+                    saved.unshift({
+                        ...img,
+                        prompt: prompt,
+                        style: style,
+                        savedAt: new Date().toISOString()
+                    });
+                });
+                
+                // Keep only last 50 images
+                if (saved.length > 50) saved.length = 50;
+                
+                localStorage.setItem('ai_generated_images', JSON.stringify(saved));
+            } catch (error) {
+                console.error('Error saving images:', error);
+            }
+        }
+        
+        // Load saved images
+        function loadSavedImages() {
+            try {
+                const saved = JSON.parse(localStorage.getItem('ai_generated_images') || '[]');
+                if (saved.length > 0) {
+                    // Display latest 4 images
+                    const recent = saved.slice(0, 4);
+                    displayImages(recent, recent[0].prompt, recent[0].style);
+                }
+            } catch (error) {
+                console.error('Error loading saved images:', error);
+            }
+        }
+        
+        // Utility functions
+        function downloadImage(imgId, prompt) {
+            const img = document.getElementById(imgId);
+            const link = document.createElement('a');
+            link.href = img.src;
+            link.download = `ai-image-${Date.now()}.jpg`;
+            link.click();
+            
+            // Log download
+            console.log(`Downloaded: ${prompt}`);
+        }
+        
+        function copyImageLink(url) {
+            navigator.clipboard.writeText(url);
+            alert('Image link copied to clipboard!');
+        }
+        
+        function shareImage(url, prompt) {
+            if (navigator.share) {
+                navigator.share({
+                    title: 'AI Generated Image',
+                    text: `Check out this AI image: ${prompt}`,
+                    url: url
+                });
+            } else {
+                copyImageLink(url);
+            }
+        }
+        
+        function loadExample(index) {
+            document.getElementById('prompt').value = promptExamples[index];
+        }
+        
+        // REAL API INTEGRATION EXAMPLE (Uncomment and add your API key)
+        /*
+        async function generateWithDalle(prompt, size, count) {
+            const response = await fetch('https://api.openai.com/v1/images/generations', {
+                method: 'POST',
+                headers: {
+                    'Authorization': 'Bearer YOUR_API_KEY',
+                    'Content-Type': 'application/json'
+                },
+                body: JSON.stringify({
+                    prompt: prompt,
+                    n: count,
+                    size: size,
+                    response_format: 'url'
+                })
+            });
+            
+            const data = await response.json();
+            return data.data.map(img => ({ url: img.url }));
+        }
+        */
+    </script>
+</body>
+</html>

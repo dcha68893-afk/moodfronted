@@ -1,0 +1,833 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Advanced CRM | MoodChat</title>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; }
+        :root {
+            --primary: #6366f1; --success: #10b981; --warning: #f59e0b; --danger: #ef4444; --info: #3b82f6;
+            --light: #f8fafc; --text: #1e293b; --text-light: #64748b;
+        }
+        body { background: linear-gradient(135deg, #f8fafc 0%, #f1f5f9 100%); min-height: 100vh; padding: 20px; }
+        .container { max-width: 1400px; margin: 0 auto; }
+        .header { 
+            background: white; border-radius: 15px; padding: 25px; margin-bottom: 25px;
+            box-shadow: 0 4px 6px rgba(0,0,0,0.07); display: flex; justify-content: space-between; align-items: center;
+        }
+        .header h1 { font-size: 28px; background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); -webkit-background-clip: text; background-clip: text; color: transparent; }
+        .header-controls { display: flex; gap: 15px; }
+        .back-btn, .action-btn { padding: 10px 20px; background: var(--primary); color: white; border: none; border-radius: 8px; cursor: pointer; display: flex; align-items: center; gap: 8px; }
+        .action-btn.success { background: var(--success); }
+        .action-btn.warning { background: var(--warning); }
+        .crm-layout { display: grid; grid-template-columns: 300px 1fr; gap: 25px; }
+        .sidebar { background: white; border-radius: 15px; padding: 25px; box-shadow: 0 4px 6px rgba(0,0,0,0.07); }
+        .main-content { background: white; border-radius: 15px; padding: 25px; box-shadow: 0 4px 6px rgba(0,0,0,0.07); }
+        .tab-navigation { display: flex; border-bottom: 1px solid #e2e8f0; margin-bottom: 25px; }
+        .tab { padding: 12px 24px; background: none; border: none; cursor: pointer; font-weight: 500; color: var(--text-light); }
+        .tab.active { color: var(--primary); border-bottom: 2px solid var(--primary); }
+        .stats-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 15px; margin-bottom: 25px; }
+        .stat-card { padding: 20px; border-radius: 10px; }
+        .stat-card.leads { background: linear-gradient(135deg, rgba(99, 102, 241, 0.1) 0%, rgba(139, 92, 246, 0.1) 100%); }
+        .stat-card.conversions { background: linear-gradient(135deg, rgba(16, 185, 129, 0.1) 0%, rgba(5, 150, 105, 0.1) 100%); }
+        .stat-card.revenue { background: linear-gradient(135deg, rgba(245, 158, 11, 0.1) 0%, rgba(217, 119, 6, 0.1) 100%); }
+        .stat-card.tasks { background: linear-gradient(135deg, rgba(59, 130, 246, 0.1) 0%, rgba(29, 78, 216, 0.1) 100%); }
+        .stat-value { font-size: 28px; font-weight: 700; margin-bottom: 5px; }
+        .stat-label { font-size: 14px; color: var(--text-light); }
+        .filters { display: flex; gap: 15px; margin-bottom: 25px; }
+        .filter-select { padding: 10px 15px; border: 1px solid #e2e8f0; border-radius: 8px; background: white; }
+        .search-input { flex: 1; padding: 10px 15px; border: 1px solid #e2e8f0; border-radius: 8px; }
+        .contacts-table { width: 100%; border-collapse: collapse; }
+        .contacts-table th, .contacts-table td { padding: 15px; text-align: left; border-bottom: 1px solid #e2e8f0; }
+        .contacts-table th { background: #f8fafc; font-weight: 600; color: var(--text); }
+        .contact-avatar { width: 40px; height: 40px; border-radius: 50%; background: var(--primary); color: white; display: flex; align-items: center; justify-content: center; font-weight: 600; }
+        .lead-score { padding: 4px 10px; border-radius: 12px; font-size: 12px; font-weight: 600; }
+        .score-hot { background: rgba(239, 68, 68, 0.1); color: var(--danger); }
+        .score-warm { background: rgba(245, 158, 11, 0.1); color: var(--warning); }
+        .score-cold { background: rgba(59, 130, 246, 0.1); color: var(--info); }
+        .status-badge { padding: 4px 10px; border-radius: 12px; font-size: 12px; font-weight: 600; }
+        .status-new { background: rgba(99, 102, 241, 0.1); color: var(--primary); }
+        .status-contact { background: rgba(16, 185, 129, 0.1); color: var(--success); }
+        .status-proposal { background: rgba(245, 158, 11, 0.1); color: var(--warning); }
+        .status-closed { background: rgba(59, 130, 246, 0.1); color: var(--info); }
+        .action-buttons { display: flex; gap: 5px; }
+        .action-icon { width: 32px; height: 32px; border-radius: 6px; display: flex; align-items: center; justify-content: center; cursor: pointer; }
+        .action-icon.view { background: rgba(59, 130, 246, 0.1); color: var(--info); }
+        .action-icon.edit { background: rgba(245, 158, 11, 0.1); color: var(--warning); }
+        .action-icon.delete { background: rgba(239, 68, 68, 0.1); color: var(--danger); }
+        .sidebar-section { margin-bottom: 30px; }
+        .sidebar-section h3 { font-size: 16px; margin-bottom: 15px; color: var(--text); }
+        .user-list { list-style: none; }
+        .user-item { display: flex; align-items: center; gap: 10px; padding: 10px 0; border-bottom: 1px solid #f1f5f9; }
+        .user-avatar { width: 32px; height: 32px; border-radius: 50%; background: var(--primary); color: white; display: flex; align-items: center; justify-content: center; font-size: 12px; }
+        .quick-stats { padding: 15px; background: #f8fafc; border-radius: 10px; }
+        .activity-feed { max-height: 400px; overflow-y: auto; }
+        .activity-item { padding: 12px 0; border-bottom: 1px solid #f1f5f9; font-size: 14px; }
+        .activity-time { font-size: 12px; color: var(--text-light); margin-top: 3px; }
+        .modal { display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.5); z-index: 1000; align-items: center; justify-content: center; }
+        .modal.active { display: flex; }
+        .modal-content { background: white; border-radius: 15px; width: 500px; max-width: 90%; max-height: 90vh; overflow-y: auto; }
+        .modal-header { padding: 20px; border-bottom: 1px solid #e2e8f0; display: flex; justify-content: space-between; align-items: center; }
+        .modal-body { padding: 20px; }
+        .form-group { margin-bottom: 20px; }
+        .form-label { display: block; margin-bottom: 8px; font-weight: 500; color: var(--text); }
+        .form-input { width: 100%; padding: 10px 15px; border: 1px solid #e2e8f0; border-radius: 8px; }
+        .form-actions { display: flex; gap: 10px; justify-content: flex-end; padding: 20px; border-top: 1px solid #e2e8f0; }
+        .pagination { display: flex; justify-content: center; gap: 10px; margin-top: 25px; }
+        .page-btn { width: 36px; height: 36px; border: 1px solid #e2e8f0; background: white; border-radius: 6px; cursor: pointer; }
+        .page-btn.active { background: var(--primary); color: white; border-color: var(--primary); }
+        @media (max-width: 1200px) { 
+            .crm-layout { grid-template-columns: 1fr; }
+            .stats-grid { grid-template-columns: repeat(2, 1fr); }
+        }
+        @media (max-width: 768px) { 
+            .stats-grid { grid-template-columns: 1fr; }
+            .filters { flex-direction: column; }
+            .contacts-table { display: block; overflow-x: auto; }
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <h1><i class="fas fa-users"></i> Advanced CRM</h1>
+            <div class="header-controls">
+                <button class="action-btn success" onclick="openAddContactModal()">
+                    <i class="fas fa-plus"></i> Add Contact
+                </button>
+                <button class="action-btn warning" onclick="importContacts()">
+                    <i class="fas fa-upload"></i> Import
+                </button>
+                <button class="back-btn" onclick="window.history.back()">
+                    <i class="fas fa-arrow-left"></i> Back
+                </button>
+            </div>
+        </div>
+        
+        <div class="crm-layout">
+            <!-- Sidebar -->
+            <div class="sidebar">
+                <div class="sidebar-section">
+                    <h3>Team Members</h3>
+                    <ul class="user-list" id="teamMembers">
+                        <!-- Team members will be loaded here -->
+                    </ul>
+                </div>
+                
+                <div class="sidebar-section">
+                    <h3>Quick Stats</h3>
+                    <div class="quick-stats">
+                        <div style="margin-bottom: 15px;">
+                            <div class="stat-value">87%</div>
+                            <div class="stat-label">Response Rate</div>
+                        </div>
+                        <div style="margin-bottom: 15px;">
+                            <div class="stat-value">2.4 days</div>
+                            <div class="stat-label">Avg. Response Time</div>
+                        </div>
+                        <div>
+                            <div class="stat-value">$1,240</div>
+                            <div class="stat-label">Avg. Deal Value</div>
+                        </div>
+                    </div>
+                </div>
+                
+                <div class="sidebar-section">
+                    <h3>Recent Activity</h3>
+                    <div class="activity-feed" id="activityFeed">
+                        <!-- Activity feed will be loaded here -->
+                    </div>
+                </div>
+            </div>
+            
+            <!-- Main Content -->
+            <div class="main-content">
+                <div class="tab-navigation">
+                    <button class="tab active" data-tab="contacts">Contacts</button>
+                    <button class="tab" data-tab="leads">Leads</button>
+                    <button class="tab" data-tab="deals">Deals</button>
+                    <button class="tab" data-tab="tasks">Tasks</button>
+                    <button class="tab" data-tab="analytics">Analytics</button>
+                </div>
+                
+                <div class="stats-grid">
+                    <div class="stat-card leads">
+                        <div class="stat-value" id="totalLeads">147</div>
+                        <div class="stat-label">Total Leads</div>
+                        <div style="color: var(--success); font-size: 12px; margin-top: 5px;">+12 this week</div>
+                    </div>
+                    <div class="stat-card conversions">
+                        <div class="stat-value" id="conversionRate">23%</div>
+                        <div class="stat-label">Conversion Rate</div>
+                        <div style="color: var(--success); font-size: 12px; margin-top: 5px;">+2.4% this month</div>
+                    </div>
+                    <div class="stat-card revenue">
+                        <div class="stat-value" id="totalRevenue">$42,580</div>
+                        <div class="stat-label">Monthly Revenue</div>
+                        <div style="color: var(--success); font-size: 12px; margin-top: 5px;">+8.7% growth</div>
+                    </div>
+                    <div class="stat-card tasks">
+                        <div class="stat-value" id="pendingTasks">18</div>
+                        <div class="stat-label">Pending Tasks</div>
+                        <div style="color: var(--warning); font-size: 12px; margin-top: 5px;">5 overdue</div>
+                    </div>
+                </div>
+                
+                <div class="filters">
+                    <select class="filter-select" id="filterStatus">
+                        <option value="">All Status</option>
+                        <option value="new">New</option>
+                        <option value="contacted">Contacted</option>
+                        <option value="proposal">Proposal Sent</option>
+                        <option value="negotiation">Negotiation</option>
+                        <option value="closed">Closed</option>
+                    </select>
+                    
+                    <select class="filter-select" id="filterSource">
+                        <option value="">All Sources</option>
+                        <option value="website">Website</option>
+                        <option value="referral">Referral</option>
+                        <option value="social">Social Media</option>
+                        <option value="event">Event</option>
+                        <option value="cold">Cold Outreach</option>
+                    </select>
+                    
+                    <select class="filter-select" id="filterOwner">
+                        <option value="">All Owners</option>
+                        <option value="john">John Doe</option>
+                        <option value="jane">Jane Smith</option>
+                        <option value="mike">Mike Johnson</option>
+                    </select>
+                    
+                    <input type="text" class="search-input" id="searchContacts" placeholder="Search contacts...">
+                </div>
+                
+                <table class="contacts-table" id="contactsTable">
+                    <thead>
+                        <tr>
+                            <th>Contact</th>
+                            <th>Company</th>
+                            <th>Lead Score</th>
+                            <th>Status</th>
+                            <th>Last Contact</th>
+                            <th>Value</th>
+                            <th>Actions</th>
+                        </tr>
+                    </thead>
+                    <tbody id="contactsBody">
+                        <!-- Contacts will be loaded here -->
+                    </tbody>
+                </table>
+                
+                <div class="pagination" id="pagination">
+                    <!-- Pagination will be generated here -->
+                </div>
+            </div>
+        </div>
+    </div>
+    
+    <!-- Add Contact Modal -->
+    <div class="modal" id="addContactModal">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h2>Add New Contact</h2>
+                <button onclick="closeModal('addContactModal')" style="background: none; border: none; font-size: 20px; cursor: pointer;">×</button>
+            </div>
+            <div class="modal-body">
+                <div class="form-group">
+                    <label class="form-label">First Name *</label>
+                    <input type="text" class="form-input" id="firstName" required>
+                </div>
+                <div class="form-group">
+                    <label class="form-label">Last Name *</label>
+                    <input type="text" class="form-input" id="lastName" required>
+                </div>
+                <div class="form-group">
+                    <label class="form-label">Email *</label>
+                    <input type="email" class="form-input" id="email" required>
+                </div>
+                <div class="form-group">
+                    <label class="form-label">Company</label>
+                    <input type="text" class="form-input" id="company">
+                </div>
+                <div class="form-group">
+                    <label class="form-label">Phone</label>
+                    <input type="tel" class="form-input" id="phone">
+                </div>
+                <div class="form-group">
+                    <label class="form-label">Lead Source</label>
+                    <select class="form-input" id="leadSource">
+                        <option value="website">Website</option>
+                        <option value="referral">Referral</option>
+                        <option value="social">Social Media</option>
+                        <option value="event">Event</option>
+                        <option value="cold">Cold Outreach</option>
+                    </select>
+                </div>
+                <div class="form-group">
+                    <label class="form-label">Initial Status</label>
+                    <select class="form-input" id="initialStatus">
+                        <option value="new">New Lead</option>
+                        <option value="contacted">Contacted</option>
+                        <option value="proposal">Proposal Sent</option>
+                    </select>
+                </div>
+                <div class="form-group">
+                    <label class="form-label">Estimated Value ($)</label>
+                    <input type="number" class="form-input" id="estimatedValue" min="0" step="100">
+                </div>
+                <div class="form-group">
+                    <label class="form-label">Notes</label>
+                    <textarea class="form-input" id="notes" rows="3"></textarea>
+                </div>
+            </div>
+            <div class="form-actions">
+                <button class="action-btn secondary" onclick="closeModal('addContactModal')">Cancel</button>
+                <button class="action-btn success" onclick="saveContact()">Save Contact</button>
+            </div>
+        </div>
+    </div>
+    
+    <!-- Contact Detail Modal -->
+    <div class="modal" id="contactDetailModal">
+        <div class="modal-content" style="width: 700px;">
+            <div class="modal-header">
+                <h2 id="contactName">Contact Details</h2>
+                <button onclick="closeModal('contactDetailModal')" style="background: none; border: none; font-size: 20px; cursor: pointer;">×</button>
+            </div>
+            <div class="modal-body" id="contactDetailContent">
+                <!-- Contact details will be loaded here -->
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // Sample CRM data
+        let contacts = [];
+        let currentPage = 1;
+        const itemsPerPage = 10;
+        
+        // Initialize
+        document.addEventListener('DOMContentLoaded', function() {
+            loadSampleData();
+            setupEventListeners();
+            renderContacts();
+            loadTeamMembers();
+            loadActivityFeed();
+            updateStats();
+        });
+        
+        // Load sample data
+        function loadSampleData() {
+            const firstNames = ['John', 'Jane', 'Michael', 'Sarah', 'David', 'Lisa', 'Robert', 'Emily', 'William', 'Jessica'];
+            const lastNames = ['Smith', 'Johnson', 'Williams', 'Brown', 'Jones', 'Garcia', 'Miller', 'Davis', 'Rodriguez', 'Martinez'];
+            const companies = ['TechCorp', 'Innovate Inc', 'Global Solutions', 'Digital Dynamics', 'Future Systems', 'Cloud Networks', 'DataWorks', 'SmartTech', 'NextGen', 'Visionary Labs'];
+            const statuses = ['new', 'contacted', 'proposal', 'negotiation', 'closed'];
+            const sources = ['website', 'referral', 'social', 'event', 'cold'];
+            
+            contacts = [];
+            
+            for (let i = 1; i <= 147; i++) {
+                const firstName = firstNames[Math.floor(Math.random() * firstNames.length)];
+                const lastName = lastNames[Math.floor(Math.random() * lastNames.length)];
+                const status = statuses[Math.floor(Math.random() * statuses.length)];
+                const source = sources[Math.floor(Math.random() * sources.length)];
+                const leadScore = Math.floor(Math.random() * 100);
+                const value = Math.floor(Math.random() * 5000) + 500;
+                
+                // Determine lead score category
+                let scoreClass = 'score-cold';
+                if (leadScore >= 70) scoreClass = 'score-hot';
+                else if (leadScore >= 40) scoreClass = 'score-warm';
+                
+                // Determine status class
+                let statusClass = 'status-new';
+                if (status === 'contacted') statusClass = 'status-contact';
+                else if (status === 'proposal') statusClass = 'status-proposal';
+                else if (status === 'closed') statusClass = 'status-closed';
+                
+                contacts.push({
+                    id: i,
+                    firstName: firstName,
+                    lastName: lastName,
+                    email: `${firstName.toLowerCase()}.${lastName.toLowerCase()}@example.com`,
+                    company: companies[Math.floor(Math.random() * companies.length)],
+                    phone: `+1 (555) ${Math.floor(Math.random() * 900) + 100}-${Math.floor(Math.random() * 9000) + 1000}`,
+                    status: status,
+                    statusClass: statusClass,
+                    source: source,
+                    leadScore: leadScore,
+                    scoreClass: scoreClass,
+                    value: value,
+                    lastContact: getRandomDate(),
+                    owner: ['john', 'jane', 'mike'][Math.floor(Math.random() * 3)],
+                    notes: 'Potential client interested in our premium services.'
+                });
+            }
+            
+            // Save to localStorage
+            localStorage.setItem('crm_contacts', JSON.stringify(contacts));
+        }
+        
+        // Get random date for last contact
+        function getRandomDate() {
+            const daysAgo = Math.floor(Math.random() * 30);
+            const date = new Date();
+            date.setDate(date.getDate() - daysAgo);
+            return date.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+        }
+        
+        // Setup event listeners
+        function setupEventListeners() {
+            // Tab navigation
+            document.querySelectorAll('.tab').forEach(tab => {
+                tab.addEventListener('click', function() {
+                    document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
+                    this.classList.add('active');
+                    switchTab(this.dataset.tab);
+                });
+            });
+            
+            // Filter changes
+            document.getElementById('filterStatus').addEventListener('change', filterContacts);
+            document.getElementById('filterSource').addEventListener('change', filterContacts);
+            document.getElementById('filterOwner').addEventListener('change', filterContacts);
+            document.getElementById('searchContacts').addEventListener('input', filterContacts);
+            
+            // Load from localStorage if available
+            const savedContacts = localStorage.getItem('crm_contacts');
+            if (savedContacts) {
+                contacts = JSON.parse(savedContacts);
+                renderContacts();
+            }
+        }
+        
+        // Switch between tabs
+        function switchTab(tabName) {
+            // Hide all content sections
+            document.querySelectorAll('.tab-content').forEach(section => {
+                section.style.display = 'none';
+            });
+            
+            // Show selected tab content
+            const contentSection = document.getElementById(`${tabName}Content`);
+            if (contentSection) {
+                contentSection.style.display = 'block';
+            }
+            
+            // Update table based on tab
+            if (tabName === 'contacts') {
+                renderContacts();
+            } else if (tabName === 'leads') {
+                // Filter to show only leads (non-closed)
+                renderContacts(contacts.filter(c => c.status !== 'closed'));
+            } else if (tabName === 'deals') {
+                // Show only closed deals
+                renderContacts(contacts.filter(c => c.status === 'closed'));
+            }
+            
+            // Update stats display
+            document.querySelector('.stats-grid').style.display = tabName === 'analytics' ? 'none' : 'grid';
+        }
+        
+        // Render contacts table
+        function renderContacts(contactList = contacts) {
+            const tbody = document.getElementById('contactsBody');
+            tbody.innerHTML = '';
+            
+            // Apply pagination
+            const startIndex = (currentPage - 1) * itemsPerPage;
+            const endIndex = startIndex + itemsPerPage;
+            const pageContacts = contactList.slice(startIndex, endIndex);
+            
+            if (pageContacts.length === 0) {
+                tbody.innerHTML = `
+                    <tr>
+                        <td colspan="7" style="text-align: center; padding: 40px 20px; color: var(--text-light);">
+                            <i class="fas fa-users" style="font-size: 48px; margin-bottom: 15px; opacity: 0.3;"></i>
+                            <p>No contacts found</p>
+                        </td>
+                    </tr>
+                `;
+                return;
+            }
+            
+            pageContacts.forEach(contact => {
+                const row = document.createElement('tr');
+                
+                row.innerHTML = `
+                    <td>
+                        <div style="display: flex; align-items: center; gap: 10px;">
+                            <div class="contact-avatar">
+                                ${contact.firstName[0]}${contact.lastName[0]}
+                            </div>
+                            <div>
+                                <div style="font-weight: 600;">${contact.firstName} ${contact.lastName}</div>
+                                <div style="font-size: 12px; color: var(--text-light);">${contact.email}</div>
+                            </div>
+                        </div>
+                    </td>
+                    <td>${contact.company}</td>
+                    <td>
+                        <span class="lead-score ${contact.scoreClass}">${contact.leadScore}/100</span>
+                    </td>
+                    <td>
+                        <span class="status-badge ${contact.statusClass}">${contact.status.toUpperCase()}</span>
+                    </td>
+                    <td>${contact.lastContact}</td>
+                    <td style="font-weight: 600;">$${contact.value.toLocaleString()}</td>
+                    <td>
+                        <div class="action-buttons">
+                            <div class="action-icon view" onclick="viewContact(${contact.id})">
+                                <i class="fas fa-eye"></i>
+                            </div>
+                            <div class="action-icon edit" onclick="editContact(${contact.id})">
+                                <i class="fas fa-edit"></i>
+                            </div>
+                            <div class="action-icon delete" onclick="deleteContact(${contact.id})">
+                                <i class="fas fa-trash"></i>
+                            </div>
+                        </div>
+                    </td>
+                `;
+                
+                tbody.appendChild(row);
+            });
+            
+            // Update pagination
+            updatePagination(contactList.length);
+        }
+        
+        // Filter contacts
+        function filterContacts() {
+            const statusFilter = document.getElementById('filterStatus').value;
+            const sourceFilter = document.getElementById('filterSource').value;
+            const ownerFilter = document.getElementById('filterOwner').value;
+            const searchFilter = document.getElementById('searchContacts').value.toLowerCase();
+            
+            const filtered = contacts.filter(contact => {
+                // Apply filters
+                if (statusFilter && contact.status !== statusFilter) return false;
+                if (sourceFilter && contact.source !== sourceFilter) return false;
+                if (ownerFilter && contact.owner !== ownerFilter) return false;
+                
+                // Apply search
+                if (searchFilter) {
+                    const searchStr = `${contact.firstName} ${contact.lastName} ${contact.email} ${contact.company} ${contact.phone}`.toLowerCase();
+                    if (!searchStr.includes(searchFilter)) return false;
+                }
+                
+                return true;
+            });
+            
+            currentPage = 1;
+            renderContacts(filtered);
+        }
+        
+        // Update pagination
+        function updatePagination(totalItems) {
+            const pagination = document.getElementById('pagination');
+            const totalPages = Math.ceil(totalItems / itemsPerPage);
+            
+            if (totalPages <= 1) {
+                pagination.innerHTML = '';
+                return;
+            }
+            
+            let html = '';
+            
+            // Previous button
+            html += `<button class="page-btn" onclick="changePage(${currentPage - 1})" ${currentPage === 1 ? 'disabled' : ''}><i class="fas fa-chevron-left"></i></button>`;
+            
+            // Page numbers
+            for (let i = 1; i <= totalPages; i++) {
+                if (i === 1 || i === totalPages || (i >= currentPage - 1 && i <= currentPage + 1)) {
+                    html += `<button class="page-btn ${i === currentPage ? 'active' : ''}" onclick="changePage(${i})">${i}</button>`;
+                } else if (i === currentPage - 2 || i === currentPage + 2) {
+                    html += `<span style="align-self: center;">...</span>`;
+                }
+            }
+            
+            // Next button
+            html += `<button class="page-btn" onclick="changePage(${currentPage + 1})" ${currentPage === totalPages ? 'disabled' : ''}><i class="fas fa-chevron-right"></i></button>`;
+            
+            pagination.innerHTML = html;
+        }
+        
+        // Change page
+        function changePage(page) {
+            const totalPages = Math.ceil(contacts.length / itemsPerPage);
+            if (page < 1 || page > totalPages) return;
+            
+            currentPage = page;
+            renderContacts();
+        }
+        
+        // Load team members
+        function loadTeamMembers() {
+            const teamMembers = [
+                { name: 'John Doe', role: 'Sales Manager', avatar: 'JD' },
+                { name: 'Jane Smith', role: 'Account Executive', avatar: 'JS' },
+                { name: 'Mike Johnson', role: 'Business Development', avatar: 'MJ' },
+                { name: 'Sarah Williams', role: 'Customer Success', avatar: 'SW' },
+                { name: 'David Brown', role: 'Marketing', avatar: 'DB' }
+            ];
+            
+            const container = document.getElementById('teamMembers');
+            container.innerHTML = '';
+            
+            teamMembers.forEach(member => {
+                const li = document.createElement('li');
+                li.className = 'user-item';
+                li.innerHTML = `
+                    <div class="user-avatar">${member.avatar}</div>
+                    <div>
+                        <div style="font-weight: 500;">${member.name}</div>
+                        <div style="font-size: 12px; color: var(--text-light);">${member.role}</div>
+                    </div>
+                `;
+                container.appendChild(li);
+            });
+        }
+        
+        // Load activity feed
+        function loadActivityFeed() {
+            const activities = [
+                { action: 'John Doe closed a deal with TechCorp for $5,200', time: '10 minutes ago' },
+                { action: 'Jane Smith scheduled a follow-up meeting with Innovate Inc', time: '1 hour ago' },
+                { action: 'Mike Johnson added 3 new leads from website', time: '2 hours ago' },
+                { action: 'Sarah Williams updated the pricing proposal', time: '3 hours ago' },
+                { action: 'David Brown published a new marketing campaign', time: '5 hours ago' },
+                { action: 'New lead from social media: Emily Rodriguez', time: '1 day ago' },
+                { action: 'Monthly revenue target achieved: $42,580', time: '2 days ago' }
+            ];
+            
+            const container = document.getElementById('activityFeed');
+            container.innerHTML = '';
+            
+            activities.forEach(activity => {
+                const div = document.createElement('div');
+                div.className = 'activity-item';
+                div.innerHTML = `
+                    <div>${activity.action}</div>
+                    <div class="activity-time">${activity.time}</div>
+                `;
+                container.appendChild(div);
+            });
+        }
+        
+        // Update stats
+        function updateStats() {
+            const totalLeads = contacts.length;
+            const closedDeals = contacts.filter(c => c.status === 'closed').length;
+            const conversionRate = Math.round((closedDeals / totalLeads) * 100);
+            const totalRevenue = contacts.filter(c => c.status === 'closed').reduce((sum, c) => sum + c.value, 0);
+            
+            document.getElementById('totalLeads').textContent = totalLeads;
+            document.getElementById('conversionRate').textContent = `${conversionRate}%`;
+            document.getElementById('totalRevenue').textContent = `$${totalRevenue.toLocaleString()}`;
+        }
+        
+        // Modal functions
+        function openAddContactModal() {
+            document.getElementById('addContactModal').classList.add('active');
+        }
+        
+        function closeModal(modalId) {
+            document.getElementById(modalId).classList.remove('active');
+        }
+        
+        // Save new contact
+        function saveContact() {
+            const firstName = document.getElementById('firstName').value.trim();
+            const lastName = document.getElementById('lastName').value.trim();
+            const email = document.getElementById('email').value.trim();
+            
+            if (!firstName || !lastName || !email) {
+                alert('Please fill in all required fields');
+                return;
+            }
+            
+            // Create new contact
+            const newContact = {
+                id: contacts.length + 1,
+                firstName: firstName,
+                lastName: lastName,
+                email: email,
+                company: document.getElementById('company').value.trim(),
+                phone: document.getElementById('phone').value.trim(),
+                status: document.getElementById('initialStatus').value,
+                statusClass: `status-${document.getElementById('initialStatus').value}`,
+                source: document.getElementById('leadSource').value,
+                leadScore: Math.floor(Math.random() * 100),
+                scoreClass: 'score-cold',
+                value: parseInt(document.getElementById('estimatedValue').value) || 0,
+                lastContact: new Date().toLocaleDateString('en-US', { month: 'short', day: 'numeric' }),
+                owner: 'john',
+                notes: document.getElementById('notes').value.trim()
+            };
+            
+            // Determine score class
+            if (newContact.leadScore >= 70) newContact.scoreClass = 'score-hot';
+            else if (newContact.leadScore >= 40) newContact.scoreClass = 'score-warm';
+            
+            // Add to contacts
+            contacts.unshift(newContact);
+            
+            // Update UI
+            renderContacts();
+            updateStats();
+            closeModal('addContactModal');
+            
+            // Save to localStorage
+            localStorage.setItem('crm_contacts', JSON.stringify(contacts));
+            
+            // Add activity
+            addActivity(`${firstName} ${lastName} added as new contact`);
+            
+            alert('Contact added successfully!');
+        }
+        
+        // View contact details
+        function viewContact(id) {
+            const contact = contacts.find(c => c.id === id);
+            if (!contact) return;
+            
+            document.getElementById('contactName').textContent = `${contact.firstName} ${contact.lastName}`;
+            
+            const content = document.getElementById('contactDetailContent');
+            content.innerHTML = `
+                <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 20px;">
+                    <div>
+                        <h3 style="margin-bottom: 15px;">Contact Information</h3>
+                        <div style="background: #f8fafc; padding: 20px; border-radius: 10px;">
+                            <p><strong>Email:</strong> ${contact.email}</p>
+                            <p><strong>Phone:</strong> ${contact.phone}</p>
+                            <p><strong>Company:</strong> ${contact.company}</p>
+                            <p><strong>Lead Source:</strong> ${contact.source}</p>
+                            <p><strong>Status:</strong> <span class="status-badge ${contact.statusClass}">${contact.status.toUpperCase()}</span></p>
+                            <p><strong>Lead Score:</strong> <span class="lead-score ${contact.scoreClass}">${contact.leadScore}/100</span></p>
+                            <p><strong>Estimated Value:</strong> $${contact.value.toLocaleString()}</p>
+                            <p><strong>Last Contact:</strong> ${contact.lastContact}</p>
+                        </div>
+                    </div>
+                    
+                    <div>
+                        <h3 style="margin-bottom: 15px;">Quick Actions</h3>
+                        <div style="display: flex; flex-direction: column; gap: 10px;">
+                            <button class="action-btn" onclick="sendEmail('${contact.email}')">
+                                <i class="fas fa-envelope"></i> Send Email
+                            </button>
+                            <button class="action-btn success" onclick="scheduleMeeting(${id})">
+                                <i class="fas fa-calendar"></i> Schedule Meeting
+                            </button>
+                            <button class="action-btn warning" onclick="updateStatus(${id})">
+                                <i class="fas fa-edit"></i> Update Status
+                            </button>
+                            <button class="action-btn" style="background: var(--info);" onclick="addNote(${id})">
+                                <i class="fas fa-sticky-note"></i> Add Note
+                            </button>
+                        </div>
+                        
+                        <h3 style="margin-top: 30px; margin-bottom: 15px;">Notes</h3>
+                        <div style="background: #f8fafc; padding: 15px; border-radius: 10px; min-height: 100px;">
+                            ${contact.notes || 'No notes added yet.'}
+                        </div>
+                    </div>
+                </div>
+                
+                <div style="margin-top: 30px;">
+                    <h3>Recent Interactions</h3>
+                    <div style="background: #f8fafc; padding: 15px; border-radius: 10px; margin-top: 10px;">
+                        <p><i class="fas fa-check-circle" style="color: var(--success);"></i> Initial contact made - ${contact.lastContact}</p>
+                        <p><i class="fas fa-envelope" style="color: var(--primary);"></i> Welcome email sent - ${contact.lastContact}</p>
+                    </div>
+                </div>
+            `;
+            
+            document.getElementById('contactDetailModal').classList.add('active');
+        }
+        
+        // Edit contact
+        function editContact(id) {
+            alert(`Edit contact ${id} - This would open an edit form in production`);
+            // In production, this would open a pre-filled edit modal
+        }
+        
+        // Delete contact
+        function deleteContact(id) {
+            if (confirm('Are you sure you want to delete this contact?')) {
+                contacts = contacts.filter(c => c.id !== id);
+                renderContacts();
+                updateStats();
+                localStorage.setItem('crm_contacts', JSON.stringify(contacts));
+                addActivity(`Contact #${id} deleted`);
+            }
+        }
+        
+        // Import contacts
+        function importContacts() {
+            alert('Import feature - This would allow CSV import in production');
+        }
+        
+        // Helper functions
+        function sendEmail(email) {
+            window.location.href = `mailto:${email}`;
+        }
+        
+        function scheduleMeeting(id) {
+            alert(`Schedule meeting with contact #${id}`);
+        }
+        
+        function updateStatus(id) {
+            const newStatus = prompt('Enter new status (new, contacted, proposal, negotiation, closed):');
+            if (newStatus && ['new', 'contacted', 'proposal', 'negotiation', 'closed'].includes(newStatus)) {
+                const contact = contacts.find(c => c.id === id);
+                if (contact) {
+                    contact.status = newStatus;
+                    contact.statusClass = `status-${newStatus}`;
+                    renderContacts();
+                    localStorage.setItem('crm_contacts', JSON.stringify(contacts));
+                    addActivity(`Updated status for contact #${id} to ${newStatus}`);
+                }
+            }
+        }
+        
+        function addNote(id) {
+            const note = prompt('Add a note for this contact:');
+            if (note) {
+                const contact = contacts.find(c => c.id === id);
+                if (contact) {
+                    contact.notes = note;
+                    localStorage.setItem('crm_contacts', JSON.stringify(contacts));
+                    addActivity(`Added note to contact #${id}`);
+                }
+            }
+        }
+        
+        function addActivity(action) {
+            const activity = {
+                action: action,
+                time: 'Just now'
+            };
+            
+            // Add to activity feed
+            const container = document.getElementById('activityFeed');
+            const div = document.createElement('div');
+            div.className = 'activity-item';
+            div.innerHTML = `
+                <div>${activity.action}</div>
+                <div class="activity-time">${activity.time}</div>
+            `;
+            container.insertBefore(div, container.firstChild);
+            
+            // Keep only last 20 activities
+            while (container.children.length > 20) {
+                container.removeChild(container.lastChild);
+            }
+        }
+    </script>
+</body>
+</html>

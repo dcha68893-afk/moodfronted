@@ -284,12 +284,12 @@
         
         /* Main Content Area */
         .main-content {
-    flex: 1;
-    display: flex;
-    flex-direction: column;
-    overflow-y: auto;  /* Changed from overflow: hidden */
-    height: 100vh;     /* Add this to ensure it takes full height */
-}
+            flex: 1;
+            display: flex;
+            flex-direction: column;
+            overflow-y: auto;
+            height: 100vh;
+        }
         
         /* Top Header */
         .top-header {
@@ -445,12 +445,12 @@
         
         /* Tool Management */
         .tool-management {
-    padding: 0 20px;
-    flex: 1;
-    overflow-y: auto;  /* Changed from overflow: hidden */
-    display: flex;
-    flex-direction: column;
-}
+            padding: 0 20px;
+            flex: 1;
+            overflow-y: auto;
+            display: flex;
+            flex-direction: column;
+        }
         
         .search-refresh-container {
             display: flex;
@@ -2260,7 +2260,7 @@
                 features: ['SEO optimized', 'Multiple languages', 'Tone adjustment', 'Plagiarism check'],
                 isPremium: true,
                 requiresSubscription: 'basic',
-                isMostUsed: true // ⿣ TOOLS CARDS: Mark as most used
+                isMostUsed: true
             },
             {
                 id: 'predictive-analytics',
@@ -2286,7 +2286,7 @@
                 plan: 'free',
                 features: ['Email templates', 'Scheduling', 'Open tracking', 'Analytics'],
                 isPremium: false,
-                isMostUsed: true // ⿣ TOOLS CARDS: Mark as most used
+                isMostUsed: true
             },
             {
                 id: 'ai-image',
@@ -2970,7 +2970,7 @@
         function handleToolAction(action, tool, button) {
             switch (action) {
                 case 'use':
-                    useTool(tool);
+                    openActualTool(tool.id);
                     break;
                 case 'details':
                     showToolDetails(tool);
@@ -2985,47 +2985,120 @@
             }
         }
         
-        // Use a tool
-        function useTool(tool) {
-            if (tool.credits > 0 && availableCredits < tool.credits) {
-                showToast(`Not enough credits. You need ${tool.credits} credits.`, 'warning');
-                showCreditsModal();
-                return;
+        // =============================================
+        // OPEN ACTUAL TOOL FUNCTION - INTEGRATED
+        // =============================================
+        
+        function openActualTool(toolId) {
+            const toolMap = {
+                'ai-content': '/tools/content-generator.html',
+                'ai-image': '/tools/image-generator.html',
+                'bulk-email': '/tools/email-sender.html',
+                'predictive-analytics': '/tools/analytics.html',
+                'crm-advanced': '/tools/crm.html',
+                'data-export': '/tools/data-export.html',
+                'ai-templates': '/tools/templates-marketplace.html',
+                'analytics-addon': '/tools/advanced-analytics.html',
+                'integration-plugin': '/tools/integrations.html'
+            };
+            
+            if (toolMap[toolId]) {
+                // First check if user has subscription or credits for this tool
+                const tool = allTools.find(t => t.id === toolId);
+                if (tool) {
+                    // Check if tool is locked
+                    if (isToolLocked(tool)) {
+                        if (tool.requiresSubscription) {
+                            showToast(`This tool requires ${tool.requiresSubscription} subscription`, 'warning');
+                            showUpgradeModal();
+                        } else if (tool.credits > 0) {
+                            showToast(`Not enough credits. You need ${tool.credits} credits.`, 'warning');
+                            showCreditsModal();
+                        }
+                        return;
+                    }
+                    
+                    // Deduct credits if needed
+                    if (tool.credits > 0) {
+                        if (availableCredits < tool.credits) {
+                            showToast(`Not enough credits. You need ${tool.credits} credits.`, 'warning');
+                            showCreditsModal();
+                            return;
+                        }
+                        
+                        availableCredits -= tool.credits;
+                        addTransaction({
+                            type: 'Tool Usage',
+                            amount: -tool.credits,
+                            status: 'completed',
+                            description: `Used ${tool.name}`
+                        });
+                    }
+                    
+                    // Increment tools used
+                    toolsUsed++;
+                    
+                    // Update productivity score
+                    productivityScore = Math.min(100, productivityScore + Math.floor(Math.random() * 3));
+                    
+                    // Update UI
+                    updateUI();
+                    saveUserDataToCache();
+                    
+                    // Open the actual tool in new tab
+                    window.open(toolMap[toolId], '_blank');
+                    showToast(`Opening ${tool.name}...`, 'success');
+                } else {
+                    // Tool not found in our data
+                    showGenericTool(toolId);
+                }
+            } else {
+                // For tools not in the map, show a generic tool interface
+                showGenericTool(toolId);
             }
-            
-            // Deduct credits if needed
-            if (tool.credits > 0) {
-                availableCredits -= tool.credits;
-                addTransaction({
-                    type: 'Tool Usage',
-                    amount: -tool.credits,
-                    status: 'completed',
-                    description: `Used ${tool.name}`
-                });
-            }
-            
-            // Increment tools used
-            toolsUsed++;
-            
-            // Update productivity score
-            productivityScore = Math.min(100, productivityScore + Math.floor(Math.random() * 3));
-            
-            // Update UI
-            updateUI();
-            saveUserDataToCache();
-            
-            // Show success message
-            showToast(`Successfully used ${tool.name}`, 'success');
-            
-            // Simulate tool execution
-            simulateToolExecution(tool);
         }
         
-        // Simulate tool execution
-        function simulateToolExecution(tool) {
-            setTimeout(() => {
-                showToast(`${tool.name} completed successfully. Check your results.`, 'success');
-            }, 1500);
+        // Fallback for undefined tools
+        function showGenericTool(toolId) {
+            const toolName = toolId.split('-').map(word => 
+                word.charAt(0).toUpperCase() + word.slice(1)
+            ).join(' ');
+            
+            const modal = document.createElement('div');
+            modal.className = 'modal';
+            modal.style.cssText = `
+                position: fixed; top: 0; left: 0; width: 100%; height: 100%;
+                background: rgba(0,0,0,0.5); z-index: 10000; display: flex;
+                align-items: center; justify-content: center;
+            `;
+            
+            modal.innerHTML = `
+                <div style="background: white; border-radius: 15px; padding: 30px; max-width: 500px; width: 90%;">
+                    <h2 style="margin-bottom: 15px;">${toolName}</h2>
+                    <p style="color: var(--text-secondary); margin-bottom: 20px;">
+                        This tool is currently being developed. Check back soon!
+                    </p>
+                    <div style="display: flex; justify-content: flex-end; gap: 10px;">
+                        <button onclick="this.closest('.modal').remove()" 
+                                style="padding: 10px 20px; background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 8px; cursor: pointer;">
+                            Close
+                        </button>
+                        <button onclick="window.open('/tools/suggest-tool.html?tool=${toolId}', '_blank')" 
+                                style="padding: 10px 20px; background: var(--primary-color); color: white; border: none; border-radius: 8px; cursor: pointer;">
+                            Request Early Access
+                        </button>
+                    </div>
+                </div>
+            `;
+            
+            document.body.appendChild(modal);
+            
+            // Close when clicking outside
+            modal.addEventListener('click', (e) => {
+                if (e.target === modal) {
+                    modal.remove();
+                }
+            });
         }
         
         // Show tool details modal
@@ -3084,7 +3157,7 @@
                 <button class="action-btn secondary" id="closeToolDetails">Close</button>
                 <button class="action-btn primary" id="useToolFromModal">
                     <i class="fas fa-play"></i>
-                    Use Tool
+                    Open Tool
                 </button>
             `;
             
@@ -3111,7 +3184,7 @@
             if (useBtn) {
                 useBtn.addEventListener('click', () => {
                     toolModal.classList.remove('active');
-                    useTool(tool);
+                    openActualTool(tool.id);
                 });
             }
         }

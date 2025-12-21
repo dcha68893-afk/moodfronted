@@ -1,0 +1,859 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Data Export Tool | MoodChat</title>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <!-- SheetJS for Excel export -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; }
+        :root {
+            --primary: #6366f1; --success: #10b981; --warning: #f59e0b; --danger: #ef4444;
+            --light: #f8fafc; --text: #1e293b; --text-light: #64748b;
+        }
+        body { background: linear-gradient(135deg, #f8fafc 0%, #f1f5f9 100%); min-height: 100vh; padding: 20px; }
+        .container { max-width: 1200px; margin: 0 auto; }
+        .header { 
+            background: white; border-radius: 15px; padding: 25px; margin-bottom: 25px;
+            box-shadow: 0 4px 6px rgba(0,0,0,0.07); display: flex; justify-content: space-between; align-items: center;
+        }
+        .header h1 { font-size: 28px; background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); -webkit-background-clip: text; background-clip: text; color: transparent; }
+        .back-btn { padding: 10px 20px; background: var(--primary); color: white; border: none; border-radius: 8px; cursor: pointer; }
+        .export-wizard { display: grid; grid-template-columns: 300px 1fr; gap: 25px; }
+        .wizard-sidebar { background: white; border-radius: 15px; padding: 25px; box-shadow: 0 4px 6px rgba(0,0,0,0.07); }
+        .wizard-content { background: white; border-radius: 15px; padding: 25px; box-shadow: 0 4px 6px rgba(0,0,0,0.07); }
+        .wizard-steps { margin-bottom: 30px; }
+        .wizard-step { display: flex; align-items: center; gap: 10px; padding: 15px; margin-bottom: 10px; border-radius: 10px; cursor: pointer; }
+        .wizard-step.active { background: linear-gradient(135deg, rgba(99, 102, 241, 0.1) 0%, rgba(139, 92, 246, 0.1) 100%); }
+        .step-number { width: 30px; height: 30px; border-radius: 50%; background: #e2e8f0; display: flex; align-items: center; justify-content: center; font-weight: 600; }
+        .wizard-step.active .step-number { background: var(--primary); color: white; }
+        .step-title { font-weight: 600; }
+        .step-subtitle { font-size: 12px; color: var(--text-light); }
+        .data-sources { display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap: 15px; margin-bottom: 25px; }
+        .source-card { padding: 20px; border: 2px solid #e2e8f0; border-radius: 10px; cursor: pointer; }
+        .source-card.selected { border-color: var(--primary); background: linear-gradient(135deg, rgba(99, 102, 241, 0.05) 0%, rgba(139, 92, 246, 0.05) 100%); }
+        .source-icon { font-size: 24px; margin-bottom: 10px; color: var(--primary); }
+        .filter-section { margin-bottom: 25px; }
+        .filter-section h3 { margin-bottom: 15px; color: var(--text); }
+        .filter-group { display: flex; gap: 15px; margin-bottom: 15px; }
+        .filter-input { flex: 1; padding: 10px 15px; border: 1px solid #e2e8f0; border-radius: 8px; }
+        .date-range { display: flex; gap: 10px; align-items: center; }
+        .date-input { padding: 10px 15px; border: 1px solid #e2e8f0; border-radius: 8px; }
+        .column-selector { background: #f8fafc; padding: 20px; border-radius: 10px; margin-bottom: 25px; }
+        .columns-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap: 10px; margin-top: 15px; }
+        .column-checkbox { display: flex; align-items: center; gap: 8px; padding: 8px 12px; background: white; border-radius: 6px; }
+        .preview-area { margin-top: 25px; }
+        .data-preview { width: 100%; border-collapse: collapse; margin-top: 15px; }
+        .data-preview th, .data-preview td { padding: 12px 15px; text-align: left; border-bottom: 1px solid #e2e8f0; }
+        .data-preview th { background: #f8fafc; font-weight: 600; color: var(--text); }
+        .action-buttons { display: flex; gap: 15px; margin-top: 25px; }
+        .action-btn { 
+            padding: 14px 28px; background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); 
+            color: white; border: none; border-radius: 8px; cursor: pointer; font-weight: 600; 
+            display: flex; align-items: center; justify-content: center; gap: 10px;
+        }
+        .action-btn.secondary { background: #f8fafc; color: var(--text); border: 1px solid #e2e8f0; }
+        .action-btn.success { background: linear-gradient(135deg, #10b981 0%, #059669 100%); }
+        .loading { display: none; align-items: center; justify-content: center; gap: 10px; margin: 20px 0; }
+        .loading i { animation: spin 1s linear infinite; }
+        @keyframes spin { 100% { transform: rotate(360deg); } }
+        .export-options { display: grid; grid-template-columns: repeat(3, 1fr); gap: 15px; margin-top: 25px; }
+        .export-option { padding: 20px; border: 2px solid #e2e8f0; border-radius: 10px; text-align: center; cursor: pointer; }
+        .export-option.selected { border-color: var(--primary); }
+        .export-option i { font-size: 32px; margin-bottom: 10px; color: var(--primary); }
+        .schedule-export { background: #f8fafc; padding: 20px; border-radius: 10px; margin-top: 25px; }
+        .progress-bar { height: 8px; background: #e2e8f0; border-radius: 4px; margin: 20px 0; overflow: hidden; }
+        .progress { height: 100%; background: var(--success); width: 0%; transition: width 0.3s; }
+        .history-list { margin-top: 25px; }
+        .history-item { padding: 15px; border: 1px solid #e2e8f0; border-radius: 10px; margin-bottom: 10px; display: flex; justify-content: space-between; align-items: center; }
+        @media (max-width: 992px) { 
+            .export-wizard { grid-template-columns: 1fr; }
+            .data-sources { grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); }
+            .export-options { grid-template-columns: 1fr; }
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <h1><i class="fas fa-file-export"></i> Data Export Tool</h1>
+            <button class="back-btn" onclick="window.history.back()">
+                <i class="fas fa-arrow-left"></i> Back to Dashboard
+            </button>
+        </div>
+        
+        <div class="export-wizard">
+            <!-- Wizard Steps -->
+            <div class="wizard-sidebar">
+                <div class="wizard-steps">
+                    <div class="wizard-step active" data-step="1">
+                        <div class="step-number">1</div>
+                        <div>
+                            <div class="step-title">Select Data Source</div>
+                            <div class="step-subtitle">Choose what to export</div>
+                        </div>
+                    </div>
+                    <div class="wizard-step" data-step="2">
+                        <div class="step-number">2</div>
+                        <div>
+                            <div class="step-title">Configure Filters</div>
+                            <div class="step-subtitle">Refine your data</div>
+                        </div>
+                    </div>
+                    <div class="wizard-step" data-step="3">
+                        <div class="step-number">3</div>
+                        <div>
+                            <div class="step-title">Select Columns</div>
+                            <div class="step-subtitle">Choose fields to include</div>
+                        </div>
+                    </div>
+                    <div class="wizard-step" data-step="4">
+                        <div class="step-number">4</div>
+                        <div>
+                            <div class="step-title">Export Options</div>
+                            <div class="step-subtitle">Format & schedule</div>
+                        </div>
+                    </div>
+                </div>
+                
+                <div class="quick-export">
+                    <h3>Quick Exports</h3>
+                    <button class="action-btn secondary" style="width: 100%; margin-bottom: 10px;" onclick="quickExport('revenue')">
+                        <i class="fas fa-dollar-sign"></i> Revenue Report
+                    </button>
+                    <button class="action-btn secondary" style="width: 100%; margin-bottom: 10px;" onclick="quickExport('users')">
+                        <i class="fas fa-users"></i> User List
+                    </button>
+                    <button class="action-btn secondary" style="width: 100%;" onclick="quickExport('activity')">
+                        <i class="fas fa-chart-bar"></i> Activity Log
+                    </button>
+                </div>
+            </div>
+            
+            <!-- Wizard Content -->
+            <div class="wizard-content">
+                <!-- Step 1: Select Data Source -->
+                <div id="step1" class="wizard-step-content">
+                    <h2>Select Data Source</h2>
+                    <p style="color: var(--text-light); margin-bottom: 25px;">Choose the type of data you want to export</p>
+                    
+                    <div class="data-sources">
+                        <div class="source-card selected" data-source="users">
+                            <div class="source-icon"><i class="fas fa-users"></i></div>
+                            <h3>Users</h3>
+                            <p>Export user accounts and profiles</p>
+                            <div style="font-size: 12px; color: var(--text-light);">1,247 records available</div>
+                        </div>
+                        
+                        <div class="source-card" data-source="transactions">
+                            <div class="source-icon"><i class="fas fa-receipt"></i></div>
+                            <h3>Transactions</h3>
+                            <p>Payment and purchase history</p>
+                            <div style="font-size: 12px; color: var(--text-light);">8,943 records available</div>
+                        </div>
+                        
+                        <div class="source-card" data-source="analytics">
+                            <div class="source-icon"><i class="fas fa-chart-line"></i></div>
+                            <h3>Analytics</h3>
+                            <p>Usage statistics and metrics</p>
+                            <div style="font-size: 12px; color: var(--text-light);">Daily metrics for 90 days</div>
+                        </div>
+                        
+                        <div class="source-card" data-source="content">
+                            <div class="source-icon"><i class="fas fa-file-alt"></i></div>
+                            <h3>Content</h3>
+                            <p>Articles, posts, and media</p>
+                            <div style="font-size: 12px; color: var(--text-light);">542 content items</div>
+                        </div>
+                        
+                        <div class="source-card" data-source="crm">
+                            <div class="source-icon"><i class="fas fa-address-book"></i></div>
+                            <h3>CRM Data</h3>
+                            <p>Contacts and lead information</p>
+                            <div style="font-size: 12px; color: var(--text-light);">1,589 contacts</div>
+                        </div>
+                        
+                        <div class="source-card" data-source="custom">
+                            <div class="source-icon"><i class="fas fa-database"></i></div>
+                            <h3>Custom Query</h3>
+                            <p>Write your own SQL query</p>
+                            <div style="font-size: 12px; color: var(--text-light);">Advanced users only</div>
+                        </div>
+                    </div>
+                </div>
+                
+                <!-- Step 2: Configure Filters -->
+                <div id="step2" class="wizard-step-content" style="display: none;">
+                    <h2>Configure Filters</h2>
+                    <p style="color: var(--text-light); margin-bottom: 25px;">Refine your data with filters</p>
+                    
+                    <div class="filter-section">
+                        <h3>Date Range</h3>
+                        <div class="date-range">
+                            <input type="date" class="date-input" id="startDate" value="2024-01-01">
+                            <span>to</span>
+                            <input type="date" class="date-input" id="endDate" value="2024-01-31">
+                            <button class="action-btn secondary" onclick="setDateRange('today')">Today</button>
+                            <button class="action-btn secondary" onclick="setDateRange('week')">This Week</button>
+                            <button class="action-btn secondary" onclick="setDateRange('month')">This Month</button>
+                        </div>
+                    </div>
+                    
+                    <div class="filter-section">
+                        <h3>Additional Filters</h3>
+                        <div class="filter-group">
+                            <select class="filter-input" id="statusFilter">
+                                <option value="">All Statuses</option>
+                                <option value="active">Active</option>
+                                <option value="inactive">Inactive</option>
+                                <option value="pending">Pending</option>
+                                <option value="completed">Completed</option>
+                            </select>
+                            
+                            <select class="filter-input" id="typeFilter">
+                                <option value="">All Types</option>
+                                <option value="free">Free Users</option>
+                                <option value="premium">Premium Users</option>
+                                <option value="admin">Administrators</option>
+                            </select>
+                        </div>
+                        
+                        <div class="filter-group">
+                            <input type="text" class="filter-input" id="searchFilter" placeholder="Search keyword...">
+                            <select class="filter-input" id="countryFilter">
+                                <option value="">All Countries</option>
+                                <option value="us">United States</option>
+                                <option value="uk">United Kingdom</option>
+                                <option value="ca">Canada</option>
+                                <option value="au">Australia</option>
+                                <option value="ng">Nigeria</option>
+                            </select>
+                        </div>
+                    </div>
+                    
+                    <div class="filter-section">
+                        <h3>Record Limit</h3>
+                        <input type="range" id="recordLimit" min="10" max="10000" value="1000" style="width: 100%;">
+                        <div style="text-align: center; margin-top: 5px;">
+                            <span id="limitDisplay">1,000 records</span> (maximum: 10,000)
+                        </div>
+                    </div>
+                </div>
+                
+                <!-- Step 3: Select Columns -->
+                <div id="step3" class="wizard-step-content" style="display: none;">
+                    <h2>Select Columns</h2>
+                    <p style="color: var(--text-light); margin-bottom: 25px;">Choose which fields to include in your export</p>
+                    
+                    <div class="column-selector">
+                        <div style="display: flex; justify-content: space-between; margin-bottom: 15px;">
+                            <div>
+                                <button class="action-btn secondary" onclick="selectAllColumns()">Select All</button>
+                                <button class="action-btn secondary" onclick="deselectAllColumns()">Deselect All</button>
+                            </div>
+                            <div>
+                                <span id="selectedCount">0 columns selected</span>
+                            </div>
+                        </div>
+                        
+                        <div class="columns-grid" id="columnsList">
+                            <!-- Columns will be populated by JavaScript -->
+                        </div>
+                    </div>
+                    
+                    <div class="preview-area">
+                        <h3>Data Preview</h3>
+                        <div style="font-size: 14px; color: var(--text-light); margin-bottom: 10px;">
+                            Showing first 10 rows of filtered data
+                        </div>
+                        <div style="overflow-x: auto;">
+                            <table class="data-preview" id="dataPreview">
+                                <!-- Preview will be populated by JavaScript -->
+                            </table>
+                        </div>
+                    </div>
+                </div>
+                
+                <!-- Step 4: Export Options -->
+                <div id="step4" class="wizard-step-content" style="display: none;">
+                    <h2>Export Options</h2>
+                    <p style="color: var(--text-light); margin-bottom: 25px;">Choose export format and delivery method</p>
+                    
+                    <div class="export-options">
+                        <div class="export-option selected" data-format="csv">
+                            <i class="fas fa-file-csv"></i>
+                            <h3>CSV</h3>
+                            <p>Comma-separated values</p>
+                            <small>Best for spreadsheets</small>
+                        </div>
+                        
+                        <div class="export-option" data-format="excel">
+                            <i class="fas fa-file-excel"></i>
+                            <h3>Excel</h3>
+                            <p>Microsoft Excel format</p>
+                            <small>Formatted sheets</small>
+                        </div>
+                        
+                        <div class="export-option" data-format="json">
+                            <i class="fas fa-code"></i>
+                            <h3>JSON</h3>
+                            <p>JavaScript Object Notation</p>
+                            <small>For developers</small>
+                        </div>
+                    </div>
+                    
+                    <div class="schedule-export">
+                        <h3>Schedule Export</h3>
+                        <div style="display: flex; gap: 15px; align-items: center; margin-top: 15px;">
+                            <input type="checkbox" id="scheduleToggle">
+                            <label for="scheduleToggle">Schedule recurring export</label>
+                        </div>
+                        
+                        <div id="scheduleOptions" style="margin-top: 15px; display: none;">
+                            <div class="filter-group">
+                                <select class="filter-input" id="scheduleFrequency">
+                                    <option value="daily">Daily</option>
+                                    <option value="weekly">Weekly</option>
+                                    <option value="monthly">Monthly</option>
+                                </select>
+                                
+                                <select class="filter-input" id="scheduleTime">
+                                    <option value="06:00">6:00 AM</option>
+                                    <option value="09:00">9:00 AM</option>
+                                    <option value="12:00">12:00 PM</option>
+                                    <option value="18:00">6:00 PM</option>
+                                    <option value="00:00">12:00 AM</option>
+                                </select>
+                            </div>
+                            
+                            <div class="filter-group">
+                                <input type="email" class="filter-input" id="scheduleEmail" placeholder="Email for notifications">
+                                <select class="filter-input" id="scheduleDestination">
+                                    <option value="email">Email as attachment</option>
+                                    <option value="cloud">Save to cloud storage</option>
+                                    <option value="webhook">Send to webhook</option>
+                                </select>
+                            </div>
+                        </div>
+                    </div>
+                    
+                    <div class="history-list">
+                        <h3>Export History</h3>
+                        <div id="exportHistory">
+                            <!-- Export history will be populated by JavaScript -->
+                        </div>
+                    </div>
+                </div>
+                
+                <!-- Action Buttons -->
+                <div class="action-buttons">
+                    <button class="action-btn secondary" id="prevBtn" style="display: none;">
+                        <i class="fas fa-arrow-left"></i> Previous
+                    </button>
+                    
+                    <button class="action-btn" id="nextBtn">
+                        Next <i class="fas fa-arrow-right"></i>
+                    </button>
+                    
+                    <button class="action-btn success" id="exportBtn" style="display: none;">
+                        <i class="fas fa-download"></i> Export Now
+                    </button>
+                </div>
+                
+                <div class="loading" id="loading">
+                    <i class="fas fa-spinner"></i>
+                    <span>Processing your export...</span>
+                </div>
+                
+                <div class="progress-bar" id="progressContainer" style="display: none;">
+                    <div class="progress" id="progress"></div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // Current state
+        let currentStep = 1;
+        let selectedSource = 'users';
+        let selectedColumns = new Set();
+        let selectedFormat = 'csv';
+        let exportData = [];
+        
+        // Sample data for preview
+        const sampleUsers = [
+            { id: 1, name: 'John Doe', email: 'john@example.com', country: 'US', status: 'active', type: 'premium', joined: '2024-01-15', revenue: 149 },
+            { id: 2, name: 'Jane Smith', email: 'jane@example.com', country: 'UK', status: 'active', type: 'free', joined: '2024-01-10', revenue: 0 },
+            { id: 3, name: 'Mike Johnson', email: 'mike@example.com', country: 'CA', status: 'pending', type: 'free', joined: '2024-01-05', revenue: 0 },
+            { id: 4, name: 'Sarah Williams', email: 'sarah@example.com', country: 'AU', status: 'active', type: 'premium', joined: '2024-01-01', revenue: 299 },
+            { id: 5, name: 'David Brown', email: 'david@example.com', country: 'US', status: 'inactive', type: 'free', joined: '2023-12-28', revenue: 0 },
+            { id: 6, name: 'Lisa Garcia', email: 'lisa@example.com', country: 'US', status: 'active', type: 'admin', joined: '2023-12-25', revenue: 0 },
+            { id: 7, name: 'Robert Miller', email: 'robert@example.com', country: 'NG', status: 'active', type: 'premium', joined: '2023-12-20', revenue: 99 },
+            { id: 8, name: 'Emily Davis', email: 'emily@example.com', country: 'UK', status: 'completed', type: 'premium', joined: '2023-12-15', revenue: 199 },
+            { id: 9, name: 'William Rodriguez', email: 'william@example.com', country: 'CA', status: 'active', type: 'free', joined: '2023-12-10', revenue: 0 },
+            { id: 10, name: 'Jessica Martinez', email: 'jessica@example.com', country: 'US', status: 'active', type: 'premium', joined: '2023-12-05', revenue: 149 }
+        ];
+        
+        // Available columns for users data
+        const availableColumns = [
+            { id: 'id', name: 'ID', type: 'number', selected: true },
+            { id: 'name', name: 'Name', type: 'text', selected: true },
+            { id: 'email', name: 'Email', type: 'email', selected: true },
+            { id: 'country', name: 'Country', type: 'text', selected: true },
+            { id: 'status', name: 'Status', type: 'text', selected: true },
+            { id: 'type', name: 'User Type', type: 'text', selected: false },
+            { id: 'joined', name: 'Joined Date', type: 'date', selected: false },
+            { id: 'revenue', name: 'Total Revenue', type: 'currency', selected: false },
+            { id: 'last_login', name: 'Last Login', type: 'datetime', selected: false },
+            { id: 'login_count', name: 'Login Count', type: 'number', selected: false }
+        ];
+        
+        // Initialize
+        document.addEventListener('DOMContentLoaded', function() {
+            setupEventListeners();
+            updateSelectedColumns();
+            generatePreview();
+            loadExportHistory();
+        });
+        
+        // Setup event listeners
+        function setupEventListeners() {
+            // Wizard steps
+            document.querySelectorAll('.wizard-step').forEach(step => {
+                step.addEventListener('click', function() {
+                    const stepNum = parseInt(this.dataset.step);
+                    if (stepNum <= currentStep) {
+                        goToStep(stepNum);
+                    }
+                });
+            });
+            
+            // Data source selection
+            document.querySelectorAll('.source-card').forEach(card => {
+                card.addEventListener('click', function() {
+                    document.querySelectorAll('.source-card').forEach(c => c.classList.remove('selected'));
+                    this.classList.add('selected');
+                    selectedSource = this.dataset.source;
+                    generatePreview();
+                });
+            });
+            
+            // Export format selection
+            document.querySelectorAll('.export-option').forEach(option => {
+                option.addEventListener('click', function() {
+                    document.querySelectorAll('.export-option').forEach(o => o.classList.remove('selected'));
+                    this.classList.add('selected');
+                    selectedFormat = this.dataset.format;
+                });
+            });
+            
+            // Record limit slider
+            document.getElementById('recordLimit').addEventListener('input', function() {
+                document.getElementById('limitDisplay').textContent = 
+                    `${this.value.toLocaleString()} records`;
+            });
+            
+            // Schedule toggle
+            document.getElementById('scheduleToggle').addEventListener('change', function() {
+                document.getElementById('scheduleOptions').style.display = 
+                    this.checked ? 'block' : 'none';
+            });
+            
+            // Navigation buttons
+            document.getElementById('prevBtn').addEventListener('click', goToPreviousStep);
+            document.getElementById('nextBtn').addEventListener('click', goToNextStep);
+            document.getElementById('exportBtn').addEventListener('click', startExport);
+        }
+        
+        // Navigation functions
+        function goToStep(step) {
+            currentStep = step;
+            
+            // Update wizard steps UI
+            document.querySelectorAll('.wizard-step').forEach(wizardStep => {
+                const stepNum = parseInt(wizardStep.dataset.step);
+                wizardStep.classList.toggle('active', stepNum === step);
+                wizardStep.querySelector('.step-number').style.background = 
+                    stepNum <= step ? 'var(--primary)' : '#e2e8f0';
+                wizardStep.querySelector('.step-number').style.color = 
+                    stepNum <= step ? 'white' : 'var(--text)';
+            });
+            
+            // Show/hide step content
+            document.querySelectorAll('.wizard-step-content').forEach(content => {
+                content.style.display = 'none';
+            });
+            document.getElementById(`step${step}`).style.display = 'block';
+            
+            // Update navigation buttons
+            document.getElementById('prevBtn').style.display = step > 1 ? 'flex' : 'none';
+            document.getElementById('nextBtn').style.display = step < 4 ? 'flex' : 'none';
+            document.getElementById('exportBtn').style.display = step === 4 ? 'flex' : 'none';
+            
+            // Update step-specific content
+            if (step === 3) {
+                updateSelectedColumns();
+                generatePreview();
+            }
+        }
+        
+        function goToPreviousStep() {
+            if (currentStep > 1) {
+                goToStep(currentStep - 1);
+            }
+        }
+        
+        function goToNextStep() {
+            // Validate current step
+            if (currentStep === 1 && !selectedSource) {
+                alert('Please select a data source first');
+                return;
+            }
+            
+            if (currentStep === 3 && selectedColumns.size === 0) {
+                alert('Please select at least one column to export');
+                return;
+            }
+            
+            if (currentStep < 4) {
+                goToStep(currentStep + 1);
+            }
+        }
+        
+        // Column selection
+        function selectAllColumns() {
+            availableColumns.forEach(col => col.selected = true);
+            updateSelectedColumns();
+            generatePreview();
+        }
+        
+        function deselectAllColumns() {
+            availableColumns.forEach(col => col.selected = false);
+            updateSelectedColumns();
+            generatePreview();
+        }
+        
+        function updateSelectedColumns() {
+            const columnsList = document.getElementById('columnsList');
+            columnsList.innerHTML = '';
+            
+            selectedColumns.clear();
+            
+            availableColumns.forEach(column => {
+                const checkboxId = `col-${column.id}`;
+                const div = document.createElement('div');
+                div.className = 'column-checkbox';
+                div.innerHTML = `
+                    <input type="checkbox" id="${checkboxId}" ${column.selected ? 'checked' : ''}>
+                    <label for="${checkboxId}" style="cursor: pointer;">${column.name}</label>
+                `;
+                
+                columnsList.appendChild(div);
+                
+                // Add event listener
+                const checkbox = document.getElementById(checkboxId);
+                checkbox.addEventListener('change', function() {
+                    column.selected = this.checked;
+                    if (this.checked) {
+                        selectedColumns.add(column.id);
+                    } else {
+                        selectedColumns.delete(column.id);
+                    }
+                    updateSelectedCount();
+                    generatePreview();
+                });
+                
+                if (column.selected) {
+                    selectedColumns.add(column.id);
+                }
+            });
+            
+            updateSelectedCount();
+        }
+        
+        function updateSelectedCount() {
+            document.getElementById('selectedCount').textContent = 
+                `${selectedColumns.size} column${selectedColumns.size !== 1 ? 's' : ''} selected`;
+        }
+        
+        // Generate data preview
+        function generatePreview() {
+            const previewTable = document.getElementById('dataPreview');
+            const selectedCols = availableColumns.filter(col => col.selected);
+            
+            // Create header
+            let html = '<thead><tr>';
+            selectedCols.forEach(col => {
+                html += `<th>${col.name}</th>`;
+            });
+            html += '</tr></thead>';
+            
+            // Create body with sample data
+            html += '<tbody>';
+            sampleUsers.forEach(user => {
+                html += '<tr>';
+                selectedCols.forEach(col => {
+                    let value = user[col.id];
+                    
+                    // Format value based on type
+                    if (col.type === 'currency' && value !== undefined) {
+                        value = `$${value}`;
+                    } else if (col.type === 'date' && value) {
+                        value = new Date(value).toLocaleDateString();
+                    } else if (value === undefined) {
+                        // Generate sample data for missing columns
+                        if (col.id === 'last_login') {
+                            value = '2024-01-15 14:30';
+                        } else if (col.id === 'login_count') {
+                            value = Math.floor(Math.random() * 100);
+                        }
+                    }
+                    
+                    html += `<td>${value || ''}</td>`;
+                });
+                html += '</tr>';
+            });
+            html += '</tbody>';
+            
+            previewTable.innerHTML = html;
+        }
+        
+        // Export functions
+        function startExport() {
+            // Show loading and progress
+            document.getElementById('loading').style.display = 'flex';
+            document.getElementById('progressContainer').style.display = 'block';
+            document.getElementById('exportBtn').disabled = true;
+            
+            // Simulate export process
+            simulateExportProcess();
+        }
+        
+        function simulateExportProcess() {
+            let progress = 0;
+            const progressBar = document.getElementById('progress');
+            
+            const interval = setInterval(() => {
+                progress += 5;
+                progressBar.style.width = `${progress}%`;
+                
+                if (progress >= 100) {
+                    clearInterval(interval);
+                    completeExport();
+                }
+            }, 100);
+        }
+        
+        function completeExport() {
+            // Hide loading
+            document.getElementById('loading').style.display = 'none';
+            document.getElementById('exportBtn').disabled = false;
+            
+            // Generate export file
+            const data = generateExportData();
+            const fileName = `${selectedSource}-export-${new Date().toISOString().split('T')[0]}`;
+            
+            // Export based on selected format
+            switch (selectedFormat) {
+                case 'csv':
+                    exportToCSV(data, fileName);
+                    break;
+                case 'excel':
+                    exportToExcel(data, fileName);
+                    break;
+                case 'json':
+                    exportToJSON(data, fileName);
+                    break;
+            }
+            
+            // Save to history
+            saveToExportHistory(fileName);
+            
+            // Reset progress
+            setTimeout(() => {
+                document.getElementById('progressContainer').style.display = 'none';
+                document.getElementById('progress').style.width = '0%';
+            }, 1000);
+        }
+        
+        function generateExportData() {
+            // In production, this would fetch real data from your API
+            // For demo, we'll use sample data
+            const selectedCols = availableColumns.filter(col => col.selected);
+            const data = sampleUsers.map(user => {
+                const row = {};
+                selectedCols.forEach(col => {
+                    let value = user[col.id];
+                    
+                    if (value === undefined) {
+                        // Generate sample data
+                        if (col.id === 'last_login') {
+                            value = new Date().toISOString();
+                        } else if (col.id === 'login_count') {
+                            value = Math.floor(Math.random() * 100);
+                        }
+                    }
+                    
+                    row[col.name] = value;
+                });
+                return row;
+            });
+            
+            return data;
+        }
+        
+        function exportToCSV(data, fileName) {
+            if (data.length === 0) return;
+            
+            const headers = Object.keys(data[0]);
+            const csvContent = [
+                headers.join(','),
+                ...data.map(row => headers.map(header => `"${row[header] || ''}"`).join(','))
+            ].join('\n');
+            
+            const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+            const link = document.createElement('a');
+            link.href = URL.createObjectURL(blob);
+            link.download = `${fileName}.csv`;
+            link.click();
+            
+            alert('CSV export completed! File downloading now.');
+        }
+        
+        function exportToExcel(data, fileName) {
+            if (data.length === 0) return;
+            
+            try {
+                // Convert data to worksheet
+                const ws = XLSX.utils.json_to_sheet(data);
+                const wb = XLSX.utils.book_new();
+                XLSX.utils.book_append_sheet(wb, ws, 'Export');
+                
+                // Generate Excel file
+                XLSX.writeFile(wb, `${fileName}.xlsx`);
+                alert('Excel export completed! File downloading now.');
+            } catch (error) {
+                console.error('Excel export error:', error);
+                alert('Error generating Excel file. Trying CSV instead.');
+                exportToCSV(data, fileName);
+            }
+        }
+        
+        function exportToJSON(data, fileName) {
+            const jsonContent = JSON.stringify(data, null, 2);
+            const blob = new Blob([jsonContent], { type: 'application/json' });
+            const link = document.createElement('a');
+            link.href = URL.createObjectURL(blob);
+            link.download = `${fileName}.json`;
+            link.click();
+            
+            alert('JSON export completed! File downloading now.');
+        }
+        
+        // Quick export functions
+        function quickExport(type) {
+            alert(`Quick ${type} export - This would generate a predefined report`);
+            // In production, this would generate a standard report
+        }
+        
+        // Date range helpers
+        function setDateRange(range) {
+            const today = new Date();
+            let startDate, endDate;
+            
+            switch (range) {
+                case 'today':
+                    startDate = today;
+                    endDate = today;
+                    break;
+                case 'week':
+                    startDate = new Date(today);
+                    startDate.setDate(today.getDate() - today.getDay());
+                    endDate = new Date(today);
+                    endDate.setDate(today.getDate() + (6 - today.getDay()));
+                    break;
+                case 'month':
+                    startDate = new Date(today.getFullYear(), today.getMonth(), 1);
+                    endDate = new Date(today.getFullYear(), today.getMonth() + 1, 0);
+                    break;
+            }
+            
+            document.getElementById('startDate').value = startDate.toISOString().split('T')[0];
+            document.getElementById('endDate').value = endDate.toISOString().split('T')[0];
+        }
+        
+        // Export history
+        function loadExportHistory() {
+            const history = JSON.parse(localStorage.getItem('export_history') || '[]');
+            const container = document.getElementById('exportHistory');
+            
+            if (history.length === 0) {
+                container.innerHTML = '<p style="color: var(--text-light); text-align: center;">No export history yet</p>';
+                return;
+            }
+            
+            container.innerHTML = '';
+            history.slice(0, 5).forEach(item => {
+                const div = document.createElement('div');
+                div.className = 'history-item';
+                div.innerHTML = `
+                    <div>
+                        <strong>${item.name}</strong><br>
+                        <small style="color: var(--text-light);">${item.date} • ${item.format.toUpperCase()}</small>
+                    </div>
+                    <button onclick="reuseExport('${item.id}')" style="padding: 5px 10px; background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 6px; cursor: pointer;">
+                        <i class="fas fa-redo"></i>
+                    </button>
+                `;
+                container.appendChild(div);
+            });
+        }
+        
+        function saveToExportHistory(fileName) {
+            const history = JSON.parse(localStorage.getItem('export_history') || '[]');
+            
+            history.unshift({
+                id: Date.now().toString(),
+                name: fileName,
+                date: new Date().toLocaleDateString(),
+                format: selectedFormat,
+                source: selectedSource,
+                timestamp: new Date().toISOString()
+            });
+            
+            // Keep only last 20 exports
+            if (history.length > 20) {
+                history.length = 20;
+            }
+            
+            localStorage.setItem('export_history', JSON.stringify(history));
+            loadExportHistory();
+        }
+        
+        function reuseExport(exportId) {
+            const history = JSON.parse(localStorage.getItem('export_history') || '[]');
+            const exportItem = history.find(item => item.id === exportId);
+            
+            if (exportItem) {
+                // Apply saved settings
+                selectedSource = exportItem.source;
+                selectedFormat = exportItem.format;
+                
+                // Update UI
+                document.querySelectorAll('.source-card').forEach(card => {
+                    card.classList.toggle('selected', card.dataset.source === selectedSource);
+                });
+                
+                document.querySelectorAll('.export-option').forEach(option => {
+                    option.classList.toggle('selected', option.dataset.format === selectedFormat);
+                });
+                
+                alert(`Loaded settings from ${exportItem.name}. Proceed to export.`);
+                goToStep(4);
+            }
+        }
+    </script>
+</body>
+</html>
