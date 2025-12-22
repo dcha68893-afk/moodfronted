@@ -23,6 +23,7 @@
     <script src="https://js.stripe.com/v3/"></script>
     
     <style>
+        /* All existing CSS styles remain exactly the same */
         * {
             margin: 0;
             padding: 0;
@@ -85,7 +86,43 @@
             background: linear-gradient(135deg, #f8fafc 0%, #f1f5f9 100%);
         }
         
-        /* Offline Overlay - Same as friends.html */
+        /* Auth State Loader */
+        .auth-loader {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: white;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            z-index: 10000;
+            transition: opacity 0.3s ease;
+        }
+        
+        .auth-loader.hidden {
+            opacity: 0;
+            pointer-events: none;
+        }
+        
+        .auth-loader-spinner {
+            width: 50px;
+            height: 50px;
+            border: 3px solid var(--border-color);
+            border-top: 3px solid var(--primary-color);
+            border-radius: 50%;
+            animation: spin 1s linear infinite;
+            margin-bottom: 20px;
+        }
+        
+        .auth-loader-text {
+            font-size: 16px;
+            color: var(--text-secondary);
+        }
+        
+        /* Offline Overlay */
         .offline-overlay {
             position: fixed;
             top: 0;
@@ -1589,6 +1626,12 @@
     </style>
 </head>
 <body>
+    <!-- Auth State Loader -->
+    <div class="auth-loader" id="authLoader">
+        <div class="auth-loader-spinner"></div>
+        <div class="auth-loader-text">Checking authentication...</div>
+    </div>
+    
     <!-- Offline Overlay -->
     <div class="offline-overlay" id="offlineOverlay">
         <div class="offline-icon">
@@ -1644,7 +1687,7 @@
                 </button>
             </div>
             <div class="transactions-content" id="transactionsContent">
-                <!-- ⿨ TRANSACTION HISTORY (TRUST TEXT) -->
+                <!-- TRANSACTION HISTORY (TRUST TEXT) -->
                 <div class="trust-text">
                     All transactions are securely recorded and auditable.
                 </div>
@@ -1672,12 +1715,12 @@
                 <!-- Top Header -->
                 <div class="top-header">
                     <div class="header-left">
-                        <!-- ⿡ MAIN HEADER (TEXT ONLY) -->
+                        <!-- MAIN HEADER (TEXT ONLY) -->
                         <h1>MoodChat Business Hub</h1>
                         <p>Turn conversations into productivity, revenue, and growth — in one platform.</p>
                     </div>
                     <div class="header-right">
-                        <!-- ⿤ SUBSCRIPTION BADGE (TEXT EXTENSION) -->
+                        <!-- SUBSCRIPTION BADGE (TEXT EXTENSION) -->
                         <div class="subscription-status status-free" id="subscriptionStatus">
                             <i class="fas fa-crown"></i>
                             <div style="display: flex; flex-direction: column; align-items: flex-start;">
@@ -1685,7 +1728,7 @@
                                 <span class="benefit-description">Unlimited tools · No ads · Affiliate earnings</span>
                             </div>
                         </div>
-                        <!-- ⿥ CREDITS SECTION (EXPLANATION LINE) -->
+                        <!-- CREDITS SECTION (EXPLANATION LINE) -->
                         <div style="display: flex; flex-direction: column; align-items: center;">
                             <div class="credit-balance" id="creditBalance">
                                 <i class="fas fa-coins"></i>
@@ -1752,7 +1795,7 @@
                 
                 <!-- Tool Management -->
                 <div class="tool-management">
-                    <!-- ⿢ ADD PRIMARY ACTION CARD (NEW SMALL SECTION) -->
+                    <!-- ADD PRIMARY ACTION CARD (NEW SMALL SECTION) -->
                     <div class="cta-card">
                         <h3>Start Earning With MoodChat</h3>
                         <p>Use AI tools, sell services, or advertise your business.</p>
@@ -1787,14 +1830,14 @@
                     <div class="cache-indicator" id="cacheIndicator" style="display: none;">
                         <i class="fas fa-database"></i>
                         <span>Showing cached tools data. Some features may be limited.</span>
-                    </div>
+                        </div>
                     
                     <!-- Tools Grid -->
                     <div class="tools-grid" id="toolsGrid">
-                        <!-- ⿣ TOOLS CARDS (TEXT ADDITION ONLY) - Tools will be loaded here with badges and helper text -->
+                        <!-- TOOLS CARDS (TEXT ADDITION ONLY) - Tools will be loaded here with badges and helper text -->
                     </div>
                     
-                    <!-- ⿩ ADD "WHY MOODCHAT?" MINI SECTION -->
+                    <!-- ADD "WHY MOODCHAT?" MINI SECTION -->
                     <div class="why-moodchat">
                         <h4>Why MoodChat?</h4>
                         <ul>
@@ -1924,7 +1967,7 @@
                 </button>
             </div>
             <div class="modal-content">
-                <!-- ⿦ MARKETPLACE SECTION (SELLER CTA) -->
+                <!-- MARKETPLACE SECTION (SELLER CTA) -->
                 <div class="seller-cta">
                     <h4>Sell on MoodChat</h4>
                     <p>Reach users ready to pay. We handle payments.</p>
@@ -2044,7 +2087,7 @@
                 </button>
             </div>
             <div class="modal-content">
-                <!-- ⿧ ADVERTISING CARD (TEXT IMPROVEMENT ONLY) -->
+                <!-- ADVERTISING CARD (TEXT IMPROVEMENT ONLY) -->
                 <div class="ad-space">
                     <i class="fas fa-bullhorn" style="font-size: 48px; color: var(--primary-color); margin-bottom: 20px;"></i>
                     <h4>Promote Your Business</h4>
@@ -2143,18 +2186,21 @@
         
         // Initialize Firebase with error handling
         let firebaseInitialized = false;
+        let auth = null;
+        let db = null;
+        let storage = null;
+        
         try {
             firebase.initializeApp(firebaseConfig);
             firebaseInitialized = true;
+            auth = firebase.auth();
+            db = firebase.firestore();
+            storage = firebase.storage();
             console.log('Firebase initialized successfully');
         } catch (error) {
             console.log('Firebase initialization error (continuing offline):', error.message);
             // Continue without Firebase - offline mode
         }
-        
-        const db = firebaseInitialized ? firebase.firestore() : null;
-        const auth = firebaseInitialized ? firebase.auth() : null;
-        const storage = firebaseInitialized ? firebase.storage() : null;
         
         // Global variables
         let currentUser = null;
@@ -2193,7 +2239,8 @@
             AFFILIATE: 'knecta_affiliate',
             LAST_SYNC: 'knecta_tools_last_sync',
             OFFLINE_OVERLAY_DISMISSED: 'knecta_tools_offline_overlay_dismissed',
-            PENDING_ACTIONS: 'knecta_tools_pending_actions'
+            PENDING_ACTIONS: 'knecta_tools_pending_actions',
+            AUTH_INTENT: 'knecta_auth_intent'
         };
         
         // Subscription Plans
@@ -2479,6 +2526,7 @@
         ];
         
         // DOM Elements
+        const authLoader = document.getElementById('authLoader');
         const offlineOverlay = document.getElementById('offlineOverlay');
         const offlineIndicator = document.getElementById('offlineIndicator');
         const localStorageIndicator = document.getElementById('localStorageIndicator');
@@ -2508,44 +2556,96 @@
         });
         
         async function initializeApp() {
-            // Show loading screen
-            loadingScreen.style.display = 'flex';
+            // Hide the app container initially
+            document.querySelector('.app-container').style.display = 'none';
+            
+            // Show auth loader
+            authLoader.style.display = 'flex';
             
             // Initialize offline detection
             initializeOfflineDetection();
             
-            // Load user from cache first (offline-first)
-            await loadUserFromCache();
-            
-            // Then try to load from Firebase
-            await tryLoadUserFromFirebase();
-            
-            // Load tools and data from cache
-            await loadToolsFromCache();
-            
-            // Setup event listeners
-            setupEventListeners();
-            
-            // Generate sample data if none exists
-            if (allTools.length === 0) {
-                generateSampleData();
+            // Check for auth intent from localStorage
+            const authIntent = localStorage.getItem(LOCAL_STORAGE_KEYS.AUTH_INTENT);
+            if (authIntent === 'tools') {
+                console.log('Detected auth intent for tools page');
+                localStorage.removeItem(LOCAL_STORAGE_KEYS.AUTH_INTENT);
             }
             
-            // Update UI
-            updateUI();
-            
-            // Hide loading screen
-            setTimeout(() => {
-                loadingScreen.style.display = 'none';
-                showToast('AI Tools Suite loaded successfully', 'success');
-            }, 1500);
-            
-            // Try to sync with server in background
-            if (isOnline && firebaseInitialized) {
-                trySyncWithServer();
+            // Wait for auth state using onAuthStateChanged
+            if (firebaseInitialized && auth) {
+                console.log('Waiting for Firebase auth state...');
+                auth.onAuthStateChanged(async (user) => {
+                    if (user) {
+                        console.log('User authenticated:', user.uid);
+                        currentUser = user;
+                        await initializeUserInFirebase();
+                        await loadToolsFromCache();
+                        setupEventListeners();
+                        
+                        if (allTools.length === 0) {
+                            generateSampleData();
+                        }
+                        
+                        // Show the app
+                        authLoader.classList.add('hidden');
+                        setTimeout(() => {
+                            authLoader.style.display = 'none';
+                            document.querySelector('.app-container').style.display = 'flex';
+                            updateUI();
+                            showToast('Welcome to Business Tools!', 'success');
+                        }, 500);
+                    } else {
+                        console.log('No user authenticated, loading offline mode');
+                        await loadUserFromCache();
+                        await loadToolsFromCache();
+                        setupEventListeners();
+                        
+                        if (allTools.length === 0) {
+                            generateSampleData();
+                        }
+                        
+                        // Show the app in offline mode
+                        authLoader.classList.add('hidden');
+                        setTimeout(() => {
+                            authLoader.style.display = 'none';
+                            document.querySelector('.app-container').style.display = 'flex';
+                            updateUI();
+                            showToast('Loaded in offline mode. Some features may be limited.', 'warning');
+                        }, 500);
+                    }
+                    
+                    // Hide loading screen after auth check
+                    loadingScreen.style.display = 'none';
+                    
+                    // Try to sync with server in background
+                    if (isOnline && firebaseInitialized && currentUser) {
+                        trySyncWithServer();
+                    }
+                });
+            } else {
+                // Firebase not available, load offline mode
+                console.log('Firebase not available, loading offline mode');
+                await loadUserFromCache();
+                await loadToolsFromCache();
+                setupEventListeners();
+                
+                if (allTools.length === 0) {
+                    generateSampleData();
+                }
+                
+                // Show the app
+                authLoader.classList.add('hidden');
+                setTimeout(() => {
+                    authLoader.style.display = 'none';
+                    document.querySelector('.app-container').style.display = 'flex';
+                    updateUI();
+                    showToast('Loaded in offline mode', 'info');
+                    loadingScreen.style.display = 'none';
+                }, 500);
             }
             
-            console.log('Business Tools System initialized successfully');
+            console.log('Business Tools System initialization started');
         }
         
         // Load user from cache first
@@ -2623,47 +2723,9 @@
             }
         }
         
-        // Try to load user from Firebase
-        async function tryLoadUserFromFirebase() {
-            if (!isOnline || !firebaseInitialized) return;
-            
-            try {
-                // Try Firebase auth
-                if (auth) {
-                    await new Promise((resolve, reject) => {
-                        const unsubscribe = auth.onAuthStateChanged(user => {
-                            unsubscribe();
-                            if (user) {
-                                currentUser = user;
-                                console.log('User detected from Firebase:', currentUser.uid);
-                                
-                                // Save to cache
-                                localStorage.setItem(LOCAL_STORAGE_KEYS.USER, JSON.stringify({
-                                    uid: user.uid,
-                                    displayName: user.displayName,
-                                    email: user.email,
-                                    photoURL: user.photoURL
-                                }));
-                                
-                                resolve(user);
-                            } else {
-                                reject(new Error('No Firebase user'));
-                            }
-                        }, reject);
-                    });
-                    
-                    // Initialize user in Firebase
-                    await initializeUserInFirebase();
-                }
-            } catch (error) {
-                console.log('Could not load user from Firebase, using cached data:', error.message);
-                // Continue with cached user
-            }
-        }
-        
         // Initialize user in Firebase
         async function initializeUserInFirebase() {
-            if (!isOnline || !firebaseInitialized || !currentUser) return;
+            if (!isOnline || !firebaseInitialized || !currentUser || !db) return;
             
             try {
                 const userRef = db.collection('users').doc(currentUser.uid);
@@ -2795,7 +2857,7 @@
             const statusElement = document.getElementById('subscriptionStatus');
             statusElement.className = `subscription-status status-${currentSubscription}`;
             
-            // ⿤ SUBSCRIPTION BADGE (TEXT EXTENSION)
+            // SUBSCRIPTION BADGE (TEXT EXTENSION)
             let benefitText = '';
             switch(currentSubscription) {
                 case 'free':
@@ -2884,7 +2946,7 @@
             const categoryInfo = toolCategories[tool.category];
             const planInfo = subscriptionPlans[tool.requiresSubscription || 'free'];
             
-            // ⿣ TOOLS CARDS: Add Most Used badge and helper text
+            // TOOLS CARDS: Add Most Used badge and helper text
             const mostUsedBadge = tool.isMostUsed ? '<span class="most-used-badge">Most Used</span>' : '';
             const helperText = tool.isMostUsed ? '<span class="helper-text">Best for: small businesses & freelancers</span>' : '';
             
@@ -2958,7 +3020,7 @@
                     </div>
                 </div>
                 
-                <!-- ⿧ ADVERTISING CARD (TEXT IMPROVEMENT ONLY) -->
+                <!-- ADVERTISING CARD (TEXT IMPROVEMENT ONLY) -->
                 <h3 class="tool-title">Promote Your Business</h3>
                 <p class="tool-description">Reach engaged users inside MoodChat.</p>
                 
@@ -3582,7 +3644,7 @@
             isOnline = true;
             updateUIForConnectivity();
             
-            if (currentUser && firebaseInitialized) {
+            if (currentUser && firebaseInitialized && auth) {
                 updateUserPresence(true);
             }
             
@@ -3602,7 +3664,7 @@
             console.log('App is now offline');
             isOnline = false;
             
-            if (currentUser && firebaseInitialized) {
+            if (currentUser && firebaseInitialized && auth) {
                 updateUserPresence(false);
             }
             
@@ -3708,7 +3770,7 @@
         
         // Update user presence in Firebase
         async function updateUserPresence(online) {
-            if (!currentUser || !isOnline || !firebaseInitialized) return;
+            if (!currentUser || !isOnline || !firebaseInitialized || !db) return;
             
             try {
                 await db.collection('users').doc(currentUser.uid).update({
@@ -3722,7 +3784,7 @@
         
         // Try to sync with server
         async function trySyncWithServer() {
-            if (!isOnline || !firebaseInitialized) return;
+            if (!isOnline || !firebaseInitialized || !db) return;
             
             try {
                 console.log('Syncing tools with server...');
@@ -3750,7 +3812,7 @@
         
         // Send pending offline actions
         async function sendPendingOfflineActions() {
-            if (!firebaseInitialized) return;
+            if (!firebaseInitialized || !db) return;
             
             try {
                 const pendingActions = JSON.parse(localStorage.getItem(LOCAL_STORAGE_KEYS.PENDING_ACTIONS) || '[]');
@@ -3788,7 +3850,7 @@
         
         // Setup event listeners
         function setupEventListeners() {
-            // ⿢ ADD PRIMARY ACTION CARD: Add function for the Get Started button
+            // ADD PRIMARY ACTION CARD: Add function for the Get Started button
             window.openUpgradeModal = function() {
                 showUpgradeModal();
             };
@@ -4024,7 +4086,7 @@
             
             // Before unload
             window.addEventListener('beforeunload', () => {
-                if (currentUser && isOnline && firebaseInitialized) {
+                if (currentUser && isOnline && firebaseInitialized && auth) {
                     updateUserPresence(false);
                 }
                 

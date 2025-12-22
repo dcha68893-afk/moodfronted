@@ -1,9 +1,9 @@
 // Service Worker for Kynecta MoodChat - Firebase Web Application
-// Version: 1.4.2 - Enhanced Offline-First with Safe Cache Versioning
+// Version: 1.4.3 - Enhanced Offline-First with Safe Cache Versioning
 // Project: kynecta-ee95c
 // Firebase: 9.22.1 (Compact)
 
-const APP_VERSION = '1.4.2';
+const APP_VERSION = '1.4.3';
 const CACHE_NAME = `moodchat-v${APP_VERSION.replace(/\./g, '-')}`;
 
 // COMPLETE APP SHELL ASSETS - PERMANENTLY CACHED FOR OFFLINE USE
@@ -17,13 +17,15 @@ const APP_SHELL_ASSETS = [
   '/status.html',
   '/call.html',
   '/message.html',
-  'Tools.html',
+  '/messages.html',
+  '/Tools.html',
+  '/tools.html',
   
   // CSS Files - ALL stylesheets (CRITICAL for layout)
   '/styles.css',
   '/css/styles.css',
   '/css/main.css',
-  '/css/layout.css', // ADDED: Critical layout CSS to prevent layout breaking
+  '/css/layout.css',
   '/style.css',
   '/assets/css/app.css',
   
@@ -55,7 +57,7 @@ const APP_SHELL_ASSETS = [
 // CRITICAL AUTH ASSETS - Must load offline without fail
 const CRITICAL_AUTH_ASSETS = [
   '/index.html',
-  '/layouts.css',
+  '/css/layout.css',
   '/',
   '/icons/moodchat-192.png',
   '/favicon.ico',
@@ -1553,3 +1555,5 @@ console.log(`[Kynecta MoodChat Service Worker] v${APP_VERSION} loaded - Versione
 console.log(`[Kynecta] Safe versioned caching active - Old caches will be automatically deleted`);
 console.log(`[Kynecta] ✓ Auth page (index.html) and layout.css GUARANTEED to load offline`);
 console.log(`[Kynecta] ✓ Firebase SDK/API requests are NEVER cached (auth-safe)`);
+console.log(`[Kynecta] ✓ All HTML, CSS, and JS files cached for offline use`);
+console.log(`[Kynecta] ✓ Offline functionality restored - App works without internet`);
