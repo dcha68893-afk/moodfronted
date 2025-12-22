@@ -2426,6 +2426,19 @@
         });
         
         async function initializeApp() {
+              // Try to get users data from app.js context
+    if (window.allUsers) {
+        console.log('Found users from app.js:', Object.keys(window.allUsers).length);
+        // Cache these users for immediate use
+        Object.entries(window.allUsers).forEach(([userId, userData]) => {
+            if (userId !== currentUser.uid && userData.displayName) {
+                localStorage.setItem(`userInfo_${userId}_displayName`, userData.displayName);
+                if (userData.photoURL) {
+                    localStorage.setItem(`userInfo_${userId}_photoURL`, userData.photoURL);
+                }
+            }
+        });
+    }
             // Initialize offline detection
             initializeOfflineDetection();
             
@@ -2941,6 +2954,15 @@
         function saveCallToLocalStorage(callData) {
             try {
                 if (!currentUser) return;
+                const enhancedCallData = { ...callData };
+        
+        if (enhancedCallData.participants && !enhancedCallData.displayName) {
+            const otherParticipants = enhancedCallData.participants.filter(id => id !== currentUser.uid);
+            if (otherParticipants.length === 1) {
+                const contactName = getContactName(otherParticipants[0]);
+                enhancedCallData.displayName = contactName || 'Contact';
+            }
+        }
                 
                 const storageKey = getLocalStorageKey('history');
                 const storedCalls = localStorage.getItem(storageKey);
@@ -3033,6 +3055,16 @@
             }
         }
         
+        // Add this function to refresh contact data periodically
+async function refreshContactCache(userIds) {
+    if (!isOnline || !userIds || !Array.isArray(userIds)) return;
+    
+    for (const userId of userIds) {
+        if (userId !== currentUser.uid) {
+            await fetchAndCacheUserData(userId);
+        }
+    }
+}
         // Display calls from array (enhanced for offline mode)
         function displayCallsFromArray(callsArray, container, type) {
             if (!container) return;
@@ -3089,26 +3121,39 @@
         }
         
         // Display call item from data (enhanced for offline mode)
-        function displayCallItemFromData(callData, container) {
-            // Get contact names from localStorage to avoid "Unknown"
-            let displayName = callData.displayName || 'Unknown';
-            let otherParticipantIds = [];
-            
-            if (callData.participants) {
-                otherParticipantIds = callData.participants.filter(id => 
-                    id !== (currentUser ? currentUser.uid : 'user1')
-                );
-                
-                if (!displayName || displayName === 'Unknown') {
-                    if (otherParticipantIds.length === 1) {
-                        // Try to get name from contacts cache
-                        const contactName = getContactName(otherParticipantIds[0]);
-                        displayName = contactName || 'Contact';
-                    } else if (otherParticipantIds.length > 1) {
-                        displayName = `Group Call (${callData.participants.length})`;
+       // Replace or modify your displayCallItemFromData function
+async function displayCallItemFromData(callData, container) {
+    // Get contact names with better logic
+    let displayName = callData.displayName || 'Contact';
+    let otherParticipantIds = [];
+    
+    if (callData.participants) {
+        otherParticipantIds = callData.participants.filter(id => 
+            id !== (currentUser ? currentUser.uid : 'user1')
+        );
+        
+        // If displayName is still generic, try to get proper names
+        if (!displayName || displayName === 'Contact' || displayName === 'Unknown') {
+            if (otherParticipantIds.length === 1) {
+                // Try to get name from multiple sources
+                const contactName = getContactName(otherParticipantIds[0]);
+                if (contactName && contactName !== 'Contact' && contactName !== 'Unknown') {
+                    displayName = contactName;
+                } else {
+                    // Try to fetch fresh data
+                    const userData = await fetchAndCacheUserData(otherParticipantIds[0]);
+                    if (userData && userData.displayName) {
+                        displayName = userData.displayName;
+                    } else {
+                        displayName = 'Contact';
                     }
                 }
+            } else if (otherParticipantIds.length > 1) {
+                displayName = `Group Call (${callData.participants.length})`;
             }
+        }
+    }
+    
             
             const isGroupCall = callData.group === true || (callData.participants && callData.participants.length > 2);
             const callType = callData.type || 'voice';
@@ -3201,17 +3246,94 @@
         }
         
         // Helper function to get contact name from cache
-        function getContactName(userId) {
-            if (!userId) return null;
-            
-            // Check multiple storage locations
-            const contactName = localStorage.getItem(`contact_${userId}_name`) ||
-                              localStorage.getItem(`userInfo_${userId}_displayName`) ||
-                              localStorage.getItem(`friend_${userId}_name`);
-            
-            return contactName;
+        
+        // Replace your getContactName function with this enhanced version
+function getContactName(userId) {
+    if (!userId) return null;
+    
+    // Check in this order:
+    // 1. Firebase cached users from app.js (most reliable)
+    // 2. LocalStorage contact cache
+    // 3. Firebase userPresence data
+    // 4. Friends list data
+    
+    // First check if there's a global users object from app.js
+    if (window.allUsers && window.allUsers[userId]) {
+        return window.allUsers[userId].displayName || null;
+    }
+    
+    // Check multiple storage locations with priority
+    const contactName = localStorage.getItem(`userInfo_${userId}_displayName`) ||
+                       localStorage.getItem(`contact_${userId}_name`) ||
+                       localStorage.getItem(`friend_${userId}_name`);
+    
+    if (contactName) return contactName;
+    
+    // If still not found, check if we have recently fetched this user
+    const recentContact = sessionStorage.getItem(`recent_contact_${userId}`);
+    if (recentContact) {
+        try {
+            const contactData = JSON.parse(recentContact);
+            return contactData.displayName || null;
+        } catch (e) {
+            console.error('Error parsing recent contact:', e);
+        }
+    }
+    
+    return null;
+}
+
+// Add this function to fetch user data and cache it
+async function fetchAndCacheUserData(userId) {
+    if (!userId || userId === currentUser.uid) return null;
+    
+    try {
+        // First try Firebase
+        if (isOnline && db) {
+            const userDoc = await db.collection('users').doc(userId).get();
+            if (userDoc.exists) {
+                const userData = userDoc.data();
+                
+                // Cache in multiple places for redundancy
+                localStorage.setItem(`userInfo_${userId}_displayName`, userData.displayName || 'Contact');
+                if (userData.photoURL) {
+                    localStorage.setItem(`userInfo_${userId}_photoURL`, userData.photoURL);
+                }
+                
+                // Also cache in session storage for immediate use
+                sessionStorage.setItem(`recent_contact_${userId}`, JSON.stringify({
+                    displayName: userData.displayName || 'Contact',
+                    photoURL: userData.photoURL || ''
+                }));
+                
+                return userData;
+            }
         }
         
+        // If Firebase fails, check if we have friends data
+        const friendsData = localStorage.getItem('friendsData');
+        if (friendsData) {
+            try {
+                const friends = JSON.parse(friendsData);
+                const friend = friends.find(f => f.id === userId);
+                if (friend) {
+                    localStorage.setItem(`friend_${userId}_name`, friend.name || friend.displayName || 'Contact');
+                    if (friend.avatar) {
+                        localStorage.setItem(`friend_${userId}_avatar`, friend.avatar);
+                    }
+                    return { displayName: friend.name || friend.displayName || 'Contact', photoURL: friend.avatar || '' };
+                }
+            } catch (e) {
+                console.error('Error parsing friends data:', e);
+            }
+        }
+        
+    } catch (error) {
+        console.error('Error fetching user data:', error);
+    }
+    
+    return null;
+}
         // Helper function to get contact avatar from cache
         function getContactAvatar(userId) {
             if (!userId) return null;

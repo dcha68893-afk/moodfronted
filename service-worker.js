@@ -1,10 +1,10 @@
 // Service Worker for Kynecta MoodChat - Firebase Web Application
-// Version: 1.4.1 - Enhanced Offline-First with Permanent App Shell Availability
+// Version: 1.4.2 - Enhanced Offline-First with Safe Cache Versioning
 // Project: kynecta-ee95c
 // Firebase: 9.22.1 (Compact)
 
-const APP_VERSION = '1.4.1';
-const CACHE_NAME = `kynecta-moodchat-permanent-v${APP_VERSION}`;
+const APP_VERSION = '1.4.2';
+const CACHE_NAME = `moodchat-v${APP_VERSION.replace(/\./g, '-')}`;
 
 // COMPLETE APP SHELL ASSETS - PERMANENTLY CACHED FOR OFFLINE USE
 const APP_SHELL_ASSETS = [
@@ -16,6 +16,8 @@ const APP_SHELL_ASSETS = [
   '/group.html',
   '/status.html',
   '/call.html',
+  '/message.html',
+  'Tools.html',
   
   // CSS Files - ALL stylesheets (CRITICAL for layout)
   '/styles.css',
@@ -83,16 +85,16 @@ const FIREBASE_API_PATTERNS = [
 
 // Install Event - PERMANENTLY Cache ALL App Shell Assets
 self.addEventListener('install', (event) => {
-  console.log(`[Kynecta MoodChat Service Worker] Installing version ${APP_VERSION} - PERMANENT App Shell Caching`);
+  console.log(`[Kynecta MoodChat Service Worker] Installing version ${APP_VERSION} - Safe Cache: ${CACHE_NAME}`);
   
   // Force immediate activation to replace old service worker
   self.skipWaiting();
   
   event.waitUntil(
-    // Open permanent cache for app shell
+    // Open versioned cache for app shell
     caches.open(CACHE_NAME)
       .then(cache => {
-        console.log('[Kynecta] PERMANENTLY caching app shell:', APP_SHELL_ASSETS.length, 'assets');
+        console.log('[Kynecta] Caching app shell in versioned cache:', APP_SHELL_ASSETS.length, 'assets');
         
         // Cache all app shell assets with aggressive error handling
         return Promise.allSettled(
@@ -105,19 +107,18 @@ self.addEventListener('install', (event) => {
           })
         ).then(results => {
           const successful = results.filter(r => r.status === 'fulfilled' && r.value !== undefined).length;
-          console.log(`[Kynecta] PERMANENTLY cached ${successful}/${APP_SHELL_ASSETS.length} app shell assets`);
+          console.log(`[Kynecta] Cached ${successful}/${APP_SHELL_ASSETS.length} app shell assets in ${CACHE_NAME}`);
           
           // Ensure critical auth assets are cached (SPECIAL FOCUS)
           return ensureCriticalAuthAssetsCached(cache);
         });
       })
       .then(() => {
-        console.log('[Kynecta] PERMANENT app shell caching completed');
+        console.log(`[Kynecta] Versioned cache ${CACHE_NAME} ready`);
         return initializeOfflineStorage();
       })
       .then(() => {
-        console.log('[Kynecta] Service Worker installed - App is PERMANENTLY offline-ready');
-        console.log('[Kynecta] Special: index.html and css/layout.css are GUARANTEED to load offline');
+        console.log('[Kynecta] Service Worker installed - Safe versioned caching active');
         // Send message to all clients that new version is ready
         return self.clients.matchAll();
       })
@@ -126,13 +127,14 @@ self.addEventListener('install', (event) => {
           client.postMessage({
             type: 'NEW_VERSION_READY',
             version: APP_VERSION,
+            cacheName: CACHE_NAME,
             permanentOffline: true,
             authPageOffline: true
           });
         });
       })
       .catch(error => {
-        console.error('[Kynecta] PERMANENT installation error:', error);
+        console.error('[Kynecta] Installation error:', error);
         // Installation must succeed even with errors
       })
   );
@@ -511,7 +513,7 @@ async function initializeOfflineStorage() {
     };
     
     request.onsuccess = (event) => {
-      console.log('[Kynecta] Offline storage initialized for PERMANENT caching');
+      console.log('[Kynecta] Offline storage initialized');
       resolve(event.target.result);
     };
     
@@ -522,32 +524,34 @@ async function initializeOfflineStorage() {
   });
 }
 
-// Activate Event - AGGRESSIVELY clean up ALL old caches
+// Activate Event - Clean up ALL old versioned caches
 self.addEventListener('activate', (event) => {
-  console.log('[Kynecta] Activating PERMANENT offline version', APP_VERSION);
+  console.log('[Kynecta] Activating version', APP_VERSION, 'with cache:', CACHE_NAME);
   
   event.waitUntil(
     caches.keys().then(cacheNames => {
       const deletions = cacheNames.map(cacheName => {
         // Delete ALL old caches that don't match current version
-        // This prevents old broken layouts from being reused
-        if ((cacheName.startsWith('uniconnect-') || cacheName.startsWith('kynecta-')) && 
-            cacheName !== CACHE_NAME) {
-          console.log('[Kynecta] DELETING old cache to prevent broken layouts:', cacheName);
-          return caches.delete(cacheName);
+        if (cacheName.startsWith('moodchat-') || 
+            cacheName.startsWith('kynecta-') || 
+            cacheName.startsWith('uniconnect-')) {
+          if (cacheName !== CACHE_NAME) {
+            console.log('[Kynecta] Deleting old cache:', cacheName);
+            return caches.delete(cacheName);
+          }
         }
         return Promise.resolve();
       });
       return Promise.all(deletions);
     }).then(() => {
-      console.log('[Kynecta] AGGRESSIVE cache cleanup completed - only v' + APP_VERSION + ' remains');
+      console.log('[Kynecta] Cache cleanup completed - only', CACHE_NAME, 'remains');
       // Take control of ALL clients immediately
       return self.clients.claim();
     }).then(() => {
-      // Verify permanent cache is working
+      // Verify versioned cache is working
       return caches.open(CACHE_NAME).then(cache => {
         return cache.keys().then(keys => {
-          console.log(`[Kynecta] PERMANENT cache contains ${keys.length} assets for offline use`);
+          console.log(`[Kynecta] Versioned cache ${CACHE_NAME} contains ${keys.length} assets`);
           
           // Validate critical auth assets are present
           const missing = [];
@@ -568,7 +572,7 @@ self.addEventListener('activate', (event) => {
             return recacheCriticalAuthAssets();
           }
           
-          console.log('[Kynecta] ✓ All critical auth assets verified');
+          console.log('[Kynecta] ✓ All critical auth assets verified in', CACHE_NAME);
           return Promise.resolve();
         });
       });
@@ -595,7 +599,7 @@ async function recacheCriticalAuthAssets() {
   }
 }
 
-// Enhanced Fetch Event - PERMANENT App Shell Availability
+// Enhanced Fetch Event - Versioned Cache Strategy
 self.addEventListener('fetch', (event) => {
   const { request } = event;
   const url = new URL(request.url);
@@ -618,9 +622,9 @@ self.addEventListener('fetch', (event) => {
     return;
   }
   
-  // Check if this is an App Shell asset (PERMANENTLY CACHED)
+  // Check if this is an App Shell asset
   if (isAppShellAsset(url)) {
-    event.respondWith(handlePermanentAppShell(request));
+    event.respondWith(handleVersionedAppShell(request));
     return;
   }
   
@@ -634,16 +638,16 @@ self.addEventListener('fetch', (event) => {
   event.respondWith(handleDefaultCacheFirst(request));
 });
 
-// CRITICAL AUTH ASSETS HANDLER - Cache First, guaranteed offline
+// CRITICAL AUTH ASSETS HANDLER - Versioned Cache First
 async function handleCriticalAuthAssets(request) {
   const url = new URL(request.url);
   console.log(`[Kynecta] Critical auth asset request: ${url.pathname}`);
   
-  // ALWAYS try cache first - this is what guarantees offline loading
-  const cachedResponse = await caches.match(request);
+  // Try versioned cache first
+  const cachedResponse = await caches.match(request, { cacheName: CACHE_NAME });
   
   if (cachedResponse) {
-    console.log(`[Kynecta] Serving critical auth asset from cache: ${url.pathname}`);
+    console.log(`[Kynecta] Serving from versioned cache ${CACHE_NAME}: ${url.pathname}`);
     
     // Update cache in background if online (silent refresh)
     if (navigator.onLine) {
@@ -653,28 +657,35 @@ async function handleCriticalAuthAssets(request) {
     return cachedResponse;
   }
   
-  // If not in cache, try network
+  // If not in versioned cache, try any cache (legacy support)
+  const anyCachedResponse = await caches.match(request);
+  if (anyCachedResponse) {
+    console.log(`[Kynecta] Serving from legacy cache: ${url.pathname}`);
+    
+    // Migrate to versioned cache
+    if (navigator.onLine) {
+      silentlyUpdateCache(request);
+    }
+    
+    return anyCachedResponse;
+  }
+  
+  // If not in any cache, try network
   try {
     const networkResponse = await fetch(request);
     
-    // Cache for PERMANENT offline use
+    // Cache in versioned cache for offline use
     if (networkResponse.ok) {
       const cache = await caches.open(CACHE_NAME);
       await cache.put(request, networkResponse.clone());
-      console.log(`[Kynecta] Added critical auth asset to cache: ${url.pathname}`);
+      console.log(`[Kynecta] Added to versioned cache ${CACHE_NAME}: ${url.pathname}`);
     }
     
     return networkResponse;
   } catch (error) {
     console.log(`[Kynecta] Network failed for critical auth asset: ${url.pathname}`);
     
-    // Serve fallback from cache (should always exist due to install event)
-    const fallbackResponse = await caches.match(request);
-    if (fallbackResponse) {
-      return fallbackResponse;
-    }
-    
-    // Ultimate fallback
+    // Serve fallback
     if (url.pathname.endsWith('.css')) {
       return createLayoutCSSFallbackResponse();
     } else {
@@ -791,7 +802,7 @@ function isFirebaseRequest(url) {
   );
 }
 
-// Check if asset is part of App Shell (PERMANENT CACHE)
+// Check if asset is part of App Shell
 function isAppShellAsset(url) {
   const path = url.pathname;
   const isSameOrigin = url.origin === self.location.origin;
@@ -823,15 +834,15 @@ function isAppShellAsset(url) {
   return false;
 }
 
-// PERMANENT App Shell Handler - Always available offline
-async function handlePermanentAppShell(request) {
-  console.log('[Kynecta] App Shell request (PERMANENT):', request.url);
+// VERSIONED App Shell Handler - Always serve from versioned cache
+async function handleVersionedAppShell(request) {
+  console.log('[Kynecta] App Shell request for versioned cache:', request.url);
   
-  // ALWAYS try cache first for app shell assets
-  const cachedResponse = await caches.match(request);
+  // Try versioned cache first
+  const cachedResponse = await caches.match(request, { cacheName: CACHE_NAME });
   
   if (cachedResponse) {
-    console.log('[Kynecta] Serving PERMANENT app shell from cache:', request.url);
+    console.log('[Kynecta] Serving from versioned cache:', request.url);
     
     // Update cache in background if online (silent refresh)
     if (navigator.onLine) {
@@ -841,20 +852,33 @@ async function handlePermanentAppShell(request) {
     return cachedResponse;
   }
   
-  // If not in cache, try network
+  // If not in versioned cache, try any cache (legacy support)
+  const anyCachedResponse = await caches.match(request);
+  if (anyCachedResponse) {
+    console.log('[Kynecta] Serving from legacy cache:', request.url);
+    
+    // Migrate to versioned cache
+    if (navigator.onLine) {
+      silentlyUpdateCache(request);
+    }
+    
+    return anyCachedResponse;
+  }
+  
+  // If not in any cache, try network
   try {
     const networkResponse = await fetch(request);
     
-    // Cache for PERMANENT offline use
+    // Cache in versioned cache for offline use
     if (networkResponse.ok) {
       const cache = await caches.open(CACHE_NAME);
       await cache.put(request, networkResponse.clone());
-      console.log('[Kynecta] Added to PERMANENT cache:', request.url);
+      console.log('[Kynecta] Added to versioned cache:', request.url);
     }
     
     return networkResponse;
   } catch (error) {
-    console.log('[Kynecta] Network failed for app shell, serving robust fallback');
+    console.log('[Kynecta] Network failed for app shell, serving fallback');
     
     // Return appropriate fallback based on file type
     return serveRobustFallback(request);
@@ -870,20 +894,26 @@ async function serveRobustFallback(request) {
   if (path.endsWith('.html') || path === '/') {
     console.log('[Kynecta] HTML unavailable, serving offline page');
     
-    // Try to serve any cached HTML page
+    // Try to serve from versioned cache first
     const cache = await caches.open(CACHE_NAME);
     const keys = await cache.keys();
     
-    // Find any HTML page in cache
+    // Find any HTML page in versioned cache
     for (const key of keys) {
       const keyUrl = new URL(key.url);
       if (keyUrl.pathname.endsWith('.html') || keyUrl.pathname === '/') {
         const response = await cache.match(key);
         if (response) {
-          console.log('[Kynecta] Serving cached HTML as fallback:', key.url);
+          console.log('[Kynecta] Serving cached HTML from versioned cache:', key.url);
           return response;
         }
       }
+    }
+    
+    // Try any cache
+    const anyCachedResponse = await caches.match('/offline.html') || await caches.match('/index.html') || await caches.match('/');
+    if (anyCachedResponse) {
+      return anyCachedResponse;
     }
     
     // Ultimate HTML fallback
@@ -1046,10 +1076,16 @@ async function handleApiNetworkFirst(request) {
     
     return networkResponse;
   } catch (error) {
-    // Try cache
-    const cachedResponse = await caches.match(request);
+    // Try versioned cache first
+    const cachedResponse = await caches.match(request, { cacheName: CACHE_NAME });
     if (cachedResponse) {
       return cachedResponse;
+    }
+    
+    // Try any cache
+    const anyCachedResponse = await caches.match(request);
+    if (anyCachedResponse) {
+      return anyCachedResponse;
     }
     
     // Return safe offline response
@@ -1070,14 +1106,24 @@ async function handleApiNetworkFirst(request) {
 
 // Default Handler - Cache First with Network Fallback
 async function handleDefaultCacheFirst(request) {
-  // Try cache first
-  const cachedResponse = await caches.match(request);
+  // Try versioned cache first
+  const cachedResponse = await caches.match(request, { cacheName: CACHE_NAME });
   if (cachedResponse) {
     // Update in background if online
     if (navigator.onLine) {
       silentlyUpdateCache(request);
     }
     return cachedResponse;
+  }
+  
+  // Try any cache
+  const anyCachedResponse = await caches.match(request);
+  if (anyCachedResponse) {
+    // Update in background if online
+    if (navigator.onLine) {
+      silentlyUpdateCache(request);
+    }
+    return anyCachedResponse;
   }
   
   // If not in cache, try network
@@ -1106,7 +1152,7 @@ async function silentlyUpdateCache(request) {
   }
 }
 
-// Enhanced Message Event with PERMANENT offline support
+// Enhanced Message Event with versioned cache support
 self.addEventListener('message', (event) => {
   const { data } = event;
   
@@ -1122,7 +1168,7 @@ self.addEventListener('message', (event) => {
           cacheName: CACHE_NAME,
           permanentOffline: true,
           authPageOffline: true,
-          cacheStrategy: 'permanent-app-shell'
+          cacheStrategy: 'versioned-app-shell'
         });
       }
       break;
@@ -1132,9 +1178,10 @@ self.addEventListener('message', (event) => {
         event.ports[0].postMessage({
           offline: !navigator.onLine,
           version: APP_VERSION,
+          cacheName: CACHE_NAME,
           permanentCache: true,
           authPageAvailable: true,
-          cacheStatus: 'active-permanent'
+          cacheStatus: 'active-versioned'
         });
       }
       break;
@@ -1153,6 +1200,7 @@ self.addEventListener('message', (event) => {
               verified: !!(indexHtml || root),
               layoutCssAvailable: !!layoutCss,
               authPageOfflineReady: true,
+              cacheName: CACHE_NAME,
               timestamp: Date.now()
             });
           }
@@ -1173,6 +1221,7 @@ self.addEventListener('message', (event) => {
           if (event.ports && event.ports[0]) {
             event.ports[0].postMessage({
               verified: true,
+              cacheName: CACHE_NAME,
               htmlCount: htmlFiles.length,
               cssCount: cssFiles.length,
               jsCount: jsFiles.length,
@@ -1209,6 +1258,7 @@ self.addEventListener('message', (event) => {
           if (event.ports && event.ports[0]) {
             event.ports[0].postMessage({ 
               refreshed: true,
+              cacheName: CACHE_NAME,
               authAssetsRefreshed: true 
             });
           }
@@ -1318,6 +1368,7 @@ async function verifyCacheIntegrity() {
   
   return {
     integrity: missing.length === 0 ? 'healthy' : 'degraded',
+    cacheName: CACHE_NAME,
     totalCached: keys.length,
     missingCritical: missing,
     permanentCache: true,
@@ -1441,38 +1492,38 @@ async function getOfflineData() {
 
 // Keep all existing sync functions
 async function syncOfflineMessages() {
-  console.log('[Kynecta PERMANENT] Syncing offline messages...');
+  console.log(`[Kynecta ${CACHE_NAME}] Syncing offline messages...`);
   // Existing implementation
 }
 
 async function syncOfflineMoodSelections() {
-  console.log('[Kynecta PERMANENT] Syncing offline mood selections...');
+  console.log(`[Kynecta ${CACHE_NAME}] Syncing offline mood selections...`);
   // Existing implementation
 }
 
 async function syncOfflineInterestSelections() {
-  console.log('[Kynecta PERMANENT] Syncing offline interest selections...');
+  console.log(`[Kynecta ${CACHE_NAME}] Syncing offline interest selections...`);
   // Existing implementation
 }
 
 async function syncFirebaseAuth() {
-  console.log('[Kynecta PERMANENT] Syncing Firebase Auth...');
+  console.log(`[Kynecta ${CACHE_NAME}] Syncing Firebase Auth...`);
   // Existing implementation
 }
 
 async function syncFirestoreData() {
-  console.log('[Kynecta PERMANENT] Syncing Firestore data...');
+  console.log(`[Kynecta ${CACHE_NAME}] Syncing Firestore data...`);
   // Existing implementation
 }
 
 async function syncPendingMessages() {
-  console.log('[Kynecta PERMANENT] Syncing pending messages...');
+  console.log(`[Kynecta ${CACHE_NAME}] Syncing pending messages...`);
   // Existing implementation
 }
 
 // Background Sync (Keep existing functionality)
 self.addEventListener('sync', (event) => {
-  console.log('[Kynecta PERMANENT] Background sync:', event.tag);
+  console.log(`[Kynecta ${CACHE_NAME}] Background sync:`, event.tag);
   
   if (event.tag === 'firebase-auth-sync') {
     event.waitUntil(syncFirebaseAuth());
@@ -1498,8 +1549,7 @@ self.addEventListener('notificationclick', (event) => {
   // Existing notification click implementation
 });
 
-console.log(`[Kynecta MoodChat Service Worker] v${APP_VERSION} loaded - PERMANENT Offline Availability`);
-console.log(`[Kynecta] App Shell will ALWAYS load offline, even after 24+ hours without internet`);
+console.log(`[Kynecta MoodChat Service Worker] v${APP_VERSION} loaded - Versioned Cache: ${CACHE_NAME}`);
+console.log(`[Kynecta] Safe versioned caching active - Old caches will be automatically deleted`);
 console.log(`[Kynecta] ✓ Auth page (index.html) and layout.css GUARANTEED to load offline`);
-console.log(`[Kynecta] ✓ Layout will not break when offline`);
-console.log(`[Kynecta] Firebase SDK/API requests are NEVER cached (auth-safe)`);
+console.log(`[Kynecta] ✓ Firebase SDK/API requests are NEVER cached (auth-safe)`);

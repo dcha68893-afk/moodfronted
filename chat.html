@@ -12,14 +12,7 @@
     <link href="https://cdn.jsdelivr.net/npm/tailwindcss@2.2.19/dist/tailwind.min.css" rel="stylesheet">
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
     
-    <script src="https://www.gstatic.com/firebasejs/9.22.0/firebase-app-compat.js"></script>
-    <script src="https://www.gstatic.com/firebasejs/9.22.0/firebase-firestore-compat.js"></script>
-    <script src="https://www.gstatic.com/firebasejs/9.22.0/firebase-auth-compat.js"></script>
-    <script src="https://www.gstatic.com/firebasejs/9.22.0/firebase-storage-compat.js"></script>
-    <script src="https://www.gstatic.com/firebasejs/9.22.0/firebase-messaging-compat.js"></script>
-    
-    <script src="user-data.js"></script>
-    <script src="display-user-selections.js"></script>
+    <!-- Firebase scripts removed from controller - loaded in individual pages -->
     
     <meta name="ignore-tailwind-cdn-warning" content="true">
     <style>
@@ -1421,9 +1414,14 @@
     
     let currentPage = 'messages';
     let iframesLoaded = {};
+    let appVersion = '1.0.0'; // Default version, will be updated from service worker
+    let isOnline = navigator.onLine;
     
     document.addEventListener('DOMContentLoaded', function() {
         console.log('DOM loaded, initializing navigation system...');
+        
+        // Set up online/offline detection
+        setupOnlineStatus();
         
         // Show loading screen initially
         showLoading();
@@ -1431,7 +1429,7 @@
         // Setup navigation
         setupNavigation();
         
-        // Pre-load iframes
+        // Pre-load iframes with cache-busting
         preloadIframes();
         
         // Hide loading screen after a short delay
@@ -1441,7 +1439,35 @@
             switchPage('messages');
             console.log('Navigation system initialization complete');
         }, 1000);
+        
+        // Listen for iframe messages
+        window.addEventListener('message', handleIframeMessage);
+        
+        // Listen for service worker updates
+        if ('serviceWorker' in navigator) {
+            navigator.serviceWorker.addEventListener('message', event => {
+                if (event.data && event.data.type === 'APP_UPDATED') {
+                    appVersion = event.data.version || Date.now().toString();
+                    console.log('App updated to version:', appVersion);
+                    reloadIframes();
+                }
+            });
+        }
     });
+    
+    function setupOnlineStatus() {
+        window.addEventListener('online', () => {
+            isOnline = true;
+            console.log('App is online');
+            document.getElementById('offlineIndicator').classList.remove('show');
+        });
+        
+        window.addEventListener('offline', () => {
+            isOnline = false;
+            console.log('App is offline');
+            document.getElementById('offlineIndicator').classList.add('show');
+        });
+    }
     
     function setupNavigation() {
         console.log('Setting up navigation...');
@@ -1475,6 +1501,15 @@
                 switchPage('group');
             });
         });
+        
+        // Show mobile nav bar on mobile devices
+        if (window.innerWidth < 768) {
+            const mobileNavBar = document.getElementById('mobileNavBar');
+            if (mobileNavBar) {
+                mobileNavBar.classList.remove('hidden');
+                console.log('Mobile nav bar shown');
+            }
+        }
     }
     
     function preloadIframes() {
@@ -1496,16 +1531,22 @@
                 // Mark as not loaded yet
                 iframesLoaded[iframe.id] = false;
                 
+                // Add cache-busting parameter for offline support
+                const cacheBuster = `?v=${appVersion}&t=${Date.now()}`;
+                const iframeSrc = iframe.src + cacheBuster;
+                
                 element.onload = function() {
                     console.log(`${iframe.id} loaded successfully`);
                     iframesLoaded[iframe.id] = true;
                     this.classList.add('loaded');
                     
-                    // Send a message to the iframe to initialize it
+                    // Send initialization message to iframe
                     try {
                         this.contentWindow.postMessage({ 
                             type: 'kynecta_init',
-                            page: iframe.id.replace('Iframe', '')
+                            page: iframe.id.replace('Iframe', ''),
+                            isOnline: isOnline,
+                            version: appVersion
                         }, '*');
                     } catch (e) {
                         console.log('Could not send message to iframe:', e);
@@ -1517,10 +1558,36 @@
                     // Even if iframe fails to load, mark as loaded to prevent infinite loading
                     iframesLoaded[iframe.id] = true;
                     this.classList.add('loaded');
+                    
+                    // For offline mode, show a fallback message
+                    if (!isOnline) {
+                        try {
+                            this.contentWindow.document.body.innerHTML = `
+                                <div class="p-4 text-center">
+                                    <h3 class="text-lg font-semibold mb-2">Offline Mode</h3>
+                                    <p class="text-gray-600">This page is not available offline.</p>
+                                </div>
+                            `;
+                        } catch (e) {
+                            // Cross-origin error, can't modify iframe content
+                        }
+                    }
                 };
                 
-                // Set src to pre-load
-                element.src = iframe.src;
+                // Set src to pre-load with cache-busting
+                element.src = iframeSrc;
+            }
+        });
+    }
+    
+    function reloadIframes() {
+        console.log('Reloading iframes due to app update...');
+        Object.keys(iframesLoaded).forEach(iframeId => {
+            iframesLoaded[iframeId] = false;
+            const iframe = document.getElementById(iframeId);
+            if (iframe) {
+                const src = iframe.src.split('?')[0]; // Remove existing query params
+                iframe.src = src + `?v=${appVersion}&t=${Date.now()}`;
             }
         });
     }
@@ -1569,12 +1636,38 @@
                     }, 300);
                 }
                 
-                // Force iframe reload on mobile for proper display if not loaded
-                if (window.innerWidth < 768 && !iframesLoaded[`${pageName}Iframe`]) {
-                    setTimeout(() => {
-                        iframe.src = iframe.src;
-                    }, 100);
+                // Send online status update to iframe
+                try {
+                    iframe.contentWindow.postMessage({
+                        type: 'online_status',
+                        isOnline: isOnline
+                    }, '*');
+                } catch (e) {
+                    console.log('Could not send online status to iframe:', e);
                 }
+            }
+        }
+    }
+    
+    function handleIframeMessage(event) {
+        // Handle messages from iframes
+        if (event.data && event.data.type) {
+            switch(event.data.type) {
+                case 'iframe_loaded':
+                    console.log('Iframe loaded confirmation:', event.data.page);
+                    break;
+                    
+                case 'auth_required':
+                    // Forward auth requirement to parent if needed
+                    console.log('Auth required in iframe:', event.data.page);
+                    break;
+                    
+                case 'navigate_to':
+                    // Navigate to a different page
+                    if (event.data.page) {
+                        switchPage(event.data.page);
+                    }
+                    break;
             }
         }
     }
@@ -1645,15 +1738,6 @@
         setTimeout(() => {
             toast.remove();
         }, 3000);
-    }
-    
-    // Show mobile nav bar on mobile devices
-    if (window.innerWidth < 768) {
-        const mobileNavBar = document.getElementById('mobileNavBar');
-        if (mobileNavBar) {
-            mobileNavBar.classList.remove('hidden');
-            console.log('Mobile nav bar shown');
-        }
     }
     
     console.log('Navigation system loaded successfully');

@@ -287,8 +287,64 @@
             flex: 1;
             display: flex;
             flex-direction: column;
-            overflow-y: auto;
+            overflow: hidden;
             height: 100vh;
+        }
+        
+        /* Tool Container for Iframe */
+        .tool-container {
+            display: none;
+            flex: 1;
+            flex-direction: column;
+            background: white;
+        }
+        
+        .tool-container.active {
+            display: flex;
+        }
+        
+        .tool-header-bar {
+            padding: 15px 20px;
+            background: white;
+            border-bottom: 1px solid var(--border-color);
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+        
+        .tool-back-btn {
+            padding: 8px 16px;
+            background: var(--secondary-color);
+            border: 1px solid var(--border-color);
+            border-radius: 8px;
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            font-weight: 500;
+            transition: all 0.2s;
+        }
+        
+        .tool-back-btn:hover {
+            background: var(--border-color);
+        }
+        
+        .tool-iframe {
+            flex: 1;
+            width: 100%;
+            border: none;
+            background: white;
+        }
+        
+        .tools-view {
+            display: flex;
+            flex-direction: column;
+            flex: 1;
+            overflow: hidden;
+        }
+        
+        .tools-view.active {
+            display: flex;
         }
         
         /* Top Header */
@@ -450,6 +506,7 @@
             overflow-y: auto;
             display: flex;
             flex-direction: column;
+            max-height: calc(100vh - 300px);
         }
         
         .search-refresh-container {
@@ -537,9 +594,10 @@
             display: grid;
             grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
             gap: 20px;
-            overflow-y: auto;
+            overflow: visible;
             padding-right: 5px;
-            flex: 1;
+            flex: 0 0 auto;
+            margin-bottom: 20px;
         }
         
         /* Custom Scrollbar */
@@ -1494,17 +1552,17 @@
     flex: 1;
     display: flex;
     flex-direction: column;
-    overflow: hidden; /* Keep main container from scrolling */
+    overflow: hidden;
 }
 
 /* Make the tool management area the scrollable section */
 .tool-management {
     padding: 0 20px;
     flex: 1;
-    overflow-y: auto; /* Enable scrolling here */
+    overflow-y: auto;
     display: flex;
     flex-direction: column;
-    max-height: calc(100vh - 300px); /* Adjust based on your header height */
+    max-height: calc(100vh - 300px);
 }
 
 /* Tools grid should not scroll independently */
@@ -1514,7 +1572,7 @@
     gap: 20px;
     overflow: visible;
     padding-right: 5px;
-    flex: 0 0 auto; /* Don't grow or shrink */
+    flex: 0 0 auto;
     margin-bottom: 20px;
 }
 
@@ -1526,7 +1584,7 @@
     border-radius: 12px;
     box-shadow: var(--shadow);
     border-top: 4px solid var(--primary-color);
-    flex-shrink: 0; /* Prevent shrinking */
+    flex-shrink: 0;
 }
     </style>
 </head>
@@ -1596,139 +1654,155 @@
         
         <!-- Main Content -->
         <div class="main-content">
-            <!-- Top Header -->
-            <div class="top-header">
-                <div class="header-left">
-                    <!-- ⿡ MAIN HEADER (TEXT ONLY) -->
-                    <h1>MoodChat Business Hub</h1>
-                    <p>Turn conversations into productivity, revenue, and growth — in one platform.</p>
+            <!-- Tool Container (Hidden by default) -->
+            <div class="tool-container" id="toolContainer">
+                <div class="tool-header-bar">
+                    <button class="tool-back-btn" id="toolBackBtn">
+                        <i class="fas fa-arrow-left"></i>
+                        Back to Tools
+                    </button>
+                    <h3 id="currentToolTitle">Tool</h3>
+                    <div style="width: 100px;"></div> <!-- Spacer for alignment -->
                 </div>
-                <div class="header-right">
-                    <!-- ⿤ SUBSCRIPTION BADGE (TEXT EXTENSION) -->
-                    <div class="subscription-status status-free" id="subscriptionStatus">
-                        <i class="fas fa-crown"></i>
-                        <div style="display: flex; flex-direction: column; align-items: flex-start;">
-                            <span>Free Plan</span>
-                            <span class="benefit-description">Unlimited tools · No ads · Affiliate earnings</span>
-                        </div>
+                <iframe class="tool-iframe" id="toolIframe" sandbox="allow-same-origin allow-scripts allow-forms allow-popups"></iframe>
+            </div>
+            
+            <!-- Tools View (Visible by default) -->
+            <div class="tools-view" id="toolsView">
+                <!-- Top Header -->
+                <div class="top-header">
+                    <div class="header-left">
+                        <!-- ⿡ MAIN HEADER (TEXT ONLY) -->
+                        <h1>MoodChat Business Hub</h1>
+                        <p>Turn conversations into productivity, revenue, and growth — in one platform.</p>
                     </div>
-                    <!-- ⿥ CREDITS SECTION (EXPLANATION LINE) -->
-                    <div style="display: flex; flex-direction: column; align-items: center;">
-                        <div class="credit-balance" id="creditBalance">
+                    <div class="header-right">
+                        <!-- ⿤ SUBSCRIPTION BADGE (TEXT EXTENSION) -->
+                        <div class="subscription-status status-free" id="subscriptionStatus">
+                            <i class="fas fa-crown"></i>
+                            <div style="display: flex; flex-direction: column; align-items: flex-start;">
+                                <span>Free Plan</span>
+                                <span class="benefit-description">Unlimited tools · No ads · Affiliate earnings</span>
+                            </div>
+                        </div>
+                        <!-- ⿥ CREDITS SECTION (EXPLANATION LINE) -->
+                        <div style="display: flex; flex-direction: column; align-items: center;">
+                            <div class="credit-balance" id="creditBalance">
+                                <i class="fas fa-coins"></i>
+                                <span>0 Credits <span class="bonus-badge">+Bonus Credits</span></span>
+                            </div>
+                            <span class="credit-explanation">Credits power premium tools. Buy once, use anytime.</span>
+                        </div>
+                        <button class="upgrade-btn" id="upgradeBtn">
+                            <i class="fas fa-rocket"></i>
+                            Upgrade Now
+                        </button>
+                    </div>
+                </div>
+                
+                <!-- Statistics Cards -->
+                <div class="stats-container">
+                    <div class="stat-card revenue">
+                        <div class="stat-value" id="revenueValue">$0</div>
+                        <div class="stat-label">
+                            <i class="fas fa-chart-line"></i>
+                            <span>Monthly Revenue</span>
+                        </div>
+                        <div class="stat-trend trend-up">+0% this month</div>
+                    </div>
+                    
+                    <div class="stat-card credits">
+                        <div class="stat-value" id="creditsValue">0</div>
+                        <div class="stat-label">
                             <i class="fas fa-coins"></i>
-                            <span>0 Credits <span class="bonus-badge">+Bonus Credits</span></span>
+                            <span>Available Credits</span>
                         </div>
-                        <span class="credit-explanation">Credits power premium tools. Buy once, use anytime.</span>
+                        <div class="stat-trend trend-down">Buy more</div>
                     </div>
-                    <button class="upgrade-btn" id="upgradeBtn">
-                        <i class="fas fa-rocket"></i>
-                        Upgrade Now
-                    </button>
-                </div>
-            </div>
-            
-            <!-- Statistics Cards -->
-            <div class="stats-container">
-                <div class="stat-card revenue">
-                    <div class="stat-value" id="revenueValue">$0</div>
-                    <div class="stat-label">
-                        <i class="fas fa-chart-line"></i>
-                        <span>Monthly Revenue</span>
+                    
+                    <div class="stat-card productivity">
+                        <div class="productivity-ring">
+                            <svg class="ring-circle" viewBox="0 0 80 80">
+                                <defs>
+                                    <linearGradient id="gradient-warning" x1="0%" y1="0%" x2="100%" y2="100%">
+                                        <stop offset="0%" stop-color="#f59e0b" />
+                                        <stop offset="100%" stop-color="#d97706" />
+                                    </linearGradient>
+                                </defs>
+                                <circle class="ring-background" cx="40" cy="40" r="36" />
+                                <circle class="ring-progress" cx="40" cy="40" r="36" />
+                            </svg>
+                            <div class="ring-text" id="productivityScore">78%</div>
+                        </div>
+                        <div class="stat-label">
+                            <i class="fas fa-bolt"></i>
+                            <span>Productivity Score</span>
+                        </div>
                     </div>
-                    <div class="stat-trend trend-up">+0% this month</div>
-                </div>
-                
-                <div class="stat-card credits">
-                    <div class="stat-value" id="creditsValue">0</div>
-                    <div class="stat-label">
-                        <i class="fas fa-coins"></i>
-                        <span>Available Credits</span>
-                    </div>
-                    <div class="stat-trend trend-down">Buy more</div>
-                </div>
-                
-                <div class="stat-card productivity">
-                    <div class="productivity-ring">
-                        <svg class="ring-circle" viewBox="0 0 80 80">
-                            <defs>
-                                <linearGradient id="gradient-warning" x1="0%" y1="0%" x2="100%" y2="100%">
-                                    <stop offset="0%" stop-color="#f59e0b" />
-                                    <stop offset="100%" stop-color="#d97706" />
-                                </linearGradient>
-                            </defs>
-                            <circle class="ring-background" cx="40" cy="40" r="36" />
-                            <circle class="ring-progress" cx="40" cy="40" r="36" />
-                        </svg>
-                        <div class="ring-text" id="productivityScore">78%</div>
-                    </div>
-                    <div class="stat-label">
-                        <i class="fas fa-bolt"></i>
-                        <span>Productivity Score</span>
+                    
+                    <div class="stat-card tools">
+                        <div class="stat-value" id="toolsUsed">0</div>
+                        <div class="stat-label">
+                            <i class="fas fa-tools"></i>
+                            <span>AI Tools Used</span>
+                        </div>
+                        <div class="stat-trend trend-up">+0 this week</div>
                     </div>
                 </div>
                 
-                <div class="stat-card tools">
-                    <div class="stat-value" id="toolsUsed">0</div>
-                    <div class="stat-label">
-                        <i class="fas fa-tools"></i>
-                        <span>AI Tools Used</span>
+                <!-- Tool Management -->
+                <div class="tool-management">
+                    <!-- ⿢ ADD PRIMARY ACTION CARD (NEW SMALL SECTION) -->
+                    <div class="cta-card">
+                        <h3>Start Earning With MoodChat</h3>
+                        <p>Use AI tools, sell services, or advertise your business.</p>
+                        <button class="action-btn success" onclick="openUpgradeModal()" style="background: white; color: var(--primary-color); font-weight: 600;">
+                            <i class="fas fa-rocket"></i>
+                            Get Started
+                        </button>
                     </div>
-                    <div class="stat-trend trend-up">+0 this week</div>
-                </div>
-            </div>
-            
-            <!-- Tool Management -->
-            <div class="tool-management">
-                <!-- ⿢ ADD PRIMARY ACTION CARD (NEW SMALL SECTION) -->
-                <div class="cta-card">
-                    <h3>Start Earning With MoodChat</h3>
-                    <p>Use AI tools, sell services, or advertise your business.</p>
-                    <button class="action-btn success" onclick="openUpgradeModal()" style="background: white; color: var(--primary-color); font-weight: 600;">
-                        <i class="fas fa-rocket"></i>
-                        Get Started
-                    </button>
-                </div>
-                
-                <div class="search-refresh-container">
-                    <div class="search-box">
-                        <input type="text" class="search-input" id="toolSearch" placeholder="Search tools and features...">
-                        <i class="fas fa-search" style="position: absolute; right: 15px; top: 50%; transform: translateY(-50%); color: var(--text-secondary);"></i>
+                    
+                    <div class="search-refresh-container">
+                        <div class="search-box">
+                            <input type="text" class="search-input" id="toolSearch" placeholder="Search tools and features...">
+                            <i class="fas fa-search" style="position: absolute; right: 15px; top: 50%; transform: translateY(-50%); color: var(--text-secondary);"></i>
+                        </div>
+                        <button class="refresh-btn" id="refreshTools">
+                            <i class="fas fa-sync-alt"></i>
+                            Refresh Tools
+                        </button>
                     </div>
-                    <button class="refresh-btn" id="refreshTools">
-                        <i class="fas fa-sync-alt"></i>
-                        Refresh Tools
-                    </button>
-                </div>
-                
-                <!-- Tool Categories -->
-                <div class="tool-categories">
-                    <button class="category-btn active" data-category="all">All Tools</button>
-                    <button class="category-btn" data-category="ai">AI Tools</button>
-                    <button class="category-btn" data-category="business">Business</button>
-                    <button class="category-btn" data-category="productivity">Productivity</button>
-                    <button class="category-btn" data-category="marketplace">Marketplace</button>
-                    <button class="category-btn" data-category="premium">Premium</button>
-                </div>
-                
-                <!-- Cache Indicator -->
-                <div class="cache-indicator" id="cacheIndicator" style="display: none;">
-                    <i class="fas fa-database"></i>
-                    <span>Showing cached tools data. Some features may be limited.</span>
-                </div>
-                
-                <!-- Tools Grid -->
-                <div class="tools-grid" id="toolsGrid">
-                    <!-- ⿣ TOOLS CARDS (TEXT ADDITION ONLY) - Tools will be loaded here with badges and helper text -->
-                </div>
-                
-                <!-- ⿩ ADD "WHY MOODCHAT?" MINI SECTION -->
-                <div class="why-moodchat">
-                    <h4>Why MoodChat?</h4>
-                    <ul>
-                        <li>All-in-one chat + business platform</li>
-                        <li>Built for African payments & connectivity</li>
-                        <li>Offline-first, fast, and secure</li>
-                    </ul>
+                    
+                    <!-- Tool Categories -->
+                    <div class="tool-categories">
+                        <button class="category-btn active" data-category="all">All Tools</button>
+                        <button class="category-btn" data-category="ai">AI Tools</button>
+                        <button class="category-btn" data-category="business">Business</button>
+                        <button class="category-btn" data-category="productivity">Productivity</button>
+                        <button class="category-btn" data-category="marketplace">Marketplace</button>
+                        <button class="category-btn" data-category="premium">Premium</button>
+                    </div>
+                    
+                    <!-- Cache Indicator -->
+                    <div class="cache-indicator" id="cacheIndicator" style="display: none;">
+                        <i class="fas fa-database"></i>
+                        <span>Showing cached tools data. Some features may be limited.</span>
+                    </div>
+                    
+                    <!-- Tools Grid -->
+                    <div class="tools-grid" id="toolsGrid">
+                        <!-- ⿣ TOOLS CARDS (TEXT ADDITION ONLY) - Tools will be loaded here with badges and helper text -->
+                    </div>
+                    
+                    <!-- ⿩ ADD "WHY MOODCHAT?" MINI SECTION -->
+                    <div class="why-moodchat">
+                        <h4>Why MoodChat?</h4>
+                        <ul>
+                            <li>All-in-one chat + business platform</li>
+                            <li>Built for African payments & connectivity</li>
+                            <li>Offline-first, fast, and secure</li>
+                        </ul>
+                    </div>
                 </div>
             </div>
         </div>
@@ -2102,6 +2176,7 @@
         let selectedCreditPackage = null;
         let selectedPaymentMethod = 'card';
         let selectedTool = null;
+        let currentToolId = null;
         
         // Local Storage Keys
         const LOCAL_STORAGE_KEYS = {
@@ -2367,6 +2442,19 @@
             }
         ];
         
+        // Tool URL Mapping
+        const toolUrlMap = {
+            'ai-content': '/tools/content-generator.html',
+            'ai-image': '/tools/image-generator.html',
+            'bulk-email': '/tools/email-sender.html',
+            'predictive-analytics': '/tools/analytics.html',
+            'crm-advanced': '/tools/crm.html',
+            'data-export': '/tools/data-export.html',
+            'ai-templates': '/tools/templates-marketplace.html',
+            'analytics-addon': '/tools/advanced-analytics.html',
+            'integration-plugin': '/tools/integrations.html'
+        };
+        
         // Sample Marketplace Items
         const sampleMarketplaceItems = [
             { id: 'template1', name: 'Sales Funnel Template', price: 4.99, category: 'template' },
@@ -2408,6 +2496,11 @@
         const consultationModal = document.getElementById('consultationModal');
         const advertisingModal = document.getElementById('advertisingModal');
         const paymentModal = document.getElementById('paymentModal');
+        const toolContainer = document.getElementById('toolContainer');
+        const toolsView = document.getElementById('toolsView');
+        const toolIframe = document.getElementById('toolIframe');
+        const toolBackBtn = document.getElementById('toolBackBtn');
+        const currentToolTitle = document.getElementById('currentToolTitle');
         
         // Initialize the application
         document.addEventListener('DOMContentLoaded', function() {
@@ -2970,7 +3063,7 @@
         function handleToolAction(action, tool, button) {
             switch (action) {
                 case 'use':
-                    openActualTool(tool.id);
+                    openToolInline(tool);
                     break;
                 case 'details':
                     showToolDetails(tool);
@@ -2986,119 +3079,70 @@
         }
         
         // =============================================
-        // OPEN ACTUAL TOOL FUNCTION - INTEGRATED
+        // OPEN TOOL INLINE - UPDATED FUNCTION
         // =============================================
         
-        function openActualTool(toolId) {
-            const toolMap = {
-                'ai-content': '/tools/content-generator.html',
-                'ai-image': '/tools/image-generator.html',
-                'bulk-email': '/tools/email-sender.html',
-                'predictive-analytics': '/tools/analytics.html',
-                'crm-advanced': '/tools/crm.html',
-                'data-export': '/tools/data-export.html',
-                'ai-templates': '/tools/templates-marketplace.html',
-                'analytics-addon': '/tools/advanced-analytics.html',
-                'integration-plugin': '/tools/integrations.html'
-            };
-            
-            if (toolMap[toolId]) {
-                // First check if user has subscription or credits for this tool
-                const tool = allTools.find(t => t.id === toolId);
-                if (tool) {
-                    // Check if tool is locked
-                    if (isToolLocked(tool)) {
-                        if (tool.requiresSubscription) {
-                            showToast(`This tool requires ${tool.requiresSubscription} subscription`, 'warning');
-                            showUpgradeModal();
-                        } else if (tool.credits > 0) {
-                            showToast(`Not enough credits. You need ${tool.credits} credits.`, 'warning');
-                            showCreditsModal();
-                        }
-                        return;
-                    }
-                    
-                    // Deduct credits if needed
-                    if (tool.credits > 0) {
-                        if (availableCredits < tool.credits) {
-                            showToast(`Not enough credits. You need ${tool.credits} credits.`, 'warning');
-                            showCreditsModal();
-                            return;
-                        }
-                        
-                        availableCredits -= tool.credits;
-                        addTransaction({
-                            type: 'Tool Usage',
-                            amount: -tool.credits,
-                            status: 'completed',
-                            description: `Used ${tool.name}`
-                        });
-                    }
-                    
-                    // Increment tools used
-                    toolsUsed++;
-                    
-                    // Update productivity score
-                    productivityScore = Math.min(100, productivityScore + Math.floor(Math.random() * 3));
-                    
-                    // Update UI
-                    updateUI();
-                    saveUserDataToCache();
-                    
-                    // Open the actual tool in new tab
-                    window.open(toolMap[toolId], '_blank');
-                    showToast(`Opening ${tool.name}...`, 'success');
-                } else {
-                    // Tool not found in our data
-                    showGenericTool(toolId);
+        function openToolInline(tool) {
+            // First check if user has subscription or credits for this tool
+            if (isToolLocked(tool)) {
+                if (tool.requiresSubscription) {
+                    showToast(`This tool requires ${tool.requiresSubscription} subscription`, 'warning');
+                    showUpgradeModal();
+                } else if (tool.credits > 0) {
+                    showToast(`Not enough credits. You need ${tool.credits} credits.`, 'warning');
+                    showCreditsModal();
                 }
-            } else {
-                // For tools not in the map, show a generic tool interface
-                showGenericTool(toolId);
+                return;
             }
+            
+            // Deduct credits if needed
+            if (tool.credits > 0) {
+                if (availableCredits < tool.credits) {
+                    showToast(`Not enough credits. You need ${tool.credits} credits.`, 'warning');
+                    showCreditsModal();
+                    return;
+                }
+                
+                availableCredits -= tool.credits;
+                addTransaction({
+                    type: 'Tool Usage',
+                    amount: -tool.credits,
+                    status: 'completed',
+                    description: `Used ${tool.name}`
+                });
+            }
+            
+            // Increment tools used
+            toolsUsed++;
+            
+            // Update productivity score
+            productivityScore = Math.min(100, productivityScore + Math.floor(Math.random() * 3));
+            
+            // Update UI
+            updateUI();
+            saveUserDataToCache();
+            
+            // Set current tool
+            currentToolId = tool.id;
+            currentToolTitle.textContent = tool.name;
+            
+            // Show tool container, hide tools view
+            toolsView.style.display = 'none';
+            toolContainer.classList.add('active');
+            
+            // Load tool in iframe
+            const toolUrl = toolUrlMap[tool.id] || '/tools/placeholder.html';
+            toolIframe.src = toolUrl;
+            
+            showToast(`Opening ${tool.name}...`, 'success');
         }
         
-        // Fallback for undefined tools
-        function showGenericTool(toolId) {
-            const toolName = toolId.split('-').map(word => 
-                word.charAt(0).toUpperCase() + word.slice(1)
-            ).join(' ');
-            
-            const modal = document.createElement('div');
-            modal.className = 'modal';
-            modal.style.cssText = `
-                position: fixed; top: 0; left: 0; width: 100%; height: 100%;
-                background: rgba(0,0,0,0.5); z-index: 10000; display: flex;
-                align-items: center; justify-content: center;
-            `;
-            
-            modal.innerHTML = `
-                <div style="background: white; border-radius: 15px; padding: 30px; max-width: 500px; width: 90%;">
-                    <h2 style="margin-bottom: 15px;">${toolName}</h2>
-                    <p style="color: var(--text-secondary); margin-bottom: 20px;">
-                        This tool is currently being developed. Check back soon!
-                    </p>
-                    <div style="display: flex; justify-content: flex-end; gap: 10px;">
-                        <button onclick="this.closest('.modal').remove()" 
-                                style="padding: 10px 20px; background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 8px; cursor: pointer;">
-                            Close
-                        </button>
-                        <button onclick="window.open('/tools/suggest-tool.html?tool=${toolId}', '_blank')" 
-                                style="padding: 10px 20px; background: var(--primary-color); color: white; border: none; border-radius: 8px; cursor: pointer;">
-                            Request Early Access
-                        </button>
-                    </div>
-                </div>
-            `;
-            
-            document.body.appendChild(modal);
-            
-            // Close when clicking outside
-            modal.addEventListener('click', (e) => {
-                if (e.target === modal) {
-                    modal.remove();
-                }
-            });
+        // Go back to tools view
+        function goBackToTools() {
+            toolContainer.classList.remove('active');
+            toolsView.style.display = 'flex';
+            toolIframe.src = 'about:blank';
+            currentToolId = null;
         }
         
         // Show tool details modal
@@ -3184,7 +3228,7 @@
             if (useBtn) {
                 useBtn.addEventListener('click', () => {
                     toolModal.classList.remove('active');
-                    openActualTool(tool.id);
+                    openToolInline(tool);
                 });
             }
         }
@@ -3751,6 +3795,9 @@
             
             // Dismiss offline overlay
             document.getElementById('dismissOfflineBtn').addEventListener('click', dismissOfflineOverlay);
+            
+            // Tool back button
+            toolBackBtn.addEventListener('click', goBackToTools);
             
             // Tool search
             document.getElementById('toolSearch').addEventListener('input', function() {

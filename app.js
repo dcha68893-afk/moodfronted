@@ -2,7 +2,6 @@
 // Manages the single-page application shell and tab visibility
 // Enhanced with Firebase auth, offline detection, global state management, and centralized settings service
 // MODIFIED: Added robust offline support with data caching
-// MODIFIED: Added support for messages.html, tools.html, and iframe-based chat loading
 
 // ============================================================================
 // CONFIGURATION
@@ -21,8 +20,7 @@ const TAB_CONFIG = {
   chats: {
     container: '#chatsTab',
     icon: '[data-tab="chats"]',
-    isExternal: false,
-    iframeSrc: 'messages.html'  // NEW: Load messages in iframe
+    isExternal: false
   },
   groups: {
     container: '#groupsTab',
@@ -42,22 +40,13 @@ const TAB_CONFIG = {
   tools: {
     container: '#toolsTab',
     icon: '[data-tab="tools"]',
-    isExternal: false,
-    iframeSrc: 'tools.html'  // NEW: Load tools in iframe
-  },
-  messages: {  // NEW: Separate messages tab for iframe loading
-    container: '#messagesTab',
-    icon: '[data-tab="chats"]',  // Shares icon with chats
-    isExternal: false,
-    iframeSrc: 'messages.html',
-    isIframe: true
+    isExternal: false
   }
 };
 
 // External page configurations
 const EXTERNAL_TABS = {
-  groups: 'group.html',
-  chats: 'chat.html'  // Load chat.html externally when iframe not available
+  groups: 'group.html'
 };
 
 // ============================================================================
@@ -71,8 +60,6 @@ const CACHE_CONFIG = {
     CHATS: 2 * 60 * 1000, // 2 minutes
     CALLS: 10 * 60 * 1000, // 10 minutes
     GROUPS: 5 * 60 * 1000, // 5 minutes
-    MESSAGES: 2 * 60 * 1000, // 2 minutes
-    TOOLS: 30 * 60 * 1000, // 30 minutes
     GENERAL: 30 * 60 * 1000 // 30 minutes
   },
   
@@ -82,8 +69,6 @@ const CACHE_CONFIG = {
     CHATS_LIST: 'kynecta-cached-chats',
     CALLS_LIST: 'kynecta-cached-calls',
     GROUPS_LIST: 'kynecta-cached-groups',
-    MESSAGES_LIST: 'kynecta-cached-messages',
-    TOOLS_DATA: 'kynecta-cached-tools',
     USER_DATA: 'kynecta-cached-user-data'
   }
 };
@@ -174,9 +159,6 @@ const SETTINGS_SERVICE = {
   // Page callbacks for settings updates
   pageCallbacks: new Map(),
   
-  // Iframe callbacks for settings updates
-  iframeCallbacks: new Map(),
-  
   // Initialize settings service
   initialize: function() {
     console.log('Initializing Settings Service...');
@@ -227,10 +209,6 @@ const SETTINGS_SERVICE = {
       localStorage.setItem('kynecta-settings-timestamp', Date.now().toString());
       
       console.log('Settings saved to localStorage');
-      
-      // Notify all iframes about settings change
-      this.notifyIframes();
-      
       return true;
     } catch (error) {
       console.error('Error saving settings:', error);
@@ -327,9 +305,6 @@ const SETTINGS_SERVICE = {
     // Notify all registered pages
     this.notifyPages();
     
-    // Notify all iframes
-    this.notifyIframes();
-    
     console.log('All settings applied');
   },
   
@@ -357,9 +332,8 @@ const SETTINGS_SERVICE = {
         break;
     }
     
-    // Always notify pages and iframes about the change
+    // Always notify pages about the change
     this.notifyPages();
-    this.notifyIframes();
   },
   
   // Apply theme settings
@@ -380,24 +354,7 @@ const SETTINGS_SERVICE = {
       html.classList.add(`theme-${theme}`);
     }
     
-    // Apply theme to all iframes
-    this.applyThemeToIframes(theme);
-    
     console.log(`Theme applied: ${theme}`);
-  },
-  
-  // Apply theme to iframes
-  applyThemeToIframes: function(theme) {
-    document.querySelectorAll('iframe.kynecta-iframe').forEach(iframe => {
-      try {
-        iframe.contentWindow.postMessage({
-          type: 'apply-theme',
-          theme: theme
-        }, window.location.origin);
-      } catch (e) {
-        // Silently fail if iframe is not ready or from different origin
-      }
-    });
   },
   
   // Apply font size settings
@@ -526,9 +483,6 @@ const SETTINGS_SERVICE = {
         
         // Notify pages
         this.notifyPages();
-        
-        // Notify iframes
-        this.notifyIframes();
       }
     });
   },
@@ -599,23 +553,6 @@ const SETTINGS_SERVICE = {
     console.log(`Page callback unregistered: ${pageId}`);
   },
   
-  // Register an iframe callback for settings updates
-  registerIframeCallback: function(iframeId, callback) {
-    if (typeof callback === 'function') {
-      this.iframeCallbacks.set(iframeId, callback);
-      console.log(`Iframe callback registered: ${iframeId}`);
-      
-      // Immediately notify this iframe with current settings
-      callback(this.current);
-    }
-  },
-  
-  // Unregister an iframe callback
-  unregisterIframeCallback: function(iframeId) {
-    this.iframeCallbacks.delete(iframeId);
-    console.log(`Iframe callback unregistered: ${iframeId}`);
-  },
-  
   // Notify all registered pages about settings changes
   notifyPages: function() {
     console.log(`Notifying ${this.pageCallbacks.size} pages about settings changes`);
@@ -625,32 +562,6 @@ const SETTINGS_SERVICE = {
         callback(this.current);
       } catch (error) {
         console.error(`Error in page callback for ${pageId}:`, error);
-      }
-    });
-  },
-  
-  // Notify all iframes about settings changes
-  notifyIframes: function() {
-    console.log(`Notifying iframes about settings changes`);
-    
-    // Send message to all iframes
-    document.querySelectorAll('iframe.kynecta-iframe').forEach(iframe => {
-      try {
-        iframe.contentWindow.postMessage({
-          type: 'settings-update',
-          data: this.current
-        }, window.location.origin);
-      } catch (e) {
-        // Silently fail if iframe is not ready or from different origin
-      }
-    });
-    
-    // Also notify registered iframe callbacks
-    this.iframeCallbacks.forEach((callback, iframeId) => {
-      try {
-        callback(this.current);
-      } catch (error) {
-        console.error(`Error in iframe callback for ${iframeId}:`, error);
       }
     });
   },
@@ -665,8 +576,6 @@ const SETTINGS_SERVICE = {
       applySettings: () => this.applySettings(),
       registerPageCallback: (pageId, callback) => this.registerPageCallback(pageId, callback),
       unregisterPageCallback: (pageId) => this.unregisterPageCallback(pageId),
-      registerIframeCallback: (iframeId, callback) => this.registerIframeCallback(iframeId, callback),
-      unregisterIframeCallback: (iframeId) => this.unregisterIframeCallback(iframeId),
       getDefaults: () => JSON.parse(JSON.stringify(this.DEFAULTS)),
       resetToDefaults: () => this.resetToDefaults()
     };
@@ -684,7 +593,6 @@ const SETTINGS_SERVICE = {
     this.save();
     this.applySettings();
     this.notifyPages();
-    this.notifyIframes();
     return true;
   }
 };
@@ -834,26 +742,6 @@ const DATA_CACHE = {
   // Get cached groups list
   getCachedGroups: function() {
     return this.get(CACHE_CONFIG.KEYS.GROUPS_LIST);
-  },
-  
-  // NEW: Cache messages list
-  cacheMessages: function(messagesList) {
-    return this.set(CACHE_CONFIG.KEYS.MESSAGES_LIST, messagesList, CACHE_CONFIG.EXPIRATION.MESSAGES);
-  },
-  
-  // NEW: Get cached messages list
-  getCachedMessages: function() {
-    return this.get(CACHE_CONFIG.KEYS.MESSAGES_LIST);
-  },
-  
-  // NEW: Cache tools data
-  cacheTools: function(toolsData) {
-    return this.set(CACHE_CONFIG.KEYS.TOOLS_DATA, toolsData, CACHE_CONFIG.EXPIRATION.TOOLS);
-  },
-  
-  // NEW: Get cached tools data
-  getCachedTools: function() {
-    return this.get(CACHE_CONFIG.KEYS.TOOLS_DATA);
   }
 };
 
@@ -995,77 +883,6 @@ const OFFLINE_DATA_PROVIDER = {
     ];
   },
   
-  // NEW: Generate mock messages data for offline use
-  generateMockMessages: function() {
-    console.log('Generating mock messages data for offline use');
-    return [
-      {
-        id: 'msg_offline_1',
-        senderId: 'friend_offline_1',
-        senderName: 'Alex Johnson',
-        content: 'Hey, are we still meeting today?',
-        timestamp: new Date().toISOString(),
-        isOwn: false,
-        status: 'delivered',
-        avatar: 'https://ui-avatars.com/api/?name=Alex+Johnson&background=8b5cf6&color=fff'
-      },
-      {
-        id: 'msg_offline_2',
-        senderId: 'self',
-        senderName: 'You',
-        content: 'Yes, 3 PM at the usual place',
-        timestamp: new Date().toISOString(),
-        isOwn: true,
-        status: 'read',
-        avatar: 'https://ui-avatars.com/api/?name=You&background=10b981&color=fff'
-      },
-      {
-        id: 'msg_offline_3',
-        senderId: 'friend_offline_1',
-        senderName: 'Alex Johnson',
-        content: 'Perfect! See you then',
-        timestamp: new Date().toISOString(),
-        isOwn: false,
-        status: 'delivered',
-        avatar: 'https://ui-avatars.com/api/?name=Alex+Johnson&background=8b5cf6&color=fff'
-      }
-    ];
-  },
-  
-  // NEW: Generate mock tools data for offline use
-  generateMockTools: function() {
-    console.log('Generating mock tools data for offline use');
-    return [
-      {
-        id: 'tool_offline_1',
-        name: 'File Converter',
-        description: 'Convert files between different formats',
-        icon: '📁',
-        category: 'files',
-        isAvailable: true,
-        lastUsed: new Date(Date.now() - 86400000).toISOString() // 1 day ago
-      },
-      {
-        id: 'tool_offline_2',
-        name: 'Code Editor',
-        description: 'Write and edit code with syntax highlighting',
-        icon: '💻',
-        category: 'development',
-        isAvailable: true,
-        lastUsed: new Date().toISOString()
-      },
-      {
-        id: 'tool_offline_3',
-        name: 'Meeting Notes',
-        description: 'Collaborative note taking during meetings',
-        icon: '📝',
-        category: 'productivity',
-        isAvailable: true,
-        lastUsed: new Date(Date.now() - 172800000).toISOString() // 2 days ago
-      }
-    ];
-  },
-  
   // Get data for a specific tab, using cache or generating mock data
   getTabData: async function(tabName) {
     console.log(`Getting ${tabName} data (offline mode: ${!isOnline})`);
@@ -1100,20 +917,6 @@ const OFFLINE_DATA_PROVIDER = {
         if (!cachedData && !isOnline) {
           cachedData = this.generateMockGroups();
           DATA_CACHE.cacheGroups(cachedData);
-        }
-        break;
-      case 'messages':
-        cachedData = DATA_CACHE.getCachedMessages();
-        if (!cachedData && !isOnline) {
-          cachedData = this.generateMockMessages();
-          DATA_CACHE.cacheMessages(cachedData);
-        }
-        break;
-      case 'tools':
-        cachedData = DATA_CACHE.getCachedTools();
-        if (!cachedData && !isOnline) {
-          cachedData = this.generateMockTools();
-          DATA_CACHE.cacheTools(cachedData);
         }
         break;
     }
@@ -1168,10 +971,6 @@ const OFFLINE_DATA_PROVIDER = {
         return this.generateMockCalls();
       case 'getGroups':
         return this.generateMockGroups();
-      case 'getMessages':
-        return this.generateMockMessages();
-      case 'getTools':
-        return this.generateMockTools();
       case 'sendMessage':
         return {
           messageId: 'msg_' + Date.now(),
@@ -1224,7 +1023,7 @@ function initializeFirebase() {
     // Check if Firebase is available
     if (typeof firebase === 'undefined' || !firebase.apps) {
       console.error('Firebase SDK not loaded');
-      // Set auth as restored even without Firebase for offline mode
+      // Mark auth as ready for offline mode
       authStateRestored = true;
       broadcastAuthReady();
       return;
@@ -1232,13 +1031,11 @@ function initializeFirebase() {
 
     // Initialize Firebase app if not already initialized
     if (firebase.apps.length === 0) {
-      // Firebase config should be defined in index.html or loaded elsewhere
       if (window.firebaseConfig) {
         firebase.initializeApp(window.firebaseConfig);
         console.log('Firebase app initialized');
       } else {
         console.warn('Firebase config not found. Running in offline mode.');
-        // Continue without Firebase for offline functionality
         authStateRestored = true;
         broadcastAuthReady();
         return;
@@ -1253,34 +1050,26 @@ function initializeFirebase() {
       .then(() => {
         console.log('Auth persistence set to LOCAL');
         
-        // FIRST: Restore from localStorage (immediate, works offline)
-        restoreUserFromLocalStorage();
-        
-        // SECOND: Set up Firebase auth observer (works when online)
+        // Set up Firebase auth observer as the ONLY auth check
         const unsubscribe = auth.onAuthStateChanged((user) => {
           console.log('Firebase auth state changed:', user ? 'User logged in' : 'No user');
           
-          // Only update if different from localStorage user
-          const storedUser = getStoredUserFromLocalStorage();
-          if (!user && storedUser) {
-            // Firebase says no user, but we have one stored - keep stored user
-            console.log('Keeping stored user despite Firebase state');
-            handleAuthStateChange(storedUser, true); // fromStorage flag
-          } else {
-            // Use Firebase user or null
-            handleAuthStateChange(user, false);
-          }
+          // Update user state based on Firebase ONLY
+          handleAuthStateChange(user, false);
           
           // Mark auth as restored
           if (!authStateRestored) {
             authStateRestored = true;
             broadcastAuthReady();
           }
+          
+          // Check if redirect is needed (ONLY when online and unauthenticated)
+          checkForRedirect(user);
         }, (error) => {
           console.error('Auth state observer error:', error);
-          // Even if Firebase fails, restore from localStorage
+          
+          // Even if Firebase fails, mark auth as ready for offline mode
           if (!authStateRestored) {
-            restoreUserFromLocalStorage();
             authStateRestored = true;
             broadcastAuthReady();
           }
@@ -1291,21 +1080,10 @@ function initializeFirebase() {
         
         firebaseInitialized = true;
         console.log('Firebase auth initialized successfully');
-        
-        // If auth state hasn't been restored within 3 seconds, force it
-        setTimeout(() => {
-          if (!authStateRestored) {
-            console.log('Forcing auth state restoration');
-            restoreUserFromLocalStorage();
-            authStateRestored = true;
-            broadcastAuthReady();
-          }
-        }, 3000);
       })
       .catch((error) => {
         console.error('Error setting auth persistence:', error);
-        // Continue with localStorage-based auth
-        restoreUserFromLocalStorage();
+        // Continue for offline functionality
         firebaseInitialized = true;
         authStateRestored = true;
         broadcastAuthReady();
@@ -1314,50 +1092,60 @@ function initializeFirebase() {
   } catch (error) {
     console.error('Firebase initialization error:', error);
     // Don't prevent app from loading if Firebase fails
-    restoreUserFromLocalStorage();
     firebaseInitialized = true;
     authStateRestored = true;
     broadcastAuthReady();
   }
 }
 
-// Get stored user from localStorage
-function getStoredUserFromLocalStorage() {
-  try {
-    const storedAuth = localStorage.getItem('kynecta-auth-state');
-    if (storedAuth) {
-      const authData = JSON.parse(storedAuth);
-      if (authData.user && authData.user.uid) {
-        return authData.user;
-      }
-    }
-  } catch (error) {
-    console.warn('Could not get stored user:', error);
-  }
-  return null;
+// Check if current page is index.html
+function isIndexPage() {
+  const path = window.location.pathname;
+  return path.endsWith('index.html') || 
+         path.endsWith('/') || 
+         (path.endsWith('.html') && !path.includes('chat') && !path.includes('messages') && !path.includes('tools'));
 }
 
-// Restore user from localStorage (fastest method, works offline)
-function restoreUserFromLocalStorage() {
-  const storedUser = getStoredUserFromLocalStorage();
-  if (storedUser) {
-    console.log('Restoring user from localStorage:', storedUser.uid);
-    handleAuthStateChange(storedUser, true);
+// Check if redirect is needed
+function checkForRedirect(user) {
+  // ONLY redirect when:
+  // 1. User is unauthenticated
+  // 2. App is online
+  // 3. We're not already on index.html
+  if (!user && isOnline && !isIndexPage()) {
+    console.log('Unauthenticated and online - checking redirect...');
     
-    // Update global state immediately
-    updateGlobalAuthState(storedUser);
-    
-    // Broadcast to other components
-    broadcastAuthChange(storedUser);
-    
-    return true;
+    // Small delay to let other components initialize
+    setTimeout(() => {
+      if (!currentUser && isOnline) {
+        redirectToIndex();
+      }
+    }, 500);
   }
-  return false;
+}
+
+// Redirect to index.html
+function redirectToIndex() {
+  console.log('Redirecting to index.html (unauthenticated + online)');
+  
+  // Check if we're in an iframe
+  if (window.self !== window.top) {
+    // Iframe context - redirect parent window
+    try {
+      window.top.location.href = 'index.html';
+    } catch (e) {
+      console.warn('Cannot redirect parent from iframe:', e);
+      // Fallback to self redirect
+      window.location.href = 'index.html';
+    }
+  } else {
+    // Main window context
+    window.location.href = 'index.html';
+  }
 }
 
 // Handle auth state changes
 function handleAuthStateChange(user, fromStorage = false) {
-  // Only update if user is different
   const userId = user ? user.uid : null;
   const currentUserId = currentUser ? currentUser.uid : null;
   
@@ -1370,15 +1158,8 @@ function handleAuthStateChange(user, fromStorage = false) {
     // Broadcast auth change to other components
     broadcastAuthChange(user);
     
-    // Store in localStorage for persistence (unless this came from storage)
-    if (!fromStorage) {
-      storeAuthInLocalStorage(user);
-    }
-    
-    // If user logged in and we're online, try to update user data
-    if (user && isOnline && firebaseInitialized && !fromStorage) {
-      updateUserProfile(user);
-    }
+    // Store in localStorage for persistence
+    storeAuthInLocalStorage(user);
     
     console.log('Auth state updated:', user ? user.uid : 'No user');
   }
@@ -1402,32 +1183,10 @@ function updateGlobalAuthState(user) {
     detail: { 
       user: user, 
       isAuthenticated: !!user,
-      isAuthReady: authStateRestored,
-      fromStorage: false
+      isAuthReady: authStateRestored
     }
   });
   window.dispatchEvent(event);
-  
-  // Broadcast to iframes
-  broadcastAuthToIframes(user);
-}
-
-// Broadcast auth to iframes
-function broadcastAuthToIframes(user) {
-  document.querySelectorAll('iframe.kynecta-iframe').forEach(iframe => {
-    try {
-      iframe.contentWindow.postMessage({
-        type: 'auth-state-update',
-        data: {
-          user: user,
-          isAuthenticated: !!user,
-          isAuthReady: authStateRestored
-        }
-      }, window.location.origin);
-    } catch (e) {
-      // Silently fail if iframe is not ready or from different origin
-    }
-  });
 }
 
 // Broadcast auth change to other tabs/pages
@@ -1476,17 +1235,6 @@ function storeAuthInLocalStorage(user) {
   }
 }
 
-// Update user profile (when online)
-function updateUserProfile(user) {
-  if (!user || !firebaseInitialized) return;
-  
-  // This can be extended to fetch additional user data from Firestore
-  console.log('User profile updated:', user.uid);
-  
-  // Update localStorage with latest user data
-  storeAuthInLocalStorage(user);
-}
-
 // Broadcast that auth is ready
 function broadcastAuthReady() {
   const event = new CustomEvent('auth-ready', {
@@ -1497,22 +1245,6 @@ function broadcastAuthReady() {
     }
   });
   window.dispatchEvent(event);
-  
-  // Broadcast to iframes
-  document.querySelectorAll('iframe.kynecta-iframe').forEach(iframe => {
-    try {
-      iframe.contentWindow.postMessage({
-        type: 'auth-ready',
-        data: {
-          isReady: true,
-          user: currentUser
-        }
-      }, window.location.origin);
-    } catch (e) {
-      // Silently fail if iframe is not ready or from different origin
-    }
-  });
-  
   console.log('Auth ready broadcasted, user:', currentUser ? currentUser.uid : 'No user');
 }
 
@@ -1588,14 +1320,9 @@ function handleOnline() {
   // BACKGROUND SYNC: Trigger sync when coming online
   triggerBackgroundSync();
   
-  // If we have a stored user and Firebase is initialized, verify with Firebase
-  if (currentUser && firebaseInitialized) {
-    setTimeout(() => {
-      const auth = firebase.auth();
-      auth.currentUser?.reload().catch(error => {
-        console.log('User reload error (might be offline user):', error.message);
-      });
-    }, 1000);
+  // Check if we need to redirect (only when coming online)
+  if (!currentUser) {
+    checkForRedirect(currentUser);
   }
 }
 
@@ -1629,28 +1356,8 @@ function updateNetworkStatus(online) {
   });
   window.dispatchEvent(event);
   
-  // Broadcast to iframes
-  broadcastNetworkToIframes(online);
-  
   // Update UI based on network status
   updateNetworkUI(online);
-}
-
-// Broadcast network status to iframes
-function broadcastNetworkToIframes(online) {
-  document.querySelectorAll('iframe.kynecta-iframe').forEach(iframe => {
-    try {
-      iframe.contentWindow.postMessage({
-        type: 'network-state-update',
-        data: {
-          isOnline: online,
-          isOffline: !online
-        }
-      }, window.location.origin);
-    } catch (e) {
-      // Silently fail if iframe is not ready or from different origin
-    }
-  });
 }
 
 // Update UI based on network status
@@ -1877,7 +1584,7 @@ function queueForSync(data, type = 'message') {
           queued: true, 
           offline: true, 
           id: addRequest.result,
-          message: `${type} queued for when online`
+          message: `${type} queued for when online` 
         });
       };
       
@@ -2278,9 +1985,7 @@ function exposeGlobalStateToIframes() {
       friends: () => OFFLINE_DATA_PROVIDER.generateMockFriends(),
       chats: () => OFFLINE_DATA_PROVIDER.generateMockChats(),
       calls: () => OFFLINE_DATA_PROVIDER.generateMockCalls(),
-      groups: () => OFFLINE_DATA_PROVIDER.generateMockGroups(),
-      messages: () => OFFLINE_DATA_PROVIDER.generateMockMessages(),
-      tools: () => OFFLINE_DATA_PROVIDER.generateMockTools()
+      groups: () => OFFLINE_DATA_PROVIDER.generateMockGroups()
     }
   };
   
@@ -2386,107 +2091,7 @@ function handleIframeMessage(event) {
         }, event.origin);
       }
       break;
-      
-    case 'iframe-loaded':
-      // Iframe has finished loading
-      console.log(`Iframe loaded: ${data?.iframeId || 'unknown'}`);
-      
-      // Send current state to iframe
-      event.source.postMessage({
-        type: 'auth-state-update',
-        data: {
-          user: currentUser,
-          isAuthenticated: !!currentUser,
-          isAuthReady: authStateRestored
-        }
-      }, event.origin);
-      
-      event.source.postMessage({
-        type: 'network-state-update',
-        data: {
-          isOnline: isOnline,
-          isOffline: !isOnline
-        }
-      }, event.origin);
-      
-      event.source.postMessage({
-        type: 'settings-update',
-        data: SETTINGS_SERVICE.current
-      }, event.origin);
-      break;
-      
-    case 'iframe-close-request':
-      // Iframe wants to close itself (e.g., go back to chat list)
-      handleIframeCloseRequest(data, event.source);
-      break;
-      
-    case 'iframe-navigation-request':
-      // Iframe wants to navigate to a different view
-      handleIframeNavigationRequest(data, event.source);
-      break;
   }
-}
-
-function handleIframeCloseRequest(data, sourceWindow) {
-  console.log('Iframe close request:', data);
-  
-  // For messages iframe, show chat list
-  if (data.iframeType === 'messages') {
-    window.showChatList();
-  }
-  
-  // For tools iframe, just stay in tools tab
-  // No action needed
-  
-  // Acknowledge the request
-  sourceWindow.postMessage({
-    type: 'iframe-close-acknowledged',
-    data: { success: true }
-  }, window.location.origin);
-}
-
-function handleIframeNavigationRequest(data, sourceWindow) {
-  console.log('Iframe navigation request:', data);
-  
-  // Handle different navigation requests
-  switch(data.action) {
-    case 'open-chat':
-      // Open a specific chat
-      if (data.chatId) {
-        // This would be handled by chat.js
-        window.showChatArea();
-        // Broadcast to other components
-        const event = new CustomEvent('open-chat', {
-          detail: { chatId: data.chatId }
-        });
-        window.dispatchEvent(event);
-      }
-      break;
-      
-    case 'open-tool':
-      // Open a specific tool
-      if (data.toolId) {
-        // This would be handled by tools.js
-        const event = new CustomEvent('open-tool', {
-          detail: { toolId: data.toolId }
-        });
-        window.dispatchEvent(event);
-      }
-      break;
-      
-    case 'switch-tab':
-      // Switch to a different tab
-      if (data.tabName && TAB_CONFIG[data.tabName]) {
-        switchTab(data.tabName);
-      }
-      break;
-  }
-  
-  // Acknowledge the request
-  sourceWindow.postMessage({
-    type: 'iframe-navigation-acknowledged',
-    data: { success: true }
-  }, window.location.origin);
 }
 
 function handleStorageEvent(event) {
@@ -2533,7 +2138,7 @@ function handleStorageEvent(event) {
 function broadcastStateToIframes() {
   // This function would broadcast state to all iframes
   // In a real implementation, you would get all iframes and post messages
-  const iframes = document.querySelectorAll('iframe.kynecta-iframe');
+  const iframes = document.querySelectorAll('iframe');
   iframes.forEach(iframe => {
     try {
       // Send auth state
@@ -2567,7 +2172,7 @@ function broadcastStateToIframes() {
 }
 
 // ============================================================================
-// APPLICATION SHELL FUNCTIONS (ENHANCED FOR IFRAME SUPPORT)
+// APPLICATION SHELL FUNCTIONS (UNCHANGED)
 // ============================================================================
 
 window.toggleSidebar = function() {
@@ -2617,7 +2222,7 @@ function initializeLoadedContent(container) {
 }
 
 // ============================================================================
-// TAB MANAGEMENT (ENHANCED WITH IFRAME SUPPORT)
+// TAB MANAGEMENT (ENHANCED WITH OFFLINE SUPPORT)
 // ============================================================================
 
 function switchTab(tabName) {
@@ -2660,68 +2265,11 @@ function showTab(tabName) {
     
     // Trigger data load for the tab (works offline)
     triggerTabDataLoad(tabName);
-    
-    // Special handling for iframe tabs
-    if (config.iframeSrc) {
-      loadIframeTab(tabName, config);
-    }
   } else {
     console.error(`Tab container not found: ${config.container} for tab: ${tabName}`);
     if (EXTERNAL_TABS[tabName]) {
       loadExternalTab(tabName, EXTERNAL_TABS[tabName]);
     }
-  }
-}
-
-// Load iframe for a tab
-function loadIframeTab(tabName, config) {
-  const tabContainer = document.querySelector(config.container);
-  if (!tabContainer) return;
-  
-  // Check if iframe already exists
-  let iframe = tabContainer.querySelector('iframe.kynecta-iframe');
-  
-  if (!iframe) {
-    // Create iframe
-    iframe = document.createElement('iframe');
-    iframe.className = 'kynecta-iframe w-full h-full border-0';
-    iframe.id = `${tabName}Iframe`;
-    iframe.src = config.iframeSrc;
-    iframe.title = `${tabName.charAt(0).toUpperCase() + tabName.slice(1)}`;
-    
-    // Set sandbox attributes for security
-    iframe.setAttribute('sandbox', 'allow-same-origin allow-scripts allow-forms allow-popups allow-modals allow-downloads');
-    iframe.setAttribute('allow', 'microphone; camera');
-    
-    // Add loading indicator
-    iframe.onload = function() {
-      console.log(`${tabName} iframe loaded`);
-      
-      // Notify iframe that it's loaded
-      try {
-        iframe.contentWindow.postMessage({
-          type: 'iframe-loaded',
-          data: {
-            tabName: tabName,
-            iframeId: iframe.id
-          }
-        }, window.location.origin);
-      } catch (e) {
-        console.warn(`Could not post message to ${tabName} iframe:`, e);
-      }
-    };
-    
-    iframe.onerror = function() {
-      console.error(`Failed to load ${tabName} iframe`);
-      // Fallback to external loading
-      if (EXTERNAL_TABS[tabName]) {
-        loadExternalTab(tabName, EXTERNAL_TABS[tabName]);
-      }
-    };
-    
-    // Clear container and add iframe
-    tabContainer.innerHTML = '';
-    tabContainer.appendChild(iframe);
   }
 }
 
@@ -2738,24 +2286,6 @@ function triggerTabDataLoad(tabName) {
     }
   });
   window.dispatchEvent(event);
-  
-  // Also send message to iframe if it exists
-  if (TAB_CONFIG[tabName]?.iframeSrc) {
-    const iframe = document.getElementById(`${tabName}Iframe`);
-    if (iframe) {
-      try {
-        iframe.contentWindow.postMessage({
-          type: 'tab-data-request',
-          data: {
-            tab: tabName,
-            isOnline: isOnline
-          }
-        }, window.location.origin);
-      } catch (e) {
-        // Silently fail if iframe is not ready
-      }
-    }
-  }
 }
 
 async function loadExternalTab(tabName, htmlFile) {
@@ -2861,7 +2391,7 @@ function updateChatAreaVisibility(tabName) {
   
   const isMobile = window.innerWidth < 768;
   
-  if (tabName === 'chats' || tabName === 'groups' || tabName === 'messages') {
+  if (tabName === 'chats' || tabName === 'groups') {
     const hasActiveChat = chatHeader && !chatHeader.classList.contains('hidden');
     
     if (hasActiveChat) {
@@ -3035,7 +2565,7 @@ function showError(message) {
 }
 
 // ============================================================================
-// EVENT HANDLERS (UPDATED WITH IFRAME SUPPORT)
+// EVENT HANDLERS (UPDATED WITH OFFLINE SUPPORT)
 // ============================================================================
 
 function setupEventListeners() {
@@ -3220,7 +2750,7 @@ window.triggerFileInput = function(inputId) {
 };
 
 // ============================================================================
-// ENHANCED INITIALIZATION WITH IFRAME SUPPORT
+// ENHANCED INITIALIZATION WITH OFFLINE SUPPORT
 // ============================================================================
 
 function initializeApp() {
@@ -3325,7 +2855,6 @@ function runInitialization() {
     console.log('Network:', isOnline ? 'Online' : 'Offline');
     console.log('Settings loaded:', Object.keys(SETTINGS_SERVICE.current).length, 'categories');
     console.log('Offline support: ENABLED with data caching');
-    console.log('Iframe support: ENABLED for messages.html and tools.html');
     
     // Trigger initial data load for current tab
     setTimeout(() => {
@@ -3413,8 +2942,6 @@ function injectStyles() {
     
     .tab-panel {
       display: none;
-      width: 100%;
-      height: 100%;
     }
     
     .tab-panel.active {
@@ -3423,14 +2950,6 @@ function injectStyles() {
     
     .hidden {
       display: none !important;
-    }
-    
-    /* Iframe styles */
-    .kynecta-iframe {
-      width: 100%;
-      height: 100%;
-      border: none;
-      background: transparent;
     }
     
     /* Theme classes */
@@ -3524,10 +3043,6 @@ function injectStyles() {
       #sidebar.open + #sidebar-overlay {
         display: block;
       }
-      
-      .kynecta-iframe {
-        min-height: calc(100vh - 60px);
-      }
     }
   `;
   
@@ -3538,7 +3053,7 @@ function injectStyles() {
 }
 
 // ============================================================================
-// ENHANCED PUBLIC API WITH IFRAME SUPPORT
+// ENHANCED PUBLIC API WITH OFFLINE SUPPORT
 // ============================================================================
 
 // Expose application functions
@@ -3711,53 +3226,6 @@ window.clearCache = function(key = null) {
   }
 };
 
-// IFRAME MANAGEMENT FUNCTIONS
-window.loadIframeContent = function(tabName, url) {
-  const config = TAB_CONFIG[tabName];
-  if (!config) {
-    console.error(`No config found for tab: ${tabName}`);
-    return false;
-  }
-  
-  const tabContainer = document.querySelector(config.container);
-  if (!tabContainer) {
-    console.error(`Tab container not found: ${config.container}`);
-    return false;
-  }
-  
-  // Find or create iframe
-  let iframe = tabContainer.querySelector('iframe.kynecta-iframe');
-  if (!iframe) {
-    iframe = document.createElement('iframe');
-    iframe.className = 'kynecta-iframe w-full h-full border-0';
-    iframe.id = `${tabName}Iframe`;
-    iframe.title = `${tabName.charAt(0).toUpperCase() + tabName.slice(1)}`;
-    iframe.setAttribute('sandbox', 'allow-same-origin allow-scripts allow-forms allow-popups allow-modals allow-downloads');
-    iframe.setAttribute('allow', 'microphone; camera');
-    tabContainer.appendChild(iframe);
-  }
-  
-  // Load content
-  iframe.src = url;
-  return true;
-};
-
-window.sendMessageToIframe = function(iframeId, message) {
-  const iframe = document.getElementById(iframeId);
-  if (!iframe) {
-    console.error(`Iframe not found: ${iframeId}`);
-    return false;
-  }
-  
-  try {
-    iframe.contentWindow.postMessage(message, window.location.origin);
-    return true;
-  } catch (e) {
-    console.error(`Failed to send message to iframe ${iframeId}:`, e);
-    return false;
-  }
-};
-
 // ============================================================================
 // STARTUP
 // ============================================================================
@@ -3769,15 +3237,10 @@ if (document.readyState === 'loading') {
   setTimeout(initializeApp, 0);
 }
 
-console.log('Kynecta app.js loaded - Application shell ready with enhanced auth, offline support, centralized settings service, and iframe support');
+console.log('Kynecta app.js loaded - Application shell ready with enhanced auth, offline support, and centralized settings service');
 console.log('Offline features:');
 console.log('  ✓ Auth works offline (localStorage)');
 console.log('  ✓ Data caching with expiration');
 console.log('  ✓ Mock data generation for offline mode');
 console.log('  ✓ Background sync when online');
 console.log('  ✓ All UI remains functional offline');
-console.log('Iframe features:');
-console.log('  ✓ messages.html loads in iframe');
-console.log('  ✓ tools.html loads in iframe');
-console.log('  ✓ Cross-iframe communication');
-console.log('  ✓ Shared auth and settings state');

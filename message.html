@@ -1474,99 +1474,111 @@
         
         // Initialize the application
         document.addEventListener('DOMContentLoaded', function() {
-            // INSTANT LOAD: Show cached data immediately
+            // Load cached data immediately - NO AUTH DEPENDENCY
             instantLoadFromCache();
             
-            // Load current user from app.js or localStorage
-            loadCurrentUser();
-            
-            // Initialize app in background
-            setTimeout(() => {
-                initializeApp();
-            }, 100);
-            
+            // Setup event listeners
             setupEventListeners();
             setupMessageInput();
-            setupOfflineSupport();
             setupEmojiPicker();
             setupResponsiveBehavior();
+            
+            // Initialize offline support
+            setupOfflineSupport();
+            
+            // Check auth state in background (non-blocking)
+            setTimeout(() => {
+                checkAuthState();
+            }, 100);
         });
         
-        // INSTANT LOAD FUNCTION - Shows cached data immediately
+        // INSTANT LOAD FUNCTION - Shows cached data immediately without auth
         function instantLoadFromCache() {
             try {
-                // Try to load user from localStorage first
-                const userData = localStorage.getItem('currentUser');
-                if (userData) {
-                    const user = JSON.parse(userData);
-                    if (user && user.uid) {
-                        // Load cached chats
-                        loadCachedChats();
-                        
-                        // Load cached contacts
-                        loadCachedContacts();
-                        
-                        // Update UI with cached data immediately
-                        if (cachedChats.length > 0) {
-                            updateChatListWithCache();
+                // Load cached user data WITHOUT waiting for Firebase auth
+                const cachedUserData = localStorage.getItem('currentUser');
+                if (cachedUserData) {
+                    try {
+                        const user = JSON.parse(cachedUserData);
+                        if (user && user.uid) {
+                            currentUser = user;
+                            console.log('Using cached user data for offline rendering');
                         }
-                        
-                        // Show cached contacts in new chat modal if available
-                        if (cachedContacts.length > 0) {
-                            populateContactsList(cachedContacts);
-                        }
+                    } catch (e) {
+                        console.log('No valid cached user data');
                     }
                 }
                 
-                // Remove any loading placeholders
-                const loadingPlaceholders = document.querySelectorAll('.loading-placeholder');
-                loadingPlaceholders.forEach(el => el.style.display = 'none');
+                // Load cached chats
+                loadCachedChats();
+                
+                // Load cached contacts
+                loadCachedContacts();
+                
+                // Update UI with cached data immediately
+                if (cachedChats.length > 0) {
+                    updateChatListWithCache();
+                }
+                
+                // Show cached contacts in new chat modal if available
+                if (cachedContacts.length > 0) {
+                    populateContactsList(cachedContacts);
+                }
+                
+                // Load pending messages
+                loadPendingMessages();
+                
+                // Check if we have any offline data to display
+                if (cachedChats.length === 0 && cachedContacts.length === 0) {
+                    console.log('No cached data found for offline rendering');
+                }
                 
             } catch (error) {
                 console.error('Error in instant load:', error);
             }
         }
         
-        // Load current user from app.js data
-        function loadCurrentUser() {
-            try {
-                // Check if user data is available from app.js
-                if (typeof window.currentUser !== 'undefined' && window.currentUser) {
-                    currentUser = window.currentUser;
-                    console.log('User loaded from app.js:', currentUser.uid);
+        // Check auth state without blocking UI
+        function checkAuthState() {
+            auth.onAuthStateChanged(user => {
+                if (user) {
+                    // User is signed in
+                    currentUser = user;
+                    
+                    // Update cached user data
+                    localStorage.setItem('currentUser', JSON.stringify({
+                        uid: user.uid,
+                        displayName: user.displayName,
+                        photoURL: user.photoURL,
+                        email: user.email
+                    }));
+                    
+                    console.log('User authenticated:', user.uid);
+                    
+                    // Load fresh data if online
+                    if (isOnline) {
+                        loadUserData();
+                        loadOnlineUsers();
+                        loadChats();
+                        loadContacts();
+                    }
+                    
                 } else {
-                    // Fallback to localStorage
-                    const userData = localStorage.getItem('currentUser');
-                    if (userData) {
-                        currentUser = JSON.parse(userData);
-                        console.log('User loaded from localStorage:', currentUser.uid);
-                    } else {
-                        // Check Firebase auth state
-                        auth.onAuthStateChanged(user => {
-                            if (user) {
-                                currentUser = user;
-                                localStorage.setItem('currentUser', JSON.stringify({
-                                    uid: user.uid,
-                                    displayName: user.displayName,
-                                    photoURL: user.photoURL,
-                                    email: user.email
-                                }));
-                                console.log('User loaded from Firebase auth:', user.uid);
-                                
-                                // Now that we have user, load cached data
-                                loadCachedChats();
-                                loadCachedContacts();
-                                updateChatListWithCache();
-                            } else {
-                                console.log('No user found, redirecting to login');
-                                window.location.href = 'index.html';
-                            }
-                        });
+                    // User is not signed in but we might have cached data
+                    console.log('No authenticated user, using cached data if available');
+                    
+                    // Don't redirect if we have cached data (offline mode)
+                    const cachedUserData = localStorage.getItem('currentUser');
+                    if (!cachedUserData && isOnline) {
+                        // Only redirect if online and no cached data
+                        console.log('No cached user data, redirecting to login');
+                        window.location.href = 'index.html';
                     }
                 }
-            } catch (error) {
-                console.error('Error loading current user:', error);
-            }
+            }, error => {
+                console.error('Auth state change error:', error);
+                // Don't redirect on auth errors - continue with cached data
+            });
         }
         
         // OFFLINE SUPPORT FUNCTIONS
@@ -1578,24 +1590,8 @@
             // Initial check
             handleOnlineStatusChange();
             
-            // Load cached data if not already loaded
-            if (cachedChats.length === 0) {
-                loadCachedChats();
-            }
-            if (cachedContacts.length === 0) {
-                loadCachedContacts();
-            }
-            
-            // Load pending messages
-            loadPendingMessages();
-            
             // Start background sync interval
             startBackgroundSync();
-            
-            // Setup real-time listener if online
-            if (isOnline && currentUser && currentUser.uid) {
-                setupRealTimeListener();
-            }
         }
         
         function handleOnlineStatusChange() {
@@ -1612,14 +1608,18 @@
                     processPendingMessages();
                 }, 2000);
                 
-                // Start real-time listener
-                setupRealTimeListener();
+                // Start real-time listener if user is authenticated
+                if (currentUser && currentUser.uid) {
+                    setupRealTimeListener();
+                }
                 
-                // Load fresh data in background
-                setTimeout(() => {
-                    loadChats();
-                    loadContacts();
-                }, 1000);
+                // Load fresh data in background if authenticated
+                if (currentUser && currentUser.uid) {
+                    setTimeout(() => {
+                        loadChats();
+                        loadContacts();
+                    }, 1000);
+                }
                 
             } else if (!isOnline && wasOnline) {
                 // Just went offline
@@ -1635,16 +1635,30 @@
         
         function loadCachedChats() {
             try {
-                if (!currentUser || !currentUser.uid) {
-                    console.log('No user ID available for loading cached chats');
-                    cachedChats = [];
-                    return;
+                // Try to load from localStorage using currentUser ID or generic cache
+                let cachedData = null;
+                
+                if (currentUser && currentUser.uid) {
+                    cachedData = localStorage.getItem(`cachedChats_${currentUser.uid}`);
                 }
                 
-                const cachedData = localStorage.getItem(`cachedChats_${currentUser.uid}`);
+                // Fallback to generic cache if user-specific not found
+                if (!cachedData) {
+                    cachedData = localStorage.getItem('cachedChats');
+                }
+                
                 if (cachedData) {
                     cachedChats = JSON.parse(cachedData);
                     console.log(`Loaded ${cachedChats.length} cached chats`);
+                    
+                    // Update timestamp to ensure freshness
+                    cachedChats.forEach(chat => {
+                        if (chat.lastMessageTimestamp && typeof chat.lastMessageTimestamp === 'string') {
+                            // Ensure timestamp is a Date object
+                            chat.lastMessageTimestamp = new Date(chat.lastMessageTimestamp);
+                        }
+                    });
+                    
                 } else {
                     cachedChats = [];
                 }
@@ -1656,10 +1670,9 @@
         
         function saveChatToCache(chat) {
             try {
-                if (!currentUser || !currentUser.uid) {
-                    console.log('No user ID available for saving chat cache');
-                    return;
-                }
+                // Save to both user-specific and generic cache for offline access
+                const cacheKey = currentUser && currentUser.uid ? 
+                    `cachedChats_${currentUser.uid}` : 'cachedChats';
                 
                 // Check if chat already exists in cache
                 const existingIndex = cachedChats.findIndex(c => 
@@ -1680,7 +1693,12 @@
                 }
                 
                 // Save to localStorage
-                localStorage.setItem(`cachedChats_${currentUser.uid}`, JSON.stringify(cachedChats));
+                localStorage.setItem(cacheKey, JSON.stringify(cachedChats));
+                
+                // Also save to generic cache for offline access
+                if (currentUser && currentUser.uid) {
+                    localStorage.setItem('cachedChats', JSON.stringify(cachedChats));
+                }
                 
                 // Update UI with cached chat if offline
                 if (!isOnline) {
@@ -1694,13 +1712,18 @@
         
         function loadCachedContacts() {
             try {
-                if (!currentUser || !currentUser.uid) {
-                    console.log('No user ID available for loading cached contacts');
-                    cachedContacts = [];
-                    return;
+                // Try to load from localStorage using currentUser ID or generic cache
+                let cachedData = null;
+                
+                if (currentUser && currentUser.uid) {
+                    cachedData = localStorage.getItem(`cachedContacts_${currentUser.uid}`);
                 }
                 
-                const cachedData = localStorage.getItem(`cachedContacts_${currentUser.uid}`);
+                // Fallback to generic cache if user-specific not found
+                if (!cachedData) {
+                    cachedData = localStorage.getItem('cachedContacts');
+                }
+                
                 if (cachedData) {
                     cachedContacts = JSON.parse(cachedData);
                     console.log(`Loaded ${cachedContacts.length} cached contacts`);
@@ -1715,13 +1738,17 @@
         
         function saveContactsToCache(contacts) {
             try {
-                if (!currentUser || !currentUser.uid) {
-                    console.log('No user ID available for saving contacts cache');
-                    return;
-                }
+                // Save to both user-specific and generic cache
+                const cacheKey = currentUser && currentUser.uid ? 
+                    `cachedContacts_${currentUser.uid}` : 'cachedContacts';
                 
                 cachedContacts = contacts;
-                localStorage.setItem(`cachedContacts_${currentUser.uid}`, JSON.stringify(cachedContacts));
+                localStorage.setItem(cacheKey, JSON.stringify(cachedContacts));
+                
+                // Also save to generic cache for offline access
+                if (currentUser && currentUser.uid) {
+                    localStorage.setItem('cachedContacts', JSON.stringify(cachedContacts));
+                }
                 
             } catch (error) {
                 console.error('Error saving contacts to cache:', error);
@@ -1742,7 +1769,7 @@
             // Combine cached chats with online chats
             const allCombinedChats = [...allChats, ...cachedChats];
             
-            // Remove duplicates
+            // Remove duplicates - prefer cached version for offline freshness
             const uniqueChats = [];
             const seenIds = new Set();
             
@@ -1758,8 +1785,8 @@
             
             // Sort by last message timestamp (newest first)
             filteredChats.sort((a, b) => {
-                const timeA = a.lastMessageTimestamp ? new Date(a.lastMessageTimestamp) : new Date();
-                const timeB = b.lastMessageTimestamp ? new Date(b.lastMessageTimestamp) : new Date();
+                const timeA = a.lastMessageTimestamp ? new Date(a.lastMessageTimestamp) : new Date(0);
+                const timeB = b.lastMessageTimestamp ? new Date(b.lastMessageTimestamp) : new Date(0);
                 return timeB - timeA;
             });
             
@@ -1808,7 +1835,7 @@
                     
                 case 'sent':
                     filteredChats = chats.filter(chat => 
-                        !chat.isArchived && 
+                        !chat.isArchivated && 
                         chat.lastMessageSender === userId
                     );
                     break;
@@ -1984,13 +2011,17 @@
         
         function loadPendingMessages() {
             try {
-                if (!currentUser || !currentUser.uid) {
-                    console.log('No user ID available for loading pending messages');
-                    pendingMessages = [];
-                    return;
+                let pendingData = null;
+                
+                if (currentUser && currentUser.uid) {
+                    pendingData = localStorage.getItem(`pendingMessages_${currentUser.uid}`);
                 }
                 
-                const pendingData = localStorage.getItem(`pendingMessages_${currentUser.uid}`);
+                // Fallback to generic cache
+                if (!pendingData) {
+                    pendingData = localStorage.getItem('pendingMessages');
+                }
+                
                 if (pendingData) {
                     pendingMessages = JSON.parse(pendingData);
                     console.log(`Loaded ${pendingMessages.length} pending messages`);
@@ -2005,10 +2036,9 @@
         
         function savePendingMessage(message) {
             try {
-                if (!currentUser || !currentUser.uid) {
-                    console.log('No user ID available for saving pending message');
-                    return null;
-                }
+                // Save to both user-specific and generic cache
+                const cacheKey = currentUser && currentUser.uid ? 
+                    `pendingMessages_${currentUser.uid}` : 'pendingMessages';
                 
                 // Generate a temporary ID for offline message
                 const tempId = 'temp_' + Date.now() + '_' + Math.random().toString(36).substr(2, 9);
@@ -2020,7 +2050,12 @@
                 pendingMessages.push(message);
                 
                 // Save to localStorage
-                localStorage.setItem(`pendingMessages_${currentUser.uid}`, JSON.stringify(pendingMessages));
+                localStorage.setItem(cacheKey, JSON.stringify(pendingMessages));
+                
+                // Also save to generic cache
+                if (currentUser && currentUser.uid) {
+                    localStorage.setItem('pendingMessages', JSON.stringify(pendingMessages));
+                }
                 
                 console.log(`Saved pending message with tempId: ${tempId}`);
                 
@@ -2031,8 +2066,26 @@
             }
         }
         
+        function removePendingMessage(tempId) {
+            try {
+                pendingMessages = pendingMessages.filter(msg => msg.tempId !== tempId);
+                
+                const cacheKey = currentUser && currentUser.uid ? 
+                    `pendingMessages_${currentUser.uid}` : 'pendingMessages';
+                
+                localStorage.setItem(cacheKey, JSON.stringify(pendingMessages));
+                
+                // Also update generic cache
+                if (currentUser && currentUser.uid) {
+                    localStorage.setItem('pendingMessages', JSON.stringify(pendingMessages));
+                }
+            } catch (error) {
+                console.error('Error removing pending message:', error);
+            }
+        }
+        
         async function processPendingMessages() {
-            if (isSyncing || pendingMessages.length === 0 || !isOnline) return;
+            if (isSyncing || pendingMessages.length === 0 || !isOnline || !currentUser) return;
             
             isSyncing = true;
             
@@ -2132,7 +2185,7 @@
             
             // Sync every 30 seconds when online
             backgroundSyncInterval = setInterval(() => {
-                if (isOnline) {
+                if (isOnline && currentUser) {
                     syncOfflineData();
                 }
             }, 30000);
@@ -2190,7 +2243,7 @@
         }
         
         async function syncOfflineData() {
-            if (!isOnline) return;
+            if (!isOnline || !currentUser) return;
             
             // Sync read receipts
             await syncReadReceipts();
@@ -2202,65 +2255,27 @@
             await syncMessageReactions();
         }
         
+        async function syncReadReceipts() {
+            // Implementation for syncing read receipts
+            // This would mark messages as read when coming online
+        }
+        
+        async function syncTypingStatus() {
+            // Implementation for syncing typing status
+        }
+        
+        async function syncMessageReactions() {
+            // Implementation for syncing message reactions
+        }
+        
         // ============================================
         // CHAT MANAGEMENT FUNCTIONS
         // ============================================
         
-        function initializeApp() {
-            // Check if user is loaded
-            if (!currentUser) {
-                loadCurrentUser();
-            }
-            
-            // Initialize with user data
-            if (currentUser && currentUser.uid) {
-                loadUserData();
-                loadOnlineUsers();
-                
-                // Load chats and contacts in background
-                setTimeout(() => {
-                    loadChats();
-                    loadContacts();
-                }, 500);
-                
-            } else {
-                // Wait for auth state
-                auth.onAuthStateChanged(user => {
-                    if (user) {
-                        currentUser = user;
-                        localStorage.setItem('currentUser', JSON.stringify({
-                            uid: user.uid,
-                            displayName: user.displayName,
-                            photoURL: user.photoURL,
-                            email: user.email
-                        }));
-                        loadUserData();
-                        loadOnlineUsers();
-                        
-                        // Load chats and contacts in background
-                        setTimeout(() => {
-                            loadChats();
-                            loadContacts();
-                        }, 500);
-                    } else {
-                        // Redirect to login page if not authenticated
-                        window.location.href = 'index.html';
-                    }
-                });
-            }
-        }
-        
         async function loadChats() {
             try {
-                if (!currentUser || !currentUser.uid) {
-                    console.log('No user ID available for loading chats');
-                    updateChatListWithCache();
-                    return;
-                }
-                
-                if (!isOnline) {
-                    // Load from cache when offline
-                    console.log('Offline mode: Using cached chats');
+                if (!currentUser || !currentUser.uid || !isOnline) {
+                    // Use cached data when offline or no user
                     updateChatListWithCache();
                     return;
                 }
@@ -2315,12 +2330,13 @@
                 console.error('Error loading chats:', error);
                 
                 // Fallback to cache on error
-                console.log('Falling back to cached chats');
                 updateChatListWithCache();
             }
         }
         
         async function loadUserInfoForChats() {
+            if (!currentUser || !currentUser.uid || !isOnline) return;
+            
             const userIds = new Set();
             
             // Collect all unique user IDs from individual chats
@@ -2366,14 +2382,8 @@
         
         async function loadContacts() {
             try {
-                if (!currentUser || !currentUser.uid) {
-                    console.log('No user ID available for loading contacts');
-                    return;
-                }
-                
-                if (!isOnline) {
+                if (!currentUser || !currentUser.uid || !isOnline) {
                     // Use cached contacts when offline
-                    console.log('Offline mode: Using cached contacts');
                     populateContactsList(cachedContacts);
                     return;
                 }
@@ -2408,7 +2418,6 @@
                 console.error('Error loading contacts:', error);
                 
                 // Fallback to cached contacts
-                console.log('Falling back to cached contacts');
                 populateContactsList(cachedContacts);
             }
         }
@@ -2516,8 +2525,8 @@
                         createdAt: firebase.firestore.FieldValue.serverTimestamp()
                     };
                     
-                    // Save to Firestore if online
-                    if (isOnline) {
+                    // Save to Firestore if online and authenticated
+                    if (isOnline && currentUser && currentUser.uid) {
                         await db.collection('chats').doc(chatId).set(chatData);
                     }
                     
@@ -2641,9 +2650,9 @@
             
             try {
                 // Load cached messages first for instant display
-                loadCachedMessages();
+                loadCachedMessagesForChat(currentChatId);
                 
-                if (isOnline) {
+                if (isOnline && currentUser && currentUser.uid) {
                     // Load from Firestore
                     const messagesSnapshot = await db.collection('messages')
                         .where('chatId', '==', currentChatId)
@@ -2675,10 +2684,37 @@
             }
         }
         
-        function loadCachedMessages() {
-            // Implement caching for messages
-            // For now, we'll just show a loading state
+        function loadCachedMessagesForChat(chatId) {
             const messagesContainer = document.getElementById('messagesContainer');
+            
+            // Try to load cached messages for this specific chat
+            try {
+                const cachedMessagesKey = `cachedMessages_${chatId}`;
+                const cachedMessagesData = localStorage.getItem(cachedMessagesKey);
+                
+                if (cachedMessagesData) {
+                    const cachedMessages = JSON.parse(cachedMessagesData);
+                    
+                    // Clear container
+                    messagesContainer.innerHTML = '';
+                    
+                    // Add cached messages
+                    cachedMessages.forEach(message => {
+                        addMessageToUI(message);
+                    });
+                    
+                    // Scroll to bottom
+                    setTimeout(() => {
+                        messagesContainer.scrollTop = messagesContainer.scrollHeight;
+                    }, 100);
+                    
+                    return;
+                }
+            } catch (error) {
+                console.error('Error loading cached messages:', error);
+            }
+            
+            // Fallback to generic loading state
             messagesContainer.innerHTML = `
                 <div style="text-align: center; padding: 20px; color: var(--text-secondary);">
                     <div class="spinner"></div>
@@ -2830,6 +2866,46 @@
                     messagesContainer.scrollTop = messagesContainer.scrollHeight;
                 }, 50);
             }
+            
+            // Cache this message for offline access
+            cacheMessageForChat(currentChatId, message);
+        }
+        
+        function cacheMessageForChat(chatId, message) {
+            try {
+                const cacheKey = `cachedMessages_${chatId}`;
+                let cachedMessages = [];
+                
+                // Load existing cached messages
+                const cachedData = localStorage.getItem(cacheKey);
+                if (cachedData) {
+                    cachedMessages = JSON.parse(cachedData);
+                }
+                
+                // Check if message already exists in cache
+                const existingIndex = cachedMessages.findIndex(m => 
+                    (m.id && m.id === message.id) || (m.tempId && m.tempId === message.tempId)
+                );
+                
+                if (existingIndex !== -1) {
+                    // Update existing message
+                    cachedMessages[existingIndex] = message;
+                } else {
+                    // Add new message
+                    cachedMessages.push(message);
+                }
+                
+                // Keep only last 200 messages per chat
+                if (cachedMessages.length > 200) {
+                    cachedMessages = cachedMessages.slice(-200);
+                }
+                
+                // Save to cache
+                localStorage.setItem(cacheKey, JSON.stringify(cachedMessages));
+                
+            } catch (error) {
+                console.error('Error caching message:', error);
+            }
         }
         
         function formatMessageText(text) {
@@ -2904,7 +2980,7 @@
                 
                 let messageId;
                 
-                if (isOnline) {
+                if (isOnline && currentUser && currentUser.uid) {
                     // Send immediately if online
                     const messageRef = await db.collection('messages').add({
                         ...messageData,
@@ -2963,7 +3039,7 @@
                     caption: caption.trim() || null
                 };
                 
-                if (isOnline) {
+                if (isOnline && currentUser && currentUser.uid) {
                     // Upload to Firebase Storage
                     const fileType = type === 'image' ? 'images' : type === 'video' ? 'videos' : 'files';
                     content = await uploadToFirebaseStorage(file, fileType);
@@ -3029,7 +3105,7 @@
                 
                 let content = '';
                 
-                if (isOnline) {
+                if (isOnline && currentUser && currentUser.uid) {
                     // Upload to Firebase Storage
                     const file = new File([blob], `voice_${Date.now()}.wav`, { type: 'audio/wav' });
                     content = await uploadToFirebaseStorage(file, 'voice_messages');
@@ -3051,7 +3127,7 @@
         }
         
         function setupTypingListener() {
-            if (!currentChatId || !isOnline) return;
+            if (!currentChatId || !isOnline || !currentUser) return;
             
             // Clear any existing listener
             if (typingTimeout) {
@@ -3082,7 +3158,7 @@
         }
         
         function startTyping() {
-            if (!currentChatId || !isOnline) return;
+            if (!currentChatId || !isOnline || !currentUser) return;
             
             // Update typing status
             const typingRef = db.collection('typing').doc(currentChatId);
@@ -3103,7 +3179,7 @@
         }
         
         function stopTyping() {
-            if (!currentChatId || !isOnline) return;
+            if (!currentChatId || !isOnline || !currentUser) return;
             
             // Clear timeout
             if (typingTimeout) {
@@ -3120,46 +3196,49 @@
         }
         
         function setupMessageListener() {
-            if (!currentChatId) return;
+            if (!currentChatId || !currentUser) return;
             
             // Clear existing listener
             if (messagesListener) {
                 messagesListener();
             }
             
-            // Set up new listener
-            messagesListener = db.collection('messages')
-                .where('chatId', '==', currentChatId)
-                .orderBy('timestamp', 'asc')
-                .onSnapshot((snapshot) => {
-                    snapshot.docChanges().forEach((change) => {
-                        if (change.type === 'added') {
-                            const messageData = change.doc.data();
-                            const message = {
-                                id: change.doc.id,
-                                ...messageData,
-                                timestamp: messageData.timestamp ? messageData.timestamp.toDate() : new Date()
-                            };
-                            
-                            // Don't add if it's our own pending message
-                            if (!message.isPending || message.senderId !== currentUser.uid) {
-                                addMessageToUI(message);
+            // Only set up listener if online
+            if (isOnline && currentUser.uid) {
+                // Set up new listener
+                messagesListener = db.collection('messages')
+                    .where('chatId', '==', currentChatId)
+                    .orderBy('timestamp', 'asc')
+                    .onSnapshot((snapshot) => {
+                        snapshot.docChanges().forEach((change) => {
+                            if (change.type === 'added') {
+                                const messageData = change.doc.data();
+                                const message = {
+                                    id: change.doc.id,
+                                    ...messageData,
+                                    timestamp: messageData.timestamp ? messageData.timestamp.toDate() : new Date()
+                                };
+                                
+                                // Don't add if it's our own pending message
+                                if (!message.isPending || message.senderId !== currentUser.uid) {
+                                    addMessageToUI(message);
+                                }
+                                
+                                // Mark as read if it's not our message
+                                if (message.senderId !== currentUser.uid) {
+                                    markMessageAsRead(change.doc.id);
+                                }
+                            } else if (change.type === 'modified') {
+                                // Update message (e.g., reactions, read status)
+                                updateMessageInUI(change.doc.data());
                             }
-                            
-                            // Mark as read if it's not our message
-                            if (message.senderId !== currentUser.uid) {
-                                markMessageAsRead(change.doc.id);
-                            }
-                        } else if (change.type === 'modified') {
-                            // Update message (e.g., reactions, read status)
-                            updateMessageInUI(change.doc.data());
-                        }
+                        });
                     });
-                });
+            }
         }
         
         async function markChatAsRead(chatId) {
-            if (!chatId || !isOnline) return;
+            if (!chatId || !isOnline || !currentUser) return;
             
             try {
                 // Reset unread count
@@ -3180,7 +3259,7 @@
         }
         
         async function markMessageAsRead(messageId) {
-            if (!messageId || !isOnline) return;
+            if (!messageId || !isOnline || !currentUser) return;
             
             try {
                 await db.collection('messages').doc(messageId).update({
@@ -3192,7 +3271,7 @@
         }
         
         async function addReactionToMessage(messageId, emoji) {
-            if (!messageId || !emoji || !isOnline) return;
+            if (!messageId || !emoji || !isOnline || !currentUser) return;
             
             try {
                 await db.collection('messages').doc(messageId).update({
@@ -3375,7 +3454,17 @@
         }
         
         function updateChatDocument(chatId, updates) {
+            if (!currentUser || !currentUser.uid) return Promise.reject('No user authenticated');
             return db.collection('chats').doc(chatId).update(updates);
+        }
+        
+        function updateMessageInUI(messageData) {
+            // Implementation for updating message UI (reactions, read status, etc.)
+            const messageElement = document.querySelector(`[data-message-id="${messageData.id}"]`);
+            if (messageElement) {
+                // Update message reactions, read status, etc.
+                // This is a simplified implementation
+            }
         }
         
         // ============================================
@@ -3627,9 +3716,15 @@
         function logoutUser() {
             // Clear local storage
             localStorage.removeItem('currentUser');
-            localStorage.removeItem(`cachedChats_${currentUser.uid}`);
-            localStorage.removeItem(`cachedContacts_${currentUser.uid}`);
-            localStorage.removeItem(`pendingMessages_${currentUser.uid}`);
+            if (currentUser && currentUser.uid) {
+                localStorage.removeItem(`cachedChats_${currentUser.uid}`);
+                localStorage.removeItem(`cachedContacts_${currentUser.uid}`);
+                localStorage.removeItem(`pendingMessages_${currentUser.uid}`);
+            }
+            // Clear generic caches
+            localStorage.removeItem('cachedChats');
+            localStorage.removeItem('cachedContacts');
+            localStorage.removeItem('pendingMessages');
             
             // Sign out from Firebase
             auth.signOut().then(() => {
@@ -3654,7 +3749,7 @@
                 updateSendButton();
                 
                 // Start typing indicator
-                if (this.value.trim()) {
+                if (this.value.trim() && currentUser && currentUser.uid) {
                     startTyping();
                 }
             });
@@ -3697,7 +3792,9 @@
                             messageInput.value += emoji;
                             messageInput.focus();
                             updateSendButton();
-                            startTyping();
+                            if (currentUser && currentUser.uid) {
+                                startTyping();
+                            }
                         }
                         pickerContainer.classList.remove('active');
                     });
@@ -4326,7 +4423,7 @@
         }
         
         async function updateMessage(messageId, newText) {
-            if (!messageId || !newText.trim() || !isOnline) return;
+            if (!messageId || !newText.trim() || !isOnline || !currentUser) return;
             
             try {
                 await db.collection('messages').doc(messageId).update({
@@ -4347,7 +4444,7 @@
                 return;
             }
             
-            if (isOnline && message.id) {
+            if (isOnline && message.id && currentUser) {
                 try {
                     await db.collection('messages').doc(message.id).update({
                         isDeleted: true,
@@ -4398,7 +4495,7 @@
         }
         
         async function loadOnlineUsers() {
-            if (!isOnline) return;
+            if (!isOnline || !currentUser) return;
             
             try {
                 // Listen for online users
@@ -4468,7 +4565,7 @@
         
         // Initialize when page loads
         window.addEventListener('load', () => {
-            console.log('Messages page loaded');
+            console.log('Messages page loaded with offline support');
         });
     </script>
 </body>
