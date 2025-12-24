@@ -1207,6 +1207,17 @@
         document.addEventListener('DOMContentLoaded', function() {
             // UI FIRST: Show layout immediately
             console.log('✅ UI rendering complete - layout visible');
+            
+            // ✅ NEW: Check if user is already logged in on page load
+            const loggedIn = localStorage.getItem("isLoggedIn");
+            if (loggedIn === "true") {
+                const userId = localStorage.getItem("userId");
+                console.log('✅ User already logged in with ID:', userId);
+                // Redirect to main/home page
+                window.location.href = "chat.html";
+            } else {
+                console.log('ℹ️ User not logged in, showing auth UI');
+            }
         });
         
         // DEFENSIVE AUTH: Firebase configuration with offline fallback
@@ -1344,6 +1355,10 @@
                             localStorage.setItem('kynecta-chat-user', JSON.stringify(userData));
                             localStorage.setItem('kynecta-chat-auto-login', 'true');
                             
+                            // ✅ NEW: Set login persistence
+                            localStorage.setItem("isLoggedIn", "true");
+                            localStorage.setItem("userId", currentUser.uid);
+                            
                             // Update app UI to show auto-login status
                             if (window.kynectaChatApp) {
                                 window.kynectaChatApp.updateAutoLoginStatus(true);
@@ -1379,6 +1394,10 @@
                     await user.updateProfile({
                         displayName: displayName
                     });
+                    
+                    // ✅ NEW: Set login persistence after registration
+                    localStorage.setItem("isLoggedIn", "true");
+                    localStorage.setItem("userId", user.uid);
                     
                     // DEFENSIVE AUTH: Wrap database write in try/catch
                     try {
@@ -1466,6 +1485,10 @@
                 try {
                     // Generate a secure local user ID
                     const localUserId = 'local_' + Date.now() + '_' + btoa(email).substr(0, 12) + '_' + Math.random().toString(36).substr(2, 6);
+                    
+                    // ✅ NEW: Set login persistence for local registration
+                    localStorage.setItem("isLoggedIn", "true");
+                    localStorage.setItem("userId", localUserId);
                     
                     const userData = {
                         uid: localUserId,
@@ -1555,6 +1578,10 @@
                     }
                     
                     const user = userCredential.user;
+                    
+                    // ✅ NEW: Set login persistence after successful login
+                    localStorage.setItem("isLoggedIn", "true");
+                    localStorage.setItem("userId", user.uid);
                     
                     // DEFENSIVE AUTH: Try to get user data, but continue if it fails
                     let userData = {};
@@ -1681,6 +1708,10 @@
                         throw new Error('Incorrect password.');
                     }
                     
+                    // ✅ NEW: Set login persistence for local login
+                    localStorage.setItem("isLoggedIn", "true");
+                    localStorage.setItem("userId", userData.uid);
+                    
                     // Update last login
                     userData.lastLogin = new Date().toISOString();
                     userData.autoLogin = rememberMe;
@@ -1720,6 +1751,10 @@
                     }
                     
                     const userData = JSON.parse(savedUser);
+                    
+                    // ✅ NEW: Set login persistence for quick login
+                    localStorage.setItem("isLoggedIn", "true");
+                    localStorage.setItem("userId", userData.uid);
                     
                     // If we're online and authentication is initialized, try to refresh session
                     if (this.isOnline && this.isInitialized && !this.offlineMode && !userData.isOfflineUser && userData.session) {
@@ -1833,8 +1868,9 @@
                     // Check localStorage first (fastest)
                     const savedUser = localStorage.getItem('kynecta-chat-user');
                     const autoLoginEnabled = localStorage.getItem('kynecta-chat-auto-login') === 'true';
+                    const isLoggedIn = localStorage.getItem('isLoggedIn') === 'true';
                     
-                    if (!savedUser || !autoLoginEnabled) {
+                    if (!savedUser || !autoLoginEnabled || !isLoggedIn) {
                         return false;
                     }
                     
@@ -1881,6 +1917,10 @@
             // New method: Logout user (clear session)
             logoutUser() {
                 try {
+                    // ✅ NEW: Clear login persistence
+                    localStorage.removeItem('isLoggedIn');
+                    localStorage.removeItem('userId');
+                    
                     // Mark as logged out
                     localStorage.setItem('kynecta-chat-logged-out', 'true');
                     
@@ -1926,6 +1966,16 @@
 
         class kynectaChatApp {
             constructor() {
+                // ✅ NEW: Check if user is already logged in on app initialization
+                const loggedIn = localStorage.getItem("isLoggedIn");
+                if (loggedIn === "true") {
+                    const userId = localStorage.getItem("userId");
+                    console.log('✅ User already logged in with ID:', userId);
+                    // Redirect to main/home page
+                    window.location.href = "chat.html";
+                    return; // Stop further initialization since we're redirecting
+                }
+                
                 // UI FIRST: Initialize UI state immediately
                 this.currentPanel = 'login';
                 this.isTransitioning = false;
@@ -1980,8 +2030,9 @@
                     // Check localStorage FIRST (instant, no async, no waiting)
                     const savedUser = localStorage.getItem('kynecta-chat-user');
                     const autoLoginEnabled = localStorage.getItem('kynecta-chat-auto-login') === 'true';
+                    const isLoggedIn = localStorage.getItem('isLoggedIn') === 'true';
                     
-                    if (savedUser && autoLoginEnabled) {
+                    if (savedUser && autoLoginEnabled && isLoggedIn) {
                         const userData = JSON.parse(savedUser);
                         
                         // Store quick login user for immediate use
@@ -2238,6 +2289,10 @@
                         console.log('✅ Quick login using cached data');
                     }
                     
+                    // ✅ NEW: Ensure login persistence is set
+                    localStorage.setItem("isLoggedIn", "true");
+                    localStorage.setItem("userId", this.quickLoginUser.uid);
+                    
                     // Success - redirect to chat with professional fade animation
                     this.redirectToChatWithFade();
                     
@@ -2273,6 +2328,9 @@
                 // Mark as logged out
                 localStorage.setItem('kynecta-chat-logged-out', 'true');
                 localStorage.removeItem('kynecta-chat-auto-login');
+                // ✅ NEW: Clear login persistence
+                localStorage.removeItem('isLoggedIn');
+                localStorage.removeItem('userId');
                 
                 // Reset auto-login status
                 this.autoLoginAvailable = false;
@@ -2649,6 +2707,8 @@
                     let loginResult;
                     if (window.authService && window.authService.isInitialized && !window.authService.offlineMode) {
                         loginResult = await window.authService.loginUser(identifier, password, method, rememberMe);
+                        
+                        // ✅ NEW: Login persistence is already set in loginUser method
                         
                         if (loginResult.user.isOfflineUser) {
                             this.showToast('Logged in with local account.', 'info');

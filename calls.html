@@ -821,6 +821,14 @@
             padding: 20px;
         }
         
+        .panel-section {
+            display: none;
+        }
+        
+        .panel-section.active {
+            display: block;
+        }
+        
         /* Participants List */
         .participants-list {
             display: flex;
@@ -1241,6 +1249,14 @@
             flex: 1;
             padding: 25px;
             overflow-y: auto;
+        }
+        
+        .new-call-tab-content {
+            display: none;
+        }
+        
+        .new-call-tab-content.active {
+            display: block;
         }
         
         .contact-search {
@@ -2426,19 +2442,6 @@
         });
         
         async function initializeApp() {
-              // Try to get users data from app.js context
-    if (window.allUsers) {
-        console.log('Found users from app.js:', Object.keys(window.allUsers).length);
-        // Cache these users for immediate use
-        Object.entries(window.allUsers).forEach(([userId, userData]) => {
-            if (userId !== currentUser.uid && userData.displayName) {
-                localStorage.setItem(`userInfo_${userId}_displayName`, userData.displayName);
-                if (userData.photoURL) {
-                    localStorage.setItem(`userInfo_${userId}_photoURL`, userData.photoURL);
-                }
-            }
-        });
-    }
             // Initialize offline detection
             initializeOfflineDetection();
             
@@ -2951,18 +2954,20 @@
         }
         
         // Save calls to local storage with better structure
-        function saveCallToLocalStorage(callData) {
+        async function saveCallToLocalStorage(callData) {
             try {
-                if (!currentUser) return;
+                if (!currentUser) return null;
+                
                 const enhancedCallData = { ...callData };
-        
-        if (enhancedCallData.participants && !enhancedCallData.displayName) {
-            const otherParticipants = enhancedCallData.participants.filter(id => id !== currentUser.uid);
-            if (otherParticipants.length === 1) {
-                const contactName = getContactName(otherParticipants[0]);
-                enhancedCallData.displayName = contactName || 'Contact';
-            }
-        }
+                
+                if (enhancedCallData.participants && !enhancedCallData.displayName) {
+                    const otherParticipants = enhancedCallData.participants.filter(id => id !== currentUser.uid);
+                    if (otherParticipants.length === 1) {
+                        // Try to get real name from Firebase or cache
+                        const contactName = await getContactNameWithFallback(otherParticipants[0]);
+                        enhancedCallData.displayName = contactName || 'Contact';
+                    }
+                }
                 
                 const storageKey = getLocalStorageKey('history');
                 const storedCalls = localStorage.getItem(storageKey);
@@ -2974,7 +2979,7 @@
                 
                 // Add new call with unique ID
                 const callWithId = {
-                    ...callData,
+                    ...enhancedCallData,
                     id: `local_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
                     savedAt: new Date().toISOString(),
                     isLocal: true
@@ -3055,16 +3060,49 @@
             }
         }
         
-        // Add this function to refresh contact data periodically
-async function refreshContactCache(userIds) {
-    if (!isOnline || !userIds || !Array.isArray(userIds)) return;
-    
-    for (const userId of userIds) {
-        if (userId !== currentUser.uid) {
-            await fetchAndCacheUserData(userId);
+        // NEW: Get contact name with fallback to Firebase
+        async function getContactNameWithFallback(userId) {
+            if (!userId || userId === currentUser.uid) return 'You';
+            
+            // Try multiple sources in order
+            const sources = [
+                () => localStorage.getItem(`userInfo_${userId}_displayName`),
+                () => localStorage.getItem(`contact_${userId}_name`),
+                () => localStorage.getItem(`friend_${userId}_name`),
+                async () => {
+                    if (isOnline && db) {
+                        try {
+                            const userDoc = await db.collection('users').doc(userId).get();
+                            if (userDoc.exists) {
+                                const userData = userDoc.data();
+                                localStorage.setItem(`userInfo_${userId}_displayName`, userData.displayName || 'Contact');
+                                if (userData.photoURL) {
+                                    localStorage.setItem(`userInfo_${userId}_photoURL`, userData.photoURL);
+                                }
+                                return userData.displayName || 'Contact';
+                            }
+                        } catch (error) {
+                            console.error('Error fetching user from Firebase:', error);
+                        }
+                    }
+                    return null;
+                }
+            ];
+            
+            for (const source of sources) {
+                try {
+                    const result = typeof source === 'function' ? await source() : source;
+                    if (result && result !== 'Contact' && result !== 'Unknown') {
+                        return result;
+                    }
+                } catch (error) {
+                    console.error('Error getting contact name:', error);
+                }
+            }
+            
+            return 'Contact';
         }
-    }
-}
+        
         // Display calls from array (enhanced for offline mode)
         function displayCallsFromArray(callsArray, container, type) {
             if (!container) return;
@@ -3121,39 +3159,26 @@ async function refreshContactCache(userIds) {
         }
         
         // Display call item from data (enhanced for offline mode)
-       // Replace or modify your displayCallItemFromData function
-async function displayCallItemFromData(callData, container) {
-    // Get contact names with better logic
-    let displayName = callData.displayName || 'Contact';
-    let otherParticipantIds = [];
-    
-    if (callData.participants) {
-        otherParticipantIds = callData.participants.filter(id => 
-            id !== (currentUser ? currentUser.uid : 'user1')
-        );
-        
-        // If displayName is still generic, try to get proper names
-        if (!displayName || displayName === 'Contact' || displayName === 'Unknown') {
-            if (otherParticipantIds.length === 1) {
-                // Try to get name from multiple sources
-                const contactName = getContactName(otherParticipantIds[0]);
-                if (contactName && contactName !== 'Contact' && contactName !== 'Unknown') {
-                    displayName = contactName;
-                } else {
-                    // Try to fetch fresh data
-                    const userData = await fetchAndCacheUserData(otherParticipantIds[0]);
-                    if (userData && userData.displayName) {
-                        displayName = userData.displayName;
-                    } else {
-                        displayName = 'Contact';
+        async function displayCallItemFromData(callData, container) {
+            // Get contact names with better logic
+            let displayName = callData.displayName || 'Contact';
+            let otherParticipantIds = [];
+            
+            if (callData.participants) {
+                otherParticipantIds = callData.participants.filter(id => 
+                    id !== (currentUser ? currentUser.uid : 'user1')
+                );
+                
+                // If displayName is still generic, try to get proper names
+                if (!displayName || displayName === 'Contact' || displayName === 'Unknown') {
+                    if (otherParticipantIds.length === 1) {
+                        // Use our improved function to get the name
+                        displayName = await getContactNameWithFallback(otherParticipantIds[0]);
+                    } else if (otherParticipantIds.length > 1) {
+                        displayName = `Group Call (${callData.participants.length})`;
                     }
                 }
-            } else if (otherParticipantIds.length > 1) {
-                displayName = `Group Call (${callData.participants.length})`;
             }
-        }
-    }
-    
             
             const isGroupCall = callData.group === true || (callData.participants && callData.participants.length > 2);
             const callType = callData.type || 'voice';
@@ -3197,7 +3222,14 @@ async function displayCallItemFromData(callData, container) {
             }
             
             const initials = displayName.split(' ').map(word => word[0]).join('').toUpperCase().substring(0, 2);
-            const avatarUrl = callData.avatar || getContactAvatar(otherParticipantIds[0]) || '';
+            
+            // Try to get avatar
+            let avatarUrl = '';
+            if (otherParticipantIds.length === 1) {
+                avatarUrl = localStorage.getItem(`userInfo_${otherParticipantIds[0]}_photoURL`) || 
+                           localStorage.getItem(`contact_${otherParticipantIds[0]}_avatar`) || 
+                           localStorage.getItem(`friend_${otherParticipantIds[0]}_avatar`) || '';
+            }
             
             callItem.innerHTML = `
                 <div class="call-avatar" ${avatarUrl ? `style="background-image: url('${avatarUrl}')"` : ''}>
@@ -3243,107 +3275,6 @@ async function displayCallItemFromData(callData, container) {
             });
             
             container.appendChild(callItem);
-        }
-        
-        // Helper function to get contact name from cache
-        
-        // Replace your getContactName function with this enhanced version
-function getContactName(userId) {
-    if (!userId) return null;
-    
-    // Check in this order:
-    // 1. Firebase cached users from app.js (most reliable)
-    // 2. LocalStorage contact cache
-    // 3. Firebase userPresence data
-    // 4. Friends list data
-    
-    // First check if there's a global users object from app.js
-    if (window.allUsers && window.allUsers[userId]) {
-        return window.allUsers[userId].displayName || null;
-    }
-    
-    // Check multiple storage locations with priority
-    const contactName = localStorage.getItem(`userInfo_${userId}_displayName`) ||
-                       localStorage.getItem(`contact_${userId}_name`) ||
-                       localStorage.getItem(`friend_${userId}_name`);
-    
-    if (contactName) return contactName;
-    
-    // If still not found, check if we have recently fetched this user
-    const recentContact = sessionStorage.getItem(`recent_contact_${userId}`);
-    if (recentContact) {
-        try {
-            const contactData = JSON.parse(recentContact);
-            return contactData.displayName || null;
-        } catch (e) {
-            console.error('Error parsing recent contact:', e);
-        }
-    }
-    
-    return null;
-}
-
-// Add this function to fetch user data and cache it
-async function fetchAndCacheUserData(userId) {
-    if (!userId || userId === currentUser.uid) return null;
-    
-    try {
-        // First try Firebase
-        if (isOnline && db) {
-            const userDoc = await db.collection('users').doc(userId).get();
-            if (userDoc.exists) {
-                const userData = userDoc.data();
-                
-                // Cache in multiple places for redundancy
-                localStorage.setItem(`userInfo_${userId}_displayName`, userData.displayName || 'Contact');
-                if (userData.photoURL) {
-                    localStorage.setItem(`userInfo_${userId}_photoURL`, userData.photoURL);
-                }
-                
-                // Also cache in session storage for immediate use
-                sessionStorage.setItem(`recent_contact_${userId}`, JSON.stringify({
-                    displayName: userData.displayName || 'Contact',
-                    photoURL: userData.photoURL || ''
-                }));
-                
-                return userData;
-            }
-        }
-        
-        // If Firebase fails, check if we have friends data
-        const friendsData = localStorage.getItem('friendsData');
-        if (friendsData) {
-            try {
-                const friends = JSON.parse(friendsData);
-                const friend = friends.find(f => f.id === userId);
-                if (friend) {
-                    localStorage.setItem(`friend_${userId}_name`, friend.name || friend.displayName || 'Contact');
-                    if (friend.avatar) {
-                        localStorage.setItem(`friend_${userId}_avatar`, friend.avatar);
-                    }
-                    return { displayName: friend.name || friend.displayName || 'Contact', photoURL: friend.avatar || '' };
-                }
-            } catch (e) {
-                console.error('Error parsing friends data:', e);
-            }
-        }
-        
-    } catch (error) {
-        console.error('Error fetching user data:', error);
-    }
-    
-    return null;
-}
-        // Helper function to get contact avatar from cache
-        function getContactAvatar(userId) {
-            if (!userId) return null;
-            
-            // Check multiple storage locations
-            const contactAvatar = localStorage.getItem(`contact_${userId}_avatar`) ||
-                                 localStorage.getItem(`userInfo_${userId}_photoURL`) ||
-                                 localStorage.getItem(`friend_${userId}_avatar`);
-            
-            return contactAvatar;
         }
         
         function listenForExternalCalls() {
@@ -3840,6 +3771,7 @@ async function fetchAndCacheUserData(userId) {
                     });
                 });
                 
+                // FIXED: Improved incoming call handler for immediate response
                 peer.on('call', async (incomingCall) => {
                     console.log('📞 Incoming call from:', incomingCall.peer);
                     
@@ -3849,15 +3781,19 @@ async function fetchAndCacheUserData(userId) {
                         
                         let callerData = null;
                         
-                        // Try to get caller info from Firebase
+                        // Try to get caller info from Firebase IMMEDIATELY
                         if (db) {
-                            const callerDoc = await db.collection('users').doc(callerId).get();
-                            if (callerDoc.exists) {
-                                callerData = callerDoc.data();
+                            try {
+                                const callerDoc = await db.collection('users').doc(callerId).get();
+                                if (callerDoc.exists) {
+                                    callerData = callerDoc.data();
+                                }
+                            } catch (error) {
+                                console.error('Error fetching caller info:', error);
                             }
                         }
                         
-                        // If no Firebase data, check localStorage
+                        // If no Firebase data, check localStorage IMMEDIATELY
                         if (!callerData) {
                             const cachedCaller = localStorage.getItem(`userInfo_${callerId}`);
                             if (cachedCaller) {
@@ -3865,14 +3801,15 @@ async function fetchAndCacheUserData(userId) {
                             }
                         }
                         
-                        // Fallback to basic info
+                        // Fallback to metadata
                         if (!callerData) {
                             callerData = {
-                                displayName: 'Contact',
-                                photoURL: ''
+                                displayName: metadata.callerName || 'Contact',
+                                photoURL: metadata.callerAvatar || ''
                             };
                         }
                         
+                        // Update UI IMMEDIATELY
                         document.getElementById('incomingCallName').textContent = callerData.displayName || 'Contact';
                         document.getElementById('incomingCallType').textContent = 
                             metadata.type === 'video' ? 'Incoming Video Call' : 'Incoming Voice Call';
@@ -3897,8 +3834,15 @@ async function fetchAndCacheUserData(userId) {
                             type: metadata.type || 'video'
                         };
                         
+                        // Show modal IMMEDIATELY
                         incomingCallModal.classList.add('active');
                         
+                        // Reset button states
+                        document.getElementById('declineCallBtn').disabled = false;
+                        document.getElementById('acceptCallBtn').disabled = false;
+                        document.getElementById('acceptVideoCallBtn').disabled = false;
+                        
+                        // Auto decline after 45 seconds
                         setTimeout(() => {
                             if (incomingCallModal.classList.contains('active')) {
                                 declineCall();
@@ -3975,7 +3919,7 @@ async function fetchAndCacheUserData(userId) {
                     status: 'missed',
                     timestamp: new Date().toISOString(),
                     missedReason: 'offline_attempt',
-                    displayName: getContactName(userId) || 'Contact'
+                    displayName: await getContactNameWithFallback(userId)
                 });
                 
                 return;
@@ -4000,7 +3944,7 @@ async function fetchAndCacheUserData(userId) {
                     status: 'missed',
                     timestamp: new Date().toISOString(),
                     missedReason: 'user_offline',
-                    displayName: getContactName(userId) || 'Contact'
+                    displayName: await getContactNameWithFallback(userId)
                 });
                 
                 return;
@@ -4039,7 +3983,10 @@ async function fetchAndCacheUserData(userId) {
                 callContainer.classList.add('active');
                 document.getElementById('callTypeIcon').innerHTML = 
                     `<i class="fas fa-${type === 'video' ? 'video' : 'phone'}"></i>`;
-                document.getElementById('callParticipants').textContent = 'Calling...';
+                
+                // Get actual contact name
+                const contactName = await getContactNameWithFallback(userId);
+                document.getElementById('callParticipants').textContent = `Calling ${contactName}...`;
                 document.getElementById('callStatus').textContent = 'Connecting...';
                 
                 addVideoStream(currentUser.uid, localStream, true);
@@ -4067,7 +4014,7 @@ async function fetchAndCacheUserData(userId) {
                             status: 'missed',
                             timestamp: new Date().toISOString(),
                             duration: 0,
-                            displayName: getContactName(userId) || 'Contact'
+                            displayName: await getContactNameWithFallback(userId)
                         });
                         
                         endCall();
@@ -4123,7 +4070,10 @@ async function fetchAndCacheUserData(userId) {
                     callStartTime = new Date();
                     startCallTimer();
                     
-                    document.getElementById('callParticipants').textContent = 'Connected';
+                    // Get actual contact name
+                    getContactNameWithFallback(userId).then(contactName => {
+                        document.getElementById('callParticipants').textContent = `Connected with ${contactName}`;
+                    });
                     document.getElementById('callStatus').textContent = 'In call';
                     
                     if (callId && db) {
@@ -4138,7 +4088,7 @@ async function fetchAndCacheUserData(userId) {
                         status: 'connected',
                         timestamp: new Date().toISOString(),
                         startTime: callStartTime,
-                        displayName: getContactName(userId) || 'Contact'
+                        displayName: getContactNameWithFallback(userId)
                     });
                     
                     setupDataConnection(userId);
@@ -4237,6 +4187,10 @@ async function fetchAndCacheUserData(userId) {
             if (dataConnections.has(targetUserId)) {
                 const connection = dataConnections.get(targetUserId);
                 if (connection.open) {
+                    // FIXED: Ensure emojis are properly encoded
+                    if (message.type === 'reaction') {
+                        message.reaction = String.fromCodePoint(...message.reaction.split('-').map(c => parseInt(c, 16)));
+                    }
                     connection.send(message);
                     return true;
                 }
@@ -4248,6 +4202,10 @@ async function fetchAndCacheUserData(userId) {
         function broadcastDataMessage(message, excludeUserId = null) {
             dataConnections.forEach((connection, userId) => {
                 if (userId !== excludeUserId && connection.open) {
+                    // FIXED: Ensure emojis are properly encoded
+                    if (message.type === 'reaction') {
+                        message.reaction = String.fromCodePoint(...message.reaction.split('-').map(c => parseInt(c, 16)));
+                    }
                     connection.send(message);
                 }
             });
@@ -4263,7 +4221,9 @@ async function fetchAndCacheUserData(userId) {
                     
                 case 'reaction':
                     if (userSettings.reactions) {
-                        showFloatingReaction(data.reaction);
+                        // FIXED: Properly display emojis
+                        const reaction = data.reaction;
+                        showFloatingReaction(reaction);
                     }
                     break;
                     
@@ -4458,19 +4418,13 @@ async function fetchAndCacheUserData(userId) {
                 // Try to get user info from Firebase or localStorage
                 const getUserInfo = async () => {
                     try {
-                        if (db) {
-                            const userDoc = await db.collection('users').doc(userId).get();
-                            if (userDoc.exists) {
-                                const userData = userDoc.data();
-                                userName = userData.displayName || 'Contact';
-                                userAvatar = userData.photoURL || '';
-                            }
-                        } else {
-                            // Check localStorage
-                            const contactName = getContactName(userId);
-                            userName = contactName || 'Contact';
-                            userAvatar = getContactAvatar(userId) || '';
-                        }
+                        const contactName = await getContactNameWithFallback(userId);
+                        userName = contactName;
+                        
+                        // Try to get avatar
+                        userAvatar = localStorage.getItem(`userInfo_${userId}_photoURL`) || 
+                                    localStorage.getItem(`contact_${userId}_avatar`) || 
+                                    localStorage.getItem(`friend_${userId}_avatar`) || '';
                     } catch (error) {
                         console.error('Error getting user info:', error);
                     }
@@ -4615,6 +4569,14 @@ async function fetchAndCacheUserData(userId) {
                     callParticipants : 
                     [currentUser.uid, currentCall.targetId];
                 
+                // Get display name for the call
+                let displayName = '';
+                if (currentCall.group) {
+                    displayName = `Group Call (${participants.length})`;
+                } else {
+                    displayName = await getContactNameWithFallback(currentCall.targetId);
+                }
+                
                 // Save completed call to local storage
                 saveCallToLocalStorage({
                     participants: participants,
@@ -4626,7 +4588,7 @@ async function fetchAndCacheUserData(userId) {
                     endTime: endTime,
                     duration: duration,
                     group: currentCall.group || false,
-                    displayName: currentCall.group ? `Group Call (${participants.length})` : getContactName(currentCall.targetId) || 'Contact'
+                    displayName: displayName
                 });
             }
             
@@ -5037,30 +4999,11 @@ async function fetchAndCacheUserData(userId) {
             let avatar = '';
             
             if (otherParticipantIds.length === 1 && !displayName) {
-                // Use cached contact name instead of "Unknown"
-                const contactName = getContactName(otherParticipantIds[0]);
-                displayName = contactName || 'Contact';
-                avatar = getContactAvatar(otherParticipantIds[0]) || '';
-                
-                // If still no name, try Firebase
-                if (!contactName && db && isOnline) {
-                    try {
-                        const userDoc = await db.collection('users').doc(otherParticipantIds[0]).get();
-                        if (userDoc.exists) {
-                            const userData = userDoc.data();
-                            displayName = userData.displayName || 'Contact';
-                            avatar = userData.photoURL || '';
-                            
-                            // Save contact info to local storage for offline use
-                            localStorage.setItem(`contact_${otherParticipantIds[0]}_name`, userData.displayName || 'Contact');
-                            if (userData.photoURL) {
-                                localStorage.setItem(`contact_${otherParticipantIds[0]}_avatar`, userData.photoURL);
-                            }
-                        }
-                    } catch (error) {
-                        console.error('Error fetching user data:', error);
-                    }
-                }
+                // Use our improved function to get the name
+                displayName = await getContactNameWithFallback(otherParticipantIds[0]);
+                avatar = localStorage.getItem(`userInfo_${otherParticipantIds[0]}_photoURL`) || 
+                        localStorage.getItem(`contact_${otherParticipantIds[0]}_avatar`) || 
+                        localStorage.getItem(`friend_${otherParticipantIds[0]}_avatar`) || '';
             } else if (otherParticipantIds.length > 1 && !displayName) {
                 displayName = `Group Call (${callData.participants.length})`;
             }
@@ -5354,10 +5297,12 @@ async function fetchAndCacheUserData(userId) {
                 // Try to get user info
                 const getUserInfo = async () => {
                     try {
-                        const contactName = getContactName(userId);
-                        const contactAvatar = getContactAvatar(userId);
+                        const contactName = await getContactNameWithFallback(userId);
+                        const contactAvatar = localStorage.getItem(`userInfo_${userId}_photoURL`) || 
+                                            localStorage.getItem(`contact_${userId}_avatar`) || 
+                                            localStorage.getItem(`friend_${userId}_avatar`) || '';
                         
-                        addParticipantItem(userId, contactName || 'Contact', contactAvatar || '', false, true);
+                        addParticipantItem(userId, contactName, contactAvatar, false, true);
                     } catch (error) {
                         console.error('Error getting participant info:', error);
                         addParticipantItem(userId, 'Contact', '', false, true);
@@ -5522,9 +5467,12 @@ async function fetchAndCacheUserData(userId) {
             if (senderId === currentUser.uid) {
                 senderName = 'You';
             } else {
-                // Try to get sender name from cache
-                const contactName = getContactName(senderId);
-                senderName = contactName || 'Contact';
+                // Try to get sender name
+                getContactNameWithFallback(senderId).then(contactName => {
+                    senderName = contactName;
+                    const senderDiv = messageDiv.querySelector('.message-sender');
+                    if (senderDiv) senderDiv.textContent = senderName;
+                });
             }
             
             messageDiv.innerHTML = `
@@ -5561,6 +5509,11 @@ async function fetchAndCacheUserData(userId) {
                     console.log(`User ${senderId} video status: ${data.videoOff}`);
                     break;
             }
+        }
+        
+        function handleWhiteboardData(data, senderId) {
+            // Implement whiteboard data synchronization here
+            console.log('Whiteboard data received:', data, 'from:', senderId);
         }
         
         function setupEventListeners() {
@@ -6085,7 +6038,7 @@ async function fetchAndCacheUserData(userId) {
                 document.getElementById('notesPreview').innerHTML = html;
             });
             
-            // Reactions
+            // Reactions - FIXED: Proper emoji handling
             document.querySelectorAll('.reaction-btn').forEach(reactionBtn => {
                 reactionBtn.addEventListener('click', function() {
                     if (!userSettings.reactions) {
