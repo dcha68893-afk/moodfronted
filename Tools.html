@@ -451,7 +451,7 @@
         .tool-categories {
             display: flex;
             gap: 10px;
-            padding: 20px;
+            padding: 15px 20px;
             border-bottom: 1px solid var(--border-color);
             overflow-x: auto;
             scrollbar-width: none;
@@ -481,41 +481,16 @@
             background-color: #e4e6e9;
         }
         
-        /* Search Bar */
-        .search-container {
-            padding: 15px 20px;
-            border-bottom: 1px solid var(--border-color);
+        /* REMOVED Search Bar Styles */
+        
+        /* Tools Grid - FIXED SCROLL */
+        .tools-container {
+            flex: 1;
+            display: flex;
+            flex-direction: column;
+            overflow: hidden;
         }
         
-        .search-box {
-            position: relative;
-        }
-        
-        .search-input {
-            width: 100%;
-            padding: 12px 45px 12px 15px;
-            border: 1px solid var(--border-color);
-            border-radius: 20px;
-            font-size: 14px;
-            background-color: var(--secondary-color);
-            transition: all 0.2s;
-        }
-        
-        .search-input:focus {
-            outline: none;
-            border-color: var(--primary-color);
-            background-color: var(--bg-color);
-        }
-        
-        .search-icon {
-            position: absolute;
-            right: 15px;
-            top: 50%;
-            transform: translateY(-50%);
-            color: var(--text-secondary);
-        }
-        
-        /* Tools Grid */
         .tools-grid {
             flex: 1;
             overflow-y: auto;
@@ -523,6 +498,7 @@
             display: grid;
             grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
             gap: 20px;
+            height: 100%;
         }
         
         @media (max-width: 768px) {
@@ -540,6 +516,9 @@
             transition: all 0.3s;
             position: relative;
             overflow: hidden;
+            min-height: 280px;
+            display: flex;
+            flex-direction: column;
         }
         
         .tool-card:hover {
@@ -628,7 +607,7 @@
             font-size: 14px;
             line-height: 1.5;
             margin-bottom: 15px;
-            min-height: 60px;
+            flex: 1;
         }
         
         .tool-pricing {
@@ -675,6 +654,7 @@
         .tool-actions {
             display: flex;
             gap: 10px;
+            margin-top: auto;
         }
         
         .tool-btn {
@@ -723,7 +703,7 @@
             cursor: not-allowed;
         }
         
-        /* Tool Modal */
+        /* Tool Modal - UPDATED FOR FULL IFRAME */
         .tool-modal {
             display: none;
             position: fixed;
@@ -742,15 +722,15 @@
         }
         
         .tool-modal-container {
-            width: 90%;
-            max-width: 800px;
+            width: 95%;
+            height: 90vh;
             background-color: var(--bg-color);
             border-radius: 20px;
             overflow: hidden;
             display: flex;
             flex-direction: column;
-            max-height: 90vh;
             box-shadow: var(--shadow-lg);
+            position: relative;
         }
         
         .tool-modal-header {
@@ -761,6 +741,7 @@
             align-items: center;
             background: var(--ai-gradient);
             color: white;
+            flex-shrink: 0;
         }
         
         .tool-modal-header h3 {
@@ -773,40 +754,28 @@
         
         .tool-modal-content {
             flex: 1;
-            padding: 25px;
             overflow-y: auto;
-        }
-        
-        .tool-features {
-            margin: 20px 0;
-        }
-        
-        .feature-item {
-            display: flex;
-            align-items: center;
-            gap: 10px;
-            margin-bottom: 10px;
-            padding: 10px;
-            background-color: var(--secondary-color);
-            border-radius: 8px;
+            padding: 25px;
         }
         
         .tool-iframe-container {
             width: 100%;
-            height: 400px;
-            border: 1px solid var(--border-color);
+            height: calc(100vh - 180px);
+            border: none;
             border-radius: 12px;
             overflow: hidden;
-            margin-top: 20px;
+            margin-top: 0;
+            flex: 1;
         }
         
         .tool-iframe {
             width: 100%;
             height: 100%;
             border: none;
+            border-radius: 12px;
         }
         
-        /* Payment Modal */
+        /* Payment Modal - MINIMIZED */
         .payment-modal {
             display: none;
             position: fixed;
@@ -826,31 +795,36 @@
         
         .payment-modal-container {
             width: 90%;
-            max-width: 500px;
+            max-width: 450px; /* Reduced from 500px */
+            max-height: 85vh; /* Reduced height */
             background-color: var(--bg-color);
             border-radius: 20px;
             overflow: hidden;
             box-shadow: var(--shadow-lg);
+            display: flex;
+            flex-direction: column;
         }
         
         .payment-modal-header {
-            padding: 20px;
+            padding: 15px 20px; /* Reduced padding */
             border-bottom: 1px solid var(--border-color);
             display: flex;
             justify-content: space-between;
             align-items: center;
             background: var(--success-color);
             color: white;
+            flex-shrink: 0;
         }
         
         .payment-tabs {
             display: flex;
             border-bottom: 1px solid var(--border-color);
+            flex-shrink: 0;
         }
         
         .payment-tab {
             flex: 1;
-            padding: 15px;
+            padding: 12px; /* Reduced padding */
             text-align: center;
             background: none;
             border: none;
@@ -859,6 +833,7 @@
             color: var(--text-secondary);
             transition: all 0.2s;
             border-bottom: 3px solid transparent;
+            font-size: 14px; /* Smaller font */
         }
         
         .payment-tab.active {
@@ -867,23 +842,26 @@
         }
         
         .payment-form {
-            padding: 25px;
+            padding: 20px; /* Reduced padding */
+            overflow-y: auto;
+            flex: 1;
         }
         
         .payment-methods {
             display: grid;
             grid-template-columns: repeat(2, 1fr);
-            gap: 15px;
-            margin-bottom: 20px;
+            gap: 10px; /* Reduced gap */
+            margin-bottom: 15px;
         }
         
         .payment-method {
-            padding: 15px;
+            padding: 12px; /* Reduced padding */
             border: 2px solid var(--border-color);
             border-radius: 12px;
             cursor: pointer;
             text-align: center;
             transition: all 0.2s;
+            font-size: 14px;
         }
         
         .payment-method.selected {
@@ -892,24 +870,25 @@
         }
         
         .payment-method-icon {
-            font-size: 24px;
-            margin-bottom: 10px;
+            font-size: 20px; /* Reduced size */
+            margin-bottom: 8px;
             color: var(--primary-color);
         }
         
         .form-group {
-            margin-bottom: 20px;
+            margin-bottom: 15px; /* Reduced margin */
         }
         
         .form-label {
             display: block;
-            margin-bottom: 8px;
+            margin-bottom: 6px; /* Reduced margin */
             font-weight: 500;
+            font-size: 14px;
         }
         
         .form-input {
             width: 100%;
-            padding: 12px 15px;
+            padding: 10px 12px; /* Reduced padding */
             border: 1px solid var(--border-color);
             border-radius: 8px;
             font-size: 14px;
@@ -923,14 +902,14 @@
         .form-row {
             display: grid;
             grid-template-columns: 1fr 1fr;
-            gap: 15px;
+            gap: 12px; /* Reduced gap */
         }
         
         .secure-badge {
             display: flex;
             align-items: center;
-            gap: 8px;
-            font-size: 12px;
+            gap: 6px;
+            font-size: 11px; /* Smaller font */
             color: var(--success-color);
             margin-top: 10px;
         }
@@ -939,12 +918,12 @@
         .credit-packages {
             display: grid;
             grid-template-columns: repeat(2, 1fr);
-            gap: 15px;
-            margin-bottom: 20px;
+            gap: 12px; /* Reduced gap */
+            margin-bottom: 15px;
         }
         
         .credit-package {
-            padding: 20px;
+            padding: 15px; /* Reduced padding */
             border: 2px solid var(--border-color);
             border-radius: 12px;
             cursor: pointer;
@@ -963,39 +942,39 @@
         
         .popular-badge {
             position: absolute;
-            top: -10px;
-            right: 10px;
+            top: -8px;
+            right: 8px;
             background-color: var(--premium-color);
             color: #333;
-            padding: 4px 8px;
-            border-radius: 10px;
-            font-size: 11px;
+            padding: 3px 6px;
+            border-radius: 8px;
+            font-size: 10px; /* Smaller font */
             font-weight: 600;
         }
         
         .package-amount {
-            font-size: 24px;
+            font-size: 20px; /* Reduced size */
             font-weight: 700;
             margin-bottom: 5px;
         }
         
         .package-price {
-            font-size: 18px;
+            font-size: 16px; /* Reduced size */
             font-weight: 600;
             color: var(--success-color);
         }
         
         .package-value {
-            font-size: 13px;
+            font-size: 12px; /* Smaller font */
             color: var(--text-secondary);
         }
         
-        /* Subscription Plans */
+        /* Subscription Plans - COMPACT */
         .subscription-plans {
             display: grid;
-            grid-template-columns: repeat(4, 1fr);
-            gap: 15px;
-            margin-bottom: 20px;
+            grid-template-columns: repeat(2, 1fr);
+            gap: 12px; /* Reduced gap */
+            margin-bottom: 15px;
         }
         
         @media (max-width: 1024px) {
@@ -1011,7 +990,7 @@
         }
         
         .subscription-plan {
-            padding: 25px;
+            padding: 15px; /* Reduced padding */
             border: 2px solid var(--border-color);
             border-radius: 12px;
             text-align: center;
@@ -1021,8 +1000,8 @@
         
         .subscription-plan.selected {
             border-color: var(--primary-color);
-            transform: scale(1.05);
-            box-shadow: var(--shadow-lg);
+            transform: scale(1.02); /* Reduced scale */
+            box-shadow: var(--shadow);
         }
         
         .subscription-plan.popular {
@@ -1031,45 +1010,46 @@
         }
         
         .plan-name {
-            font-size: 18px;
+            font-size: 16px; /* Reduced size */
             font-weight: 600;
-            margin-bottom: 10px;
+            margin-bottom: 8px;
         }
         
         .plan-price {
-            font-size: 32px;
+            font-size: 24px; /* Reduced size */
             font-weight: 700;
             margin-bottom: 5px;
         }
         
         .plan-period {
-            font-size: 14px;
+            font-size: 12px; /* Smaller font */
             color: var(--text-secondary);
-            margin-bottom: 20px;
+            margin-bottom: 15px;
         }
         
         .plan-features {
             text-align: left;
-            margin-bottom: 20px;
+            margin-bottom: 15px;
         }
         
         .plan-feature {
             display: flex;
             align-items: center;
-            gap: 8px;
-            margin-bottom: 8px;
-            font-size: 14px;
+            gap: 6px;
+            margin-bottom: 6px;
+            font-size: 12px; /* Smaller font */
         }
         
         .plan-feature i {
             color: var(--success-color);
+            font-size: 10px; /* Smaller icon */
         }
         
         /* Marketplace Items */
         .marketplace-items {
             display: grid;
-            grid-template-columns: repeat(auto-fill, minmax(250px, 1fr));
-            gap: 15px;
+            grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); /* Smaller min width */
+            gap: 12px; /* Reduced gap */
         }
         
         .marketplace-item {
@@ -1085,93 +1065,96 @@
         }
         
         .marketplace-image {
-            height: 150px;
+            height: 100px; /* Reduced height */
             background-color: var(--secondary-color);
             display: flex;
             align-items: center;
             justify-content: center;
-            font-size: 40px;
+            font-size: 30px; /* Reduced size */
             color: var(--text-secondary);
         }
         
         .marketplace-content {
-            padding: 15px;
+            padding: 12px; /* Reduced padding */
         }
         
         .marketplace-title {
             font-weight: 600;
-            margin-bottom: 8px;
+            margin-bottom: 6px;
+            font-size: 14px;
         }
         
         .marketplace-description {
-            font-size: 13px;
+            font-size: 12px; /* Smaller font */
             color: var(--text-secondary);
-            margin-bottom: 10px;
+            margin-bottom: 8px;
             line-height: 1.4;
         }
         
         .marketplace-price {
             font-weight: 600;
             color: var(--success-color);
+            font-size: 14px;
         }
         
         /* Affiliate Dashboard */
         .affiliate-stats {
             display: grid;
-            grid-template-columns: repeat(4, 1fr);
-            gap: 15px;
-            margin-bottom: 20px;
+            grid-template-columns: repeat(2, 1fr); /* Changed to 2 columns */
+            gap: 12px; /* Reduced gap */
+            margin-bottom: 15px;
         }
         
         .affiliate-stat {
             text-align: center;
-            padding: 20px;
+            padding: 15px; /* Reduced padding */
             background-color: var(--secondary-color);
             border-radius: 12px;
         }
         
         .affiliate-stat-value {
-            font-size: 24px;
+            font-size: 20px; /* Reduced size */
             font-weight: 700;
             margin-bottom: 5px;
         }
         
         .affiliate-stat-label {
-            font-size: 14px;
+            font-size: 12px; /* Smaller font */
             color: var(--text-secondary);
         }
         
         .affiliate-link-container {
             background-color: var(--secondary-color);
-            padding: 15px;
+            padding: 12px; /* Reduced padding */
             border-radius: 12px;
-            margin-bottom: 20px;
+            margin-bottom: 15px;
         }
         
         .affiliate-link {
             display: flex;
-            gap: 10px;
+            gap: 8px;
         }
         
         .affiliate-link-input {
             flex: 1;
-            padding: 10px;
+            padding: 8px; /* Reduced padding */
             border: 1px solid var(--border-color);
             border-radius: 8px;
             background-color: var(--bg-color);
+            font-size: 12px; /* Smaller font */
         }
         
         /* Consultation Cards */
         .consultation-cards {
             display: grid;
-            grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
-            gap: 20px;
+            grid-template-columns: repeat(auto-fill, minmax(250px, 1fr)); /* Smaller min width */
+            gap: 15px; /* Reduced gap */
         }
         
         .consultation-card {
             border: 1px solid var(--border-color);
             border-radius: 12px;
-            padding: 20px;
+            padding: 15px; /* Reduced padding */
             transition: all 0.2s;
         }
         
@@ -1181,58 +1164,60 @@
         }
         
         .consultation-title {
-            font-size: 18px;
+            font-size: 16px; /* Reduced size */
             font-weight: 600;
-            margin-bottom: 10px;
+            margin-bottom: 8px;
         }
         
         .consultation-price {
-            font-size: 24px;
+            font-size: 20px; /* Reduced size */
             font-weight: 700;
             color: var(--success-color);
-            margin-bottom: 15px;
+            margin-bottom: 12px;
         }
         
         /* Ad Space */
         .ad-space {
             background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
             color: white;
-            padding: 20px;
+            padding: 15px; /* Reduced padding */
             border-radius: 12px;
-            margin: 20px 0;
+            margin: 15px 0; /* Reduced margin */
             text-align: center;
         }
         
         .ad-space h4 {
-            font-size: 18px;
-            margin-bottom: 10px;
+            font-size: 16px; /* Reduced size */
+            margin-bottom: 8px;
         }
         
         .ad-space p {
             opacity: 0.9;
-            margin-bottom: 15px;
+            margin-bottom: 12px;
+            font-size: 14px;
         }
         
         .roi-badge {
             display: inline-block;
             background-color: rgba(255, 255, 255, 0.2);
-            padding: 5px 10px;
+            padding: 4px 8px; /* Reduced padding */
             border-radius: 20px;
-            font-size: 12px;
-            margin-bottom: 15px;
+            font-size: 11px; /* Smaller font */
+            margin-bottom: 12px;
         }
         
-        /* Why MoodChat */
+        /* Why MoodChat - MOVED TO BOTTOM */
         .why-moodchat {
             background-color: var(--secondary-color);
-            padding: 30px;
+            padding: 25px 20px;
             border-radius: 12px;
-            margin: 20px 0;
+            margin: 20px;
             text-align: center;
+            border-top: 3px solid var(--primary-color);
         }
         
         .why-moodchat h3 {
-            font-size: 24px;
+            font-size: 22px;
             margin-bottom: 15px;
             color: var(--primary-color);
         }
@@ -1242,47 +1227,49 @@
             max-width: 600px;
             margin: 0 auto 20px;
             line-height: 1.6;
+            font-size: 15px;
         }
         
         .features-grid {
             display: grid;
-            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
-            gap: 20px;
+            grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+            gap: 15px;
             margin-top: 20px;
         }
         
         .feature-card {
             background-color: var(--bg-color);
-            padding: 20px;
+            padding: 15px;
             border-radius: 12px;
             text-align: center;
             box-shadow: var(--shadow);
         }
         
         .feature-icon {
-            font-size: 32px;
+            font-size: 28px;
             color: var(--primary-color);
-            margin-bottom: 15px;
+            margin-bottom: 12px;
         }
         
         /* CTA Card */
         .cta-card {
             background: linear-gradient(135deg, #ff6b6b 0%, #ee5a52 100%);
             color: white;
-            padding: 30px;
+            padding: 25px;
             border-radius: 12px;
             text-align: center;
-            margin: 20px 0;
+            margin: 20px;
         }
         
         .cta-card h3 {
-            font-size: 24px;
+            font-size: 22px;
             margin-bottom: 10px;
         }
         
         .cta-card p {
             opacity: 0.9;
             margin-bottom: 20px;
+            font-size: 15px;
         }
         
         /* Notification */
@@ -1458,7 +1445,7 @@
             }
             
             .tool-categories {
-                padding: 15px;
+                padding: 12px 15px;
             }
             
             .category-btn {
@@ -1470,6 +1457,12 @@
             .payment-modal-container {
                 width: 95%;
                 max-height: 95vh;
+            }
+            
+            .why-moodchat,
+            .cta-card {
+                margin: 15px;
+                padding: 20px;
             }
         }
         
@@ -1552,20 +1545,20 @@
             </div>
             
             <!-- Advertising Space -->
-            <div class="ad-space" style="margin: 20px; background: linear-gradient(135deg, #9b59b6 0%, #3498db 100%);">
+            <div class="ad-space" style="margin: 15px; background: linear-gradient(135deg, #9b59b6 0%, #3498db 100%);">
                 <h4>Premium Ad Space</h4>
                 <div class="roi-badge">2.8% average CTR</div>
                 <p>Reach 50,000+ business users</p>
-                <button class="tool-btn primary" style="width: 100%;">
+                <button class="tool-btn primary" style="width: 100%; padding: 8px;">
                     <i class="fas fa-bullhorn"></i> Book Now
                 </button>
             </div>
             
             <!-- Affiliate Program -->
-            <div style="padding: 20px; border-top: 1px solid var(--border-color);">
-                <h3 style="font-size: 16px; margin-bottom: 10px;">Affiliate Program</h3>
-                <p style="font-size: 14px; color: var(--text-secondary); margin-bottom: 15px;">Earn 30% commission on referrals</p>
-                <button class="tool-btn success" style="width: 100%;" id="viewAffiliateBtn">
+            <div style="padding: 15px; border-top: 1px solid var(--border-color);">
+                <h3 style="font-size: 16px; margin-bottom: 8px;">Affiliate Program</h3>
+                <p style="font-size: 13px; color: var(--text-secondary); margin-bottom: 12px;">Earn 30% commission on referrals</p>
+                <button class="tool-btn success" style="width: 100%; padding: 8px;" id="viewAffiliateBtn">
                     <i class="fas fa-chart-line"></i> View Dashboard
                 </button>
             </div>
@@ -1678,78 +1671,18 @@
                 <button class="category-btn" data-category="premium">Premium</button>
             </div>
             
-            <!-- Search Bar -->
-            <div class="search-container">
-                <div class="search-box">
-                    <input type="text" class="search-input" id="toolSearch" placeholder="Search tools...">
-                    <i class="fas fa-search search-icon"></i>
-                </div>
-            </div>
-            
             <!-- Cache Indicator -->
             <div class="cache-indicator" id="cacheIndicator" style="display: none;">
                 <i class="fas fa-database"></i>
                 <span>Showing cached tools data. Some features may be limited.</span>
             </div>
             
-            <!-- Tools Grid -->
-            <div class="tools-grid" id="toolsGrid">
-                <div class="loading">
-                    <div class="loading-spinner"></div>
-                </div>
-            </div>
-            
-            <!-- Why MoodChat Section -->
-            <div class="why-moodchat">
-                <h3>Why MoodChat?</h3>
-                <p>Africa's first all-in-one chat + business platform built for African payments & connectivity. Offline-first, fast, and secure.</p>
-                
-                <div class="features-grid">
-                    <div class="feature-card">
-                        <div class="feature-icon">
-                            <i class="fas fa-bolt"></i>
-                        </div>
-                        <h4>Offline-First</h4>
-                        <p>Works without internet, syncs when back online</p>
+            <!-- Tools Grid Container -->
+            <div class="tools-container">
+                <div class="tools-grid" id="toolsGrid">
+                    <div class="loading">
+                        <div class="loading-spinner"></div>
                     </div>
-                    
-                    <div class="feature-card">
-                        <div class="feature-icon">
-                            <i class="fas fa-shield-alt"></i>
-                        </div>
-                        <h4>Secure</h4>
-                        <p>Bank-level encryption for all transactions</p>
-                    </div>
-                    
-                    <div class="feature-card">
-                        <div class="feature-icon">
-                            <i class="fas fa-hand-holding-usd"></i>
-                        </div>
-                        <h4>African Payments</h4>
-                        <p>Built for local payment methods</p>
-                    </div>
-                    
-                    <div class="feature-card">
-                        <div class="feature-icon">
-                            <i class="fas fa-robot"></i>
-                        </div>
-                        <h4>AI-Powered</h4>
-                        <p>Smart tools that grow with your business</p>
-                    </div>
-                </div>
-            </div>
-            
-            <!-- CTA Card -->
-            <div class="cta-card">
-                <h3>Start Earning With MoodChat</h3>
-                <p>Join thousands of entrepreneurs growing their business with our platform. No coding required.</p>
-                <div class="tool-actions" style="justify-content: center;">
-                    <button class="tool-btn success" style="padding: 12px 30px;">
-                        <i class="fas fa-rocket"></i> Get Started Free
-                    </button>
-                    <button class="tool-btn primary" style="padding: 12px 30px;">
-                        <i class="fas fa-play-circle"></i> Watch Demo
-                    </button>
                 </div>
             </div>
         </div>
@@ -1772,7 +1705,7 @@
                 <!-- Tool details will be loaded here -->
             </div>
             
-            <div style="padding: 20px; border-top: 1px solid var(--border-color); display: flex; justify-content: space-between;">
+            <div style="padding: 15px; border-top: 1px solid var(--border-color); display: flex; justify-content: space-between; flex-shrink: 0;">
                 <button class="tool-btn secondary" id="cancelToolBtn">
                     <i class="fas fa-times"></i> Cancel
                 </button>
@@ -1810,6 +1743,60 @@
     <div class="notification" id="notification">
         <i class="fas fa-check-circle"></i>
         <span id="notificationText">Operation completed successfully</span>
+    </div>
+
+    <!-- Why MoodChat Section - MOVED OUTSIDE MAIN CONTENT TO BOTTOM -->
+    <div class="why-moodchat" id="whyMoodchatSection">
+        <h3>Why MoodChat?</h3>
+        <p>Africa's first all-in-one chat + business platform built for African payments & connectivity. Offline-first, fast, and secure.</p>
+        
+        <div class="features-grid">
+            <div class="feature-card">
+                <div class="feature-icon">
+                    <i class="fas fa-bolt"></i>
+                </div>
+                <h4>Offline-First</h4>
+                <p>Works without internet, syncs when back online</p>
+            </div>
+            
+            <div class="feature-card">
+                <div class="feature-icon">
+                    <i class="fas fa-shield-alt"></i>
+                </div>
+                <h4>Secure</h4>
+                <p>Bank-level encryption for all transactions</p>
+            </div>
+            
+            <div class="feature-card">
+                <div class="feature-icon">
+                    <i class="fas fa-hand-holding-usd"></i>
+                </div>
+                <h4>African Payments</h4>
+                <p>Built for local payment methods</p>
+            </div>
+            
+            <div class="feature-card">
+                <div class="feature-icon">
+                    <i class="fas fa-robot"></i>
+                </div>
+                <h4>AI-Powered</h4>
+                <p>Smart tools that grow with your business</p>
+            </div>
+        </div>
+    </div>
+    
+    <!-- CTA Card - MOVED TO BOTTOM -->
+    <div class="cta-card" id="ctaSection">
+        <h3>Start Earning With MoodChat</h3>
+        <p>Join thousands of entrepreneurs growing their business with our platform. No coding required.</p>
+        <div class="tool-actions" style="justify-content: center;">
+            <button class="tool-btn success" style="padding: 12px 30px;">
+                <i class="fas fa-rocket"></i> Get Started Free
+            </button>
+            <button class="tool-btn primary" style="padding: 12px 30px;">
+                <i class="fas fa-play-circle"></i> Watch Demo
+            </button>
+        </div>
     </div>
 
     <script>
@@ -1963,20 +1950,20 @@
         const toolUrlMap = {
             'ai-content': '../ai-tools/content-generator.html',
             'ai-image': '../ai-tools/image-generator.html',
+            'seo-analyzer': '../ai-tools/seo-analyzer.html',
+            'chatbot-builder': '../ai-tools/chatbot-builder.html',
             'bulk-email': '../business-tools/email-sender.html',
             'predictive-analytics': '../business-tools/analytics.html',
+            'invoice-generator': '../business-tools/invoice-generator.html',
+            'payment-gateway': '../business-tools/payment-gateway.html',
             'crm-advanced': '../business-tools/crm.html',
             'data-export': '../productivity-tools/data-export.html',
+            'social-scheduler': '../productivity-tools/social-scheduler.html',
+            'analytics-dashboard': '../productivity-tools/analytics-dashboard.html',
             'ai-templates': '../marketplace/templates-marketplace.html',
             'analytics-addon': '../premium-tools/advanced-analytics.html',
             'integration-plugin': '../premium-tools/integrations.html',
-            'invoice-generator': '../business-tools/invoice-generator.html',
-            'social-scheduler': '../productivity-tools/social-scheduler.html',
-            'seo-analyzer': '../ai-tools/seo-analyzer.html',
-            'video-editor': '../premium-tools/video-editor.html',
-            'chatbot-builder': '../ai-tools/chatbot-builder.html',
-            'payment-gateway': '../business-tools/payment-gateway.html',
-            'analytics-dashboard': '../productivity-tools/analytics-dashboard.html'
+            'video-editor': '../premium-tools/video-editor.html'
         };
         
         // Marketplace items
@@ -2220,6 +2207,8 @@
         const mobileOverlay = document.getElementById('mobileOverlay');
         const toolsGrid = document.getElementById('toolsGrid');
         const transactionsList = document.getElementById('transactionsList');
+        const whyMoodchatSection = document.getElementById('whyMoodchatSection');
+        const ctaSection = document.getElementById('ctaSection');
         
         // Local Storage Keys
         const LOCAL_STORAGE_KEYS = {
@@ -2603,12 +2592,6 @@
                     btn.title = 'Requires internet connection';
                 }
             });
-            
-            // Update search placeholder
-            const searchInput = document.getElementById('toolSearch');
-            if (searchInput) {
-                searchInput.placeholder = 'Search cached tools...';
-            }
         }
         
         function updateUIForOnlineMode() {
@@ -2624,12 +2607,6 @@
                     btn.title = '';
                 }
             });
-            
-            // Restore search placeholder
-            const searchInput = document.getElementById('toolSearch');
-            if (searchInput) {
-                searchInput.placeholder = 'Search tools...';
-            }
         }
         
         function enableOnlineFeatures() {
@@ -2716,18 +2693,11 @@
         function renderTools() {
             toolsGrid.innerHTML = '';
             
-            // Filter tools based on category and search
+            // Filter tools based on category
             filteredTools = allTools.filter(tool => {
                 // Category filter
                 if (currentCategory !== 'all' && tool.category !== currentCategory) {
                     return false;
-                }
-                
-                // Search filter
-                if (currentSearchTerm) {
-                    const searchLower = currentSearchTerm.toLowerCase();
-                    return tool.name.toLowerCase().includes(searchLower) || 
-                           tool.description.toLowerCase().includes(searchLower);
                 }
                 
                 return true;
@@ -2736,9 +2706,9 @@
             if (filteredTools.length === 0) {
                 toolsGrid.innerHTML = `
                     <div style="grid-column: 1 / -1; text-align: center; padding: 40px 20px; color: var(--text-secondary);">
-                        <i class="fas fa-search" style="font-size: 48px; margin-bottom: 15px; opacity: 0.5;"></i>
-                        <p>No tools found</p>
-                        <p class="subtext">Try a different search or category</p>
+                        <i class="fas fa-tools" style="font-size: 48px; margin-bottom: 15px; opacity: 0.5;"></i>
+                        <p>No tools found in this category</p>
+                        <p class="subtext">Try selecting a different category</p>
                     </div>
                 `;
                 return;
@@ -3026,11 +2996,10 @@
                 updateStatsDisplay();
             }
             
-            // Open tool in iframe or redirect
-            const toolUrl = toolUrlMap[tool.id] || '/tools/placeholder.html';
+            // Open tool in iframe within modal
+            const toolUrl = toolUrlMap[tool.id] || `../tools/placeholder.html?tool=${tool.id}`;
             
-            // Open in iframe within modal
-            document.getElementById('toolModalContent').innerHTML += `
+            document.getElementById('toolModalContent').innerHTML = `
                 <div class="tool-iframe-container">
                     <iframe src="${toolUrl}" class="tool-iframe" frameborder="0"></iframe>
                 </div>
@@ -3043,6 +3012,12 @@
                 toolModal.classList.remove('active');
                 showToolDetails(tool); // Reset to details view
             };
+            
+            // Update modal header
+            document.getElementById('toolModalTitle').innerHTML = `
+                <i class="${tool.icon}"></i>
+                <span>${tool.name} - Running</span>
+            `;
             
             renderTransactions();
         }
@@ -3071,7 +3046,7 @@
             switch(tab) {
                 case 'credits':
                     paymentForm.innerHTML = `
-                        <h4 style="margin-bottom: 20px; text-align: center;">Buy Credits</h4>
+                        <h4 style="margin-bottom: 15px; text-align: center; font-size: 18px;">Buy Credits</h4>
                         
                         <div class="credit-packages">
                             ${creditPackages.map(pkg => `
@@ -3126,22 +3101,22 @@
                         </div>
                         
                         <div id="paypalPaymentForm" style="display: none;">
-                            <div style="text-align: center; padding: 20px;">
-                                <i class="fab fa-paypal" style="font-size: 48px; color: #003087; margin-bottom: 15px;"></i>
-                                <p>You will be redirected to PayPal to complete your payment</p>
+                            <div style="text-align: center; padding: 15px;">
+                                <i class="fab fa-paypal" style="font-size: 40px; color: #003087; margin-bottom: 12px;"></i>
+                                <p style="font-size: 14px;">You will be redirected to PayPal to complete your payment</p>
                             </div>
                         </div>
                         
                         <div class="secure-badge">
                             <i class="fas fa-shield-alt"></i>
-                            <span>Secured by Stripe • All transactions are securely recorded and auditable</span>
+                            <span>Secured by Stripe • All transactions are secure</span>
                         </div>
                         
-                        <div style="margin-top: 30px; display: flex; justify-content: space-between;">
-                            <button class="tool-btn secondary" id="cancelPaymentBtn">
+                        <div style="margin-top: 20px; display: flex; justify-content: space-between;">
+                            <button class="tool-btn secondary" id="cancelPaymentBtn" style="padding: 8px 15px;">
                                 <i class="fas fa-times"></i> Cancel
                             </button>
-                            <button class="tool-btn success" id="confirmPaymentBtn">
+                            <button class="tool-btn success" id="confirmPaymentBtn" style="padding: 8px 15px;">
                                 <i class="fas fa-lock"></i> Pay Now
                             </button>
                         </div>
@@ -3177,13 +3152,13 @@
                     
                 case 'subscription':
                     paymentForm.innerHTML = `
-                        <h4 style="margin-bottom: 20px; text-align: center;">Upgrade Your Plan</h4>
+                        <h4 style="margin-bottom: 15px; text-align: center; font-size: 18px;">Upgrade Your Plan</h4>
                         
                         <div class="subscription-plans">
                             ${Object.entries(subscriptionPlans).map(([key, plan]) => `
                                 <div class="subscription-plan ${plan.popular ? 'popular' : ''} ${key === currentPlan ? 'selected' : ''}" data-plan="${key}">
                                     <div class="plan-name">${plan.name}</div>
-                                    <div class="plan-price">$${plan.price}<span style="font-size: 16px;">/${plan.price === 0 ? 'forever' : 'month'}</span></div>
+                                    <div class="plan-price">$${plan.price}<span style="font-size: 14px;">/${plan.price === 0 ? 'forever' : 'month'}</span></div>
                                     <div class="plan-period">${plan.credits} credits/month</div>
                                     
                                     <div class="plan-features">
@@ -3196,11 +3171,11 @@
                                     </div>
                                     
                                     ${key === currentPlan ? `
-                                    <button class="tool-btn secondary" style="width: 100%;" disabled>
+                                    <button class="tool-btn secondary" style="width: 100%; padding: 8px;" disabled>
                                         <i class="fas fa-check"></i> Current Plan
                                     </button>
                                     ` : `
-                                    <button class="tool-btn ${plan.popular ? 'success' : 'primary'}" style="width: 100%;" data-upgrade="${key}">
+                                    <button class="tool-btn ${plan.popular ? 'success' : 'primary'}" style="width: 100%; padding: 8px;" data-upgrade="${key}">
                                         <i class="fas fa-arrow-up"></i> ${plan.price === 0 ? 'Downgrade' : 'Upgrade'}
                                     </button>
                                     `}
@@ -3208,8 +3183,8 @@
                             `).join('')}
                         </div>
                         
-                        <div style="margin-top: 30px; text-align: center;">
-                            <button class="tool-btn secondary" id="cancelPaymentBtn">
+                        <div style="margin-top: 20px; text-align: center;">
+                            <button class="tool-btn secondary" id="cancelPaymentBtn" style="padding: 8px 15px;">
                                 <i class="fas fa-times"></i> Cancel
                             </button>
                         </div>
@@ -3229,7 +3204,7 @@
                     
                 case 'affiliate':
                     paymentForm.innerHTML = `
-                        <h4 style="margin-bottom: 20px; text-align: center;">Affiliate Program</h4>
+                        <h4 style="margin-bottom: 15px; text-align: center; font-size: 18px;">Affiliate Program</h4>
                         
                         <div class="affiliate-stats">
                             <div class="affiliate-stat">
@@ -3251,17 +3226,17 @@
                         </div>
                         
                         <div class="affiliate-link-container">
-                            <h5 style="margin-bottom: 10px;">Your Referral Link</h5>
+                            <h5 style="margin-bottom: 8px; font-size: 14px;">Your Referral Link</h5>
                             <div class="affiliate-link">
                                 <input type="text" class="affiliate-link-input" value="https://moodchat.com/ref/${currentUser?.uid || 'demo123'}" readonly>
-                                <button class="tool-btn primary" id="copyAffiliateLink">
+                                <button class="tool-btn primary" id="copyAffiliateLink" style="padding: 8px 12px;">
                                     <i class="fas fa-copy"></i> Copy
                                 </button>
                             </div>
                         </div>
                         
-                        <div style="margin-top: 20px;">
-                            <h5 style="margin-bottom: 10px;">Payout Request</h5>
+                        <div style="margin-top: 15px;">
+                            <h5 style="margin-bottom: 8px; font-size: 14px;">Payout Request</h5>
                             <div class="form-group">
                                 <label class="form-label">Amount (Min: $50)</label>
                                 <input type="number" class="form-input" id="payoutAmount" value="50" min="50" max="245.50" step="0.01">
@@ -3277,11 +3252,11 @@
                             </div>
                         </div>
                         
-                        <div style="margin-top: 30px; display: flex; justify-content: space-between;">
-                            <button class="tool-btn secondary" id="cancelPaymentBtn">
+                        <div style="margin-top: 20px; display: flex; justify-content: space-between;">
+                            <button class="tool-btn secondary" id="cancelPaymentBtn" style="padding: 8px 15px;">
                                 <i class="fas fa-times"></i> Cancel
                             </button>
-                            <button class="tool-btn success" id="requestPayoutBtn">
+                            <button class="tool-btn success" id="requestPayoutBtn" style="padding: 8px 15px;">
                                 <i class="fas fa-money-check-alt"></i> Request Payout
                             </button>
                         </div>
@@ -3304,26 +3279,26 @@
                     
                 case 'consultation':
                     paymentForm.innerHTML = `
-                        <h4 style="margin-bottom: 20px; text-align: center;">Book Expert Consultation</h4>
+                        <h4 style="margin-bottom: 15px; text-align: center; font-size: 18px;">Book Expert Consultation</h4>
                         
                         <div class="consultation-cards">
                             ${consultationServices.map(service => `
                                 <div class="consultation-card" data-service="${service.id}">
                                     <div class="consultation-title">${service.name}</div>
                                     <div class="consultation-price">${service.price}</div>
-                                    <div style="font-size: 14px; color: var(--text-secondary); margin-bottom: 15px;">
+                                    <div style="font-size: 13px; color: var(--text-secondary); margin-bottom: 12px;">
                                         <i class="fas fa-clock"></i> ${service.duration}
                                     </div>
-                                    <p style="font-size: 14px; color: var(--text-secondary); margin-bottom: 15px;">${service.description}</p>
-                                    <button class="tool-btn primary" style="width: 100%;" data-book="${service.id}">
+                                    <p style="font-size: 13px; color: var(--text-secondary); margin-bottom: 15px;">${service.description}</p>
+                                    <button class="tool-btn primary" style="width: 100%; padding: 8px;" data-book="${service.id}">
                                         <i class="fas fa-calendar-check"></i> Book Now
                                     </button>
                                 </div>
                             `).join('')}
                         </div>
                         
-                        <div style="margin-top: 30px; text-align: center;">
-                            <button class="tool-btn secondary" id="cancelPaymentBtn">
+                        <div style="margin-top: 20px; text-align: center;">
+                            <button class="tool-btn secondary" id="cancelPaymentBtn" style="padding: 8px 15px;">
                                 <i class="fas fa-times"></i> Cancel
                             </button>
                         </div>
@@ -3553,12 +3528,6 @@
                 });
             });
             
-            // Search input
-            document.getElementById('toolSearch').addEventListener('input', function() {
-                currentSearchTerm = this.value;
-                renderTools();
-            });
-            
             // Buy credits button
             document.getElementById('buyCreditsBtn').addEventListener('click', () => {
                 showPaymentModal('credits');
@@ -3651,12 +3620,6 @@
                         sidebar.classList.remove('active');
                         mobileOverlay.classList.remove('active');
                     }
-                }
-                
-                // Focus search with Ctrl/Cmd + K
-                if ((e.ctrlKey || e.metaKey) && e.key === 'k') {
-                    e.preventDefault();
-                    document.getElementById('toolSearch').focus();
                 }
             });
         }

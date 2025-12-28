@@ -1,8 +1,8 @@
 // firebase-config.js
 /**
  * Firebase Configuration Module
- * Only handles Firebase app initialization and service exports
- * No business logic - just setup and configuration
+ * Enhanced for device-based authentication with offline-first approach
+ * Supports: Device ID tracking, local user storage, and background sync
  */
 
 // Firebase configuration
@@ -23,11 +23,17 @@ import {
   browserLocalPersistence,
   inMemoryPersistence,
   signInWithEmailAndPassword,
-  onAuthStateChanged
+  createUserWithEmailAndPassword,
+  onAuthStateChanged,
+  signOut
 } from "https://www.gstatic.com/firebasejs/9.22.1/firebase-auth.js";
 import { 
   getFirestore, 
-  enableIndexedDbPersistence
+  enableIndexedDbPersistence,
+  doc,
+  setDoc,
+  getDoc,
+  updateDoc
 } from "https://www.gstatic.com/firebasejs/9.22.1/firebase-firestore.js";
 import { getStorage } from "https://www.gstatic.com/firebasejs/9.22.1/firebase-storage.js";
 import { getDatabase } from "https://www.gstatic.com/firebasejs/9.22.1/firebase-database.js";
@@ -41,14 +47,93 @@ const db = getFirestore(app);
 const storage = getStorage(app);
 const realtimeDb = getDatabase(app);
 
-// Session Cache Keys
+// Session Cache Keys (enhanced for device-based auth)
 const SESSION_CACHE_KEY = 'firebase_session_cache';
 const CREDENTIALS_CACHE_KEY = 'firebase_credentials_cache';
+const DEVICE_ID_KEY = 'user_device_id';
+const MULTI_USER_STORAGE_KEY = 'uniconnect_saved_users';
+const LOGGED_OUT_FLAG_KEY = 'user_logged_out';
 
-// Cache user session data
-const cacheUserSession = (user) => {
+// Generate or retrieve device ID
+const getOrCreateDeviceId = () => {
+  let deviceId = localStorage.getItem(DEVICE_ID_KEY);
+  if (!deviceId) {
+    // Generate a unique device ID
+    deviceId = 'device_' + Date.now() + '_' + Math.random().toString(36).substr(2, 9);
+    localStorage.setItem(DEVICE_ID_KEY, deviceId);
+    console.log("New device ID generated:", deviceId);
+  }
+  return deviceId;
+};
+
+// Get current device ID
+const getCurrentDeviceId = () => {
+  return localStorage.getItem(DEVICE_ID_KEY);
+};
+
+// Store multiple users for quick login
+const storeUserForQuickLogin = (userData) => {
+  try {
+    const users = JSON.parse(localStorage.getItem(MULTI_USER_STORAGE_KEY)) || [];
+    
+    // Check if user already exists
+    const existingIndex = users.findIndex(u => u.email === userData.email);
+    
+    if (existingIndex !== -1) {
+      // Update existing user
+      users[existingIndex] = {
+        ...users[existingIndex],
+        ...userData,
+        lastLogin: Date.now(),
+        deviceId: getCurrentDeviceId()
+      };
+    } else {
+      // Add new user
+      users.push({
+        ...userData,
+        lastLogin: Date.now(),
+        deviceId: getCurrentDeviceId()
+      });
+    }
+    
+    // Keep only last 5 users
+    const sortedUsers = users.sort((a, b) => b.lastLogin - a.lastLogin);
+    const recentUsers = sortedUsers.slice(0, 5);
+    
+    localStorage.setItem(MULTI_USER_STORAGE_KEY, JSON.stringify(recentUsers));
+    console.log("User stored for quick login:", userData.email);
+  } catch (error) {
+    console.error("Error storing user for quick login:", error);
+  }
+};
+
+// Get all saved users for quick login
+const getSavedUsers = () => {
+  try {
+    return JSON.parse(localStorage.getItem(MULTI_USER_STORAGE_KEY)) || [];
+  } catch (error) {
+    console.error("Error reading saved users:", error);
+    return [];
+  }
+};
+
+// Remove user from quick login list
+const removeSavedUser = (email) => {
+  try {
+    const users = JSON.parse(localStorage.getItem(MULTI_USER_STORAGE_KEY)) || [];
+    const filteredUsers = users.filter(u => u.email !== email);
+    localStorage.setItem(MULTI_USER_STORAGE_KEY, JSON.stringify(filteredUsers));
+    console.log("User removed from quick login:", email);
+  } catch (error) {
+    console.error("Error removing saved user:", error);
+  }
+};
+
+// Cache user session data with device info
+const cacheUserSession = (user, additionalData = {}) => {
   if (!user) {
     localStorage.removeItem(SESSION_CACHE_KEY);
+    localStorage.removeItem(LOGGED_OUT_FLAG_KEY);
     return;
   }
   
@@ -59,56 +144,117 @@ const cacheUserSession = (user) => {
     photoURL: user.photoURL,
     emailVerified: user.emailVerified,
     lastLogin: Date.now(),
-    // Add other relevant user data
+    deviceId: getCurrentDeviceId(),
+    isLoggedIn: true,
+    accountType: additionalData.accountType || 'student',
+    expiresAt: Date.now() + (7 * 24 * 60 * 60 * 1000), // 7 days from now
+    ...additionalData
   };
   
   localStorage.setItem(SESSION_CACHE_KEY, JSON.stringify(sessionData));
-  console.log("User session cached");
+  localStorage.removeItem(LOGGED_OUT_FLAG_KEY); // Clear logged out flag
+  
+  // Also store for quick login
+  storeUserForQuickLogin({
+    uid: user.uid,
+    email: user.email,
+    displayName: user.displayName,
+    photoURL: user.photoURL,
+    accountType: additionalData.accountType || 'student'
+  });
+  
+  console.log("User session cached with device ID:", getCurrentDeviceId());
 };
 
-// Get cached user session
+// Get cached user session with device validation
 const getCachedUserSession = () => {
   try {
+    // Check if user explicitly logged out
+    if (localStorage.getItem(LOGGED_OUT_FLAG_KEY) === 'true') {
+      console.log("User logged out explicitly, skipping cache");
+      return null;
+    }
+    
     const cached = localStorage.getItem(SESSION_CACHE_KEY);
     if (!cached) return null;
     
     const sessionData = JSON.parse(cached);
-    // Check if cache is still valid (e.g., less than 7 days old)
-    const cacheAge = Date.now() - sessionData.lastLogin;
-    const maxAge = 7 * 24 * 60 * 60 * 1000; // 7 days
     
-    if (cacheAge < maxAge) {
-      console.log("Valid cached session found");
-      return sessionData;
-    } else {
+    // Check if session has expired
+    if (sessionData.expiresAt && Date.now() > sessionData.expiresAt) {
       console.log("Cached session expired");
       localStorage.removeItem(SESSION_CACHE_KEY);
       return null;
     }
+    
+    // Check if session is from current device
+    const currentDeviceId = getCurrentDeviceId();
+    if (sessionData.deviceId && sessionData.deviceId !== currentDeviceId) {
+      console.log("Session from different device, not using cache");
+      return null;
+    }
+    
+    // Check if session is marked as logged in
+    if (!sessionData.isLoggedIn) {
+      console.log("Session marked as not logged in");
+      return null;
+    }
+    
+    console.log("Valid cached session found for device:", currentDeviceId);
+    return sessionData;
+    
   } catch (error) {
     console.error("Error reading cached session:", error);
     return null;
   }
 };
 
+// Mark user as logged out
+const markUserAsLoggedOut = () => {
+  localStorage.setItem(LOGGED_OUT_FLAG_KEY, 'true');
+  console.log("User marked as logged out");
+};
+
+// Clear all user data
+const clearAllUserData = () => {
+  localStorage.removeItem(SESSION_CACHE_KEY);
+  localStorage.removeItem(CREDENTIALS_CACHE_KEY);
+  localStorage.setItem(LOGGED_OUT_FLAG_KEY, 'true');
+  console.log("All user data cleared");
+};
+
 // Store user credentials for "remember me" functionality
 const storeUserCredentials = (email, password) => {
   try {
-    const credentials = { email, password, timestamp: Date.now() };
+    const credentials = { 
+      email, 
+      password, 
+      timestamp: Date.now(),
+      deviceId: getCurrentDeviceId() 
+    };
     localStorage.setItem(CREDENTIALS_CACHE_KEY, JSON.stringify(credentials));
-    console.log("User credentials stored");
+    console.log("User credentials stored for device:", getCurrentDeviceId());
   } catch (error) {
     console.error("Error storing credentials:", error);
   }
 };
 
-// Get stored credentials
+// Get stored credentials with device validation
 const getStoredCredentials = () => {
   try {
     const stored = localStorage.getItem(CREDENTIALS_CACHE_KEY);
     if (!stored) return null;
     
     const credentials = JSON.parse(stored);
+    const currentDeviceId = getCurrentDeviceId();
+    
+    // Check if credentials are from current device
+    if (credentials.deviceId && credentials.deviceId !== currentDeviceId) {
+      console.log("Credentials from different device, not using");
+      localStorage.removeItem(CREDENTIALS_CACHE_KEY);
+      return null;
+    }
+    
     // Check if credentials are still valid (e.g., less than 30 days old)
     const cacheAge = Date.now() - credentials.timestamp;
     const maxAge = 30 * 24 * 60 * 60 * 1000; // 30 days
@@ -129,10 +275,52 @@ const getStoredCredentials = () => {
 const clearUserCredentials = () => {
   localStorage.removeItem(CREDENTIALS_CACHE_KEY);
   localStorage.removeItem(SESSION_CACHE_KEY);
+  localStorage.setItem(LOGGED_OUT_FLAG_KEY, 'true');
   console.log("Stored user credentials and session cleared");
 };
 
-// Background Firebase verification
+// Create user in Firestore (background sync)
+const createUserInFirestore = async (userId, userData) => {
+  try {
+    const userRef = doc(db, "users", userId);
+    await setDoc(userRef, {
+      ...userData,
+      createdAt: new Date().toISOString(),
+      lastUpdated: new Date().toISOString(),
+      devices: [getCurrentDeviceId()]
+    });
+    console.log("User created in Firestore:", userId);
+    return true;
+  } catch (error) {
+    console.error("Error creating user in Firestore:", error);
+    return false;
+  }
+};
+
+// Update user devices in Firestore
+const updateUserDevicesInFirestore = async (userId) => {
+  try {
+    const userRef = doc(db, "users", userId);
+    const userDoc = await getDoc(userRef);
+    
+    if (userDoc.exists()) {
+      const currentDevices = userDoc.data().devices || [];
+      const currentDeviceId = getCurrentDeviceId();
+      
+      if (!currentDevices.includes(currentDeviceId)) {
+        await updateDoc(userRef, {
+          devices: [...currentDevices, currentDeviceId],
+          lastUpdated: new Date().toISOString()
+        });
+        console.log("Device added to user profile:", currentDeviceId);
+      }
+    }
+  } catch (error) {
+    console.error("Error updating user devices:", error);
+  }
+};
+
+// Background Firebase verification with device tracking
 const verifyUserInBackground = async () => {
   try {
     // Get stored credentials
@@ -142,26 +330,34 @@ const verifyUserInBackground = async () => {
       return;
     }
     
-    // Try to sign in with Firebase (this will fail if offline)
+    // Try to sign in with Firebase
     const userCredential = await signInWithEmailAndPassword(
       auth, 
       credentials.email, 
       credentials.password
     );
     
+    // Update user devices in Firestore
+    await updateUserDevicesInFirestore(userCredential.user.uid);
+    
     // Update cache with fresh data
-    cacheUserSession(userCredential.user);
+    const cached = getCachedUserSession();
+    cacheUserSession(userCredential.user, {
+      accountType: cached?.accountType || 'student'
+    });
+    
     console.log("Background verification successful for:", credentials.email);
     
   } catch (error) {
-    // Silently handle errors - user stays logged in with cached session
+    // Silently handle errors
     if (error.code === 'auth/network-request-failed') {
       console.log("Background verification skipped (offline)");
     } else if (error.code === 'auth/invalid-credential') {
       console.log("Stored credentials invalid, clearing cache");
       clearUserCredentials();
+      removeSavedUser(credentials.email);
     } else {
-      console.log("Background verification error (non-critical):", error.code);
+      console.log("Background verification error:", error.code);
     }
   }
 };
@@ -169,6 +365,9 @@ const verifyUserInBackground = async () => {
 // Initialize auth with offline support
 const initializeAuthPersistence = async () => {
   try {
+    // Generate device ID if not exists
+    getOrCreateDeviceId();
+    
     // Set persistence to LOCAL for offline support
     await setPersistence(auth, browserLocalPersistence);
     console.log("Firebase Auth persistence set to LOCAL");
@@ -179,8 +378,14 @@ const initializeAuthPersistence = async () => {
     if (cachedUser) {
       console.log("Using cached user session for immediate UI display");
       
-      // IMPORTANT: We don't wait for Firebase verification here
-      // UI should show based on cached session immediately
+      // Dispatch event for UI to update immediately
+      document.dispatchEvent(new CustomEvent('user-authenticated', {
+        detail: { 
+          user: cachedUser, 
+          source: 'cache',
+          isOnline: false 
+        }
+      }));
       
       // Start background verification
       setTimeout(verifyUserInBackground, 1000);
@@ -219,39 +424,66 @@ const initializeFirestoreOfflinePersistence = () => {
     });
 };
 
-// Monitor auth state changes (background only)
+// Monitor auth state changes with device tracking
 const monitorAuthState = () => {
   onAuthStateChanged(auth, (user) => {
     if (user) {
       console.log("Firebase auth state: User authenticated", user.email);
-      // Cache the fresh Firebase user data
-      cacheUserSession(user);
       
-      // Dispatch custom event for UI to update if needed
+      // Get cached account type if available
+      const cached = getCachedUserSession();
+      
+      // Cache the fresh Firebase user data
+      cacheUserSession(user, {
+        accountType: cached?.accountType || 'student'
+      });
+      
+      // Update user devices in background
+      updateUserDevicesInFirestore(user.uid);
+      
+      // Dispatch custom event for UI to update
       document.dispatchEvent(new CustomEvent('firebase-auth-changed', {
-        detail: { user, source: 'firebase' }
+        detail: { 
+          user, 
+          source: 'firebase',
+          isOnline: true 
+        }
       }));
     } else {
       console.log("Firebase auth state: User signed out");
-      // Clear cache when Firebase confirms sign out
-      cacheUserSession(null);
       
-      // Dispatch custom event for UI to update if needed
+      // Don't clear cache on Firebase sign out if we have valid cached session
+      // This allows offline operation
+      const cachedUser = getCachedUserSession();
+      if (!cachedUser) {
+        cacheUserSession(null);
+      }
+      
+      // Dispatch custom event for UI to update
       document.dispatchEvent(new CustomEvent('firebase-auth-changed', {
-        detail: { user: null, source: 'firebase' }
+        detail: { 
+          user: null, 
+          source: 'firebase',
+          isOnline: true 
+        }
       }));
     }
   });
 };
 
-// Helper function for UI to check authentication state
+// Enhanced helper function for UI to check authentication state
 const getCurrentAuthState = () => {
   // First check Firebase auth (if available online)
   const firebaseUser = auth.currentUser;
   
   if (firebaseUser) {
+    const cached = getCachedUserSession();
     return {
-      user: firebaseUser,
+      user: {
+        ...firebaseUser,
+        accountType: cached?.accountType || 'student',
+        deviceId: getCurrentDeviceId()
+      },
       isOnline: true,
       source: 'firebase'
     };
@@ -276,6 +508,23 @@ const getCurrentAuthState = () => {
   };
 };
 
+// Check if user should be auto-logged in
+const shouldAutoLogin = () => {
+  const cachedUser = getCachedUserSession();
+  if (!cachedUser) return false;
+  
+  // Check all conditions
+  const conditions = [
+    cachedUser.isLoggedIn === true,
+    cachedUser.uid,
+    cachedUser.deviceId === getCurrentDeviceId(),
+    cachedUser.expiresAt > Date.now(),
+    localStorage.getItem(LOGGED_OUT_FLAG_KEY) !== 'true'
+  ];
+  
+  return conditions.every(condition => condition);
+};
+
 // Initialize all Firebase services with persistence
 const initializeAllServices = async () => {
   try {
@@ -291,7 +540,7 @@ const initializeAllServices = async () => {
     // Start monitoring auth state in background
     monitorAuthState();
     
-    console.log("Firebase services initialized with offline support");
+    console.log("Firebase services initialized with device-based offline support");
     
     return { 
       app, 
@@ -300,8 +549,17 @@ const initializeAllServices = async () => {
       storage, 
       realtimeDb,
       getCurrentAuthState,
+      getSavedUsers,
       cacheUserSession,
-      getCachedUserSession
+      getCachedUserSession,
+      storeUserCredentials,
+      clearUserCredentials,
+      clearAllUserData,
+      markUserAsLoggedOut,
+      shouldAutoLogin,
+      getCurrentDeviceId,
+      createUserInFirestore,
+      removeSavedUser
     };
   } catch (error) {
     console.error("Error initializing Firebase services:", error);
@@ -314,13 +572,22 @@ const initializeAllServices = async () => {
       storage, 
       realtimeDb,
       getCurrentAuthState,
+      getSavedUsers,
       cacheUserSession,
-      getCachedUserSession
+      getCachedUserSession,
+      storeUserCredentials,
+      clearUserCredentials,
+      clearAllUserData,
+      markUserAsLoggedOut,
+      shouldAutoLogin,
+      getCurrentDeviceId,
+      createUserInFirestore,
+      removeSavedUser
     };
   }
 };
 
-// Initialize services (non-blocking - doesn't wait for completion)
+// Initialize services (non-blocking)
 const firebaseInitialized = initializeAllServices().catch(error => {
   console.error("Failed to initialize Firebase:", error);
   // Return services anyway for offline operation
@@ -331,8 +598,17 @@ const firebaseInitialized = initializeAllServices().catch(error => {
     storage, 
     realtimeDb,
     getCurrentAuthState,
+    getSavedUsers,
     cacheUserSession,
-    getCachedUserSession
+    getCachedUserSession,
+    storeUserCredentials,
+    clearUserCredentials,
+    clearAllUserData,
+    markUserAsLoggedOut,
+    shouldAutoLogin,
+    getCurrentDeviceId,
+    createUserInFirestore,
+    removeSavedUser
   };
 });
 
@@ -346,9 +622,20 @@ export {
   firebaseInitialized,
   storeUserCredentials,
   clearUserCredentials,
+  clearAllUserData,
+  markUserAsLoggedOut,
   getCurrentAuthState,
+  getSavedUsers,
   cacheUserSession,
-  getCachedUserSession
+  getCachedUserSession,
+  shouldAutoLogin,
+  getCurrentDeviceId,
+  createUserInFirestore,
+  removeSavedUser,
+  getOrCreateDeviceId,
+  createUserWithEmailAndPassword,
+  signInWithEmailAndPassword,
+  signOut
 };
 
 // Export default app
