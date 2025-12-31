@@ -3,6 +3,7 @@
 // COMPLETE VERSION WITH USER ISOLATION AND REAL AUTHENTICATION
 // UPDATED: Real authentication with device-based login, no demo data
 // ENHANCED: Non-blocking startup with instant UI display and background sync
+// OFFLINE-FIRST: Load instantly from cache, sync in background
 
 // ============================================================================
 // CONFIGURATION

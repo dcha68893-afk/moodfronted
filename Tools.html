@@ -1789,9 +1789,80 @@
             transform: translateY(-2px);
             box-shadow: var(--shadow-lg);
         }
+        
+        /* Syncing Indicator */
+        .syncing-indicator {
+            position: fixed;
+            top: 10px;
+            right: 10px;
+            background-color: var(--info-color);
+            color: white;
+            padding: 6px 12px;
+            border-radius: 20px;
+            font-size: 12px;
+            font-weight: 500;
+            z-index: 10000;
+            display: flex;
+            align-items: center;
+            gap: 6px;
+            box-shadow: var(--shadow);
+            display: none;
+        }
+        
+        .syncing-indicator.active {
+            display: flex;
+        }
+        
+        .syncing-dot {
+            width: 8px;
+            height: 8px;
+            background-color: white;
+            border-radius: 50%;
+            animation: pulse 1.5s infinite;
+        }
+        
+        @keyframes pulse {
+            0% { opacity: 0.4; }
+            50% { opacity: 1; }
+            100% { opacity: 0.4; }
+        }
+        
+        /* Quick Load State */
+        .quick-load-overlay {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background-color: var(--bg-color);
+            z-index: 9998;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            transition: opacity 0.3s ease;
+        }
+        
+        .quick-load-overlay.fade-out {
+            opacity: 0;
+            pointer-events: none;
+        }
+        
+        .quick-load-text {
+            margin-top: 20px;
+            color: var(--text-secondary);
+            font-size: 14px;
+        }
     </style>
 </head>
 <body>
+    <!-- Quick Load Overlay -->
+    <div class="quick-load-overlay" id="quickLoadOverlay">
+        <i class="fas fa-tools" style="font-size: 48px; color: var(--primary-color); margin-bottom: 15px;"></i>
+        <div class="loading-spinner" style="width: 40px; height: 40px;"></div>
+        <div class="quick-load-text">Loading cached tools...</div>
+    </div>
+    
     <!-- Offline Overlay - Full screen but dismissible -->
     <div class="offline-overlay" id="offlineOverlay">
         <div class="offline-icon">
@@ -1811,6 +1882,12 @@
     <div class="offline-indicator" id="offlineIndicator">
         <i class="fas fa-wifi-slash"></i>
         <span>Offline</span>
+    </div>
+    
+    <!-- Syncing Indicator -->
+    <div class="syncing-indicator" id="syncingIndicator">
+        <div class="syncing-dot"></div>
+        <span>Syncing...</span>
     </div>
     
     <!-- Local Storage Indicator -->
@@ -2334,6 +2411,8 @@
         let isLoadedFromLocalStorage = false;
         let isMobile = window.innerWidth <= 768;
         let offlineOverlayDismissed = false;
+        let backgroundSyncInProgress = false;
+        let lastSyncTime = 0;
         
         // Tool categories with colors and icons
         const toolCategories = {
@@ -2755,6 +2834,8 @@
         const offlineIndicator = document.getElementById('offlineIndicator');
         const localStorageIndicator = document.getElementById('localStorageIndicator');
         const cacheIndicator = document.getElementById('cacheIndicator');
+        const syncingIndicator = document.getElementById('syncingIndicator');
+        const quickLoadOverlay = document.getElementById('quickLoadOverlay');
         const sidebar = document.getElementById('sidebar');
         const dismissOfflineBtn = document.getElementById('dismissOfflineBtn');
         const mainContent = document.getElementById('mainContent');
@@ -2796,7 +2877,8 @@
             LAST_SYNC: 'knecta_tools_last_sync',
             PENDING_ACTIONS: 'knecta_pending_actions',
             OFFLINE_OVERLAY_DISMISSED: 'knecta_offline_overlay_dismissed_tools',
-            DASHBOARD_STATS: 'knecta_dashboard_stats'
+            DASHBOARD_STATS: 'knecta_dashboard_stats',
+            APP_USER: 'knecta_app_user' // From index.html app.js
         };
         
         // Initialize the application
@@ -2805,211 +2887,114 @@
         });
         
         async function initializeApp() {
-            // Initialize offline detection
+            // Show quick load overlay
+            showQuickLoadOverlay();
+            
+            // STEP 1: Load cached data INSTANTLY (doesn't wait for anything)
+            await loadCachedDataInstantly();
+            
+            // STEP 2: Hide quick load overlay after showing cached data
+            hideQuickLoadOverlay();
+            
+            // STEP 3: Initialize offline detection
             initializeOfflineDetection();
             
-            // Check if mobile
+            // STEP 4: Check if mobile
             checkMobile();
             window.addEventListener('resize', checkMobile);
             
-            // Load user from cache first (offline-first)
-            await loadUserFromCache();
-            
-            // Then try to load from Firebase
-            await tryLoadUserFromFirebase();
-            
-            // Load all data from cache immediately
-            await loadAllDataFromCache();
-            
+            // STEP 5: Setup event listeners
             setupEventListeners();
             
-            // Setup real-time listeners if online
-            if (isOnline && firebaseInitialized) {
-                setupRealtimeListeners();
-            }
-            
-            // Initialize dashboard charts
+            // STEP 6: Initialize dashboard charts
             initializeCharts();
             
-            // Show notification
-            showNotification('Business tools system ready', 'success');
+            // STEP 7: Start background sync if online (doesn't block UI)
+            startBackgroundSync();
             
-            // Try to sync with server in background
-            if (isOnline && firebaseInitialized) {
-                trySyncWithServer();
-            }
-            
-            // Process any pending offline actions
+            // STEP 8: Process any pending offline actions in background
             processPendingOfflineActions();
             
-            // Check offline overlay dismissal status
+            // STEP 9: Check offline overlay dismissal status
             checkOfflineOverlayDismissed();
             
             console.log('Business tools system initialized successfully. Online:', isOnline);
+            showNotification('Business tools system ready', 'success');
         }
         
-        // Load user from cache first
-        async function loadUserFromCache() {
-            try {
-                // Try to get user from localStorage first
-                const cachedUser = localStorage.getItem(LOCAL_STORAGE_KEYS.USER);
-                if (cachedUser) {
-                    currentUser = JSON.parse(cachedUser);
-                    console.log('Loaded user from cache:', currentUser.uid);
-                }
-                
-                // Try to get user data from app.js
-                if (window.appState && window.appState.currentUser) {
-                    currentUser = window.appState.currentUser;
-                    console.log('User detected from app.js:', currentUser.uid);
-                }
-                
-                // Load user data from cache
-                const cachedUserData = localStorage.getItem(LOCAL_STORAGE_KEYS.USER_DATA);
-                if (cachedUserData) {
-                    userData = JSON.parse(cachedUserData);
-                }
-                
-                // Load user plan from cache
-                const cachedPlan = localStorage.getItem(LOCAL_STORAGE_KEYS.USER_PLAN);
-                if (cachedPlan) {
-                    userPlan = cachedPlan;
-                }
-                
-                // Load user credits from cache
-                const cachedCredits = localStorage.getItem(LOCAL_STORAGE_KEYS.USER_CREDITS);
-                if (cachedCredits) {
-                    userCredits = parseInt(cachedCredits) || 0;
-                }
-                
-                // If no user found, create a minimal user object
-                if (!currentUser) {
-                    currentUser = {
-                        uid: 'local_user_' + Date.now(),
-                        displayName: 'Local User',
-                        email: '',
-                        photoURL: ''
-                    };
-                    console.log('Created minimal user object for offline use');
-                }
-                
-                // Update UI with cached user data
-                updateUserUI();
-                
-            } catch (error) {
-                console.error('Error loading user from cache:', error);
-                // Create a fallback user
+        // Load cached data instantly without waiting for network
+        async function loadCachedDataInstantly() {
+            console.log('Loading cached data instantly...');
+            
+            // Load user from multiple sources (cache, app.js, localStorage)
+            await loadUserFromAllSources();
+            
+            // Load tools from cache immediately
+            await loadToolsFromCache();
+            
+            // Load transactions from cache immediately
+            await loadTransactionsFromCache();
+            
+            // Load affiliate data from cache immediately
+            await loadAffiliateDataFromCache();
+            
+            // Load dashboard stats from cache immediately
+            await loadDashboardStatsFromCache();
+            
+            // Render UI with cached data immediately
+            renderCachedUI();
+            
+            console.log('Cached data loaded and UI rendered instantly');
+        }
+        
+        // Load user from all possible sources
+        async function loadUserFromAllSources() {
+            // Try to get user from app.js first (if coming from index.html)
+            if (window.appState && window.appState.currentUser) {
+                currentUser = window.appState.currentUser;
+                console.log('User detected from app.js:', currentUser.uid);
+            } 
+            // Try localStorage from app
+            else if (localStorage.getItem(LOCAL_STORAGE_KEYS.APP_USER)) {
+                currentUser = JSON.parse(localStorage.getItem(LOCAL_STORAGE_KEYS.APP_USER));
+                console.log('User loaded from app localStorage:', currentUser.uid);
+            }
+            // Try tools-specific cache
+            else if (localStorage.getItem(LOCAL_STORAGE_KEYS.USER)) {
+                currentUser = JSON.parse(localStorage.getItem(LOCAL_STORAGE_KEYS.USER));
+                console.log('User loaded from tools cache:', currentUser.uid);
+            }
+            // Create minimal user for offline use
+            else {
                 currentUser = {
-                    uid: 'fallback_user_' + Date.now(),
-                    displayName: 'User',
+                    uid: 'local_user_' + Date.now(),
+                    displayName: 'Local User',
                     email: '',
                     photoURL: ''
                 };
-                userPlan = 'free';
-                userCredits = 100;
-                updateUserUI();
+                console.log('Created minimal user object for offline use');
             }
-        }
-        
-        // Try to load user from Firebase
-        async function tryLoadUserFromFirebase() {
-            if (!isOnline || !firebaseInitialized) return;
             
-            try {
-                // Try Firebase auth first
-                if (auth) {
-                    await new Promise((resolve, reject) => {
-                        const unsubscribe = auth.onAuthStateChanged(user => {
-                            unsubscribe();
-                            if (user) {
-                                currentUser = user;
-                                console.log('User detected from Firebase:', currentUser.uid);
-                                
-                                // Save to cache
-                                localStorage.setItem(LOCAL_STORAGE_KEYS.USER, JSON.stringify({
-                                    uid: user.uid,
-                                    displayName: user.displayName,
-                                    email: user.email,
-                                    photoURL: user.photoURL
-                                }));
-                                
-                                resolve(user);
-                            } else {
-                                reject(new Error('No Firebase user'));
-                            }
-                        }, reject);
-                    });
-                    
-                    // Load user data from Firebase
-                    await loadUserDataFromFirebase();
-                }
-            } catch (error) {
-                console.log('Could not load user from Firebase, using cached data:', error.message);
-                // Continue with cached user
+            // Load user data from cache
+            const cachedUserData = localStorage.getItem(LOCAL_STORAGE_KEYS.USER_DATA);
+            if (cachedUserData) {
+                userData = JSON.parse(cachedUserData);
             }
-        }
-        
-        // Load user data from Firebase
-        async function loadUserDataFromFirebase() {
-            if (!isOnline || !firebaseInitialized || !currentUser) return;
             
-            try {
-                const userRef = db.collection('users').doc(currentUser.uid);
-                const userDoc = await userRef.get();
-                
-                if (userDoc.exists) {
-                    userData = userDoc.data();
-                    
-                    // Load tools-specific user data
-                    const toolsRef = db.collection('toolsUsers').doc(currentUser.uid);
-                    const toolsDoc = await toolsRef.get();
-                    
-                    if (toolsDoc.exists) {
-                        const toolsData = toolsDoc.data();
-                        userPlan = toolsData.plan || 'free';
-                        userCredits = toolsData.credits || 0;
-                        
-                        // Save to cache
-                        localStorage.setItem(LOCAL_STORAGE_KEYS.USER_DATA, JSON.stringify(userData));
-                        localStorage.setItem(LOCAL_STORAGE_KEYS.USER_PLAN, userPlan);
-                        localStorage.setItem(LOCAL_STORAGE_KEYS.USER_CREDITS, userCredits.toString());
-                        
-                        // Update UI
-                        updateUserUI();
-                    }
-                }
-                
-            } catch (error) {
-                console.error('Error loading user data from Firebase:', error);
+            // Load user plan from cache
+            const cachedPlan = localStorage.getItem(LOCAL_STORAGE_KEYS.USER_PLAN);
+            if (cachedPlan) {
+                userPlan = cachedPlan;
             }
-        }
-        
-        // Load all data from cache
-        async function loadAllDataFromCache() {
-            try {
-                // Load tools from cache
-                await loadToolsFromCache();
-                
-                // Load transactions from cache
-                await loadTransactionsFromCache();
-                
-                // Load affiliate data from cache
-                await loadAffiliateDataFromCache();
-                
-                // Load dashboard stats from cache
-                await loadDashboardStatsFromCache();
-                
-                // Render all data
-                renderToolsGrid();
-                renderTransactionList();
-                updateAffiliateUI();
-                updateDashboardUI();
-                
-            } catch (error) {
-                console.error('Error loading data from cache:', error);
-                // Initialize with sample data if cache is empty
-                initializeSampleData();
+            
+            // Load user credits from cache
+            const cachedCredits = localStorage.getItem(LOCAL_STORAGE_KEYS.USER_CREDITS);
+            if (cachedCredits) {
+                userCredits = parseInt(cachedCredits) || 0;
             }
+            
+            // Update UI with cached user data
+            updateUserUI();
         }
         
         // Load tools from cache
@@ -3098,193 +3083,159 @@
             }
         }
         
-        // Initialize sample data if cache is empty
-        function initializeSampleData() {
-            tools = JSON.parse(JSON.stringify(toolsData));
-            generateSampleTransactions();
-            affiliateData = {
-                earnings: 0,
-                referrals: 0,
-                commissionRate: 0.3,
-                pendingPayout: 0,
-                referralCode: generateReferralCode(),
-                referralLink: `https://knecta.chat/ref/${generateReferralCode()}`
-            };
+        // Render UI with cached data
+        function renderCachedUI() {
+            // Render tools grid
+            renderToolsGrid();
             
-            // Save to cache
-            saveAllDataToCache();
+            // Render transaction list
+            renderTransactionList();
             
-            console.log('Initialized with sample data');
+            // Update affiliate UI
+            updateAffiliateUI();
+            
+            // Update dashboard UI
+            updateDashboardUI();
+            
+            // Update user UI
+            updateUserUI();
+            
+            // Show local storage indicator if loaded from cache
+            if (isLoadedFromLocalStorage) {
+                localStorageIndicator.classList.add('active');
+                setTimeout(() => {
+                    localStorageIndicator.classList.remove('active');
+                }, 3000);
+            }
         }
         
-        // Generate sample transactions
-        function generateSampleTransactions() {
-            const now = new Date();
-            transactions = [
-                {
-                    id: '1',
-                    type: 'credit_purchase',
-                    amount: 45,
-                    description: 'Purchased 500 credits',
-                    date: new Date(now.getTime() - 2 * 24 * 60 * 60 * 1000), // 2 days ago
-                    status: 'completed'
-                },
-                {
-                    id: '2',
-                    type: 'tool_usage',
-                    amount: -10,
-                    description: 'AI Content Generator usage',
-                    date: new Date(now.getTime() - 1 * 24 * 60 * 60 * 1000), // 1 day ago
-                    status: 'completed'
-                },
-                {
-                    id: '3',
-                    type: 'affiliate_earning',
-                    amount: 25,
-                    description: 'Affiliate commission',
-                    date: new Date(now.getTime() - 3 * 24 * 60 * 60 * 1000), // 3 days ago
-                    status: 'completed'
-                },
-                {
-                    id: '4',
-                    type: 'subscription',
-                    amount: -19,
-                    description: 'Basic plan renewal',
-                    date: new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000), // 7 days ago
-                    status: 'completed'
-                },
-                {
-                    id: '5',
-                    type: 'marketplace',
-                    amount: -29,
-                    description: 'Zapier Plugin purchase',
-                    date: new Date(now.getTime() - 10 * 24 * 60 * 60 * 1000), // 10 days ago
-                    status: 'completed'
+        // Show quick load overlay
+        function showQuickLoadOverlay() {
+            quickLoadOverlay.style.display = 'flex';
+        }
+        
+        // Hide quick load overlay
+        function hideQuickLoadOverlay() {
+            setTimeout(() => {
+                quickLoadOverlay.classList.add('fade-out');
+                setTimeout(() => {
+                    quickLoadOverlay.style.display = 'none';
+                }, 300);
+            }, 500); // Show for at least 500ms for smooth experience
+        }
+        
+        // Start background sync
+        function startBackgroundSync() {
+            // Don't block UI, run in background
+            setTimeout(async () => {
+                if (isOnline && firebaseInitialized) {
+                    console.log('Starting background sync...');
+                    syncingIndicator.classList.add('active');
+                    backgroundSyncInProgress = true;
+                    
+                    try {
+                        // Try to load user from Firebase in background
+                        await tryLoadUserFromFirebase();
+                        
+                        // Try to sync with server in background
+                        await trySyncWithServer();
+                        
+                        // Load fresh data from Firebase
+                        await loadDataFromFirebase();
+                        
+                        // Update UI with fresh data
+                        updateUIWithFreshData();
+                        
+                        console.log('Background sync completed successfully');
+                        
+                    } catch (error) {
+                        console.error('Background sync error:', error);
+                        // Don't show error to user, just keep cached data
+                    } finally {
+                        syncingIndicator.classList.remove('active');
+                        backgroundSyncInProgress = false;
+                        lastSyncTime = Date.now();
+                    }
+                } else {
+                    console.log('Skipping background sync (offline or no Firebase)');
                 }
-            ];
+            }, 1000); // Start after 1 second to ensure UI is already rendered
+        }
+        
+        // Try to load user from Firebase
+        async function tryLoadUserFromFirebase() {
+            if (!isOnline || !firebaseInitialized) return;
             
-            saveTransactionsToCache();
-        }
-        
-        // Generate a referral code
-        function generateReferralCode() {
-            const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789';
-            let code = '';
-            for (let i = 0; i < 8; i++) {
-                code += chars.charAt(Math.floor(Math.random() * chars.length));
-            }
-            return code;
-        }
-        
-        // Save all data to cache
-        function saveAllDataToCache() {
             try {
-                localStorage.setItem(LOCAL_STORAGE_KEYS.TOOLS, JSON.stringify(tools));
-                localStorage.setItem(LOCAL_STORAGE_KEYS.TRANSACTIONS, JSON.stringify(transactions));
-                localStorage.setItem(LOCAL_STORAGE_KEYS.AFFILIATE_DATA, JSON.stringify(affiliateData));
-                localStorage.setItem(LOCAL_STORAGE_KEYS.USER_PLAN, userPlan);
-                localStorage.setItem(LOCAL_STORAGE_KEYS.USER_CREDITS, userCredits.toString());
-                console.log('All data saved to cache');
+                // Try Firebase auth first
+                if (auth) {
+                    await new Promise((resolve, reject) => {
+                        const unsubscribe = auth.onAuthStateChanged(user => {
+                            unsubscribe();
+                            if (user) {
+                                currentUser = user;
+                                console.log('User detected from Firebase:', currentUser.uid);
+                                
+                                // Save to cache
+                                localStorage.setItem(LOCAL_STORAGE_KEYS.USER, JSON.stringify({
+                                    uid: user.uid,
+                                    displayName: user.displayName,
+                                    email: user.email,
+                                    photoURL: user.photoURL
+                                }));
+                                
+                                resolve(user);
+                            } else {
+                                reject(new Error('No Firebase user'));
+                            }
+                        }, reject);
+                    });
+                    
+                    // Load user data from Firebase
+                    await loadUserDataFromFirebase();
+                }
             } catch (error) {
-                console.error('Error saving data to cache:', error);
+                console.log('Could not load user from Firebase, using cached data:', error.message);
+                // Continue with cached user
             }
         }
         
-        // Save tools to cache
-        function saveToolsToCache() {
+        // Load user data from Firebase
+        async function loadUserDataFromFirebase() {
+            if (!isOnline || !firebaseInitialized || !currentUser) return;
+            
             try {
-                localStorage.setItem(LOCAL_STORAGE_KEYS.TOOLS, JSON.stringify(tools));
+                const userRef = db.collection('users').doc(currentUser.uid);
+                const userDoc = await userRef.get();
+                
+                if (userDoc.exists) {
+                    userData = userDoc.data();
+                    
+                    // Load tools-specific user data
+                    const toolsRef = db.collection('toolsUsers').doc(currentUser.uid);
+                    const toolsDoc = await toolsRef.get();
+                    
+                    if (toolsDoc.exists) {
+                        const toolsData = toolsDoc.data();
+                        userPlan = toolsData.plan || 'free';
+                        userCredits = toolsData.credits || 0;
+                        
+                        // Save to cache
+                        localStorage.setItem(LOCAL_STORAGE_KEYS.USER_DATA, JSON.stringify(userData));
+                        localStorage.setItem(LOCAL_STORAGE_KEYS.USER_PLAN, userPlan);
+                        localStorage.setItem(LOCAL_STORAGE_KEYS.USER_CREDITS, userCredits.toString());
+                        
+                        // Update UI
+                        updateUserUI();
+                    }
+                }
+                
             } catch (error) {
-                console.error('Error saving tools to cache:', error);
+                console.error('Error loading user data from Firebase:', error);
             }
         }
         
-        // Save transactions to cache
-        function saveTransactionsToCache() {
-            try {
-                localStorage.setItem(LOCAL_STORAGE_KEYS.TRANSACTIONS, JSON.stringify(transactions));
-            } catch (error) {
-                console.error('Error saving transactions to cache:', error);
-            }
-        }
-        
-        // Save affiliate data to cache
-        function saveAffiliateDataToCache() {
-            try {
-                localStorage.setItem(LOCAL_STORAGE_KEYS.AFFILIATE_DATA, JSON.stringify(affiliateData));
-            } catch (error) {
-                console.error('Error saving affiliate data to cache:', error);
-            }
-        }
-        
-        // Save dashboard stats to cache
-        function saveDashboardStatsToCache(stats) {
-            try {
-                localStorage.setItem(LOCAL_STORAGE_KEYS.DASHBOARD_STATS, JSON.stringify(stats));
-            } catch (error) {
-                console.error('Error saving dashboard stats to cache:', error);
-            }
-        }
-        
-        function checkMobile() {
-            isMobile = window.innerWidth <= 768;
-            if (isMobile) {
-                document.body.classList.add('mobile');
-                // Sidebar is always visible on mobile now
-                sidebar.classList.add('active');
-            } else {
-                document.body.classList.remove('mobile');
-                // Sidebar is always active on desktop
-                sidebar.classList.add('active');
-            }
-        }
-        
-        function initializeOfflineDetection() {
-            // Check initial online status
-            updateOnlineStatus();
-            
-            // Listen for online/offline events
-            window.addEventListener('online', handleOnline);
-            window.addEventListener('offline', handleOffline);
-            
-            // Start periodic connectivity check
-            offlineCheckInterval = setInterval(checkConnectivity, 30000);
-            
-            // Initial UI update
-            updateUIForConnectivity();
-        }
-        
-        function updateOnlineStatus() {
-            isOnline = navigator.onLine;
-            console.log('Network status:', isOnline ? 'Online' : 'Offline');
-        }
-        
-        function handleOnline() {
-            console.log('App is now online');
-            isOnline = true;
-            updateUIForConnectivity();
-            
-            // Sync data from server in background
-            trySyncWithServer();
-            
-            // Send any pending offline actions
-            processPendingOfflineActions();
-            
-            // Hide local storage indicator and cache indicator
-            localStorageIndicator.classList.remove('active');
-            cacheIndicator.style.display = 'none';
-            isLoadedFromLocalStorage = false;
-            
-            // Hide offline overlay
-            offlineOverlay.classList.remove('active');
-            
-            // Show notification
-            showNotification('You are back online. Syncing tools data...', 'success');
-            
-            // Update UI to enable online features
-            enableOnlineFeatures();
-        }
-        
+        // Try to sync with server
         async function trySyncWithServer() {
             if (!isOnline || !firebaseInitialized) return;
             
@@ -3403,12 +3354,120 @@
             }
         }
         
+        async function loadDataFromFirebase() {
+            if (!isOnline || !firebaseInitialized) return;
+            
+            try {
+                await Promise.all([
+                    loadToolsUsageFromFirebase(),
+                    loadTransactionsFromFirebase(),
+                    loadAffiliateDataFromFirebase()
+                ]);
+                
+            } catch (error) {
+                console.error('Error loading data from Firebase:', error);
+            }
+        }
+        
+        async function loadToolsUsageFromFirebase() {
+            if (!isOnline || !firebaseInitialized || !currentUser) return;
+            
+            try {
+                const usageSnapshot = await db.collection('toolUsage')
+                    .where('userId', '==', currentUser.uid)
+                    .get();
+                
+                if (!usageSnapshot.empty) {
+                    usageSnapshot.forEach(doc => {
+                        const usageData = doc.data();
+                        const toolIndex = tools.findIndex(t => t.id === usageData.toolId);
+                        if (toolIndex !== -1) {
+                            tools[toolIndex].usageCount = usageData.usageCount || 0;
+                        }
+                    });
+                    
+                    saveToolsToCache();
+                }
+                
+            } catch (error) {
+                console.error('Error loading tools usage:', error);
+            }
+        }
+        
+        async function loadTransactionsFromFirebase() {
+            if (!isOnline || !firebaseInitialized || !currentUser) return;
+            
+            try {
+                const transactionsSnapshot = await db.collection('transactions')
+                    .where('userId', '==', currentUser.uid)
+                    .orderBy('date', 'desc')
+                    .limit(50)
+                    .get();
+                
+                if (!transactionsSnapshot.empty) {
+                    const newTransactions = [];
+                    transactionsSnapshot.forEach(doc => {
+                        const transactionData = doc.data();
+                        // Remove Firebase-specific fields
+                        const { userId, syncedAt, ...transaction } = transactionData;
+                        newTransactions.push(transaction);
+                    });
+                    
+                    transactions = newTransactions;
+                    saveTransactionsToCache();
+                }
+                
+            } catch (error) {
+                console.error('Error loading transactions:', error);
+            }
+        }
+        
+        async function loadAffiliateDataFromFirebase() {
+            if (!isOnline || !firebaseInitialized || !currentUser) return;
+            
+            try {
+                const affiliateDoc = await db.collection('affiliates').doc(currentUser.uid).get();
+                
+                if (affiliateDoc.exists) {
+                    affiliateData = affiliateDoc.data();
+                    saveAffiliateDataToCache();
+                }
+                
+            } catch (error) {
+                console.error('Error loading affiliate data:', error);
+            }
+        }
+        
+        // Update UI with fresh data from Firebase
+        function updateUIWithFreshData() {
+            // Only update if data has actually changed
+            if (isOnline && firebaseInitialized) {
+                // Re-render tools grid with updated usage counts
+                const activeCategory = document.querySelector('.category-btn.active');
+                if (activeCategory) {
+                    renderToolsGrid(activeCategory.dataset.category);
+                }
+                
+                // Re-render transaction list
+                renderTransactionList();
+                
+                // Update affiliate UI
+                updateAffiliateUI();
+                
+                // Update user UI
+                updateUserUI();
+                
+                // Show subtle notification
+                showNotification('Tools data updated', 'info');
+            }
+        }
+        
         async function processPendingOfflineActions() {
             try {
                 const pendingActions = JSON.parse(localStorage.getItem(LOCAL_STORAGE_KEYS.PENDING_ACTIONS) || '[]');
                 
                 if (pendingActions.length > 0 && isOnline && firebaseInitialized) {
-                    showNotification(`Processing ${pendingActions.length} pending actions...`, 'info');
+                    console.log(`Processing ${pendingActions.length} pending actions...`);
                     
                     // Process each pending action
                     for (const action of pendingActions) {
@@ -3440,6 +3499,63 @@
             }
         }
         
+        function checkMobile() {
+            isMobile = window.innerWidth <= 768;
+            if (isMobile) {
+                document.body.classList.add('mobile');
+                // Sidebar is always visible on mobile now
+                sidebar.classList.add('active');
+            } else {
+                document.body.classList.remove('mobile');
+                // Sidebar is always active on desktop
+                sidebar.classList.add('active');
+            }
+        }
+        
+        function initializeOfflineDetection() {
+            // Check initial online status
+            updateOnlineStatus();
+            
+            // Listen for online/offline events
+            window.addEventListener('online', handleOnline);
+            window.addEventListener('offline', handleOffline);
+            
+            // Start periodic connectivity check
+            offlineCheckInterval = setInterval(checkConnectivity, 30000);
+            
+            // Initial UI update
+            updateUIForConnectivity();
+        }
+        
+        function updateOnlineStatus() {
+            isOnline = navigator.onLine;
+            console.log('Network status:', isOnline ? 'Online' : 'Offline');
+        }
+        
+        function handleOnline() {
+            console.log('App is now online');
+            isOnline = true;
+            updateUIForConnectivity();
+            
+            // Hide offline overlay and indicator
+            offlineOverlay.classList.remove('active');
+            offlineIndicator.classList.remove('active');
+            cacheIndicator.style.display = 'none';
+            
+            // Hide local storage indicator
+            localStorageIndicator.classList.remove('active');
+            isLoadedFromLocalStorage = false;
+            
+            // Start background sync
+            startBackgroundSync();
+            
+            // Show subtle notification
+            showNotification('Back online. Syncing in background...', 'info');
+            
+            // Update UI to enable online features
+            enableOnlineFeatures();
+        }
+        
         function handleOffline() {
             console.log('App is now offline');
             isOnline = false;
@@ -3461,11 +3577,11 @@
                 localStorageIndicator.classList.add('active');
                 setTimeout(() => {
                     localStorageIndicator.classList.remove('active');
-                }, 5000);
+                }, 3000);
             }
             
-            // Show notification
-            showNotification('You are offline. Tools loaded from local storage.', 'warning');
+            // Show subtle notification
+            showNotification('Offline. Using cached tools.', 'warning');
         }
         
         function checkOfflineOverlay() {
@@ -3603,9 +3719,9 @@
             // Re-enable all features that require internet
             updateButtonStatesForOnline();
             
-            // Refresh data from server
-            if (firebaseInitialized) {
-                loadDataFromFirebase();
+            // Setup real-time listeners if online
+            if (isOnline && firebaseInitialized) {
+                setupRealtimeListeners();
             }
         }
         
@@ -3614,6 +3730,7 @@
             const titles = document.querySelectorAll('.main-header h1, .sidebar-header h2');
             titles.forEach(title => {
                 if (!title.textContent.includes('(Cached)')) {
+                    title.setAttribute('data-original-text', title.textContent);
                     title.textContent = title.textContent + ' (Cached)';
                 }
             });
@@ -3623,7 +3740,9 @@
             // Remove cached labels
             const titles = document.querySelectorAll('.main-header h1, .sidebar-header h2');
             titles.forEach(title => {
-                title.textContent = title.textContent.replace(' (Cached)', '');
+                const originalText = title.getAttribute('data-original-text') || title.textContent.replace(' (Cached)', '');
+                title.textContent = originalText;
+                title.removeAttribute('data-original-text');
             });
         }
         
@@ -3651,98 +3770,6 @@
                     }
                 }
             });
-        }
-        
-        async function loadDataFromFirebase() {
-            if (!isOnline || !firebaseInitialized) return;
-            
-            try {
-                await Promise.all([
-                    loadUserDataFromFirebase(),
-                    loadToolsUsageFromFirebase(),
-                    loadTransactionsFromFirebase(),
-                    loadAffiliateDataFromFirebase()
-                ]);
-                
-                // Update UI
-                updateUserUI();
-                renderToolsGrid();
-                renderTransactionList();
-                updateAffiliateUI();
-                updateDashboardUI();
-                
-            } catch (error) {
-                console.error('Error loading data from Firebase:', error);
-            }
-        }
-        
-        async function loadToolsUsageFromFirebase() {
-            if (!isOnline || !firebaseInitialized || !currentUser) return;
-            
-            try {
-                const usageSnapshot = await db.collection('toolUsage')
-                    .where('userId', '==', currentUser.uid)
-                    .get();
-                
-                if (!usageSnapshot.empty) {
-                    usageSnapshot.forEach(doc => {
-                        const usageData = doc.data();
-                        const toolIndex = tools.findIndex(t => t.id === usageData.toolId);
-                        if (toolIndex !== -1) {
-                            tools[toolIndex].usageCount = usageData.usageCount || 0;
-                        }
-                    });
-                    
-                    saveToolsToCache();
-                }
-                
-            } catch (error) {
-                console.error('Error loading tools usage:', error);
-            }
-        }
-        
-        async function loadTransactionsFromFirebase() {
-            if (!isOnline || !firebaseInitialized || !currentUser) return;
-            
-            try {
-                const transactionsSnapshot = await db.collection('transactions')
-                    .where('userId', '==', currentUser.uid)
-                    .orderBy('date', 'desc')
-                    .limit(50)
-                    .get();
-                
-                if (!transactionsSnapshot.empty) {
-                    const newTransactions = [];
-                    transactionsSnapshot.forEach(doc => {
-                        const transactionData = doc.data();
-                        // Remove Firebase-specific fields
-                        const { userId, syncedAt, ...transaction } = transactionData;
-                        newTransactions.push(transaction);
-                    });
-                    
-                    transactions = newTransactions;
-                    saveTransactionsToCache();
-                }
-                
-            } catch (error) {
-                console.error('Error loading transactions:', error);
-            }
-        }
-        
-        async function loadAffiliateDataFromFirebase() {
-            if (!isOnline || !firebaseInitialized || !currentUser) return;
-            
-            try {
-                const affiliateDoc = await db.collection('affiliates').doc(currentUser.uid).get();
-                
-                if (affiliateDoc.exists) {
-                    affiliateData = affiliateDoc.data();
-                    saveAffiliateDataToCache();
-                }
-                
-            } catch (error) {
-                console.error('Error loading affiliate data:', error);
-            }
         }
         
         // Update user UI elements
@@ -5047,6 +5074,115 @@
             calculateDashboardStats();
         }
         
+        // Generate sample transactions
+        function generateSampleTransactions() {
+            const now = new Date();
+            transactions = [
+                {
+                    id: '1',
+                    type: 'credit_purchase',
+                    amount: 45,
+                    description: 'Purchased 500 credits',
+                    date: new Date(now.getTime() - 2 * 24 * 60 * 60 * 1000), // 2 days ago
+                    status: 'completed'
+                },
+                {
+                    id: '2',
+                    type: 'tool_usage',
+                    amount: -10,
+                    description: 'AI Content Generator usage',
+                    date: new Date(now.getTime() - 1 * 24 * 60 * 60 * 1000), // 1 day ago
+                    status: 'completed'
+                },
+                {
+                    id: '3',
+                    type: 'affiliate_earning',
+                    amount: 25,
+                    description: 'Affiliate commission',
+                    date: new Date(now.getTime() - 3 * 24 * 60 * 60 * 1000), // 3 days ago
+                    status: 'completed'
+                },
+                {
+                    id: '4',
+                    type: 'subscription',
+                    amount: -19,
+                    description: 'Basic plan renewal',
+                    date: new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000), // 7 days ago
+                    status: 'completed'
+                },
+                {
+                    id: '5',
+                    type: 'marketplace',
+                    amount: -29,
+                    description: 'Zapier Plugin purchase',
+                    date: new Date(now.getTime() - 10 * 24 * 60 * 60 * 1000), // 10 days ago
+                    status: 'completed'
+                }
+            ];
+            
+            saveTransactionsToCache();
+        }
+        
+        // Generate a referral code
+        function generateReferralCode() {
+            const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789';
+            let code = '';
+            for (let i = 0; i < 8; i++) {
+                code += chars.charAt(Math.floor(Math.random() * chars.length));
+            }
+            return code;
+        }
+        
+        // Save all data to cache
+        function saveAllDataToCache() {
+            try {
+                localStorage.setItem(LOCAL_STORAGE_KEYS.TOOLS, JSON.stringify(tools));
+                localStorage.setItem(LOCAL_STORAGE_KEYS.TRANSACTIONS, JSON.stringify(transactions));
+                localStorage.setItem(LOCAL_STORAGE_KEYS.AFFILIATE_DATA, JSON.stringify(affiliateData));
+                localStorage.setItem(LOCAL_STORAGE_KEYS.USER_PLAN, userPlan);
+                localStorage.setItem(LOCAL_STORAGE_KEYS.USER_CREDITS, userCredits.toString());
+                console.log('All data saved to cache');
+            } catch (error) {
+                console.error('Error saving data to cache:', error);
+            }
+        }
+        
+        // Save tools to cache
+        function saveToolsToCache() {
+            try {
+                localStorage.setItem(LOCAL_STORAGE_KEYS.TOOLS, JSON.stringify(tools));
+            } catch (error) {
+                console.error('Error saving tools to cache:', error);
+            }
+        }
+        
+        // Save transactions to cache
+        function saveTransactionsToCache() {
+            try {
+                localStorage.setItem(LOCAL_STORAGE_KEYS.TRANSACTIONS, JSON.stringify(transactions));
+            } catch (error) {
+                console.error('Error saving transactions to cache:', error);
+            }
+        }
+        
+        // Save affiliate data to cache
+        function saveAffiliateDataToCache() {
+            try {
+                localStorage.setItem(LOCAL_STORAGE_KEYS.AFFILIATE_DATA, JSON.stringify(affiliateData));
+            } catch (error) {
+                console.error('Error saving affiliate data to cache:', error);
+            }
+        }
+        
+        // Save dashboard stats to cache
+        function saveDashboardStatsToCache(stats) {
+            try {
+                localStorage.setItem(LOCAL_STORAGE_KEYS.DASHBOARD_STATS, JSON.stringify(stats));
+            } catch (error) {
+                console.error('Error saving dashboard stats to cache:', error);
+            }
+        }
+        
         // Show notification
         function showNotification(message, type = 'success') {
             const notificationText = document.getElementById('notificationText');
@@ -5252,6 +5388,13 @@
             window.addEventListener('beforeunload', () => {
                 saveAllDataToCache();
             });
+            
+            // Periodic sync every 5 minutes if online
+            setInterval(() => {
+                if (isOnline && firebaseInitialized) {
+                    startBackgroundSync();
+                }
+            }, 5 * 60 * 1000); // 5 minutes
         }
         
         console.log('Complete offline-first business tools system initialized successfully');

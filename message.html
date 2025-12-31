@@ -70,6 +70,69 @@
             display: flex;
         }
         
+        /* SYNCING INDICATOR - NEW */
+        .syncing-indicator {
+            position: fixed;
+            top: 10px;
+            left: 50%;
+            transform: translateX(-50%);
+            background-color: #0084ff;
+            color: white;
+            padding: 8px 15px;
+            border-radius: 20px;
+            font-size: 12px;
+            z-index: 2000;
+            display: none;
+            align-items: center;
+            gap: 8px;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.2);
+        }
+        
+        .syncing-indicator.active {
+            display: flex;
+        }
+        
+        .syncing-spinner {
+            width: 12px;
+            height: 12px;
+            border: 2px solid rgba(255,255,255,0.3);
+            border-radius: 50%;
+            border-top-color: white;
+            animation: spin 1s linear infinite;
+        }
+        
+        /* CACHED BADGE - NEW */
+        .cached-badge {
+            position: absolute;
+            top: 2px;
+            left: 2px;
+            width: 16px;
+            height: 16px;
+            background-color: #ff9500;
+            color: white;
+            border-radius: 50%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 10px;
+        }
+        
+        /* PENDING MESSAGE INDICATOR */
+        .pending-indicator {
+            position: absolute;
+            top: 2px;
+            right: 2px;
+            width: 16px;
+            height: 16px;
+            background-color: #ff9500;
+            color: white;
+            border-radius: 50%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 10px;
+        }
+        
         /* Base Styles */
         * {
             margin: 0;
@@ -300,6 +363,10 @@
         
         .chat-item.unread {
             background-color: #f8f9ff;
+        }
+        
+        .chat-item.cached {
+            opacity: 0.9;
         }
         
         .chat-avatar {
@@ -1214,6 +1281,12 @@
         <span>You're offline. Messages will sync when back online.</span>
     </div>
     
+    <!-- Syncing Indicator - NEW -->
+    <div class="syncing-indicator" id="syncingIndicator">
+        <div class="syncing-spinner"></div>
+        <span>Syncing...</span>
+    </div>
+    
     <div class="app-container">
         <!-- Sidebar with chat list -->
         <div class="sidebar active" id="sidebar">
@@ -1255,7 +1328,7 @@
                     <button class="clear-all-btn" id="clearAllBtn" style="display: none;">Clear All</button>
                 </div>
                 <div id="recentChatsList">
-                    <!-- Recent chats will be loaded here -->
+                    <!-- Recent chats will be loaded here INSTANTLY -->
                 </div>
                 
                 <div class="chat-section-title" style="display: none;" id="searchResultsTitle">
@@ -1485,12 +1558,16 @@
         let recordingTime = 0;
         let recordingTimer = null;
         
-        // OFFLINE SUPPORT
+        // OFFLINE-FIRST VARIABLES - ENHANCED
         let cachedChats = [];
         let pendingMessages = [];
         let isSyncing = false;
         let backgroundSyncInterval = null;
         let realTimeListener = null;
+        let isBackgroundSyncing = false;
+        let lastSyncTime = null;
+        let syncRetryCount = 0;
+        const MAX_RETRIES = 3;
         
         // DOM Elements
         const sidebar = document.getElementById('sidebar');
@@ -1501,9 +1578,10 @@
         const notification = document.getElementById('notification');
         const offlineIndicator = document.getElementById('offlineIndicator');
         const permanentStartChatBtn = document.getElementById('permanentStartChatBtn');
+        const syncingIndicator = document.getElementById('syncingIndicator'); // NEW
         
         // ============================================
-        // CORE FUNCTIONS - Optimized for instant loading
+        // CORE FUNCTIONS - Optimized for OFFLINE-FIRST loading
         // ============================================
         
         // Initialize the application
@@ -1514,7 +1592,7 @@
                 applySettings(); // Apply settings immediately for instant theme application
             }
             
-            // Load cached data immediately - NO AUTH DEPENDENCY
+            // Load cached data IMMEDIATELY - NO AUTH DEPENDENCY
             instantLoadFromCache();
             
             // Setup event listeners
@@ -1535,11 +1613,21 @@
             setTimeout(() => {
                 checkAuthState();
             }, 100);
+            
+            // Start background sync if online
+            if (isOnline) {
+                setTimeout(() => {
+                    backgroundSync();
+                }, 2000);
+            }
         });
         
         // INSTANT LOAD FUNCTION - Shows cached data immediately without auth
         function instantLoadFromCache() {
             try {
+                // Show loading state briefly (50ms)
+                showChatListLoading(true);
+                
                 // Load cached user data WITHOUT waiting for Firebase auth
                 const cachedUserData = localStorage.getItem('currentUser');
                 if (cachedUserData) {
@@ -1547,22 +1635,25 @@
                         const user = JSON.parse(cachedUserData);
                         if (user && user.uid) {
                             currentUser = user;
-                            console.log('Using cached user data for offline rendering');
+                            console.log('Using cached user data for instant loading');
                         }
                     } catch (e) {
                         console.log('No valid cached user data');
                     }
                 }
                 
-                // Load cached chats
+                // Load cached chats INSTANTLY
                 loadCachedChats();
                 
                 // Load cached contacts
                 loadCachedContacts();
                 
-                // Update UI with cached data immediately
+                // Update UI with cached data IMMEDIATELY
                 if (cachedChats.length > 0) {
                     updateChatListWithCache();
+                    console.log(`Instantly loaded ${cachedChats.length} cached chats`);
+                } else {
+                    showEmptyChatState(document.getElementById('recentChatsList'));
                 }
                 
                 // Show cached contacts in new chat modal if available
@@ -1573,13 +1664,35 @@
                 // Load pending messages
                 loadPendingMessages();
                 
+                // Hide loading state
+                setTimeout(() => {
+                    showChatListLoading(false);
+                }, 50);
+                
                 // Check if we have any offline data to display
                 if (cachedChats.length === 0 && cachedContacts.length === 0) {
-                    console.log('No cached data found for offline rendering');
+                    console.log('No cached data found for instant loading');
                 }
                 
             } catch (error) {
                 console.error('Error in instant load:', error);
+                showChatListLoading(false);
+            }
+        }
+        
+        function showChatListLoading(show) {
+            const recentChatsList = document.getElementById('recentChatsList');
+            if (!recentChatsList) return;
+            
+            if (show) {
+                recentChatsList.innerHTML = `
+                    <div style="text-align: center; padding: 40px 20px; color: var(--text-secondary);">
+                        <div class="spinner"></div>
+                        <p style="margin-top: 10px;">Loading chats...</p>
+                    </div>
+                `;
+            } else if (cachedChats.length === 0) {
+                showEmptyChatState(recentChatsList);
             }
         }
         
@@ -1603,17 +1716,14 @@
                     // Update user online status
                     updateUserOnlineStatus(true);
                     
-                    // Load fresh data if online
+                    // Start background sync for fresh data
                     if (isOnline) {
-                        loadUserData();
-                        loadOnlineUsers();
-                        loadChats();
-                        loadContacts();
+                        backgroundSync();
                     }
                     
                 } else {
                     // User is not signed in but we might have cached data
-                    console.log('No authenticated user, using cached data if available');
+                    console.log('No authenticated user, using cached data');
                     
                     // Don't redirect if we have cached data (offline mode)
                     const cachedUserData = localStorage.getItem('currentUser');
@@ -1631,7 +1741,7 @@
         
         // Update user online status in Firestore
         async function updateUserOnlineStatus(isOnlineStatus) {
-            if (!currentUser || !currentUser.uid) return;
+            if (!currentUser || !currentUser.uid || !isOnline) return;
             
             try {
                 const userStatusRef = db.collection('users').doc(currentUser.uid);
@@ -1662,6 +1772,14 @@
                     updateUserOnlineStatus(false);
                 }
             });
+            
+            // Listen for visibility change to sync when app becomes visible
+            document.addEventListener('visibilitychange', () => {
+                if (!document.hidden && isOnline) {
+                    // App became visible and we're online, sync in background
+                    backgroundSync();
+                }
+            });
         }
         
         function handleOnlineStatusChange() {
@@ -1678,27 +1796,18 @@
                     updateUserOnlineStatus(true);
                 }
                 
-                // Process pending messages in background
-                setTimeout(() => {
-                    processPendingMessages();
-                }, 2000);
+                // Start background sync
+                backgroundSync();
                 
                 // Start real-time listener if user is authenticated
                 if (currentUser && currentUser.uid) {
                     setupRealTimeListener();
                 }
                 
-                // Load fresh data in background if authenticated
-                if (currentUser && currentUser.uid) {
-                    setTimeout(() => {
-                        loadChats();
-                        loadContacts();
-                    }, 1000);
-                }
-                
             } else if (!isOnline && wasOnline) {
                 // Just went offline
                 offlineIndicator.classList.add('active');
+                hideSyncingIndicator();
                 
                 // Update online status
                 if (currentUser && currentUser.uid) {
@@ -1710,6 +1819,20 @@
                 
                 // Show cached data
                 updateChatListWithCache();
+            }
+        }
+        
+        // NEW: Show syncing indicator
+        function showSyncingIndicator() {
+            if (syncingIndicator && isOnline) {
+                syncingIndicator.classList.add('active');
+            }
+        }
+        
+        // NEW: Hide syncing indicator
+        function hideSyncingIndicator() {
+            if (syncingIndicator) {
+                syncingIndicator.classList.remove('active');
             }
         }
         
@@ -1737,6 +1860,8 @@
                             // Ensure timestamp is a Date object
                             chat.lastMessageTimestamp = new Date(chat.lastMessageTimestamp);
                         }
+                        // Mark as cached for UI
+                        chat.isCached = true;
                     });
                     
                 } else {
@@ -1761,10 +1886,17 @@
                 
                 if (existingIndex !== -1) {
                     // Update existing cache entry
-                    cachedChats[existingIndex] = chat;
+                    cachedChats[existingIndex] = {
+                        ...cachedChats[existingIndex],
+                        ...chat,
+                        isCached: true
+                    };
                 } else {
                     // Add to cache
-                    cachedChats.unshift(chat);
+                    cachedChats.unshift({
+                        ...chat,
+                        isCached: true
+                    });
                 }
                 
                 // Keep only last 100 chats in cache
@@ -1998,7 +2130,8 @@
                     ${isGroup ? '<i class="fas fa-users"></i>' : ''}
                     ${!isGroup && onlineUsers.includes(chat.userId) ? '<div class="online-status"></div>' : ''}
                     ${!isGroup && !onlineUsers.includes(chat.userId) ? '<div class="offline-status"></div>' : ''}
-                    ${isCached ? '<div class="pending-indicator" title="Pending"><i class="fas fa-clock"></i></div>' : ''}
+                    ${isCached ? '<div class="cached-badge" title="Cached"><i class="fas fa-database"></i></div>' : ''}
+                    ${chat.isPending ? '<div class="pending-indicator" title="Pending"><i class="fas fa-clock"></i></div>' : ''}
                 </div>
                 <div class="chat-info">
                     <div class="chat-header">
@@ -2168,6 +2301,7 @@
             if (isSyncing || pendingMessages.length === 0 || !isOnline || !currentUser) return;
             
             isSyncing = true;
+            showSyncingIndicator();
             
             // Process each pending message
             for (let i = 0; i < pendingMessages.length; i++) {
@@ -2247,15 +2381,61 @@
                     
                 } catch (error) {
                     console.error(`Error uploading pending message ${pendingMessage.tempId}:`, error);
+                    syncRetryCount++;
+                    
+                    if (syncRetryCount >= MAX_RETRIES) {
+                        console.log('Max retries reached, stopping sync');
+                        break;
+                    }
                 }
             }
             
             isSyncing = false;
+            hideSyncingIndicator();
+            syncRetryCount = 0;
             
             // Reload chats in background
             setTimeout(() => {
                 loadChats();
             }, 1000);
+        }
+        
+        // NEW: Background sync function
+        async function backgroundSync() {
+            if (!isOnline || !currentUser || isBackgroundSyncing) return;
+            
+            isBackgroundSyncing = true;
+            showSyncingIndicator();
+            
+            try {
+                // Process pending messages first
+                await processPendingMessages();
+                
+                // Then sync chats
+                await loadChats();
+                
+                // Then sync contacts
+                await loadContacts();
+                
+                // Update last sync time
+                lastSyncTime = new Date();
+                localStorage.setItem('lastSyncTime', lastSyncTime.toISOString());
+                
+                // Show success notification if we synced something
+                if (pendingMessages.length > 0) {
+                    showNotification('Messages synced successfully', 'success');
+                }
+                
+            } catch (error) {
+                console.error('Background sync error:', error);
+                // Don't show error to user - just continue with cached data
+            } finally {
+                isBackgroundSyncing = false;
+                hideSyncingIndicator();
+                
+                // Setup real-time listeners after initial sync
+                setupRealTimeListener();
+            }
         }
         
         function startBackgroundSync() {
@@ -2266,7 +2446,7 @@
             // Sync every 30 seconds when online
             backgroundSyncInterval = setInterval(() => {
                 if (isOnline && currentUser) {
-                    syncOfflineData();
+                    backgroundSync();
                 }
             }, 30000);
         }
@@ -2322,95 +2502,80 @@
             }
         }
         
-        async function syncOfflineData() {
-            if (!isOnline || !currentUser) return;
-            
-            // Sync read receipts
-            await syncReadReceipts();
-            
-            // Sync typing status
-            await syncTypingStatus();
-            
-            // Sync message reactions
-            await syncMessageReactions();
-        }
-        
-        async function syncReadReceipts() {
-            // Implementation for syncing read receipts
-            // This would mark messages as read when coming online
-        }
-        
-        async function syncTypingStatus() {
-            // Implementation for syncing typing status
-        }
-        
-        async function syncMessageReactions() {
-            // Implementation for syncing message reactions
-        }
-        
         // ============================================
-        // CHAT MANAGEMENT FUNCTIONS
+        // CHAT MANAGEMENT FUNCTIONS - OFFLINE-FIRST
         // ============================================
         
         async function loadChats() {
             try {
-                if (!currentUser || !currentUser.uid || !isOnline) {
-                    // Use cached data when offline or no user
+                // Always show cached chats first
+                if (cachedChats.length > 0) {
                     updateChatListWithCache();
+                }
+                
+                // If offline or no user, just use cached data
+                if (!currentUser || !currentUser.uid || !isOnline) {
+                    console.log('Using cached chats (offline/no user)');
                     return;
                 }
                 
-                // Load chats from Firestore
-                const chatsSnapshot = await db.collection('chats')
-                    .where('participants', 'array-contains', currentUser.uid)
-                    .orderBy('lastMessageTimestamp', 'desc')
-                    .limit(50)
-                    .get();
-                
-                // Process chats
-                allChats = [];
-                
-                chatsSnapshot.forEach(doc => {
-                    const chatData = doc.data();
-                    const chat = {
-                        chatId: doc.id,
-                        ...chatData,
-                        lastMessageTimestamp: chatData.lastMessageTimestamp ? chatData.lastMessageTimestamp.toDate() : new Date()
-                    };
+                // Try to load chats from Firestore in background
+                try {
+                    const chatsSnapshot = await db.collection('chats')
+                        .where('participants', 'array-contains', currentUser.uid)
+                        .orderBy('lastMessageTimestamp', 'desc')
+                        .limit(50)
+                        .get();
                     
-                    // Determine chat type and extract other user info for individual chats
-                    if (chatData.type === 'individual') {
-                        const otherParticipant = chatData.participants.find(p => p !== currentUser.uid);
-                        chat.userId = otherParticipant;
+                    // Process chats
+                    allChats = [];
+                    
+                    chatsSnapshot.forEach(doc => {
+                        const chatData = doc.data();
+                        const chat = {
+                            chatId: doc.id,
+                            ...chatData,
+                            lastMessageTimestamp: chatData.lastMessageTimestamp ? chatData.lastMessageTimestamp.toDate() : new Date()
+                        };
                         
-                        // Try to get user info from chat data or fetch it
-                        if (chatData.participantInfo && chatData.participantInfo[otherParticipant]) {
-                            chat.otherUser = chatData.participantInfo[otherParticipant];
-                        } else {
-                            // We'll load this separately
-                            chat.otherUser = { uid: otherParticipant };
+                        // Determine chat type and extract other user info for individual chats
+                        if (chatData.type === 'individual') {
+                            const otherParticipant = chatData.participants.find(p => p !== currentUser.uid);
+                            chat.userId = otherParticipant;
+                            
+                            // Try to get user info from chat data or fetch it
+                            if (chatData.participantInfo && chatData.participantInfo[otherParticipant]) {
+                                chat.otherUser = chatData.participantInfo[otherParticipant];
+                            } else {
+                                // We'll load this separately
+                                chat.otherUser = { uid: otherParticipant };
+                            }
                         }
-                    }
+                        
+                        allChats.push(chat);
+                        
+                        // Cache the chat
+                        saveChatToCache(chat);
+                    });
                     
-                    allChats.push(chat);
+                    console.log(`Loaded ${allChats.length} chats from Firestore`);
                     
-                    // Cache the chat
-                    saveChatToCache(chat);
-                });
-                
-                console.log(`Loaded ${allChats.length} chats from Firestore`);
-                
-                // Update the chat list
-                updateChatListWithCache();
-                
-                // Load user info for individual chats
-                await loadUserInfoForChats();
+                    // Update the chat list with fresh data
+                    updateChatListWithCache();
+                    
+                    // Load user info for individual chats in background
+                    setTimeout(() => {
+                        loadUserInfoForChats();
+                    }, 1000);
+                    
+                } catch (error) {
+                    console.error('Error loading chats from Firestore:', error);
+                    // Continue with cached data - don't show error to user
+                }
                 
             } catch (error) {
-                console.error('Error loading chats:', error);
-                
-                // Fallback to cache on error
-                updateChatListWithCache();
+                console.error('Error in loadChats:', error);
+                // Don't throw error - just use cached data
             }
         }
         
@@ -2462,45 +2627,54 @@
         
         async function loadContacts() {
             try {
+                // Always show cached contacts first
+                if (cachedContacts.length > 0) {
+                    populateContactsList(cachedContacts);
+                }
+                
                 if (!currentUser || !currentUser.uid || !isOnline) {
                     // Use cached contacts when offline
-                    populateContactsList(cachedContacts);
+                    console.log('Using cached contacts (offline/no user)');
                     return;
                 }
                 
-                // Load contacts from Firestore
-                const contactsSnapshot = await db.collection('users')
-                    .where('uid', '!=', currentUser.uid)
-                    .limit(100)
-                    .get();
-                
-                userContacts = [];
-                contactsSnapshot.forEach(doc => {
-                    const userData = doc.data();
-                    userContacts.push({
-                        uid: userData.uid,
-                        name: userData.displayName,
-                        photoURL: userData.photoURL,
-                        status: userData.status || 'Hey there! I am using MoodChat',
-                        email: userData.email,
-                        isOnline: userData.isOnline || false,
-                        lastSeen: userData.lastSeen ? userData.lastSeen.toDate() : null
+                // Try to load contacts from Firestore in background
+                try {
+                    const contactsSnapshot = await db.collection('users')
+                        .where('uid', '!=', currentUser.uid)
+                        .limit(100)
+                        .get();
+                    
+                    userContacts = [];
+                    contactsSnapshot.forEach(doc => {
+                        const userData = doc.data();
+                        userContacts.push({
+                            uid: userData.uid,
+                            name: userData.displayName,
+                            photoURL: userData.photoURL,
+                            status: userData.status || 'Hey there! I am using MoodChat',
+                            email: userData.email,
+                            isOnline: userData.isOnline || false,
+                            lastSeen: userData.lastSeen ? userData.lastSeen.toDate() : null
+                        });
                     });
-                });
-                
-                console.log(`Loaded ${userContacts.length} contacts from Firestore`);
-                
-                // Save to cache
-                saveContactsToCache(userContacts);
-                
-                // Populate contacts list
-                populateContactsList(userContacts);
+                    
+                    console.log(`Loaded ${userContacts.length} contacts from Firestore`);
+                    
+                    // Save to cache
+                    saveContactsToCache(userContacts);
+                    
+                    // Populate contacts list
+                    populateContactsList(userContacts);
+                    
+                } catch (error) {
+                    console.error('Error loading contacts from Firestore:', error);
+                    // Continue with cached contacts
+                }
                 
             } catch (error) {
-                console.error('Error loading contacts:', error);
-                
-                // Fallback to cached contacts
-                populateContactsList(cachedContacts);
+                console.error('Error in loadContacts:', error);
+                // Don't throw error - just use cached data
             }
         }
         
@@ -2586,9 +2760,9 @@
                 // Close new chat modal
                 if (newChatModal) newChatModal.classList.remove('active');
                 
-                // Check if chat already exists
+                // Check if chat already exists in cache first
                 let existingChat = null;
-                for (const chat of allChats) {
+                for (const chat of [...allChats, ...cachedChats]) {
                     if (chat.type === 'individual' && chat.userId === user.uid) {
                         existingChat = chat;
                         break;
@@ -2618,37 +2792,47 @@
                             }
                         },
                         lastMessage: null,
-                        lastMessageTimestamp: firebase.firestore.FieldValue.serverTimestamp(),
+                        lastMessageTimestamp: new Date(),
                         lastMessageSender: null,
                         unreadCount: 0,
                         isArchived: false,
-                        createdAt: firebase.firestore.FieldValue.serverTimestamp()
+                        createdAt: new Date()
                     };
-                    
-                    // Save to Firestore if online and authenticated
-                    if (isOnline && currentUser && currentUser.uid) {
-                        await db.collection('chats').doc(chatId).set(chatData);
-                    }
                     
                     // Create chat object for UI
                     const newChat = {
                         chatId: chatId,
                         ...chatData,
                         otherUser: user,
-                        userId: user.uid
+                        userId: user.uid,
+                        isCached: true
                     };
                     
-                    // Add to chats list
+                    // Add to chats list and cache immediately
                     allChats.unshift(newChat);
-                    
-                    // Cache the chat
                     saveChatToCache(newChat);
                     
-                    // Update UI
+                    // Update UI immediately
                     updateChatListWithCache();
                     
-                    // Open the new chat
+                    // Open the new chat immediately
                     openChat(newChat);
+                    
+                    // Save to Firestore in background if online and authenticated
+                    if (isOnline && currentUser && currentUser.uid) {
+                        setTimeout(async () => {
+                            try {
+                                await db.collection('chats').doc(chatId).set({
+                                    ...chatData,
+                                    lastMessageTimestamp: firebase.firestore.FieldValue.serverTimestamp(),
+                                    createdAt: firebase.firestore.FieldValue.serverTimestamp()
+                                });
+                            } catch (error) {
+                                console.error('Error saving chat to Firestore:', error);
+                                // Chat is already cached locally, so continue
+                            }
+                        }, 0);
+                    }
                     
                     showNotification(`Started chat with ${user.name}`, 'success');
                 }
@@ -2736,7 +2920,7 @@
                 }
             });
             
-            // Load messages
+            // Load messages (cached first, then fresh)
             loadMessages();
             
             // Mark chat as read
@@ -2759,38 +2943,53 @@
             if (!currentChatId) return;
             
             const messagesContainer = document.getElementById('messagesContainer');
-            messagesContainer.innerHTML = '';
             
             try {
                 // Load cached messages first for instant display
                 loadCachedMessagesForChat(currentChatId);
                 
+                // Then try to load fresh messages in background if online
                 if (isOnline && currentUser && currentUser.uid) {
-                    // Load from Firestore
-                    const messagesSnapshot = await db.collection('messages')
-                        .where('chatId', '==', currentChatId)
-                        .orderBy('timestamp', 'asc')
-                        .limit(100)
-                        .get();
-                    
-                    // Clear and reload with fresh data
-                    messagesContainer.innerHTML = '';
-                    
-                    messagesSnapshot.forEach(doc => {
-                        const messageData = doc.data();
-                        const message = {
-                            id: doc.id,
-                            ...messageData,
-                            timestamp: messageData.timestamp ? messageData.timestamp.toDate() : new Date()
-                        };
-                        addMessageToUI(message);
-                    });
-                    
-                    // Scroll to bottom
-                    setTimeout(() => {
-                        messagesContainer.scrollTop = messagesContainer.scrollHeight;
-                    }, 100);
+                    try {
+                        const messagesSnapshot = await db.collection('messages')
+                            .where('chatId', '==', currentChatId)
+                            .orderBy('timestamp', 'asc')
+                            .limit(100)
+                            .get();
+                        
+                        // Clear and reload with fresh data only if we have fresh data
+                        if (messagesSnapshot.size > 0) {
+                            const freshMessages = [];
+                            messagesSnapshot.forEach(doc => {
+                                const messageData = doc.data();
+                                const message = {
+                                    id: doc.id,
+                                    ...messageData,
+                                    timestamp: messageData.timestamp ? messageData.timestamp.toDate() : new Date()
+                                };
+                                freshMessages.push(message);
+                                cacheMessageForChat(currentChatId, message);
+                            });
+                            
+                            // Only update if we have new messages
+                            if (freshMessages.length > 0) {
+                                messagesContainer.innerHTML = '';
+                                freshMessages.forEach(message => {
+                                    addMessageToUI(message);
+                                });
+                            }
+                        }
+                        
+                    } catch (error) {
+                        console.error('Error loading fresh messages:', error);
+                        // Continue with cached messages
+                    }
                 }
+                
+                // Scroll to bottom
+                setTimeout(() => {
+                    messagesContainer.scrollTop = messagesContainer.scrollHeight;
+                }, 100);
                 
             } catch (error) {
                 console.error('Error loading messages:', error);
@@ -2827,7 +3026,7 @@
                 console.error('Error loading cached messages:', error);
             }
             
-            // Fallback to generic loading state
+            // Fallback to loading state
             messagesContainer.innerHTML = `
                 <div style="text-align: center; padding: 20px; color: var(--text-secondary);">
                     <div class="spinner"></div>
@@ -3095,19 +3294,26 @@
                 
                 if (isOnline && currentUser && currentUser.uid) {
                     // Send immediately if online
-                    const messageRef = await db.collection('messages').add({
-                        ...messageData,
-                        timestamp: firebase.firestore.FieldValue.serverTimestamp()
-                    });
-                    messageId = messageRef.id;
-                    
-                    // Update chat document
-                    await updateChatDocument(currentChatId, {
-                        lastMessage: messageData,
-                        lastMessageTimestamp: firebase.firestore.FieldValue.serverTimestamp(),
-                        lastMessageSender: currentUser.uid,
-                        unreadCount: firebase.firestore.FieldValue.increment(1)
-                    });
+                    try {
+                        const messageRef = await db.collection('messages').add({
+                            ...messageData,
+                            timestamp: firebase.firestore.FieldValue.serverTimestamp()
+                        });
+                        messageId = messageRef.id;
+                        
+                        // Update chat document
+                        await updateChatDocument(currentChatId, {
+                            lastMessage: messageData,
+                            lastMessageTimestamp: firebase.firestore.FieldValue.serverTimestamp(),
+                            lastMessageSender: currentUser.uid,
+                            unreadCount: firebase.firestore.FieldValue.increment(1)
+                        });
+                    } catch (error) {
+                        console.error('Error sending message online:', error);
+                        // Fallback to offline mode
+                        messageId = savePendingMessage(messageData);
+                        showNotification('Message saved offline. Will send when connection improves.', 'warning');
+                    }
                     
                 } else {
                     // Save to pending messages if offline
@@ -3133,6 +3339,9 @@
                 
                 // Stop typing indicator
                 stopTyping();
+                
+                // Update chat list immediately
+                updateChatFromMessage(uiMessage);
                 
             } catch (error) {
                 console.error('Error sending message:', error);
@@ -3565,7 +3774,9 @@
                 // Create new chat entry
                 // This would require fetching chat details
                 // For now, we'll just reload chats
-                loadChats();
+                setTimeout(() => {
+                    loadChats();
+                }, 1000);
             }
             
             // Update UI
@@ -4914,11 +5125,18 @@
         
         // Initialize when page loads
         window.addEventListener('load', () => {
-            console.log('Messages page loaded with offline support');
+            console.log('Messages page loaded with OFFLINE-FIRST support');
             
             // Ensure permanent start chat button is always visible
             if (permanentStartChatBtn) {
                 permanentStartChatBtn.style.display = 'flex';
+            }
+            
+            // Start background sync if online
+            if (isOnline) {
+                setTimeout(() => {
+                    backgroundSync();
+                }, 3000);
             }
         });
     </script>

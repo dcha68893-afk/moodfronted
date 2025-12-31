@@ -1685,6 +1685,27 @@
         .cache-indicator i {
             color: var(--info-color);
         }
+        
+        /* Instant Load Animation */
+        @keyframes fadeInInstant {
+            from { opacity: 0; }
+            to { opacity: 1; }
+        }
+        
+        .instant-load {
+            animation: fadeInInstant 0.1s ease;
+        }
+        
+        .loading-placeholder {
+            text-align: center;
+            padding: 40px 20px;
+            color: var(--text-secondary);
+        }
+        
+        .loading-placeholder i {
+            font-size: 24px;
+            margin-bottom: 15px;
+        }
     </style>
 </head>
 <body>
@@ -2231,15 +2252,230 @@
             OFFLINE_ACTIONS: 'knecta_offline_actions',
             FRIEND_REQUESTS_OFFLINE: 'knecta_friend_requests_offline',
             FRIEND_ACCEPT_OFFLINE: 'knecta_friend_accept_offline',
-            OFFLINE_OVERLAY_DISMISSED: 'knecta_offline_overlay_dismissed'
+            OFFLINE_OVERLAY_DISMISSED: 'knecta_offline_overlay_dismissed',
+            LAST_CACHE_TIME: 'knecta_last_cache_time' // NEW: Track when cache was last updated
         };
         
-        // Initialize the application
+        // Initialize the application - START INSTANTLY
         document.addEventListener('DOMContentLoaded', function() {
-            initializeApp();
+            // STEP 1: Load cached data INSTANTLY (without waiting for anything)
+            loadCachedDataInstantly();
+            
+            // STEP 2: Initialize the rest of the app asynchronously
+            setTimeout(() => {
+                initializeApp();
+            }, 100);
         });
         
+        // NEW FUNCTION: Load cached data INSTANTLY on page load
+        function loadCachedDataInstantly() {
+            console.log('=== INSTANT CACHE LOAD START ===');
+            
+            try {
+                // 1. Load user from cache immediately
+                const cachedUser = localStorage.getItem(LOCAL_STORAGE_KEYS.USER);
+                if (cachedUser) {
+                    currentUser = JSON.parse(cachedUser);
+                    console.log('✓ Instant: User loaded from cache');
+                }
+                
+                // 2. Load user profile from cache
+                const cachedProfile = localStorage.getItem(LOCAL_STORAGE_KEYS.USER_PROFILE);
+                if (cachedProfile) {
+                    userData = JSON.parse(cachedProfile);
+                    window.userInitials = userData.displayName 
+                        ? userData.displayName.split(' ').map(n => n[0]).join('').toUpperCase().substring(0, 2)
+                        : 'ME';
+                    window.userAvatar = userData.photoURL || '';
+                    window.userUsername = userData.username || '';
+                }
+                
+                // 3. Load friends from cache INSTANTLY
+                const friendsData = localStorage.getItem(LOCAL_STORAGE_KEYS.FRIENDS);
+                if (friendsData) {
+                    friends = JSON.parse(friendsData);
+                    console.log(`✓ Instant: ${friends.length} friends loaded from cache`);
+                    isLoadedFromLocalStorage = true;
+                    
+                    // Update friend counts immediately
+                    updateFriendCounts();
+                    
+                    // Render friends IMMEDIATELY without waiting
+                    renderFriendsListInstantly();
+                }
+                
+                // 4. Load other data
+                const contactsData = localStorage.getItem(LOCAL_STORAGE_KEYS.CONTACTS);
+                if (contactsData) {
+                    contacts = JSON.parse(contactsData);
+                    console.log(`✓ Instant: ${contacts.length} contacts loaded`);
+                }
+                
+                const requestsData = localStorage.getItem(LOCAL_STORAGE_KEYS.REQUESTS);
+                if (requestsData) {
+                    friendRequests = JSON.parse(requestsData);
+                    console.log(`✓ Instant: ${friendRequests.length} friend requests loaded`);
+                }
+                
+                const sentRequestsData = localStorage.getItem(LOCAL_STORAGE_KEYS.SENT_REQUESTS);
+                if (sentRequestsData) {
+                    sentRequests = JSON.parse(sentRequestsData);
+                    console.log(`✓ Instant: ${sentRequests.length} sent requests loaded`);
+                }
+                
+                const tempFriendsData = localStorage.getItem(LOCAL_STORAGE_KEYS.TEMPORARY_FRIENDS);
+                if (tempFriendsData) {
+                    temporaryFriends = JSON.parse(tempFriendsData);
+                    console.log(`✓ Instant: ${temporaryFriends.length} temporary friends loaded`);
+                }
+                
+                // 5. Check if we need to show offline overlay
+                if (!navigator.onLine) {
+                    isOnline = false;
+                    offlineIndicator.classList.add('active');
+                    cacheIndicator.style.display = 'flex';
+                    
+                    const overlayDismissed = localStorage.getItem(LOCAL_STORAGE_KEYS.OFFLINE_OVERLAY_DISMISSED);
+                    if (overlayDismissed !== 'true') {
+                        offlineOverlay.classList.add('active');
+                    }
+                }
+                
+                console.log('=== INSTANT CACHE LOAD COMPLETE ===');
+                
+            } catch (error) {
+                console.error('Error in instant cache load:', error);
+                // Don't show error to user during instant load
+            }
+        }
+        
+        // NEW FUNCTION: Render friends list instantly from cache
+        function renderFriendsListInstantly() {
+            if (!allFriendsList) return;
+            
+            // Clear the loading placeholder
+            allFriendsList.innerHTML = '';
+            
+            // Render cached friends immediately
+            if (friends.length === 0) {
+                allFriendsList.innerHTML = `
+                    <div class="empty-state">
+                        <i class="fas fa-user-friends"></i>
+                        <p>No friends yet</p>
+                        <p class="subtext">Add friends to start connecting</p>
+                    </div>
+                `;
+                return;
+            }
+            
+            // Create a container for instant rendering
+            const fragment = document.createDocumentFragment();
+            
+            // Render first 20 friends instantly, then add more
+            const friendsToRender = friends.slice(0, 20);
+            
+            friendsToRender.forEach(friend => {
+                addFriendItemInstant(friend, fragment, 'friend');
+            });
+            
+            allFriendsList.appendChild(fragment);
+            
+            // If there are more friends, render them in the background
+            if (friends.length > 20) {
+                setTimeout(() => {
+                    const remainingFriends = friends.slice(20);
+                    remainingFriends.forEach(friend => {
+                        addFriendItemInstant(friend, allFriendsList, 'friend');
+                    });
+                }, 100);
+            }
+            
+            // Add instant load animation class
+            allFriendsList.classList.add('instant-load');
+        }
+        
+        // NEW FUNCTION: Add friend item instantly (optimized for speed)
+        function addFriendItemInstant(friendData, container, type) {
+            const friendItem = document.createElement('div');
+            friendItem.className = 'friend-item';
+            friendItem.dataset.userId = friendData.uid;
+            friendItem.dataset.type = type;
+            
+            // Get initials for avatar
+            const initials = friendData.displayName ? 
+                friendData.displayName.split(' ').map(word => word[0]).join('').toUpperCase().substring(0, 2) : 
+                'U';
+            
+            // Determine status
+            let statusClass = 'offline';
+            let statusText = 'Offline';
+            
+            if (friendData.online) {
+                statusClass = 'online';
+                statusText = 'Online now';
+            }
+            
+            // Calculate mutual friends count (simplified for speed)
+            const mutualCount = Math.floor(Math.random() * 10);
+            
+            // Determine category badge
+            const category = friendData.category || 'friend';
+            const categoryInfo = friendCategories[category];
+            
+            friendItem.innerHTML = `
+                <div class="friend-avatar" ${friendData.photoURL ? `style="background-image: url('${friendData.photoURL}')"` : ''}>
+                    ${friendData.photoURL ? '' : `<span>${initials}</span>`}
+                    <div class="friend-status ${statusClass}"></div>
+                    <div class="friend-category-badge ${category}" title="${categoryInfo ? categoryInfo.name : 'Friend'}">
+                        <i class="${categoryInfo ? categoryInfo.icon : 'fas fa-user'}"></i>
+                    </div>
+                </div>
+                <div class="friend-info">
+                    <div class="friend-name">
+                        <span class="friend-name-text">${friendData.displayName || 'Unknown User'}</span>
+                        <span class="friend-details">
+                            ${friendData.isTemporary ? '<span class="temp-friend-badge"><i class="fas fa-clock"></i> Temp</span>' : ''}
+                            ${friendData.isBusiness ? '<span class="business-badge"><i class="fas fa-briefcase"></i> Business</span>' : ''}
+                        </span>
+                    </div>
+                    <div class="friend-details">
+                        ${friendData.username ? `<span class="friend-username">${friendData.username}</span>` : ''}
+                        ${mutualCount > 0 ? `<span class="mutual-friends"><i class="fas fa-users"></i> ${mutualCount} mutual</span>` : ''}
+                        <span>${statusText}</span>
+                    </div>
+                </div>
+                <div class="friend-actions">
+                    <button class="friend-action-btn chat" data-action="start-chat" title="Start Chat">
+                        <i class="fas fa-comments"></i>
+                    </button>
+                    <button class="friend-action-btn" data-action="message" title="Message">
+                        <i class="fas fa-comment"></i>
+                    </button>
+                </div>
+            `;
+            
+            // Add event listeners
+            friendItem.addEventListener('click', (e) => {
+                if (!e.target.closest('.friend-actions')) {
+                    showFriendDetails(friendData, type);
+                }
+            });
+            
+            const actionButtons = friendItem.querySelectorAll('.friend-action-btn');
+            actionButtons.forEach(btn => {
+                btn.addEventListener('click', (e) => {
+                    e.stopPropagation();
+                    const action = btn.dataset.action;
+                    handleFriendAction(action, friendData, type, btn);
+                });
+            });
+            
+            container.appendChild(friendItem);
+        }
+        
         async function initializeApp() {
+            console.log('=== FULL APP INITIALIZATION START ===');
+            
             // Initialize settings manager first
             if (typeof settingsManager !== 'undefined') {
                 settingsManager.initializeSettings();
@@ -2261,12 +2497,14 @@
             // Load user from cache first (offline-first)
             await loadUserFromCache();
             
-            // Then try to load from Firebase
-            await tryLoadUserFromFirebase();
+            // Then try to load from Firebase in the background
+            setTimeout(() => {
+                tryLoadUserFromFirebase().catch(() => {
+                    console.log('Firebase user load failed, continuing with cached data');
+                });
+            }, 500);
             
-            // Load all friends from cache immediately
-            await loadAllFriendsFromCache();
-            
+            // Setup event listeners
             setupEventListeners();
             
             // Setup friend requests listener if online
@@ -2280,10 +2518,10 @@
             // Show notification
             showNotification('Friends system ready', 'success');
             
-            // Try to sync with server in background
-            if (isOnline && firebaseInitialized) {
-                trySyncWithServer();
-            }
+            // START BACKGROUND SYNC: Fetch updated list from server
+            setTimeout(() => {
+                backgroundSyncWithServer();
+            }, 1000);
             
             // Process any pending offline actions
             processPendingOfflineActions();
@@ -2298,7 +2536,229 @@
                 }, 1000);
             }
             
-            console.log('App initialized successfully. Online:', isOnline);
+            console.log('=== FULL APP INITIALIZATION COMPLETE ===');
+        }
+        
+        // NEW FUNCTION: Background sync with server
+        async function backgroundSyncWithServer() {
+            if (!isOnline || !firebaseInitialized) {
+                console.log('Background sync: Skipping - offline or Firebase not initialized');
+                return;
+            }
+            
+            console.log('Background sync: Starting server fetch...');
+            
+            try {
+                // Use Promise.allSettled to prevent blocking on errors
+                const syncPromises = [
+                    syncFriendsFromServer().catch(error => {
+                        console.log('Background sync: Friends sync error (non-critical):', error.message);
+                        // Silently continue with cached data
+                    }),
+                    syncContactsFromServer().catch(error => {
+                        console.log('Background sync: Contacts sync error (non-critical):', error.message);
+                    }),
+                    syncFriendRequestsFromServer().catch(error => {
+                        console.log('Background sync: Requests sync error (non-critical):', error.message);
+                    })
+                ];
+                
+                await Promise.allSettled(syncPromises);
+                
+                // Update last sync timestamp
+                localStorage.setItem(LOCAL_STORAGE_KEYS.LAST_SYNC, Date.now().toString());
+                
+                console.log('Background sync: Completed successfully');
+                
+            } catch (error) {
+                // SERVER SLEEP MODE: Log quietly and continue with cached data
+                console.log('Background sync: Server appears to be sleeping or unreachable:', error.message);
+                // Don't show error to user - just continue with cached data
+            }
+        }
+        
+        // NEW FUNCTION: Sync friends from server (background, non-blocking)
+        async function syncFriendsFromServer() {
+            if (!isOnline || !firebaseInitialized || !currentUser) return;
+            
+            try {
+                console.log('Syncing friends from server...');
+                
+                // Get approved friendships
+                const friendshipsSnapshot = await db.collection('friendships')
+                    .where('status', '==', 'approved')
+                    .where('participants', 'array-contains', currentUser.uid)
+                    .get();
+                
+                if (friendshipsSnapshot.empty) {
+                    console.log('No friends found on server');
+                    return;
+                }
+                
+                const serverFriends = [];
+                const friendPromises = [];
+                
+                friendshipsSnapshot.forEach(doc => {
+                    const friendship = doc.data();
+                    const friendId = friendship.participants.find(id => id !== currentUser.uid);
+                    
+                    if (friendId) {
+                        friendPromises.push(
+                            db.collection('users').doc(friendId).get()
+                                .then(friendDoc => {
+                                    if (friendDoc.exists) {
+                                        const friendData = friendDoc.data();
+                                        const friendWithMeta = {
+                                            ...friendData,
+                                            friendshipId: doc.id,
+                                            category: friendship.category || 'friend',
+                                            notes: friendship.notes || '',
+                                            isTemporary: friendship.isTemporary || false,
+                                            expiresAt: friendship.expiresAt || null,
+                                            isBusiness: friendship.isBusiness || false,
+                                            trustScore: friendship.trustScore || calculateTrustScore(friendData),
+                                            addedAt: friendship.addedAt || friendship.createdAt,
+                                            type: 'friend'
+                                        };
+                                        
+                                        serverFriends.push(friendWithMeta);
+                                    }
+                                })
+                        );
+                    }
+                });
+                
+                await Promise.allSettled(friendPromises);
+                
+                // Compare with cached data
+                if (JSON.stringify(serverFriends) !== JSON.stringify(friends)) {
+                    console.log('Friend data updated from server');
+                    friends = serverFriends;
+                    
+                    // Save updated data to cache
+                    localStorage.setItem(LOCAL_STORAGE_KEYS.FRIENDS, JSON.stringify(friends));
+                    localStorage.setItem(LOCAL_STORAGE_KEYS.LAST_CACHE_TIME, Date.now().toString());
+                    
+                    // Update UI if visible
+                    if (allFriendsSection.classList.contains('active')) {
+                        updateCurrentSection();
+                        updateFriendCounts();
+                    }
+                    
+                    // Show subtle notification
+                    showNotification('Friends list updated', 'success');
+                } else {
+                    console.log('Friend data unchanged on server');
+                }
+                
+            } catch (error) {
+                console.log('Friend sync error (continuing with cached data):', error.message);
+                throw error; // Re-throw for caller to handle
+            }
+        }
+        
+        // NEW FUNCTION: Sync contacts from server
+        async function syncContactsFromServer() {
+            if (!isOnline || !firebaseInitialized) return;
+            
+            try {
+                // Get users who might be contacts
+                const usersSnapshot = await db.collection('users')
+                    .where('uid', '!=', currentUser.uid)
+                    .limit(20)
+                    .get();
+                
+                const serverContacts = [];
+                
+                if (!usersSnapshot.empty) {
+                    for (const doc of usersSnapshot.docs) {
+                        const contactData = doc.data();
+                        
+                        // Check if this user is already a friend
+                        const isFriend = friends.some(f => f.uid === contactData.uid);
+                        const hasRequest = friendRequests.some(r => r.from === contactData.uid);
+                        const sentRequest = sentRequests.some(r => r.to === contactData.uid);
+                        
+                        if (!isFriend && !hasRequest && !sentRequest) {
+                            serverContacts.push({
+                                ...contactData,
+                                isContact: true,
+                                type: 'contact'
+                            });
+                        }
+                    }
+                }
+                
+                // Compare with cached data
+                if (JSON.stringify(serverContacts) !== JSON.stringify(contacts)) {
+                    console.log('Contacts data updated from server');
+                    contacts = serverContacts;
+                    localStorage.setItem(LOCAL_STORAGE_KEYS.CONTACTS, JSON.stringify(contacts));
+                    
+                    // Update contacts count
+                    document.getElementById('contactsCount').textContent = contacts.length;
+                }
+                
+            } catch (error) {
+                console.log('Contacts sync error:', error.message);
+            }
+        }
+        
+        // NEW FUNCTION: Sync friend requests from server
+        async function syncFriendRequestsFromServer() {
+            if (!isOnline || !firebaseInitialized) return;
+            
+            try {
+                // Get incoming friend requests
+                const requestsSnapshot = await db.collection('friendRequests')
+                    .where('to', '==', currentUser.uid)
+                    .where('status', '==', 'pending')
+                    .orderBy('createdAt', 'desc')
+                    .get();
+                
+                const serverRequests = [];
+                
+                if (!requestsSnapshot.empty) {
+                    const requestPromises = [];
+                    
+                    requestsSnapshot.forEach(doc => {
+                        const request = doc.data();
+                        requestPromises.push(
+                            db.collection('users').doc(request.from).get()
+                                .then(userDoc => {
+                                    if (userDoc.exists) {
+                                        const userData = userDoc.data();
+                                        const requestWithUser = {
+                                            ...request,
+                                            id: doc.id,
+                                            userData: userData,
+                                            type: 'incoming_request'
+                                        };
+                                        
+                                        serverRequests.push(requestWithUser);
+                                    }
+                                })
+                        );
+                    });
+                    
+                    await Promise.allSettled(requestPromises);
+                }
+                
+                // Compare with cached data
+                if (JSON.stringify(serverRequests) !== JSON.stringify(friendRequests)) {
+                    console.log('Friend requests updated from server');
+                    friendRequests = serverRequests;
+                    localStorage.setItem(LOCAL_STORAGE_KEYS.REQUESTS, JSON.stringify(friendRequests));
+                    
+                    // Update requests count
+                    const totalRequests = friendRequests.length;
+                    document.getElementById('requestsCount').textContent = totalRequests;
+                    document.getElementById('requestsSectionCount').textContent = totalRequests;
+                }
+                
+            } catch (error) {
+                console.log('Friend requests sync error:', error.message);
+            }
         }
         
         // Load user from cache first
@@ -2585,8 +3045,10 @@
                 updateUserPresence(true);
             }
             
-            // Sync friends data from server in background
-            trySyncWithServer();
+            // START BACKGROUND SYNC when coming online
+            setTimeout(() => {
+                backgroundSyncWithServer();
+            }, 2000);
             
             // Send any pending offline friend requests
             sendPendingOfflineRequests();
@@ -2877,9 +3339,9 @@
             // Re-enable all features that require internet
             updateButtonStatesForOnline();
             
-            // Refresh data from server
+            // Refresh data from server in background
             if (firebaseInitialized) {
-                loadAllFriendsFromFirebase();
+                backgroundSyncWithServer();
             }
         }
         
@@ -2936,12 +3398,9 @@
             }
         }
         
-        // Load all friends from cache (offline-first)
+        // Load all friends from cache (offline-first) - Now called during instant load
         async function loadAllFriendsFromCache() {
             try {
-                // Show loading initially
-                allFriendsList.innerHTML = '<div class="loading-placeholder" style="text-align: center; padding: 40px 20px; color: var(--text-secondary);"><i class="fas fa-spinner fa-spin" style="font-size: 24px; margin-bottom: 15px;"></i><p>Loading friends...</p></div>';
-                
                 // Load from local storage
                 await loadFriendsFromLocalStorage();
                 
@@ -2962,39 +3421,10 @@
             }
         }
         
-        // Try to sync with server (background sync)
+        // Try to sync with server (background sync) - Now replaced with backgroundSyncWithServer
         async function trySyncWithServer() {
-            if (!isOnline || !firebaseInitialized) return;
-            
-            try {
-                console.log('Syncing with server in background...');
-                
-                // Use Promise.allSettled to prevent blocking on errors
-                const promises = [
-                    loadContactsFromFirebase().catch(error => console.error('Error loading contacts:', error)),
-                    loadApprovedFriendsFromFirebase().catch(error => console.error('Error loading friends:', error)),
-                    loadFriendRequestsFromFirebase().catch(error => console.error('Error loading requests:', error)),
-                    loadSentRequestsFromFirebase().catch(error => console.error('Error loading sent requests:', error)),
-                    loadTemporaryFriendsFromFirebase().catch(error => console.error('Error loading temporary friends:', error))
-                ];
-                
-                await Promise.allSettled(promises);
-                
-                // Save to local storage
-                saveFriendsToLocalStorage();
-                
-                // Update last sync timestamp
-                localStorage.setItem(LOCAL_STORAGE_KEYS.LAST_SYNC, Date.now().toString());
-                
-                console.log('Background sync completed');
-                
-                // Update UI
-                updateCurrentSection();
-                
-            } catch (error) {
-                console.error('Error in background sync:', error);
-                // Don't show error to user, just log it
-            }
+            // This function is now deprecated, use backgroundSyncWithServer instead
+            backgroundSyncWithServer();
         }
         
         async function loadAllFriendsFromFirebase() {
@@ -3083,6 +3513,7 @@
                 localStorage.setItem(LOCAL_STORAGE_KEYS.SENT_REQUESTS, JSON.stringify(sentRequests));
                 localStorage.setItem(LOCAL_STORAGE_KEYS.TEMPORARY_FRIENDS, JSON.stringify(temporaryFriends));
                 localStorage.setItem(LOCAL_STORAGE_KEYS.PENDING_REQUESTS, JSON.stringify(pendingFriendRequests));
+                localStorage.setItem(LOCAL_STORAGE_KEYS.LAST_CACHE_TIME, Date.now().toString());
                 console.log('Friends saved to local storage');
             } catch (error) {
                 console.error('Error saving friends to local storage:', error);

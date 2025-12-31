@@ -579,7 +579,6 @@
             text-align: center;
             padding: 40px;
             max-width: 800px;
-            text-shadow: 2px 2px 10px rgba(0,0,0,0.5);
             word-wrap: break-word;
         }
         
@@ -2481,20 +2480,25 @@
         // INSTANT LOAD FUNCTION - Shows cached data immediately
         function instantLoadFromCache() {
             try {
+                console.log('Instant loading from cache...');
+                
                 // Try to load user from localStorage first
                 const userData = localStorage.getItem('currentUser');
                 if (userData) {
                     const user = JSON.parse(userData);
                     if (user && user.uid) {
-                        // Load cached statuses
+                        // Load cached statuses immediately
                         loadCachedStatuses();
                         
-                        // Update UI with cached data immediately
+                        // Update UI with cached data immediately - don't wait for Firebase
                         if (cachedStatuses.length > 0) {
                             updateStatusListWithCache();
+                            console.log(`Instantly loaded ${cachedStatuses.length} cached statuses`);
+                        } else {
+                            console.log('No cached statuses found');
                         }
                         
-                        // Update my status avatar
+                        // Update my status avatar immediately
                         const myStatusAvatar = document.getElementById('myStatusAvatar');
                         const userInitials = user.displayName ? 
                             user.displayName.split(' ').map(n => n[0]).join('').toUpperCase().substring(0, 2) : 
@@ -2532,7 +2536,7 @@
                         currentUser = JSON.parse(userData);
                         console.log('User loaded from localStorage:', currentUser.uid);
                     } else {
-                        // Check Firebase auth state
+                        // Check Firebase auth state (silently in background)
                         auth.onAuthStateChanged(user => {
                             if (user) {
                                 currentUser = user;
@@ -2591,9 +2595,11 @@
             // Start background sync interval
             startBackgroundSync();
             
-            // Setup real-time listener if online
+            // Setup real-time listener if online (silently in background)
             if (isOnline && currentUser && currentUser.uid) {
-                setupRealTimeListener();
+                setTimeout(() => {
+                    setupRealTimeListener();
+                }, 2000); // Wait a bit before setting up real-time listener
             }
         }
         
@@ -2604,24 +2610,27 @@
             if (isOnline && !wasOnline) {
                 // Just came online
                 offlineIndicator.classList.remove('active');
-                showNotification('You are back online. Syncing in background...', 'success');
+                console.log('Back online - starting background sync');
                 
-                // Process pending uploads in background
+                // Process pending uploads in background (silently)
                 setTimeout(() => {
                     processPendingUploads();
+                }, 3000); // Wait 3 seconds before syncing
+                
+                // Start real-time listener silently
+                setTimeout(() => {
+                    setupRealTimeListener();
                 }, 2000);
                 
-                // Start real-time listener
-                setupRealTimeListener();
-                
-                // Load fresh data in background
+                // Load fresh data in background (silently)
                 setTimeout(() => {
-                    loadStatusUpdates();
+                    loadStatusUpdatesInBackground();
                 }, 1000);
                 
             } else if (!isOnline && wasOnline) {
                 // Just went offline
                 offlineIndicator.classList.add('active');
+                console.log('Went offline - showing cached data');
                 
                 // Stop real-time listener
                 stopRealTimeListener();
@@ -2633,6 +2642,88 @@
             // Update create status modal indicator
             if (offlinePostingIndicator) {
                 offlinePostingIndicator.style.display = isOnline ? 'none' : 'block';
+            }
+        }
+        
+        // NEW: Load status updates silently in background
+        async function loadStatusUpdatesInBackground() {
+            try {
+                if (!currentUser || !currentUser.uid || !isOnline) {
+                    console.log('Skipping background status load - offline or no user');
+                    return;
+                }
+                
+                console.log('Loading status updates in background...');
+                const now = new Date();
+                
+                // Load statuses from Firestore silently
+                const statusesSnapshot = await db.collection('statuses')
+                    .where('expiresAt', '>', now)
+                    .orderBy('expiresAt', 'desc')
+                    .limit(50)
+                    .get();
+                
+                // Process statuses silently
+                const newStatuses = [];
+                
+                statusesSnapshot.forEach(doc => {
+                    const statusData = doc.data();
+                    const status = {
+                        id: doc.id,
+                        ...statusData,
+                        createdAt: statusData.createdAt ? statusData.createdAt.toDate() : new Date(),
+                        expiresAt: statusData.expiresAt ? statusData.expiresAt.toDate() : new Date(now.getTime() + 24 * 60 * 60 * 1000)
+                    };
+                    
+                    // Check if status is visible to user based on privacy
+                    if (isStatusVisible(status)) {
+                        // Don't show user's own statuses in the contacts list
+                        if (status.userId !== currentUser.uid) {
+                            newStatuses.push(status);
+                        }
+                        
+                        // Cache the status silently
+                        saveStatusToCache(status);
+                    }
+                });
+                
+                console.log(`Background loaded ${newStatuses.length} status updates`);
+                
+                // Only update if we have new statuses
+                if (newStatuses.length > 0) {
+                    // Merge with existing statuses
+                    allStatuses = [...allStatuses, ...newStatuses];
+                    
+                    // Remove duplicates
+                    const seenIds = new Set();
+                    allStatuses = allStatuses.filter(status => {
+                        if (seenIds.has(status.id)) {
+                            return false;
+                        }
+                        seenIds.add(status.id);
+                        return true;
+                    });
+                    
+                    // Sort by date (newest first)
+                    allStatuses.sort((a, b) => {
+                        const dateA = a.createdAt ? new Date(a.createdAt) : new Date();
+                        const dateB = b.createdAt ? new Date(b.createdAt) : new Date();
+                        return dateB - dateA;
+                    });
+                    
+                    // Update the status list silently
+                    updateStatusListWithCache();
+                    
+                    // Update my status item
+                    updateMyStatusItem();
+                }
+                
+                // Mark initial load as complete
+                isInitialLoadComplete = true;
+                
+            } catch (error) {
+                console.error('Error loading status updates in background:', error);
+                // Silently fail - keep cached data
             }
         }
         
@@ -3027,6 +3118,7 @@
             if (isSyncing || pendingUploads.length === 0 || !isOnline) return;
             
             isSyncing = true;
+            console.log(`Processing ${pendingUploads.length} pending uploads...`);
             
             // Process each pending upload
             for (let i = 0; i < pendingUploads.length; i++) {
@@ -3076,16 +3168,19 @@
                     // Remove from pending uploads
                     removePendingUpload(pendingStatus.tempId);
                     
+                    console.log(`Uploaded pending status ${pendingStatus.tempId}`);
+                    
                 } catch (error) {
                     console.error(`Error uploading pending status ${pendingStatus.tempId}:`, error);
                 }
             }
             
             isSyncing = false;
+            console.log('Finished processing pending uploads');
             
             // Reload statuses in background
             setTimeout(() => {
-                loadStatusUpdates();
+                loadStatusUpdatesInBackground();
             }, 1000);
         }
         
@@ -3151,7 +3246,7 @@
                 
                 // Reload statuses in background
                 setTimeout(() => {
-                    loadStatusUpdates();
+                    loadStatusUpdatesInBackground();
                 }, 500);
                 
             } catch (error) {
@@ -3187,10 +3282,11 @@
                 clearInterval(backgroundSyncInterval);
             }
             
-            // Sync every 30 seconds when online
+            // Sync every 30 seconds when online (silently)
             backgroundSyncInterval = setInterval(() => {
                 if (isOnline) {
                     syncOfflineData();
+                    loadStatusUpdatesInBackground();
                 }
             }, 30000);
         }
@@ -3268,16 +3364,16 @@
         async function syncOfflineData() {
             if (!isOnline) return;
             
-            // Sync viewed statuses
+            // Sync viewed statuses silently
             await syncViewedStatuses();
             
-            // Sync reactions
+            // Sync reactions silently
             await syncOfflineReactions();
             
-            // Sync poll votes
+            // Sync poll votes silently
             await syncOfflinePollVotes();
             
-            // Sync answers
+            // Sync answers silently
             await syncOfflineAnswers();
         }
         
@@ -3292,7 +3388,7 @@
                 
                 if (viewedStatuses.length === 0) return;
                 
-                // Sync each viewed status
+                // Sync each viewed status silently
                 for (const statusId of viewedStatuses) {
                     try {
                         await db.collection('statuses')
@@ -3478,7 +3574,7 @@
                     localStorage.setItem(`viewedStatuses_${currentUser.uid}`, JSON.stringify(viewedStatuses));
                     
                     if (isOnline) {
-                        // Update in Firestore
+                        // Update in Firestore (silently)
                         try {
                             await db.collection('statuses')
                                 .doc(statusId)
@@ -3507,10 +3603,12 @@
             }
         }
         
+        // UPDATED: Load status updates with silent failure
         async function loadStatusUpdates() {
             try {
                 if (!currentUser || !currentUser.uid) {
                     console.log('No user ID available for loading status updates');
+                    // Still update with cache
                     updateStatusListWithCache();
                     return;
                 }
@@ -3522,6 +3620,7 @@
                     return;
                 }
                 
+                console.log('Loading status updates from server...');
                 const now = new Date();
                 
                 // Load statuses from Firestore
@@ -3537,7 +3636,7 @@
                 viewedStatuses = viewedData ? JSON.parse(viewedData) : [];
                 
                 // Process statuses
-                allStatuses = [];
+                const newStatuses = [];
                 
                 statusesSnapshot.forEach(doc => {
                     const statusData = doc.data();
@@ -3552,7 +3651,7 @@
                     if (isStatusVisible(status)) {
                         // Don't show user's own statuses in the contacts list
                         if (status.userId !== currentUser.uid) {
-                            allStatuses.push(status);
+                            newStatuses.push(status);
                         }
                         
                         // Cache the status
@@ -3560,13 +3659,18 @@
                     }
                 });
                 
-                console.log(`Loaded ${allStatuses.length} status updates from Firestore`);
+                console.log(`Loaded ${newStatuses.length} status updates from Firestore`);
                 
-                // Update my status item
-                updateMyStatusItem();
-                
-                // Update the status list
-                updateStatusListWithCache();
+                // Only update if we have new statuses
+                if (newStatuses.length > 0) {
+                    allStatuses = newStatuses;
+                    
+                    // Update my status item
+                    updateMyStatusItem();
+                    
+                    // Update the status list
+                    updateStatusListWithCache();
+                }
                 
                 // Mark initial load as complete
                 isInitialLoadComplete = true;
@@ -3574,9 +3678,9 @@
             } catch (error) {
                 console.error('Error loading status updates:', error);
                 
-                // Fallback to cache on error
-                console.log('Falling back to cached status updates');
-                updateStatusListWithCache();
+                // Silent failure - keep cached data
+                console.log('Keeping cached status updates due to error');
+                // Don't show error to user
             }
         }
         
@@ -3594,10 +3698,10 @@
                 loadHighlightedStatuses();
                 loadUserGroups();
                 
-                // Load status updates in background
+                // Load status updates in background (silently)
                 setTimeout(() => {
-                    loadStatusUpdates();
-                }, 500);
+                    loadStatusUpdatesInBackground();
+                }, 1000);
                 
             } else {
                 // Wait for auth state
@@ -3616,10 +3720,10 @@
                         loadHighlightedStatuses();
                         loadUserGroups();
                         
-                        // Load status updates in background
+                        // Load status updates in background (silently)
                         setTimeout(() => {
-                            loadStatusUpdates();
-                        }, 500);
+                            loadStatusUpdatesInBackground();
+                        }, 1000);
                     } else {
                         // Redirect to login page if not authenticated
                         window.location.href = 'index.html';
@@ -3690,20 +3794,25 @@
             try {
                 if (!currentUser || !currentUser.uid) return;
                 
-                // Load user's groups from Firestore
-                const groupsSnapshot = await db.collection('groups')
-                    .where('members', 'array-contains', currentUser.uid)
-                    .get();
-                
-                userGroups = [];
-                groupsSnapshot.forEach(doc => {
-                    const groupData = doc.data();
-                    userGroups.push({
-                        id: doc.id,
-                        name: groupData.name,
-                        members: groupData.members || []
+                // Load user's groups from Firestore (silently)
+                try {
+                    const groupsSnapshot = await db.collection('groups')
+                        .where('members', 'array-contains', currentUser.uid)
+                        .get();
+                    
+                    userGroups = [];
+                    groupsSnapshot.forEach(doc => {
+                        const groupData = doc.data();
+                        userGroups.push({
+                            id: doc.id,
+                            name: groupData.name,
+                            members: groupData.members || []
+                        });
                     });
-                });
+                } catch (error) {
+                    console.error('Error loading user groups:', error);
+                    userGroups = [];
+                }
             } catch (error) {
                 console.error('Error loading user groups:', error);
                 userGroups = [];
@@ -3755,29 +3864,34 @@
         async function updateMyStatusItem() {
             if (!currentUser || !currentUser.uid) return;
             
-            const myStatuses = await getUserStatuses(currentUser.uid);
-            const myStatusItem = document.getElementById('myStatusItem');
-            const myStatusOptions = document.getElementById('myStatusOptions');
-            
-            if (myStatuses && myStatuses.length > 0) {
-                const latestStatus = myStatuses[0];
-                const statusCount = myStatuses.length;
+            try {
+                const myStatuses = await getUserStatuses(currentUser.uid);
+                const myStatusItem = document.getElementById('myStatusItem');
+                const myStatusOptions = document.getElementById('myStatusOptions');
                 
-                myStatusItem.querySelector('.my-status-desc').textContent = 
-                    `${statusCount} update${statusCount > 1 ? 's' : ''}`;
-                
-                // Add status ring to avatar
-                myStatusItem.querySelector('.my-status-avatar').classList.add('has-status');
-                
-                // Show options
-                myStatusOptions.style.display = 'block';
-                
-                // Store current user's statuses
-                window.myCurrentStatuses = myStatuses;
-            } else {
-                myStatusItem.querySelector('.my-status-desc').textContent = 'Tap to add status update';
-                myStatusItem.querySelector('.my-status-avatar').classList.remove('has-status');
-                myStatusOptions.style.display = 'none';
+                if (myStatuses && myStatuses.length > 0) {
+                    const latestStatus = myStatuses[0];
+                    const statusCount = myStatuses.length;
+                    
+                    myStatusItem.querySelector('.my-status-desc').textContent = 
+                        `${statusCount} update${statusCount > 1 ? 's' : ''}`;
+                    
+                    // Add status ring to avatar
+                    myStatusItem.querySelector('.my-status-avatar').classList.add('has-status');
+                    
+                    // Show options
+                    myStatusOptions.style.display = 'block';
+                    
+                    // Store current user's statuses
+                    window.myCurrentStatuses = myStatuses;
+                } else {
+                    myStatusItem.querySelector('.my-status-desc').textContent = 'Tap to add status update';
+                    myStatusItem.querySelector('.my-status-avatar').classList.remove('has-status');
+                    myStatusOptions.style.display = 'none';
+                }
+            } catch (error) {
+                console.error('Error updating my status item:', error);
+                // Silent fail - keep UI as is
             }
         }
         
@@ -6461,14 +6575,14 @@
             });
             
             // Category tabs
-            document.querySelectorAll('.category-btn').forEach(tab => {
-                tab.addEventListener('click', function() {
+            document.querySelectorAll('.category-btn').forEach(btn => {
+                btn.addEventListener('click', function() {
                     const category = this.id.replace('Tab', '');
                     currentCategory = category;
                     
                     // Update active tab
-                    document.querySelectorAll('.category-btn').forEach(t => {
-                        t.classList.remove('active');
+                    document.querySelectorAll('.category-btn').forEach(b => {
+                        b.classList.remove('active');
                     });
                     this.classList.add('active');
                     
@@ -6489,12 +6603,12 @@
                                 sectionTitle.textContent = 'Archived Statuses';
                                 break;
                             case 'highlights':
-                                sectionTitle.textContent = 'Highlights';
+                                sectionTitle.textContent = 'Highlighted Statuses';
                                 break;
                         }
                     }
                     
-                    // Update the status list
+                    // Update status list
                     updateStatusListWithCache();
                 });
             });
@@ -6505,76 +6619,59 @@
             const textEditor = document.getElementById('textEditor');
             if (textEditor) textEditor.value = '';
             
-            // Reset emoji
-            selectedEmoji = '😊';
-            const emojiOnlyDisplay = document.getElementById('emojiOnlyDisplay');
-            if (emojiOnlyDisplay) emojiOnlyDisplay.textContent = selectedEmoji;
-            
-            // Reset media previews
+            // Reset photo upload
             const photoPreview = document.getElementById('photoPreview');
-            if (photoPreview) photoPreview.classList.remove('active');
+            if (photoPreview) {
+                photoPreview.classList.remove('active');
+                const photoPreviewImg = document.getElementById('photoPreviewImg');
+                if (photoPreviewImg) photoPreviewImg.src = '';
+            }
             
+            // Reset video upload
             const videoPreview = document.getElementById('videoPreview');
-            if (videoPreview) videoPreview.classList.remove('active');
-            
-            // Hide edit tools
-            const photoEditTools = document.getElementById('photoEditTools');
-            if (photoEditTools) photoEditTools.style.display = 'none';
-            
-            const videoEditTools = document.getElementById('videoEditTools');
-            if (videoEditTools) videoEditTools.style.display = 'none';
+            if (videoPreview) {
+                videoPreview.classList.remove('active');
+                const videoPreviewVideo = document.getElementById('videoPreviewVideo');
+                if (videoPreviewVideo) videoPreviewVideo.src = '';
+            }
             
             // Reset voice recording
             const voicePlayback = document.getElementById('voicePlayback');
             if (voicePlayback) voicePlayback.style.display = 'none';
-            currentMediaFile = null;
-            audioChunks = [];
-            isRecording = false;
-            recordingTime = 0;
-            clearInterval(recordingTimer);
-            const recordBtn = document.getElementById('recordBtn');
-            if (recordBtn) recordBtn.classList.remove('recording');
             
             // Reset poll
             const pollQuestionInput = document.getElementById('pollQuestionInput');
             if (pollQuestionInput) pollQuestionInput.value = '';
             
-            const pollOptionsContainer = document.getElementById('pollOptionsContainer');
-            if (pollOptionsContainer) {
-                pollOptionsContainer.innerHTML = `
-                    <div class="poll-option">
-                        <input type="text" class="poll-option-input" placeholder="Option 1" data-index="0">
-                    <\/div>
-                    <div class="poll-option">
-                        <input type="text" class="poll-option-input" placeholder="Option 2" data-index="1">
-                    <\/div>
-                `;
-            }
-            
-            // Reset question
-            const questionInput = document.getElementById('questionInput');
-            if (questionInput) questionInput.value = '';
-            
-            // Reset music selection
-            window.selectedMusic = null;
-            const musicResults = document.getElementById('musicResults');
-            if (musicResults) {
-                musicResults.querySelectorAll('.music-result').forEach(r => {
-                    r.style.background = 'none';
-                });
-            }
-            
-            // Reset group selection
-            selectedGroup = null;
-            const groupOptions = document.querySelectorAll('.group-option');
-            groupOptions.forEach(opt => {
-                opt.classList.remove('active');
+            // Reset other inputs
+            ['photoCaptionInput', 'videoCaptionInput', 'questionInput', 'musicSearchInput'].forEach(id => {
+                const input = document.getElementById(id);
+                if (input) input.value = '';
             });
             
-            // Reset scheduled time
+            // Reset media file
+            currentMediaFile = null;
+            audioChunks = [];
+            isRecording = false;
+            recordingTime = 0;
+            
+            // Reset selection
+            selectedStatusType = 'text';
+            selectedEmoji = '😊';
             scheduledTime = null;
-            const scheduleInput = document.getElementById('scheduleInput');
-            if (scheduleInput) scheduleInput.value = '';
+            selectedGroup = null;
+            window.selectedMusic = null;
+            
+            // Reset to text tab
+            document.querySelectorAll('.create-status-tab').forEach(tab => {
+                tab.classList.remove('active');
+            });
+            document.querySelector('.create-status-tab[data-type="text"]').classList.add('active');
+            
+            document.querySelectorAll('.status-type-container').forEach(container => {
+                container.classList.remove('active');
+            });
+            document.getElementById('textStatusContainer').classList.add('active');
         }
     </script>
 </body>

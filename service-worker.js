@@ -534,7 +534,192 @@ function isStale(cachedResponse) {
   return age > parseInt(ttl);
 }
 
-// NEW: Network-first with cache fallback (for API calls)
+// NEW: Cache-first with background update strategy (OFFLINE-FIRST)
+async function cacheFirstWithBackgroundUpdate(request) {
+  const url = new URL(request.url);
+  
+  // Try to get from cache first
+  const cache = await caches.open(STATIC_CACHE_NAME);
+  const cachedResponse = await cache.match(request);
+  
+  // If we have a cached response, return it immediately
+  if (cachedResponse) {
+    // Check if stale, if so, update in background
+    if (isStale(cachedResponse)) {
+      updateInBackground(request);
+    }
+    return cachedResponse;
+  }
+  
+  // If not in cache, try network (with offline fallback)
+  try {
+    const networkResponse = await fetch(request);
+    
+    // Cache successful responses
+    if (networkResponse.status === 200) {
+      await cacheWithMetadata(request, networkResponse.clone(), STATIC_CACHE_NAME);
+    }
+    
+    return networkResponse;
+  } catch (error) {
+    // Network failed, create offline response
+    return createOfflineResponse(request);
+  }
+}
+
+// NEW: API cache-first with background sync
+async function apiCacheFirstWithBackgroundSync(request) {
+  const cache = await caches.open(API_CACHE_NAME);
+  const cachedResponse = await cache.match(request);
+  
+  // Always return cached API response immediately if available
+  if (cachedResponse) {
+    // Update from network in background
+    updateApiInBackground(request);
+    return cachedResponse;
+  }
+  
+  // If not in cache, try network
+  try {
+    const response = await fetch(request);
+    
+    // Cache successful API responses
+    if (response.status === 200) {
+      await cacheWithMetadata(request, response.clone(), API_CACHE_NAME);
+    }
+    
+    return response;
+  } catch (error) {
+    // Return cached offline response
+    if (cachedResponse) {
+      return cachedResponse;
+    }
+    
+    // Return generic offline API response
+    return new Response(JSON.stringify({
+      offline: true,
+      message: 'API data not available offline',
+      timestamp: Date.now()
+    }), {
+      headers: { 'Content-Type': 'application/json' },
+      status: 200
+    });
+  }
+}
+
+// NEW: Update API cache in background
+async function updateApiInBackground(request) {
+  const url = request.url;
+  
+  // Skip if already in queue
+  if (updateQueue.has(url)) return;
+  
+  updateQueue.set(url, true);
+  
+  try {
+    const response = await fetch(request);
+    if (response.status === 200) {
+      const cache = await caches.open(API_CACHE_NAME);
+      await cacheWithMetadata(request, response.clone(), API_CACHE_NAME);
+      console.log(`[Service Worker] API cache updated: ${url}`);
+      
+      // Notify clients about updated API data
+      const clients = await self.clients.matchAll();
+      clients.forEach(client => {
+        client.postMessage({
+          type: 'API_DATA_UPDATED',
+          url: url,
+          timestamp: Date.now()
+        });
+      });
+    }
+  } catch (error) {
+    // Silent fail for background updates
+    console.log(`[Service Worker] API background update failed for ${url}:`, error);
+  } finally {
+    updateQueue.delete(url);
+  }
+}
+
+// NEW: User data cache-first strategy
+async function userDataCacheFirst(request) {
+  const userCacheName = await getUserCacheName();
+  
+  if (!userCacheName) {
+    // No user logged in, try regular fetch
+    try {
+      return await fetch(request);
+    } catch (error) {
+      return createOfflineResponse(request);
+    }
+  }
+  
+  const userCache = await caches.open(userCacheName);
+  const cachedResponse = await userCache.match(request);
+  
+  // Return cached user data if available
+  if (cachedResponse) {
+    // Update in background if stale
+    if (isStale(cachedResponse)) {
+      updateUserDataInBackground(request, userCacheName);
+    }
+    return cachedResponse;
+  }
+  
+  // Try network for user data
+  try {
+    const response = await fetch(request);
+    if (response.status === 200) {
+      await cacheWithMetadata(request, response.clone(), userCacheName);
+    }
+    return response;
+  } catch (error) {
+    return createOfflineResponse(request);
+  }
+}
+
+// NEW: Update user data in background
+async function updateUserDataInBackground(request, userCacheName) {
+  const url = request.url;
+  
+  // Skip if already in queue
+  if (updateQueue.has(url)) return;
+  
+  updateQueue.set(url, true);
+  
+  try {
+    const response = await fetch(request);
+    if (response.status === 200) {
+      const userCache = await caches.open(userCacheName);
+      await cacheWithMetadata(request, response.clone(), userCacheName);
+      console.log(`[Service Worker] User data updated: ${url}`);
+    }
+  } catch (error) {
+    // Silent fail for background updates
+  } finally {
+    updateQueue.delete(url);
+  }
+}
+
+// NEW: Main offline-first fetch strategy
+async function offlineFirstStrategy(request) {
+  const url = new URL(request.url);
+  
+  // API requests: Cache-first with background update
+  if (isApiRequest(url)) {
+    return apiCacheFirstWithBackgroundSync(request);
+  }
+  
+  // User data requests: User-specific cache-first
+  if (isUserDataRequest(url)) {
+    return userDataCacheFirst(request);
+  }
+  
+  // Static assets: Cache-first with background update
+  return cacheFirstWithBackgroundUpdate(request);
+}
+
+// OLD FUNCTION: Network-first with cache fallback (for API calls) - KEPT FOR COMPATIBILITY
 async function networkFirstWithCache(request) {
   try {
     // Try network first with timeout
@@ -576,7 +761,7 @@ async function networkFirstWithCache(request) {
   }
 }
 
-// NEW: Stale-while-revalidate strategy for static assets
+// OLD FUNCTION: Stale-while-revalidate strategy for static assets - KEPT FOR COMPATIBILITY
 async function staleWhileRevalidate(request) {
   const cache = await caches.open(STATIC_CACHE_NAME);
   const cachedResponse = await cache.match(request);
@@ -665,7 +850,7 @@ async function cacheApiResponse(request, response) {
   return response;
 }
 
-// Fetch and cache with user isolation
+// OLD FUNCTION: Fetch and cache with user isolation - KEPT FOR COMPATIBILITY
 async function fetchAndCache(request) {
   const url = new URL(request.url);
   const isUserData = isUserDataRequest(url);
@@ -698,7 +883,7 @@ async function fetchAndCache(request) {
   }
 }
 
-// Serve from cache with user isolation
+// OLD FUNCTION: Serve from cache with user isolation - KEPT FOR COMPATIBILITY
 async function serveWithUserIsolation(request) {
   const url = new URL(request.url);
   
@@ -927,6 +1112,7 @@ self.addEventListener('activate', (event) => {
       }
       
       console.log('[Service Worker] Now controlling all clients with device-based auth');
+      console.log('[Service Worker] OFFLINE-FIRST MODE ENABLED: Cache-first strategy active');
     })()
   );
 });
@@ -938,7 +1124,7 @@ self.addEventListener('periodicsync', (event) => {
   }
 });
 
-// FETCH HANDLER - Cache-first strategy with user isolation
+// FETCH HANDLER - OFFLINE-FIRST CACHE-FIRST STRATEGY
 self.addEventListener('fetch', (event) => {
   const request = event.request;
   const url = new URL(request.url);
@@ -960,8 +1146,8 @@ self.addEventListener('fetch', (event) => {
     return;
   }
   
-  // Use user-isolated caching strategy with performance improvements
-  event.respondWith(serveWithUserIsolation(request));
+  // Use offline-first caching strategy
+  event.respondWith(offlineFirstStrategy(request));
 });
 
 // MESSAGE HANDLING - Enhanced for device-based auth
@@ -987,7 +1173,7 @@ self.addEventListener('message', (event) => {
             deviceId: deviceId,
             isLoggedIn: session ? session.isLoggedIn : false,
             version: APP_VERSION,
-            strategy: 'Device-Based User Isolation + Stale-While-Revalidate'
+            strategy: 'OFFLINE-FIRST: Cache-First + Background Updates'
           });
         })()
       );
@@ -1212,6 +1398,39 @@ self.addEventListener('message', (event) => {
         })()
       );
       break;
+      
+    // NEW: Test offline-first mode
+    case 'TEST_OFFLINE_MODE':
+      event.waitUntil(
+        (async () => {
+          const testUrls = [
+            '/',
+            '/styles.css',
+            '/js/app.js',
+            '/api/user/test'
+          ];
+          
+          const results = await Promise.all(
+            testUrls.map(async (url) => {
+              const cache = await caches.open(STATIC_CACHE_NAME);
+              const cached = await cache.match(url);
+              return {
+                url,
+                cached: !!cached,
+                strategy: 'cache-first'
+              };
+            })
+          );
+          
+          event.source.postMessage({
+            type: 'OFFLINE_TEST_RESULTS',
+            results: results,
+            mode: 'offline-first',
+            timestamp: Date.now()
+          });
+        })()
+      );
+      break;
   }
 });
 
@@ -1304,9 +1523,10 @@ async function syncFailedRequests() {
 
 // INITIALIZATION LOG
 console.log(`[Kynecta MoodChat Service Worker] v${APP_VERSION} loaded`);
-console.log('[Service Worker] Strategy: DEVICE-BASED USER ISOLATION + STALE-WHILE-REVALIDATE');
+console.log('[Service Worker] Strategy: OFFLINE-FIRST CACHE-FIRST WITH BACKGROUND UPDATES');
 console.log('[Service Worker] Static assets cached, user data isolated by device');
 console.log('[Service Worker] Auto-login detection with device ID validation');
 console.log('[Service Worker] Supports both online and offline authentication');
 console.log('[Service Worker] Enhanced: Background updates, API caching, 3s network timeout');
 console.log('[Service Worker] Critical assets prioritized for offline access');
+console.log('[Service Worker] OFFLINE-FIRST MODE: All requests try cache first, network updates in background');
