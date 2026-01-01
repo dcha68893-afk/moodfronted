@@ -252,12 +252,107 @@
             color: white;
         }
         
+        /* ====== WHATSAPP-LIKE BOTTOM NAVIGATION ====== */
+        /* Mobile bottom navigation bar - WhatsApp-like behavior */
+        .mobile-nav-bar {
+            position: fixed !important;
+            bottom: 0 !important;
+            left: 0 !important;
+            right: 0 !important;
+            height: 60px !important;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%) !important;
+            display: flex !important;
+            justify-content: space-around !important;
+            align-items: center !important;
+            z-index: 1000 !important;
+            border-top: 1px solid rgba(255, 255, 255, 0.1);
+            padding: 0 10px !important;
+            transform: translateY(0);
+            transition: transform 0.3s cubic-bezier(0.4, 0, 0.2, 1) !important;
+            box-shadow: 0 -2px 10px rgba(0, 0, 0, 0.1);
+        }
+        
+        /* Hide bottom nav when in fullscreen views */
+        .mobile-nav-bar.hidden-nav {
+            transform: translateY(100%) !important;
+            pointer-events: none !important;
+        }
+        
+        /* WhatsApp-like behavior: Hide nav in chat/status/group views */
+        body.in-chat-view .mobile-nav-bar,
+        body.in-status-view .mobile-nav-bar,
+        body.in-group-view .mobile-nav-bar,
+        body.in-fullscreen-view .mobile-nav-bar {
+            transform: translateY(100%) !important;
+            pointer-events: none !important;
+        }
+        
+        /* Adjust content areas when nav is hidden - WhatsApp behavior */
+        body.in-chat-view .iframe-container,
+        body.in-status-view .iframe-container,
+        body.in-group-view .iframe-container,
+        body.in-fullscreen-view .iframe-container {
+            height: 100vh !important;
+            padding-bottom: 0 !important;
+            bottom: 0 !important;
+        }
+        
+        /* FIXED: Mobile nav icons styling for better visibility */
+        .mobile-nav-icon {
+            color: transparent !important; /* Hide text color */
+            font-size: 0; /* Hide text */
+            padding: 12px;
+            border-radius: 12px;
+            transition: all 0.2s ease;
+            flex: 1;
+            text-align: center;
+            min-width: 0;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            position: relative;
+        }
+        
+        /* FIXED: Ensure FontAwesome icons are visible */
+        .mobile-nav-icon i {
+            font-family: "Font Awesome 6 Free" !important;
+            font-weight: 900 !important;
+            -webkit-font-smoothing: antialiased !important;
+            display: inline-block !important;
+            font-style: normal !important;
+            font-variant: normal !important;
+            text-rendering: auto !important;
+            line-height: 1 !important;
+            font-size: 20px !important;
+            color: rgba(255, 255, 255, 0.85) !important;
+        }
+        
+        .mobile-nav-icon.active {
+            color: transparent !important;
+            background: rgba(255, 255, 255, 0.2);
+        }
+        
+        .mobile-nav-icon.active i {
+            color: white !important;
+            filter: drop-shadow(0 2px 4px rgba(0, 0, 0, 0.3));
+        }
+        
+        .mobile-nav-icon:hover {
+            background: rgba(255, 255, 255, 0.15);
+        }
+        
+        .mobile-nav-icon:hover i {
+            color: white !important;
+        }
+        
         /* ====== FIXED: MOBILE NAVIGATION ICONS ====== */
         @media (max-width: 767px) {
             .iframe-container {
                 left: 0;
                 width: 100%;
                 z-index: 30;
+                transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
             }
             
             .fixed.left-0 {
@@ -296,7 +391,7 @@
             #chatApp {
                 margin-left: 0 !important;
                 width: 100% !important;
-                margin-bottom: 0; /* Removed space for bottom navbar */
+                margin-bottom: 60px; /* Space for bottom navbar */
             }
             
             /* Adjust content areas - REMOVED sidebar offset */
@@ -308,11 +403,22 @@
                 padding-bottom: 60px !important; /* Space for mobile navbar */
             }
             
+            /* WhatsApp behavior: Fullscreen views take full height */
+            body.in-chat-view .iframe-container,
+            body.in-status-view .iframe-container,
+            body.in-group-view .iframe-container,
+            body.in-fullscreen-view .iframe-container {
+                height: 100vh !important;
+                padding-bottom: 0 !important;
+                bottom: 0 !important;
+            }
+            
             /* Make sure iframe pages don't hide sidebar */
             .content-area.iframe-container {
                 left: 0 !important;
                 width: 100% !important;
                 height: 100vh !important; /* Full screen height */
+                padding-bottom: 60px; /* Space for mobile navbar */
             }
             
             /* Chat filter tabs for mobile - UPDATED: Increased icon size */
@@ -325,71 +431,6 @@
                 width: 44px; /* Increased from 36px */
                 height: 44px; /* Increased from 36px */
                 font-size: 18px; /* Increased from 16px */
-            }
-            
-            /* ====== FIXED: MOBILE NAVIGATION BAR ====== */
-            .mobile-nav-bar {
-                position: fixed !important;
-                bottom: 0 !important;
-                left: 0 !important;
-                right: 0 !important;
-                height: 60px !important;
-                background: linear-gradient(135deg, #667eea 0%, #764ba2 100%) !important;
-                display: flex !important;
-                justify-content: space-around !important;
-                align-items: center !important;
-                z-index: 1000 !important;
-                border-top: 1px solid rgba(255, 255, 255, 0.1);
-                padding: 0 10px !important;
-            }
-            
-            /* FIXED: Mobile nav icons styling for better visibility */
-            .mobile-nav-icon {
-                color: transparent !important; /* Hide text color */
-                font-size: 0; /* Hide text */
-                padding: 12px;
-                border-radius: 12px;
-                transition: all 0.2s ease;
-                flex: 1;
-                text-align: center;
-                min-width: 0;
-                display: flex;
-                flex-direction: column;
-                align-items: center;
-                justify-content: center;
-                position: relative;
-            }
-            
-            /* FIXED: Ensure FontAwesome icons are visible */
-            .mobile-nav-icon i {
-                font-family: "Font Awesome 6 Free" !important;
-                font-weight: 900 !important;
-                -webkit-font-smoothing: antialiased !important;
-                display: inline-block !important;
-                font-style: normal !important;
-                font-variant: normal !important;
-                text-rendering: auto !important;
-                line-height: 1 !important;
-                font-size: 20px !important;
-                color: rgba(255, 255, 255, 0.85) !important;
-            }
-            
-            .mobile-nav-icon.active {
-                color: transparent !important;
-                background: rgba(255, 255, 255, 0.2);
-            }
-            
-            .mobile-nav-icon.active i {
-                color: white !important;
-                filter: drop-shadow(0 2px 4px rgba(0, 0, 0, 0.3));
-            }
-            
-            .mobile-nav-icon:hover {
-                background: rgba(255, 255, 255, 0.15);
-            }
-            
-            .mobile-nav-icon:hover i {
-                color: white !important;
             }
             
             /* Hide desktop chat header icons on mobile when not in chat */
@@ -460,9 +501,38 @@
             }
             
             /* Show mobile menu button only on specific pages in mobile view */
-            body.in-message-page .mobile-menu-button,
-            body.in-call-page .mobile-menu-button,
-            body.in-status-page .mobile-menu-button {
+            body.in-chat-view .mobile-menu-button {
+                display: inline-flex !important;
+            }
+            
+            /* WhatsApp-like back button */
+            .back-button {
+                display: inline-flex !important;
+                align-items: center;
+                justify-content: center;
+                margin-right: 10px;
+                padding: 8px;
+                border-radius: 50%;
+                background: rgba(255, 255, 255, 0.1);
+                color: white !important;
+                cursor: pointer;
+            }
+            
+            .back-button i {
+                font-size: 18px !important;
+                color: white !important;
+            }
+            
+            /* WhatsApp behavior: Show back button in fullscreen views, hide menu button */
+            body.in-chat-view .mobile-menu-button,
+            body.in-status-view .mobile-menu-button,
+            body.in-group-view .mobile-menu-button {
+                display: none !important;
+            }
+            
+            body.in-chat-view .back-button,
+            body.in-status-view .back-button,
+            body.in-group-view .back-button {
                 display: inline-flex !important;
             }
         }
@@ -496,6 +566,11 @@
             .desktop-header-buttons {
                 display: flex !important;
             }
+            
+            /* Hide mobile nav bar on tablet */
+            #mobileNavBar {
+                display: none !important;
+            }
         }
         
         /* Desktop optimizations */
@@ -526,6 +601,11 @@
             
             .desktop-header-buttons {
                 display: flex !important;
+            }
+            
+            /* Hide mobile nav bar on desktop */
+            #mobileNavBar {
+                display: none !important;
             }
         }
         
@@ -954,7 +1034,7 @@
             height: 20px;
             font-size: 12px;
             display: flex;
-            align-items: center;
+                align-items: center;
             justify-content: center;
             font-weight: bold;
         }
@@ -1227,7 +1307,7 @@
             animation: slideInRight 0.3s ease;
             max-width: 300px;
             display: flex;
-            align-items: center;
+                align-items: center;
             justify-content: space-between;
         }
         
@@ -1248,7 +1328,7 @@
             height: 24px;
             border-radius: 50%;
             display: flex;
-            align-items: center;
+                align-items: center;
             justify-content: center;
             cursor: pointer;
         }
@@ -1267,7 +1347,7 @@
             animation: slideInRight 0.3s ease;
             max-width: 300px;
             display: flex;
-            align-items: center;
+                align-items: center;
             justify-content: space-between;
         }
         
@@ -1289,7 +1369,7 @@
             height: 32px;
             border-radius: 50%;
             display: flex;
-            align-items: center;
+                align-items: center;
             justify-content: center;
             cursor: pointer;
         }
@@ -1300,6 +1380,33 @@
         
         .global-call-notification .call-btn.reject {
             background: rgba(239, 68, 68, 0.8);
+        }
+        
+        /* ====== WHATSAPP-LIKE BACK NAVIGATION ====== */
+        .back-button {
+            display: none !important;
+        }
+        
+        @media (max-width: 767px) {
+            .back-button {
+                display: none !important;
+            }
+            
+            /* WhatsApp behavior: Show back button in fullscreen views */
+            body.in-chat-view .back-button,
+            body.in-status-view .back-button,
+            body.in-group-view .back-button,
+            body.in-fullscreen-view .back-button {
+                display: inline-flex !important;
+            }
+            
+            /* WhatsApp behavior: Hide menu button in fullscreen views */
+            body.in-chat-view .mobile-menu-button,
+            body.in-status-view .mobile-menu-button,
+            body.in-group-view .mobile-menu-button,
+            body.in-fullscreen-view .mobile-menu-button {
+                display: none !important;
+            }
         }
         
         /* ====== CRITICAL FIXES - END ====== */
@@ -1376,7 +1483,7 @@
         </div>
     </div>
 
-    <!-- Permanent Sidebar - Always Visible (Hidden on Mobile) -->
+    <!-- Permanent Sidebar - Always Visible on Desktop/Laptop (Hidden on Mobile) -->
     <div id="permanentSidebar" class="fixed left-0 top-0 bottom-0 w-16 bg-gray-900 z-40 flex flex-col items-center py-6 space-y-8 hidden md:flex">
         <!-- Profile section removed from sidebar -->
         
@@ -1416,8 +1523,9 @@
         </button>
     </div>
 
-    <!-- ====== FIXED: MOBILE NAVIGATION BAR WITH GROUP ICON ====== -->
-    <div id="mobileNavBar" class="mobile-nav-bar hidden">
+    <!-- ====== WHATSAPP-LIKE BOTTOM NAVIGATION BAR ====== -->
+    <!-- Mobile only - Shows all icons like WhatsApp -->
+    <div id="mobileNavBar" class="mobile-nav-bar">
         <button class="mobile-nav-icon active" data-page="messages" title="Messages">
             <i class="fas fa-comments"></i>
             <span id="mobileChatBadge" class="mobile-nav-badge hidden"></span>
@@ -1428,7 +1536,7 @@
             <span id="mobileCallBadge" class="mobile-nav-badge hidden"></span>
         </button>
         
-        <!-- ADDED: Group icon in mobile navigation -->
+        <!-- Group icon in mobile navigation -->
         <button class="mobile-nav-icon" data-page="group" title="Groups">
             <i class="fas fa-users"></i>
             <span id="mobileGroupBadge" class="mobile-nav-badge hidden"></span>
@@ -1602,7 +1710,13 @@
     let isOnline = navigator.onLine;
     let currentUser = null;
     let activeCall = null;
-    let currentActiveChat = false;
+    let bottomNavVisible = true;
+    let fullscreenPageDetectionEnabled = true;
+    let chatHistory = []; // Track chat navigation history for back button
+    let isInChatView = false; // Track if we're in a chat conversation view
+    let isInStatusView = false; // Track if we're in a status view
+    let isInGroupView = false; // Track if we're in a group view
+    let isInFullscreenView = false; // Track if we're in any fullscreen view
     
     document.addEventListener('DOMContentLoaded', function() {
         console.log('DOM loaded, initializing iframe controller...');
@@ -1614,8 +1728,11 @@
         // Set up online/offline detection
         setupOnlineStatus();
         
-        // Initialize mobile menu button
-        initializeMobileMenuButton();
+        // Setup back button functionality
+        setupBackButton();
+        
+        // Setup fullscreen page detection
+        setupFullscreenPageDetection();
     });
     
     function initializeUserFromStorage() {
@@ -1714,9 +1831,6 @@
         
         // Show sidebar and mobile nav
         document.getElementById('permanentSidebar').classList.remove('hidden');
-        if (window.innerWidth < 768) {
-            document.getElementById('mobileNavBar').classList.remove('hidden');
-        }
         
         // Setup navigation
         setupNavigation();
@@ -1747,15 +1861,228 @@
                 }
             });
         }
+    }
+    
+    function setupBackButton() {
+        // Add back button to window object for iframes to call
+        window.goBack = function() {
+            if (isInChatView || isInStatusView || isInGroupView || isInFullscreenView) {
+                // Exit fullscreen view and show bottom navigation
+                if (isInChatView) {
+                    setIsInChatView(false);
+                    // Notify the messages iframe to go back to chat list
+                    const messagesIframe = document.getElementById('messagesIframe');
+                    if (messagesIframe && iframesLoaded['messagesIframe']) {
+                        messagesIframe.contentWindow.postMessage({
+                            type: 'go_back'
+                        }, '*');
+                    }
+                } else if (isInStatusView) {
+                    setIsInStatusView(false);
+                    // Notify the status iframe to go back to status list
+                    const statusIframe = document.getElementById('statusIframe');
+                    if (statusIframe && iframesLoaded['statusIframe']) {
+                        statusIframe.contentWindow.postMessage({
+                            type: 'go_back'
+                        }, '*');
+                    }
+                } else if (isInGroupView) {
+                    setIsInGroupView(false);
+                    // Notify the group iframe to go back to group list
+                    const groupIframe = document.getElementById('groupIframe');
+                    if (groupIframe && iframesLoaded['groupIframe']) {
+                        groupIframe.contentWindow.postMessage({
+                            type: 'go_back'
+                        }, '*');
+                    }
+                } else if (isInFullscreenView) {
+                    setIsInFullscreenView(false);
+                }
+                return true;
+            }
+            return false;
+        };
+    }
+    
+    function setIsInChatView(inChatView) {
+        isInChatView = inChatView;
         
-        // Listen for page changes to update mobile menu button
-        window.addEventListener('hashchange', updatePageClass);
-        updatePageClass();
+        // Update body class for CSS
+        if (inChatView) {
+            document.body.classList.add('in-chat-view');
+            // Hide bottom navigation when in chat view (WhatsApp behavior)
+            hideBottomNavigation();
+        } else {
+            document.body.classList.remove('in-chat-view');
+            // Show bottom navigation when exiting chat view
+            showBottomNavigation();
+        }
+    }
+    
+    function setIsInStatusView(inStatusView) {
+        isInStatusView = inStatusView;
+        
+        if (inStatusView) {
+            document.body.classList.add('in-status-view');
+            // Hide bottom navigation when in status view (WhatsApp behavior)
+            hideBottomNavigation();
+        } else {
+            document.body.classList.remove('in-status-view');
+            // Show bottom navigation when exiting status view
+            showBottomNavigation();
+        }
+    }
+    
+    function setIsInGroupView(inGroupView) {
+        isInGroupView = inGroupView;
+        
+        if (inGroupView) {
+            document.body.classList.add('in-group-view');
+            // Hide bottom navigation when in group view (WhatsApp behavior)
+            hideBottomNavigation();
+        } else {
+            document.body.classList.remove('in-group-view');
+            // Show bottom navigation when exiting group view
+            showBottomNavigation();
+        }
+    }
+    
+    function setIsInFullscreenView(inFullscreenView) {
+        isInFullscreenView = inFullscreenView;
+        
+        if (inFullscreenView) {
+            document.body.classList.add('in-fullscreen-view');
+            // Hide bottom navigation when in fullscreen view (WhatsApp behavior)
+            hideBottomNavigation();
+        } else {
+            document.body.classList.remove('in-fullscreen-view');
+            // Show bottom navigation when exiting fullscreen view
+            showBottomNavigation();
+        }
+    }
+    
+    function setupFullscreenPageDetection() {
+        console.log('Setting up fullscreen page detection...');
+        
+        // Detect iframe URL changes for fullscreen pages
+        const iframeObserver = new MutationObserver(function(mutations) {
+            mutations.forEach(function(mutation) {
+                if (mutation.type === 'attributes' && mutation.attributeName === 'src') {
+                    setTimeout(() => {
+                        checkIframeForFullscreenPage();
+                    }, 100);
+                }
+            });
+        });
+        
+        // Observe all iframes for src changes
+        document.querySelectorAll('.content-iframe').forEach(iframe => {
+            iframeObserver.observe(iframe, { attributes: true });
+        });
+        
+        // Initial check
+        setTimeout(() => {
+            checkIframeForFullscreenPage();
+        }, 500);
+    }
+    
+    function checkIframeForFullscreenPage() {
+        if (!fullscreenPageDetectionEnabled || window.innerWidth >= 768) return;
+        
+        const activeIframe = document.querySelector('.content-area:not(.hidden) .content-iframe');
+        if (!activeIframe) return;
+        
+        try {
+            // Check if iframe has a URL we can access
+            const iframeSrc = activeIframe.src || '';
+            const iframeUrl = new URL(iframeSrc, window.location.origin);
+            
+            // Define patterns that indicate fullscreen pages (chat views)
+            const fullscreenPatterns = [
+                /chat-view/i,
+                /conversation/i,
+                /message-detail/i,
+                /status-view/i,
+                /status-detail/i,
+                /call-view/i,
+                /call-detail/i,
+                /profile-view/i,
+                /settings-view/i,
+                /fullscreen/i,
+                /\?fullscreen=true/i,
+                /#fullscreen/i
+            ];
+            
+            // Check if current URL matches any fullscreen pattern
+            const isFullscreenPage = fullscreenPatterns.some(pattern => 
+                pattern.test(iframeUrl.pathname) || pattern.test(iframeUrl.search) || pattern.test(iframeUrl.hash)
+            );
+            
+            // Also check for specific page names in hash
+            const hash = iframeUrl.hash.toLowerCase();
+            const isFullscreenHash = hash.includes('chat') && !hash.includes('chats') || 
+                                    hash.includes('status') && !hash.includes('status-list') ||
+                                    hash.includes('call') && !hash.includes('calls-list') ||
+                                    hash.includes('profile') ||
+                                    hash.includes('detail') ||
+                                    hash.includes('group-chat') ||
+                                    hash.includes('create-status') ||
+                                    hash.includes('view-status');
+            
+            if (isFullscreenPage || isFullscreenHash) {
+                hideBottomNavigation();
+            } else {
+                showBottomNavigation();
+            }
+        } catch (e) {
+            // Can't access iframe URL due to cross-origin, use alternative method
+            checkIframeForFullscreenViaMessages();
+        }
+    }
+    
+    function checkIframeForFullscreenViaMessages() {
+        // Try to get fullscreen status via postMessage
+        const activeIframe = document.querySelector('.content-area:not(.hidden) .content-iframe');
+        if (activeIframe && activeIframe.contentWindow) {
+            try {
+                // Request fullscreen status from iframe
+                activeIframe.contentWindow.postMessage({
+                    type: 'get_fullscreen_status'
+                }, '*');
+            } catch (e) {
+                // Silently ignore
+            }
+        }
+    }
+    
+    function showBottomNavigation() {
+        if (window.innerWidth >= 768) return; // Only for mobile
+        
+        // Don't show if we're in any fullscreen view (WhatsApp behavior)
+        if (isInChatView || isInStatusView || isInGroupView || isInFullscreenView) return;
+        
+        const mobileNavBar = document.getElementById('mobileNavBar');
+        if (mobileNavBar && mobileNavBar.classList.contains('hidden-nav')) {
+            mobileNavBar.classList.remove('hidden-nav');
+            bottomNavVisible = true;
+            console.log('Bottom navigation shown');
+        }
+    }
+    
+    function hideBottomNavigation() {
+        if (window.innerWidth >= 768) return; // Only for mobile
+        
+        const mobileNavBar = document.getElementById('mobileNavBar');
+        if (mobileNavBar && !mobileNavBar.classList.contains('hidden-nav')) {
+            mobileNavBar.classList.add('hidden-nav');
+            bottomNavVisible = false;
+            console.log('Bottom navigation hidden (fullscreen view detected)');
+        }
     }
     
     function setupGlobalCallNotification() {
         const globalAcceptBtn = document.getElementById('globalAcceptCall');
-        const globalRejectBtn = document.getElementById('globalRejectCall');
+        const globalRejectBtn = document.getElementById('globalRejectBtn');
         
         if (globalAcceptBtn) {
             globalAcceptBtn.addEventListener('click', function() {
@@ -1864,19 +2191,6 @@
         }
     }
     
-    function initializeMobileMenuButton() {
-        // This function will be called from iframes to update mobile menu visibility
-        window.updateMobileMenuVisibility = function(showMenu) {
-            if (window.innerWidth < 768) {
-                if (showMenu) {
-                    document.body.classList.add('in-message-page');
-                } else {
-                    document.body.classList.remove('in-message-page');
-                }
-            }
-        };
-    }
-    
     function setupOnlineStatus() {
         window.addEventListener('online', () => {
             isOnline = true;
@@ -1952,6 +2266,11 @@
             icon.addEventListener('click', function() {
                 const page = this.dataset.page;
                 if (page) {
+                    // Exit any fullscreen view when switching pages (WhatsApp behavior)
+                    if (isInChatView) setIsInChatView(false);
+                    if (isInStatusView) setIsInStatusView(false);
+                    if (isInGroupView) setIsInGroupView(false);
+                    if (isInFullscreenView) setIsInFullscreenView(false);
                     switchPage(page);
                 }
             });
@@ -1962,6 +2281,11 @@
             icon.addEventListener('click', function() {
                 const page = this.dataset.page;
                 if (page) {
+                    // Exit any fullscreen view when switching pages (WhatsApp behavior)
+                    if (isInChatView) setIsInChatView(false);
+                    if (isInStatusView) setIsInStatusView(false);
+                    if (isInGroupView) setIsInGroupView(false);
+                    if (isInFullscreenView) setIsInFullscreenView(false);
                     switchPage(page);
                 }
             });
@@ -1973,13 +2297,6 @@
             if (mobileNavBar) {
                 mobileNavBar.classList.remove('hidden');
                 console.log('Mobile nav bar shown');
-                
-                // Debug: Check if mobile icons are visible
-                const mobileIcons = document.querySelectorAll('.mobile-nav-icon i');
-                console.log('Mobile icons found:', mobileIcons.length);
-                mobileIcons.forEach((icon, index) => {
-                    console.log(`Icon ${index}:`, icon.className, icon.style.cssText);
-                });
             }
         }
     }
@@ -2075,8 +2392,11 @@
         console.log('Switching to page:', pageName);
         currentPage = pageName;
         
-        // Update body class for mobile menu button
-        updatePageClass();
+        // When switching pages, exit all fullscreen views and show bottom nav (WhatsApp behavior)
+        if (isInChatView) setIsInChatView(false);
+        if (isInStatusView) setIsInStatusView(false);
+        if (isInGroupView) setIsInGroupView(false);
+        if (isInFullscreenView) setIsInFullscreenView(false);
         
         // Hide loading screen immediately (will be shown only if needed)
         hideLoading();
@@ -2140,19 +2460,11 @@
                 }
             }
         }
-    }
-    
-    function updatePageClass() {
-        // Update body class based on current page for mobile menu button
-        document.body.classList.remove('in-message-page', 'in-call-page', 'in-status-page');
         
-        if (currentPage === 'messages' && currentActiveChat) {
-            document.body.classList.add('in-message-page');
-        } else if (currentPage === 'calls' && activeCall) {
-            document.body.classList.add('in-call-page');
-        } else if (currentPage === 'status') {
-            document.body.classList.add('in-status-page');
-        }
+        // Check if we're on a fullscreen page after a short delay (WhatsApp behavior)
+        setTimeout(() => {
+            checkIframeForFullscreenPage();
+        }, 200);
     }
     
     function handleIframeMessage(event) {
@@ -2173,6 +2485,11 @@
                 case 'navigate_to':
                     // Navigate to a different page
                     if (event.data.page) {
+                        // Exit any fullscreen view when navigating (WhatsApp behavior)
+                        if (isInChatView) setIsInChatView(false);
+                        if (isInStatusView) setIsInStatusView(false);
+                        if (isInGroupView) setIsInGroupView(false);
+                        if (isInFullscreenView) setIsInFullscreenView(false);
                         switchPage(event.data.page);
                     }
                     break;
@@ -2222,19 +2539,84 @@
                     // Hide global call notification when call ends
                     hideGlobalCallNotification();
                     activeCall = null;
-                    updatePageClass();
                     break;
                     
-                case 'chat_active':
-                    // Update active chat status for mobile menu button
-                    currentActiveChat = event.data.active || false;
-                    updatePageClass();
+                case 'enter_chat_view':
+                    // User entered a chat conversation
+                    setIsInChatView(true);
+                    // Add to chat history
+                    chatHistory.push({
+                        page: currentPage,
+                        chatId: event.data.chatId,
+                        timestamp: Date.now()
+                    });
                     break;
                     
-                case 'call_active':
-                    // Update active call status for mobile menu button
-                    activeCall = event.data.active ? (event.data.callData || true) : null;
-                    updatePageClass();
+                case 'exit_chat_view':
+                    // User exited a chat conversation
+                    setIsInChatView(false);
+                    // Clear chat history
+                    chatHistory = [];
+                    break;
+                    
+                case 'enter_status_view':
+                    // User entered a status view
+                    setIsInStatusView(true);
+                    break;
+                    
+                case 'exit_status_view':
+                    // User exited a status view
+                    setIsInStatusView(false);
+                    break;
+                    
+                case 'enter_group_view':
+                    // User entered a group view
+                    setIsInGroupView(true);
+                    break;
+                    
+                case 'exit_group_view':
+                    // User exited a group view
+                    setIsInGroupView(false);
+                    break;
+                    
+                case 'enter_fullscreen_view':
+                    // User entered any fullscreen view
+                    setIsInFullscreenView(true);
+                    break;
+                    
+                case 'exit_fullscreen_view':
+                    // User exited any fullscreen view
+                    setIsInFullscreenView(false);
+                    break;
+                    
+                case 'fullscreen_status':
+                    // Handle fullscreen status from iframe
+                    if (window.innerWidth < 768) {
+                        if (event.data.isFullscreen) {
+                            hideBottomNavigation();
+                        } else {
+                            showBottomNavigation();
+                        }
+                    }
+                    break;
+                    
+                case 'hide_bottom_nav':
+                    // Direct command to hide bottom navigation (WhatsApp behavior)
+                    if (window.innerWidth < 768) {
+                        hideBottomNavigation();
+                    }
+                    break;
+                    
+                case 'show_bottom_nav':
+                    // Direct command to show bottom navigation (WhatsApp behavior)
+                    if (window.innerWidth < 768) {
+                        showBottomNavigation();
+                    }
+                    break;
+                    
+                case 'back_button_clicked':
+                    // Handle back button click from iframe
+                    goBack();
                     break;
             }
         }
@@ -2319,10 +2701,44 @@
         }, 3000);
     }
     
-    // Make removeNotification globally available
+    // Make functions globally available
     window.removeNotification = removeNotification;
+    window.showBottomNavigation = showBottomNavigation;
+    window.hideBottomNavigation = hideBottomNavigation;
+    window.goBack = goBack;
+    window.setIsInChatView = setIsInChatView;
+    window.setIsInStatusView = setIsInStatusView;
+    window.setIsInGroupView = setIsInGroupView;
+    window.setIsInFullscreenView = setIsInFullscreenView;
     
-    console.log('Iframe controller loaded successfully');
+    // Handle window resize (WhatsApp behavior)
+    window.addEventListener('resize', function() {
+        if (window.innerWidth < 768) {
+            // On mobile, check if we should show/hide nav based on current view
+            setTimeout(() => {
+                checkIframeForFullscreenPage();
+                
+                // Show mobile nav if not in any fullscreen view (WhatsApp behavior)
+                if (!isInChatView && !isInStatusView && !isInGroupView && !isInFullscreenView) {
+                    showBottomNavigation();
+                }
+            }, 100);
+        } else {
+            // On desktop, always show sidebar and hide mobile nav
+            document.getElementById('permanentSidebar').classList.remove('hidden');
+            document.getElementById('mobileNavBar').classList.add('hidden-nav');
+        }
+    });
+    
+    // Handle Android back button (WhatsApp behavior)
+    document.addEventListener('backbutton', function(e) {
+        if (isInChatView || isInStatusView || isInGroupView || isInFullscreenView) {
+            e.preventDefault();
+            goBack();
+        }
+    }, false);
+    
+    console.log('Iframe controller loaded successfully with WhatsApp-like navigation behavior');
     </script>
 </body>
 </html>

@@ -749,6 +749,14 @@
             background-color: rgba(52, 199, 89, 0.1);
         }
         
+        .friend-action-btn.call {
+            color: var(--primary-color);
+        }
+        
+        .friend-action-btn.call:hover:not(:disabled) {
+            background-color: rgba(0, 132, 255, 0.1);
+        }
+        
         /* Friend Details Panel */
         .friend-details-panel {
             flex: 1;
@@ -1706,6 +1714,46 @@
             font-size: 24px;
             margin-bottom: 15px;
         }
+        
+        /* Friend Request Profile Styles */
+        .friend-request-profile {
+            max-height: 400px;
+            overflow-y: auto;
+        }
+        
+        .request-actions {
+            display: flex;
+            gap: 10px;
+            margin-top: 20px;
+        }
+        
+        .profile-view-btn {
+            background: var(--primary-color);
+            color: white;
+            border: none;
+            padding: 8px 15px;
+            border-radius: 8px;
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            gap: 5px;
+        }
+        
+        /* Call button styles */
+        .call-btn-fixed {
+            background: none;
+            border: none;
+            color: var(--primary-color);
+            cursor: pointer;
+            font-size: 20px;
+            padding: 8px;
+            border-radius: 50%;
+            transition: all 0.2s;
+        }
+        
+        .call-btn-fixed:hover {
+            background-color: var(--secondary-color);
+        }
     </style>
 </head>
 <body>
@@ -2122,7 +2170,7 @@
 
     <script>
         // =============================================
-        // COMPLETE OFFLINE-FIRST FRIENDS SYSTEM
+        // COMPLETE FIXED FRIENDS SYSTEM
         // =============================================
 
         // Firebase Configuration
@@ -2253,21 +2301,21 @@
             FRIEND_REQUESTS_OFFLINE: 'knecta_friend_requests_offline',
             FRIEND_ACCEPT_OFFLINE: 'knecta_friend_accept_offline',
             OFFLINE_OVERLAY_DISMISSED: 'knecta_offline_overlay_dismissed',
-            LAST_CACHE_TIME: 'knecta_last_cache_time' // NEW: Track when cache was last updated
+            LAST_CACHE_TIME: 'knecta_last_cache_time',
+            UNIQUE_QR_CODE: 'knecta_unique_qr_code'
         };
         
-        // Initialize the application - START INSTANTLY
+        // Initialize the application
         document.addEventListener('DOMContentLoaded', function() {
-            // STEP 1: Load cached data INSTANTLY (without waiting for anything)
+            // Load cached data INSTANTLY
             loadCachedDataInstantly();
             
-            // STEP 2: Initialize the rest of the app asynchronously
+            // Initialize the rest of the app asynchronously
             setTimeout(() => {
                 initializeApp();
             }, 100);
         });
         
-        // NEW FUNCTION: Load cached data INSTANTLY on page load
         function loadCachedDataInstantly() {
             console.log('=== INSTANT CACHE LOAD START ===');
             
@@ -2345,11 +2393,9 @@
                 
             } catch (error) {
                 console.error('Error in instant cache load:', error);
-                // Don't show error to user during instant load
             }
         }
         
-        // NEW FUNCTION: Render friends list instantly from cache
         function renderFriendsListInstantly() {
             if (!allFriendsList) return;
             
@@ -2371,7 +2417,7 @@
             // Create a container for instant rendering
             const fragment = document.createDocumentFragment();
             
-            // Render first 20 friends instantly, then add more
+            // Render first 20 friends instantly
             const friendsToRender = friends.slice(0, 20);
             
             friendsToRender.forEach(friend => {
@@ -2394,7 +2440,6 @@
             allFriendsList.classList.add('instant-load');
         }
         
-        // NEW FUNCTION: Add friend item instantly (optimized for speed)
         function addFriendItemInstant(friendData, container, type) {
             const friendItem = document.createElement('div');
             friendItem.className = 'friend-item';
@@ -2415,7 +2460,7 @@
                 statusText = 'Online now';
             }
             
-            // Calculate mutual friends count (simplified for speed)
+            // Calculate mutual friends count
             const mutualCount = Math.floor(Math.random() * 10);
             
             // Determine category badge
@@ -2448,8 +2493,11 @@
                     <button class="friend-action-btn chat" data-action="start-chat" title="Start Chat">
                         <i class="fas fa-comments"></i>
                     </button>
-                    <button class="friend-action-btn" data-action="message" title="Message">
-                        <i class="fas fa-comment"></i>
+                    <button class="friend-action-btn call" data-action="call" title="Voice Call">
+                        <i class="fas fa-phone"></i>
+                    </button>
+                    <button class="friend-action-btn" data-action="more" title="More options">
+                        <i class="fas fa-ellipsis-v"></i>
                     </button>
                 </div>
             `;
@@ -2507,21 +2555,18 @@
             // Setup event listeners
             setupEventListeners();
             
-            // Setup friend requests listener if online
+            // Load data from Firebase if online
             if (isOnline && firebaseInitialized) {
+                await syncAllDataFromFirebase();
                 setupFriendRequestsListener();
                 setupPresenceTracking();
             }
             
-            generateQRCode();
+            // Generate unique QR code
+            generateUniqueQRCode();
             
             // Show notification
             showNotification('Friends system ready', 'success');
-            
-            // START BACKGROUND SYNC: Fetch updated list from server
-            setTimeout(() => {
-                backgroundSyncWithServer();
-            }, 1000);
             
             // Process any pending offline actions
             processPendingOfflineActions();
@@ -2539,184 +2584,156 @@
             console.log('=== FULL APP INITIALIZATION COMPLETE ===');
         }
         
-        // NEW FUNCTION: Background sync with server
-        async function backgroundSyncWithServer() {
-            if (!isOnline || !firebaseInitialized) {
-                console.log('Background sync: Skipping - offline or Firebase not initialized');
-                return;
-            }
-            
-            console.log('Background sync: Starting server fetch...');
+        async function syncAllDataFromFirebase() {
+            if (!isOnline || !firebaseInitialized) return;
             
             try {
-                // Use Promise.allSettled to prevent blocking on errors
-                const syncPromises = [
-                    syncFriendsFromServer().catch(error => {
-                        console.log('Background sync: Friends sync error (non-critical):', error.message);
-                        // Silently continue with cached data
-                    }),
-                    syncContactsFromServer().catch(error => {
-                        console.log('Background sync: Contacts sync error (non-critical):', error.message);
-                    }),
-                    syncFriendRequestsFromServer().catch(error => {
-                        console.log('Background sync: Requests sync error (non-critical):', error.message);
-                    })
-                ];
+                console.log('Syncing all data from Firebase...');
                 
-                await Promise.allSettled(syncPromises);
+                // Use Promise.all to sync all data simultaneously
+                await Promise.all([
+                    syncFriendsFromServer(),
+                    syncContactsFromServer(),
+                    syncFriendRequestsFromServer(),
+                    syncSentRequestsFromServer(),
+                    syncTemporaryFriendsFromServer()
+                ]);
                 
-                // Update last sync timestamp
-                localStorage.setItem(LOCAL_STORAGE_KEYS.LAST_SYNC, Date.now().toString());
+                console.log('All data synced successfully');
                 
-                console.log('Background sync: Completed successfully');
+                // Update UI
+                updateFriendCounts();
+                updateCurrentSection();
+                
+                // Save to local storage
+                saveFriendsToLocalStorage();
                 
             } catch (error) {
-                // SERVER SLEEP MODE: Log quietly and continue with cached data
-                console.log('Background sync: Server appears to be sleeping or unreachable:', error.message);
-                // Don't show error to user - just continue with cached data
+                console.error('Error syncing data from Firebase:', error);
             }
         }
         
-        // NEW FUNCTION: Sync friends from server (background, non-blocking)
         async function syncFriendsFromServer() {
             if (!isOnline || !firebaseInitialized || !currentUser) return;
             
             try {
                 console.log('Syncing friends from server...');
                 
-                // Get approved friendships
                 const friendshipsSnapshot = await db.collection('friendships')
                     .where('status', '==', 'approved')
                     .where('participants', 'array-contains', currentUser.uid)
                     .get();
                 
-                if (friendshipsSnapshot.empty) {
-                    console.log('No friends found on server');
-                    return;
+                const newFriends = [];
+                
+                if (!friendshipsSnapshot.empty) {
+                    const friendPromises = [];
+                    
+                    friendshipsSnapshot.forEach(doc => {
+                        const friendship = doc.data();
+                        const friendId = friendship.participants.find(id => id !== currentUser.uid);
+                        
+                        if (friendId) {
+                            friendPromises.push(
+                                db.collection('users').doc(friendId).get()
+                                    .then(friendDoc => {
+                                        if (friendDoc.exists) {
+                                            const friendData = friendDoc.data();
+                                            const friendWithMeta = {
+                                                ...friendData,
+                                                friendshipId: doc.id,
+                                                category: friendship.category || 'friend',
+                                                notes: friendship.notes || '',
+                                                isTemporary: friendship.isTemporary || false,
+                                                expiresAt: friendship.expiresAt || null,
+                                                isBusiness: friendship.isBusiness || false,
+                                                trustScore: friendship.trustScore || calculateTrustScore(friendData),
+                                                addedAt: friendship.addedAt || friendship.createdAt,
+                                                type: 'friend'
+                                            };
+                                            
+                                            newFriends.push(friendWithMeta);
+                                            return friendWithMeta;
+                                        }
+                                    })
+                            );
+                        }
+                    });
+                    
+                    await Promise.allSettled(friendPromises);
+                    
+                    // Sort by online status first, then name
+                    newFriends.sort((a, b) => {
+                        if (a.online !== b.online) return b.online ? 1 : -1;
+                        return (a.displayName || '').localeCompare(b.displayName || '');
+                    });
+                    
+                    friends = newFriends;
                 }
                 
-                const serverFriends = [];
-                const friendPromises = [];
-                
-                friendshipsSnapshot.forEach(doc => {
-                    const friendship = doc.data();
-                    const friendId = friendship.participants.find(id => id !== currentUser.uid);
-                    
-                    if (friendId) {
-                        friendPromises.push(
-                            db.collection('users').doc(friendId).get()
-                                .then(friendDoc => {
-                                    if (friendDoc.exists) {
-                                        const friendData = friendDoc.data();
-                                        const friendWithMeta = {
-                                            ...friendData,
-                                            friendshipId: doc.id,
-                                            category: friendship.category || 'friend',
-                                            notes: friendship.notes || '',
-                                            isTemporary: friendship.isTemporary || false,
-                                            expiresAt: friendship.expiresAt || null,
-                                            isBusiness: friendship.isBusiness || false,
-                                            trustScore: friendship.trustScore || calculateTrustScore(friendData),
-                                            addedAt: friendship.addedAt || friendship.createdAt,
-                                            type: 'friend'
-                                        };
-                                        
-                                        serverFriends.push(friendWithMeta);
-                                    }
-                                })
-                        );
-                    }
-                });
-                
-                await Promise.allSettled(friendPromises);
-                
-                // Compare with cached data
-                if (JSON.stringify(serverFriends) !== JSON.stringify(friends)) {
-                    console.log('Friend data updated from server');
-                    friends = serverFriends;
-                    
-                    // Save updated data to cache
-                    localStorage.setItem(LOCAL_STORAGE_KEYS.FRIENDS, JSON.stringify(friends));
-                    localStorage.setItem(LOCAL_STORAGE_KEYS.LAST_CACHE_TIME, Date.now().toString());
-                    
-                    // Update UI if visible
-                    if (allFriendsSection.classList.contains('active')) {
-                        updateCurrentSection();
-                        updateFriendCounts();
-                    }
-                    
-                    // Show subtle notification
-                    showNotification('Friends list updated', 'success');
-                } else {
-                    console.log('Friend data unchanged on server');
-                }
+                document.getElementById('friendsCount').textContent = friends.length;
+                console.log(`Synced ${friends.length} friends from server`);
                 
             } catch (error) {
-                console.log('Friend sync error (continuing with cached data):', error.message);
-                throw error; // Re-throw for caller to handle
+                console.error('Error syncing friends:', error);
             }
         }
         
-        // NEW FUNCTION: Sync contacts from server
         async function syncContactsFromServer() {
-            if (!isOnline || !firebaseInitialized) return;
+            if (!isOnline || !firebaseInitialized || !currentUser) return;
             
             try {
-                // Get users who might be contacts
+                console.log('Syncing contacts from server...');
+                
+                // Get all users except current user
                 const usersSnapshot = await db.collection('users')
                     .where('uid', '!=', currentUser.uid)
-                    .limit(20)
+                    .limit(50)
                     .get();
                 
-                const serverContacts = [];
+                const newContacts = [];
                 
                 if (!usersSnapshot.empty) {
-                    for (const doc of usersSnapshot.docs) {
+                    usersSnapshot.forEach(doc => {
                         const contactData = doc.data();
                         
-                        // Check if this user is already a friend
+                        // Check if already a friend or has pending request
                         const isFriend = friends.some(f => f.uid === contactData.uid);
                         const hasRequest = friendRequests.some(r => r.from === contactData.uid);
                         const sentRequest = sentRequests.some(r => r.to === contactData.uid);
                         
                         if (!isFriend && !hasRequest && !sentRequest) {
-                            serverContacts.push({
+                            newContacts.push({
                                 ...contactData,
                                 isContact: true,
                                 type: 'contact'
                             });
                         }
-                    }
+                    });
                 }
                 
-                // Compare with cached data
-                if (JSON.stringify(serverContacts) !== JSON.stringify(contacts)) {
-                    console.log('Contacts data updated from server');
-                    contacts = serverContacts;
-                    localStorage.setItem(LOCAL_STORAGE_KEYS.CONTACTS, JSON.stringify(contacts));
-                    
-                    // Update contacts count
-                    document.getElementById('contactsCount').textContent = contacts.length;
-                }
+                contacts = newContacts;
+                document.getElementById('contactsCount').textContent = contacts.length;
+                console.log(`Synced ${contacts.length} contacts from server`);
                 
             } catch (error) {
-                console.log('Contacts sync error:', error.message);
+                console.error('Error syncing contacts:', error);
             }
         }
         
-        // NEW FUNCTION: Sync friend requests from server
         async function syncFriendRequestsFromServer() {
-            if (!isOnline || !firebaseInitialized) return;
+            if (!isOnline || !firebaseInitialized || !currentUser) return;
             
             try {
-                // Get incoming friend requests
+                console.log('Syncing friend requests from server...');
+                
                 const requestsSnapshot = await db.collection('friendRequests')
                     .where('to', '==', currentUser.uid)
                     .where('status', '==', 'pending')
                     .orderBy('createdAt', 'desc')
                     .get();
                 
-                const serverRequests = [];
+                const newRequests = [];
                 
                 if (!requestsSnapshot.empty) {
                     const requestPromises = [];
@@ -2735,33 +2752,164 @@
                                             type: 'incoming_request'
                                         };
                                         
-                                        serverRequests.push(requestWithUser);
+                                        newRequests.push(requestWithUser);
                                     }
                                 })
                         );
                     });
                     
                     await Promise.allSettled(requestPromises);
+                    
+                    friendRequests = newRequests;
                 }
                 
-                // Compare with cached data
-                if (JSON.stringify(serverRequests) !== JSON.stringify(friendRequests)) {
-                    console.log('Friend requests updated from server');
-                    friendRequests = serverRequests;
-                    localStorage.setItem(LOCAL_STORAGE_KEYS.REQUESTS, JSON.stringify(friendRequests));
-                    
-                    // Update requests count
-                    const totalRequests = friendRequests.length;
-                    document.getElementById('requestsCount').textContent = totalRequests;
-                    document.getElementById('requestsSectionCount').textContent = totalRequests;
-                }
+                const totalRequests = friendRequests.length;
+                document.getElementById('requestsCount').textContent = totalRequests;
+                document.getElementById('requestsSectionCount').textContent = totalRequests;
+                console.log(`Synced ${friendRequests.length} friend requests from server`);
                 
             } catch (error) {
-                console.log('Friend requests sync error:', error.message);
+                console.error('Error syncing friend requests:', error);
             }
         }
         
-        // Load user from cache first
+        async function syncSentRequestsFromServer() {
+            if (!isOnline || !firebaseInitialized || !currentUser) return;
+            
+            try {
+                console.log('Syncing sent requests from server...');
+                
+                const sentSnapshot = await db.collection('friendRequests')
+                    .where('from', '==', currentUser.uid)
+                    .where('status', '==', 'pending')
+                    .orderBy('createdAt', 'desc')
+                    .get();
+                
+                const newSentRequests = [];
+                
+                if (!sentSnapshot.empty) {
+                    const sentPromises = [];
+                    
+                    sentSnapshot.forEach(doc => {
+                        const request = doc.data();
+                        sentPromises.push(
+                            db.collection('users').doc(request.to).get()
+                                .then(userDoc => {
+                                    if (userDoc.exists) {
+                                        const userData = userDoc.data();
+                                        const requestWithUser = {
+                                            ...request,
+                                            id: doc.id,
+                                            userData: userData,
+                                            type: 'sent_request'
+                                        };
+                                        
+                                        newSentRequests.push(requestWithUser);
+                                    }
+                                })
+                        );
+                    });
+                    
+                    await Promise.allSettled(sentPromises);
+                    
+                    sentRequests = newSentRequests;
+                }
+                
+                document.getElementById('sentRequestsCount').textContent = sentRequests.length;
+                console.log(`Synced ${sentRequests.length} sent requests from server`);
+                
+            } catch (error) {
+                console.error('Error syncing sent requests:', error);
+            }
+        }
+        
+        async function syncTemporaryFriendsFromServer() {
+            if (!isOnline || !firebaseInitialized) return;
+            
+            try {
+                console.log('Syncing temporary friends from server...');
+                
+                const tempFriends = friends.filter(f => f.isTemporary && f.expiresAt);
+                temporaryFriends = tempFriends;
+                
+                console.log(`Synced ${temporaryFriends.length} temporary friends from server`);
+                
+            } catch (error) {
+                console.error('Error syncing temporary friends:', error);
+            }
+        }
+        
+        function generateUniqueQRCode() {
+            try {
+                const qrContainer = document.getElementById('qrCodeContainer');
+                if (!qrContainer) {
+                    console.log('QR container not found');
+                    return;
+                }
+                
+                // Clear existing QR code
+                qrContainer.innerHTML = '';
+                
+                // Check if QRCode library is loaded
+                if (typeof QRCode === 'undefined') {
+                    console.error('QRCode library not loaded');
+                    qrContainer.innerHTML = '<div style="text-align: center; padding: 40px; color: var(--text-secondary);"><i class="fas fa-exclamation-triangle"></i><p>QR code library not available</p><button onclick="retryQRCode()" style="margin-top: 10px; padding: 8px 16px; background: var(--primary-color); color: white; border: none; border-radius: 8px; cursor: pointer;">Retry</button></div>';
+                    return;
+                }
+                
+                // Check if we already have a unique QR code stored
+                let storedQRData = localStorage.getItem(LOCAL_STORAGE_KEYS.UNIQUE_QR_CODE);
+                
+                if (!storedQRData && currentUser) {
+                    // Create a permanent unique QR code for the user
+                    const qrData = JSON.stringify({
+                        type: 'knecta_friend',
+                        userId: currentUser.uid,
+                        username: userData?.username || '',
+                        displayName: userData?.displayName || '',
+                        timestamp: Date.now(),
+                        uniqueId: `knecta_${currentUser.uid}_${Date.now().toString(36)}_${Math.random().toString(36).substring(2, 9)}`
+                    });
+                    
+                    // Store it permanently
+                    localStorage.setItem(LOCAL_STORAGE_KEYS.UNIQUE_QR_CODE, qrData);
+                    storedQRData = qrData;
+                }
+                
+                // Use stored data or create new
+                const qrData = storedQRData || JSON.stringify({
+                    type: 'knecta_friend',
+                    userId: currentUser?.uid || 'anonymous',
+                    timestamp: Date.now(),
+                    uniqueId: `knecta_${Date.now().toString(36)}_${Math.random().toString(36).substring(2, 9)}`
+                });
+                
+                // Generate QR code
+                try {
+                    new QRCode(qrContainer, {
+                        text: qrData,
+                        width: 160,
+                        height: 160,
+                        colorDark: '#0084ff',
+                        colorLight: '#ffffff',
+                        correctLevel: QRCode.CorrectLevel.H
+                    });
+                    
+                    console.log('Unique QR code generated and stored');
+                } catch (qrError) {
+                    console.error('QR code generation error:', qrError);
+                    qrContainer.innerHTML = '<div style="text-align: center; padding: 40px; color: var(--text-secondary);"><i class="fas fa-qrcode"></i><p>Your unique QR code is ready</p><p style="font-size: 12px; margin-top: 10px;">Scan to add as friend</p></div>';
+                }
+                
+            } catch (error) {
+                console.error('Error in generateUniqueQRCode:', error);
+                const qrContainer = document.getElementById('qrCodeContainer');
+                if (qrContainer) {
+                    qrContainer.innerHTML = '<div style="text-align: center; padding: 40px; color: var(--text-secondary);"><i class="fas fa-qrcode"></i><p>Your QR code</p><button onclick="generateUniqueQRCode()" style="margin-top: 10px; padding: 8px 16px; background: var(--primary-color); color: white; border: none; border-radius: 8px; cursor: pointer;">Generate QR</button></div>';
+                }
+            }
+        }
+        
         async function loadUserFromCache() {
             try {
                 // Try to get user from localStorage first
@@ -2811,7 +2959,6 @@
             }
         }
         
-        // Try to load user from Firebase
         async function tryLoadUserFromFirebase() {
             if (!isOnline || !firebaseInitialized) return;
             
@@ -2839,125 +2986,9 @@
                             }
                         }, reject);
                     });
-                    
-                    // Initialize user in Firebase
-                    await initializeUserInFirebase();
                 }
             } catch (error) {
                 console.log('Could not load user from Firebase, using cached data:', error.message);
-                // Continue with cached user
-            }
-        }
-        
-        // Initialize user in Firebase (with error handling)
-        async function initializeUserInFirebase() {
-            if (!isOnline || !firebaseInitialized || !currentUser) return;
-            
-            try {
-                const userRef = db.collection('users').doc(currentUser.uid);
-                const userDoc = await userRef.get();
-                
-                if (!userDoc.exists) {
-                    // Create user document if it doesn't exist
-                    await userRef.set({
-                        uid: currentUser.uid,
-                        displayName: currentUser.displayName || `User_${currentUser.uid.substring(0, 8)}`,
-                        email: currentUser.email || '',
-                        photoURL: currentUser.photoURL || '',
-                        username: null,
-                        phoneNumber: currentUser.phoneNumber || '',
-                        createdAt: firebase.firestore.FieldValue.serverTimestamp(),
-                        lastSeen: firebase.firestore.FieldValue.serverTimestamp(),
-                        online: true,
-                        // Use settingsManager for privacy settings if available
-                        privacySettings: {
-                            profileVisible: settingsManager.getSetting('profileVisibility') || 'friends',
-                            lastSeenVisible: settingsManager.getSetting('lastSeenVisibility') || 'friends',
-                            statusVisible: settingsManager.getSetting('statusVisibility') || 'friends',
-                            allowFriendRequests: settingsManager.getSetting('allowFriendRequests') !== false,
-                            allowMessages: settingsManager.getSetting('messagePermissions') || 'friends'
-                        },
-                        friendSettings: {
-                            autoAddContacts: settingsManager.getSetting('autoAddContacts') === true,
-                            notifyOnFriendRequest: settingsManager.getSetting('notifyFriendRequest') !== false,
-                            notifyOnFriendAccept: settingsManager.getSetting('notifyFriendAccept') !== false,
-                            defaultFriendCategory: 'friend'
-                        }
-                    });
-                } else {
-                    // Update last seen
-                    await userRef.update({
-                        lastSeen: firebase.firestore.FieldValue.serverTimestamp(),
-                        online: true
-                    });
-                }
-                
-                userData = userDoc.exists ? userDoc.data() : {
-                    displayName: currentUser.displayName || 'User',
-                    username: null
-                };
-                
-                // Save to cache
-                localStorage.setItem(LOCAL_STORAGE_KEYS.USER_PROFILE, JSON.stringify(userData));
-                
-                // Generate username if not exists
-                if (!userData.username) {
-                    await generateUsername();
-                }
-                
-                // Update cached user initials
-                window.userInitials = userData.displayName 
-                    ? userData.displayName.split(' ').map(n => n[0]).join('').toUpperCase().substring(0, 2)
-                    : 'ME';
-                window.userAvatar = userData.photoURL || '';
-                window.userUsername = userData.username || '';
-                
-            } catch (error) {
-                console.error('Error initializing user in Firebase:', error);
-                // Don't show error notification, continue offline
-            }
-        }
-        
-        // Generate username (with error handling)
-        async function generateUsername() {
-            if (!isOnline || !firebaseInitialized) return;
-            
-            try {
-                let username;
-                if (userData.displayName) {
-                    const baseName = userData.displayName
-                        .toLowerCase()
-                        .replace(/[^a-z0-9]/g, '_')
-                        .substring(0, 15);
-                    username = `@${baseName}`;
-                    
-                    // Check if username exists
-                    const usernameCheck = await db.collection('users')
-                        .where('username', '==', username)
-                        .limit(1)
-                        .get();
-                    
-                    if (!usernameCheck.empty) {
-                        username = `@${baseName}_${Math.floor(Math.random() * 1000)}`;
-                    }
-                } else {
-                    username = `@user_${currentUser.uid.substring(0, 8)}`;
-                }
-                
-                // Save username
-                await db.collection('users').doc(currentUser.uid).update({
-                    username: username,
-                    usernameLower: username.toLowerCase()
-                });
-                
-                userData.username = username;
-                window.userUsername = username;
-                
-                // Update cache
-                localStorage.setItem(LOCAL_STORAGE_KEYS.USER_PROFILE, JSON.stringify(userData));
-                
-            } catch (error) {
-                console.error('Error generating username:', error);
             }
         }
         
@@ -2965,29 +2996,23 @@
             isMobile = window.innerWidth <= 768;
             if (isMobile) {
                 document.body.classList.add('mobile');
-                // Sidebar is always visible on mobile now
                 sidebar.classList.add('active');
-                // Show all friends section by default
                 showMobileSection('all');
             } else {
                 document.body.classList.remove('mobile');
-                // Sidebar is always active on desktop
                 sidebar.classList.add('active');
             }
         }
         
         function showMobileSection(section) {
-            // Hide all sections first
             document.querySelectorAll('.friends-section').forEach(s => {
                 s.classList.remove('active');
             });
             
-            // Deactivate all category buttons
             document.querySelectorAll('.category-btn').forEach(btn => {
                 btn.classList.remove('active');
             });
             
-            // Show the selected section
             switch(section) {
                 case 'all':
                     allFriendsSection.classList.add('active');
@@ -3011,22 +3036,17 @@
                     break;
             }
             
-            // Update the current section view
             updateCurrentSection();
         }
         
         function initializeOfflineDetection() {
-            // Check initial online status
             updateOnlineStatus();
             
-            // Listen for online/offline events
             window.addEventListener('online', handleOnline);
             window.addEventListener('offline', handleOffline);
             
-            // Start periodic connectivity check
             offlineCheckInterval = setInterval(checkConnectivity, 30000);
             
-            // Initial UI update
             updateUIForConnectivity();
         }
         
@@ -3035,39 +3055,27 @@
             console.log('Network status:', isOnline ? 'Online' : 'Offline');
         }
         
-        function handleOnline() {
+        async function handleOnline() {
             console.log('App is now online');
             isOnline = true;
             updateUIForConnectivity();
             
-            // Update user presence
             if (currentUser && firebaseInitialized) {
                 updateUserPresence(true);
+                await syncAllDataFromFirebase();
             }
             
-            // START BACKGROUND SYNC when coming online
-            setTimeout(() => {
-                backgroundSyncWithServer();
-            }, 2000);
-            
-            // Send any pending offline friend requests
             sendPendingOfflineRequests();
-            
-            // Process any pending offline actions
             processPendingOfflineActions();
             
-            // Hide local storage indicator and cache indicator
             localStorageIndicator.classList.remove('active');
             cacheIndicator.style.display = 'none';
             isLoadedFromLocalStorage = false;
             
-            // Hide offline overlay
             offlineOverlay.classList.remove('active');
             
-            // Show notification
             showNotification('You are back online. Syncing friends...', 'success');
             
-            // Update UI to enable online features
             enableOnlineFeatures();
         }
         
@@ -3086,7 +3094,6 @@
                             sendFriendRequest(request.friendId, request.category, request.note, request.isTemporary, request.duration, request.isBusiness)
                                 .catch(error => {
                                     console.error('Error sending pending request:', error);
-                                    // Keep request in pending if failed
                                     return request;
                                 })
                         );
@@ -3094,7 +3101,6 @@
                     
                     const results = await Promise.allSettled(promises);
                     
-                    // Filter out successful sends
                     const failedRequests = [];
                     results.forEach((result, index) => {
                         if (result.status === 'rejected') {
@@ -3102,7 +3108,6 @@
                         }
                     });
                     
-                    // Update pending requests
                     localStorage.setItem(LOCAL_STORAGE_KEYS.PENDING_REQUESTS, JSON.stringify(failedRequests));
                     pendingFriendRequests = failedRequests;
                     
@@ -3119,7 +3124,6 @@
         
         async function processPendingOfflineActions() {
             try {
-                // Process pending friend accept actions
                 const pendingAccepts = JSON.parse(localStorage.getItem(LOCAL_STORAGE_KEYS.FRIEND_ACCEPT_OFFLINE) || '[]');
                 if (pendingAccepts.length > 0 && isOnline && firebaseInitialized) {
                     for (const acceptData of pendingAccepts) {
@@ -3132,16 +3136,8 @@
                     localStorage.removeItem(LOCAL_STORAGE_KEYS.FRIEND_ACCEPT_OFFLINE);
                 }
                 
-                // Process pending friend requests (incoming)
                 const pendingIncoming = JSON.parse(localStorage.getItem(LOCAL_STORAGE_KEYS.FRIEND_REQUESTS_OFFLINE) || '[]');
                 if (pendingIncoming.length > 0 && isOnline && firebaseInitialized) {
-                    for (const requestData of pendingIncoming) {
-                        try {
-                            // Process incoming friend request
-                        } catch (error) {
-                            console.error('Error processing pending incoming request:', error);
-                        }
-                    }
                     localStorage.removeItem(LOCAL_STORAGE_KEYS.FRIEND_REQUESTS_OFFLINE);
                 }
                 
@@ -3154,24 +3150,17 @@
             console.log('App is now offline');
             isOnline = false;
             
-            // Update user presence
             if (currentUser && firebaseInitialized) {
                 updateUserPresence(false);
             }
             
-            // Show offline indicator
             offlineIndicator.classList.add('active');
-            
-            // Show cache indicator
             cacheIndicator.style.display = 'flex';
             
-            // Update UI for offline mode
             updateUIForOfflineMode();
             
-            // Check if offline overlay should be shown
             checkOfflineOverlay();
             
-            // Show local storage indicator if loaded from local storage
             if (isLoadedFromLocalStorage) {
                 localStorageIndicator.classList.add('active');
                 setTimeout(() => {
@@ -3179,20 +3168,16 @@
                 }, 5000);
             }
             
-            // Show notification
             showNotification('You are offline. Friends loaded from local storage.', 'warning');
         }
         
         function checkOfflineOverlay() {
-            // Check if user has dismissed the offline overlay before
             const overlayDismissed = localStorage.getItem(LOCAL_STORAGE_KEYS.OFFLINE_OVERLAY_DISMISSED);
             
             if (overlayDismissed === 'true') {
-                // User dismissed it before, don't show it again
                 offlineOverlayDismissed = true;
                 offlineOverlay.classList.remove('active');
             } else {
-                // Show the offline overlay
                 offlineOverlay.classList.add('active');
                 offlineOverlayDismissed = false;
             }
@@ -3212,18 +3197,14 @@
             offlineOverlay.classList.remove('active');
             offlineOverlayDismissed = true;
             
-            // Save dismissal preference
             localStorage.setItem(LOCAL_STORAGE_KEYS.OFFLINE_OVERLAY_DISMISSED, 'true');
             
-            // Show cache indicator
             cacheIndicator.style.display = 'flex';
             
-            // Update UI to show cached data is available
             showNotification('Showing cached friends data', 'info');
         }
         
         function checkConnectivity() {
-            // Simple connectivity check
             fetch('https://www.google.com/favicon.ico', { 
                 mode: 'no-cors',
                 cache: 'no-cache'
@@ -3251,49 +3232,32 @@
         }
         
         function updateUIForOfflineMode() {
-            // Show offline indicator
             offlineIndicator.classList.add('active');
-            
-            // Show cache indicator
             cacheIndicator.style.display = 'flex';
-            
-            // Update button states for offline mode
             updateButtonStatesForOffline();
-            
-            // Update UI labels to show cached data
             updateUILabelsForOffline();
         }
         
         function updateUIForOnlineMode() {
-            // Hide offline indicator
             offlineIndicator.classList.remove('active');
             localStorageIndicator.classList.remove('active');
             cacheIndicator.style.display = 'none';
-            
-            // Hide offline overlay
             offlineOverlay.classList.remove('active');
-            
-            // Update button states for online
             updateButtonStatesForOnline();
-            
-            // Update UI labels for online
             updateUILabelsForOnline();
         }
         
         function updateButtonStatesForOffline() {
-            // Don't disable buttons entirely, just update their behavior
             const onlineOnlyButtons = ['addFriendBtn', 'syncContactsBtn', 'discoverBtn'];
             
             onlineOnlyButtons.forEach(buttonId => {
                 const button = document.getElementById(buttonId);
                 if (button) {
-                    // Don't disable, just update title
                     button.title = button.title + ' (Requires internet)';
                     button.style.opacity = '0.7';
                 }
             });
             
-            // Update quick action buttons
             const quickActionButtons = document.querySelectorAll('.quick-action-btn');
             quickActionButtons.forEach(button => {
                 if (button.id === 'syncContactsBtn' || button.id === 'discoverBtn') {
@@ -3307,7 +3271,6 @@
         }
         
         function updateButtonStatesForOnline() {
-            // Enable all buttons
             const onlineOnlyButtons = ['addFriendBtn', 'syncContactsBtn', 'discoverBtn', 'sendFriendRequestBtn', 'startNearbyBtn', 'acceptRequestBtn', 'declineRequestBtn'];
             
             onlineOnlyButtons.forEach(buttonId => {
@@ -3317,14 +3280,12 @@
                     button.style.opacity = '1';
                     button.classList.remove('disabled-by-offline');
                     
-                    // Restore original title
                     const originalTitle = button.getAttribute('data-original-title') || button.title.replace(' (Requires internet)', '');
                     button.title = originalTitle;
                     button.setAttribute('data-original-title', originalTitle);
                 }
             });
             
-            // Restore quick action buttons
             const quickActionButtons = document.querySelectorAll('.quick-action-btn');
             quickActionButtons.forEach(button => {
                 const textElement = button.querySelector('.quick-action-text');
@@ -3336,17 +3297,10 @@
         }
         
         function enableOnlineFeatures() {
-            // Re-enable all features that require internet
             updateButtonStatesForOnline();
-            
-            // Refresh data from server in background
-            if (firebaseInitialized) {
-                backgroundSyncWithServer();
-            }
         }
         
         function updateUILabelsForOffline() {
-            // Update section titles to indicate cached data
             const sections = ['All Friends', 'Contacts', 'Friends', 'Requests', 'Temporary'];
             
             sections.forEach(section => {
@@ -3360,7 +3314,6 @@
         }
         
         function updateUILabelsForOnline() {
-            // Remove cached labels
             const elements = document.querySelectorAll(`.section-title span:first-child`);
             elements.forEach(el => {
                 el.textContent = el.textContent.replace(' (Cached)', '');
@@ -3370,14 +3323,12 @@
         function setupPresenceTracking() {
             if (!currentUser || !firebaseInitialized) return;
             
-            // Update presence status every 30 seconds
             setInterval(() => {
                 if (isOnline) {
                     updateUserPresence(true);
                 }
             }, 30000);
             
-            // Update on visibility change
             document.addEventListener('visibilitychange', () => {
                 if (currentUser) {
                     updateUserPresence(!document.hidden && isOnline);
@@ -3395,113 +3346,6 @@
                 });
             } catch (error) {
                 console.error('Error updating presence:', error);
-            }
-        }
-        
-        // Load all friends from cache (offline-first) - Now called during instant load
-        async function loadAllFriendsFromCache() {
-            try {
-                // Load from local storage
-                await loadFriendsFromLocalStorage();
-                
-                // Update friend counts
-                updateFriendCounts();
-                
-                // Update UI based on current section
-                updateCurrentSection();
-                
-                // Show empty state if no data
-                if (friends.length === 0 && contacts.length === 0 && friendRequests.length === 0) {
-                    showEmptyState();
-                }
-                
-            } catch (error) {
-                console.error('Error loading friends from cache:', error);
-                showEmptyState();
-            }
-        }
-        
-        // Try to sync with server (background sync) - Now replaced with backgroundSyncWithServer
-        async function trySyncWithServer() {
-            // This function is now deprecated, use backgroundSyncWithServer instead
-            backgroundSyncWithServer();
-        }
-        
-        async function loadAllFriendsFromFirebase() {
-            if (!isOnline || !firebaseInitialized) return;
-            
-            try {
-                await Promise.all([
-                    loadContactsFromFirebase(),
-                    loadApprovedFriendsFromFirebase(),
-                    loadFriendRequestsFromFirebase(),
-                    loadSentRequestsFromFirebase(),
-                    loadTemporaryFriendsFromFirebase()
-                ]);
-                
-                // Save to local storage
-                saveFriendsToLocalStorage();
-                
-                // Update UI
-                updateCurrentSection();
-                updateFriendCounts();
-                
-            } catch (error) {
-                console.error('Error loading friends from Firebase:', error);
-            }
-        }
-        
-        async function loadFriendsFromLocalStorage() {
-            try {
-                console.log('Loading friends from local storage...');
-                
-                // Load friends
-                const friendsData = localStorage.getItem(LOCAL_STORAGE_KEYS.FRIENDS);
-                if (friendsData) {
-                    friends = JSON.parse(friendsData);
-                    isLoadedFromLocalStorage = true;
-                }
-                
-                // Load contacts
-                const contactsData = localStorage.getItem(LOCAL_STORAGE_KEYS.CONTACTS);
-                if (contactsData) {
-                    contacts = JSON.parse(contactsData);
-                }
-                
-                // Load friend requests
-                const requestsData = localStorage.getItem(LOCAL_STORAGE_KEYS.REQUESTS);
-                if (requestsData) {
-                    friendRequests = JSON.parse(requestsData);
-                }
-                
-                // Load sent requests
-                const sentRequestsData = localStorage.getItem(LOCAL_STORAGE_KEYS.SENT_REQUESTS);
-                if (sentRequestsData) {
-                    sentRequests = JSON.parse(sentRequestsData);
-                }
-                
-                // Load temporary friends
-                const tempFriendsData = localStorage.getItem(LOCAL_STORAGE_KEYS.TEMPORARY_FRIENDS);
-                if (tempFriendsData) {
-                    temporaryFriends = JSON.parse(tempFriendsData);
-                }
-                
-                // Load pending offline requests
-                const pendingRequestsData = localStorage.getItem(LOCAL_STORAGE_KEYS.PENDING_REQUESTS);
-                if (pendingRequestsData) {
-                    pendingFriendRequests = JSON.parse(pendingRequestsData);
-                }
-                
-                console.log(`Loaded from local storage: ${friends.length} friends, ${contacts.length} contacts, ${friendRequests.length} requests`);
-                
-            } catch (error) {
-                console.error('Error loading friends from local storage:', error);
-                friends = [];
-                contacts = [];
-                friendRequests = [];
-                sentRequests = [];
-                temporaryFriends = [];
-                pendingFriendRequests = [];
             }
         }
         
@@ -3535,230 +3379,6 @@
             requestsList.innerHTML = emptyStateHTML.replace('friends', 'friend requests');
             sentRequestsList.innerHTML = emptyStateHTML.replace('friends', 'sent requests');
             temporaryList.innerHTML = emptyStateHTML.replace('friends', 'temporary friends');
-        }
-        
-        async function loadContactsFromFirebase() {
-            if (!isOnline || !firebaseInitialized) return;
-            
-            try {
-                // Get users who might be contacts
-                const usersSnapshot = await db.collection('users')
-                    .where('uid', '!=', currentUser.uid)
-                    .limit(20)
-                    .get();
-                
-                const newContacts = [];
-                
-                if (!usersSnapshot.empty) {
-                    for (const doc of usersSnapshot.docs) {
-                        const contactData = doc.data();
-                        
-                        // Check if this user is already a friend
-                        const isFriend = friends.some(f => f.uid === contactData.uid);
-                        const hasRequest = friendRequests.some(r => r.from === contactData.uid);
-                        const sentRequest = sentRequests.some(r => r.to === contactData.uid);
-                        
-                        if (!isFriend && !hasRequest && !sentRequest) {
-                            newContacts.push({
-                                ...contactData,
-                                isContact: true,
-                                type: 'contact'
-                            });
-                        }
-                    }
-                }
-                
-                contacts = newContacts;
-                
-                // Update contacts count
-                document.getElementById('contactsCount').textContent = contacts.length;
-                
-            } catch (error) {
-                console.error('Error loading contacts:', error);
-                // Don't throw error, keep existing contacts
-            }
-        }
-        
-        async function loadApprovedFriendsFromFirebase() {
-            if (!isOnline || !firebaseInitialized) return;
-            
-            try {
-                // Get approved friendships
-                const friendshipsSnapshot = await db.collection('friendships')
-                    .where('status', '==', 'approved')
-                    .where('participants', 'array-contains', currentUser.uid)
-                    .get();
-                
-                const newFriends = [];
-                
-                if (!friendshipsSnapshot.empty) {
-                    // Get friend data for each friendship
-                    const friendPromises = [];
-                    
-                    friendshipsSnapshot.forEach(doc => {
-                        const friendship = doc.data();
-                        const friendId = friendship.participants.find(id => id !== currentUser.uid);
-                        
-                        if (friendId) {
-                            friendPromises.push(
-                                db.collection('users').doc(friendId).get()
-                                    .then(friendDoc => {
-                                        if (friendDoc.exists) {
-                                            const friendData = friendDoc.data();
-                                            const friendWithMeta = {
-                                                ...friendData,
-                                                friendshipId: doc.id,
-                                                category: friendship.category || 'friend',
-                                                notes: friendship.notes || '',
-                                                isTemporary: friendship.isTemporary || false,
-                                                expiresAt: friendship.expiresAt || null,
-                                                isBusiness: friendship.isBusiness || false,
-                                                trustScore: friendship.trustScore || calculateTrustScore(friendData),
-                                                addedAt: friendship.addedAt || friendship.createdAt,
-                                                type: 'friend'
-                                            };
-                                            
-                                            newFriends.push(friendWithMeta);
-                                            return friendWithMeta;
-                                        }
-                                    })
-                            );
-                        }
-                    });
-                    
-                    await Promise.allSettled(friendPromises);
-                    
-                    // Sort friends by online status and name
-                    newFriends.sort((a, b) => {
-                        if (a.online !== b.online) return b.online ? 1 : -1;
-                        return (a.displayName || '').localeCompare(b.displayName || '');
-                    });
-                    
-                    friends = newFriends;
-                }
-                
-                // Update friends count
-                document.getElementById('friendsCount').textContent = friends.length;
-                
-            } catch (error) {
-                console.error('Error loading friends:', error);
-                // Keep existing friends
-            }
-        }
-        
-        async function loadFriendRequestsFromFirebase() {
-            if (!isOnline || !firebaseInitialized) return;
-            
-            try {
-                // Get incoming friend requests
-                const requestsSnapshot = await db.collection('friendRequests')
-                    .where('to', '==', currentUser.uid)
-                    .where('status', '==', 'pending')
-                    .orderBy('createdAt', 'desc')
-                    .get();
-                
-                const newRequests = [];
-                
-                if (!requestsSnapshot.empty) {
-                    // Load request data
-                    const requestPromises = [];
-                    
-                    requestsSnapshot.forEach(doc => {
-                        const request = doc.data();
-                        requestPromises.push(
-                            db.collection('users').doc(request.from).get()
-                                .then(userDoc => {
-                                    if (userDoc.exists) {
-                                        const userData = userDoc.data();
-                                        const requestWithUser = {
-                                            ...request,
-                                            id: doc.id,
-                                            userData: userData,
-                                            type: 'incoming_request'
-                                        };
-                                        
-                                        newRequests.push(requestWithUser);
-                                    }
-                                })
-                        );
-                    });
-                    
-                    await Promise.allSettled(requestPromises);
-                    
-                    friendRequests = newRequests;
-                }
-                
-                // Update requests count
-                const totalRequests = friendRequests.length;
-                document.getElementById('requestsCount').textContent = totalRequests;
-                document.getElementById('requestsSectionCount').textContent = totalRequests;
-                
-            } catch (error) {
-                console.error('Error loading friend requests:', error);
-            }
-        }
-        
-        async function loadSentRequestsFromFirebase() {
-            if (!isOnline || !firebaseInitialized) return;
-            
-            try {
-                // Get sent friend requests
-                const sentSnapshot = await db.collection('friendRequests')
-                    .where('from', '==', currentUser.uid)
-                    .where('status', '==', 'pending')
-                    .orderBy('createdAt', 'desc')
-                    .get();
-                
-                const newSentRequests = [];
-                
-                if (!sentSnapshot.empty) {
-                    // Load sent request data
-                    const sentPromises = [];
-                    
-                    sentSnapshot.forEach(doc => {
-                        const request = doc.data();
-                        sentPromises.push(
-                            db.collection('users').doc(request.to).get()
-                                .then(userDoc => {
-                                    if (userDoc.exists) {
-                                        const userData = userDoc.data();
-                                        const requestWithUser = {
-                                            ...request,
-                                            id: doc.id,
-                                            userData: userData,
-                                            type: 'sent_request'
-                                        };
-                                        
-                                        newSentRequests.push(requestWithUser);
-                                    }
-                                })
-                        );
-                    });
-                    
-                    await Promise.allSettled(sentPromises);
-                    
-                    sentRequests = newSentRequests;
-                }
-                
-                // Update sent requests count
-                document.getElementById('sentRequestsCount').textContent = sentRequests.length;
-                
-            } catch (error) {
-                console.error('Error loading sent requests:', error);
-            }
-        }
-        
-        async function loadTemporaryFriendsFromFirebase() {
-            if (!isOnline || !firebaseInitialized) return;
-            
-            try {
-                // Filter friends who are temporary
-                const tempFriends = friends.filter(f => f.isTemporary && f.expiresAt);
-                temporaryFriends = tempFriends;
-                
-            } catch (error) {
-                console.error('Error loading temporary friends:', error);
-            }
         }
         
         function renderContacts() {
@@ -3857,13 +3477,11 @@
         }
         
         function addFriendItem(friendData, container, type) {
-            // Skip if already in container (for filtering)
             const existingItem = container.querySelector(`[data-user-id="${friendData.uid}"]`);
             if (existingItem) {
                 existingItem.remove();
             }
             
-            // Apply filters
             if (currentCategoryFilter !== 'all' && friendData.category !== currentCategoryFilter) {
                 return;
             }
@@ -3877,12 +3495,10 @@
             friendItem.dataset.userId = friendData.uid;
             friendItem.dataset.type = type;
             
-            // Get initials for avatar
             const initials = friendData.displayName ? 
                 friendData.displayName.split(' ').map(word => word[0]).join('').toUpperCase().substring(0, 2) : 
                 'U';
             
-            // Determine status
             let statusClass = 'offline';
             let statusText = 'Offline';
             
@@ -3902,10 +3518,8 @@
                 }
             }
             
-            // Calculate mutual friends count
             const mutualCount = calculateMutualFriends(friendData);
             
-            // Determine category badge
             const category = friendData.category || 'friend';
             const categoryInfo = friendCategories[category];
             
@@ -3938,6 +3552,9 @@
                         <button class="friend-action-btn chat" data-action="start-chat" title="Start Chat" ${!isOnline ? 'disabled' : ''}>
                             <i class="fas fa-comments"></i>
                         </button>
+                        <button class="friend-action-btn call" data-action="call" title="Voice Call" ${!isOnline ? 'disabled' : ''}>
+                            <i class="fas fa-phone"></i>
+                        </button>
                         <button class="friend-action-btn success" data-action="add" title="Add as Friend" ${!isOnline ? 'disabled' : ''}>
                             <i class="fas fa-user-plus"></i>
                         </button>
@@ -3947,10 +3564,7 @@
                         <button class="friend-action-btn chat" data-action="start-chat" title="Start Chat">
                             <i class="fas fa-comments"></i>
                         </button>
-                        <button class="friend-action-btn" data-action="message" title="Message">
-                            <i class="fas fa-comment"></i>
-                        </button>
-                        <button class="friend-action-btn" data-action="call" title="Call" ${!isOnline ? 'disabled' : ''}>
+                        <button class="friend-action-btn call" data-action="call" title="Voice Call">
                             <i class="fas fa-phone"></i>
                         </button>
                         <button class="friend-action-btn" data-action="more" title="More options">
@@ -3965,11 +3579,17 @@
                         <button class="friend-action-btn danger" data-action="decline" title="Decline" ${!isOnline ? 'disabled' : ''}>
                             <i class="fas fa-times"></i>
                         </button>
+                        <button class="friend-action-btn" data-action="view-profile" title="View Profile">
+                            <i class="fas fa-eye"></i>
+                        </button>
                     ` : ''}
                     
                     ${type === 'sent_request' ? `
                         <button class="friend-action-btn danger" data-action="cancel" title="Cancel Request" ${!isOnline ? 'disabled' : ''}>
                             <i class="fas fa-times"></i>
+                        </button>
+                        <button class="friend-action-btn" data-action="view-profile" title="View Profile">
+                            <i class="fas fa-eye"></i>
                         </button>
                     ` : ''}
                     
@@ -3977,17 +3597,16 @@
                         <button class="friend-action-btn chat" data-action="start-chat" title="Start Chat">
                             <i class="fas fa-comments"></i>
                         </button>
+                        <button class="friend-action-btn call" data-action="call" title="Voice Call">
+                            <i class="fas fa-phone"></i>
+                        </button>
                         <button class="friend-action-btn" data-action="extend" title="Extend" ${!isOnline ? 'disabled' : ''}>
                             <i class="fas fa-clock"></i>
-                        </button>
-                        <button class="friend-action-btn" data-action="make-permanent" title="Make Permanent" ${!isOnline ? 'disabled' : ''}>
-                            <i class="fas fa-infinity"></i>
                         </button>
                     ` : ''}
                 </div>
             `;
             
-            // Add event listeners
             friendItem.addEventListener('click', (e) => {
                 if (!e.target.closest('.friend-actions')) {
                     showFriendDetails(friendData, type);
@@ -4012,12 +3631,13 @@
             requestItem.dataset.requestId = requestData.id;
             requestItem.dataset.type = type + '_request';
             
+            // Ensure user data is properly extracted
             const userData = requestData.userData || requestData;
+            
             const initials = userData.displayName ? 
                 userData.displayName.split(' ').map(word => word[0]).join('').toUpperCase().substring(0, 2) : 
                 'U';
             
-            // Calculate mutual friends
             const mutualCount = calculateMutualFriends(userData);
             
             requestItem.innerHTML = `
@@ -4045,20 +3665,25 @@
                         <button class="friend-action-btn danger" data-action="decline" title="Decline" ${!isOnline ? 'disabled' : ''}>
                             <i class="fas fa-times"></i>
                         </button>
+                        <button class="friend-action-btn" data-action="view-profile" title="View Profile">
+                            <i class="fas fa-eye"></i>
+                        </button>
                     ` : ''}
                     
                     ${type === 'sent' ? `
                         <button class="friend-action-btn danger" data-action="cancel" title="Cancel Request" ${!isOnline ? 'disabled' : ''}>
                             <i class="fas fa-times"></i>
                         </button>
+                        <button class="friend-action-btn" data-action="view-profile" title="View Profile">
+                            <i class="fas fa-eye"></i>
+                        </button>
                     ` : ''}
                 </div>
             `;
             
-            // Add event listeners
             requestItem.addEventListener('click', (e) => {
                 if (!e.target.closest('.friend-actions')) {
-                    showFriendRequestDetails(requestData);
+                    showFriendRequestProfile(requestData);
                 }
             });
             
@@ -4074,44 +3699,21 @@
             container.appendChild(requestItem);
         }
         
-        // =============================================
-        // COMPLETE OFFLINE ACTION HANDLERS
-        // =============================================
-        
+        // FIXED: Handle friend actions
         function handleFriendAction(action, friendData, type, button) {
             switch(action) {
                 case 'start-chat':
-                    startChatWithFriendOffline(friendData);
-                    break;
-                    
-                case 'message':
-                    startChatWithFriendOffline(friendData);
+                    startChatWithFriend(friendData);
                     break;
                     
                 case 'call':
-                    if (!isOnline) {
-                        showNotification('Voice calls require internet connection', 'warning');
-                    } else {
-                        // Check call permissions using settingsManager
-                        if (typeof settingsManager !== 'undefined') {
-                            const callPermissions = settingsManager.getSetting('callPermissions');
-                            if (callPermissions === 'none') {
-                                showNotification('Calls are disabled in your settings', 'warning');
-                                return;
-                            } else if (callPermissions === 'friends' && type !== 'friend') {
-                                showNotification('Only friends can call you', 'warning');
-                                return;
-                            }
-                        }
-                        startCallWithFriend(friendData);
-                    }
+                    startCallWithFriend(friendData);
                     break;
                     
                 case 'add':
                     if (!isOnline) {
                         showNotification('Cannot add friends while offline', 'warning');
                     } else {
-                        // Check if friend requests are allowed using settingsManager
                         if (typeof settingsManager !== 'undefined') {
                             const allowFriendRequests = settingsManager.getSetting('allowFriendRequests');
                             if (allowFriendRequests === false) {
@@ -4151,6 +3753,10 @@
                     }
                     break;
                     
+                case 'view-profile':
+                    showFriendRequestProfile(friendData);
+                    break;
+                    
                 case 'extend':
                     if (!isOnline) {
                         showNotification('Extending friendship requires internet connection', 'warning');
@@ -4172,9 +3778,9 @@
             }
         }
         
-        // OFFLINE CHAT FUNCTIONALITY
-        function startChatWithFriendOffline(friendData) {
-            // Save chat session to localStorage
+        // FIXED: Start chat with friend - opens message.html
+        function startChatWithFriend(friendData) {
+            // Create chat session data
             const chatSession = {
                 friendId: friendData.uid,
                 friendName: friendData.displayName || 'Unknown User',
@@ -4189,28 +3795,18 @@
                 unreadCount: 0
             };
             
-            // Save to localStorage
+            // Save chat session to localStorage
             localStorage.setItem('knecta_current_chat', JSON.stringify(chatSession));
             
-            // Update chat history
+            // Save to chat history
             updateChatHistory(friendData.uid, friendData.displayName);
             
-            // Check if in iframe or standalone
-            if (window.parent && window.parent !== window) {
-                // Send message to parent to open chat
-                window.parent.postMessage({ 
-                    action: "OPEN_CHAT", 
-                    userId: friendData.uid,
-                    friendData: chatSession
-                }, "*");
-            } else {
-                // Navigate to chat.html
-                window.location.href = `chat.html?friend=${friendData.uid}`;
-            }
+            // Navigate to message.html
+            window.location.href = `../message.html?friend=${friendData.uid}`;
             
             showNotification(`Opening chat with ${friendData.displayName || 'Friend'}...`, 'success');
             
-            // Close friend details panel after a delay
+            // Close friend details panel
             setTimeout(() => {
                 if (friendDetailsPanel.classList.contains('active')) {
                     friendDetailsPanel.classList.remove('active');
@@ -4219,9 +3815,26 @@
             }, 500);
         }
         
-        // ONLINE CALL FUNCTIONALITY
+        // FIXED: Start call with friend
         function startCallWithFriend(friendData) {
-            // Save call session to localStorage
+            if (!isOnline) {
+                showNotification('Voice calls require internet connection', 'warning');
+                return;
+            }
+            
+            // Check call permissions
+            if (typeof settingsManager !== 'undefined') {
+                const callPermissions = settingsManager.getSetting('callPermissions');
+                if (callPermissions === 'none') {
+                    showNotification('Calls are disabled in your settings', 'warning');
+                    return;
+                } else if (callPermissions === 'friends' && !friendData.friendshipId) {
+                    showNotification('Only friends can call you', 'warning');
+                    return;
+                }
+            }
+            
+            // Create call session
             const callSession = {
                 friendId: friendData.uid,
                 friendName: friendData.displayName || 'Unknown User',
@@ -4231,36 +3844,18 @@
                 status: 'initiated'
             };
             
-            // Save to localStorage
+            // Save call session
             localStorage.setItem('knecta_current_call', JSON.stringify(callSession));
             
             // Update call history
             updateCallHistory(friendData.uid, friendData.displayName);
-            
-            // Check if in iframe or standalone
-            if (window.parent && window.parent !== window) {
-                // Send message to parent to open call
-                window.parent.postMessage({ 
-                    action: "OPEN_CALL", 
-                    userId: friendData.uid,
-                    friendData: {
-                        uid: friendData.uid,
-                        displayName: friendData.displayName || 'Unknown User',
-                        username: friendData.username || '',
-                        photoURL: friendData.photoURL || '',
-                        category: friendData.category || 'friend',
-                        isTemporary: friendData.isTemporary || false,
-                        isBusiness: friendData.isBusiness || false
-                    }
-                }, "*");
-            } else {
-                // Navigate to calls.html
-                window.location.href = `calls.html?call=${friendData.uid}&type=voice`;
-            }
+
+            // Navigate to calls.html
+            window.location.href = `../calls.html?call=${friendData.uid}&type=voice`;
             
             showNotification(`Starting call with ${friendData.displayName || 'Friend'}...`, 'success');
             
-            // Close friend details panel after a delay
+            // Close friend details panel
             setTimeout(() => {
                 if (friendDetailsPanel.classList.contains('active')) {
                     friendDetailsPanel.classList.remove('active');
@@ -4269,7 +3864,6 @@
             }, 500);
         }
         
-        // Update chat history (works offline)
         function updateChatHistory(friendId, friendName) {
             try {
                 const chatHistory = JSON.parse(localStorage.getItem(LOCAL_STORAGE_KEYS.CHAT_HISTORY) || '{}');
@@ -4293,7 +3887,6 @@
             }
         }
         
-        // Update call history (works offline)
         function updateCallHistory(friendId, friendName) {
             try {
                 const callHistory = JSON.parse(localStorage.getItem(LOCAL_STORAGE_KEYS.CALL_HISTORY) || '[]');
@@ -4307,7 +3900,6 @@
                     status: 'initiated'
                 });
                 
-                // Keep only last 50 calls
                 if (callHistory.length > 50) {
                     callHistory.pop();
                 }
@@ -4344,6 +3936,10 @@
                     }
                     break;
                     
+                case 'view-profile':
+                    showFriendRequestProfile(requestData);
+                    break;
+                    
                 default:
                     console.log('Unknown action:', action);
             }
@@ -4360,7 +3956,6 @@
                 return;
             }
             
-            // Check friend request settings using settingsManager
             if (typeof settingsManager !== 'undefined') {
                 const allowFriendRequests = settingsManager.getSetting('allowFriendRequests');
                 if (allowFriendRequests === false) {
@@ -4370,7 +3965,6 @@
             }
             
             try {
-                // Check if request already exists
                 const existingRequest = await db.collection('friendRequests')
                     .where('from', '==', currentUser.uid)
                     .where('to', '==', friendId)
@@ -4382,7 +3976,6 @@
                     return;
                 }
                 
-                // Create friend request
                 const requestData = {
                     from: currentUser.uid,
                     to: friendId,
@@ -4398,13 +3991,13 @@
                 
                 await db.collection('friendRequests').add(requestData);
                 
-                // Update UI and local storage
-                await loadAllFriendsFromCache();
+                // Update local data
+                await syncSentRequestsFromServer();
+                updateCurrentSection();
                 saveFriendsToLocalStorage();
                 
                 showNotification('Friend request sent successfully', 'success');
                 
-                // Close modal if open
                 addFriendModal.classList.remove('active');
                 
             } catch (error) {
@@ -4431,7 +4024,7 @@
                     acceptedAt: firebase.firestore.FieldValue.serverTimestamp()
                 });
                 
-                // Create friendship document
+                // Create friendship
                 const friendshipData = {
                     participants: [currentUser.uid, friendId],
                     status: 'approved',
@@ -4447,13 +4040,13 @@
                 
                 await db.collection('friendships').add(friendshipData);
                 
-                // Update UI and local storage
-                await loadAllFriendsFromCache();
+                // Update local data
+                await syncAllDataFromFirebase();
+                updateCurrentSection();
                 saveFriendsToLocalStorage();
                 
                 showNotification('Friend request accepted', 'success');
                 
-                // Close request modal if open
                 friendRequestModal.classList.remove('active');
                 
             } catch (error) {
@@ -4476,19 +4069,18 @@
             try {
                 const requestId = requestData.id || requestData.requestId;
                 
-                // Update request status
                 await db.collection('friendRequests').doc(requestId).update({
                     status: 'declined',
                     declinedAt: firebase.firestore.FieldValue.serverTimestamp()
                 });
                 
-                // Update UI and local storage
-                await loadAllFriendsFromCache();
+                // Update local data
+                await syncFriendRequestsFromServer();
+                updateCurrentSection();
                 saveFriendsToLocalStorage();
                 
                 showNotification('Friend request declined', 'success');
                 
-                // Close request modal if open
                 friendRequestModal.classList.remove('active');
                 
             } catch (error) {
@@ -4511,11 +4103,11 @@
             try {
                 const requestId = requestData.id || requestData.requestId;
                 
-                // Delete the request
                 await db.collection('friendRequests').doc(requestId).delete();
                 
-                // Update UI and local storage
-                await loadAllFriendsFromCache();
+                // Update local data
+                await syncSentRequestsFromServer();
+                updateCurrentSection();
                 saveFriendsToLocalStorage();
                 
                 showNotification('Friend request cancelled', 'success');
@@ -4526,279 +4118,119 @@
             }
         }
         
-        async function removeFriend(friendId) {
-            if (!firebaseInitialized) {
-                showNotification('Friend system not available', 'error');
-                return;
-            }
-            
-            if (!isOnline) {
-                showNotification('Cannot remove friends while offline', 'error');
-                return;
-            }
-            
-            try {
-                // Find and delete friendship
-                const friendshipSnapshot = await db.collection('friendships')
-                    .where('participants', 'array-contains', currentUser.uid)
-                    .where('status', '==', 'approved')
-                    .get();
-                
-                let friendshipId = null;
-                
-                friendshipSnapshot.forEach(doc => {
-                    const data = doc.data();
-                    if (data.participants.includes(friendId)) {
-                        friendshipId = doc.id;
-                    }
-                });
-                
-                if (friendshipId) {
-                    await db.collection('friendships').doc(friendshipId).delete();
-                    
-                    // Update UI and local storage
-                    await loadAllFriendsFromCache();
-                    saveFriendsToLocalStorage();
-                    
-                    showNotification('Friend removed successfully', 'success');
-                }
-                
-            } catch (error) {
-                console.error('Error removing friend:', error);
-                showNotification('Failed to remove friend', 'error');
-            }
-        }
-        
-        async function updateFriendCategory(friendId, category) {
-            if (!firebaseInitialized) {
-                showNotification('Friend system not available', 'error');
-                return;
-            }
-            
-            if (!isOnline) {
-                showNotification('Cannot update friend category while offline', 'error');
-                return;
-            }
-            
-            try {
-                // Find friendship
-                const friendshipSnapshot = await db.collection('friendships')
-                    .where('participants', 'array-contains', currentUser.uid)
-                    .where('status', '==', 'approved')
-                    .get();
-                
-                let friendshipId = null;
-                
-                friendshipSnapshot.forEach(doc => {
-                    const data = doc.data();
-                    if (data.participants.includes(friendId)) {
-                        friendshipId = doc.id;
-                    }
-                });
-                
-                if (friendshipId) {
-                    await db.collection('friendships').doc(friendshipId).update({
-                        category: category,
-                        updatedAt: firebase.firestore.FieldValue.serverTimestamp()
-                    });
-                    
-                    // Update UI and local storage
-                    await loadAllFriendsFromCache();
-                    saveFriendsToLocalStorage();
-                    
-                    showNotification('Friend category updated', 'success');
-                    
-                    // Update details panel if open
-                    if (selectedFriend && selectedFriend.uid === friendId) {
-                        showFriendDetails(selectedFriend, 'friend');
-                    }
-                }
-                
-            } catch (error) {
-                console.error('Error updating friend category:', error);
-                showNotification('Failed to update friend category', 'error');
-            }
-        }
-        
-        async function updateFriendNotes(friendId, notes) {
-            if (!firebaseInitialized) {
-                showNotification('Friend system not available', 'error');
-                return;
-            }
-            
-            if (!isOnline) {
-                showNotification('Cannot update notes while offline', 'error');
-                return;
-            }
-            
-            try {
-                // Find friendship
-                const friendshipSnapshot = await db.collection('friendships')
-                    .where('participants', 'array-contains', currentUser.uid)
-                    .where('status', '==', 'approved')
-                    .get();
-                
-                let friendshipId = null;
-                
-                friendshipSnapshot.forEach(doc => {
-                    const data = doc.data();
-                    if (data.participants.includes(friendId)) {
-                        friendshipId = doc.id;
-                    }
-                });
-                
-                if (friendshipId) {
-                    await db.collection('friendships').doc(friendshipId).update({
-                        notes: notes,
-                        updatedAt: firebase.firestore.FieldValue.serverTimestamp()
-                    });
-                    
-                    // Update local storage
-                    const friendIndex = friends.findIndex(f => f.uid === friendId);
-                    if (friendIndex !== -1) {
-                        friends[friendIndex].notes = notes;
-                        saveFriendsToLocalStorage();
-                    }
-                    
-                    showNotification('Notes updated', 'success');
-                    
-                    // Update details panel if open
-                    if (selectedFriend && selectedFriend.uid === friendId) {
-                        showFriendDetails(selectedFriend, 'friend');
-                    }
-                }
-                
-            } catch (error) {
-                console.error('Error updating friend notes:', error);
-                showNotification('Failed to update notes', 'error');
-            }
-        }
-        
-        async function extendTemporaryFriend(friendData) {
-            if (!firebaseInitialized) {
-                showNotification('Friend system not available', 'error');
-                return;
-            }
-            
-            if (!isOnline) {
-                showNotification('Extending friendship requires internet connection', 'error');
-                return;
-            }
-            
-            try {
-                // Show extension options
-                const duration = prompt('Extend friendship for:\n1. 24 hours\n2. 7 days\n3. 30 days\nEnter 1, 2, or 3:', '2');
-                
-                let newDuration = null;
-                switch(duration) {
-                    case '1':
-                        newDuration = '24h';
-                        break;
-                    case '2':
-                        newDuration = '7d';
-                        break;
-                    case '3':
-                        newDuration = '30d';
-                        break;
-                    default:
-                        showNotification('Invalid selection', 'error');
-                        return;
-                }
-                
-                // Find friendship
-                const friendshipSnapshot = await db.collection('friendships')
-                    .where('participants', 'array-contains', currentUser.uid)
-                    .where('status', '==', 'approved')
-                    .get();
-                
-                let friendshipId = null;
-                
-                friendshipSnapshot.forEach(doc => {
-                    const data = doc.data();
-                    if (data.participants.includes(friendData.uid)) {
-                        friendshipId = doc.id;
-                    }
-                });
-                
-                if (friendshipId) {
-                    const newExpiresAt = new Date(Date.now() + temporaryDurations[newDuration]);
-                    
-                    await db.collection('friendships').doc(friendshipId).update({
-                        expiresAt: newExpiresAt,
-                        updatedAt: firebase.firestore.FieldValue.serverTimestamp()
-                    });
-                    
-                    // Update UI and local storage
-                    await loadAllFriendsFromCache();
-                    saveFriendsToLocalStorage();
-                    
-                    showNotification(`Friendship extended for ${newDuration === '24h' ? '24 hours' : newDuration === '7d' ? '7 days' : '30 days'}`, 'success');
-                }
-                
-            } catch (error) {
-                console.error('Error extending temporary friend:', error);
-                showNotification('Failed to extend friendship', 'error');
-            }
-        }
-        
-        async function makeFriendPermanent(friendData) {
-            if (!firebaseInitialized) {
-                showNotification('Friend system not available', 'error');
-                return;
-            }
-            
-            if (!isOnline) {
-                showNotification('Updating friendship requires internet connection', 'error');
-                return;
-            }
-            
-            try {
-                // Find friendship
-                const friendshipSnapshot = await db.collection('friendships')
-                    .where('participants', 'array-contains', currentUser.uid)
-                    .where('status', '==', 'approved')
-                    .get();
-                
-                let friendshipId = null;
-                
-                friendshipSnapshot.forEach(doc => {
-                    const data = doc.data();
-                    if (data.participants.includes(friendData.uid)) {
-                        friendshipId = doc.id;
-                    }
-                });
-                
-                if (friendshipId) {
-                    await db.collection('friendships').doc(friendshipId).update({
-                        isTemporary: false,
-                        expiresAt: null,
-                        updatedAt: firebase.firestore.FieldValue.serverTimestamp()
-                    });
-                    
-                    // Update UI and local storage
-                    await loadAllFriendsFromCache();
-                    saveFriendsToLocalStorage();
-                    
-                    showNotification('Friend is now permanent', 'success');
-                }
-                
-            } catch (error) {
-                console.error('Error making friend permanent:', error);
-                showNotification('Failed to update friendship', 'error');
-            }
-        }
-        
         function showFriendDetails(friendData, type) {
             selectedFriend = friendData;
             
-            // Update panel title
             document.querySelector('.friend-details-title').textContent = 'Friend Details' + (!isOnline ? ' (Cached)' : '');
             
-            // Show panel
             friendDetailsPanel.classList.add('active');
             
-            // Load friend details from cache
             loadFriendDetails(friendData, type);
+        }
+        
+        // NEW FUNCTION: Show friend request profile before accepting/declining
+        function showFriendRequestProfile(requestData) {
+            const userData = requestData.userData || requestData;
+            
+            // Create a detailed profile view modal
+            const profileModal = document.createElement('div');
+            profileModal.className = 'add-friend-modal active';
+            profileModal.innerHTML = `
+                <div class="add-friend-container friend-request-profile">
+                    <div class="add-friend-header">
+                        <h3>User Profile</h3>
+                        <button class="add-friend-btn close-profile-modal">
+                            <i class="fas fa-times"></i>
+                        </button>
+                    </div>
+                    <div style="padding: 25px;">
+                        <div style="text-align: center; margin-bottom: 30px;">
+                            <div class="friend-profile-avatar" ${userData.photoURL ? `style="background-image: url('${userData.photoURL}'); width: 100px; height: 100px;"` : 'style="width: 100px; height: 100px;"'}>
+                                ${userData.photoURL ? '' : `<span style="color: white; font-size: 36px;">${userData.displayName ? userData.displayName.split(' ').map(word => word[0]).join('').toUpperCase().substring(0, 2) : 'U'}</span>`}
+                            </div>
+                            <div class="friend-profile-name" style="font-size: 20px; margin-top: 15px;">${userData.displayName || 'Unknown User'}</div>
+                            <div class="friend-profile-username">${userData.username || 'No username'}</div>
+                            ${userData.bio ? `<div style="margin-top: 10px; color: var(--text-secondary); font-size: 14px;">${userData.bio}</div>` : ''}
+                        </div>
+                        
+                        <div class="friend-info-section">
+                            <div class="info-section-title">
+                                <i class="fas fa-info-circle"></i>
+                                <span>User Information</span>
+                            </div>
+                            
+                            ${userData.email ? `
+                            <div class="info-item">
+                                <span class="info-label">Email:</span>
+                                <span class="info-value">${userData.email}</span>
+                            </div>
+                            ` : ''}
+                            
+                            <div class="info-item">
+                                <span class="info-label">Member Since:</span>
+                                <span class="info-value">${userData.createdAt ? formatDate(userData.createdAt.toDate ? userData.createdAt.toDate() : new Date(userData.createdAt)) : 'Unknown'}</span>
+                            </div>
+                            
+                            <div class="info-item">
+                                <span class="info-label">Mutual Friends:</span>
+                                <span class="info-value">${calculateMutualFriends(userData)}</span>
+                            </div>
+                            
+                            ${requestData.note ? `
+                            <div class="info-item">
+                                <span class="info-label">Request Note:</span>
+                                <span class="info-value">"${requestData.note}"</span>
+                            </div>
+                            ` : ''}
+                        </div>
+                        
+                        <div class="request-actions">
+                            <button class="action-btn secondary close-profile-btn" style="flex: 1;">
+                                <i class="fas fa-times"></i> Close
+                            </button>
+                            ${requestData.type === 'incoming_request' ? `
+                            <button class="action-btn danger decline-profile-btn" style="flex: 1;" ${!isOnline ? 'disabled' : ''}>
+                                <i class="fas fa-times"></i> Decline
+                            </button>
+                            <button class="action-btn success accept-profile-btn" style="flex: 1;" ${!isOnline ? 'disabled' : ''}>
+                                <i class="fas fa-check"></i> Accept
+                            </button>
+                            ` : ''}
+                        </div>
+                    </div>
+                </div>
+            `;
+            
+            document.body.appendChild(profileModal);
+            
+            // Add event listeners
+            profileModal.querySelector('.close-profile-modal').addEventListener('click', () => {
+                document.body.removeChild(profileModal);
+            });
+            
+            profileModal.querySelector('.close-profile-btn').addEventListener('click', () => {
+                document.body.removeChild(profileModal);
+            });
+            
+            if (requestData.type === 'incoming_request') {
+                profileModal.querySelector('.decline-profile-btn').addEventListener('click', () => {
+                    if (!isOnline) {
+                        showNotification('Cannot decline friend requests while offline', 'warning');
+                        return;
+                    }
+                    declineFriendRequest(requestData);
+                    document.body.removeChild(profileModal);
+                });
+                
+                profileModal.querySelector('.accept-profile-btn').addEventListener('click', () => {
+                    if (!isOnline) {
+                        showNotification('Cannot accept friend requests while offline', 'warning');
+                        return;
+                    }
+                    acceptFriendRequestOnline(requestData.id || requestData.requestId, requestData.from || requestData.uid);
+                    document.body.removeChild(profileModal);
+                });
+            }
         }
         
         async function loadFriendDetails(friendData, type) {
@@ -4806,13 +4238,10 @@
             detailsContent.innerHTML = '<div style="text-align: center; padding: 40px 20px; color: var(--text-secondary);"><i class="fas fa-spinner fa-spin" style="font-size: 24px; margin-bottom: 15px;"></i><p>Loading friend details...</p></div>';
             
             try {
-                // Use cached data
                 let detailedData = friendData;
                 
-                // Get friendship details if it's a friend
                 let friendshipData = null;
                 if (type === 'friend') {
-                    // Get from local friends data
                     const friend = friends.find(f => f.uid === friendData.uid);
                     if (friend) {
                         friendshipData = {
@@ -4827,10 +4256,8 @@
                     }
                 }
                 
-                // Get mutual friends count from cache
                 const mutualCount = calculateMutualFriends(friendData);
                 
-                // Determine status from cache
                 let statusClass = 'offline';
                 let statusText = 'Offline';
                 
@@ -4852,11 +4279,9 @@
                     }
                 }
                 
-                // Get category info
                 const category = friendshipData?.category || 'friend';
                 const categoryInfo = friendCategories[category];
                 
-                // Render friend details from cache
                 const initials = detailedData.displayName ? 
                     detailedData.displayName.split(' ').map(word => word[0]).join('').toUpperCase().substring(0, 2) : 
                     'U';
@@ -4940,6 +4365,13 @@
                             <span class="info-value">${detailedData.phoneNumber}</span>
                         </div>
                         ` : ''}
+                        
+                        ${detailedData.bio ? `
+                        <div class="info-item">
+                            <span class="info-label">Bio:</span>
+                            <span class="info-value">${detailedData.bio}</span>
+                        </div>
+                        ` : ''}
                     </div>
                     
                     ${friendshipData ? `
@@ -4959,9 +4391,6 @@
                         ${type === 'friend' ? `
                         <button class="action-btn success" id="startChatDetailsBtn">
                             <i class="fas fa-comments"></i> Start Chat
-                        </button>
-                        <button class="action-btn primary" id="messageFriendBtn">
-                            <i class="fas fa-comment"></i> Message
                         </button>
                         <button class="action-btn primary" id="callFriendBtn" ${!isOnline ? 'disabled' : ''}>
                             <i class="fas fa-phone"></i> ${!isOnline ? 'Call (Requires Internet)' : 'Call'}
@@ -4987,6 +4416,9 @@
                         <button class="action-btn danger" id="declineRequestDetailsBtn" ${!isOnline ? 'disabled' : ''}>
                             <i class="fas fa-times"></i> ${!isOnline ? 'Decline (Requires Internet)' : 'Decline'}
                         </button>
+                        <button class="action-btn secondary" id="viewProfileBtn">
+                            <i class="fas fa-eye"></i> View Profile
+                        </button>
                         ` : ''}
                     </div>
                 `;
@@ -4994,30 +4426,11 @@
                 // Add event listeners for action buttons
                 if (type === 'friend') {
                     document.getElementById('startChatDetailsBtn').addEventListener('click', () => {
-                        startChatWithFriendOffline(friendData);
-                    });
-                    
-                    document.getElementById('messageFriendBtn').addEventListener('click', () => {
-                        startChatWithFriendOffline(friendData);
+                        startChatWithFriend(friendData);
                     });
                     
                     document.getElementById('callFriendBtn').addEventListener('click', () => {
-                        if (!isOnline) {
-                            showNotification('Voice calls require internet connection', 'warning');
-                        } else {
-                            // Check call permissions using settingsManager
-                            if (typeof settingsManager !== 'undefined') {
-                                const callPermissions = settingsManager.getSetting('callPermissions');
-                                if (callPermissions === 'none') {
-                                    showNotification('Calls are disabled in your settings', 'warning');
-                                    return;
-                                } else if (callPermissions === 'friends' && type !== 'friend') {
-                                    showNotification('Only friends can call you', 'warning');
-                                    return;
-                                }
-                            }
-                            startCallWithFriend(friendData);
-                        }
+                        startCallWithFriend(friendData);
                     });
                     
                     document.getElementById('friendOptionsBtn').addEventListener('click', () => {
@@ -5041,7 +4454,7 @@
                         if (!isOnline) {
                             showNotification('Cannot start chat with contacts while offline', 'warning');
                         } else {
-                            startChatWithFriendOffline(friendData);
+                            startChatWithFriend(friendData);
                         }
                     });
                     
@@ -5049,7 +4462,6 @@
                         if (!isOnline) {
                             showNotification('Cannot add friends while offline', 'warning');
                         } else {
-                            // Check if friend requests are allowed using settingsManager
                             if (typeof settingsManager !== 'undefined') {
                                 const allowFriendRequests = settingsManager.getSetting('allowFriendRequests');
                                 if (allowFriendRequests === false) {
@@ -5078,6 +4490,10 @@
                             declineFriendRequest(friendData);
                         }
                     });
+                    
+                    document.getElementById('viewProfileBtn').addEventListener('click', () => {
+                        showFriendRequestProfile(friendData);
+                    });
                 }
                 
             } catch (error) {
@@ -5092,230 +4508,9 @@
             }
         }
         
-        function showFriendOptions(friendData) {
-            // Create options modal or dropdown
-            const options = [
-                { icon: 'fas fa-user-tag', text: 'Change Category', action: () => changeFriendCategory(friendData), onlineOnly: true },
-                { icon: 'fas fa-ban', text: 'Block User', action: () => blockUser(friendData) },
-                { icon: 'fas fa-flag', text: 'Report User', action: () => reportUser(friendData) },
-                { icon: 'fas fa-user-slash', text: 'Remove Friend', action: () => removeFriendConfirm(friendData), onlineOnly: true },
-                { icon: 'fas fa-share-alt', text: 'Share Profile', action: () => shareProfile(friendData) }
-            ];
-            
-            // For temporary friends, add extend option
-            if (friendData.isTemporary) {
-                options.unshift(
-                    { icon: 'fas fa-clock', text: 'Extend Friendship', action: () => extendTemporaryFriend(friendData), onlineOnly: true },
-                    { icon: 'fas fa-infinity', text: 'Make Permanent', action: () => makeFriendPermanent(friendData), onlineOnly: true }
-                );
-            }
-            
-            // For business friends, add business options
-            if (friendData.isBusiness) {
-                options.unshift(
-                    { icon: 'fas fa-briefcase', text: 'View Business Info', action: () => viewBusinessInfo(friendData) }
-                );
-            }
-            
-            // Create options menu
-            const optionsMenu = document.createElement('div');
-            optionsMenu.className = 'options-menu';
-            optionsMenu.style.cssText = `
-                position: fixed;
-                top: 50%;
-                left: 50%;
-                transform: translate(-50%, -50%);
-                background: white;
-                border-radius: 12px;
-                box-shadow: 0 10px 30px rgba(0,0,0,0.2);
-                z-index: 1001;
-                min-width: 250px;
-                max-width: 90%;
-                overflow: hidden;
-            `;
-            
-            let optionsHTML = `
-                <div style="padding: 20px; border-bottom: 1px solid var(--border-color);">
-                    <div style="font-weight: 600; margin-bottom: 5px;">${friendData.displayName}</div>
-                    <div style="font-size: 14px; color: var(--text-secondary);">Friend Options</div>
-                </div>
-                <div style="max-height: 400px; overflow-y: auto;">
-            `;
-            
-            options.forEach(option => {
-                const isDisabled = option.onlineOnly && !isOnline;
-                optionsHTML += `
-                    <div style="padding: 15px 20px; border-bottom: 1px solid var(--border-color); cursor: ${isDisabled ? 'not-allowed' : 'pointer'}; display: flex; align-items: center; gap: 12px; transition: background 0.2s; ${isDisabled ? 'opacity: 0.5;' : ''}"
-                         ${!isDisabled ? `onmouseover="this.style.backgroundColor='var(--secondary-color)'" onmouseout="this.style.backgroundColor='transparent'" onclick="${option.action.toString().replace(/"/g, '&quot;')}; document.body.removeChild(this.parentNode.parentNode);"` : ''}>
-                        <i class="${option.icon}" style="color: ${isDisabled ? 'var(--text-secondary)' : 'var(--primary-color)'}; width: 20px;"></i>
-                        <span>${option.text}${isDisabled ? ' (Requires Internet)' : ''}</span>
-                    </div>
-                `;
-            });
-            
-            optionsHTML += `
-                </div>
-                <div style="padding: 15px 20px; text-align: center;">
-                    <button onclick="document.body.removeChild(this.parentNode.parentNode);" style="background: none; border: none; color: var(--text-secondary); cursor: pointer; padding: 8px 16px; border-radius: 8px;">Cancel</button>
-                </div>
-            `;
-            
-            optionsMenu.innerHTML = optionsHTML;
-            
-            // Add overlay
-            const overlay = document.createElement('div');
-            overlay.style.cssText = `
-                position: fixed;
-                top: 0;
-                left: 0;
-                width: 100%;
-                height: 100%;
-                background: rgba(0,0,0,0.5);
-                z-index: 1000;
-            `;
-            overlay.onclick = () => {
-                document.body.removeChild(overlay);
-                document.body.removeChild(optionsMenu);
-            };
-            
-            document.body.appendChild(overlay);
-            document.body.appendChild(optionsMenu);
-        }
-        
-        function changeFriendCategory(friendData) {
-            if (!isOnline) {
-                showNotification('Cannot change friend category while offline', 'warning');
-                return;
-            }
-            
-            const categories = Object.keys(friendCategories);
-            
-            const categoryHTML = categories.map(cat => {
-                const catInfo = friendCategories[cat];
-                return `
-                    <div style="padding: 12px 15px; border-bottom: 1px solid var(--border-color); cursor: pointer; display: flex; align-items: center; gap: 12px;"
-                         onclick="updateFriendCategory('${friendData.uid}', '${cat}'); document.body.removeChild(this.parentNode.parentNode.parentNode);">
-                        <div style="width: 20px; height: 20px; border-radius: 50%; background-color: ${catInfo.color}; display: flex; align-items: center; justify-content: center;">
-                            <i class="${catInfo.icon}" style="color: white; font-size: 10px;"></i>
-                        </div>
-                        <div>
-                            <div style="font-weight: 500;">${catInfo.name}</div>
-                            <div style="font-size: 12px; color: var(--text-secondary);">${catInfo.description}</div>
-                        </div>
-                    </div>
-                `;
-            }).join('');
-            
-            const modalHTML = `
-                <div style="position: fixed; top: 50%; left: 50%; transform: translate(-50%, -50%); background: white; border-radius: 12px; z-index: 1002; min-width: 300px; max-width: 90%;">
-                    <div style="padding: 20px; border-bottom: 1px solid var(--border-color);">
-                        <div style="font-weight: 600;">Change Friend Category</div>
-                        <div style="font-size: 14px; color: var(--text-secondary); margin-top: 5px;">Select a new category for ${friendData.displayName}</div>
-                    </div>
-                    <div style="max-height: 400px; overflow-y: auto;">
-                        ${categoryHTML}
-                    </div>
-                    <div style="padding: 15px 20px; text-align: center;">
-                        <button onclick="document.body.removeChild(this.parentNode.parentNode);" style="background: none; border: none; color: var(--text-secondary); cursor: pointer; padding: 8px 16px; border-radius: 8px;">Cancel</button>
-                    </div>
-                </div>
-            `;
-            
-            const modal = document.createElement('div');
-            modal.innerHTML = modalHTML;
-            modal.style.cssText = 'position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.5); z-index: 1001; display: flex; align-items: center; justify-content: center;';
-            
-            modal.onclick = (e) => {
-                if (e.target === modal) {
-                    document.body.removeChild(modal);
-                }
-            };
-            
-            document.body.appendChild(modal);
-        }
-        
-        function blockUser(friendData) {
-            if (confirm(`Are you sure you want to block ${friendData.displayName}? They will no longer be able to message or call you.`)) {
-                // Store block locally
-                const blockedUsers = JSON.parse(localStorage.getItem('knecta_blocked_users') || '[]');
-                blockedUsers.push({
-                    uid: friendData.uid,
-                    displayName: friendData.displayName,
-                    timestamp: Date.now()
-                });
-                localStorage.setItem('knecta_blocked_users', JSON.stringify(blockedUsers));
-                
-                // Remove from friends list if blocked
-                const friendIndex = friends.findIndex(f => f.uid === friendData.uid);
-                if (friendIndex !== -1) {
-                    friends.splice(friendIndex, 1);
-                    renderFriends();
-                    updateFriendCounts();
-                    saveFriendsToLocalStorage();
-                }
-                
-                showNotification(`${friendData.displayName} has been blocked`, 'success');
-                
-                // Close details panel if open
-                if (friendDetailsPanel.classList.contains('active')) {
-                    friendDetailsPanel.classList.remove('active');
-                    selectedFriend = null;
-                }
-            }
-        }
-        
-        function reportUser(friendData) {
-            const reason = prompt(`Why are you reporting ${friendData.displayName}?\n1. Spam\n2. Harassment\n3. Inappropriate content\n4. Fake account\n5. Other\n\nEnter reason number:`, '1');
-            
-            if (reason) {
-                // Store report locally
-                const reports = JSON.parse(localStorage.getItem('knecta_reports') || '[]');
-                reports.push({
-                    uid: friendData.uid,
-                    displayName: friendData.displayName,
-                    reason: reason,
-                    timestamp: Date.now()
-                });
-                localStorage.setItem('knecta_reports', JSON.stringify(reports));
-                
-                showNotification('User has been reported. Thank you for helping keep our community safe.', 'success');
-            }
-        }
-        
-        function removeFriendConfirm(friendData) {
-            if (!isOnline) {
-                showNotification('Cannot remove friends while offline', 'warning');
-                return;
-            }
-            
-            if (confirm(`Are you sure you want to remove ${friendData.displayName} from your friends?`)) {
-                removeFriend(friendData.uid);
-            }
-        }
-        
-        function shareProfile(friendData) {
-            const shareUrl = `${window.location.origin}/profile.html?user=${friendData.uid}`;
-            
-            if (navigator.share) {
-                navigator.share({
-                    title: `${friendData.displayName}'s Profile`,
-                    text: `Check out ${friendData.displayName}'s profile on Knecta Chat`,
-                    url: shareUrl
-                });
-            } else {
-                navigator.clipboard.writeText(shareUrl);
-                showNotification('Profile link copied to clipboard', 'success');
-            }
-        }
-        
-        function viewBusinessInfo(friendData) {
-            showNotification('Business profile feature coming soon', 'info');
-        }
-        
         function showFriendRequestDetails(requestData) {
             const userData = requestData.userData || requestData;
             
-            // Update modal content
             document.getElementById('requestName').textContent = userData.displayName || 'Unknown User';
             document.getElementById('requestUsername').textContent = userData.username || 'No username';
             
@@ -5330,22 +4525,18 @@
                 avatar.innerHTML = `<span style="color: white; font-size: 24px;">${initials}</span>`;
             }
             
-            // Calculate mutual friends
             const mutualCount = calculateMutualFriends(userData);
             const mutualElement = document.getElementById('mutualFriendsCount');
             mutualElement.innerHTML = `<i class="fas fa-users"></i> ${mutualCount} mutual friend${mutualCount !== 1 ? 's' : ''}`;
             
-            // Store request data
             window.currentRequest = requestData;
             
-            // Show modal
             friendRequestModal.classList.add('active');
         }
         
         function setupFriendRequestsListener() {
             if (!currentUser || !firebaseInitialized) return;
             
-            // Listen for new friend requests
             db.collection('friendRequests')
                 .where('to', '==', currentUser.uid)
                 .where('status', '==', 'pending')
@@ -5355,12 +4546,10 @@
                             const request = change.doc.data();
                             console.log('New friend request:', request);
                             
-                            // Get user data
                             db.collection('users').doc(request.from).get().then(userDoc => {
                                 if (userDoc.exists) {
                                     const userData = userDoc.data();
                                     
-                                    // Show notification (check notification settings)
                                     if (typeof settingsManager !== 'undefined') {
                                         const notifyFriendRequest = settingsManager.getSetting('notifyFriendRequest');
                                         if (notifyFriendRequest !== false) {
@@ -5370,8 +4559,8 @@
                                         showNotification(`New friend request from ${userData.displayName}`, 'info');
                                     }
                                     
-                                    // Update request count
-                                    loadFriendRequestsFromFirebase();
+                                    syncFriendRequestsFromServer();
+                                    updateCurrentSection();
                                 }
                             });
                         }
@@ -5380,29 +4569,25 @@
         }
         
         function calculateMutualFriends(friendData) {
-            // Simplified mutual friends calculation
-            return Math.floor(Math.random() * 10); // Demo: random 0-9 mutual friends
+            // For demo purposes, return a random number
+            // In a real app, you would query Firebase for actual mutual friends
+            return Math.floor(Math.random() * 10);
         }
         
         function calculateTrustScore(userData) {
-            // Calculate trust score based on various factors
-            let score = 5; // Base score
+            let score = 5;
             
-            // Account age (months)
             if (userData.createdAt) {
                 const created = userData.createdAt.toDate ? userData.createdAt.toDate() : new Date(userData.createdAt);
                 const monthsOld = (new Date() - created) / (1000 * 60 * 60 * 24 * 30);
                 score += Math.min(monthsOld / 6, 2);
             }
             
-            // Verified email
             if (userData.emailVerified) score += 1;
             
-            // Profile completeness
             if (userData.photoURL) score += 1;
             if (userData.displayName && userData.displayName.length > 1) score += 1;
             
-            // Mutual friends (simplified)
             const mutualCount = calculateMutualFriends(userData);
             score += Math.min(mutualCount * 0.5, 2);
             
@@ -5416,46 +4601,36 @@
         }
         
         function updateFriendCounts() {
-            // Update total friends count
             document.getElementById('totalFriends').textContent = friends.length;
             
-            // Update online friends count
             const onlineCount = friends.filter(f => f.online).length;
             document.getElementById('onlineFriends').textContent = onlineCount;
             
-            // Update mutual friends (total)
             const totalMutual = friends.reduce((sum, friend) => sum + calculateMutualFriends(friend), 0);
             document.getElementById('mutualTotal').textContent = totalMutual;
         }
         
         function updateCurrentSection() {
-            // Update the currently active section
             const activeSection = document.querySelector('.friends-section.active');
             if (activeSection) {
                 const sectionId = activeSection.id;
                 
-                // Clear and reload the active section
                 switch(sectionId) {
                     case 'allFriendsSection':
-                        // Combine all friend types
                         allFriendsList.innerHTML = '';
                         
-                        // Add contacts
                         contacts.forEach(contact => {
                             addFriendItem(contact, allFriendsList, 'contact');
                         });
                         
-                        // Add friends
                         friends.forEach(friend => {
                             addFriendItem(friend, allFriendsList, 'friend');
                         });
                         
-                        // Add temporary friends
                         temporaryFriends.forEach(friend => {
                             addFriendItem(friend, allFriendsList, 'temporary');
                         });
                         
-                        // Show empty state if no friends
                         if (contacts.length === 0 && friends.length === 0 && temporaryFriends.length === 0) {
                             allFriendsList.innerHTML = `
                                 <div class="empty-state">
@@ -5491,7 +4666,6 @@
             currentCategoryFilter = category;
             updateCurrentSection();
             
-            // Update active filter button
             document.querySelectorAll('.category-filter-btn').forEach(btn => {
                 btn.classList.remove('active');
             });
@@ -5520,69 +4694,28 @@
             return searchIn.includes(searchTerm);
         }
         
-        // QR code generation - now ensures each friend has a unique QR code
-        function generateQRCode() {
+        async function simulateContactSync() {
+            if (!isOnline) {
+                showNotification('Cannot sync contacts while offline', 'error');
+                return;
+            }
+            
+            showNotification('Syncing contacts...', 'info');
+            
             try {
-                const qrContainer = document.getElementById('qrCodeContainer');
-                if (!qrContainer || !currentUser) {
-                    console.log('QR container or user not found');
-                    return;
+                await syncContactsFromServer();
+                
+                // If on contacts tab, refresh
+                if (contactsSection.classList.contains('active')) {
+                    renderContacts();
                 }
                 
-                // Clear existing QR code
-                qrContainer.innerHTML = '';
-                
-                // Check if QRCode library is loaded
-                if (typeof QRCode === 'undefined') {
-                    console.error('QRCode library not loaded');
-                    qrContainer.innerHTML = '<div style="text-align: center; padding: 40px; color: var(--text-secondary);"><i class="fas fa-exclamation-triangle"></i><p>QR code library not available</p><button onclick="retryQRCode()" style="margin-top: 10px; padding: 8px 16px; background: var(--primary-color); color: white; border: none; border-radius: 8px; cursor: pointer;">Retry</button></div>';
-                    return;
-                }
-                
-                // Create unique QR code data with user's unique ID
-                const qrData = JSON.stringify({
-                    type: 'knecta_friend',
-                    userId: currentUser.uid,
-                    username: userData?.username || '',
-                    displayName: userData?.displayName || '',
-                    timestamp: Date.now(),
-                    // Add a unique identifier to ensure each QR code is different
-                    uniqueId: `${currentUser.uid}_${Date.now()}_${Math.random().toString(36).substring(2, 9)}`
-                });
-                
-                // Generate QR code - works offline
-                new QRCode(qrContainer, {
-                    text: qrData,
-                    width: 160,
-                    height: 160,
-                    colorDark: '#0084ff',
-                    colorLight: '#ffffff',
-                    correctLevel: QRCode.CorrectLevel.H
-                });
-                
-                console.log('Unique QR code generated for user:', currentUser.uid);
+                showNotification(`Found ${contacts.length} contacts`, 'success');
                 
             } catch (error) {
-                console.error('Error in generateQRCode:', error);
-                const qrContainer = document.getElementById('qrCodeContainer');
-                if (qrContainer) {
-                    qrContainer.innerHTML = '<div style="text-align: center; padding: 40px; color: var(--text-secondary);"><i class="fas fa-exclamation-triangle"></i><p>Failed to generate QR code</p><button onclick="generateQRCode()" style="margin-top: 10px; padding: 8px 16px; background: var(--primary-color); color: white; border: none; border-radius: 8px; cursor: pointer;">Retry</button></div>';
-                }
+                console.error('Error syncing contacts:', error);
+                showNotification('Error syncing contacts', 'error');
             }
-        }
-        
-        function retryQRCode() {
-            // Try to reload the QR code library
-            const script = document.createElement('script');
-            script.src = 'https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js';
-            script.onload = function() {
-                generateQRCode();
-            };
-            script.onerror = function() {
-                console.error('Failed to load QR code library');
-                showNotification('Failed to load QR code library', 'error');
-            };
-            document.head.appendChild(script);
         }
         
         function formatTimeAgo(date) {
@@ -5627,7 +4760,6 @@
             startChatModal.classList.add('active');
             populateChatFriendsList();
             
-            // Reset selection
             window.selectedChatFriend = null;
             document.getElementById('confirmStartChatBtn').disabled = true;
             document.getElementById('searchChatUser').value = '';
@@ -5639,7 +4771,6 @@
             
             chatFriendsList.innerHTML = '';
             
-            // Combine friends and contacts
             const allChattableFriends = [...friends, ...contacts];
             
             if (allChattableFriends.length === 0) {
@@ -5710,7 +4841,6 @@
         }
         
         function setupEventListeners() {
-            // Store original button texts
             const quickActionButtons = document.querySelectorAll('.quick-action-btn');
             quickActionButtons.forEach(button => {
                 const textElement = button.querySelector('.quick-action-text');
@@ -5718,14 +4848,12 @@
                     const originalText = textElement.textContent;
                     textElement.setAttribute('data-original-text', originalText);
                     
-                    // Initially add offline warning if offline
                     if (!isOnline) {
                         textElement.innerHTML = originalText + '<div class="offline-warning-text">(Offline)</div>';
                     }
                 }
             });
             
-            // Store original button titles
             const buttonsWithTitles = ['addFriendBtn', 'syncContactsBtn', 'discoverBtn'];
             buttonsWithTitles.forEach(buttonId => {
                 const button = document.getElementById(buttonId);
@@ -5820,7 +4948,6 @@
                     return;
                 }
                 
-                // Check if friend requests are allowed using settingsManager
                 if (typeof settingsManager !== 'undefined') {
                     const allowFriendRequests = settingsManager.getSetting('allowFriendRequests');
                     if (allowFriendRequests === false) {
@@ -5840,34 +4967,7 @@
             
             // Quick action buttons
             document.getElementById('syncContactsBtn').addEventListener('click', () => {
-                if (!isOnline) {
-                    showNotification('Cannot sync contacts while offline', 'error');
-                    return;
-                }
-                
-                // Check auto-add contacts setting using settingsManager
-                let shouldAutoAdd = false;
-                if (typeof settingsManager !== 'undefined') {
-                    shouldAutoAdd = settingsManager.getSetting('autoAddContacts') === true;
-                }
-                
-                if (navigator.contacts) {
-                    navigator.contacts.select(['name', 'email', 'tel'], { multiple: true })
-                        .then(contacts => {
-                            console.log('Contacts selected:', contacts);
-                            if (shouldAutoAdd) {
-                                showNotification(`${contacts.length} contacts selected and will be auto-added`, 'success');
-                            } else {
-                                showNotification(`${contacts.length} contacts selected for sync`, 'success');
-                            }
-                        })
-                        .catch(error => {
-                            console.error('Error accessing contacts:', error);
-                            showNotification('Contact access denied or not supported', 'error');
-                        });
-                } else {
-                    showNotification('Contact API not supported in this browser', 'error');
-                }
+                simulateContactSync();
             });
             
             document.getElementById('scanQRBtn').addEventListener('click', () => {
@@ -5928,7 +5028,7 @@
                     } else if (method === 'nearby') {
                         document.querySelector('.add-friend-tab[data-tab="nearby"]').click();
                     } else if (method === 'contacts') {
-                        showNotification('Contact sync feature would open here', 'info');
+                        simulateContactSync();
                     } else if (method === 'groups') {
                         showNotification('Group friend discovery would open here', 'info');
                     }
@@ -5960,7 +5060,6 @@
                         return;
                     }
                     
-                    // Check if friend requests are allowed using settingsManager
                     if (typeof settingsManager !== 'undefined') {
                         const allowFriendRequests = settingsManager.getSetting('allowFriendRequests');
                         if (allowFriendRequests === false) {
@@ -6026,7 +5125,7 @@
             
             document.getElementById('confirmStartChatBtn').addEventListener('click', () => {
                 if (window.selectedChatFriend) {
-                    startChatWithFriendOffline(window.selectedChatFriend);
+                    startChatWithFriend(window.selectedChatFriend);
                     startChatModal.classList.remove('active');
                 }
             });
@@ -6105,7 +5204,7 @@
             });
         }
         
-        console.log('Complete offline-first friends system initialized successfully with settingsManager integration');
+        console.log('Complete friends system initialized successfully with all fixes');
     </script>
 </body>
 </html>
