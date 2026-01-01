@@ -55,6 +55,7 @@
             --basic-plan: #007aff;
             --pro-plan: #5856d6;
             --business-plan: #ff2d55;
+            --animation-duration: 0.3s;
         }
         
         body {
@@ -70,34 +71,6 @@
             position: relative;
         }
         
-        /* Mobile Navigation Toggle */
-        .mobile-nav-toggle {
-            display: none;
-            position: fixed;
-            top: 20px;
-            left: 20px;
-            z-index: 1001;
-            background: var(--primary-color);
-            color: white;
-            width: 50px;
-            height: 50px;
-            border-radius: 50%;
-            border: none;
-            font-size: 20px;
-            cursor: pointer;
-            box-shadow: var(--shadow);
-            align-items: center;
-            justify-content: center;
-        }
-        
-        .mobile-nav-toggle i {
-            transition: transform 0.3s ease;
-        }
-        
-        .mobile-nav-toggle.active i {
-            transform: rotate(90deg);
-        }
-        
         /* Mobile Header */
         .mobile-header {
             display: none;
@@ -107,11 +80,69 @@
             right: 0;
             background: var(--tools-gradient);
             color: white;
-            padding: 15px 20px;
+            padding: 12px 15px;
             z-index: 1000;
             align-items: center;
             justify-content: space-between;
             box-shadow: var(--shadow);
+            height: 60px;
+        }
+        
+        .mobile-header.active {
+            display: flex;
+        }
+        
+        .mobile-header-left {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+        }
+        
+        .back-btn {
+            background: none;
+            border: none;
+            color: white;
+            font-size: 20px;
+            cursor: pointer;
+            display: none;
+            align-items: center;
+            justify-content: center;
+            width: 36px;
+            height: 36px;
+            border-radius: 50%;
+            transition: background-color 0.2s;
+        }
+        
+        .back-btn:hover {
+            background-color: rgba(255, 255, 255, 0.2);
+        }
+        
+        .back-btn.active {
+            display: flex;
+        }
+        
+        .mobile-header-title {
+            font-size: 18px;
+            font-weight: 600;
+        }
+        
+        /* Mobile Navigation Menu */
+        .mobile-nav-menu {
+            display: none;
+            position: fixed;
+            top: 60px;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            background: var(--bg-color);
+            z-index: 999;
+            overflow-y: auto;
+            padding: 20px;
+            animation: slideInRight 0.3s ease;
+        }
+        
+        .mobile-nav-menu.active {
+            display: block;
         }
         
         /* Offline Overlay */
@@ -193,7 +224,7 @@
         
         .offline-indicator {
             position: fixed;
-            top: 20px;
+            top: 70px;
             right: 20px;
             background-color: var(--warning-color);
             color: white;
@@ -214,30 +245,6 @@
             display: flex;
         }
         
-        /* Local Storage Indicator */
-        .local-storage-indicator {
-            position: fixed;
-            bottom: 70px;
-            right: 20px;
-            background-color: var(--info-color);
-            color: white;
-            padding: 8px 16px;
-            border-radius: 20px;
-            font-size: 12px;
-            font-weight: 500;
-            z-index: 10000;
-            display: flex;
-            align-items: center;
-            gap: 8px;
-            box-shadow: var(--shadow);
-            animation: slideInRight 0.3s ease;
-            display: none;
-        }
-        
-        .local-storage-indicator.active {
-            display: flex;
-        }
-        
         /* Sidebar Styles */
         .sidebar {
             width: 380px;
@@ -251,7 +258,7 @@
             top: 0;
             flex-shrink: 0;
             transition: transform 0.3s ease;
-            z-index: 999;
+            z-index: 900;
         }
         
         .sidebar-header {
@@ -373,6 +380,7 @@
             text-decoration: none;
             transition: all 0.2s;
             cursor: pointer;
+            user-select: none;
         }
         
         .nav-tab:hover {
@@ -402,6 +410,36 @@
             font-size: 11px;
             padding: 2px 6px;
             border-radius: 10px;
+        }
+        
+        /* Mobile Navigation Items */
+        .mobile-nav-item {
+            display: flex;
+            align-items: center;
+            gap: 15px;
+            padding: 15px;
+            border-radius: 10px;
+            color: var(--text-primary);
+            text-decoration: none;
+            transition: all 0.2s;
+            cursor: pointer;
+            margin-bottom: 8px;
+            user-select: none;
+        }
+        
+        .mobile-nav-item:hover {
+            background-color: var(--secondary-color);
+        }
+        
+        .mobile-nav-item.active {
+            background-color: rgba(0, 132, 255, 0.1);
+            color: var(--primary-color);
+            font-weight: 500;
+        }
+        
+        .mobile-nav-item i {
+            font-size: 20px;
+            width: 30px;
         }
         
         /* Category Filters */
@@ -435,6 +473,7 @@
             white-space: nowrap;
             flex-shrink: 0;
             transition: all 0.2s;
+            user-select: none;
         }
         
         .category-filter-btn.active {
@@ -487,10 +526,16 @@
             display: none;
             flex-direction: column;
             min-height: 100vh;
+            opacity: 0;
+            transform: translateY(10px);
+            transition: opacity var(--animation-duration) ease, transform var(--animation-duration) ease;
         }
         
         .tools-content.active {
             display: flex;
+            opacity: 1;
+            transform: translateY(0);
+            animation: fadeInUp var(--animation-duration) ease;
         }
         
         .content-header {
@@ -531,6 +576,7 @@
             gap: 8px;
             transition: all 0.2s;
             white-space: nowrap;
+            user-select: none;
         }
         
         .action-btn:hover {
@@ -570,6 +616,7 @@
             cursor: pointer;
             position: relative;
             overflow: hidden;
+            user-select: none;
         }
         
         .tool-card:hover {
@@ -688,9 +735,10 @@
             width: 100%;
             height: 100%;
             background-color: rgba(0, 0, 0, 0.5);
-            z-index: 1000;
+            z-index: 1100;
             align-items: center;
             justify-content: center;
+            animation: fadeIn var(--animation-duration) ease;
         }
         
         .tool-preview-modal.active {
@@ -707,6 +755,7 @@
             flex-direction: column;
             max-height: 90vh;
             box-shadow: var(--shadow-lg);
+            animation: slideInUp var(--animation-duration) ease;
         }
         
         .tool-preview-header {
@@ -737,9 +786,10 @@
             width: 100%;
             height: 100%;
             background-color: rgba(0, 0, 0, 0.5);
-            z-index: 1000;
+            z-index: 1100;
             align-items: center;
             justify-content: center;
+            animation: fadeIn var(--animation-duration) ease;
         }
         
         .payment-modal.active {
@@ -753,6 +803,7 @@
             border-radius: 20px;
             overflow: hidden;
             box-shadow: var(--shadow-lg);
+            animation: slideInUp var(--animation-duration) ease;
         }
         
         .payment-header {
@@ -910,9 +961,10 @@
             width: 100%;
             height: 100%;
             background-color: rgba(0, 0, 0, 0.5);
-            z-index: 1000;
+            z-index: 1100;
             align-items: center;
             justify-content: center;
+            animation: fadeIn var(--animation-duration) ease;
         }
         
         .tool-execution-modal.active {
@@ -927,6 +979,7 @@
             overflow: hidden;
             display: flex;
             flex-direction: column;
+            animation: slideInUp var(--animation-duration) ease;
         }
         
         .tool-execution-header {
@@ -958,7 +1011,7 @@
             padding: 12px 20px;
             border-radius: 8px;
             box-shadow: var(--shadow);
-            z-index: 1000;
+            z-index: 1200;
             display: flex;
             align-items: center;
             gap: 10px;
@@ -992,7 +1045,7 @@
             width: 100%;
             height: 100%;
             background-color: rgba(255, 255, 255, 0.9);
-            z-index: 1001;
+            z-index: 1300;
             display: none;
             align-items: center;
             justify-content: center;
@@ -1069,288 +1122,13 @@
             opacity: 0.5;
         }
         
-        /* Cache Indicator */
-        .cache-indicator {
-            padding: 10px 20px;
-            background-color: var(--secondary-color);
-            border-radius: 8px;
-            margin: 10px 20px;
-            font-size: 13px;
-            color: var(--text-secondary);
-            display: flex;
-            align-items: center;
-            gap: 8px;
-            animation: fadeIn 0.3s ease;
-        }
-        
-        /* Switch Toggle */
-        .switch {
-            position: relative;
-            display: inline-block;
-            width: 50px;
-            height: 24px;
-        }
-        
-        .switch input {
-            opacity: 0;
-            width: 0;
-            height: 0;
-        }
-        
-        .slider {
-            position: absolute;
-            cursor: pointer;
-            top: 0;
-            left: 0;
-            right: 0;
-            bottom: 0;
-            background-color: #ccc;
-            transition: .4s;
-            border-radius: 34px;
-        }
-        
-        .slider:before {
-            position: absolute;
-            content: "";
-            height: 16px;
-            width: 16px;
-            left: 4px;
-            bottom: 4px;
-            background-color: white;
-            transition: .4s;
-            border-radius: 50%;
-        }
-        
-        input:checked + .slider {
-            background-color: var(--primary-color);
-        }
-        
-        input:checked + .slider:before {
-            transform: translateX(26px);
-        }
-        
-        /* Plan Comparison */
-        .plan-comparison {
-            display: grid;
-            grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
-            gap: 20px;
-            margin-top: 20px;
-        }
-        
-        .plan-card {
-            background-color: var(--bg-color);
-            border-radius: 12px;
-            padding: 25px;
-            border: 2px solid var(--border-color);
-            transition: all 0.3s;
-            position: relative;
-        }
-        
-        .plan-card:hover {
-            border-color: var(--primary-color);
-            box-shadow: var(--card-shadow);
-        }
-        
-        .plan-card.featured {
-            border-color: var(--primary-color);
-            box-shadow: 0 0 0 3px rgba(0, 132, 255, 0.1);
-        }
-        
-        .plan-name {
-            font-size: 20px;
-            font-weight: 600;
-            margin-bottom: 10px;
-        }
-        
-        .plan-price {
-            font-size: 32px;
-            font-weight: 700;
-            margin-bottom: 20px;
-        }
-        
-        .plan-price .period {
-            font-size: 14px;
-            color: var(--text-secondary);
-            font-weight: normal;
-        }
-        
-        .plan-features {
-            list-style: none;
-            margin-bottom: 20px;
-        }
-        
-        .plan-features li {
-            padding: 8px 0;
-            border-bottom: 1px solid var(--border-color);
-            display: flex;
-            align-items: center;
-            gap: 10px;
-        }
-        
-        .plan-features li:last-child {
-            border-bottom: none;
-        }
-        
-        .feature-check {
-            color: var(--success-color);
-        }
-        
-        .feature-cross {
-            color: var(--text-secondary);
-            opacity: 0.5;
-        }
-        
-        /* Credit Packages */
-        .credit-packages {
-            display: grid;
-            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
-            gap: 15px;
-            margin-top: 20px;
-        }
-        
-        .credit-package {
-            background-color: var(--secondary-color);
-            border-radius: 10px;
-            padding: 20px;
-            text-align: center;
-            cursor: pointer;
-            transition: all 0.3s;
-            border: 2px solid transparent;
-        }
-        
-        .credit-package:hover {
-            border-color: var(--primary-color);
-            transform: translateY(-3px);
-        }
-        
-        .credit-package.selected {
-            border-color: var(--primary-color);
-            background-color: rgba(0, 132, 255, 0.1);
-        }
-        
-        .package-credits {
-            font-size: 24px;
-            font-weight: 700;
-            margin-bottom: 5px;
-        }
-        
-        .package-price {
-            font-size: 18px;
-            font-weight: 600;
-            color: var(--primary-color);
-            margin-bottom: 10px;
-        }
-        
-        .package-bonus {
-            font-size: 12px;
-            color: var(--success-color);
-            background-color: rgba(52, 199, 89, 0.1);
-            padding: 4px 8px;
-            border-radius: 10px;
-            display: inline-block;
-        }
-        
-        /* Form Styles */
-        .form-group {
-            margin-bottom: 20px;
-        }
-        
-        .form-label {
-            display: block;
-            margin-bottom: 8px;
-            font-weight: 500;
-        }
-        
-        .form-input {
-            width: 100%;
-            padding: 12px 15px;
-            border: 1px solid var(--border-color);
-            border-radius: 8px;
-            font-size: 14px;
-            transition: border-color 0.2s;
-        }
-        
-        .form-input:focus {
-            outline: none;
-            border-color: var(--primary-color);
-        }
-        
-        .form-row {
-            display: flex;
-            gap: 15px;
-        }
-        
-        .form-row .form-group {
-            flex: 1;
-        }
-        
-        /* Payment Method Selector */
-        .payment-methods {
-            display: grid;
-            grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
-            gap: 10px;
-            margin-bottom: 20px;
-        }
-        
-        .payment-method {
-            padding: 15px;
-            border: 2px solid var(--border-color);
-            border-radius: 10px;
-            text-align: center;
-            cursor: pointer;
-            transition: all 0.2s;
-        }
-        
-        .payment-method:hover {
-            border-color: var(--primary-color);
-        }
-        
-        .payment-method.selected {
-            border-color: var(--primary-color);
-            background-color: rgba(0, 132, 255, 0.05);
-        }
-        
-        .payment-method i {
-            font-size: 24px;
-            margin-bottom: 10px;
-            color: var(--primary-color);
-        }
-        
-        .payment-method span {
-            display: block;
-            font-size: 12px;
-            font-weight: 500;
-        }
-        
-        /* Copy Container */
-        .copy-container {
-            display: flex;
-            gap: 10px;
-            margin-top: 10px;
-        }
-        
-        .copy-input {
-            flex: 1;
-            padding: 12px 15px;
-            border: 1px solid var(--border-color);
-            border-radius: 8px;
-            background-color: var(--secondary-color);
-            font-family: 'Monaco', 'Menlo', monospace;
-            font-size: 13px;
-        }
-        
-        .copy-btn {
-            padding: 12px 20px;
-            background-color: var(--primary-color);
-            color: white;
-            border: none;
-            border-radius: 8px;
-            cursor: pointer;
-            font-weight: 500;
-        }
-        
         /* Animations */
         @keyframes fadeIn {
+            from { opacity: 0; }
+            to { opacity: 1; }
+        }
+        
+        @keyframes fadeInUp {
             from { opacity: 0; transform: translateY(20px); }
             to { opacity: 1; transform: translateY(0); }
         }
@@ -1358,6 +1136,11 @@
         @keyframes slideInRight {
             from { transform: translateX(100%); opacity: 0; }
             to { transform: translateX(0); opacity: 1; }
+        }
+        
+        @keyframes slideInUp {
+            from { transform: translateY(50px); opacity: 0; }
+            to { transform: translateY(0); opacity: 1; }
         }
         
         @keyframes spin {
@@ -1386,10 +1169,6 @@
             .affiliate-stats {
                 grid-template-columns: repeat(2, 1fr);
             }
-            
-            .plan-comparison {
-                grid-template-columns: repeat(2, 1fr);
-            }
         }
         
         /* Mobile Landscape & Small Tablets */
@@ -1403,49 +1182,18 @@
                 min-height: 100vh;
             }
             
-            .mobile-nav-toggle {
-                display: flex;
-            }
-            
             .mobile-header {
                 display: flex;
             }
             
             .sidebar {
-                position: fixed;
-                top: 0;
-                left: 0;
-                width: 320px;
-                height: 100vh;
-                z-index: 1000;
-                transform: translateX(-100%);
-                transition: transform 0.3s ease;
-                box-shadow: var(--shadow-lg);
-            }
-            
-            .sidebar.active {
-                transform: translateX(0);
-            }
-            
-            .sidebar-overlay {
-                position: fixed;
-                top: 0;
-                left: 0;
-                right: 0;
-                bottom: 0;
-                background: rgba(0, 0, 0, 0.5);
-                z-index: 999;
                 display: none;
-            }
-            
-            .sidebar-overlay.active {
-                display: block;
             }
             
             .tools-content {
                 width: 100%;
-                margin-top: 70px;
-                min-height: calc(100vh - 70px);
+                margin-top: 60px;
+                min-height: calc(100vh - 60px);
             }
             
             .content-header {
@@ -1475,10 +1223,6 @@
                 grid-template-columns: 1fr;
             }
             
-            .plan-comparison {
-                grid-template-columns: 1fr;
-            }
-            
             .affiliate-stats {
                 grid-template-columns: repeat(3, 1fr);
             }
@@ -1494,21 +1238,21 @@
             .credit-amount {
                 font-size: 28px;
             }
+            
+            .offline-indicator {
+                top: 70px;
+            }
         }
         
         /* Mobile Portrait */
         @media (max-width: 576px) {
-            .sidebar {
-                width: 100%;
+            .mobile-header {
+                padding: 12px 15px;
             }
             
             .tools-content {
                 margin-top: 60px;
                 min-height: calc(100vh - 60px);
-            }
-            
-            .mobile-header {
-                padding: 12px 15px;
             }
             
             .tools-grid {
@@ -1521,18 +1265,6 @@
             
             .affiliate-stats {
                 grid-template-columns: 1fr;
-            }
-            
-            .plan-comparison {
-                grid-template-columns: 1fr;
-            }
-            
-            .credit-packages {
-                grid-template-columns: 1fr;
-            }
-            
-            .payment-methods {
-                grid-template-columns: repeat(2, 1fr);
             }
             
             .content-header {
@@ -1549,11 +1281,6 @@
                 font-size: 14px;
                 flex: 1;
                 justify-content: center;
-            }
-            
-            .form-row {
-                flex-direction: column;
-                gap: 0;
             }
             
             .credit-display {
@@ -1603,61 +1330,93 @@
                 border-radius: 0;
             }
         }
-        
-        /* Very Small Mobile */
-        @media (max-width: 375px) {
-            .content-title {
-                font-size: 18px;
-            }
-            
-            .action-btn {
-                font-size: 13px;
-                padding: 8px 12px;
-            }
-            
-            .tool-name {
-                font-size: 16px;
-            }
-            
-            .tool-description {
-                font-size: 13px;
-            }
-            
-            .credit-actions {
-                flex-direction: column;
-            }
-            
-            .credit-btn {
-                width: 100%;
-            }
-        }
     </style>
 </head>
 <body>
-    <!-- Mobile Navigation Toggle -->
-    <button class="mobile-nav-toggle" id="mobileNavToggle">
-        <i class="fas fa-bars"></i>
-    </button>
-    
     <!-- Mobile Header -->
     <div class="mobile-header" id="mobileHeader">
-        <div>
-            <div class="user-info">
-                <div class="user-avatar" id="mobileUserAvatar">ME</div>
-                <div class="user-details">
-                    <div class="user-name" id="mobileUserName">Loading...</div>
-                    <div class="user-plan" id="mobileUserPlan">Free Plan</div>
-                </div>
-            </div>
+        <div class="mobile-header-left">
+            <button class="back-btn" id="backBtn">
+                <i class="fas fa-arrow-left"></i>
+            </button>
+            <div class="mobile-header-title" id="mobileHeaderTitle">Dashboard</div>
         </div>
-        <div class="credit-display" style="margin: 0; padding: 10px; width: 120px;">
-            <div style="font-size: 11px; opacity: 0.9;">Credits</div>
-            <div style="font-size: 18px; font-weight: 700;" id="mobileCreditAmount">0</div>
+        <div style="display: flex; align-items: center; gap: 15px;">
+            <div style="text-align: right; color: white;">
+                <div style="font-size: 11px; opacity: 0.9;">Credits</div>
+                <div style="font-size: 18px; font-weight: 700;" id="mobileCreditAmount">100</div>
+            </div>
+            <button class="action-btn" id="menuToggleBtn" style="padding: 8px 12px; background: rgba(255,255,255,0.2);">
+                <i class="fas fa-bars"></i>
+            </button>
         </div>
     </div>
     
-    <!-- Sidebar Overlay for Mobile -->
-    <div class="sidebar-overlay" id="sidebarOverlay"></div>
+    <!-- Mobile Navigation Menu -->
+    <div class="mobile-nav-menu" id="mobileNavMenu">
+        <div class="user-info" style="padding: 20px; border-bottom: 1px solid var(--border-color); margin-bottom: 20px;">
+            <div class="user-avatar" id="mobileUserAvatar">ME</div>
+            <div class="user-details">
+                <div class="user-name" id="mobileUserName">Loading...</div>
+                <div class="user-plan" id="mobileUserPlan">Free Plan</div>
+            </div>
+        </div>
+        
+        <!-- Quick Stats in Mobile Menu -->
+        <div class="quick-stats" style="padding: 0; margin-bottom: 20px;">
+            <div class="stat-card">
+                <div class="stat-number" id="mobileToolsUsed">0</div>
+                <div class="stat-label">Tools Used</div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-number" id="mobileAiUses">0</div>
+                <div class="stat-label">AI Uses</div>
+            </div>
+        </div>
+        
+        <!-- Navigation Items -->
+        <div class="nav-tabs" style="padding: 0;">
+            <div class="mobile-nav-item active" data-tab="dashboard">
+                <i class="fas fa-home"></i>
+                <span>Dashboard</span>
+            </div>
+            <div class="mobile-nav-item" data-tab="tools">
+                <i class="fas fa-tools"></i>
+                <span>AI Tools</span>
+            </div>
+            <div class="mobile-nav-item" data-tab="transactions">
+                <i class="fas fa-exchange-alt"></i>
+                <span>Transactions</span>
+            </div>
+            <div class="mobile-nav-item" data-tab="affiliate">
+                <i class="fas fa-user-friends"></i>
+                <span>Affiliate</span>
+            </div>
+            <div class="mobile-nav-item" data-tab="consultation">
+                <i class="fas fa-calendar-check"></i>
+                <span>Consultation</span>
+            </div>
+            <div class="mobile-nav-item" data-tab="marketplace">
+                <i class="fas fa-store"></i>
+                <span>Marketplace</span>
+            </div>
+            <div class="mobile-nav-item" data-tab="settings">
+                <i class="fas fa-cog"></i>
+                <span>Settings</span>
+            </div>
+        </div>
+        
+        <!-- Category Filters in Mobile Menu -->
+        <div class="category-filters" style="padding: 20px 0 0 0;">
+            <div style="font-size: 14px; font-weight: 600; margin-bottom: 10px; color: var(--text-primary);">Categories</div>
+            <div class="category-filters-container">
+                <button class="category-filter-btn active" data-category="all">All</button>
+                <button class="category-filter-btn" data-category="ai">AI</button>
+                <button class="category-filter-btn" data-category="business">Business</button>
+                <button class="category-filter-btn" data-category="productivity">Productivity</button>
+            </div>
+        </div>
+    </div>
     
     <!-- Offline Overlay -->
     <div class="offline-overlay" id="offlineOverlay">
@@ -1680,12 +1439,6 @@
         <span>Offline</span>
     </div>
     
-    <!-- Local Storage Indicator -->
-    <div class="local-storage-indicator" id="localStorageIndicator">
-        <i class="fas fa-database"></i>
-        <span>Loaded from Local Storage</span>
-    </div>
-    
     <!-- Loading Overlay -->
     <div class="loading-overlay" id="loadingOverlay">
         <div class="loading-spinner"></div>
@@ -1694,7 +1447,7 @@
     
     <div class="app-container">
         <!-- Sidebar -->
-        <div class="sidebar active" id="sidebar">
+        <div class="sidebar" id="sidebar">
             <div class="sidebar-header">
                 <h2>AI Tools Dashboard</h2>
                 <div class="user-info">
@@ -1709,7 +1462,7 @@
             <!-- Credit Display -->
             <div class="credit-display">
                 <div class="credit-label">Available Credits</div>
-                <div class="credit-amount" id="creditAmount">0</div>
+                <div class="credit-amount" id="creditAmount">100</div>
                 <div class="credit-actions">
                     <button class="credit-btn" id="buyCreditsBtn">
                         <i class="fas fa-coins"></i> Buy Credits
@@ -1725,12 +1478,10 @@
                 <div class="nav-tab active" data-tab="dashboard">
                     <i class="fas fa-home"></i>
                     <span>Dashboard</span>
-                    <span class="nav-tab-badge" id="dashboardBadge">New</span>
                 </div>
                 <div class="nav-tab" data-tab="tools">
                     <i class="fas fa-tools"></i>
                     <span>AI Tools</span>
-                    <span class="nav-tab-badge" id="toolsBadge">24</span>
                 </div>
                 <div class="nav-tab" data-tab="transactions">
                     <i class="fas fa-exchange-alt"></i>
@@ -1739,7 +1490,6 @@
                 <div class="nav-tab" data-tab="affiliate">
                     <i class="fas fa-user-friends"></i>
                     <span>Affiliate Program</span>
-                    <span class="nav-tab-badge" id="affiliateBadge">Earn</span>
                 </div>
                 <div class="nav-tab" data-tab="consultation">
                     <i class="fas fa-calendar-check"></i>
@@ -1786,12 +1536,6 @@
                     <button class="category-filter-btn" data-category="marketplace">Marketplace</button>
                 </div>
             </div>
-            
-            <!-- Cache Indicator -->
-            <div class="cache-indicator" id="cacheIndicator" style="display: none;">
-                <i class="fas fa-database"></i>
-                <span>Showing cached tools data. Some features may be limited.</span>
-            </div>
         </div>
         
         <!-- Dashboard Content -->
@@ -1831,34 +1575,15 @@
                 <div class="chart-container">
                     <div class="chart-title">Recent Transactions</div>
                     <div class="transactions-list" id="recentTransactions">
-                        <!-- Transactions will be loaded here -->
-                    </div>
-                </div>
-                
-                <!-- Why Choose MoodChat -->
-                <div class="chart-container">
-                    <div class="chart-title">Why Choose MoodChat?</div>
-                    <div style="padding: 10px 0;">
-                        <p style="margin-bottom: 15px; line-height: 1.6;">
-                            MoodChat offers the most comprehensive suite of AI-powered tools for businesses and individuals. 
-                            From marketing automation to productivity enhancement, we provide everything you need in one platform.
-                        </p>
-                        <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 15px; margin-top: 20px;">
-                            <div style="text-align: center; padding: 15px; background: var(--secondary-color); border-radius: 10px;">
-                                <i class="fas fa-bolt" style="color: var(--primary-color); font-size: 24px; margin-bottom: 10px;"></i>
-                                <div style="font-weight: 600; margin-bottom: 5px;">Fast Execution</div>
-                                <div style="font-size: 13px; color: var(--text-secondary);">Process data in seconds</div>
+                        <div class="transaction-item">
+                            <div class="transaction-icon" style="background-color: var(--warning-color);">
+                                <i class="fas fa-coins"></i>
                             </div>
-                            <div style="text-align: center; padding: 15px; background: var(--secondary-color); border-radius: 10px;">
-                                <i class="fas fa-shield-alt" style="color: var(--success-color); font-size: 24px; margin-bottom: 10px;"></i>
-                                <div style="font-weight: 600; margin-bottom: 5px;">Bank-Level Security</div>
-                                <div style="font-size: 13px; color: var(--text-secondary);">Your data is protected</div>
+                            <div class="transaction-details">
+                                <div class="transaction-title">Credit Purchase</div>
+                                <div class="transaction-date">Today • 100 credits</div>
                             </div>
-                            <div style="text-align: center; padding: 15px; background: var(--secondary-color); border-radius: 10px;">
-                                <i class="fas fa-headset" style="color: var(--info-color); font-size: 24px; margin-bottom: 10px;"></i>
-                                <div style="font-weight: 600; margin-bottom: 5px;">24/7 Support</div>
-                                <div style="font-size: 13px; color: var(--text-secondary);">Always here to help</div>
-                            </div>
+                            <div class="transaction-amount negative">-$9.99</div>
                         </div>
                     </div>
                 </div>
@@ -1891,13 +1616,10 @@
             <div class="content-header">
                 <div class="content-title">Transaction History</div>
                 <div class="content-actions">
-                    <select class="form-input" id="transactionFilter" style="width: 150px;">
+                    <select class="form-input" id="transactionFilter" style="width: 150px; padding: 8px 12px; border: 1px solid var(--border-color); border-radius: 6px;">
                         <option value="all">All Transactions</option>
                         <option value="credit">Credit Purchases</option>
                         <option value="usage">Tool Usage</option>
-                        <option value="subscription">Subscriptions</option>
-                        <option value="affiliate">Affiliate Earnings</option>
-                        <option value="marketplace">Marketplace</option>
                     </select>
                 </div>
             </div>
@@ -1928,9 +1650,10 @@
                         Share your referral link and earn 30% commission on every purchase made by your referrals.
                     </p>
                     
-                    <div class="copy-container">
-                        <input type="text" class="copy-input" id="referralLink" value="https://moodchat.com/ref/yourcode" readonly>
-                        <button class="copy-btn" id="copyReferralBtn">
+                    <div class="copy-container" style="display: flex; gap: 10px; margin-top: 15px;">
+                        <input type="text" class="copy-input" id="referralLink" value="https://moodchat.com/ref/yourcode" readonly 
+                               style="flex: 1; padding: 10px; border: 1px solid var(--border-color); border-radius: 6px; background: rgba(255,255,255,0.1); color: white;">
+                        <button class="copy-btn" id="copyReferralBtn" style="padding: 10px 15px; background: white; color: var(--primary-color); border: none; border-radius: 6px; cursor: pointer;">
                             <i class="fas fa-copy"></i> Copy
                         </button>
                     </div>
@@ -1949,22 +1672,6 @@
                     <div class="stat-card">
                         <div class="stat-number" id="pendingPayout">$0</div>
                         <div class="stat-label">Pending Payout</div>
-                    </div>
-                </div>
-                
-                <!-- Payout Information -->
-                <div class="chart-container">
-                    <div class="chart-title">Payout Information</div>
-                    <div style="padding: 15px 0;">
-                        <p style="margin-bottom: 15px;">
-                            <strong>Minimum Payout:</strong> $50<br>
-                            <strong>Payment Method:</strong> PayPal, Bank Transfer, M-Pesa<br>
-                            <strong>Processing Time:</strong> 3-5 business days
-                        </p>
-                        <div class="security-badge">
-                            <i class="fas fa-lock"></i>
-                            <span>Secure Payout Processing</span>
-                        </div>
                     </div>
                 </div>
             </div>
@@ -2003,21 +1710,6 @@
                 <div class="marketplace-grid" id="marketplaceGrid">
                     <!-- Marketplace items will be loaded here -->
                 </div>
-                
-                <!-- Advertising Space -->
-                <div class="chart-container" style="margin-top: 30px;">
-                    <div class="chart-title">Advertising Space Available</div>
-                    <div style="padding: 20px; text-align: center;">
-                        <i class="fas fa-ad" style="font-size: 48px; color: var(--primary-color); margin-bottom: 15px;"></i>
-                        <h3 style="margin-bottom: 10px;">Reach 50K+ Monthly Users</h3>
-                        <p style="color: var(--text-secondary); margin-bottom: 20px;">
-                            Average CTR: 2.8% • Premium placement available
-                        </p>
-                        <button class="action-btn">
-                            <i class="fas fa-envelope"></i> Contact for Advertising
-                        </button>
-                    </div>
-                </div>
             </div>
         </div>
         
@@ -2036,35 +1728,8 @@
                 <!-- Plan Management -->
                 <div class="chart-container">
                     <div class="chart-title">Plan Management</div>
-                    <div class="plan-comparison" id="planComparison">
+                    <div class="plan-comparison" id="planComparison" style="display: grid; grid-template-columns: repeat(auto-fit, minmax(250px, 1fr)); gap: 20px; margin-top: 20px;">
                         <!-- Plans will be loaded here -->
-                    </div>
-                </div>
-                
-                <!-- Payment Methods -->
-                <div class="chart-container">
-                    <div class="chart-title">Payment Methods</div>
-                    <div class="payment-methods">
-                        <div class="payment-method" data-method="card">
-                            <i class="fas fa-credit-card"></i>
-                            <span>Credit Card</span>
-                        </div>
-                        <div class="payment-method" data-method="paypal">
-                            <i class="fab fa-paypal"></i>
-                            <span>PayPal</span>
-                        </div>
-                        <div class="payment-method" data-method="mpesa">
-                            <i class="fas fa-mobile-alt"></i>
-                            <span>M-Pesa</span>
-                        </div>
-                        <div class="payment-method" data-method="flutterwave">
-                            <i class="fas fa-globe-africa"></i>
-                            <span>Flutterwave</span>
-                        </div>
-                        <div class="payment-method" data-method="paystack">
-                            <i class="fas fa-university"></i>
-                            <span>Paystack</span>
-                        </div>
                     </div>
                 </div>
                 
@@ -2074,23 +1739,16 @@
                     <div style="padding: 15px 0;">
                         <div style="display: flex; justify-content: space-between; align-items: center; padding: 12px 0; border-bottom: 1px solid var(--border-color);">
                             <span>Email Notifications</span>
-                            <label class="switch">
+                            <label class="switch" style="position: relative; display: inline-block; width: 50px; height: 24px;">
                                 <input type="checkbox" id="emailNotifications" checked>
-                                <span class="slider"></span>
+                                <span class="slider" style="position: absolute; cursor: pointer; top: 0; left: 0; right: 0; bottom: 0; background-color: #ccc; transition: .4s; border-radius: 34px;"></span>
                             </label>
                         </div>
                         <div style="display: flex; justify-content: space-between; align-items: center; padding: 12px 0; border-bottom: 1px solid var(--border-color);">
                             <span>Tool Updates</span>
-                            <label class="switch">
+                            <label class="switch" style="position: relative; display: inline-block; width: 50px; height: 24px;">
                                 <input type="checkbox" id="toolUpdates" checked>
-                                <span class="slider"></span>
-                            </label>
-                        </div>
-                        <div style="display: flex; justify-content: space-between; align-items: center; padding: 12px 0;">
-                            <span>Promotional Offers</span>
-                            <label class="switch">
-                                <input type="checkbox" id="promotionalOffers">
-                                <span class="slider"></span>
+                                <span class="slider" style="position: absolute; cursor: pointer; top: 0; left: 0; right: 0; bottom: 0; background-color: #ccc; transition: .4s; border-radius: 34px;"></span>
                             </label>
                         </div>
                     </div>
@@ -2104,7 +1762,7 @@
         <div class="tool-preview-container">
             <div class="tool-preview-header">
                 <div class="tool-preview-title" id="toolPreviewTitle">Tool Preview</div>
-                <button class="add-friend-btn" id="closePreviewModal">
+                <button class="add-friend-btn" id="closePreviewModal" style="background: none; border: none; font-size: 20px; cursor: pointer; color: var(--text-primary);">
                     <i class="fas fa-times"></i>
                 </button>
             </div>
@@ -2122,56 +1780,16 @@
                 <p>Secure payment processed with bank-level encryption</p>
             </div>
             <div style="padding: 25px;">
-                <div class="credit-packages" id="creditPackages">
+                <div class="credit-packages" id="creditPackages" style="display: grid; grid-template-columns: repeat(2, 1fr); gap: 15px; margin-bottom: 20px;">
                     <!-- Credit packages will be loaded here -->
                 </div>
                 
-                <div class="form-group">
-                    <label class="form-label">Payment Method</label>
-                    <select class="form-input" id="paymentMethodSelect">
-                        <option value="card">Credit/Debit Card</option>
-                        <option value="paypal">PayPal</option>
-                        <option value="mpesa">M-Pesa</option>
-                        <option value="flutterwave">Flutterwave</option>
-                        <option value="paystack">Paystack</option>
-                    </select>
+                <div style="display: flex; gap: 10px; margin-top: 30px;">
+                    <button class="action-btn secondary" id="cancelPaymentBtn" style="flex: 1;">Cancel</button>
+                    <button class="action-btn" id="confirmPaymentBtn" style="flex: 1;">
+                        <i class="fas fa-lock"></i> Pay Now
+                    </button>
                 </div>
-                
-                <!-- Card Payment Form (shown when card is selected) -->
-                <div id="cardPaymentForm" style="display: none;">
-                    <div class="form-row">
-                        <div class="form-group">
-                            <label class="form-label">Card Number</label>
-                            <input type="text" class="form-input" id="cardNumber" placeholder="1234 5678 9012 3456" maxlength="19">
-                        </div>
-                    </div>
-                    <div class="form-row">
-                        <div class="form-group">
-                            <label class="form-label">Expiry Date</label>
-                            <input type="text" class="form-input" id="cardExpiry" placeholder="MM/YY" maxlength="5">
-                        </div>
-                        <div class="form-group">
-                            <label class="form-label">CVV</label>
-                            <input type="text" class="form-input" id="cardCVV" placeholder="123" maxlength="3">
-                        </div>
-                    </div>
-                    <div class="form-group">
-                        <label class="form-label">Cardholder Name</label>
-                        <input type="text" class="form-input" id="cardName" placeholder="John Doe">
-                    </div>
-                </div>
-                
-                <!-- Security Badge -->
-                <div class="security-badge" style="margin-bottom: 20px;">
-                    <i class="fas fa-shield-alt"></i>
-                    <span>Bank-Level Security • SSL Encrypted</span>
-                </div>
-            </div>
-            <div style="padding: 20px; border-top: 1px solid var(--border-color); display: flex; justify-content: space-between;">
-                <button class="action-btn secondary" id="cancelPaymentBtn">Cancel</button>
-                <button class="action-btn" id="confirmPaymentBtn">
-                    <i class="fas fa-lock"></i> Pay Now
-                </button>
             </div>
         </div>
     </div>
@@ -2181,12 +1799,12 @@
         <div class="tool-execution-container">
             <div class="tool-execution-header">
                 <div class="tool-preview-title" id="executionToolTitle">Running Tool...</div>
-                <button class="add-friend-btn" id="closeExecutionModal">
+                <button class="add-friend-btn" id="closeExecutionModal" style="background: none; border: none; font-size: 20px; cursor: pointer; color: var(--text-primary);">
                     <i class="fas fa-times"></i>
                 </button>
             </div>
             <div class="tool-execution-content">
-                <iframe class="tool-iframe" id="toolIframe" sandbox="allow-scripts allow-same-origin allow-forms"></iframe>
+                <iframe class="tool-iframe" id="toolIframe" sandbox="allow-scripts allow-same-origin allow-forms allow-popups"></iframe>
             </div>
         </div>
     </div>
@@ -2196,71 +1814,26 @@
         <i class="fas fa-check-circle"></i>
         <span id="notificationText">Operation completed successfully</span>
     </div>
-    
-    <!-- Import settingsManager.js -->
-    <script src="../js/settingsManager.js"></script>
 
     <script>
         // =============================================
-        // COMPLETE TOOLS DASHBOARD SYSTEM - FIXED RESPONSIVE VERSION
+        // COMPLETE TOOLS DASHBOARD SYSTEM - FIXED VERSION
         // =============================================
 
-        // Firebase Configuration
-        const firebaseConfig = {
-            apiKey: "AIzaSyDHHyGgsSV18BcXrGgzi4C8frzDAE1C1zo",
-            authDomain: "uniconnect-ee95c.firebaseapp.com",
-            projectId: "uniconnect-ee95c",
-            storageBucket: "uniconnect-ee95c.firebasestorage.app",
-            messagingSenderId: "1003264444309",
-            appId: "1:1003264444309:web:9f0307516e44d21e97d89c"
-        };
-        
-        // Initialize Firebase
-        let firebaseInitialized = false;
-        try {
-            firebase.initializeApp(firebaseConfig);
-            firebaseInitialized = true;
-            console.log('Firebase initialized successfully for tools');
-        } catch (error) {
-            console.log('Firebase initialization error (continuing offline):', error.message);
-        }
-        
-        const db = firebaseInitialized ? firebase.firestore() : null;
-        const auth = firebaseInitialized ? firebase.auth() : null;
-        
         // Global variables
         let currentUser = null;
         let userData = null;
-        let userCredits = 100; // Starting credits
-        let userPlan = 'free'; // free, basic, pro, business
+        let userCredits = 100;
+        let userPlan = 'free';
         let tools = [];
         let transactions = [];
-        let affiliateEarnings = 0;
-        let referralCount = 0;
-        let pendingPayout = 0;
         let selectedTool = null;
         let selectedCreditPackage = null;
         let currentCategoryFilter = 'all';
         let isOnline = navigator.onLine;
-        let isLoadedFromLocalStorage = false;
-        let charts = {};
         let isMobile = window.innerWidth <= 768;
-        
-        // Local Storage Keys
-        const LOCAL_STORAGE_KEYS = {
-            USER: 'knecta_current_user',
-            USER_PROFILE: 'knecta_user_profile',
-            USER_CREDITS: 'knecta_user_credits',
-            USER_PLAN: 'knecta_user_plan',
-            TOOLS: 'knecta_tools',
-            TRANSACTIONS: 'knecta_transactions',
-            AFFILIATE: 'knecta_affiliate_data',
-            TOOL_USAGE: 'knecta_tool_usage',
-            LAST_SYNC: 'knecta_tools_last_sync',
-            PENDING_ACTIONS: 'knecta_pending_actions',
-            OFFLINE_OVERLAY_DISMISSED: 'knecta_offline_overlay_dismissed',
-            SETTINGS: 'knecta_tools_settings'
-        };
+        let currentContent = 'dashboard';
+        let charts = {};
         
         // Tool categories
         const toolCategories = {
@@ -2311,8 +1884,7 @@
                 limitations: [
                     'No Premium Tools',
                     'Limited Credits',
-                    'No Priority Support',
-                    'No API Access'
+                    'No Priority Support'
                 ]
             },
             'basic': {
@@ -2328,8 +1900,7 @@
                 ],
                 limitations: [
                     'Limited Premium Tools',
-                    'No Business Tools',
-                    'No Custom Integrations'
+                    'No Business Tools'
                 ]
             },
             'pro': {
@@ -2345,24 +1916,8 @@
                     '500 Credits/month'
                 ],
                 limitations: [
-                    'No Dedicated Account Manager',
-                    'Limited Custom Development'
+                    'No Dedicated Account Manager'
                 ]
-            },
-            'business': {
-                name: 'Business',
-                price: 99.99,
-                monthlyCredits: 10000,
-                features: [
-                    'Everything in Pro',
-                    'Dedicated Account Manager',
-                    'Custom Development',
-                    'White Label Options',
-                    'Team Management',
-                    '2000 Credits/month',
-                    '24/7 Phone Support'
-                ],
-                limitations: []
             }
         };
         
@@ -2370,9 +1925,7 @@
         const creditPackages = [
             { id: 'basic', credits: 100, price: 9.99, bonus: 0 },
             { id: 'standard', credits: 500, price: 39.99, bonus: 50 },
-            { id: 'premium', credits: 1000, price: 69.99, bonus: 200 },
-            { id: 'business', credits: 5000, price: 299.99, bonus: 1000 },
-            { id: 'enterprise', credits: 10000, price: 499.99, bonus: 2500 }
+            { id: 'premium', credits: 1000, price: 69.99, bonus: 200 }
         ];
         
         // Consultation services
@@ -2386,8 +1939,7 @@
                 features: [
                     'Business Analysis',
                     'AI Integration Plan',
-                    'ROI Projection',
-                    'Implementation Roadmap'
+                    'ROI Projection'
                 ]
             },
             {
@@ -2399,21 +1951,7 @@
                 features: [
                     'Technical Setup',
                     'Custom Configuration',
-                    'Team Training',
-                    '3 Months Support'
-                ]
-            },
-            {
-                id: 'marketing',
-                name: 'Marketing Audit',
-                description: 'Complete analysis of your marketing with AI insights',
-                duration: '45 min',
-                price: 199,
-                features: [
-                    'Marketing Analysis',
-                    'Competitor Research',
-                    'AI-Powered Insights',
-                    'Actionable Recommendations'
+                    'Team Training'
                 ]
             }
         ];
@@ -2435,22 +1973,6 @@
                 category: 'integration',
                 price: 79.99,
                 icon: 'fas fa-plug'
-            },
-            {
-                id: 'plugin1',
-                name: 'Analytics Dashboard',
-                description: 'Advanced analytics plugin for MoodChat',
-                category: 'analytics',
-                price: 29.99,
-                icon: 'fas fa-chart-bar'
-            },
-            {
-                id: 'productivity1',
-                name: 'Team Productivity Suite',
-                description: 'Tools for team collaboration and productivity',
-                category: 'productivity',
-                price: 99.99,
-                icon: 'fas fa-users'
             }
         ];
         
@@ -2513,20 +2035,6 @@
                 instructions: 'Define triggers and actions for automation'
             },
             {
-                id: 'premium_ai',
-                name: 'Premium AI Model',
-                description: 'Access to cutting-edge AI models',
-                category: 'premium',
-                cost: 50,
-                plan: 'pro',
-                usage: 0,
-                locked: true,
-                icon: 'fas fa-brain',
-                features: ['Latest Models', 'High Accuracy', 'Fast Processing'],
-                requirements: 'API key',
-                instructions: 'Use API key to access premium models'
-            },
-            {
                 id: 'marketplace_tool',
                 name: 'Marketplace Tool',
                 description: 'Access exclusive marketplace tools',
@@ -2548,7 +2056,7 @@
                 id: 'tx1',
                 type: 'credit_purchase',
                 title: 'Credit Purchase',
-                amount: 9.99,
+                amount: -9.99,
                 date: new Date(Date.now() - 86400000),
                 status: 'completed',
                 details: '100 credits'
@@ -2561,41 +2069,22 @@
                 date: new Date(Date.now() - 172800000),
                 status: 'completed',
                 details: 'AI Chat Assistant'
-            },
-            {
-                id: 'tx3',
-                type: 'affiliate',
-                title: 'Affiliate Earnings',
-                amount: 15.50,
-                date: new Date(Date.now() - 259200000),
-                status: 'pending',
-                details: 'Referral commission'
-            },
-            {
-                id: 'tx4',
-                type: 'subscription',
-                title: 'Plan Upgrade',
-                amount: 29.99,
-                date: new Date(Date.now() - 345600000),
-                status: 'completed',
-                details: 'Pro Plan'
             }
         ];
         
         // DOM Elements
+        const mobileHeader = document.getElementById('mobileHeader');
+        const mobileHeaderTitle = document.getElementById('mobileHeaderTitle');
+        const backBtn = document.getElementById('backBtn');
+        const menuToggleBtn = document.getElementById('menuToggleBtn');
+        const mobileNavMenu = document.getElementById('mobileNavMenu');
         const offlineOverlay = document.getElementById('offlineOverlay');
         const offlineIndicator = document.getElementById('offlineIndicator');
-        const localStorageIndicator = document.getElementById('localStorageIndicator');
-        const cacheIndicator = document.getElementById('cacheIndicator');
         const loadingOverlay = document.getElementById('loadingOverlay');
         const notification = document.getElementById('notification');
         const toolPreviewModal = document.getElementById('toolPreviewModal');
         const paymentModal = document.getElementById('paymentModal');
         const toolExecutionModal = document.getElementById('toolExecutionModal');
-        const mobileNavToggle = document.getElementById('mobileNavToggle');
-        const sidebarOverlay = document.getElementById('sidebarOverlay');
-        const sidebar = document.getElementById('sidebar');
-        const mobileHeader = document.getElementById('mobileHeader');
         
         // Content areas
         const contentAreas = {
@@ -2610,134 +2099,10 @@
         
         // Initialize the application
         document.addEventListener('DOMContentLoaded', function() {
-            console.log('=== TOOLS DASHBOARD INITIALIZATION START ===');
+            console.log('Tools Dashboard Initializing...');
             
-            // Check mobile status
-            checkMobileStatus();
-            
-            // Load cached data instantly
-            loadCachedDataInstantly();
-            
-            // Initialize the rest asynchronously
-            setTimeout(() => {
-                initializeToolsDashboard();
-            }, 100);
-        });
-        
-        // Check mobile status and update UI
-        function checkMobileStatus() {
-            isMobile = window.innerWidth <= 768;
-            
-            if (isMobile) {
-                document.body.classList.add('mobile');
-                mobileHeader.style.display = 'flex';
-                mobileNavToggle.style.display = 'flex';
-            } else {
-                document.body.classList.remove('mobile');
-                mobileHeader.style.display = 'none';
-                mobileNavToggle.style.display = 'none';
-                sidebar.classList.add('active');
-                sidebarOverlay.classList.remove('active');
-            }
-        }
-        
-        function loadCachedDataInstantly() {
-            try {
-                console.log('Loading cached data instantly...');
-                
-                // Load user from cache
-                const cachedUser = localStorage.getItem(LOCAL_STORAGE_KEYS.USER);
-                if (cachedUser) {
-                    currentUser = JSON.parse(cachedUser);
-                    console.log('✓ User loaded from cache:', currentUser.uid);
-                }
-                
-                // Load user profile
-                const cachedProfile = localStorage.getItem(LOCAL_STORAGE_KEYS.USER_PROFILE);
-                if (cachedProfile) {
-                    userData = JSON.parse(cachedProfile);
-                    updateUserDisplay();
-                }
-                
-                // Load credits
-                const cachedCredits = localStorage.getItem(LOCAL_STORAGE_KEYS.USER_CREDITS);
-                if (cachedCredits) {
-                    userCredits = parseInt(cachedCredits);
-                    document.getElementById('creditAmount').textContent = userCredits;
-                    document.getElementById('mobileCreditAmount').textContent = userCredits;
-                }
-                
-                // Load plan
-                const cachedPlan = localStorage.getItem(LOCAL_STORAGE_KEYS.USER_PLAN);
-                if (cachedPlan) {
-                    userPlan = cachedPlan;
-                    document.getElementById('userPlan').textContent = userPlans[userPlan]?.name + ' Plan';
-                    document.getElementById('mobileUserPlan').textContent = userPlans[userPlan]?.name + ' Plan';
-                }
-                
-                // Load tools
-                const cachedTools = localStorage.getItem(LOCAL_STORAGE_KEYS.TOOLS);
-                if (cachedTools) {
-                    tools = JSON.parse(cachedTools);
-                    console.log(`✓ ${tools.length} tools loaded from cache`);
-                    isLoadedFromLocalStorage = true;
-                } else {
-                    // Use sample tools if no cache
-                    tools = [...sampleTools];
-                }
-                
-                // Load transactions
-                const cachedTransactions = localStorage.getItem(LOCAL_STORAGE_KEYS.TRANSACTIONS);
-                if (cachedTransactions) {
-                    transactions = JSON.parse(cachedTransactions);
-                } else {
-                    transactions = [...sampleTransactions];
-                }
-                
-                // Load affiliate data
-                const cachedAffiliate = localStorage.getItem(LOCAL_STORAGE_KEYS.AFFILIATE);
-                if (cachedAffiliate) {
-                    const affiliateData = JSON.parse(cachedAffiliate);
-                    affiliateEarnings = affiliateData.earnings || 0;
-                    referralCount = affiliateData.referrals || 0;
-                    pendingPayout = affiliateData.pending || 0;
-                }
-                
-                // Update UI instantly
-                updateDashboardStats();
-                updateAffiliateDisplay();
-                updateMobileUserDisplay();
-                
-                // Check offline status
-                if (!navigator.onLine) {
-                    isOnline = false;
-                    offlineIndicator.classList.add('active');
-                    cacheIndicator.style.display = 'flex';
-                    
-                    const overlayDismissed = localStorage.getItem(LOCAL_STORAGE_KEYS.OFFLINE_OVERLAY_DISMISSED);
-                    if (overlayDismissed !== 'true') {
-                        offlineOverlay.classList.add('active');
-                    }
-                }
-                
-                console.log('✓ Instant cache load complete');
-                
-            } catch (error) {
-                console.error('Error in instant cache load:', error);
-            }
-        }
-        
-        async function initializeToolsDashboard() {
-            // Initialize settings manager
-            if (typeof settingsManager !== 'undefined') {
-                settingsManager.initializeSettings();
-            }
-            
-            // Initialize offline detection
-            initializeOfflineDetection();
-            
-            // Load user data
-            await loadUserData();
+            // Initialize
+            initializeToolsDashboard();
             
             // Setup event listeners
             setupEventListeners();
@@ -2745,73 +2110,69 @@
             // Setup navigation
             setupNavigation();
             
-            // Load data from Firebase if online
-            if (isOnline && firebaseInitialized) {
-                await syncAllDataFromFirebase();
+            // Check mobile status
+            checkMobileStatus();
+            
+            // Load initial data
+            loadInitialData();
+            
+            console.log('Tools Dashboard Initialized');
+        });
+        
+        function checkMobileStatus() {
+            isMobile = window.innerWidth <= 768;
+            
+            if (isMobile) {
+                document.body.classList.add('mobile');
+                mobileHeader.classList.add('active');
+                // Hide sidebar on mobile
+                document.getElementById('sidebar').style.display = 'none';
+            } else {
+                document.body.classList.remove('mobile');
+                mobileHeader.classList.remove('active');
+                // Show sidebar on desktop
+                document.getElementById('sidebar').style.display = 'flex';
+                mobileNavMenu.classList.remove('active');
+                backBtn.classList.remove('active');
             }
             
-            // Initialize charts
-            initializeCharts();
-            
-            // Setup mobile navigation
-            setupMobileNavigation();
-            
-            // Show welcome notification
-            showNotification('AI Tools Dashboard ready!', 'success');
-            
-            console.log('=== TOOLS DASHBOARD INITIALIZATION COMPLETE ===');
+            // Update back button visibility
+            updateBackButton();
         }
         
-        async function loadUserData() {
-            try {
-                // Try to get user from app.js
-                if (window.appState && window.appState.currentUser) {
-                    currentUser = window.appState.currentUser;
-                }
-                
-                // Try Firebase auth
-                if (isOnline && firebaseInitialized && auth) {
-                    const user = auth.currentUser;
-                    if (user) {
-                        currentUser = user;
-                        await loadUserProfileFromFirebase(user.uid);
-                    }
-                }
-                
-                // Update UI
-                updateUserDisplay();
-                updateMobileUserDisplay();
-                
-            } catch (error) {
-                console.error('Error loading user data:', error);
-            }
+        function initializeToolsDashboard() {
+            console.log('Initializing Tools Dashboard...');
+            
+            // Initialize user data
+            initializeUserData();
+            
+            // Initialize offline detection
+            initializeOfflineDetection();
+            
+            console.log('Tools Dashboard Initialized');
         }
         
-        async function loadUserProfileFromFirebase(uid) {
-            if (!firebaseInitialized) return;
+        function initializeUserData() {
+            // Set default user data
+            userData = {
+                displayName: 'Demo User',
+                photoURL: null
+            };
             
-            try {
-                const userDoc = await db.collection('users').doc(uid).get();
-                if (userDoc.exists) {
-                    userData = userDoc.data();
-                    updateUserDisplay();
-                    updateMobileUserDisplay();
-                    
-                    // Save to cache
-                    localStorage.setItem(LOCAL_STORAGE_KEYS.USER_PROFILE, JSON.stringify(userData));
-                }
-            } catch (error) {
-                console.error('Error loading user profile:', error);
-            }
+            // Update user display
+            updateUserDisplay();
+            updateMobileUserDisplay();
         }
         
         function updateUserDisplay() {
             const userName = document.getElementById('userName');
             const userAvatar = document.getElementById('userAvatar');
             
-            if (userData) {
+            if (userName) {
                 userName.textContent = userData.displayName || 'User';
-                
+            }
+            
+            if (userAvatar) {
                 if (userData.photoURL) {
                     userAvatar.style.backgroundImage = `url('${userData.photoURL}')`;
                     userAvatar.innerHTML = '';
@@ -2831,9 +2192,11 @@
             const mobileUserName = document.getElementById('mobileUserName');
             const mobileUserAvatar = document.getElementById('mobileUserAvatar');
             
-            if (userData) {
+            if (mobileUserName) {
                 mobileUserName.textContent = userData.displayName || 'User';
-                
+            }
+            
+            if (mobileUserAvatar) {
                 if (userData.photoURL) {
                     mobileUserAvatar.style.backgroundImage = `url('${userData.photoURL}')`;
                     mobileUserAvatar.innerHTML = '';
@@ -2847,44 +2210,16 @@
                     mobileUserAvatar.innerHTML = initials;
                 }
             }
-        }
-        
-        function setupMobileNavigation() {
-            // Toggle sidebar on mobile
-            mobileNavToggle.addEventListener('click', toggleSidebar);
-            sidebarOverlay.addEventListener('click', closeSidebar);
             
-            // Close sidebar when clicking on nav items (mobile)
-            document.querySelectorAll('.nav-tab').forEach(tab => {
-                tab.addEventListener('click', () => {
-                    if (isMobile) {
-                        closeSidebar();
-                    }
-                });
-            });
+            // Update plan display
+            const mobileUserPlan = document.getElementById('mobileUserPlan');
+            if (mobileUserPlan) {
+                mobileUserPlan.textContent = userPlans[userPlan]?.name + ' Plan';
+            }
             
-            // Handle window resize
-            window.addEventListener('resize', handleResize);
-        }
-        
-        function toggleSidebar() {
-            sidebar.classList.toggle('active');
-            sidebarOverlay.classList.toggle('active');
-            mobileNavToggle.classList.toggle('active');
-        }
-        
-        function closeSidebar() {
-            sidebar.classList.remove('active');
-            sidebarOverlay.classList.remove('active');
-            mobileNavToggle.classList.remove('active');
-        }
-        
-        function handleResize() {
-            checkMobileStatus();
-            
-            // Close sidebar if switching to desktop
-            if (!isMobile) {
-                closeSidebar();
+            const userPlanElement = document.getElementById('userPlan');
+            if (userPlanElement) {
+                userPlanElement.textContent = userPlans[userPlan]?.name + ' Plan';
             }
         }
         
@@ -2894,8 +2229,6 @@
             window.addEventListener('online', handleOnline);
             window.addEventListener('offline', handleOffline);
             
-            setInterval(checkConnectivity, 30000); // Check every 30 seconds
-            
             updateUIForConnectivity();
         }
         
@@ -2904,85 +2237,31 @@
             console.log('Network status:', isOnline ? 'Online' : 'Offline');
         }
         
-        async function handleOnline() {
+        function handleOnline() {
             console.log('App is now online');
             isOnline = true;
             updateUIForConnectivity();
             
-            // Sync data with Firebase
-            if (currentUser && firebaseInitialized) {
-                await syncAllDataFromFirebase();
-            }
-            
-            // Process pending actions
-            await processPendingActions();
-            
-            // Update UI
-            localStorageIndicator.classList.remove('active');
-            cacheIndicator.style.display = 'none';
-            isLoadedFromLocalStorage = false;
+            // Hide offline indicators
+            offlineIndicator.classList.remove('active');
             offlineOverlay.classList.remove('active');
             
-            showNotification('Back online. Syncing data...', 'success');
-            
-            enableOnlineFeatures();
+            showNotification('Back online!', 'success');
         }
         
-        async function handleOffline() {
+        function handleOffline() {
             console.log('App is now offline');
             isOnline = false;
             
             offlineIndicator.classList.add('active');
-            cacheIndicator.style.display = 'flex';
             
-            updateUIForOfflineMode();
-            
-            checkOfflineOverlay();
-            
-            if (isLoadedFromLocalStorage) {
-                localStorageIndicator.classList.add('active');
-                setTimeout(() => {
-                    localStorageIndicator.classList.remove('active');
-                }, 5000);
-            }
-            
-            showNotification('You are offline. Using cached data.', 'warning');
-        }
-        
-        function checkOfflineOverlay() {
-            const overlayDismissed = localStorage.getItem(LOCAL_STORAGE_KEYS.OFFLINE_OVERLAY_DISMISSED);
-            
-            if (overlayDismissed === 'true') {
-                offlineOverlay.classList.remove('active');
-            } else {
+            // Show offline overlay if not already dismissed
+            const overlayDismissed = localStorage.getItem('offline_overlay_dismissed');
+            if (overlayDismissed !== 'true') {
                 offlineOverlay.classList.add('active');
             }
-        }
-        
-        function dismissOfflineOverlay() {
-            offlineOverlay.classList.remove('active');
-            localStorage.setItem(LOCAL_STORAGE_KEYS.OFFLINE_OVERLAY_DISMISSED, 'true');
-            cacheIndicator.style.display = 'flex';
-            showNotification('Showing cached tools data', 'info');
-        }
-        
-        function checkConnectivity() {
-            fetch('https://www.google.com/favicon.ico', { 
-                mode: 'no-cors',
-                cache: 'no-cache'
-            })
-            .then(() => {
-                if (!isOnline) {
-                    console.log('Connectivity check passed - switching to online');
-                    handleOnline();
-                }
-            })
-            .catch(() => {
-                if (isOnline) {
-                    console.log('Connectivity check failed - switching to offline');
-                    handleOffline();
-                }
-            });
+            
+            showNotification('You are offline. Some features may not work.', 'warning');
         }
         
         function updateUIForConnectivity() {
@@ -2995,14 +2274,11 @@
         
         function updateUIForOfflineMode() {
             offlineIndicator.classList.add('active');
-            cacheIndicator.style.display = 'flex';
             updateButtonStatesForOffline();
         }
         
         function updateUIForOnlineMode() {
             offlineIndicator.classList.remove('active');
-            localStorageIndicator.classList.remove('active');
-            cacheIndicator.style.display = 'none';
             offlineOverlay.classList.remove('active');
             updateButtonStatesForOnline();
         }
@@ -3015,7 +2291,6 @@
                 if (button) {
                     button.disabled = true;
                     button.style.opacity = '0.7';
-                    button.title = 'Requires internet connection';
                 }
             });
         }
@@ -3028,211 +2303,174 @@
                 if (button) {
                     button.disabled = false;
                     button.style.opacity = '1';
-                    button.title = '';
                 }
             });
         }
         
-        function enableOnlineFeatures() {
-            updateButtonStatesForOnline();
-        }
-        
-        async function syncAllDataFromFirebase() {
-            if (!isOnline || !firebaseInitialized) return;
-            
-            try {
-                console.log('Syncing all data from Firebase...');
-                
-                await Promise.all([
-                    syncUserDataFromFirebase(),
-                    syncToolsFromFirebase(),
-                    syncTransactionsFromFirebase(),
-                    syncAffiliateDataFromFirebase()
-                ]);
-                
-                console.log('All data synced successfully');
-                
-                // Update UI
-                updateDashboardStats();
-                updateToolsDisplay();
-                updateTransactionsDisplay();
-                updateAffiliateDisplay();
-                updateMobileUserDisplay();
-                
-                // Save to local storage
-                saveDataToLocalStorage();
-                
-            } catch (error) {
-                console.error('Error syncing data from Firebase:', error);
-            }
-        }
-        
-        async function syncUserDataFromFirebase() {
-            if (!isOnline || !firebaseInitialized || !currentUser) return;
-            
-            try {
-                const userDoc = await db.collection('users').doc(currentUser.uid).get();
-                if (userDoc.exists) {
-                    userData = userDoc.data();
-                    userCredits = userData.credits || 100;
-                    userPlan = userData.plan || 'free';
-                    
-                    updateUserDisplay();
-                    updateMobileUserDisplay();
-                    document.getElementById('creditAmount').textContent = userCredits;
-                    document.getElementById('mobileCreditAmount').textContent = userCredits;
-                    document.getElementById('userPlan').textContent = userPlans[userPlan]?.name + ' Plan';
-                    document.getElementById('mobileUserPlan').textContent = userPlans[userPlan]?.name + ' Plan';
-                }
-            } catch (error) {
-                console.error('Error syncing user data:', error);
-            }
-        }
-        
-        async function syncToolsFromFirebase() {
-            if (!isOnline || !firebaseInitialized) return;
-            
-            try {
-                const toolsSnapshot = await db.collection('tools').get();
-                if (!toolsSnapshot.empty) {
-                    tools = [];
-                    toolsSnapshot.forEach(doc => {
-                        tools.push({ id: doc.id, ...doc.data() });
-                    });
-                    console.log(`Synced ${tools.length} tools from Firebase`);
-                }
-            } catch (error) {
-                console.error('Error syncing tools:', error);
-            }
-        }
-        
-        async function syncTransactionsFromFirebase() {
-            if (!isOnline || !firebaseInitialized || !currentUser) return;
-            
-            try {
-                const transactionsSnapshot = await db.collection('transactions')
-                    .where('userId', '==', currentUser.uid)
-                    .orderBy('date', 'desc')
-                    .limit(50)
-                    .get();
-                
-                if (!transactionsSnapshot.empty) {
-                    transactions = [];
-                    transactionsSnapshot.forEach(doc => {
-                        const data = doc.data();
-                        transactions.push({
-                            id: doc.id,
-                            ...data,
-                            date: data.date.toDate()
-                        });
-                    });
-                    console.log(`Synced ${transactions.length} transactions from Firebase`);
-                }
-            } catch (error) {
-                console.error('Error syncing transactions:', error);
-            }
-        }
-        
-        async function syncAffiliateDataFromFirebase() {
-            if (!isOnline || !firebaseInitialized || !currentUser) return;
-            
-            try {
-                const affiliateDoc = await db.collection('affiliates').doc(currentUser.uid).get();
-                if (affiliateDoc.exists) {
-                    const data = affiliateDoc.data();
-                    affiliateEarnings = data.totalEarnings || 0;
-                    referralCount = data.referralCount || 0;
-                    pendingPayout = data.pendingPayout || 0;
-                }
-            } catch (error) {
-                console.error('Error syncing affiliate data:', error);
-            }
-        }
-        
-        async function processPendingActions() {
-            if (!isOnline) return;
-            
-            try {
-                const pendingActions = JSON.parse(localStorage.getItem(LOCAL_STORAGE_KEYS.PENDING_ACTIONS) || '[]');
-                
-                if (pendingActions.length > 0) {
-                    console.log(`Processing ${pendingActions.length} pending actions`);
-                    
-                    for (const action of pendingActions) {
-                        try {
-                            await processAction(action);
-                        } catch (error) {
-                            console.error('Error processing action:', error);
-                        }
-                    }
-                    
-                    localStorage.setItem(LOCAL_STORAGE_KEYS.PENDING_ACTIONS, JSON.stringify([]));
-                    showNotification(`Processed ${pendingActions.length} pending actions`, 'success');
-                }
-            } catch (error) {
-                console.error('Error processing pending actions:', error);
-            }
-        }
-        
-        async function processAction(action) {
-            switch (action.type) {
-                case 'tool_usage':
-                    await recordToolUsage(action.toolId, action.cost);
-                    break;
-                case 'credit_purchase':
-                    await recordCreditPurchase(action.credits, action.amount);
-                    break;
-                case 'subscription':
-                    await updateUserPlan(action.plan, action.amount);
-                    break;
-            }
-        }
-        
-        function saveDataToLocalStorage() {
-            try {
-                localStorage.setItem(LOCAL_STORAGE_KEYS.USER_CREDITS, userCredits.toString());
-                localStorage.setItem(LOCAL_STORAGE_KEYS.USER_PLAN, userPlan);
-                localStorage.setItem(LOCAL_STORAGE_KEYS.TOOLS, JSON.stringify(tools));
-                localStorage.setItem(LOCAL_STORAGE_KEYS.TRANSACTIONS, JSON.stringify(transactions));
-                localStorage.setItem(LOCAL_STORAGE_KEYS.AFFILIATE, JSON.stringify({
-                    earnings: affiliateEarnings,
-                    referrals: referralCount,
-                    pending: pendingPayout
-                }));
-                localStorage.setItem(LOCAL_STORAGE_KEYS.LAST_SYNC, Date.now().toString());
-                console.log('Data saved to local storage');
-            } catch (error) {
-                console.error('Error saving data to local storage:', error);
-            }
+        function dismissOfflineOverlay() {
+            offlineOverlay.classList.remove('active');
+            localStorage.setItem('offline_overlay_dismissed', 'true');
+            showNotification('Showing cached tools data', 'info');
         }
         
         function setupNavigation() {
-            const navTabs = document.querySelectorAll('.nav-tab');
-            navTabs.forEach(tab => {
-                tab.addEventListener('click', function() {
+            console.log('Setting up navigation...');
+            
+            // Desktop navigation
+            const desktopNavTabs = document.querySelectorAll('.sidebar .nav-tab');
+            desktopNavTabs.forEach(tab => {
+                tab.addEventListener('click', function(e) {
+                    e.preventDefault();
+                    e.stopPropagation();
                     const tabName = this.dataset.tab;
-                    
-                    // Update active tab
-                    navTabs.forEach(t => t.classList.remove('active'));
-                    this.classList.add('active');
-                    
-                    // Show corresponding content
-                    Object.values(contentAreas).forEach(area => {
-                        area.classList.remove('active');
-                    });
-                    
-                    if (contentAreas[tabName]) {
-                        contentAreas[tabName].classList.add('active');
-                        loadContent(tabName);
-                    }
+                    console.log('Desktop nav clicked:', tabName);
+                    navigateToContent(tabName);
                 });
             });
             
-            // Load initial content
+            // Mobile navigation
+            const mobileNavItems = document.querySelectorAll('.mobile-nav-item');
+            mobileNavItems.forEach(item => {
+                item.addEventListener('click', function(e) {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    const tabName = this.dataset.tab;
+                    console.log('Mobile nav clicked:', tabName);
+                    navigateToContent(tabName);
+                    // Close mobile menu after selection
+                    mobileNavMenu.classList.remove('active');
+                });
+            });
+            
+            // Menu toggle button
+            if (menuToggleBtn) {
+                menuToggleBtn.addEventListener('click', function(e) {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    toggleMobileMenu();
+                });
+            }
+            
+            // Back button
+            if (backBtn) {
+                backBtn.addEventListener('click', function(e) {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    goBack();
+                });
+            }
+            
+            // Handle window resize
+            window.addEventListener('resize', handleResize);
+            
+            console.log('Navigation setup complete');
+        }
+        
+        function navigateToContent(contentName) {
+            console.log('Navigating to:', contentName);
+            
+            // Update current content
+            currentContent = contentName;
+            
+            // Update active states
+            // Desktop
+            document.querySelectorAll('.sidebar .nav-tab').forEach(tab => {
+                tab.classList.remove('active');
+                if (tab.dataset.tab === contentName) {
+                    tab.classList.add('active');
+                }
+            });
+            
+            // Mobile
+            document.querySelectorAll('.mobile-nav-item').forEach(item => {
+                item.classList.remove('active');
+                if (item.dataset.tab === contentName) {
+                    item.classList.add('active');
+                }
+            });
+            
+            // Hide all content areas with animation
+            Object.values(contentAreas).forEach(area => {
+                if (area) {
+                    area.classList.remove('active');
+                }
+            });
+            
+            // Show selected content area with animation
+            setTimeout(() => {
+                if (contentAreas[contentName]) {
+                    contentAreas[contentName].classList.add('active');
+                    
+                    // Update mobile header title
+                    const titleMap = {
+                        'dashboard': 'Dashboard',
+                        'tools': 'AI Tools',
+                        'transactions': 'Transactions',
+                        'affiliate': 'Affiliate Program',
+                        'consultation': 'Consultation',
+                        'marketplace': 'Marketplace',
+                        'settings': 'Settings'
+                    };
+                    
+                    if (mobileHeaderTitle) {
+                        mobileHeaderTitle.textContent = titleMap[contentName] || contentName;
+                    }
+                    
+                    // Load content
+                    loadContent(contentName);
+                }
+            }, 50);
+            
+            // Update back button visibility
+            updateBackButton();
+            
+            // Close mobile menu if open
+            if (isMobile) {
+                mobileNavMenu.classList.remove('active');
+            }
+        }
+        
+        function updateBackButton() {
+            if (isMobile && currentContent !== 'dashboard') {
+                backBtn.classList.add('active');
+            } else {
+                backBtn.classList.remove('active');
+            }
+        }
+        
+        function goBack() {
+            if (currentContent !== 'dashboard') {
+                navigateToContent('dashboard');
+            }
+        }
+        
+        function toggleMobileMenu() {
+            mobileNavMenu.classList.toggle('active');
+        }
+        
+        function handleResize() {
+            checkMobileStatus();
+            
+            // Close mobile menu when switching to desktop
+            if (!isMobile) {
+                mobileNavMenu.classList.remove('active');
+            }
+        }
+        
+        function loadInitialData() {
+            // Load tools
+            tools = [...sampleTools];
+            
+            // Load transactions
+            transactions = [...sampleTransactions];
+            
+            // Load content
             loadContent('dashboard');
         }
         
         function loadContent(contentName) {
+            console.log('Loading content:', contentName);
+            
             switch (contentName) {
                 case 'dashboard':
                     loadDashboard();
@@ -3262,69 +2500,51 @@
             updateDashboardStats();
             updateRecentTransactions();
             
+            // Update mobile stats
+            updateMobileStats();
+            
             // Initialize charts if not already done
-            if (!charts.revenue) {
-                initializeCharts();
-            } else {
-                updateCharts();
-            }
+            initializeCharts();
         }
         
         function updateDashboardStats() {
             const toolsUsed = tools.reduce((sum, tool) => sum + (tool.usage || 0), 0);
             const aiUses = tools.filter(t => t.category === 'ai').reduce((sum, tool) => sum + (tool.usage || 0), 0);
-            const productivityScore = calculateProductivityScore();
-            const monthlyRevenue = calculateMonthlyRevenue();
+            const productivityScore = Math.min(toolsUsed * 10, 100);
+            const monthlyRevenue = 0;
             
-            document.getElementById('toolsUsed').textContent = toolsUsed;
-            document.getElementById('aiUses').textContent = aiUses;
-            document.getElementById('productivityScore').textContent = productivityScore;
-            document.getElementById('monthlyRevenue').textContent = `$${monthlyRevenue}`;
+            const toolsUsedElement = document.getElementById('toolsUsed');
+            const aiUsesElement = document.getElementById('aiUses');
+            const productivityScoreElement = document.getElementById('productivityScore');
+            const monthlyRevenueElement = document.getElementById('monthlyRevenue');
             
-            // Update badges
-            document.getElementById('toolsBadge').textContent = tools.length;
-            document.getElementById('affiliateBadge').textContent = referralCount > 0 ? `$${affiliateEarnings}` : 'Earn';
+            if (toolsUsedElement) toolsUsedElement.textContent = toolsUsed;
+            if (aiUsesElement) aiUsesElement.textContent = aiUses;
+            if (productivityScoreElement) productivityScoreElement.textContent = productivityScore;
+            if (monthlyRevenueElement) monthlyRevenueElement.textContent = `$${monthlyRevenue}`;
         }
         
-        function calculateProductivityScore() {
-            const toolUsage = tools.reduce((sum, tool) => sum + (tool.usage || 0), 0);
-            const aiUsage = tools.filter(t => t.category === 'ai').reduce((sum, tool) => sum + (tool.usage || 0), 0);
-            const recentTransactions = transactions.filter(t => t.type === 'tool_usage' && t.date > Date.now() - 604800000).length;
+        function updateMobileStats() {
+            const toolsUsed = tools.reduce((sum, tool) => sum + (tool.usage || 0), 0);
+            const aiUses = tools.filter(t => t.category === 'ai').reduce((sum, tool) => sum + (tool.usage || 0), 0);
             
-            let score = toolUsage * 2 + aiUsage * 3 + recentTransactions * 5;
-            return Math.min(Math.round(score / 10), 100);
-        }
-        
-        function calculateMonthlyRevenue() {
-            const now = new Date();
-            const thisMonth = transactions.filter(t => 
-                t.type === 'credit_purchase' || 
-                t.type === 'subscription' &&
-                t.date.getMonth() === now.getMonth() &&
-                t.date.getFullYear() === now.getFullYear()
-            ).reduce((sum, t) => sum + t.amount, 0);
+            const mobileToolsUsed = document.getElementById('mobileToolsUsed');
+            const mobileAiUses = document.getElementById('mobileAiUses');
             
-            return thisMonth.toFixed(2);
+            if (mobileToolsUsed) mobileToolsUsed.textContent = toolsUsed;
+            if (mobileAiUses) mobileAiUses.textContent = aiUses;
         }
         
         function updateRecentTransactions() {
             const container = document.getElementById('recentTransactions');
             if (!container) return;
             
-            container.innerHTML = '';
+            // Clear existing content
+            const existingItems = container.querySelectorAll('.transaction-item:not(:first-child)');
+            existingItems.forEach(item => item.remove());
             
-            const recent = transactions.slice(0, 10);
-            
-            if (recent.length === 0) {
-                container.innerHTML = `
-                    <div class="empty-state" style="padding: 20px;">
-                        <i class="fas fa-exchange-alt"></i>
-                        <p>No transactions yet</p>
-                        <p class="subtext">Your transactions will appear here</p>
-                    </div>
-                `;
-                return;
-            }
+            // Add recent transactions
+            const recent = transactions.slice(0, 3);
             
             recent.forEach(transaction => {
                 const item = document.createElement('div');
@@ -3342,18 +2562,10 @@
                         icon = 'fas fa-tools';
                         iconColor = 'var(--info-color)';
                         break;
-                    case 'affiliate':
-                        icon = 'fas fa-user-friends';
-                        iconColor = 'var(--success-color)';
-                        break;
-                    case 'subscription':
-                        icon = 'fas fa-crown';
-                        iconColor = 'var(--pro-plan)';
-                        break;
                 }
                 
                 const amountClass = transaction.amount >= 0 ? 'positive' : 'negative';
-                const amountDisplay = transaction.amount >= 0 ? `+$${transaction.amount}` : `-$${Math.abs(transaction.amount)}`;
+                const amountDisplay = transaction.amount >= 0 ? `+$${Math.abs(transaction.amount)}` : `-$${Math.abs(transaction.amount)}`;
                 const dateDisplay = formatDate(transaction.date);
                 
                 item.innerHTML = `
@@ -3373,117 +2585,84 @@
         
         function initializeCharts() {
             // Revenue Chart
-            const revenueCtx = document.getElementById('revenueChart').getContext('2d');
-            charts.revenue = new Chart(revenueCtx, {
-                type: 'line',
-                data: {
-                    labels: ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun'],
-                    datasets: [{
-                        label: 'Revenue',
-                        data: [150, 230, 180, 290, 310, 400],
-                        borderColor: 'var(--primary-color)',
-                        backgroundColor: 'rgba(0, 132, 255, 0.1)',
-                        borderWidth: 2,
-                        fill: true,
-                        tension: 0.4
-                    }]
-                },
-                options: {
-                    responsive: true,
-                    maintainAspectRatio: false,
-                    plugins: {
-                        legend: {
-                            display: false
-                        }
+            const revenueCtx = document.getElementById('revenueChart');
+            if (revenueCtx && !charts.revenue) {
+                charts.revenue = new Chart(revenueCtx.getContext('2d'), {
+                    type: 'line',
+                    data: {
+                        labels: ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun'],
+                        datasets: [{
+                            label: 'Revenue',
+                            data: [150, 230, 180, 290, 310, 400],
+                            borderColor: 'var(--primary-color)',
+                            backgroundColor: 'rgba(0, 132, 255, 0.1)',
+                            borderWidth: 2,
+                            fill: true,
+                            tension: 0.4
+                        }]
                     },
-                    scales: {
-                        y: {
-                            beginAtZero: true,
-                            grid: {
-                                color: 'rgba(0, 0, 0, 0.05)'
-                            }
-                        },
-                        x: {
-                            grid: {
-                                display: false
-                            }
+                    options: {
+                        responsive: true,
+                        maintainAspectRatio: false,
+                        plugins: { legend: { display: false } },
+                        scales: {
+                            y: { beginAtZero: true, grid: { color: 'rgba(0, 0, 0, 0.05)' } },
+                            x: { grid: { display: false } }
                         }
                     }
-                }
-            });
+                });
+            }
             
             // Credit Usage Chart
-            const creditCtx = document.getElementById('creditChart').getContext('2d');
-            charts.credit = new Chart(creditCtx, {
-                type: 'bar',
-                data: {
-                    labels: ['Week 1', 'Week 2', 'Week 3', 'Week 4'],
-                    datasets: [{
-                        label: 'Credits Used',
-                        data: [45, 78, 52, 89],
-                        backgroundColor: 'var(--primary-color)',
-                        borderRadius: 6
-                    }]
-                },
-                options: {
-                    responsive: true,
-                    maintainAspectRatio: false,
-                    plugins: {
-                        legend: {
-                            display: false
-                        }
+            const creditCtx = document.getElementById('creditChart');
+            if (creditCtx && !charts.credit) {
+                charts.credit = new Chart(creditCtx.getContext('2d'), {
+                    type: 'bar',
+                    data: {
+                        labels: ['Week 1', 'Week 2', 'Week 3', 'Week 4'],
+                        datasets: [{
+                            label: 'Credits Used',
+                            data: [45, 78, 52, 89],
+                            backgroundColor: 'var(--primary-color)',
+                            borderRadius: 6
+                        }]
                     },
-                    scales: {
-                        y: {
-                            beginAtZero: true,
-                            grid: {
-                                color: 'rgba(0, 0, 0, 0.05)'
-                            }
-                        },
-                        x: {
-                            grid: {
-                                display: false
-                            }
+                    options: {
+                        responsive: true,
+                        maintainAspectRatio: false,
+                        plugins: { legend: { display: false } },
+                        scales: {
+                            y: { beginAtZero: true, grid: { color: 'rgba(0, 0, 0, 0.05)' } },
+                            x: { grid: { display: false } }
                         }
                     }
-                }
-            });
+                });
+            }
             
             // Productivity Chart
-            const productivityCtx = document.getElementById('productivityChart').getContext('2d');
-            charts.productivity = new Chart(productivityCtx, {
-                type: 'radar',
-                data: {
-                    labels: ['AI Usage', 'Tool Variety', 'Consistency', 'Efficiency', 'Learning'],
-                    datasets: [{
-                        label: 'Productivity',
-                        data: [85, 70, 90, 65, 80],
-                        backgroundColor: 'rgba(52, 199, 89, 0.2)',
-                        borderColor: 'var(--success-color)',
-                        borderWidth: 2,
-                        pointBackgroundColor: 'var(--success-color)'
-                    }]
-                },
-                options: {
-                    responsive: true,
-                    maintainAspectRatio: false,
-                    scales: {
-                        r: {
-                            beginAtZero: true,
-                            max: 100,
-                            grid: {
-                                color: 'rgba(0, 0, 0, 0.1)'
-                            }
+            const productivityCtx = document.getElementById('productivityChart');
+            if (productivityCtx && !charts.productivity) {
+                charts.productivity = new Chart(productivityCtx.getContext('2d'), {
+                    type: 'radar',
+                    data: {
+                        labels: ['AI Usage', 'Tool Variety', 'Consistency', 'Efficiency', 'Learning'],
+                        datasets: [{
+                            label: 'Productivity',
+                            data: [85, 70, 90, 65, 80],
+                            backgroundColor: 'rgba(52, 199, 89, 0.2)',
+                            borderColor: 'var(--success-color)',
+                            borderWidth: 2,
+                            pointBackgroundColor: 'var(--success-color)'
+                        }]
+                    },
+                    options: {
+                        responsive: true,
+                        maintainAspectRatio: false,
+                        scales: {
+                            r: { beginAtZero: true, max: 100, grid: { color: 'rgba(0, 0, 0, 0.1)' } }
                         }
                     }
-                }
-            });
-        }
-        
-        function updateCharts() {
-            // Update chart data with real data
-            if (charts.revenue) {
-                // Update with actual revenue data
+                });
             }
         }
         
@@ -3493,22 +2672,23 @@
             
             toolsGrid.innerHTML = '';
             
-            if (tools.length === 0) {
+            // Filter tools based on category
+            let filteredTools = tools;
+            if (currentCategoryFilter !== 'all') {
+                filteredTools = tools.filter(tool => tool.category === currentCategoryFilter);
+            }
+            
+            if (filteredTools.length === 0) {
                 toolsGrid.innerHTML = `
                     <div class="empty-state" style="grid-column: 1 / -1; padding: 40px 20px;">
                         <i class="fas fa-tools"></i>
-                        <p>No tools available</p>
-                        <p class="subtext">Tools will load when online</p>
+                        <p>No tools found in this category</p>
                     </div>
                 `;
                 return;
             }
             
-            tools.forEach(tool => {
-                if (currentCategoryFilter !== 'all' && tool.category !== currentCategoryFilter) {
-                    return;
-                }
-                
+            filteredTools.forEach(tool => {
                 const toolCard = document.createElement('div');
                 toolCard.className = `tool-card ${tool.locked ? 'locked' : ''}`;
                 toolCard.dataset.toolId = tool.id;
@@ -3540,11 +2720,15 @@
                 `;
                 
                 if (!isLocked) {
-                    toolCard.addEventListener('click', () => {
+                    toolCard.addEventListener('click', (e) => {
+                        e.preventDefault();
+                        e.stopPropagation();
                         showToolPreview(tool);
                     });
                 } else {
                     toolCard.addEventListener('click', (e) => {
+                        e.preventDefault();
+                        e.stopPropagation();
                         if (e.target.closest('.upgrade-btn')) {
                             showUpgradeModal();
                         }
@@ -3558,7 +2742,7 @@
         function checkToolAccess(tool) {
             if (tool.plan === 'free') return true;
             
-            const planHierarchy = ['free', 'basic', 'pro', 'business'];
+            const planHierarchy = ['free', 'basic', 'pro'];
             const userPlanIndex = planHierarchy.indexOf(userPlan);
             const toolPlanIndex = planHierarchy.indexOf(tool.plan);
             
@@ -3573,7 +2757,6 @@
             switch (tool.plan) {
                 case 'basic': return 'Upgrade to Basic Plan';
                 case 'pro': return 'Upgrade to Pro Plan';
-                case 'business': return 'Upgrade to Business Plan';
                 default: return 'Not Available';
             }
         }
@@ -3581,83 +2764,87 @@
         function showToolPreview(tool) {
             selectedTool = tool;
             
-            document.getElementById('toolPreviewTitle').textContent = tool.name;
-            
+            const toolPreviewTitle = document.getElementById('toolPreviewTitle');
             const previewContent = document.getElementById('toolPreviewContent');
-            previewContent.innerHTML = `
-                <div style="margin-bottom: 30px;">
-                    <div class="tool-icon ${tool.category}" style="width: 70px; height: 70px; font-size: 28px;">
-                        <i class="${tool.icon || 'fas fa-tools'}"></i>
+            
+            if (toolPreviewTitle) {
+                toolPreviewTitle.textContent = tool.name;
+            }
+            
+            if (previewContent) {
+                previewContent.innerHTML = `
+                    <div style="margin-bottom: 30px;">
+                        <div class="tool-icon ${tool.category}" style="width: 70px; height: 70px; font-size: 28px;">
+                            <i class="${tool.icon || 'fas fa-tools'}"></i>
+                        </div>
+                        <h3 style="margin: 15px 0 10px 0;">${tool.name}</h3>
+                        <p style="color: var(--text-secondary); margin-bottom: 20px;">${tool.description}</p>
                     </div>
-                    <h3 style="margin: 15px 0 10px 0;">${tool.name}</h3>
-                    <p style="color: var(--text-secondary); margin-bottom: 20px;">${tool.description}</p>
-                </div>
-                
-                <div class="form-group">
-                    <label class="form-label">Features</label>
-                    <div style="padding: 15px; background-color: var(--secondary-color); border-radius: 8px;">
-                        ${(tool.features || []).map(feature => `
-                            <div style="display: flex; align-items: center; gap: 10px; padding: 8px 0;">
-                                <i class="fas fa-check" style="color: var(--success-color);"></i>
-                                <span>${feature}</span>
+                    
+                    <div style="margin-bottom: 20px;">
+                        <label style="display: block; margin-bottom: 8px; font-weight: 500;">Features</label>
+                        <div style="padding: 15px; background-color: var(--secondary-color); border-radius: 8px;">
+                            ${(tool.features || []).map(feature => `
+                                <div style="display: flex; align-items: center; gap: 10px; padding: 8px 0;">
+                                    <i class="fas fa-check" style="color: var(--success-color);"></i>
+                                    <span>${feature}</span>
+                                </div>
+                            `).join('')}
+                        </div>
+                    </div>
+                    
+                    <div style="display: flex; gap: 20px; margin-bottom: 20px;">
+                        <div style="flex: 1;">
+                            <label style="display: block; margin-bottom: 8px; font-weight: 500;">Cost</label>
+                            <div style="font-size: 24px; font-weight: 600; color: ${tool.cost === 0 ? 'var(--success-color)' : 'var(--primary-color)'}">
+                                ${tool.cost === 0 ? 'FREE' : `${tool.cost} credits`}
                             </div>
-                        `).join('')}
-                    </div>
-                </div>
-                
-                <div class="form-row">
-                    <div class="form-group">
-                        <label class="form-label">Cost</label>
-                        <div style="font-size: 24px; font-weight: 600; color: ${tool.cost === 0 ? 'var(--success-color)' : 'var(--primary-color)'}">
-                            ${tool.cost === 0 ? 'FREE' : `${tool.cost} credits`}
+                        </div>
+                        <div style="flex: 1;">
+                            <label style="display: block; margin-bottom: 8px; font-weight: 500;">Usage</label>
+                            <div style="font-size: 18px; font-weight: 600;">
+                                ${tool.usage || 0} times
+                            </div>
                         </div>
                     </div>
-                    <div class="form-group">
-                        <label class="form-label">Usage</label>
-                        <div style="font-size: 18px; font-weight: 600;">
-                            ${tool.usage || 0} times
-                        </div>
+                    
+                    <div style="display: flex; gap: 10px; margin-top: 30px;">
+                        <button class="action-btn secondary" id="cancelToolPreview" style="flex: 1;">
+                            Cancel
+                        </button>
+                        <button class="action-btn" id="useToolBtn" style="flex: 1;" ${userCredits < tool.cost ? 'disabled' : ''}>
+                            <i class="fas fa-play"></i> Use Tool (${tool.cost} credits)
+                        </button>
                     </div>
-                </div>
-                
-                ${tool.requirements ? `
-                <div class="form-group">
-                    <label class="form-label">Requirements</label>
-                    <div style="padding: 12px; background-color: var(--secondary-color); border-radius: 8px;">
-                        ${tool.requirements}
-                    </div>
-                </div>
-                ` : ''}
-                
-                ${tool.instructions ? `
-                <div class="form-group">
-                    <label class="form-label">How to Use</label>
-                    <div style="padding: 12px; background-color: var(--secondary-color); border-radius: 8px;">
-                        ${tool.instructions}
-                    </div>
-                </div>
-                ` : ''}
-                
-                <div style="display: flex; gap: 10px; margin-top: 30px;">
-                    <button class="action-btn secondary" id="cancelToolPreview">
-                        Cancel
-                    </button>
-                    <button class="action-btn" id="useToolBtn" ${userCredits < tool.cost ? 'disabled' : ''}>
-                        <i class="fas fa-play"></i> Use Tool (${tool.cost} credits)
-                    </button>
-                </div>
-            `;
+                `;
+            }
             
             toolPreviewModal.classList.add('active');
             
             // Add event listeners
-            document.getElementById('cancelToolPreview').addEventListener('click', () => {
-                toolPreviewModal.classList.remove('active');
-            });
-            
-            document.getElementById('useToolBtn').addEventListener('click', () => {
-                useTool(tool);
-            });
+            setTimeout(() => {
+                const cancelBtn = document.getElementById('cancelToolPreview');
+                const useBtn = document.getElementById('useToolBtn');
+                const closeBtn = document.getElementById('closePreviewModal');
+                
+                if (cancelBtn) {
+                    cancelBtn.addEventListener('click', () => {
+                        toolPreviewModal.classList.remove('active');
+                    });
+                }
+                
+                if (useBtn) {
+                    useBtn.addEventListener('click', () => {
+                        useTool(tool);
+                    });
+                }
+                
+                if (closeBtn) {
+                    closeBtn.addEventListener('click', () => {
+                        toolPreviewModal.classList.remove('active');
+                    });
+                }
+            }, 10);
         }
         
         function useTool(tool) {
@@ -3689,7 +2876,7 @@
             
             // Update UI
             updateDashboardStats();
-            saveDataToLocalStorage();
+            updateMobileStats();
             
             // Show success message
             showNotification(`${tool.name} executed successfully!`, 'success');
@@ -3697,117 +2884,72 @@
             // Close preview modal
             toolPreviewModal.classList.remove('active');
             
-            // Execute tool (open in iframe)
+            // Execute tool
             executeTool(tool);
-            
-            // Record usage in Firebase if online
-            if (isOnline && firebaseInitialized) {
-                recordToolUsageInFirebase(tool.id, tool.cost);
-            } else {
-                // Store pending action
-                storePendingAction({
-                    type: 'tool_usage',
-                    toolId: tool.id,
-                    cost: tool.cost
-                });
-            }
         }
         
         function executeTool(tool) {
-            document.getElementById('executionToolTitle').textContent = `Running: ${tool.name}`;
-            
-            const iframe = document.getElementById('toolIframe');
+            const executionToolTitle = document.getElementById('executionToolTitle');
+            if (executionToolTitle) {
+                executionToolTitle.textContent = `Running: ${tool.name}`;
+            }
             
             // Show loading state
             toolExecutionModal.classList.add('active');
             loadingOverlay.classList.add('active');
-            document.getElementById('loadingText').textContent = `Loading ${tool.name}...`;
+            const loadingText = document.getElementById('loadingText');
+            if (loadingText) {
+                loadingText.textContent = `Loading ${tool.name}...`;
+            }
             
-            // For demo purposes, load a sample tool interface
-            // In production, this would load the actual tool from a URL
+            // Simulate loading
             setTimeout(() => {
                 loadingOverlay.classList.remove('active');
                 
                 // Create a simple tool interface for demo
-                const toolHtml = `
-                    <!DOCTYPE html>
-                    <html>
-                    <head>
-                        <style>
-                            body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; padding: 20px; }
-                            .tool-container { max-width: 800px; margin: 0 auto; }
-                            .tool-header { text-align: center; margin-bottom: 30px; }
-                            .tool-result { background: #f0f2f5; padding: 20px; border-radius: 10px; margin-top: 20px; }
-                        </style>
-                    </head>
-                    <body>
-                        <div class="tool-container">
-                            <div class="tool-header">
-                                <h2>${tool.name}</h2>
-                                <p>${tool.description}</p>
-                            </div>
-                            <div style="text-align: center; padding: 40px;">
-                                <i class="fas fa-check-circle" style="font-size: 48px; color: #34c759; margin-bottom: 20px;"></i>
-                                <h3>Tool Executed Successfully!</h3>
-                                <p>You've used ${tool.cost} credits for this tool.</p>
-                                <div class="tool-result">
-                                    <h4>Sample Output:</h4>
-                                    <p>This is where the tool's output would be displayed. In a real tool, you would see results, data analysis, or generated content here.</p>
+                const iframe = document.getElementById('toolIframe');
+                if (iframe) {
+                    const toolHtml = `
+                        <!DOCTYPE html>
+                        <html>
+                        <head>
+                            <style>
+                                body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; padding: 20px; background: #f5f5f5; }
+                                .tool-container { max-width: 800px; margin: 0 auto; background: white; border-radius: 10px; padding: 30px; box-shadow: 0 2px 10px rgba(0,0,0,0.1); }
+                                .tool-header { text-align: center; margin-bottom: 30px; }
+                                .tool-result { background: #f0f2f5; padding: 20px; border-radius: 10px; margin-top: 20px; }
+                                .success-icon { color: #34c759; font-size: 48px; margin-bottom: 20px; }
+                            </style>
+                        </head>
+                        <body>
+                            <div class="tool-container">
+                                <div class="tool-header">
+                                    <h2>${tool.name}</h2>
+                                    <p>${tool.description}</p>
+                                </div>
+                                <div style="text-align: center; padding: 40px;">
+                                    <div class="success-icon">
+                                        <i class="fas fa-check-circle"></i>
+                                    </div>
+                                    <h3>Tool Executed Successfully!</h3>
+                                    <p>You've used ${tool.cost} credits for this tool.</p>
+                                    <div class="tool-result">
+                                        <h4>Sample Output:</h4>
+                                        <p>This is where the tool's output would be displayed. In a real tool, you would see results, data analysis, or generated content here.</p>
+                                    </div>
                                 </div>
                             </div>
-                        </div>
-                    </body>
-                    </html>
-                `;
-                
-                iframe.srcdoc = toolHtml;
+                        </body>
+                        </html>
+                    `;
+                    
+                    iframe.srcdoc = toolHtml;
+                }
             }, 1500);
         }
         
-        async function recordToolUsageInFirebase(toolId, cost) {
-            if (!firebaseInitialized || !currentUser) return;
-            
-            try {
-                // Update user credits
-                await db.collection('users').doc(currentUser.uid).update({
-                    credits: firebase.firestore.FieldValue.increment(-cost),
-                    lastToolUsage: firebase.firestore.FieldValue.serverTimestamp()
-                });
-                
-                // Record transaction
-                await db.collection('transactions').add({
-                    userId: currentUser.uid,
-                    type: 'tool_usage',
-                    title: 'Tool Usage',
-                    amount: -cost,
-                    date: firebase.firestore.FieldValue.serverTimestamp(),
-                    status: 'completed',
-                    toolId: toolId,
-                    details: `Used ${cost} credits`
-                });
-                
-                // Update tool usage count
-                await db.collection('toolUsage').add({
-                    userId: currentUser.uid,
-                    toolId: toolId,
-                    timestamp: firebase.firestore.FieldValue.serverTimestamp(),
-                    cost: cost
-                });
-                
-            } catch (error) {
-                console.error('Error recording tool usage:', error);
-            }
-        }
-        
-        function storePendingAction(action) {
-            try {
-                const pendingActions = JSON.parse(localStorage.getItem(LOCAL_STORAGE_KEYS.PENDING_ACTIONS) || '[]');
-                pendingActions.push(action);
-                localStorage.setItem(LOCAL_STORAGE_KEYS.PENDING_ACTIONS, JSON.stringify(pendingActions));
-                console.log('Pending action stored:', action.type);
-            } catch (error) {
-                console.error('Error storing pending action:', error);
-            }
+        function showUpgradeModal() {
+            navigateToContent('settings');
         }
         
         function loadTransactions() {
@@ -3860,18 +3002,6 @@
                         icon = 'fas fa-tools';
                         iconColor = 'var(--info-color)';
                         break;
-                    case 'affiliate':
-                        icon = 'fas fa-user-friends';
-                        iconColor = 'var(--success-color)';
-                        break;
-                    case 'subscription':
-                        icon = 'fas fa-crown';
-                        iconColor = 'var(--pro-plan)';
-                        break;
-                    case 'marketplace':
-                        icon = 'fas fa-store';
-                        iconColor = 'var(--marketplace-gradient)';
-                        break;
                 }
                 
                 const amountClass = transaction.amount >= 0 ? 'positive' : 'negative';
@@ -3911,14 +3041,18 @@
         }
         
         function updateAffiliateDisplay() {
-            document.getElementById('totalEarnings').textContent = `$${affiliateEarnings.toFixed(2)}`;
-            document.getElementById('referralCount').textContent = referralCount;
-            document.getElementById('pendingPayout').textContent = `$${pendingPayout.toFixed(2)}`;
+            const totalEarnings = document.getElementById('totalEarnings');
+            const referralCount = document.getElementById('referralCount');
+            const pendingPayout = document.getElementById('pendingPayout');
+            
+            if (totalEarnings) totalEarnings.textContent = '$0';
+            if (referralCount) referralCount.textContent = '0';
+            if (pendingPayout) pendingPayout.textContent = '$0';
             
             // Generate referral link
             const referralLink = document.getElementById('referralLink');
             if (referralLink && currentUser) {
-                referralLink.value = `https://moodchat.com/ref/${currentUser.uid.substring(0, 8)}`;
+                referralLink.value = `https://moodchat.com/ref/demo123`;
             }
         }
         
@@ -3932,28 +3066,20 @@
                 })
                 .catch(err => {
                     console.error('Failed to copy:', err);
-                    showNotification('Failed to copy link', 'error');
+                    // Fallback for browsers that don't support clipboard API
+                    referralLink.select();
+                    document.execCommand('copy');
+                    showNotification('Referral link copied!', 'success');
                 });
         }
         
         function requestPayout() {
-            if (pendingPayout < 50) {
-                showNotification('Minimum payout amount is $50', 'warning');
-                return;
-            }
-            
             if (!isOnline) {
                 showNotification('Cannot request payout while offline', 'error');
                 return;
             }
             
-            // Simulate payout request
-            showNotification(`Payout request for $${pendingPayout.toFixed(2)} submitted`, 'success');
-            
-            // Reset pending payout
-            pendingPayout = 0;
-            updateAffiliateDisplay();
-            saveDataToLocalStorage();
+            showNotification('Payout request submitted', 'success');
         }
         
         function loadConsultation() {
@@ -3988,9 +3114,12 @@
                     </div>
                 `;
                 
-                card.querySelector('.book-consultation-btn').addEventListener('click', () => {
-                    bookConsultation(service);
-                });
+                const bookBtn = card.querySelector('.book-consultation-btn');
+                if (bookBtn) {
+                    bookBtn.addEventListener('click', () => {
+                        bookConsultation(service);
+                    });
+                }
                 
                 container.appendChild(card);
             });
@@ -4002,27 +3131,10 @@
                 return;
             }
             
-            // Simulate booking process
             showNotification(`Booking ${service.name} for $${service.price}...`, 'info');
             
-            // In a real app, this would open a booking form
             setTimeout(() => {
                 showNotification(`${service.name} booked successfully! We'll contact you shortly.`, 'success');
-                
-                // Record transaction
-                const transaction = {
-                    id: 'tx_' + Date.now(),
-                    type: 'consultation',
-                    title: service.name + ' Consultation',
-                    amount: -service.price,
-                    date: new Date(),
-                    status: 'booked',
-                    details: 'Awaiting confirmation'
-                };
-                
-                transactions.unshift(transaction);
-                saveDataToLocalStorage();
-                updateTransactionsDisplay();
             }, 2000);
         }
         
@@ -4050,9 +3162,16 @@
                     </div>
                 `;
                 
-                card.querySelector('.buy-marketplace-btn').addEventListener('click', (e) => {
-                    e.stopPropagation();
-                    buyMarketplaceItem(item);
+                const buyBtn = card.querySelector('.buy-marketplace-btn');
+                if (buyBtn) {
+                    buyBtn.addEventListener('click', (e) => {
+                        e.stopPropagation();
+                        buyMarketplaceItem(item);
+                    });
+                }
+                
+                card.addEventListener('click', () => {
+                    showNotification(`${item.name}: $${item.price}`, 'info');
                 });
                 
                 container.appendChild(card);
@@ -4065,7 +3184,6 @@
                 return;
             }
             
-            // Simulate purchase
             showNotification(`Added ${item.name} to cart`, 'success');
             
             // Update cart count
@@ -4078,7 +3196,6 @@
         
         function loadSettings() {
             loadPlanComparison();
-            setupPaymentMethods();
             loadSettingsFromStorage();
         }
         
@@ -4088,50 +3205,49 @@
             
             container.innerHTML = '';
             
-            Object.entries(userPlans).forEach(([planId, plan], index) => {
+            Object.entries(userPlans).forEach(([planId, plan]) => {
                 const isCurrentPlan = planId === userPlan;
-                const isFeatured = planId === 'pro'; // Highlight Pro plan
                 
                 const card = document.createElement('div');
-                card.className = `plan-card ${isFeatured ? 'featured' : ''} ${isCurrentPlan ? 'current-plan' : ''}`;
+                card.className = `plan-card ${isCurrentPlan ? 'current-plan' : ''}`;
+                card.style.backgroundColor = 'var(--bg-color)';
+                card.style.borderRadius = '12px';
+                card.style.padding = '20px';
+                card.style.border = `2px solid ${isCurrentPlan ? 'var(--primary-color)' : 'var(--border-color)'}`;
+                card.style.transition = 'all 0.3s';
                 
                 card.innerHTML = `
-                    ${isFeatured ? `<div style="position: absolute; top: -10px; left: 50%; transform: translateX(-50%); background: var(--primary-color); color: white; padding: 5px 15px; border-radius: 20px; font-size: 12px; font-weight: 600;">MOST POPULAR</div>` : ''}
-                    
-                    <div class="plan-name">${plan.name}</div>
-                    <div class="plan-price">
+                    <div style="font-size: 20px; font-weight: 600; margin-bottom: 10px;">${plan.name}</div>
+                    <div style="font-size: 32px; font-weight: 700; margin-bottom: 20px;">
                         $${plan.price}
-                        <span class="period">${plan.price === 0 ? 'forever' : '/month'}</span>
+                        <span style="font-size: 14px; color: var(--text-secondary); font-weight: normal;">
+                            ${plan.price === 0 ? 'forever' : '/month'}
+                        </span>
                     </div>
                     
-                    <ul class="plan-features">
+                    <ul style="list-style: none; margin-bottom: 20px;">
                         ${plan.features.map(feature => `
-                            <li>
-                                <i class="fas fa-check feature-check"></i>
+                            <li style="padding: 8px 0; border-bottom: 1px solid var(--border-color); display: flex; align-items: center; gap: 10px;">
+                                <i class="fas fa-check" style="color: var(--success-color);"></i>
                                 <span>${feature}</span>
-                            </li>
-                        `).join('')}
-                        
-                        ${plan.limitations.map(limitation => `
-                            <li style="opacity: 0.6;">
-                                <i class="fas fa-times feature-cross"></i>
-                                <span>${limitation}</span>
                             </li>
                         `).join('')}
                     </ul>
                     
                     <button class="action-btn ${isCurrentPlan ? 'secondary' : ''}" 
-                            data-plan-id="${planId}"
-                            ${isCurrentPlan ? 'disabled' : ''}
-                            style="width: 100%;">
+                            style="width: 100%;"
+                            ${isCurrentPlan ? 'disabled' : ''}>
                         ${isCurrentPlan ? 'Current Plan' : 'Upgrade Now'}
                     </button>
                 `;
                 
                 if (!isCurrentPlan) {
-                    card.querySelector('button').addEventListener('click', () => {
-                        upgradePlan(planId, plan.price);
-                    });
+                    const upgradeBtn = card.querySelector('button');
+                    if (upgradeBtn) {
+                        upgradeBtn.addEventListener('click', () => {
+                            upgradePlan(planId, plan.price);
+                        });
+                    }
                 }
                 
                 container.appendChild(card);
@@ -4144,52 +3260,28 @@
                 return;
             }
             
-            // Check if user has enough credits or needs to pay
             if (price > 0) {
                 showPaymentModal('plan', planId, price);
             } else {
-                // Free plan upgrade
                 userPlan = planId;
-                document.getElementById('userPlan').textContent = userPlans[planId].name + ' Plan';
-                document.getElementById('mobileUserPlan').textContent = userPlans[planId].name + ' Plan';
-                saveDataToLocalStorage();
+                updateMobileUserDisplay();
                 loadPlanComparison();
                 showNotification(`Upgraded to ${userPlans[planId].name} Plan!`, 'success');
             }
         }
         
-        function setupPaymentMethods() {
-            const methods = document.querySelectorAll('.payment-method');
-            methods.forEach(method => {
-                method.addEventListener('click', function() {
-                    methods.forEach(m => m.classList.remove('selected'));
-                    this.classList.add('selected');
-                    
-                    const methodId = this.dataset.method;
-                    
-                    // Show/hide card form based on selection
-                    const cardForm = document.getElementById('cardPaymentForm');
-                    if (cardForm) {
-                        cardForm.style.display = methodId === 'card' ? 'block' : 'none';
-                    }
-                });
-            });
-            
-            // Select first method by default
-            if (methods.length > 0) {
-                methods[0].click();
-            }
-        }
-        
         function loadSettingsFromStorage() {
             try {
-                const settings = JSON.parse(localStorage.getItem(LOCAL_STORAGE_KEYS.SETTINGS) || '{}');
-                
                 // Load notification settings
-                if (settings.notifications) {
-                    document.getElementById('emailNotifications').checked = settings.notifications.email || true;
-                    document.getElementById('toolUpdates').checked = settings.notifications.toolUpdates || true;
-                    document.getElementById('promotionalOffers').checked = settings.notifications.promotional || false;
+                const emailNotifications = document.getElementById('emailNotifications');
+                const toolUpdates = document.getElementById('toolUpdates');
+                
+                if (emailNotifications) {
+                    emailNotifications.checked = localStorage.getItem('email_notifications') !== 'false';
+                }
+                
+                if (toolUpdates) {
+                    toolUpdates.checked = localStorage.getItem('tool_updates') !== 'false';
                 }
             } catch (error) {
                 console.error('Error loading settings:', error);
@@ -4198,15 +3290,17 @@
         
         function saveSettings() {
             try {
-                const settings = {
-                    notifications: {
-                        email: document.getElementById('emailNotifications').checked,
-                        toolUpdates: document.getElementById('toolUpdates').checked,
-                        promotional: document.getElementById('promotionalOffers').checked
-                    }
-                };
+                const emailNotifications = document.getElementById('emailNotifications');
+                const toolUpdates = document.getElementById('toolUpdates');
                 
-                localStorage.setItem(LOCAL_STORAGE_KEYS.SETTINGS, JSON.stringify(settings));
+                if (emailNotifications) {
+                    localStorage.setItem('email_notifications', emailNotifications.checked);
+                }
+                
+                if (toolUpdates) {
+                    localStorage.setItem('tool_updates', toolUpdates.checked);
+                }
+                
                 showNotification('Settings saved successfully!', 'success');
             } catch (error) {
                 console.error('Error saving settings:', error);
@@ -4215,7 +3309,6 @@
         }
         
         function showPaymentModal(type, id, amount) {
-            // Load credit packages
             const packagesContainer = document.getElementById('creditPackages');
             if (packagesContainer && type === 'credits') {
                 packagesContainer.innerHTML = '';
@@ -4224,16 +3317,21 @@
                     const packageEl = document.createElement('div');
                     packageEl.className = 'credit-package';
                     packageEl.dataset.packageId = pkg.id;
+                    packageEl.style.cssText = 'background-color: var(--secondary-color); border-radius: 10px; padding: 15px; text-align: center; cursor: pointer; transition: all 0.3s; border: 2px solid transparent;';
                     
                     packageEl.innerHTML = `
-                        <div class="package-credits">${pkg.credits}</div>
-                        <div class="package-price">$${pkg.price}</div>
-                        ${pkg.bonus > 0 ? `<div class="package-bonus">+${pkg.bonus} bonus</div>` : ''}
+                        <div style="font-size: 24px; font-weight: 700; margin-bottom: 5px;">${pkg.credits}</div>
+                        <div style="font-size: 18px; font-weight: 600; color: var(--primary-color); margin-bottom: 10px;">$${pkg.price}</div>
+                        ${pkg.bonus > 0 ? `<div style="font-size: 12px; color: var(--success-color); background-color: rgba(52, 199, 89, 0.1); padding: 4px 8px; border-radius: 10px; display: inline-block;">+${pkg.bonus} bonus</div>` : ''}
                     `;
                     
                     packageEl.addEventListener('click', () => {
-                        document.querySelectorAll('.credit-package').forEach(p => p.classList.remove('selected'));
-                        packageEl.classList.add('selected');
+                        document.querySelectorAll('.credit-package').forEach(p => {
+                            p.style.borderColor = 'transparent';
+                            p.style.backgroundColor = 'var(--secondary-color)';
+                        });
+                        packageEl.style.borderColor = 'var(--primary-color)';
+                        packageEl.style.backgroundColor = 'rgba(0, 132, 255, 0.1)';
                         selectedCreditPackage = pkg;
                     });
                     
@@ -4246,12 +3344,6 @@
                 }
             }
             
-            // Update payment modal title
-            const header = document.querySelector('.payment-header h3');
-            if (header) {
-                header.textContent = type === 'credits' ? 'Purchase Credits' : 'Upgrade Plan';
-            }
-            
             paymentModal.classList.add('active');
         }
         
@@ -4261,17 +3353,9 @@
                 return;
             }
             
-            // Validate card details if card payment
-            const paymentMethod = document.getElementById('paymentMethodSelect').value;
-            if (paymentMethod === 'card') {
-                if (!validateCardDetails()) {
-                    return;
-                }
-            }
-            
-            // Simulate payment processing
             loadingOverlay.classList.add('active');
-            document.getElementById('loadingText').textContent = 'Processing payment...';
+            const loadingText = document.getElementById('loadingText');
+            if (loadingText) loadingText.textContent = 'Processing payment...';
             
             setTimeout(() => {
                 loadingOverlay.classList.remove('active');
@@ -4296,154 +3380,231 @@
                 
                 // Update UI
                 updateDashboardStats();
-                saveDataToLocalStorage();
                 
                 // Close modal and show success
                 paymentModal.classList.remove('active');
                 showNotification(`Successfully purchased ${selectedCreditPackage.credits + selectedCreditPackage.bonus} credits!`, 'success');
                 
-                // Record in Firebase if online
-                if (isOnline && firebaseInitialized) {
-                    recordCreditPurchaseInFirebase(selectedCreditPackage.credits, selectedCreditPackage.price);
-                } else {
-                    storePendingAction({
-                        type: 'credit_purchase',
-                        credits: selectedCreditPackage.credits,
-                        amount: selectedCreditPackage.price
-                    });
-                }
-                
             }, 2000);
         }
         
-        function validateCardDetails() {
-            const cardNumber = document.getElementById('cardNumber').value.replace(/\s/g, '');
-            const cardExpiry = document.getElementById('cardExpiry').value;
-            const cardCVV = document.getElementById('cardCVV').value;
-            const cardName = document.getElementById('cardName').value;
-            
-            if (!cardNumber || cardNumber.length !== 16 || !/^\d+$/.test(cardNumber)) {
-                showNotification('Please enter a valid 16-digit card number', 'error');
-                return false;
-            }
-            
-            if (!cardExpiry || !/^\d{2}\/\d{2}$/.test(cardExpiry)) {
-                showNotification('Please enter a valid expiry date (MM/YY)', 'error');
-                return false;
-            }
-            
-            if (!cardCVV || cardCVV.length !== 3 || !/^\d+$/.test(cardCVV)) {
-                showNotification('Please enter a valid 3-digit CVV', 'error');
-                return false;
-            }
-            
-            if (!cardName || cardName.trim().length < 3) {
-                showNotification('Please enter cardholder name', 'error');
-                return false;
-            }
-            
-            return true;
-        }
-        
-        async function recordCreditPurchaseInFirebase(credits, amount) {
-            if (!firebaseInitialized || !currentUser) return;
-            
-            try {
-                // Update user credits
-                await db.collection('users').doc(currentUser.uid).update({
-                    credits: firebase.firestore.FieldValue.increment(credits),
-                    lastPurchase: firebase.firestore.FieldValue.serverTimestamp()
-                });
-                
-                // Record transaction
-                await db.collection('transactions').add({
-                    userId: currentUser.uid,
-                    type: 'credit_purchase',
-                    title: 'Credit Purchase',
-                    amount: -amount,
-                    date: firebase.firestore.FieldValue.serverTimestamp(),
-                    status: 'completed',
-                    details: `Purchased ${credits} credits`
-                });
-                
-            } catch (error) {
-                console.error('Error recording credit purchase:', error);
-            }
-        }
-        
         function setupEventListeners() {
-            // Dismiss offline overlay
-            document.getElementById('dismissOfflineBtn').addEventListener('click', dismissOfflineOverlay);
+            console.log('Setting up event listeners...');
             
-            // Category filters
-            document.querySelectorAll('.category-filter-btn').forEach(btn => {
-                btn.addEventListener('click', function() {
-                    document.querySelectorAll('.category-filter-btn').forEach(b => b.classList.remove('active'));
+            // Dismiss offline overlay
+            const dismissOfflineBtn = document.getElementById('dismissOfflineBtn');
+            if (dismissOfflineBtn) {
+                dismissOfflineBtn.addEventListener('click', dismissOfflineOverlay);
+            }
+            
+            // Category filters (desktop)
+            document.querySelectorAll('.sidebar .category-filter-btn').forEach(btn => {
+                btn.addEventListener('click', function(e) {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    document.querySelectorAll('.sidebar .category-filter-btn').forEach(b => b.classList.remove('active'));
                     this.classList.add('active');
                     currentCategoryFilter = this.dataset.category;
+                    console.log('Category filter changed to:', currentCategoryFilter);
                     loadTools();
                 });
             });
             
-            // Credit actions
-            document.getElementById('buyCreditsBtn').addEventListener('click', () => {
-                if (!isOnline) {
-                    showNotification('Cannot purchase credits while offline', 'error');
-                    return;
-                }
-                showPaymentModal('credits');
+            // Category filters (mobile)
+            document.querySelectorAll('.mobile-nav-menu .category-filter-btn').forEach(btn => {
+                btn.addEventListener('click', function(e) {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    document.querySelectorAll('.mobile-nav-menu .category-filter-btn').forEach(b => b.classList.remove('active'));
+                    this.classList.add('active');
+                    currentCategoryFilter = this.dataset.category;
+                    console.log('Mobile category filter changed to:', currentCategoryFilter);
+                    loadTools();
+                    mobileNavMenu.classList.remove('active');
+                });
             });
             
-            document.getElementById('upgradePlanBtn').addEventListener('click', () => {
-                loadContent('settings');
-            });
+            // Credit actions
+            const buyCreditsBtn = document.getElementById('buyCreditsBtn');
+            if (buyCreditsBtn) {
+                buyCreditsBtn.addEventListener('click', (e) => {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    if (!isOnline) {
+                        showNotification('Cannot purchase credits while offline', 'error');
+                        return;
+                    }
+                    showPaymentModal('credits');
+                });
+            }
+            
+            const upgradePlanBtn = document.getElementById('upgradePlanBtn');
+            if (upgradePlanBtn) {
+                upgradePlanBtn.addEventListener('click', (e) => {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    navigateToContent('settings');
+                });
+            }
             
             // Dashboard actions
-            document.getElementById('refreshDashboardBtn')?.addEventListener('click', () => {
-                loadDashboard();
-                showNotification('Dashboard refreshed', 'success');
-            });
+            const refreshDashboardBtn = document.getElementById('refreshDashboardBtn');
+            if (refreshDashboardBtn) {
+                refreshDashboardBtn.addEventListener('click', (e) => {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    loadDashboard();
+                    showNotification('Dashboard refreshed', 'success');
+                });
+            }
+            
+            const exportDataBtn = document.getElementById('exportDataBtn');
+            if (exportDataBtn) {
+                exportDataBtn.addEventListener('click', (e) => {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    showNotification('Data export feature coming soon!', 'info');
+                });
+            }
             
             // Modal close buttons
-            document.getElementById('closePreviewModal')?.addEventListener('click', () => {
-                toolPreviewModal.classList.remove('active');
-            });
+            const closePreviewModal = document.getElementById('closePreviewModal');
+            if (closePreviewModal) {
+                closePreviewModal.addEventListener('click', (e) => {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    toolPreviewModal.classList.remove('active');
+                });
+            }
             
-            document.getElementById('closeExecutionModal')?.addEventListener('click', () => {
-                toolExecutionModal.classList.remove('active');
-            });
+            const closeExecutionModal = document.getElementById('closeExecutionModal');
+            if (closeExecutionModal) {
+                closeExecutionModal.addEventListener('click', (e) => {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    toolExecutionModal.classList.remove('active');
+                });
+            }
             
             // Payment modal
-            document.getElementById('cancelPaymentBtn')?.addEventListener('click', () => {
-                paymentModal.classList.remove('active');
-            });
+            const cancelPaymentBtn = document.getElementById('cancelPaymentBtn');
+            if (cancelPaymentBtn) {
+                cancelPaymentBtn.addEventListener('click', (e) => {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    paymentModal.classList.remove('active');
+                });
+            }
             
-            document.getElementById('confirmPaymentBtn')?.addEventListener('click', processPayment);
+            const confirmPaymentBtn = document.getElementById('confirmPaymentBtn');
+            if (confirmPaymentBtn) {
+                confirmPaymentBtn.addEventListener('click', (e) => {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    processPayment();
+                });
+            }
             
             // Settings
-            document.getElementById('saveSettingsBtn')?.addEventListener('click', saveSettings);
+            const saveSettingsBtn = document.getElementById('saveSettingsBtn');
+            if (saveSettingsBtn) {
+                saveSettingsBtn.addEventListener('click', (e) => {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    saveSettings();
+                });
+            }
             
             // Free tools filter
-            document.getElementById('filterFreeBtn')?.addEventListener('click', () => {
-                currentCategoryFilter = 'all';
-                document.querySelectorAll('.category-filter-btn').forEach(b => b.classList.remove('active'));
-                document.querySelector('.category-filter-btn[data-category="all"]').classList.add('active');
-                
-                // Show only free tools
-                const toolsGrid = document.getElementById('toolsGrid');
-                if (toolsGrid) {
-                    const toolCards = toolsGrid.querySelectorAll('.tool-card');
-                    toolCards.forEach(card => {
-                        const toolId = card.dataset.toolId;
-                        const tool = tools.find(t => t.id === toolId);
-                        if (tool && tool.cost === 0) {
-                            card.style.display = 'flex';
-                        } else {
-                            card.style.display = 'none';
+            const filterFreeBtn = document.getElementById('filterFreeBtn');
+            if (filterFreeBtn) {
+                filterFreeBtn.addEventListener('click', (e) => {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    currentCategoryFilter = 'all';
+                    document.querySelectorAll('.category-filter-btn').forEach(b => b.classList.remove('active'));
+                    const allBtn = document.querySelector('.category-filter-btn[data-category="all"]');
+                    if (allBtn) allBtn.classList.add('active');
+                    
+                    // Filter tools to show only free ones
+                    const toolsGrid = document.getElementById('toolsGrid');
+                    if (toolsGrid) {
+                        toolsGrid.innerHTML = '';
+                        
+                        const freeTools = tools.filter(tool => tool.cost === 0);
+                        if (freeTools.length === 0) {
+                            toolsGrid.innerHTML = `
+                                <div class="empty-state" style="grid-column: 1 / -1; padding: 40px 20px;">
+                                    <i class="fas fa-tools"></i>
+                                    <p>No free tools available</p>
+                                </div>
+                            `;
+                            return;
                         }
-                    });
-                }
-            });
+                        
+                        freeTools.forEach(tool => {
+                            const toolCard = document.createElement('div');
+                            toolCard.className = 'tool-card';
+                            toolCard.dataset.toolId = tool.id;
+                            
+                            toolCard.innerHTML = `
+                                <div class="tool-icon ${tool.category}">
+                                    <i class="${tool.icon || 'fas fa-tools'}"></i>
+                                </div>
+                                <div class="tool-name">${tool.name}</div>
+                                <div class="tool-description">${tool.description}</div>
+                                <div class="tool-meta">
+                                    <div class="tool-cost free">Free</div>
+                                    <div class="tool-usage">
+                                        <i class="fas fa-chart-bar"></i>
+                                        ${tool.usage || 0} uses
+                                    </div>
+                                </div>
+                            `;
+                            
+                            toolCard.addEventListener('click', (e) => {
+                                e.preventDefault();
+                                e.stopPropagation();
+                                showToolPreview(tool);
+                            });
+                            
+                            toolsGrid.appendChild(toolCard);
+                        });
+                    }
+                });
+            }
+            
+            // Search tools button
+            const searchToolsBtn = document.getElementById('searchToolsBtn');
+            if (searchToolsBtn) {
+                searchToolsBtn.addEventListener('click', (e) => {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    showNotification('Search feature coming soon!', 'info');
+                });
+            }
+            
+            // View cart button
+            const viewCartBtn = document.getElementById('viewCartBtn');
+            if (viewCartBtn) {
+                viewCartBtn.addEventListener('click', (e) => {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    showNotification('Cart feature coming soon!', 'info');
+                });
+            }
+            
+            // Book consultation button
+            const bookConsultationBtn = document.getElementById('bookConsultationBtn');
+            if (bookConsultationBtn) {
+                bookConsultationBtn.addEventListener('click', (e) => {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    showNotification('Consultation booking modal coming soon!', 'info');
+                });
+            }
+            
+            console.log('Event listeners setup complete');
         }
         
         function formatDate(date) {
@@ -4465,7 +3626,7 @@
         
         function showNotification(message, type = 'success') {
             const notificationText = document.getElementById('notificationText');
-            if (!notificationText) return;
+            if (!notificationText || !notification) return;
             
             notificationText.textContent = message;
             
@@ -4479,7 +3640,8 @@
             }, 3000);
         }
         
-        console.log('Tools dashboard system initialized successfully');
+        // Initialize on load
+        console.log('Tools dashboard ready');
     </script>
 </body>
 </html>
