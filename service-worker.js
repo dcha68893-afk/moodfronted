@@ -132,6 +132,15 @@ function isAppShellAsset(url) {
   );
 }
 
+// Check if request is for an HTML page
+function isHtmlRequest(request) {
+  return request.headers.get('Accept')?.includes('text/html') || 
+         request.url.endsWith('.html') ||
+         request.url === '/' ||
+         request.url.includes('.html?') ||
+         request.mode === 'navigate';
+}
+
 // Get current user session
 async function getCurrentUserSession() {
   try {
@@ -392,17 +401,23 @@ async function appShellCacheFirst(request) {
     
     return response;
   } catch (error) {
-    // Network failed - return any cached version or minimal response
+    // Network failed - return any cached version
     const fallbackResponse = await cache.match(request);
     if (fallbackResponse) {
       return fallbackResponse;
     }
     
-    // Return minimal response (no offline screen)
-    return new Response('', {
-      status: 200,
-      headers: { 'Content-Type': 'text/html' }
-    });
+    // FIXED: Return minimal response instead of index.html for non-HTML assets
+    if (isHtmlRequest(request)) {
+      // For HTML pages, try to return the requested page, not index.html
+      return new Response('', {
+        status: 200,
+        headers: { 'Content-Type': 'text/html' }
+      });
+    }
+    
+    // For non-HTML assets, return empty
+    return new Response('', { status: 200 });
   }
 }
 
@@ -527,6 +542,45 @@ async function cleanupOldCaches() {
   }
 }
 
+// HTML PAGE HANDLER: Each HTML page loads its own UI
+async function htmlPageHandler(request) {
+  const cache = await caches.open(STATIC_CACHE_NAME);
+  const cachedResponse = await cache.match(request);
+  
+  // Always return cached HTML page if available
+  if (cachedResponse) {
+    // Update in background if stale
+    if (isStale(cachedResponse)) {
+      updateAppShellInBackground(request);
+    }
+    return cachedResponse;
+  }
+  
+  // If not in cache, try network
+  try {
+    const response = await fetch(request);
+    
+    if (response && response.status === 200) {
+      // Cache the HTML page for offline use
+      await cacheWithMetadata(request, response.clone(), STATIC_CACHE_NAME);
+      return response;
+    }
+  } catch (error) {
+    // Network failed - the HTML page is not cached
+    console.warn(`[Service Worker] HTML page not cached: ${request.url}`);
+  }
+  
+  // IMPORTANT: Return empty HTML instead of redirecting to index.html
+  // This allows the page's JavaScript to load and show its own UI
+  return new Response('', {
+    status: 200,
+    headers: { 
+      'Content-Type': 'text/html',
+      'x-sw-offline': 'true'
+    }
+  });
+}
+
 // Main fetch strategy
 async function appShellStrategy(request) {
   const url = new URL(request.url);
@@ -536,7 +590,12 @@ async function appShellStrategy(request) {
     return staleWhileRevalidate(request);
   }
   
-  // App shell requests: Cache-First
+  // HTML page requests: Special handler to show each page's own UI
+  if (isHtmlRequest(request)) {
+    return htmlPageHandler(request);
+  }
+  
+  // App shell assets: Cache-First
   if (isAppShellAsset(url)) {
     return appShellCacheFirst(request);
   }
@@ -575,9 +634,19 @@ self.addEventListener('install', (event) => {
       
       console.log(`[Service Worker] Precaching ${assets.length} app shell assets...`);
       
+      // Debug: Log all HTML files being cached
+      const htmlFiles = APP_SHELL_MANIFEST.html;
+      console.log('[Service Worker] Caching HTML pages:', htmlFiles);
+      
       try {
         await cache.addAll(assets);
         console.log('[Service Worker] App shell precached successfully');
+        
+        // Verify HTML files are cached
+        for (const htmlFile of htmlFiles) {
+          const cached = await cache.match(htmlFile);
+          console.log(`[Service Worker] ✓ ${htmlFile}: ${cached ? 'CACHED' : 'MISSING'}`);
+        }
       } catch (error) {
         console.warn('[Service Worker] Some assets failed to cache:', error);
       }
@@ -598,8 +667,9 @@ self.addEventListener('activate', (event) => {
       console.log('[Service Worker] APP SHELL STRATEGY ACTIVE');
       console.log('[Service Worker] 1. UI loads instantly from cache');
       console.log('[Service Worker] 2. No offline screens or banners');
-      console.log('[Service Worker] 3. APIs use stale-while-revalidate');
-      console.log('[Service Worker] 4. Silent background updates');
+      console.log('[Service Worker] 3. Each HTML page shows its own UI offline');
+      console.log('[Service Worker] 4. APIs use stale-while-revalidate');
+      console.log('[Service Worker] 5. Silent background updates');
     })()
   );
 });
@@ -622,7 +692,7 @@ self.addEventListener('fetch', (event) => {
     return;
   }
   
-  // Use app shell strategy
+  // Use app shell strategy for ALL requests
   event.respondWith(appShellStrategy(request));
 });
 
@@ -641,15 +711,26 @@ self.addEventListener('message', (event) => {
           const session = await getCurrentUserSession();
           const deviceId = await generateDeviceId();
           
+          // Check which HTML pages are cached
+          const htmlPages = APP_SHELL_MANIFEST.html;
+          const cachedHtml = [];
+          
+          for (const page of htmlPages) {
+            const cached = await cache.match(page);
+            if (cached) cachedHtml.push(page);
+          }
+          
           event.source.postMessage({
             type: 'CACHE_INFO',
             appShellCacheSize: keys.length,
             apiCacheSize: apiKeys.length,
+            cachedHtmlPages: cachedHtml,
+            totalHtmlPages: htmlPages.length,
             userId: session ? session.userId : null,
             deviceId: deviceId,
             isLoggedIn: session ? session.isLoggedIn : false,
             version: APP_VERSION,
-            strategy: 'App Shell Cache-First + Stale-While-Revalidate APIs'
+            strategy: 'Each HTML page shows its own UI offline'
           });
         })()
       );
@@ -758,7 +839,10 @@ self.addEventListener('message', (event) => {
         (async () => {
           const testUrls = [
             '/',
+            '/index.html',
             '/chat.html',
+            '/status.html',
+            '/settings.html',
             '/style.css',
             '/app.js',
             '/api/user/test'
@@ -775,7 +859,8 @@ self.addEventListener('message', (event) => {
               return {
                 url,
                 cached: !!cached,
-                strategy: url.includes('/api/') ? 'stale-while-revalidate' : 'cache-first'
+                strategy: url.includes('/api/') ? 'stale-while-revalidate' : 
+                         url.endsWith('.html') || url === '/' ? 'html-page-handler' : 'cache-first'
               };
             })
           );
@@ -783,6 +868,30 @@ self.addEventListener('message', (event) => {
           event.source.postMessage({
             type: 'STRATEGY_TEST_RESULTS',
             results: results,
+            timestamp: Date.now()
+          });
+        })()
+      );
+      break;
+      
+    case 'VERIFY_HTML_CACHE':
+      event.waitUntil(
+        (async () => {
+          const cache = await caches.open(STATIC_CACHE_NAME);
+          const htmlPages = APP_SHELL_MANIFEST.html;
+          const cacheStatus = [];
+          
+          for (const page of htmlPages) {
+            const cached = await cache.match(page);
+            cacheStatus.push({
+              page: page,
+              cached: !!cached
+            });
+          }
+          
+          event.source.postMessage({
+            type: 'HTML_CACHE_STATUS',
+            pages: cacheStatus,
             timestamp: Date.now()
           });
         })()
@@ -842,9 +951,10 @@ self.addEventListener('notificationclick', (event) => {
 
 // INITIALIZATION LOG
 console.log(`[Kynecta MoodChat Service Worker] App Shell Strategy v${APP_VERSION} loaded`);
-console.log('[Service Worker] STRATEGY: APP SHELL CACHE-FIRST + STALE-WHILE-REVALIDATE');
-console.log('[Service Worker] 1. UI always loads instantly from cache');
-console.log('[Service Worker] 2. No offline screens, banners, or messages');
-console.log('[Service Worker] 3. APIs refresh silently in background');
-console.log('[Service Worker] 4. Works with sleeping server (Render cold start)');
-console.log('[Service Worker] READY: Instant UI + Silent API Updates');
+console.log('[Service Worker] STRATEGY: EACH HTML PAGE SHOWS ITS OWN UI OFFLINE');
+console.log('[Service Worker] 1. Each HTML page loads its own UI from cache');
+console.log('[Service Worker] 2. No redirects to index.html - stay on same page');
+console.log('[Service Worker] 3. No offline screens, banners, or messages');
+console.log('[Service Worker] 4. APIs refresh silently in background');
+console.log('[Service Worker] 5. Works with sleeping server (Render cold start)');
+console.log('[Service Worker] READY: Each page shows its own UI offline');

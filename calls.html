@@ -2724,6 +2724,9 @@
             LAST_SYNC: 'calls_last_sync'
         };
         
+        // Call initiation from friends.html
+        let pendingCallRequest = null;
+        
         // Initialize the application
         document.addEventListener('DOMContentLoaded', function() {
             initializeApp();
@@ -2757,6 +2760,9 @@
                     
                     // Listen for external calls from friends.html
                     listenForExternalCalls();
+                    
+                    // Check for URL parameters for call initiation
+                    checkUrlForCallInitiation();
                     
                     // Update UI for offline/online state
                     updateUIForConnectivity();
@@ -2811,6 +2817,9 @@
                         // Listen for incoming calls from friends.html
                         listenForExternalCalls();
                         
+                        // Check for URL parameters for call initiation
+                        checkUrlForCallInitiation();
+                        
                         // Fix mobile layout on load
                         setTimeout(fixMobileLayout, 100);
                         
@@ -2832,6 +2841,59 @@
                     showNotification('Please login to continue', 'error');
                 }
             }
+        }
+        
+        function checkUrlForCallInitiation() {
+            // Check if URL has call parameters
+            const urlParams = new URLSearchParams(window.location.search);
+            const callUserId = urlParams.get('call');
+            const callType = urlParams.get('type') || 'video';
+            
+            if (callUserId) {
+                console.log('Call initiated via URL:', callUserId, callType);
+                
+                // Store the pending call request
+                pendingCallRequest = {
+                    userId: callUserId,
+                    type: callType,
+                    timestamp: Date.now()
+                };
+                
+                // If we're already initialized with user, start the call immediately
+                if (currentUser) {
+                    setTimeout(() => {
+                        if (isOnline) {
+                            startCallFromFriend(callUserId, callType);
+                        } else {
+                            showNotification('Call features require internet connection', 'error');
+                        }
+                    }, 2000);
+                }
+                
+                // Clean URL
+                window.history.replaceState({}, document.title, window.location.pathname);
+            }
+        }
+        
+        function startCallFromFriend(userId, type = 'video') {
+            console.log('Starting call from friend request:', userId, type);
+            
+            if (!isOnline) {
+                showNotification('Call features require internet connection', 'error');
+                return;
+            }
+            
+            if (!currentUser) {
+                showNotification('Please login to make calls', 'error');
+                return;
+            }
+            
+            // Hide sidebar and show call container immediately
+            document.querySelector('.sidebar').style.display = 'none';
+            callContainer.classList.add('active');
+            
+            // Start the call
+            startCall(userId, type);
         }
         
         // Enhanced Cache Management Functions
@@ -3287,6 +3349,14 @@
             // Update subscription info
             if (currentUser) {
                 loadUserSubscription();
+            }
+            
+            // Process any pending call request
+            if (pendingCallRequest) {
+                setTimeout(() => {
+                    startCallFromFriend(pendingCallRequest.userId, pendingCallRequest.type);
+                    pendingCallRequest = null;
+                }, 1000);
             }
         }
         
@@ -3751,21 +3821,21 @@
                     const callType = event.data.callType || 'video';
                     
                     console.log('Call request from friends.html:', userId, callType);
-                    startCall(userId, callType);
+                    startCallFromFriend(userId, callType);
                 }
                 
                 // Handle video call requests specifically
                 if (event.data && event.data.type === 'videoCall') {
                     const userId = event.data.userId;
                     console.log('Video call request from friends.html:', userId);
-                    startCall(userId, 'video');
+                    startCallFromFriend(userId, 'video');
                 }
                 
                 // Handle voice call requests specifically
                 if (event.data && event.data.type === 'voiceCall') {
                     const userId = event.data.userId;
                     console.log('Voice call request from friends.html:', userId);
-                    startCall(userId, 'voice');
+                    startCallFromFriend(userId, 'voice');
                 }
                 
                 // Handle open calls page
@@ -3788,24 +3858,27 @@
                 }
             });
             
-            // Also check for URL parameters (in case the call was initiated via URL)
-            const urlParams = new URLSearchParams(window.location.search);
-            const callUserId = urlParams.get('call');
-            const callType = urlParams.get('type') || 'video';
-            
-            if (callUserId) {
-                console.log('Call initiated via URL:', callUserId, callType);
-                setTimeout(() => {
-                    if (isOnline) {
-                        startCall(callUserId, callType);
-                    } else {
-                        showNotification('Call features require internet connection', 'error');
+            // Also listen for localStorage changes (alternative communication method)
+            window.addEventListener('storage', function(event) {
+                if (event.key === 'callRequest' && event.newValue) {
+                    try {
+                        const callRequest = JSON.parse(event.newValue);
+                        if (callRequest.userId && callRequest.initiator !== currentUser.uid) {
+                            console.log('Call request via localStorage:', callRequest);
+                            
+                            if (callRequest.type === 'videoCall' || callRequest.type === 'voiceCall') {
+                                const callType = callRequest.type === 'videoCall' ? 'video' : 'voice';
+                                startCallFromFriend(callRequest.userId, callType);
+                                
+                                // Clear the request
+                                localStorage.removeItem('callRequest');
+                            }
+                        }
+                    } catch (error) {
+                        console.error('Error parsing call request from localStorage:', error);
                     }
-                }, 2000);
-                
-                // Clean URL
-                window.history.replaceState({}, document.title, window.location.pathname);
-            }
+                }
+            });
         }
         
         async function initializeUser() {
@@ -5052,6 +5125,9 @@
             callSidePanel.classList.add('collapsed');
             incomingCallModal.classList.remove('active');
             pipContainer.style.display = 'none';
+            
+            // Show sidebar again
+            document.querySelector('.sidebar').style.display = 'flex';
             
             videoGrid.innerHTML = '';
             
