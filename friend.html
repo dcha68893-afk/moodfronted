@@ -3779,6 +3779,8 @@
         
         // FIXED: Start chat with friend - opens message.html properly
         function startChatWithFriend(friendData) {
+            console.log('Starting chat with:', friendData);
+            
             // Create chat session data
             const chatSession = {
                 friendId: friendData.uid,
@@ -3808,6 +3810,8 @@
         
         // FIXED: Start call with friend - opens calls.html properly
         function startCallWithFriend(friendData) {
+            console.log('Starting call with:', friendData);
+            
             if (!isOnline) {
                 showNotification('Voice calls require internet connection', 'warning');
                 return;
