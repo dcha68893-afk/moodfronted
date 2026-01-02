@@ -2700,8 +2700,8 @@
             // Encode parameters for URL
             const encodedName = encodeURIComponent(userName);
             
-            // Navigate to call.html in the same window/tab
-            window.location.href = `../call.html?user=${userId}&name=${encodedName}`;
+            // Navigate to calls.html in the same window/tab
+            window.location.href = `../calls.html?user=${userId}&name=${encodedName}`;
         }
         
         // FIXED: Chat function that properly navigates to chat page
@@ -5156,7 +5156,7 @@
         function viewCallHistory(friendData) {
             // Navigate to call history
             const encodedName = encodeURIComponent(friendData.displayName || 'Friend');
-            window.location.href = `../call.html?user=${friendData.uid}&name=${encodedName}&view=history`;
+            window.location.href = `../calls.html?user=${friendData.uid}&name=${encodedName}&view=history`;
         }
         
         async function removeFriend(friendData) {
