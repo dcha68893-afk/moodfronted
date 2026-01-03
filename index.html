@@ -18,10 +18,8 @@
     <link rel="icon" href="../icons/moodchat-192.png">
     <link rel="icon" href="../icons/moodchat-512.png">
     
-    <!-- Firebase SDK with offline fallback -->
-    <script src="https://www.gstatic.com/firebasejs/9.22.0/firebase-app-compat.js"></script>
-    <script src="https://www.gstatic.com/firebasejs/9.22.0/firebase-auth-compat.js"></script>
-    <script src="https://www.gstatic.com/firebasejs/9.22.0/firebase-firestore-compat.js"></script>
+    <!-- Backend API Helper -->
+    <script src="api.js"></script>
     
     <!-- Minimal Inline CSS for critical styles -->
     <style>
@@ -1201,7 +1199,7 @@
         </div>
     </div>
 
-    <!-- Firebase Configuration and Initialization -->
+    <!-- Backend API Configuration and Initialization -->
     <script>
         // ULTRA-FAST INSTANT AUTH DETECTION - Runs before DOMContentLoaded
         (function instantAuthDetection() {
@@ -1262,28 +1260,16 @@
             console.log('✅ UI rendering complete - layout visible');
         });
         
-        // DEFENSIVE AUTH: Firebase configuration with offline fallback
-        const firebaseConfig = {
-            apiKey: "AIzaSyDHHyGgsSV18BcXrGgzi4C8frzDAE1C1zo",
-            authDomain: "uniconnect-ee95c.firebaseapp.com",
-            projectId: "uniconnect-ee95c",
-            storageBucket: "uniconnect-ee95c.firebasestorage.app",
-            messagingSenderId: "1003264444309",
-            appId: "1:1003264444309:web:9f0307516e44d21e97d89c"
-        };
-
-        class FirebaseAuthService {
+        // BACKEND API AUTH SERVICE
+        class BackendAuthService {
             constructor() {
                 // UI FIRST: Don't block UI initialization
-                this.app = null;
-                this.auth = null;
-                this.db = null;
                 this.isInitialized = false;
                 this.isOnline = navigator.onLine;
                 this.offlineMode = false;
                 this.persistentSession = false;
                 
-                // OFFLINE SAFE: Initialize in background, don't block UI
+                // Initialize in background, don't block UI
                 setTimeout(() => this.init(), 100);
                 
                 // Listen for online/offline changes
@@ -1319,7 +1305,7 @@
                         this.offlineMode = true;
                     }
                     
-                    // Check if we should even try to initialize Firebase
+                    // Check if we should even try to initialize backend connection
                     if (!this.isOnline) {
                         console.log('📴 App starting with local authentication (no internet)');
                         this.isInitialized = false;
@@ -1327,46 +1313,31 @@
                         return;
                     }
                     
-                    // DEFENSIVE AUTH: Check if Firebase is available
-                    if (typeof firebase === 'undefined') {
-                        console.warn('⚠️ Firebase not loaded, using local authentication');
+                    // DEFENSIVE AUTH: Check if API helper is available
+                    if (typeof api === 'undefined') {
+                        console.warn('⚠️ API helper not loaded, using local authentication');
                         this.offlineMode = true;
                         return;
                     }
                     
-                    // OFFLINE SAFE: Initialize Firebase with timeout
+                    // Try to test backend connection
                     try {
-                        this.app = firebase.initializeApp(firebaseConfig);
-                        this.auth = firebase.auth();
-                        this.db = firebase.firestore();
-                        
-                        // Set Firestore settings for offline support
-                        this.db.settings({
-                            cacheSizeBytes: firebase.firestore.CACHE_SIZE_UNLIMITED
-                        });
-                        
-                        // Try to set persistence but don't block if it fails
-                        setTimeout(async () => {
-                            try {
-                                await this.auth.setPersistence(firebase.auth.Auth.Persistence.LOCAL);
-                                this.persistentSession = true;
-                                console.log('✅ Authentication persistence set');
-                            } catch (persistenceError) {
-                                console.warn('⚠️ Could not set persistence:', persistenceError);
-                            }
-                        }, 0);
-                        
-                        this.isInitialized = true;
-                        console.log('✅ Firebase initialized successfully');
-                        
-                        // Show security status briefly
-                        this.showSecurityStatus();
-                        
-                        // Check for existing Firebase session in background
-                        this.checkFirebaseSession();
-                        
-                    } catch (firebaseError) {
-                        console.warn('⚠️ Firebase initialization failed:', firebaseError);
+                        // Test connection with a simple ping
+                        const testResponse = await api('GET', '/health');
+                        if (testResponse && testResponse.status === 'ok') {
+                            this.isInitialized = true;
+                            console.log('✅ Backend connection established');
+                            
+                            // Show security status briefly
+                            this.showSecurityStatus();
+                            
+                            // Check for existing session in background
+                            this.checkBackendSession();
+                        } else {
+                            throw new Error('Backend not responding');
+                        }
+                    } catch (backendError) {
+                        console.warn('⚠️ Backend initialization failed:', backendError);
                         this.offlineMode = true;
                         this.isInitialized = false;
                     }
@@ -1378,33 +1349,37 @@
                 }
             }
             
-            async checkFirebaseSession() {
+            async checkBackendSession() {
                 try {
-                    if (!this.auth) return;
+                    // Check if we have a token
+                    const token = localStorage.getItem('kynecta-chat-token');
+                    if (!token) return;
                     
-                    // Listen for auth state changes
-                    this.auth.onAuthStateChanged((user) => {
-                        if (user) {
-                            console.log('✅ Firebase user session detected:', user.email);
-                            // Update localStorage with Firebase session
-                            const userData = {
-                                uid: user.uid,
-                                email: user.email,
-                                displayName: user.displayName || user.email.split('@')[0],
-                                isNewUser: false,
-                                autoLogin: true,
-                                lastLogin: new Date().toISOString(),
-                                isOfflineUser: false,
-                                session: true,
-                                sessionUid: user.uid,
-                                firebaseSession: true
-                            };
-                            localStorage.setItem('kynecta-chat-user', JSON.stringify(userData));
-                            localStorage.setItem('kynecta-chat-auto-login', 'true');
-                        }
+                    // Validate token with backend
+                    const response = await api('GET', '/auth/validate', {}, {
+                        'Authorization': `Bearer ${token}`
                     });
+                    
+                    if (response && response.valid) {
+                        console.log('✅ Backend session validated:', response.user.email);
+                        // Update localStorage with backend session
+                        const userData = {
+                            uid: response.user.id,
+                            email: response.user.email,
+                            displayName: response.user.displayName || response.user.email.split('@')[0],
+                            isNewUser: false,
+                            autoLogin: true,
+                            lastLogin: new Date().toISOString(),
+                            isOfflineUser: false,
+                            session: true,
+                            backendSession: true,
+                            token: token
+                        };
+                        localStorage.setItem('kynecta-chat-user', JSON.stringify(userData));
+                        localStorage.setItem('kynecta-chat-auto-login', 'true');
+                    }
                 } catch (error) {
-                    console.warn('⚠️ Firebase session check failed:', error);
+                    console.warn('⚠️ Backend session check failed:', error);
                 }
             }
 
@@ -1462,9 +1437,9 @@
                 // Try online registration in background if available
                 if (this.isOnline && this.isInitialized) {
                     try {
-                        await this.registerUserOnline(email, password, displayName, mobile);
-                    } catch (onlineError) {
-                        console.warn('⚠️ Online registration failed, but local registration succeeded:', onlineError);
+                        await this.registerUserBackend(email, password, displayName, mobile);
+                    } catch (backendError) {
+                        console.warn('⚠️ Backend registration failed, but local registration succeeded:', backendError);
                         // Continue with local user
                     }
                 }
@@ -1555,75 +1530,56 @@
                 }
             }
             
-            async registerUserOnline(email, password, displayName, mobile = null) {
+            async registerUserBackend(email, password, displayName, mobile = null) {
                 try {
                     if (!this.isInitialized) {
-                        throw new Error('Online services not available');
+                        throw new Error('Backend services not available');
                     }
                     
-                    const userCredential = await firebase.auth().createUserWithEmailAndPassword(email, password);
-                    const user = userCredential.user;
-                    
-                    // Update user profile
-                    await user.updateProfile({
-                        displayName: displayName
+                    const response = await api('POST', '/auth/register', {
+                        email: email,
+                        password: password,
+                        displayName: displayName,
+                        mobile: mobile,
+                        deviceId: this.getDeviceId()
                     });
                     
-                    // Try to save to Firestore
-                    try {
-                        const userDocRef = this.db.collection('chatters').doc(user.uid);
-                        await userDocRef.set({
-                            uid: user.uid,
-                            email: user.email,
-                            displayName: displayName,
-                            username: displayName,
-                            mobile: mobile || '',
-                            photoURL: '',
-                            bio: 'New kynecta chatter!',
-                            createdAt: firebase.firestore.FieldValue.serverTimestamp(),
-                            lastLogin: firebase.firestore.FieldValue.serverTimestamp(),
-                            emailVerified: false,
-                            hasPremiumTrial: true,
-                            premiumExpiresAt: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString(),
-                            autoLoginEnabled: true,
-                            lastActive: firebase.firestore.FieldValue.serverTimestamp(),
-                            deviceId: this.getDeviceId()
-                        });
-                    } catch (dbError) {
-                        console.warn('⚠️ Database write failed, but user created:', dbError);
+                    if (!response || !response.success) {
+                        throw new Error(response?.message || 'Registration failed');
                     }
                     
-                    // Update localStorage with Firebase session
+                    // Save token
+                    if (response.token) {
+                        localStorage.setItem('kynecta-chat-token', response.token);
+                    }
+                    
+                    // Update localStorage with backend session
                     const userData = JSON.parse(localStorage.getItem('kynecta-chat-user') || '{}');
-                    userData.uid = user.uid; // Update with Firebase UID
+                    userData.uid = response.user.id || userData.uid;
                     userData.isOfflineUser = false;
                     userData.session = true;
-                    userData.firebaseUid = user.uid;
-                    userData.firebaseSession = true;
+                    userData.backendSession = true;
+                    userData.token = response.token;
                     localStorage.setItem('kynecta-chat-user', JSON.stringify(userData));
-                    localStorage.setItem('userId', user.uid);
+                    localStorage.setItem('userId', userData.uid);
                     
-                    console.log('✅ User registered online:', email);
+                    console.log('✅ User registered with backend:', email);
                     
-                    return userCredential;
+                    return response;
                     
                 } catch (error) {
-                    console.error('❌ Online registration failed:', error);
+                    console.error('❌ Backend registration failed:', error);
                     
-                    let errorMessage = 'Online registration failed. ';
+                    let errorMessage = 'Backend registration failed. ';
                     
-                    switch (error.code) {
-                        case 'auth/email-already-in-use':
-                            errorMessage += 'This email is already registered.';
-                            break;
-                        case 'auth/weak-password':
-                            errorMessage += 'Password is too weak.';
-                            break;
-                        case 'auth/invalid-email':
-                            errorMessage += 'Invalid email address.';
-                            break;
-                        default:
-                            errorMessage += error.message;
+                    if (error.message.includes('already exists') || error.message.includes('duplicate')) {
+                        errorMessage += 'This email is already registered.';
+                    } else if (error.message.includes('weak')) {
+                        errorMessage += 'Password is too weak.';
+                    } else if (error.message.includes('invalid')) {
+                        errorMessage += 'Invalid email address.';
+                    } else {
+                        errorMessage += error.message;
                     }
                     
                     throw new Error(errorMessage);
@@ -1638,13 +1594,13 @@
                     const localResult = await this.loginUserLocal(identifier, password, method, rememberMe);
                     console.log('✅ Local login successful');
                     
-                    // Try online login in background if available
+                    // Try backend login in background if available
                     if (this.isOnline && this.isInitialized && !localResult.user.isOfflineUser) {
                         setTimeout(async () => {
                             try {
-                                await this.loginUserOnline(identifier, password, method, rememberMe);
-                            } catch (onlineError) {
-                                console.warn('⚠️ Online login failed, but local login succeeded:', onlineError);
+                                await this.loginUserBackend(identifier, password, method, rememberMe);
+                            } catch (backendError) {
+                                console.warn('⚠️ Backend login failed, but local login succeeded:', backendError);
                             }
                         }, 0);
                     }
@@ -1654,14 +1610,14 @@
                 } catch (localError) {
                     console.log('⚠️ Local login failed:', localError.message);
                     
-                    // If local fails and we're online, try online login
+                    // If local fails and we're online, try backend login
                     if (this.isOnline && this.isInitialized) {
                         try {
-                            const onlineResult = await this.loginUserOnline(identifier, password, method, rememberMe);
-                            console.log('✅ Online login successful');
-                            return onlineResult;
-                        } catch (onlineError) {
-                            console.error('❌ Online login failed:', onlineError);
+                            const backendResult = await this.loginUserBackend(identifier, password, method, rememberMe);
+                            console.log('✅ Backend login successful');
+                            return backendResult;
+                        } catch (backendError) {
+                            console.error('❌ Backend login failed:', backendError);
                             throw localError; // Throw the original local error for consistency
                         }
                     }
@@ -1777,84 +1733,58 @@
                 }
             }
             
-            async loginUserOnline(identifier, password, method = 'email', rememberMe = true) {
+            async loginUserBackend(identifier, password, method = 'email', rememberMe = true) {
                 try {
-                    let userCredential;
+                    let loginData = {
+                        password: password,
+                        deviceId: this.getDeviceId(),
+                        rememberMe: rememberMe
+                    };
                     
+                    // Set identifier based on method
                     if (method === 'email') {
-                        userCredential = await firebase.auth().signInWithEmailAndPassword(identifier, password);
+                        loginData.email = identifier;
                     } else if (method === 'username') {
-                        // For username login, need to find email first
-                        const usersRef = this.db.collection('chatters');
-                        const snapshot = await usersRef.where('username', '==', identifier).limit(1).get();
-                        
-                        if (snapshot.empty) {
-                            throw new Error('No account found with this username.');
-                        }
-                        
-                        const userDoc = snapshot.docs[0];
-                        const userData = userDoc.data();
-                        userCredential = await firebase.auth().signInWithEmailAndPassword(userData.email, password);
+                        loginData.username = identifier;
                     } else if (method === 'mobile') {
-                        // Mobile login
-                        const usersRef = this.db.collection('chatters');
-                        const snapshot = await usersRef.where('mobile', '==', identifier).limit(1).get();
-                        
-                        if (snapshot.empty) {
-                            throw new Error('No account found with this mobile number.');
-                        }
-                        
-                        const userDoc = snapshot.docs[0];
-                        const userData = userDoc.data();
-                        userCredential = await firebase.auth().signInWithEmailAndPassword(userData.email, password);
+                        loginData.mobile = identifier;
                     }
                     
-                    const user = userCredential.user;
+                    const response = await api('POST', '/auth/login', loginData);
                     
-                    // Update localStorage with Firebase session
+                    if (!response || !response.success) {
+                        throw new Error(response?.message || 'Login failed');
+                    }
+                    
+                    // Save token
+                    if (response.token) {
+                        localStorage.setItem('kynecta-chat-token', response.token);
+                    }
+                    
+                    const user = response.user;
+                    
+                    // Update localStorage with backend session
                     const userData = {
-                        uid: user.uid,
+                        uid: user.id,
                         email: user.email,
                         displayName: user.displayName || user.email.split('@')[0],
-                        mobile: '', // Will be updated from Firestore
+                        mobile: user.mobile || '',
                         isNewUser: false,
                         autoLogin: rememberMe,
                         lastLogin: new Date().toISOString(),
                         passwordHash: btoa(password + '_' + user.email),
-                        hasPremiumTrial: false, // Will be updated from Firestore
+                        hasPremiumTrial: user.hasPremiumTrial || false,
                         isOfflineUser: false,
                         session: true,
-                        sessionUid: user.uid,
-                        firebaseSession: true,
+                        backendSession: true,
+                        token: response.token,
                         deviceId: this.getDeviceId()
                     };
-                    
-                    // Try to get additional user data from Firestore
-                    try {
-                        const userDocRef = this.db.collection('chatters').doc(user.uid);
-                        const userDoc = await userDocRef.get();
-                        
-                        if (userDoc.exists) {
-                            const firestoreData = userDoc.data();
-                            userData.mobile = firestoreData.mobile || '';
-                            userData.hasPremiumTrial = firestoreData.hasPremiumTrial || false;
-                            userData.premiumExpiresAt = firestoreData.premiumExpiresAt || null;
-                        }
-                        
-                        // Update last login
-                        await userDocRef.update({
-                            lastLogin: firebase.firestore.FieldValue.serverTimestamp(),
-                            lastActive: firebase.firestore.FieldValue.serverTimestamp(),
-                            deviceId: userData.deviceId
-                        });
-                    } catch (dbError) {
-                        console.warn('⚠️ Could not fetch user data from database:', dbError);
-                    }
                     
                     // Store in localStorage
                     localStorage.setItem('kynecta-chat-user', JSON.stringify(userData));
                     localStorage.setItem('isLoggedIn', 'true');
-                    localStorage.setItem('userId', user.uid);
+                    localStorage.setItem('userId', user.id);
                     
                     if (rememberMe) {
                         localStorage.setItem('kynecta-chat-auto-login', 'true');
@@ -1863,12 +1793,14 @@
                     // Clear logged-out flag
                     localStorage.removeItem('kynecta-chat-logged-out');
                     
-                    console.log('✅ Online login successful for:', user.email);
+                    console.log('✅ Backend login successful for:', user.email);
                     
-                    return userCredential;
+                    return {
+                        user: userData
+                    };
                     
                 } catch (error) {
-                    console.error('❌ Online login failed:', error);
+                    console.error('❌ Backend login failed:', error);
                     throw error;
                 }
             }
@@ -1910,18 +1842,20 @@
                     userData.lastLogin = new Date().toISOString();
                     localStorage.setItem('kynecta-chat-user', JSON.stringify(userData));
                     
-                    // Try to refresh Firebase session in background if available
-                    if (this.isOnline && this.isInitialized && userData.firebaseSession) {
+                    // Try to refresh backend session in background if available
+                    if (this.isOnline && this.isInitialized && userData.backendSession && userData.token) {
                         setTimeout(async () => {
                             try {
-                                // Check if Firebase session is still valid
-                                const currentUser = this.auth.currentUser;
-                                if (!currentUser && userData.passwordHash) {
-                                    const password = atob(userData.passwordHash).split('_')[0];
-                                    await this.loginUserOnline(userData.email, password, 'email', true);
+                                // Validate token with backend
+                                const response = await api('GET', '/auth/validate', {}, {
+                                    'Authorization': `Bearer ${userData.token}`
+                                });
+                                
+                                if (response && response.valid) {
+                                    console.log('✅ Backend session refreshed');
                                 }
                             } catch (error) {
-                                console.warn('⚠️ Firebase session refresh failed:', error);
+                                console.warn('⚠️ Backend session refresh failed:', error);
                             }
                         }, 0);
                     }
@@ -1995,9 +1929,16 @@
                 }
 
                 try {
-                    await this.auth.sendPasswordResetEmail(email);
-                    console.log('✅ Password reset email sent');
-                    return true;
+                    const response = await api('POST', '/auth/reset-password', {
+                        email: email
+                    });
+                    
+                    if (response && response.success) {
+                        console.log('✅ Password reset email sent');
+                        return true;
+                    } else {
+                        throw new Error(response?.message || 'Password reset failed');
+                    }
                 } catch (error) {
                     console.error('❌ Password reset failed:', error);
                     throw error;
@@ -2020,10 +1961,19 @@
                         localStorage.setItem('kynecta-chat-user', JSON.stringify(userData));
                     }
                     
-                    // Firebase logout if available
-                    if (this.auth) {
-                        this.auth.signOut().catch(() => {});
+                    // Try backend logout if available
+                    if (this.isOnline && this.isInitialized) {
+                        const token = localStorage.getItem('kynecta-chat-token');
+                        if (token) {
+                            // Call logout API in background
+                            api('POST', '/auth/logout', {}, {
+                                'Authorization': `Bearer ${token}`
+                            }).catch(() => {});
+                        }
                     }
+                    
+                    // Clear token
+                    localStorage.removeItem('kynecta-chat-token');
                     
                     console.log('✅ User logged out');
                     return true;
@@ -2036,7 +1986,7 @@
 
         // Initialize Authentication Service
         setTimeout(() => {
-            window.authService = new FirebaseAuthService();
+            window.authService = new BackendAuthService();
         }, 500);
     </script>
     

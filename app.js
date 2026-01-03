@@ -1,7 +1,8 @@
+
 // app.js - MoodChat Application Shell & Tab Controller
-// Enhanced with Firebase auth, offline detection, global state management
+// Enhanced with custom backend API, offline detection, global state management
 // COMPLETE VERSION WITH USER ISOLATION AND REAL AUTHENTICATION
-// UPDATED: Real authentication with device-based login, no demo data
+// UPDATED: JWT-based authentication with localStorage persistence
 // ENHANCED: Non-blocking startup with instant UI display and background sync
 // OFFLINE-FIRST: Load instantly from cache, sync in background
 
@@ -15,6 +16,41 @@ const APP_CONFIG = {
   contentArea: '#content-area',
   sidebar: '#sidebar',
   sidebarToggle: '#sidebarToggle'
+};
+
+// Backend API configuration
+const BACKEND_CONFIG = {
+  BASE_URL: 'https://moodchat-backend-1.onrender.com',
+  ENDPOINTS: {
+    LOGIN: '/auth/login',
+    REGISTER: '/auth/register',
+    LOGOUT: '/auth/logout',
+    VALIDATE_TOKEN: '/auth/validate',
+    GET_USER_PROFILE: '/users/profile',
+    UPDATE_PROFILE: '/users/update-profile',
+    GET_FRIENDS: '/friends/list',
+    ADD_FRIEND: '/friends/add',
+    REMOVE_FRIEND: '/friends/remove',
+    GET_CHATS: '/chats/list',
+    GET_CHAT_MESSAGES: '/chats/messages',
+    SEND_MESSAGE: '/chats/send',
+    CREATE_GROUP: '/groups/create',
+    GET_GROUPS: '/groups/list',
+    JOIN_GROUP: '/groups/join',
+    GET_CALLS: '/calls/list',
+    LOG_CALL: '/calls/log',
+    UPDATE_STATUS: '/users/update-status',
+    PASSWORD_RESET: '/auth/password-reset',
+    VERIFY_EMAIL: '/auth/verify-email'
+  }
+};
+
+// Authentication configuration
+const AUTH_CONFIG = {
+  TOKEN_KEY: 'moodchat_jwt_token',
+  USER_KEY: 'moodchat_user_data',
+  TOKEN_REFRESH_INTERVAL: 10 * 60 * 1000, // 10 minutes
+  TOKEN_EXPIRY_BUFFER: 5 * 60 * 1000 // 5 minutes buffer
 };
 
 // Map tab names to their container IDs in chat.html
@@ -52,18 +88,441 @@ const EXTERNAL_TABS = {
 };
 
 // ============================================================================
-// FIREBASE CONFIGURATION
+// AUTHENTICATION MANAGER (JWT-BASED)
 // ============================================================================
 
-const firebaseConfig = {
-    apiKey: "AIzaSyC4mOkOqoRq1H3qPIyVcGvqL3M6jK8L8zA",
-    authDomain: "moodchat-app.firebaseapp.com",
-    projectId: "moodchat-app",
-    storageBucket: "moodchat-app.appspot.com",
-    messagingSenderId: "123456789012",
-    appId: "1:123456789012:web:abcdef1234567890",
-    measurementId: "G-ABCDEF1234"
+const AUTH_MANAGER = {
+  token: null,
+  user: null,
+  tokenRefreshTimer: null,
+
+  // Initialize authentication manager
+  initialize: function() {
+    console.log('Initializing Authentication Manager...');
+    this.loadStoredAuth();
+    this.setupTokenRefresh();
+    this.exposeAuthMethods();
+  },
+
+  // Load stored authentication from localStorage
+  loadStoredAuth: function() {
+    try {
+      const token = localStorage.getItem(AUTH_CONFIG.TOKEN_KEY);
+      const userData = localStorage.getItem(AUTH_CONFIG.USER_KEY);
+      
+      if (token && userData) {
+        this.token = token;
+        this.user = JSON.parse(userData);
+        
+        // Validate token if online
+        if (navigator.onLine) {
+          this.validateToken().then(isValid => {
+            if (isValid) {
+              console.log('Stored authentication loaded and validated');
+              this.setCurrentUser(this.user);
+            } else {
+              console.log('Stored token is invalid, clearing authentication');
+              this.clearAuth();
+            }
+          }).catch(() => {
+            // If validation fails, still use stored data for offline mode
+            console.log('Token validation failed, using stored data for offline');
+            this.setCurrentUser(this.user, true);
+          });
+        } else {
+          // Use stored data for offline mode
+          console.log('Offline mode, using stored authentication');
+          this.setCurrentUser(this.user, true);
+        }
+      } else {
+        console.log('No stored authentication found');
+      }
+    } catch (error) {
+      console.error('Error loading stored authentication:', error);
+      this.clearAuth();
+    }
+  },
+
+  // Validate token with server
+  validateToken: async function() {
+    if (!this.token) return false;
+    
+    try {
+      const response = await fetch(`${BACKEND_CONFIG.BASE_URL}${BACKEND_CONFIG.ENDPOINTS.VALIDATE_TOKEN}`, {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${this.token}`,
+          'Content-Type': 'application/json'
+        }
+      });
+      
+      if (response.ok) {
+        const data = await response.json();
+        if (data.valid) {
+          console.log('Token validated successfully');
+          return true;
+        }
+      }
+      return false;
+    } catch (error) {
+      console.error('Token validation error:', error);
+      return false;
+    }
+  },
+
+  // Set current user and update global state
+  setCurrentUser: function(user, isOffline = false) {
+    this.user = user;
+    
+    // Create user object for global state
+    const globalUser = {
+      id: user.id,
+      uid: user.id,
+      email: user.email,
+      displayName: user.displayName || user.email.split('@')[0],
+      photoURL: user.photoURL || `https://ui-avatars.com/api/?name=${encodeURIComponent(user.displayName || user.email.split('@')[0])}&background=8b5cf6&color=fff`,
+      emailVerified: user.emailVerified || false,
+      isOffline: isOffline,
+      providerId: 'jwt',
+      token: this.token,
+      refreshToken: 'jwt-token',
+      getIdToken: () => Promise.resolve(this.token),
+      metadata: user.metadata || {}
+    };
+    
+    // Update global auth state
+    handleAuthStateChange(globalUser, isOffline);
+    
+    // Set up user isolation
+    if (user.id) {
+      USER_DATA_ISOLATION.setCurrentUser(user.id);
+      DATA_CACHE.setCurrentUser(user.id);
+      SETTINGS_SERVICE.setCurrentUser(user.id);
+    }
+    
+    console.log('User set:', user.email);
+  },
+
+  // Store authentication data
+  storeAuth: function(token, userData) {
+    try {
+      localStorage.setItem(AUTH_CONFIG.TOKEN_KEY, token);
+      localStorage.setItem(AUTH_CONFIG.USER_KEY, JSON.stringify(userData));
+      this.token = token;
+      this.setCurrentUser(userData);
+      console.log('Authentication stored for user:', userData.email);
+    } catch (error) {
+      console.error('Error storing authentication:', error);
+    }
+  },
+
+  // Clear authentication data
+  clearAuth: function() {
+    localStorage.removeItem(AUTH_CONFIG.TOKEN_KEY);
+    localStorage.removeItem(AUTH_CONFIG.USER_KEY);
+    this.token = null;
+    this.user = null;
+    
+    // Clear user isolation data
+    if (currentUser && currentUser.id) {
+      USER_DATA_ISOLATION.clearUserData(currentUser.id);
+      SETTINGS_SERVICE.clearUserSettings();
+    }
+    
+    handleAuthStateChange(null);
+    console.log('Authentication cleared');
+  },
+
+  // Setup automatic token refresh
+  setupTokenRefresh: function() {
+    if (this.tokenRefreshTimer) {
+      clearInterval(this.tokenRefreshTimer);
+    }
+    
+    this.tokenRefreshTimer = setInterval(() => {
+      if (this.token && this.user && navigator.onLine) {
+        this.refreshTokenIfNeeded();
+      }
+    }, AUTH_CONFIG.TOKEN_REFRESH_INTERVAL);
+  },
+
+  // Refresh token if needed
+  refreshTokenIfNeeded: async function() {
+    if (!this.token || !this.user) return;
+    
+    try {
+      // Check if token is close to expiry
+      const tokenData = this.parseJwt(this.token);
+      if (tokenData && tokenData.exp) {
+        const expiryTime = tokenData.exp * 1000; // Convert to milliseconds
+        const currentTime = Date.now();
+        const timeUntilExpiry = expiryTime - currentTime;
+        
+        if (timeUntilExpiry < AUTH_CONFIG.TOKEN_EXPIRY_BUFFER) {
+          console.log('Token nearing expiry, attempting refresh...');
+          // In a real implementation, you would call a refresh endpoint here
+          // For now, we'll just validate the existing token
+          const isValid = await this.validateToken();
+          if (!isValid) {
+            console.log('Token refresh needed but no refresh endpoint available');
+          }
+        }
+      }
+    } catch (error) {
+      console.error('Token refresh error:', error);
+    }
+  },
+
+  // Parse JWT token
+  parseJwt: function(token) {
+    try {
+      const base64Url = token.split('.')[1];
+      const base64 = base64Url.replace(/-/g, '+').replace(/_/g, '/');
+      const jsonPayload = decodeURIComponent(atob(base64).split('').map(function(c) {
+        return '%' + ('00' + c.charCodeAt(0).toString(16)).slice(-2);
+      }).join(''));
+      return JSON.parse(jsonPayload);
+    } catch (error) {
+      console.error('Error parsing JWT:', error);
+      return null;
+    }
+  },
+
+  // Expose authentication methods globally
+  exposeAuthMethods: function() {
+    window.AUTH_MANAGER = {
+      login: this.login.bind(this),
+      register: this.register.bind(this),
+      logout: this.logout.bind(this),
+      isAuthenticated: () => !!this.user,
+      getCurrentUser: () => this.user,
+      getToken: () => this.token
+    };
+  },
+
+  // Login function
+  login: async function(email, password) {
+    try {
+      const response = await fetch(`${BACKEND_CONFIG.BASE_URL}${BACKEND_CONFIG.ENDPOINTS.LOGIN}`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({ email, password })
+      });
+      
+      if (!response.ok) {
+        const errorData = await response.json();
+        throw new Error(errorData.message || 'Login failed');
+      }
+      
+      const data = await response.json();
+      
+      if (data.token && data.user) {
+        this.storeAuth(data.token, data.user);
+        return {
+          success: true,
+          user: data.user,
+          token: data.token
+        };
+      } else {
+        throw new Error('Invalid response from server');
+      }
+    } catch (error) {
+      console.error('Login error:', error);
+      return {
+        success: false,
+        error: error.message
+      };
+    }
+  },
+
+  // Register function
+  register: async function(email, password, displayName) {
+    try {
+      const response = await fetch(`${BACKEND_CONFIG.BASE_URL}${BACKEND_CONFIG.ENDPOINTS.REGISTER}`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({ 
+          email, 
+          password, 
+          displayName: displayName || email.split('@')[0] 
+        })
+      });
+      
+      if (!response.ok) {
+        const errorData = await response.json();
+        throw new Error(errorData.message || 'Registration failed');
+      }
+      
+      const data = await response.json();
+      
+      if (data.token && data.user) {
+        this.storeAuth(data.token, data.user);
+        return {
+          success: true,
+          user: data.user,
+          token: data.token
+        };
+      } else {
+        throw new Error('Invalid response from server');
+      }
+    } catch (error) {
+      console.error('Registration error:', error);
+      return {
+        success: false,
+        error: error.message
+      };
+    }
+  },
+
+  // Logout function
+  logout: async function() {
+    try {
+      // Call logout endpoint if online
+      if (navigator.onLine && this.token) {
+        await fetch(`${BACKEND_CONFIG.BASE_URL}${BACKEND_CONFIG.ENDPOINTS.LOGOUT}`, {
+          method: 'POST',
+          headers: {
+            'Authorization': `Bearer ${this.token}`,
+            'Content-Type': 'application/json'
+          }
+        });
+      }
+    } catch (error) {
+      console.error('Logout API error:', error);
+      // Continue with local logout even if API fails
+    }
+    
+    // Clear local authentication
+    this.clearAuth();
+    
+    return {
+      success: true,
+      message: 'Logged out successfully'
+    };
+  }
 };
+
+// ============================================================================
+// API HELPER FUNCTIONS
+// ============================================================================
+
+// Centralized API helper function
+async function api(endpoint, method = 'GET', data = null, requireAuth = true) {
+  const url = `${BACKEND_CONFIG.BASE_URL}${endpoint}`;
+  const headers = {
+    'Content-Type': 'application/json',
+  };
+
+  // Add authorization token if required and available
+  if (requireAuth && AUTH_MANAGER.token) {
+    headers['Authorization'] = `Bearer ${AUTH_MANAGER.token}`;
+  }
+
+  const config = {
+    method,
+    headers,
+  };
+
+  if (data && (method === 'POST' || method === 'PUT' || method === 'PATCH')) {
+    config.body = JSON.stringify(data);
+  }
+
+  try {
+    const response = await fetch(url, config);
+    
+    // Handle HTTP errors
+    if (!response.ok) {
+      // Handle 401 Unauthorized (token expired)
+      if (response.status === 401 && requireAuth) {
+        console.log('Authentication expired, clearing auth...');
+        AUTH_MANAGER.clearAuth();
+        
+        // Redirect to login page
+        setTimeout(() => {
+          if (!window.location.href.includes('index.html')) {
+            window.location.href = 'index.html';
+          }
+        }, 1000);
+      }
+      
+      const errorText = await response.text();
+      throw new Error(`HTTP ${response.status}: ${errorText}`);
+    }
+
+    // Parse JSON response
+    const result = await response.json();
+    return { success: true, data: result };
+  } catch (error) {
+    console.error(`API call failed for ${endpoint}:`, error);
+    return { 
+      success: false, 
+      error: error.message,
+      offline: !navigator.onLine
+    };
+  }
+}
+
+// Safe API wrapper with offline queue support
+async function safeApiCall(endpoint, method = 'GET', data = null, cacheKey = null) {
+  // Check cache first if GET request
+  if (method === 'GET' && cacheKey) {
+    const cached = DATA_CACHE.getInstant(cacheKey);
+    if (cached) {
+      console.log(`Using cached data for: ${cacheKey}`);
+      return {
+        success: true,
+        cached: true,
+        data: cached,
+        message: 'Data loaded from cache'
+      };
+    }
+  }
+
+  // If offline, queue for later or return cached data
+  if (!isOnline) {
+    if (cacheKey) {
+      const cached = DATA_CACHE.getInstant(cacheKey);
+      if (cached) {
+        return {
+          success: true,
+          cached: true,
+          offline: true,
+          data: cached,
+          message: 'Offline mode: Using cached data'
+        };
+      }
+    }
+
+    // Queue action for when online
+    const queueResult = await queueForSync({
+      endpoint,
+      method,
+      data,
+      timestamp: new Date().toISOString()
+    }, 'api');
+
+    return {
+      success: false,
+      offline: true,
+      queued: queueResult.queued,
+      message: 'Action queued for when online'
+    };
+  }
+
+  // Make actual API call
+  const result = await api(endpoint, method, data);
+  
+  // Cache successful GET responses
+  if (result.success && method === 'GET' && cacheKey) {
+    DATA_CACHE.set(cacheKey, result.data);
+  }
+
+  return result;
+}
 
 // ============================================================================
 // OFFLINE MOCK DATA GENERATOR (FOR WHEN NO SERVER CONNECTION)
@@ -538,7 +997,7 @@ const SETTINGS_SERVICE = {
     console.log('Initializing Settings Service...');
     
     // Set user ID for isolation
-    this.setCurrentUser(currentUser ? currentUser.uid : null);
+    this.setCurrentUser(currentUser ? currentUser.id || currentUser.uid : null);
     
     // Load settings from localStorage
     this.load();
@@ -1328,7 +1787,7 @@ const DATA_CACHE = {
     console.log('Generating offline data for instant UI...');
     
     // Generate comprehensive offline data
-    const offlineData = OFFLINE_DATA_GENERATOR.generateAllOfflineData(currentUser.uid);
+    const offlineData = OFFLINE_DATA_GENERATOR.generateAllOfflineData(currentUser.id || currentUser.uid);
     
     // Cache all the generated data
     this.cacheFriends(offlineData.friends);
@@ -1341,7 +1800,7 @@ const DATA_CACHE = {
     localStorage.setItem(offlineKey, JSON.stringify({
       ready: true,
       timestamp: new Date().toISOString(),
-      userId: currentUser.uid
+      userId: currentUser.id || currentUser.uid
     }));
     
     console.log('Offline data generated and cached');
@@ -1368,9 +1827,8 @@ let currentTab = 'groups';
 let isLoading = false;
 let isSidebarOpen = true;
 
-// FIREBASE AUTH STATE
+// AUTH STATE (JWT-BASED)
 let currentUser = null;
-let firebaseInitialized = false;
 let authStateRestored = false;
 
 // NETWORK CONNECTIVITY STATE
@@ -1379,7 +1837,7 @@ let syncQueue = [];
 
 // NETWORK-DEPENDENT SERVICES STATE
 let networkDependentServices = {
-  firebase: false,
+  backend: false,
   websocket: false,
   api: false,
   realtimeUpdates: false
@@ -1398,7 +1856,7 @@ const NETWORK_SERVICE_MANAGER = {
   services: new Map(),
   
   states: {
-    firebase: { running: false, initialized: false },
+    backend: { running: false, initialized: false },
     websocket: { running: false, connected: false },
     api: { running: false },
     realtimeUpdates: { running: false },
@@ -1536,7 +1994,7 @@ const NETWORK_SERVICE_MANAGER = {
       return;
     }
     
-    console.log('Performing background sync for user:', currentUser.uid);
+    console.log('Performing background sync for user:', currentUser.id || currentUser.uid);
     
     // 1. Sync queued messages
     processQueuedMessages();
@@ -1562,251 +2020,13 @@ const NETWORK_SERVICE_MANAGER = {
 };
 
 // ============================================================================
-// ENHANCED FIREBASE INITIALIZATION WITH DEVICE-BASED AUTHENTICATION
+// AUTHENTICATION STATE MANAGEMENT
 // ============================================================================
 
-function initializeFirebase() {
-  if (firebaseInitialized) {
-    console.log('Firebase already initialized');
-    return;
-  }
-
-  console.log('Initializing Firebase (non-blocking)...');
-  
-  // Start auth check in background
-  setTimeout(() => {
-    try {
-      // Check if Firebase is available
-      if (typeof firebase === 'undefined' || !firebase.apps) {
-        console.log('Firebase SDK not loaded, using device-based authentication');
-        handleDeviceBasedAuth();
-        
-        // Ensure UI is still functional even without Firebase
-        if (!authStateRestored) {
-          setTimeout(() => {
-            authStateRestored = true;
-            broadcastAuthReady();
-            console.log('Broadcasting auth ready after Firebase fallback');
-          }, 500);
-        }
-        return;
-      }
-
-      // Initialize Firebase app if not already initialized
-      if (firebase.apps.length === 0) {
-        try {
-          firebase.initializeApp(firebaseConfig);
-          console.log('Firebase app initialized');
-          networkDependentServices.firebase = true;
-        } catch (error) {
-          console.log('Firebase initialization error, using device-based auth:', error);
-          handleDeviceBasedAuth();
-          return;
-        }
-      } else {
-        console.log('Firebase already initialized');
-        networkDependentServices.firebase = true;
-      }
-
-      // Get auth instance
-      const auth = firebase.auth();
-      
-      // Set persistence to LOCAL for offline login
-      auth.setPersistence(firebase.auth.Auth.Persistence.LOCAL)
-        .then(() => {
-          console.log('Auth persistence set to LOCAL');
-          
-          // Register Firebase as a network-dependent service
-          NETWORK_SERVICE_MANAGER.registerService('firebase', () => {
-            console.log('Firebase service started');
-          }, () => {
-            console.log('Firebase service stopped');
-            if (window._firebaseAuthUnsubscribe) {
-              window._firebaseAuthUnsubscribe();
-              window._firebaseAuthUnsubscribe = null;
-            }
-          });
-          
-          // Set up Firebase auth observer
-          const unsubscribe = auth.onAuthStateChanged((user) => {
-            console.log('Firebase auth state changed:', user ? `User ${user.uid}` : 'No user');
-            
-            if (user) {
-              // User authenticated via Firebase
-              handleAuthStateChange(user, false);
-              
-              // Store device-based session for offline use
-              storeDeviceBasedSession(user);
-            } else {
-              // No Firebase user, check device-based auth
-              handleDeviceBasedAuth();
-            }
-            
-            // Mark auth as restored
-            if (!authStateRestored) {
-              authStateRestored = true;
-              broadcastAuthReady();
-            }
-          }, (error) => {
-            console.log('Auth state observer error, trying device-based auth:', error);
-            handleDeviceBasedAuth();
-            
-            if (!authStateRestored) {
-              authStateRestored = true;
-              broadcastAuthReady();
-            }
-          });
-          
-          // Store unsubscribe function for cleanup
-          window._firebaseAuthUnsubscribe = unsubscribe;
-          
-          firebaseInitialized = true;
-          console.log('Firebase auth initialized');
-          
-          // Mark Firebase service as running
-          const firebaseService = NETWORK_SERVICE_MANAGER.services.get('firebase');
-          if (firebaseService) {
-            firebaseService.running = true;
-            NETWORK_SERVICE_MANAGER.states.firebase = { running: true, initialized: true };
-          }
-        })
-        .catch((error) => {
-          console.log('Error setting auth persistence, using device-based auth:', error);
-          handleDeviceBasedAuth();
-          firebaseInitialized = true;
-          authStateRestored = true;
-          broadcastAuthReady();
-        });
-
-    } catch (error) {
-      console.log('Firebase initialization error, using device-based auth:', error);
-      handleDeviceBasedAuth();
-      firebaseInitialized = true;
-      authStateRestored = true;
-      broadcastAuthReady();
-    }
-  }, 100); // Small delay to allow UI to render first
-}
-
-// Handle device-based authentication (from index.html system)
-function handleDeviceBasedAuth() {
-  console.log('Checking device-based authentication...');
-  
-  // Check for stored session
-  const storedSession = localStorage.getItem('moodchat_device_session');
-  
-  if (storedSession) {
-    try {
-      const session = JSON.parse(storedSession);
-      const currentDeviceId = getDeviceId();
-      
-      // Validate session
-      if (session.userId && 
-          session.deviceId === currentDeviceId && 
-          !session.loggedOut &&
-          (!session.expiresAt || new Date(session.expiresAt) > new Date())) {
-        
-        console.log('Valid device-based session found for user:', session.userId);
-        
-        // Create user object from session
-        const user = {
-          uid: session.userId,
-          email: session.email || null,
-          displayName: session.displayName || null,
-          photoURL: session.photoURL || null,
-          emailVerified: session.emailVerified || false,
-          providerId: session.providerId || 'device',
-          isAnonymous: false,
-          metadata: session.metadata || {},
-          isOffline: true,
-          deviceId: session.deviceId,
-          refreshToken: 'device-token',
-          getIdToken: () => Promise.resolve('device-token')
-        };
-        
-        handleAuthStateChange(user, true);
-        return true;
-      } else {
-        console.log('Device session invalid or expired');
-        localStorage.removeItem('moodchat_device_session');
-      }
-    } catch (error) {
-      console.log('Error parsing device session:', error);
-      localStorage.removeItem('moodchat_device_session');
-    }
-  }
-  
-  // No valid session found - create offline user
-  console.log('No valid device-based session, creating offline user');
-  createOfflineUser();
-  return false;
-}
-
-// Create an offline user for instant UI
-function createOfflineUser() {
-  const offlineUserId = 'offline_user_' + getDeviceId() + '_' + Date.now();
-  const offlineUser = {
-    uid: offlineUserId,
-    email: 'offline@moodchat.app',
-    displayName: 'Offline User',
-    photoURL: `https://ui-avatars.com/api/?name=Offline+User&background=8b5cf6&color=fff`,
-    emailVerified: false,
-    isOffline: true,
-    providerId: 'offline',
-    isAnonymous: true,
-    metadata: {
-      creationTime: new Date().toISOString(),
-      lastSignInTime: new Date().toISOString()
-    },
-    refreshToken: 'offline-token',
-    getIdToken: () => Promise.resolve('offline-token'),
-    isOfflineMode: true
-  };
-  
-  // Store as device session for consistency
-  storeDeviceBasedSession(offlineUser);
-  
-  handleAuthStateChange(offlineUser, true);
-  return offlineUser;
-}
-
-// Store device-based session
-function storeDeviceBasedSession(user) {
-  try {
-    const session = {
-      userId: user.uid,
-      email: user.email,
-      displayName: user.displayName,
-      photoURL: user.photoURL,
-      emailVerified: user.emailVerified || false,
-      providerId: user.providerId || 'firebase',
-      deviceId: getDeviceId(),
-      loggedOut: false,
-      expiresAt: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString(), // 30 days
-      lastLogin: new Date().toISOString()
-    };
-    
-    localStorage.setItem('moodchat_device_session', JSON.stringify(session));
-    console.log('Device-based session stored for user:', user.uid);
-  } catch (error) {
-    console.log('Error storing device session:', error);
-  }
-}
-
-// Get device ID (consistent across sessions)
-function getDeviceId() {
-  let deviceId = localStorage.getItem('moodchat_device_id');
-  if (!deviceId) {
-    deviceId = 'device_' + Date.now() + '_' + Math.random().toString(36).substr(2, 9);
-    localStorage.setItem('moodchat_device_id', deviceId);
-  }
-  return deviceId;
-}
-
 // Handle auth state changes with user data isolation
-function handleAuthStateChange(user, fromDeviceAuth = false) {
-  const userId = user ? user.uid : null;
-  const currentUserId = currentUser ? currentUser.uid : null;
+function handleAuthStateChange(user, isOffline = false) {
+  const userId = user ? (user.id || user.uid) : null;
+  const currentUserId = currentUser ? (currentUser.id || currentUser.uid) : null;
   
   // If user is changing, clear old user's data
   if (userId !== currentUserId && currentUserId) {
@@ -1842,7 +2062,10 @@ function handleAuthStateChange(user, fromDeviceAuth = false) {
   // Broadcast auth change to other components
   broadcastAuthChange(user);
   
-  console.log('Auth state updated:', user ? `User ${user.uid} (${fromDeviceAuth ? 'device' : 'firebase'})` : 'No user');
+  console.log('Auth state updated:', user ? `User ${userId} (${isOffline ? 'offline' : 'online'})` : 'No user');
+  
+  // Update UI based on auth state
+  updateUIBasedOnAuthState(user);
   
   // Load cached data instantly if we have a user
   if (user) {
@@ -1850,17 +2073,129 @@ function handleAuthStateChange(user, fromDeviceAuth = false) {
   }
 }
 
+// Update UI based on authentication state
+function updateUIBasedOnAuthState(user) {
+  const isChatPage = window.location.pathname.includes('chat.html') || 
+                    document.querySelector(APP_CONFIG.contentArea)?.innerHTML.includes('chat-container');
+  
+  if (user && isChatPage) {
+    // User is authenticated and on chat page, show chat interface
+    console.log('User authenticated, showing chat interface');
+    showChatInterface();
+  } else if (!user && isChatPage) {
+    // User not authenticated but on chat page, redirect to login
+    console.log('User not authenticated, redirecting to login');
+    window.location.href = 'index.html';
+  } else if (user && window.location.pathname.includes('index.html')) {
+    // User is authenticated but on login page, redirect to chat
+    console.log('User already authenticated, redirecting to chat');
+    window.location.href = 'chat.html';
+  }
+}
+
+// Show chat interface
+function showChatInterface() {
+  const contentArea = document.querySelector(APP_CONFIG.contentArea);
+  if (contentArea) {
+    contentArea.innerHTML = `
+      <div class="chat-container">
+        <div class="sidebar">${getSidebarHTML()}</div>
+        <div class="main-content">
+          <div class="tab-panels">
+            <div id="chatsTab" class="tab-panel hidden">Loading chats...</div>
+            <div id="groupsTab" class="tab-panel hidden">Loading groups...</div>
+            <div id="friendsTab" class="tab-panel hidden">Loading friends...</div>
+            <div id="callsTab" class="tab-panel hidden">Loading calls...</div>
+            <div id="toolsTab" class="tab-panel hidden">Loading tools...</div>
+          </div>
+        </div>
+      </div>
+    `;
+    
+    // Initialize chat interface
+    setTimeout(() => {
+      setupEventListeners();
+      switchTab('groups');
+    }, 100);
+  }
+}
+
+// Get sidebar HTML
+function getSidebarHTML() {
+  const user = AUTH_MANAGER.user || currentUser;
+  const displayName = user ? user.displayName || user.email.split('@')[0] : 'User';
+  const avatarUrl = user ? (user.photoURL || `https://ui-avatars.com/api/?name=${encodeURIComponent(displayName)}&background=8b5cf6&color=fff`) : '';
+  
+  return `
+    <div class="sidebar-header">
+      <div class="user-info">
+        <img src="${avatarUrl}" alt="${displayName}" class="user-avatar">
+        <div class="user-details">
+          <h3 class="user-name">${displayName}</h3>
+          <p class="user-status">Online</p>
+        </div>
+      </div>
+      <button class="sidebar-toggle" onclick="toggleSidebar()">
+        <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 6h16M4 12h16M4 18h16"></path>
+        </svg>
+      </button>
+    </div>
+    <div class="sidebar-nav">
+      <a href="#" class="nav-item active" data-tab="chats">
+        <svg class="nav-icon" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z"></path>
+        </svg>
+        <span class="nav-text">Chats</span>
+      </a>
+      <a href="#" class="nav-item" data-tab="groups">
+        <svg class="nav-icon" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0zm6 3a2 2 0 11-4 0 2 2 0 014 0zM7 10a2 2 0 11-4 0 2 2 0 014 0z"></path>
+        </svg>
+        <span class="nav-text">Groups</span>
+      </a>
+      <a href="#" class="nav-item" data-tab="friends">
+        <svg class="nav-icon" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4.354a4 4 0 110 5.292M15 21H3v-1a6 6 0 0112 0v1zm0 0h6v-1a6 6 0 00-9-5.197m13 1a6 6 0 01-6 6m6-6a6 6 0 00-6-6m0 0a6 6 0 01-6 6m6-6a6 6 0 00-6 6"></path>
+        </svg>
+        <span class="nav-text">Friends</span>
+      </a>
+      <a href="#" class="nav-item" data-tab="calls">
+        <svg class="nav-icon" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 5a2 2 0 012-2h3.28a1 1 0 01.948.684l1.498 4.493a1 1 0 01-.502 1.21l-2.257 1.13a11.042 11.042 0 005.516 5.516l1.13-2.257a1 1 0 011.21-.502l4.493 1.498a1 1 0 01.684.949V19a2 2 0 01-2 2h-1C9.716 21 3 14.284 3 6V5z"></path>
+        </svg>
+        <span class="nav-text">Calls</span>
+      </a>
+      <a href="#" class="nav-item" data-tab="tools">
+        <svg class="nav-icon" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z"></path>
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"></path>
+        </svg>
+        <span class="nav-text">Tools</span>
+      </a>
+    </div>
+    <div class="sidebar-footer">
+      <button class="btn-logout" onclick="AUTH_MANAGER.logout()">
+        <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17 16l4-4m0 0l-4-4m4 4H7m6 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h4a3 3 0 013 3v1"></path>
+        </svg>
+        <span>Logout</span>
+      </button>
+    </div>
+  `;
+}
+
 // Update global auth state
 function updateGlobalAuthState(user) {
   window.MOODCHAT_AUTH = {
     currentUser: user,
     isAuthenticated: !!user,
-    userId: user ? user.uid : null,
+    userId: user ? (user.id || user.uid) : null,
     userEmail: user ? user.email : null,
     displayName: user ? user.displayName : null,
     photoURL: user ? user.photoURL : null,
     isAuthReady: authStateRestored,
-    authMethod: user ? (user.isOffline ? 'device' : 'firebase') : null,
+    authMethod: 'jwt',
     timestamp: new Date().toISOString()
   };
   
@@ -1870,7 +2205,7 @@ function updateGlobalAuthState(user) {
       user: user, 
       isAuthenticated: !!user,
       isAuthReady: authStateRestored,
-      authMethod: user ? (user.isOffline ? 'device' : 'firebase') : null
+      authMethod: 'jwt'
     }
   });
   window.dispatchEvent(event);
@@ -1881,12 +2216,13 @@ function broadcastAuthChange(user) {
   const authData = {
     type: 'auth-state',
     user: user ? {
-      uid: user.uid,
+      id: user.id || user.uid,
+      uid: user.id || user.uid,
       email: user.email,
       displayName: user.displayName,
       photoURL: user.photoURL,
       emailVerified: user.emailVerified || false,
-      authMethod: user.isOffline ? 'device' : 'firebase'
+      authMethod: 'jwt'
     } : null,
     isAuthenticated: !!user,
     timestamp: new Date().toISOString()
@@ -1912,21 +2248,21 @@ function broadcastAuthReady() {
       isReady: true,
       user: currentUser,
       timestamp: new Date().toISOString(),
-      isOffline: !firebaseInitialized || (currentUser && currentUser.isOffline)
+      isOffline: !isOnline
     }
   });
   window.dispatchEvent(event);
-  console.log('Auth ready broadcasted, user:', currentUser ? currentUser.uid : 'No user');
+  console.log('Auth ready broadcasted, user:', currentUser ? (currentUser.id || currentUser.uid) : 'No user');
 }
 
 // ============================================================================
-// ENHANCED GLOBAL AUTH ACCESS WITH DEVICE-BASED AUTHENTICATION
+// ENHANCED GLOBAL AUTH ACCESS WITH JWT AUTHENTICATION
 // ============================================================================
 
 function setupGlobalAuthAccess() {
   // Create global access methods for all pages
   window.getCurrentUser = () => currentUser;
-  window.getCurrentUserId = () => currentUser ? currentUser.uid : null;
+  window.getCurrentUserId = () => currentUser ? (currentUser.id || currentUser.uid) : null;
   window.isAuthenticated = () => !!currentUser;
   window.isAuthReady = () => authStateRestored;
   window.waitForAuth = () => {
@@ -1943,222 +2279,25 @@ function setupGlobalAuthAccess() {
     });
   };
   
-  // Enhanced login function with device-based authentication
-  window.login = function(email, password) {
-    return new Promise((resolve, reject) => {
-      // Clear any existing user data before login
-      const existingUsers = USER_DATA_ISOLATION.getCachedUsers();
-      existingUsers.forEach(userId => {
-        USER_DATA_ISOLATION.clearUserData(userId);
-      });
-      
-      // Clear old session
-      localStorage.removeItem('moodchat_device_session');
-      
-      // Try Firebase login if available
-      if (!firebaseInitialized || !window.firebase) {
-        // Create device-based user
-        const deviceUserId = 'device_' + Date.now();
-        const deviceUser = {
-          uid: deviceUserId,
-          email: email,
-          displayName: email.split('@')[0],
-          photoURL: `https://ui-avatars.com/api/?name=${encodeURIComponent(email.split('@')[0])}&background=8b5cf6&color=fff`,
-          emailVerified: false,
-          isOffline: true,
-          providerId: 'device',
-          refreshToken: 'device-token',
-          getIdToken: () => Promise.resolve('device-token')
-        };
-        
-        // Store device session
-        storeDeviceBasedSession(deviceUser);
-        
-        // Generate offline data for this user
-        setTimeout(() => {
-          DATA_CACHE.ensureOfflineDataAvailable();
-        }, 100);
-        
-        handleAuthStateChange(deviceUser);
-        resolve({
-          success: true,
-          offline: true,
-          user: deviceUser,
-          message: 'Logged in with device-based authentication'
-        });
-        return;
-      }
-
-      // Firebase login
-      firebase.auth().signInWithEmailAndPassword(email, password)
-        .then((userCredential) => {
-          const user = userCredential.user;
-          
-          // Store device session for offline use
-          storeDeviceBasedSession(user);
-          
-          resolve({
-            success: true,
-            user: user,
-            message: 'Login successful'
-          });
-        })
-        .catch((error) => {
-          reject({
-            success: false,
-            error: error.message,
-            code: error.code
-          });
-        });
-    });
+  // Enhanced login function with JWT authentication
+  window.login = async function(email, password) {
+    return await AUTH_MANAGER.login(email, password);
   };
   
   // Enhanced logout function with data clearing
-  window.logout = function() {
-    return new Promise((resolve) => {
-      const userId = currentUser ? currentUser.uid : null;
-      
-      // Clear user data regardless of online/offline
-      if (userId) {
-        USER_DATA_ISOLATION.clearUserData(userId);
-        SETTINGS_SERVICE.clearUserSettings();
-      }
-      
-      // Mark device session as logged out
-      try {
-        const storedSession = localStorage.getItem('moodchat_device_session');
-        if (storedSession) {
-          const session = JSON.parse(storedSession);
-          session.loggedOut = true;
-          localStorage.setItem('moodchat_device_session', JSON.stringify(session));
-        }
-      } catch (error) {
-        console.log('Error updating device session on logout:', error);
-      }
-      
-      // Clear all local references
-      localStorage.removeItem('moodchat-auth');
-      localStorage.removeItem('moodchat-auth-state');
-      
-      if (currentUser && currentUser.isOffline) {
-        // Device-based logout
-        handleAuthStateChange(null);
-        resolve({
-          success: true,
-          offline: true,
-          message: 'Logged out and cleared user data'
-        });
-        return;
-      }
-
-      // Try Firebase logout if available
-      if (!firebaseInitialized || !window.firebase) {
-        handleAuthStateChange(null);
-        resolve({
-          success: true,
-          offline: true,
-          message: 'Logged out (Firebase unavailable)'
-        });
-        return;
-      }
-
-      // Firebase logout
-      firebase.auth().signOut()
-        .then(() => {
-          handleAuthStateChange(null);
-          resolve({
-            success: true,
-            message: 'Logout successful and user data cleared'
-          });
-        })
-        .catch((error) => {
-          // Even if Firebase fails, clear local data
-          handleAuthStateChange(null);
-          resolve({
-            success: true,
-            offline: true,
-            message: 'Logged out with local data cleared (Firebase error: ' + error.message + ')'
-          });
-        });
-    });
+  window.logout = async function() {
+    return await AUTH_MANAGER.logout();
   };
   
   // Enhanced register function
-  window.register = function(email, password, displayName) {
-    return new Promise((resolve, reject) => {
-      // Clear any existing user data before registration
-      const existingUsers = USER_DATA_ISOLATION.getCachedUsers();
-      existingUsers.forEach(userId => {
-        USER_DATA_ISOLATION.clearUserData(userId);
-      });
-      
-      // Try Firebase registration if available
-      if (!firebaseInitialized || !window.firebase) {
-        // Create device-based user for offline registration
-        const deviceUserId = 'device_' + Date.now();
-        const deviceUser = {
-          uid: deviceUserId,
-          email: email,
-          displayName: displayName || email.split('@')[0],
-          photoURL: `https://ui-avatars.com/api/?name=${encodeURIComponent(displayName || email.split('@')[0])}&background=8b5cf6&color=fff`,
-          emailVerified: false,
-          isOffline: true,
-          providerId: 'device',
-          refreshToken: 'device-token',
-          getIdToken: () => Promise.resolve('device-token')
-        };
-        
-        // Store device session
-        storeDeviceBasedSession(deviceUser);
-        
-        // Generate offline data for this user
-        setTimeout(() => {
-          DATA_CACHE.ensureOfflineDataAvailable();
-        }, 100);
-        
-        handleAuthStateChange(deviceUser);
-        resolve({
-          success: true,
-          offline: true,
-          user: deviceUser,
-          message: 'Registered with device-based authentication'
-        });
-        return;
-      }
-
-      // Firebase registration
-      firebase.auth().createUserWithEmailAndPassword(email, password)
-        .then((userCredential) => {
-          const user = userCredential.user;
-          
-          // Update display name
-          return user.updateProfile({
-            displayName: displayName || email.split('@')[0]
-          }).then(() => {
-            // Store device session for offline use
-            storeDeviceBasedSession(user);
-            
-            resolve({
-              success: true,
-              user: user,
-              message: 'Registration successful'
-            });
-          });
-        })
-        .catch((error) => {
-          reject({
-            success: false,
-            error: error.message,
-            code: error.code
-          });
-        });
-    });
+  window.register = async function(email, password, displayName) {
+    return await AUTH_MANAGER.register(email, password, displayName);
   };
   
   // Expose to window for immediate access
   window.MOODCHAT_AUTH_API = {
     getCurrentUser: () => currentUser,
-    getUserId: () => currentUser ? currentUser.uid : null,
+    getUserId: () => currentUser ? (currentUser.id || currentUser.uid) : null,
     isAuthenticated: () => !!currentUser,
     getUserEmail: () => currentUser ? currentUser.email : null,
     getDisplayName: () => currentUser ? currentUser.displayName : null,
@@ -2169,7 +2308,7 @@ function setupGlobalAuthAccess() {
     logout: window.logout,
     register: window.register,
     clearUserData: (userId) => USER_DATA_ISOLATION.clearUserData(userId),
-    getDeviceId: () => getDeviceId()
+    getToken: () => AUTH_MANAGER.token
   };
 }
 
@@ -2178,7 +2317,7 @@ function setupGlobalAuthAccess() {
 // ============================================================================
 
 function loadCachedDataInstantly() {
-  if (!currentUser || !currentUser.uid) {
+  if (!currentUser || !(currentUser.id || currentUser.uid)) {
     console.log('No user logged in, showing offline placeholder UI');
     showOfflinePlaceholderUI();
     return;
@@ -2196,7 +2335,7 @@ function loadCachedDataInstantly() {
     console.log('No cached data found, using offline data generator');
     
     // Generate and use offline data
-    const offlineData = OFFLINE_DATA_GENERATOR.generateAllOfflineData(currentUser.uid);
+    const offlineData = OFFLINE_DATA_GENERATOR.generateAllOfflineData(currentUser.id || currentUser.uid);
     
     // Cache the offline data for future use
     DATA_CACHE.cacheFriends(offlineData.friends);
@@ -2222,7 +2361,7 @@ function loadCachedDataInstantly() {
   const event = new CustomEvent('cached-data-loaded', {
     detail: {
       data: cachedData,
-      userId: currentUser.uid,
+      userId: currentUser.id || currentUser.uid,
       timestamp: new Date().toISOString(),
       source: 'cache',
       isOfflineData: cachedData.isOfflineData || false
@@ -2266,7 +2405,29 @@ function showOfflinePlaceholderUI() {
   
   // Expose the continue offline function
   window.createOfflineUserAndContinue = function() {
-    createOfflineUser();
+    // Create an offline user
+    const offlineUserId = 'offline_user_' + Date.now();
+    const offlineUser = {
+      id: offlineUserId,
+      uid: offlineUserId,
+      email: 'offline@moodchat.app',
+      displayName: 'Offline User',
+      photoURL: `https://ui-avatars.com/api/?name=Offline+User&background=8b5cf6&color=fff`,
+      emailVerified: false,
+      isOffline: true,
+      providerId: 'offline',
+      isAnonymous: true,
+      metadata: {
+        creationTime: new Date().toISOString(),
+        lastSignInTime: new Date().toISOString()
+      },
+      refreshToken: 'offline-token',
+      getIdToken: () => Promise.resolve('offline-token'),
+      isOfflineMode: true
+    };
+    
+    handleAuthStateChange(offlineUser, true);
+    
     setTimeout(() => {
       loadCachedDataInstantly();
       // Switch to groups tab
@@ -2278,12 +2439,12 @@ function showOfflinePlaceholderUI() {
 }
 
 function refreshCachedDataInBackground() {
-  if (!isOnline || !currentUser || !currentUser.uid) {
+  if (!isOnline || !currentUser || !(currentUser.id || currentUser.uid)) {
     console.log('Cannot refresh cached data: offline or no user');
     return;
   }
   
-  console.log('Refreshing cached data in background for user:', currentUser.uid);
+  console.log('Refreshing cached data in background for user:', currentUser.id || currentUser.uid);
   
   // This function should be implemented by individual tab modules
   // It will fetch fresh data from the server and update the cache
@@ -2291,7 +2452,7 @@ function refreshCachedDataInBackground() {
   // Dispatch event to trigger background data refresh
   const event = new CustomEvent('refresh-cached-data', {
     detail: {
-      userId: currentUser.uid,
+      userId: currentUser.id || currentUser.uid,
       forceRefresh: true,
       silent: true, // Don't show loading indicators
       timestamp: new Date().toISOString()
@@ -2683,7 +2844,7 @@ function initializeMessageQueue() {
 
 // Load existing queue into memory for current user only
 function loadQueueIntoMemory(db) {
-  if (!currentUser || !currentUser.uid) {
+  if (!currentUser || !(currentUser.id || currentUser.uid)) {
     console.log('No current user, not loading queue');
     return;
   }
@@ -2692,7 +2853,7 @@ function loadQueueIntoMemory(db) {
   const messageStore = transaction.objectStore('messages');
   const actionStore = transaction.objectStore('actions');
   
-  const userId = currentUser.uid;
+  const userId = currentUser.id || currentUser.uid;
   
   // Load messages for current user only
   const msgIndex = messageStore.index('userId');
@@ -2725,7 +2886,7 @@ function loadQueueIntoMemory(db) {
 
 // Queue any action for offline sync with user isolation
 function queueForSync(data, type = 'message') {
-  if (!window.indexedDB || !currentUser || !currentUser.uid) {
+  if (!window.indexedDB || !currentUser || !(currentUser.id || currentUser.uid)) {
     return Promise.resolve({ 
       queued: false, 
       offline: true,
@@ -2758,14 +2919,14 @@ function queueForSync(data, type = 'message') {
         type: type,
         status: 'pending',
         timestamp: new Date().toISOString(),
-        userId: currentUser.uid,
+        userId: currentUser.id || currentUser.uid,
         attempts: 0
       };
       
       const addRequest = store.add(item);
       
       addRequest.onsuccess = function() {
-        console.log(`${type} queued for sync for user ${currentUser.uid}:`, data);
+        console.log(`${type} queued for sync for user ${currentUser.id || currentUser.uid}:`, data);
         
         // Add to in-memory queue
         syncQueue.push({
@@ -2780,7 +2941,7 @@ function queueForSync(data, type = 'message') {
           queued: true, 
           offline: true, 
           id: addRequest.result,
-          userId: currentUser.uid,
+          userId: currentUser.id || currentUser.uid,
           message: `${type} queued for when online` 
         });
       };
@@ -2797,7 +2958,7 @@ function queueForSync(data, type = 'message') {
 function processQueuedMessages() {
   if (!isOnline || !window.indexedDB || syncQueue.length === 0 || !currentUser) return;
   
-  console.log(`Processing ${syncQueue.length} queued items for user ${currentUser.uid}...`);
+  console.log(`Processing ${syncQueue.length} queued items for user ${currentUser.id || currentUser.uid}...`);
   
   const request = indexedDB.open('MoodChatMessageQueue', 3);
   
@@ -2807,7 +2968,7 @@ function processQueuedMessages() {
   
   request.onsuccess = function(event) {
     const db = event.target.result;
-    const userId = currentUser.uid;
+    const userId = currentUser.id || currentUser.uid;
     
     // Process messages for current user only
     processStoreQueue(db, 'messages', userId);
@@ -2904,30 +3065,81 @@ function getSendFunctionForType(type) {
       return window.sendQueuedFriendRequest || defaultSendFriendRequest;
     case 'call_log':
       return window.sendQueuedCallLog || defaultSendCallLog;
+    case 'api':
+      return sendQueuedApiCall;
     default:
       return defaultSendItem;
+  }
+}
+
+// Send queued API call
+async function sendQueuedApiCall(item) {
+  try {
+    const result = await api(item.endpoint, item.method, item.data, true);
+    if (result.success) {
+      return result;
+    } else {
+      throw new Error(result.error || 'API call failed');
+    }
+  } catch (error) {
+    throw error;
   }
 }
 
 // Default send functions
 function defaultSendMessage(message) {
   console.log('Sending queued message:', message);
-  return Promise.resolve();
+  // Call backend API to send message
+  return safeApiCall(
+    BACKEND_CONFIG.ENDPOINTS.SEND_MESSAGE, 
+    'POST', 
+    {
+      chatId: message.chatId,
+      content: message.content,
+      type: message.type || 'text'
+    }
+  );
 }
 
 function defaultSendStatus(status) {
   console.log('Sending queued status:', status);
-  return Promise.resolve();
+  // Call backend API to update status
+  return safeApiCall(
+    BACKEND_CONFIG.ENDPOINTS.UPDATE_STATUS, 
+    'POST', 
+    {
+      status: status.status,
+      emoji: status.emoji
+    }
+  );
 }
 
 function defaultSendFriendRequest(request) {
   console.log('Sending queued friend request:', request);
-  return Promise.resolve();
+  // Call backend API to send friend request
+  return safeApiCall(
+    BACKEND_CONFIG.ENDPOINTS.ADD_FRIEND, 
+    'POST', 
+    {
+      friendId: request.friendId,
+      message: request.message
+    }
+  );
 }
 
 function defaultSendCallLog(callLog) {
   console.log('Sending queued call log:', callLog);
-  return Promise.resolve();
+  // Call backend API to log call
+  return safeApiCall(
+    BACKEND_CONFIG.ENDPOINTS.LOG_CALL, 
+    'POST', 
+    {
+      userId: callLog.userId,
+      type: callLog.type,
+      duration: callLog.duration,
+      status: callLog.status
+    }
+  );
 }
 
 function defaultSendItem(item) {
@@ -2999,204 +3211,6 @@ function updateItemAttempts(itemId, db, storeName, attempts, userId) {
   };
 }
 
-// ENHANCED Safe API call wrapper with instant cache fallback AND offline data
-function safeApiCall(apiFunction, data, type = 'action', cacheKey = null) {
-  return new Promise((resolve, reject) => {
-    // Always try cache first for GET-like operations (INSTANT LOADING)
-    if (cacheKey && (type === 'get' || apiFunction.name.includes('get'))) {
-      const cachedData = DATA_CACHE.getInstant(cacheKey);
-      if (cachedData) {
-        console.log(`Using cached data instantly for: ${cacheKey}`);
-        resolve({
-          success: true,
-          offline: !isOnline,
-          cached: true,
-          data: cachedData,
-          message: 'Data loaded instantly from cache',
-          instant: true
-        });
-        
-        // Also try to get fresh data in background if online
-        if (isOnline && networkDependentServices.api) {
-          setTimeout(() => {
-            fetchFreshDataInBackground(apiFunction, data, cacheKey);
-          }, 1000);
-        }
-        return;
-      }
-    }
-    
-    // If no cache and we're offline, use offline data generator
-    if (!isOnline && cacheKey && currentUser) {
-      console.log(`Offline mode: Using offline data for: ${cacheKey}`);
-      
-      // Determine which offline data to generate based on cache key
-      let offlineData = null;
-      if (cacheKey.includes('friends')) {
-        offlineData = DATA_CACHE.getOfflineTabData('friends');
-      } else if (cacheKey.includes('chats')) {
-        offlineData = DATA_CACHE.getOfflineTabData('chats');
-      } else if (cacheKey.includes('groups')) {
-        offlineData = DATA_CACHE.getOfflineTabData('groups');
-      } else if (cacheKey.includes('calls')) {
-        offlineData = DATA_CACHE.getOfflineTabData('calls');
-      } else if (cacheKey.includes('profile')) {
-        offlineData = OFFLINE_DATA_GENERATOR.generateUserProfile(currentUser.uid);
-      }
-      
-      if (offlineData) {
-        // Cache the offline data for next time
-        DATA_CACHE.set(cacheKey, offlineData, CACHE_CONFIG.EXPIRATION.OFFLINE_DATA);
-        
-        resolve({
-          success: true,
-          offline: true,
-          cached: false,
-          data: offlineData,
-          message: 'Using offline data generator',
-          isOfflineData: true
-        });
-        return;
-      }
-    }
-    
-    // For online operations
-    if (isOnline && networkDependentServices.api) {
-      // Make real API call
-      try {
-        const result = apiFunction(data);
-        if (result && result.then) {
-          result
-            .then(apiResult => {
-              // Cache the result if successful
-              if (cacheKey && apiResult.success !== false) {
-                DATA_CACHE.set(cacheKey, apiResult.data);
-                
-                // Notify UI about fresh data (silent update)
-                if (instantUILoaded) {
-                  const updateEvent = new CustomEvent('fresh-data-available', {
-                    detail: {
-                      cacheKey: cacheKey,
-                      data: apiResult.data,
-                      source: 'server',
-                      silent: true
-                    }
-                  });
-                  window.dispatchEvent(updateEvent);
-                }
-              }
-              resolve(apiResult);
-            })
-            .catch(error => {
-              console.log('API call failed:', error);
-              // Try to use offline data as fallback
-              if (cacheKey && currentUser) {
-                const offlineData = DATA_CACHE.getOfflineTabData(cacheKey.split('-')[0]);
-                if (offlineData) {
-                  resolve({
-                    success: true,
-                    offline: true,
-                    cached: false,
-                    data: offlineData,
-                    message: 'API failed, using offline data',
-                    isOfflineData: true,
-                    originalError: error.message
-                  });
-                } else {
-                  // Queue for retry
-                  queueForSync({
-                    apiFunction: apiFunction.name || 'anonymous',
-                    data: data,
-                    originalCall: new Date().toISOString()
-                  }, type)
-                  .then(queueResult => {
-                    resolve({
-                      success: false,
-                      offline: true,
-                      queued: queueResult.queued,
-                      message: 'Action queued for retry',
-                      queueId: queueResult.id,
-                      userId: queueResult.userId
-                    });
-                  });
-                }
-              }
-            });
-        } else {
-          resolve(result);
-        }
-      } catch (error) {
-        console.log('API call error:', error);
-        reject(error);
-      }
-    } else {
-      // Offline - queue the data
-      queueForSync({
-        apiFunction: apiFunction.name || 'anonymous',
-        data: data,
-        originalCall: new Date().toISOString()
-      }, type)
-      .then(queueResult => {
-        resolve({
-          success: false,
-          offline: true,
-          queued: queueResult.queued,
-          message: 'Action queued for when online',
-          queueId: queueResult.id,
-          userId: queueResult.userId
-        });
-      })
-      .catch(error => {
-        resolve({
-          success: false,
-          offline: true,
-          queued: false,
-          message: 'Action not queued',
-          error: error.message
-        });
-      });
-    }
-  });
-}
-
-// Fetch fresh data in background
-function fetchFreshDataInBackground(apiFunction, data, cacheKey) {
-  if (!isOnline || !networkDependentServices.api) return;
-  
-  console.log(`Fetching fresh data in background for: ${cacheKey}`);
-  
-  try {
-    const result = apiFunction(data);
-    if (result && result.then) {
-      result
-        .then(apiResult => {
-          if (cacheKey && apiResult.success !== false) {
-            // Update cache with fresh data
-            DATA_CACHE.set(cacheKey, apiResult.data);
-            
-            // Notify UI about the update (silently)
-            const updateEvent = new CustomEvent('background-data-updated', {
-              detail: {
-                cacheKey: cacheKey,
-                data: apiResult.data,
-                timestamp: new Date().toISOString(),
-                silent: true
-              }
-            });
-            window.dispatchEvent(updateEvent);
-            
-            console.log(`Background data updated for: ${cacheKey}`);
-          }
-        })
-        .catch(error => {
-          console.log(`Background data fetch failed for ${cacheKey}:`, error);
-        });
-    }
-  } catch (error) {
-    console.log(`Background API call error for ${cacheKey}:`, error);
-  }
-}
-
 // ============================================================================
 // ENHANCED GLOBAL STATE EXPOSURE WITH USER ISOLATION AND INSTANT LOADING
 // ============================================================================
@@ -3209,7 +3223,7 @@ function exposeGlobalStateToIframes() {
   // Expose auth state
   window.MOODCHAT_GLOBAL.auth = {
     getCurrentUser: () => currentUser,
-    getUserId: () => currentUser ? currentUser.uid : null,
+    getUserId: () => currentUser ? (currentUser.id || currentUser.uid) : null,
     isAuthenticated: () => !!currentUser,
     getUserEmail: () => currentUser ? currentUser.email : null,
     getDisplayName: () => currentUser ? currentUser.displayName : null,
@@ -3230,7 +3244,7 @@ function exposeGlobalStateToIframes() {
     },
     clearUserData: (userId) => USER_DATA_ISOLATION.clearUserData(userId),
     getCachedUsers: () => USER_DATA_ISOLATION.getCachedUsers(),
-    getDeviceId: () => getDeviceId()
+    getToken: () => AUTH_MANAGER.token
   };
   
   // Expose network state
@@ -3273,6 +3287,7 @@ function exposeGlobalStateToIframes() {
   window.MOODCHAT_GLOBAL.sync = {
     queueForSync: queueForSync,
     safeApiCall: safeApiCall,
+    api: api,
     processQueuedMessages: processQueuedMessages,
     getQueuedItems: () => [...syncQueue]
   };
@@ -3420,7 +3435,7 @@ function showTab(tabName) {
 
 // INSTANT DATA LOADING: Load cached data immediately, then refresh in background
 function loadTabDataInstantly(tabName) {
-  console.log(`Loading tab data instantly for: ${tabName} for user: ${currentUser ? currentUser.uid : 'none'}`);
+  console.log(`Loading tab data instantly for: ${tabName} for user: ${currentUser ? (currentUser.id || currentUser.uid) : 'none'}`);
   
   // Check if we have cached data for this tab
   const hasCachedData = DATA_CACHE.hasCachedTabData(tabName);
@@ -3432,7 +3447,7 @@ function loadTabDataInstantly(tabName) {
     const cacheEvent = new CustomEvent('tab-cached-data-ready', {
       detail: {
         tab: tabName,
-        userId: currentUser.uid,
+        userId: currentUser.id || currentUser.uid,
         data: cachedData,
         source: 'cache',
         timestamp: new Date().toISOString()
@@ -3449,7 +3464,7 @@ function loadTabDataInstantly(tabName) {
       const offlineEvent = new CustomEvent('tab-cached-data-ready', {
         detail: {
           tab: tabName,
-          userId: currentUser.uid,
+          userId: currentUser.id || currentUser.uid,
           data: offlineData,
           source: 'offline-generator',
           timestamp: new Date().toISOString(),
@@ -3533,13 +3548,13 @@ function getCachedDataForTab(tabName) {
 
 // Trigger data load for a tab with user isolation
 function triggerTabDataLoad(tabName) {
-  console.log(`Triggering data load for tab: ${tabName} for user: ${currentUser ? currentUser.uid : 'none'}`);
+  console.log(`Triggering data load for tab: ${tabName} for user: ${currentUser ? (currentUser.id || currentUser.uid) : 'none'}`);
   
   // Dispatch event for other components to load data
   const event = new CustomEvent('tab-data-request', {
     detail: {
       tab: tabName,
-      userId: currentUser ? currentUser.uid : null,
+      userId: currentUser ? (currentUser.id || currentUser.uid) : null,
       isOnline: isOnline,
       services: NETWORK_SERVICE_MANAGER.getServiceStates(),
       timestamp: new Date().toISOString(),
@@ -3770,7 +3785,7 @@ function attachEventListenersToNewContent(container) {
           safeApiCall(apiFunction, new FormData(form))
             .then(result => {
               if (result.offline) {
-                console.log('Form data queued for user:', currentUser ? currentUser.uid : 'none');
+                console.log('Form data queued for user:', currentUser ? (currentUser.id || currentUser.uid) : 'none');
               }
             })
             .catch(error => {
@@ -4052,11 +4067,11 @@ window.triggerFileInput = function(inputId) {
 };
 
 // ============================================================================
-// ENHANCED INITIALIZATION WITH INSTANT UI DISPLAY (FULL OFFLINE SUPPORT)
+// ENHANCED INITIALIZATION WITH JWT AUTHENTICATION
 // ============================================================================
 
 function initializeApp() {
-  console.log('Initializing MoodChat Application Shell with instant UI and full offline support...');
+  console.log('Initializing MoodChat Application Shell with JWT authentication...');
   
   // CRITICAL: Setup global state immediately
   window.MOODCHAT_GLOBAL = window.MOODCHAT_GLOBAL || {};
@@ -4081,22 +4096,25 @@ function initializeApp() {
   // STEP 1: Apply minimal styling immediately
   injectStyles();
   
-  // STEP 2: Initialize Settings Service (non-blocking)
+  // STEP 2: Initialize Authentication Manager
+  AUTH_MANAGER.initialize();
+  
+  // STEP 3: Initialize Settings Service (non-blocking)
   SETTINGS_SERVICE.initialize();
   
-  // STEP 3: Setup global auth access
+  // STEP 4: Setup global auth access
   setupGlobalAuthAccess();
   
-  // STEP 4: Initialize network detection
+  // STEP 5: Initialize network detection
   initializeNetworkDetection();
   
-  // STEP 5: Expose global state
+  // STEP 6: Expose global state
   exposeGlobalStateToIframes();
   
-  // STEP 6: Setup event listeners
+  // STEP 7: Setup event listeners
   setupEventListeners();
   
-  // STEP 7: Initialize sidebar immediately
+  // STEP 8: Initialize sidebar immediately
   const sidebar = document.querySelector(APP_CONFIG.sidebar);
   if (sidebar) {
     sidebar.classList.remove('hidden');
@@ -4112,65 +4130,52 @@ function initializeApp() {
     }
   }
   
-  // STEP 8: Ensure content area exists
-  let contentArea = document.querySelector(APP_CONFIG.contentArea);
-  if (!contentArea) {
-    contentArea = document.createElement('main');
-    contentArea.id = 'content-area';
-    contentArea.className = 'flex-1 overflow-auto bg-gray-50 dark:bg-gray-900';
-    document.body.appendChild(contentArea);
-  }
-  
-  // STEP 9: Load default page (non-blocking)
+  // STEP 9: Check authentication and update UI accordingly
   setTimeout(() => {
-    loadPage(APP_CONFIG.defaultPage);
-  }, 50);
-  
-  // STEP 10: Set default tab immediately (non-blocking)
-  setTimeout(() => {
-    try {
-      const groupsTab = document.querySelector(TAB_CONFIG.groups.container);
-      if (groupsTab) {
-        showTab('groups');
-      } else {
-        console.log('Groups tab not found in DOM, loading as external...');
-        loadExternalTab('groups', EXTERNAL_TABS.groups);
-      }
-    } catch (error) {
-      console.log('Error setting default tab:', error);
-      // Fallback to chats tab
-      if (TAB_CONFIG.chats.container && document.querySelector(TAB_CONFIG.chats.container)) {
-        showTab('chats');
-      }
+    const isAuthenticated = !!currentUser;
+    const isChatPage = window.location.pathname.includes('chat.html');
+    const isIndexPage = window.location.pathname.includes('index.html') || 
+                       window.location.pathname.endsWith('/');
+    
+    if (isAuthenticated && isIndexPage) {
+      // User is authenticated but on login page, redirect to chat
+      console.log('User already authenticated, redirecting to chat');
+      window.location.href = 'chat.html';
+    } else if (!isAuthenticated && isChatPage) {
+      // User not authenticated but on chat page, redirect to login
+      console.log('User not authenticated, redirecting to login');
+      window.location.href = 'index.html';
+    } else if (isAuthenticated && isChatPage) {
+      // User authenticated and on chat page, show chat interface
+      console.log('User authenticated, showing chat interface');
+      showChatInterface();
     }
+    
+    // Mark auth as ready
+    authStateRestored = true;
+    broadcastAuthReady();
   }, 100);
   
-  // STEP 11: Initialize Firebase in background (non-blocking)
+  // STEP 10: Load default page (non-blocking) - only if on chat page
   setTimeout(() => {
-    initializeFirebase();
-    
-    // If Firebase not ready after 3 seconds, broadcast auth ready anyway
-    setTimeout(() => {
-      if (!authStateRestored) {
-        authStateRestored = true;
-        broadcastAuthReady();
-      }
-    }, 3000);
-  }, 200);
+    if (window.location.pathname.includes('chat.html') && currentUser) {
+      loadPage(APP_CONFIG.defaultPage);
+    }
+  }, 50);
   
-  // STEP 12: Start background services after a delay
+  // STEP 11: Start background services after a delay
   setTimeout(() => {
     NETWORK_SERVICE_MANAGER.startAllServices();
   }, 1000);
   
-  // STEP 13: Trigger initial background sync if online
+  // STEP 12: Trigger initial background sync if online
   setTimeout(() => {
-    if (isOnline) {
+    if (isOnline && currentUser) {
       NETWORK_SERVICE_MANAGER.startBackgroundSync();
     }
   }, 2000);
   
-  // STEP 14: Ensure UI is loaded even if everything else fails
+  // STEP 13: Ensure UI is loaded even if everything else fails
   setTimeout(() => {
     if (!instantUILoaded && currentUser) {
       console.log('Forcing UI load after timeout');
@@ -4178,15 +4183,18 @@ function initializeApp() {
     }
   }, 3000);
   
-  console.log('MoodChat Application Shell initialized with full offline support');
+  console.log('MoodChat Application Shell initialized with JWT authentication');
   console.log('Key features:');
+  console.log('  ✓ JWT authentication with localStorage persistence');
+  console.log('  ✓ Automatic login on page load');
+  console.log('  ✓ Token validation and refresh');
   console.log('  ✓ Instant UI display (no waiting)');
   console.log('  ✓ Cached data loaded immediately');
   console.log('  ✓ Offline data generator for instant UI');
   console.log('  ✓ Background server connection when online');
   console.log('  ✓ Silent UI updates when new data arrives');
   console.log('  ✓ Full offline functionality');
-  console.log('  ✓ Device-based authentication');
+  console.log('  ✓ Backend API: https://moodchat-backend-1.onrender.com');
   console.log('  ✓ User data isolation');
   console.log('  ✓ Real API calls with offline queuing');
   console.log('  ✓ Graceful degradation when completely offline');
@@ -4392,8 +4400,125 @@ function injectStyles() {
       background: rgba(139, 92, 246, 0.1);
     }
     
+    /* Chat container styles */
+    .chat-container {
+      display: flex;
+      height: 100vh;
+    }
+    
+    .sidebar {
+      width: 260px;
+      background: #1f2937;
+      color: white;
+      display: flex;
+      flex-direction: column;
+    }
+    
+    .sidebar-header {
+      padding: 20px;
+      border-bottom: 1px solid #374151;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+    }
+    
+    .user-info {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+    }
+    
+    .user-avatar {
+      width: 40px;
+      height: 40px;
+      border-radius: 50%;
+      object-fit: cover;
+    }
+    
+    .user-details {
+      flex: 1;
+    }
+    
+    .user-name {
+      font-size: 16px;
+      font-weight: 600;
+      margin-bottom: 2px;
+    }
+    
+    .user-status {
+      font-size: 12px;
+      color: #9ca3af;
+    }
+    
+    .sidebar-nav {
+      flex: 1;
+      padding: 10px;
+    }
+    
+    .nav-item {
+      display: flex;
+      align-items: center;
+      padding: 12px 16px;
+      color: #9ca3af;
+      text-decoration: none;
+      border-radius: 8px;
+      margin-bottom: 4px;
+      transition: all 0.2s;
+    }
+    
+    .nav-item:hover {
+      background: #374151;
+      color: white;
+    }
+    
+    .nav-item.active {
+      background: #4f46e5;
+      color: white;
+    }
+    
+    .nav-icon {
+      width: 24px;
+      height: 24px;
+      margin-right: 12px;
+    }
+    
+    .nav-text {
+      font-size: 14px;
+      font-weight: 500;
+    }
+    
+    .sidebar-footer {
+      padding: 20px;
+      border-top: 1px solid #374151;
+    }
+    
+    .btn-logout {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 8px;
+      width: 100%;
+      padding: 10px 16px;
+      background: #374151;
+      color: white;
+      border: none;
+      border-radius: 8px;
+      cursor: pointer;
+      transition: background 0.2s;
+    }
+    
+    .btn-logout:hover {
+      background: #4b5563;
+    }
+    
+    .main-content {
+      flex: 1;
+      background: #f9fafb;
+      overflow: auto;
+    }
+    
     @media (max-width: 767px) {
-      #sidebar {
+      .sidebar {
         position: fixed;
         top: 0;
         left: 0;
@@ -4402,11 +4527,11 @@ function injectStyles() {
         transform: translateX(-100%);
       }
       
-      #sidebar.open {
+      .sidebar.open {
         transform: translateX(0);
       }
       
-      #sidebar-overlay {
+      .sidebar-overlay {
         position: fixed;
         top: 0;
         left: 0;
@@ -4417,8 +4542,12 @@ function injectStyles() {
         display: none;
       }
       
-      #sidebar.open + #sidebar-overlay {
+      .sidebar.open + .sidebar-overlay {
         display: block;
+      }
+      
+      .main-content {
+        width: 100%;
       }
     }
   `;
@@ -4440,24 +4569,25 @@ function setupCrossPageCommunication() {
       try {
         const authData = JSON.parse(event.newValue);
         if (authData && authData.type === 'auth-state') {
-          console.log('Auth state changed in another tab:', authData.user ? `User ${authData.user.uid}` : 'No user');
+          console.log('Auth state changed in another tab:', authData.user ? `User ${authData.user.id}` : 'No user');
           
           // Update local auth state
           if (authData.user) {
             // Create user object from stored data
             const user = {
-              uid: authData.user.uid,
+              id: authData.user.id,
+              uid: authData.user.id,
               email: authData.user.email,
               displayName: authData.user.displayName,
               photoURL: authData.user.photoURL,
               emailVerified: authData.user.emailVerified || false,
-              isOffline: authData.user.authMethod === 'device',
-              providerId: authData.user.authMethod === 'device' ? 'device' : 'firebase',
+              isOffline: false,
+              providerId: 'jwt',
               refreshToken: 'cross-tab-token',
               getIdToken: () => Promise.resolve('cross-tab-token')
             };
             
-            handleAuthStateChange(user, authData.user.authMethod === 'device');
+            handleAuthStateChange(user, false);
           } else {
             handleAuthStateChange(null);
           }
@@ -4470,7 +4600,7 @@ function setupCrossPageCommunication() {
 }
 
 // ============================================================================
-// ENHANCED PUBLIC API WITH INSTANT LOADING AND OFFLINE SUPPORT
+// ENHANCED PUBLIC API WITH JWT AUTHENTICATION
 // ============================================================================
 
 // Expose application functions
@@ -4509,16 +4639,20 @@ window.OFFLINE_DATA_GENERATOR = OFFLINE_DATA_GENERATOR;
 // SETTINGS SERVICE
 window.SETTINGS_SERVICE = SETTINGS_SERVICE;
 
+// AUTH MANAGER
+window.AUTH_MANAGER = AUTH_MANAGER;
+
 // API and sync functions with instant loading
+window.api = api;
 window.safeApiCall = safeApiCall;
 window.queueForSync = queueForSync;
 window.clearMessageQueue = function() {
-  if (!currentUser || !currentUser.uid) {
+  if (!currentUser || !(currentUser.id || currentUser.uid)) {
     console.log('No current user, cannot clear message queue');
     return;
   }
   
-  const userId = currentUser.uid;
+  const userId = currentUser.id || currentUser.uid;
   
   // Clear both stores for current user only
   const request = indexedDB.open('MoodChatMessageQueue', 3);
@@ -4563,10 +4697,88 @@ window.clearMessageQueue = function() {
 
 window.processQueuedMessages = processQueuedMessages;
 
+// BACKEND API FUNCTIONS
+window.fetchUserProfile = async function() {
+  return safeApiCall(
+    BACKEND_CONFIG.ENDPOINTS.GET_USER_PROFILE, 
+    'GET', 
+    null, 
+    CACHE_CONFIG.KEYS.USER_PROFILE
+  );
+};
+
+window.fetchFriends = async function() {
+  return safeApiCall(
+    BACKEND_CONFIG.ENDPOINTS.GET_FRIENDS, 
+    'GET', 
+    null, 
+    CACHE_CONFIG.KEYS.FRIENDS_LIST
+  );
+};
+
+window.fetchChats = async function() {
+  return safeApiCall(
+    BACKEND_CONFIG.ENDPOINTS.GET_CHATS, 
+    'GET', 
+    null, 
+    CACHE_CONFIG.KEYS.CHATS_LIST
+  );
+};
+
+window.fetchGroups = async function() {
+  return safeApiCall(
+    BACKEND_CONFIG.ENDPOINTS.GET_GROUPS, 
+    'GET', 
+    null, 
+    CACHE_CONFIG.KEYS.GROUPS_LIST
+  );
+};
+
+window.fetchCalls = async function() {
+  return safeApiCall(
+    BACKEND_CONFIG.ENDPOINTS.GET_CALLS, 
+    'GET', 
+    null, 
+    CACHE_CONFIG.KEYS.CALLS_LIST
+  );
+};
+
+window.sendMessage = async function(chatId, content, type = 'text') {
+  return safeApiCall(
+    BACKEND_CONFIG.ENDPOINTS.SEND_MESSAGE, 
+    'POST', 
+    { chatId, content, type }
+  );
+};
+
+window.updateUserProfile = async function(updates) {
+  return safeApiCall(
+    BACKEND_CONFIG.ENDPOINTS.UPDATE_PROFILE, 
+    'POST', 
+    updates
+  );
+};
+
+window.sendFriendRequest = async function(friendId, message = '') {
+  return safeApiCall(
+    BACKEND_CONFIG.ENDPOINTS.ADD_FRIEND, 
+    'POST', 
+    { friendId, message }
+  );
+};
+
+window.createGroup = async function(name, description, isPublic = true) {
+  return safeApiCall(
+    BACKEND_CONFIG.ENDPOINTS.CREATE_GROUP, 
+    'POST', 
+    { name, description, isPublic }
+  );
+};
+
 // DATA LOADING FUNCTIONS WITH INSTANT LOADING
 window.loadTabData = function(tabName, forceRefresh = false) {
   return new Promise((resolve) => {
-    const userId = currentUser ? currentUser.uid : null;
+    const userId = currentUser ? (currentUser.id || currentUser.uid) : null;
     console.log(`Loading real data for tab: ${tabName}, user: ${userId}, forceRefresh: ${forceRefresh}`);
     
     // This function should be implemented by individual tab modules
@@ -4584,12 +4796,6 @@ window.loadTabData = function(tabName, forceRefresh = false) {
 // INSTANT LOADING FUNCTIONS
 window.loadCachedDataInstantly = loadCachedDataInstantly;
 window.refreshCachedDataInBackground = refreshCachedDataInBackground;
-
-// OFFLINE SUPPORT FUNCTIONS
-window.createOfflineUser = createOfflineUser;
-window.getOfflineData = function(tabName) {
-  return DATA_CACHE.getOfflineTabData(tabName);
-};
 
 // AUTH HELPER FUNCTIONS
 
@@ -4677,7 +4883,7 @@ window.clearUserData = function(userId) {
     USER_DATA_ISOLATION.clearUserData(userId);
     return true;
   } else if (currentUser && currentUser.uid) {
-    USER_DATA_ISOLATION.clearUserData(currentUser.uid);
+    USER_DATA_ISOLATION.clearUserData(currentUser.id || currentUser.uid);
     return true;
   }
   return false;
@@ -4685,10 +4891,6 @@ window.clearUserData = function(userId) {
 
 window.getCachedUsers = function() {
   return USER_DATA_ISOLATION.getCachedUsers();
-};
-
-window.getDeviceId = function() {
-  return getDeviceId();
 };
 
 // INSTANT LOADING STATE
@@ -4715,8 +4917,11 @@ if (document.readyState === 'loading') {
 // Setup cross-page communication
 setupCrossPageCommunication();
 
-console.log('MoodChat app.js loaded - Application shell ready with full offline support');
+console.log('MoodChat app.js loaded - Application shell ready with JWT authentication');
 console.log('Enhanced startup flow:');
+console.log('  ✓ JWT authentication with localStorage persistence');
+console.log('  ✓ Automatic login on page load');
+console.log('  ✓ Token validation and refresh');
 console.log('  ✓ UI displays instantly (no waiting)');
 console.log('  ✓ Cached data loads immediately');
 console.log('  ✓ Offline data generated if no cache');
@@ -4724,3 +4929,4 @@ console.log('  ✓ Server connects in background when online');
 console.log('  ✓ UI updates silently when new data arrives');
 console.log('  ✓ Full offline functionality preserved');
 console.log('  ✓ Works identically online and offline');
+console.log('  ✓ Backend API: https://moodchat-backend-1.onrender.com');

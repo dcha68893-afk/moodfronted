@@ -10,10 +10,8 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
     <title>AI Tools Dashboard | MoodChat</title>
     
-    <!-- Firebase SDK -->
-    <script src="https://www.gstatic.com/firebasejs/9.22.0/firebase-app-compat.js"></script>
-    <script src="https://www.gstatic.com/firebasejs/9.22.0/firebase-firestore-compat.js"></script>
-    <script src="https://www.gstatic.com/firebasejs/9.22.0/firebase-auth-compat.js"></script>
+    <!-- API Helper -->
+    <script src="../js/api.js"></script>
     
     <!-- Chart.js for Analytics -->
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
@@ -50,7 +48,6 @@
             --shadow-lg: 0 10px 30px rgba(0, 0, 0, 0.2);
             --card-shadow: 0 4px 6px rgba(0, 0, 0, 0.07);
             --card-hover-shadow: 0 10px 25px rgba(0, 0, 0, 0.15);
-            --offline-overlay: rgba(255, 255, 255, 0.95);
             --free-plan: #34c759;
             --basic-plan: #007aff;
             --pro-plan: #5856d6;
@@ -145,104 +142,33 @@
             display: block;
         }
         
-        /* Offline Overlay */
-        .offline-overlay {
+        /* Loading Overlay */
+        .loading-overlay {
             position: fixed;
             top: 0;
             left: 0;
             width: 100%;
             height: 100%;
-            background-color: var(--offline-overlay);
-            z-index: 9999;
+            background-color: rgba(255, 255, 255, 0.9);
+            z-index: 1300;
             display: none;
-            flex-direction: column;
             align-items: center;
             justify-content: center;
-            text-align: center;
-            padding: 20px;
-            animation: fadeIn 0.3s ease;
+            flex-direction: column;
+            gap: 20px;
         }
         
-        .offline-overlay.active {
+        .loading-overlay.active {
             display: flex;
         }
         
-        .offline-icon {
-            font-size: 64px;
-            color: var(--text-secondary);
-            margin-bottom: 20px;
-            opacity: 0.7;
-        }
-        
-        .offline-title {
-            font-size: 24px;
-            font-weight: 600;
-            color: var(--text-primary);
-            margin-bottom: 10px;
-        }
-        
-        .offline-message {
-            font-size: 16px;
-            color: var(--text-secondary);
-            margin-bottom: 30px;
-            max-width: 400px;
-            line-height: 1.5;
-        }
-        
-        .offline-submessage {
-            font-size: 14px;
-            color: var(--text-secondary);
-            opacity: 0.8;
-            max-width: 400px;
-            margin-top: 20px;
-            padding: 15px;
-            background-color: var(--secondary-color);
-            border-radius: 12px;
-            border-left: 4px solid var(--warning-color);
-        }
-        
-        .offline-dismiss-btn {
-            margin-top: 30px;
-            padding: 12px 30px;
-            background-color: var(--primary-color);
-            color: white;
-            border: none;
-            border-radius: 8px;
-            font-size: 16px;
-            font-weight: 500;
-            cursor: pointer;
-            transition: all 0.2s;
-            display: flex;
-            align-items: center;
-            gap: 10px;
-        }
-        
-        .offline-dismiss-btn:hover {
-            background-color: #0073e6;
-            transform: translateY(-2px);
-        }
-        
-        .offline-indicator {
-            position: fixed;
-            top: 70px;
-            right: 20px;
-            background-color: var(--warning-color);
-            color: white;
-            padding: 8px 16px;
-            border-radius: 20px;
-            font-size: 14px;
-            font-weight: 500;
-            z-index: 10000;
-            display: flex;
-            align-items: center;
-            gap: 8px;
-            box-shadow: var(--shadow);
-            animation: slideInRight 0.3s ease;
-            display: none;
-        }
-        
-        .offline-indicator.active {
-            display: flex;
+        .loading-spinner {
+            width: 50px;
+            height: 50px;
+            border: 4px solid var(--secondary-color);
+            border-top-color: var(--primary-color);
+            border-radius: 50%;
+            animation: spin 1s linear infinite;
         }
         
         /* Sidebar Styles */
@@ -1037,35 +963,6 @@
             background-color: var(--info-color);
         }
         
-        /* Loading Overlay */
-        .loading-overlay {
-            position: fixed;
-            top: 0;
-            left: 0;
-            width: 100%;
-            height: 100%;
-            background-color: rgba(255, 255, 255, 0.9);
-            z-index: 1300;
-            display: none;
-            align-items: center;
-            justify-content: center;
-            flex-direction: column;
-            gap: 20px;
-        }
-        
-        .loading-overlay.active {
-            display: flex;
-        }
-        
-        .loading-spinner {
-            width: 50px;
-            height: 50px;
-            border: 4px solid var(--secondary-color);
-            border-top-color: var(--primary-color);
-            border-radius: 50%;
-            animation: spin 1s linear infinite;
-        }
-        
         /* Plan Badges */
         .plan-badge {
             display: inline-block;
@@ -1237,10 +1134,6 @@
             
             .credit-amount {
                 font-size: 28px;
-            }
-            
-            .offline-indicator {
-                top: 70px;
             }
         }
         
@@ -1416,27 +1309,6 @@
                 <button class="category-filter-btn" data-category="productivity">Productivity</button>
             </div>
         </div>
-    </div>
-    
-    <!-- Offline Overlay -->
-    <div class="offline-overlay" id="offlineOverlay">
-        <div class="offline-icon">
-            <i class="fas fa-wifi-slash"></i>
-        </div>
-        <div class="offline-title">You're Offline</div>
-        <div class="offline-message">Some tools require internet connection to work properly.</div>
-        <div class="offline-submessage">
-            <i class="fas fa-info-circle"></i> You can still use cached tools, view your credits, and access most features. Tool usage and purchases will sync when you're back online.
-        </div>
-        <button class="offline-dismiss-btn" id="dismissOfflineBtn">
-            <i class="fas fa-eye"></i> View Cached Tools
-        </button>
-    </div>
-    
-    <!-- Offline Indicator -->
-    <div class="offline-indicator" id="offlineIndicator">
-        <i class="fas fa-wifi-slash"></i>
-        <span>Offline</span>
     </div>
     
     <!-- Loading Overlay -->
@@ -1817,7 +1689,7 @@
 
     <script>
         // =============================================
-        // COMPLETE TOOLS DASHBOARD SYSTEM - FIXED VERSION
+        // COMPLETE TOOLS DASHBOARD SYSTEM - API VERSION
         // =============================================
 
         // Global variables
@@ -1830,7 +1702,6 @@
         let selectedTool = null;
         let selectedCreditPackage = null;
         let currentCategoryFilter = 'all';
-        let isOnline = navigator.onLine;
         let isMobile = window.innerWidth <= 768;
         let currentContent = 'dashboard';
         let charts = {};
@@ -1976,7 +1847,7 @@
             }
         ];
         
-        // Sample tools data
+        // Sample tools data (fallback)
         const sampleTools = [
             {
                 id: 'ai_chat',
@@ -2050,7 +1921,7 @@
             }
         ];
         
-        // Sample transactions
+        // Sample transactions (fallback)
         const sampleTransactions = [
             {
                 id: 'tx1',
@@ -2078,8 +1949,6 @@
         const backBtn = document.getElementById('backBtn');
         const menuToggleBtn = document.getElementById('menuToggleBtn');
         const mobileNavMenu = document.getElementById('mobileNavMenu');
-        const offlineOverlay = document.getElementById('offlineOverlay');
-        const offlineIndicator = document.getElementById('offlineIndicator');
         const loadingOverlay = document.getElementById('loadingOverlay');
         const notification = document.getElementById('notification');
         const toolPreviewModal = document.getElementById('toolPreviewModal');
@@ -2146,22 +2015,63 @@
             // Initialize user data
             initializeUserData();
             
-            // Initialize offline detection
-            initializeOfflineDetection();
-            
             console.log('Tools Dashboard Initialized');
         }
         
-        function initializeUserData() {
-            // Set default user data
-            userData = {
-                displayName: 'Demo User',
-                photoURL: null
-            };
+        async function initializeUserData() {
+            try {
+                // Get current user from API
+                const response = await api('GET', '/api/user/current');
+                if (response.success && response.data) {
+                    currentUser = response.data;
+                    userData = {
+                        displayName: currentUser.displayName || currentUser.email || 'User',
+                        photoURL: currentUser.photoURL
+                    };
+                } else {
+                    // Fallback to demo user
+                    userData = {
+                        displayName: 'Demo User',
+                        photoURL: null
+                    };
+                }
+            } catch (error) {
+                console.error('Error loading user data:', error);
+                // Fallback to demo user
+                userData = {
+                    displayName: 'Demo User',
+                    photoURL: null
+                };
+            }
             
             // Update user display
             updateUserDisplay();
             updateMobileUserDisplay();
+            
+            // Load user credits
+            await loadUserCredits();
+        }
+        
+        async function loadUserCredits() {
+            try {
+                const response = await api('GET', '/api/user/credits');
+                if (response.success && response.data) {
+                    userCredits = response.data.credits || 100;
+                    userPlan = response.data.plan || 'free';
+                    
+                    // Update UI
+                    document.getElementById('creditAmount').textContent = userCredits;
+                    document.getElementById('mobileCreditAmount').textContent = userCredits;
+                    
+                    // Update plan display
+                    updateMobileUserDisplay();
+                }
+            } catch (error) {
+                console.error('Error loading user credits:', error);
+                // Use default values
+                document.getElementById('creditAmount').textContent = userCredits;
+                document.getElementById('mobileCreditAmount').textContent = userCredits;
+            }
         }
         
         function updateUserDisplay() {
@@ -2221,96 +2131,6 @@
             if (userPlanElement) {
                 userPlanElement.textContent = userPlans[userPlan]?.name + ' Plan';
             }
-        }
-        
-        function initializeOfflineDetection() {
-            updateOnlineStatus();
-            
-            window.addEventListener('online', handleOnline);
-            window.addEventListener('offline', handleOffline);
-            
-            updateUIForConnectivity();
-        }
-        
-        function updateOnlineStatus() {
-            isOnline = navigator.onLine;
-            console.log('Network status:', isOnline ? 'Online' : 'Offline');
-        }
-        
-        function handleOnline() {
-            console.log('App is now online');
-            isOnline = true;
-            updateUIForConnectivity();
-            
-            // Hide offline indicators
-            offlineIndicator.classList.remove('active');
-            offlineOverlay.classList.remove('active');
-            
-            showNotification('Back online!', 'success');
-        }
-        
-        function handleOffline() {
-            console.log('App is now offline');
-            isOnline = false;
-            
-            offlineIndicator.classList.add('active');
-            
-            // Show offline overlay if not already dismissed
-            const overlayDismissed = localStorage.getItem('offline_overlay_dismissed');
-            if (overlayDismissed !== 'true') {
-                offlineOverlay.classList.add('active');
-            }
-            
-            showNotification('You are offline. Some features may not work.', 'warning');
-        }
-        
-        function updateUIForConnectivity() {
-            if (!isOnline) {
-                updateUIForOfflineMode();
-            } else {
-                updateUIForOnlineMode();
-            }
-        }
-        
-        function updateUIForOfflineMode() {
-            offlineIndicator.classList.add('active');
-            updateButtonStatesForOffline();
-        }
-        
-        function updateUIForOnlineMode() {
-            offlineIndicator.classList.remove('active');
-            offlineOverlay.classList.remove('active');
-            updateButtonStatesForOnline();
-        }
-        
-        function updateButtonStatesForOffline() {
-            const onlineOnlyButtons = ['buyCreditsBtn', 'upgradePlanBtn', 'payoutRequestBtn', 'bookConsultationBtn'];
-            
-            onlineOnlyButtons.forEach(buttonId => {
-                const button = document.getElementById(buttonId);
-                if (button) {
-                    button.disabled = true;
-                    button.style.opacity = '0.7';
-                }
-            });
-        }
-        
-        function updateButtonStatesForOnline() {
-            const onlineOnlyButtons = ['buyCreditsBtn', 'upgradePlanBtn', 'payoutRequestBtn', 'bookConsultationBtn'];
-            
-            onlineOnlyButtons.forEach(buttonId => {
-                const button = document.getElementById(buttonId);
-                if (button) {
-                    button.disabled = false;
-                    button.style.opacity = '1';
-                }
-            });
-        }
-        
-        function dismissOfflineOverlay() {
-            offlineOverlay.classList.remove('active');
-            localStorage.setItem('offline_overlay_dismissed', 'true');
-            showNotification('Showing cached tools data', 'info');
         }
         
         function setupNavigation() {
@@ -2457,15 +2277,40 @@
             }
         }
         
-        function loadInitialData() {
-            // Load tools
-            tools = [...sampleTools];
+        async function loadInitialData() {
+            // Show loading overlay
+            loadingOverlay.classList.add('active');
             
-            // Load transactions
-            transactions = [...sampleTransactions];
-            
-            // Load content
-            loadContent('dashboard');
+            try {
+                // Load tools from API
+                const toolsResponse = await api('GET', '/api/tools');
+                if (toolsResponse.success && toolsResponse.data) {
+                    tools = toolsResponse.data;
+                } else {
+                    // Use sample tools as fallback
+                    tools = [...sampleTools];
+                }
+                
+                // Load transactions from API
+                const transactionsResponse = await api('GET', '/api/transactions');
+                if (transactionsResponse.success && transactionsResponse.data) {
+                    transactions = transactionsResponse.data;
+                } else {
+                    // Use sample transactions as fallback
+                    transactions = [...sampleTransactions];
+                }
+            } catch (error) {
+                console.error('Error loading initial data:', error);
+                // Use sample data as fallback
+                tools = [...sampleTools];
+                transactions = [...sampleTransactions];
+            } finally {
+                // Hide loading overlay
+                loadingOverlay.classList.remove('active');
+                
+                // Load content
+                loadContent('dashboard');
+            }
         }
         
         function loadContent(contentName) {
@@ -2847,45 +2692,62 @@
             }, 10);
         }
         
-        function useTool(tool) {
+        async function useTool(tool) {
             if (userCredits < tool.cost) {
                 showNotification('Insufficient credits', 'error');
                 return;
             }
             
-            // Deduct credits
-            userCredits -= tool.cost;
-            document.getElementById('creditAmount').textContent = userCredits;
-            document.getElementById('mobileCreditAmount').textContent = userCredits;
-            
-            // Update tool usage
-            tool.usage = (tool.usage || 0) + 1;
-            
-            // Record transaction
-            const transaction = {
-                id: 'tx_' + Date.now(),
-                type: 'tool_usage',
-                title: tool.name + ' Usage',
-                amount: -tool.cost,
-                date: new Date(),
-                status: 'completed',
-                details: `Used ${tool.cost} credits`
-            };
-            
-            transactions.unshift(transaction);
-            
-            // Update UI
-            updateDashboardStats();
-            updateMobileStats();
-            
-            // Show success message
-            showNotification(`${tool.name} executed successfully!`, 'success');
-            
-            // Close preview modal
-            toolPreviewModal.classList.remove('active');
-            
-            // Execute tool
-            executeTool(tool);
+            try {
+                // Call API to use tool
+                const response = await api('POST', '/api/tools/use', {
+                    toolId: tool.id,
+                    cost: tool.cost
+                });
+                
+                if (response.success) {
+                    // Update credits from response
+                    userCredits = response.data.credits || userCredits - tool.cost;
+                    
+                    // Update UI
+                    document.getElementById('creditAmount').textContent = userCredits;
+                    document.getElementById('mobileCreditAmount').textContent = userCredits;
+                    
+                    // Update tool usage
+                    tool.usage = (tool.usage || 0) + 1;
+                    
+                    // Add transaction locally
+                    const transaction = {
+                        id: 'tx_' + Date.now(),
+                        type: 'tool_usage',
+                        title: tool.name + ' Usage',
+                        amount: -tool.cost,
+                        date: new Date(),
+                        status: 'completed',
+                        details: `Used ${tool.cost} credits`
+                    };
+                    
+                    transactions.unshift(transaction);
+                    
+                    // Update UI
+                    updateDashboardStats();
+                    updateMobileStats();
+                    
+                    // Show success message
+                    showNotification(`${tool.name} executed successfully!`, 'success');
+                    
+                    // Close preview modal
+                    toolPreviewModal.classList.remove('active');
+                    
+                    // Execute tool
+                    executeTool(tool);
+                } else {
+                    showNotification(response.message || 'Failed to use tool', 'error');
+                }
+            } catch (error) {
+                console.error('Error using tool:', error);
+                showNotification('Failed to use tool', 'error');
+            }
         }
         
         function executeTool(tool) {
@@ -3040,19 +2902,42 @@
             }
         }
         
-        function updateAffiliateDisplay() {
-            const totalEarnings = document.getElementById('totalEarnings');
-            const referralCount = document.getElementById('referralCount');
-            const pendingPayout = document.getElementById('pendingPayout');
-            
-            if (totalEarnings) totalEarnings.textContent = '$0';
-            if (referralCount) referralCount.textContent = '0';
-            if (pendingPayout) pendingPayout.textContent = '$0';
-            
-            // Generate referral link
-            const referralLink = document.getElementById('referralLink');
-            if (referralLink && currentUser) {
-                referralLink.value = `https://moodchat.com/ref/demo123`;
+        async function updateAffiliateDisplay() {
+            try {
+                // Load affiliate data from API
+                const response = await api('GET', '/api/affiliate');
+                if (response.success && response.data) {
+                    const { totalEarnings, referralCount, pendingPayout, referralLink } = response.data;
+                    
+                    const totalEarningsElement = document.getElementById('totalEarnings');
+                    const referralCountElement = document.getElementById('referralCount');
+                    const pendingPayoutElement = document.getElementById('pendingPayout');
+                    const referralLinkElement = document.getElementById('referralLink');
+                    
+                    if (totalEarningsElement) totalEarningsElement.textContent = `$${totalEarnings || 0}`;
+                    if (referralCountElement) referralCountElement.textContent = referralCount || 0;
+                    if (pendingPayoutElement) pendingPayoutElement.textContent = `$${pendingPayout || 0}`;
+                    if (referralLinkElement && referralLink) referralLinkElement.value = referralLink;
+                } else {
+                    // Use default values
+                    const totalEarningsElement = document.getElementById('totalEarnings');
+                    const referralCountElement = document.getElementById('referralCount');
+                    const pendingPayoutElement = document.getElementById('pendingPayout');
+                    
+                    if (totalEarningsElement) totalEarningsElement.textContent = '$0';
+                    if (referralCountElement) referralCountElement.textContent = '0';
+                    if (pendingPayoutElement) pendingPayoutElement.textContent = '$0';
+                }
+            } catch (error) {
+                console.error('Error loading affiliate data:', error);
+                // Use default values
+                const totalEarningsElement = document.getElementById('totalEarnings');
+                const referralCountElement = document.getElementById('referralCount');
+                const pendingPayoutElement = document.getElementById('pendingPayout');
+                
+                if (totalEarningsElement) totalEarningsElement.textContent = '$0';
+                if (referralCountElement) referralCountElement.textContent = '0';
+                if (pendingPayoutElement) pendingPayoutElement.textContent = '$0';
             }
         }
         
@@ -3073,13 +2958,20 @@
                 });
         }
         
-        function requestPayout() {
-            if (!isOnline) {
-                showNotification('Cannot request payout while offline', 'error');
-                return;
+        async function requestPayout() {
+            try {
+                const response = await api('POST', '/api/affiliate/payout');
+                if (response.success) {
+                    showNotification('Payout request submitted successfully', 'success');
+                    // Refresh affiliate data
+                    updateAffiliateDisplay();
+                } else {
+                    showNotification(response.message || 'Failed to request payout', 'error');
+                }
+            } catch (error) {
+                console.error('Error requesting payout:', error);
+                showNotification('Failed to request payout', 'error');
             }
-            
-            showNotification('Payout request submitted', 'success');
         }
         
         function loadConsultation() {
@@ -3125,17 +3017,22 @@
             });
         }
         
-        function bookConsultation(service) {
-            if (!isOnline) {
-                showNotification('Cannot book consultations while offline', 'error');
-                return;
+        async function bookConsultation(service) {
+            try {
+                const response = await api('POST', '/api/consultation/book', {
+                    serviceId: service.id,
+                    price: service.price
+                });
+                
+                if (response.success) {
+                    showNotification(`${service.name} booked successfully! We'll contact you shortly.`, 'success');
+                } else {
+                    showNotification(response.message || 'Failed to book consultation', 'error');
+                }
+            } catch (error) {
+                console.error('Error booking consultation:', error);
+                showNotification('Failed to book consultation', 'error');
             }
-            
-            showNotification(`Booking ${service.name} for $${service.price}...`, 'info');
-            
-            setTimeout(() => {
-                showNotification(`${service.name} booked successfully! We'll contact you shortly.`, 'success');
-            }, 2000);
         }
         
         function loadMarketplace() {
@@ -3178,19 +3075,28 @@
             });
         }
         
-        function buyMarketplaceItem(item) {
-            if (!isOnline) {
-                showNotification('Cannot purchase marketplace items while offline', 'error');
-                return;
-            }
-            
-            showNotification(`Added ${item.name} to cart`, 'success');
-            
-            // Update cart count
-            const cartBtn = document.getElementById('viewCartBtn');
-            if (cartBtn) {
-                const currentCount = parseInt(cartBtn.textContent.match(/\((\d+)\)/)?.[1] || 0);
-                cartBtn.textContent = cartBtn.textContent.replace(/\(\d+\)/, `(${currentCount + 1})`);
+        async function buyMarketplaceItem(item) {
+            try {
+                const response = await api('POST', '/api/marketplace/add-to-cart', {
+                    itemId: item.id,
+                    price: item.price
+                });
+                
+                if (response.success) {
+                    showNotification(`Added ${item.name} to cart`, 'success');
+                    
+                    // Update cart count
+                    const cartBtn = document.getElementById('viewCartBtn');
+                    if (cartBtn) {
+                        const currentCount = parseInt(cartBtn.textContent.match(/\((\d+)\)/)?.[1] || 0);
+                        cartBtn.textContent = cartBtn.textContent.replace(/\(\d+\)/, `(${currentCount + 1})`);
+                    }
+                } else {
+                    showNotification(response.message || 'Failed to add item to cart', 'error');
+                }
+            } catch (error) {
+                console.error('Error adding item to cart:', error);
+                showNotification('Failed to add item to cart', 'error');
             }
         }
         
@@ -3254,19 +3160,24 @@
             });
         }
         
-        function upgradePlan(planId, price) {
-            if (!isOnline) {
-                showNotification('Cannot upgrade plan while offline', 'error');
-                return;
-            }
-            
-            if (price > 0) {
-                showPaymentModal('plan', planId, price);
-            } else {
-                userPlan = planId;
-                updateMobileUserDisplay();
-                loadPlanComparison();
-                showNotification(`Upgraded to ${userPlans[planId].name} Plan!`, 'success');
+        async function upgradePlan(planId, price) {
+            try {
+                const response = await api('POST', '/api/user/upgrade-plan', {
+                    plan: planId,
+                    price: price
+                });
+                
+                if (response.success) {
+                    userPlan = planId;
+                    updateMobileUserDisplay();
+                    loadPlanComparison();
+                    showNotification(`Upgraded to ${userPlans[planId].name} Plan!`, 'success');
+                } else {
+                    showNotification(response.message || 'Failed to upgrade plan', 'error');
+                }
+            } catch (error) {
+                console.error('Error upgrading plan:', error);
+                showNotification('Failed to upgrade plan', 'error');
             }
         }
         
@@ -3347,7 +3258,7 @@
             paymentModal.classList.add('active');
         }
         
-        function processPayment() {
+        async function processPayment() {
             if (!selectedCreditPackage) {
                 showNotification('Please select a credit package', 'warning');
                 return;
@@ -3357,45 +3268,52 @@
             const loadingText = document.getElementById('loadingText');
             if (loadingText) loadingText.textContent = 'Processing payment...';
             
-            setTimeout(() => {
+            try {
+                const response = await api('POST', '/api/payment/purchase-credits', {
+                    packageId: selectedCreditPackage.id,
+                    credits: selectedCreditPackage.credits,
+                    price: selectedCreditPackage.price,
+                    bonus: selectedCreditPackage.bonus
+                });
+                
+                if (response.success) {
+                    // Update credits from response
+                    userCredits = response.data.credits || userCredits + selectedCreditPackage.credits + selectedCreditPackage.bonus;
+                    document.getElementById('creditAmount').textContent = userCredits;
+                    document.getElementById('mobileCreditAmount').textContent = userCredits;
+                    
+                    // Add transaction locally
+                    const transaction = {
+                        id: 'tx_' + Date.now(),
+                        type: 'credit_purchase',
+                        title: 'Credit Purchase',
+                        amount: -selectedCreditPackage.price,
+                        date: new Date(),
+                        status: 'completed',
+                        details: `Purchased ${selectedCreditPackage.credits + selectedCreditPackage.bonus} credits`
+                    };
+                    
+                    transactions.unshift(transaction);
+                    
+                    // Update UI
+                    updateDashboardStats();
+                    
+                    // Show success
+                    showNotification(`Successfully purchased ${selectedCreditPackage.credits + selectedCreditPackage.bonus} credits!`, 'success');
+                } else {
+                    showNotification(response.message || 'Payment failed', 'error');
+                }
+            } catch (error) {
+                console.error('Error processing payment:', error);
+                showNotification('Payment failed', 'error');
+            } finally {
                 loadingOverlay.classList.remove('active');
-                
-                // Add credits
-                userCredits += selectedCreditPackage.credits + selectedCreditPackage.bonus;
-                document.getElementById('creditAmount').textContent = userCredits;
-                document.getElementById('mobileCreditAmount').textContent = userCredits;
-                
-                // Record transaction
-                const transaction = {
-                    id: 'tx_' + Date.now(),
-                    type: 'credit_purchase',
-                    title: 'Credit Purchase',
-                    amount: -selectedCreditPackage.price,
-                    date: new Date(),
-                    status: 'completed',
-                    details: `Purchased ${selectedCreditPackage.credits + selectedCreditPackage.bonus} credits`
-                };
-                
-                transactions.unshift(transaction);
-                
-                // Update UI
-                updateDashboardStats();
-                
-                // Close modal and show success
                 paymentModal.classList.remove('active');
-                showNotification(`Successfully purchased ${selectedCreditPackage.credits + selectedCreditPackage.bonus} credits!`, 'success');
-                
-            }, 2000);
+            }
         }
         
         function setupEventListeners() {
             console.log('Setting up event listeners...');
-            
-            // Dismiss offline overlay
-            const dismissOfflineBtn = document.getElementById('dismissOfflineBtn');
-            if (dismissOfflineBtn) {
-                dismissOfflineBtn.addEventListener('click', dismissOfflineOverlay);
-            }
             
             // Category filters (desktop)
             document.querySelectorAll('.sidebar .category-filter-btn').forEach(btn => {
@@ -3430,10 +3348,6 @@
                 buyCreditsBtn.addEventListener('click', (e) => {
                     e.preventDefault();
                     e.stopPropagation();
-                    if (!isOnline) {
-                        showNotification('Cannot purchase credits while offline', 'error');
-                        return;
-                    }
                     showPaymentModal('credits');
                 });
             }

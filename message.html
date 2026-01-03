@@ -10,11 +10,8 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
     <title>Chat | Knecta Chat</title>
     
-    <!-- Firebase SDK -->
-    <script src="https://www.gstatic.com/firebasejs/9.22.0/firebase-app-compat.js"></script>
-    <script src="https://www.gstatic.com/firebasejs/9.22.0/firebase-firestore-compat.js"></script>
-    <script src="https://www.gstatic.com/firebasejs/9.22.0/firebase-auth-compat.js"></script>
-    <script src="https://www.gstatic.com/firebasejs/9.22.0/firebase-storage-compat.js"></script>
+    <!-- API Helper -->
+    <script src="../js/api.js"></script>
     
     <!-- Font Awesome -->
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
@@ -150,30 +147,6 @@
         .offline-dismiss-btn:hover {
             background-color: #0073e6;
             transform: translateY(-2px);
-        }
-        
-        /* Offline Indicator */
-        .offline-indicator {
-            position: fixed;
-            top: 20px;
-            right: 20px;
-            background-color: var(--warning-color);
-            color: white;
-            padding: 8px 16px;
-            border-radius: 20px;
-            font-size: 14px;
-            font-weight: 500;
-            z-index: 10000;
-            display: flex;
-            align-items: center;
-            gap: 8px;
-            box-shadow: var(--shadow);
-            animation: slideInRight 0.3s ease;
-            display: none;
-        }
-        
-        .offline-indicator.active {
-            display: flex;
         }
         
         /* Syncing Indicator */
@@ -1887,24 +1860,6 @@
     </style>
 </head>
 <body>
-    <!-- Offline Overlay -->
-    <div class="offline-overlay" id="offlineOverlay">
-        <div class="offline-icon">
-            <i class="fas fa-wifi-slash"></i>
-        </div>
-        <div class="offline-title">You're Offline</div>
-        <div class="offline-message">Chat messages will be sent when you're back online.</div>
-        <button class="offline-dismiss-btn" id="dismissOfflineBtn">
-            <i class="fas fa-eye"></i> View Cached Messages
-        </button>
-    </div>
-    
-    <!-- Offline Indicator -->
-    <div class="offline-indicator" id="offlineIndicator">
-        <i class="fas fa-wifi-slash"></i>
-        <span>Offline</span>
-    </div>
-    
     <!-- Syncing Indicator -->
     <div class="syncing-indicator" id="syncingIndicator">
         <div class="loading-spinner" style="width: 16px; height: 16px; margin: 0;"></div>
@@ -2182,30 +2137,6 @@
         // COMPLETE CHAT SYSTEM WITH ALL FEATURES
         // =============================================
 
-        // Firebase Configuration
-        const firebaseConfig = {
-            apiKey: "AIzaSyDHHyGgsSV18BcXrGgzi4C8frzDAE1C1zo",
-            authDomain: "uniconnect-ee95c.firebaseapp.com",
-            projectId: "uniconnect-ee95c",
-            storageBucket: "uniconnect-ee95c.firebasestorage.app",
-            messagingSenderId: "1003264444309",
-            appId: "1:1003264444309:web:9f0307516e44d21e97d89c"
-        };
-        
-        // Initialize Firebase
-        let firebaseInitialized = false;
-        try {
-            firebase.initializeApp(firebaseConfig);
-            firebaseInitialized = true;
-            console.log('Firebase initialized successfully');
-        } catch (error) {
-            console.log('Firebase initialization error:', error);
-        }
-        
-        const db = firebaseInitialized ? firebase.firestore() : null;
-        const auth = firebaseInitialized ? firebase.auth() : null;
-        const storage = firebaseInitialized ? firebase.storage() : null;
-        
         // Global variables
         let currentUser = null;
         let currentChat = null;
@@ -2213,7 +2144,6 @@
         let messages = [];
         let chats = [];
         let contacts = [];
-        let isOnline = navigator.onLine;
         let isRecording = false;
         let mediaRecorder = null;
         let recordingTimer = null;
@@ -2263,8 +2193,6 @@
         const mediaViewer = document.getElementById('mediaViewer');
         const threadPanel = document.getElementById('threadPanel');
         const chatsList = document.getElementById('chatsList');
-        const offlineOverlay = document.getElementById('offlineOverlay');
-        const offlineIndicator = document.getElementById('offlineIndicator');
         const syncingIndicator = document.getElementById('syncingIndicator');
         const chatInfoModal = document.getElementById('chatInfoModal');
         const reportModal = document.getElementById('reportModal');
@@ -2334,8 +2262,6 @@
                     currentChat = existingChat;
                     await loadMessages();
                     startMessageListener();
-                    startTypingListener();
-                    startPresenceListener();
                     applyChatTheme(userId);
                 } else {
                     // Create new chat object for display
@@ -2364,24 +2290,9 @@
                     showNotification(`Chat with ${username} started`, 'success');
                 }
                 
-                // Set user presence
-                if (firebaseInitialized && currentUser) {
-                    // Check if friend exists in Firebase
-                    try {
-                        const friendDoc = await db.collection('users').doc(userId).get();
-                        if (friendDoc.exists) {
-                            const friendData = friendDoc.data();
-                            updateFriendPresence(friendData);
-                        } else {
-                            document.getElementById('chatStatusText').textContent = 'Offline';
-                            document.getElementById('chatStatusIndicator').className = 'chat-status offline';
-                        }
-                    } catch (error) {
-                        console.error('Error checking friend presence:', error);
-                        document.getElementById('chatStatusText').textContent = 'Offline';
-                        document.getElementById('chatStatusIndicator').className = 'chat-status offline';
-                    }
-                }
+                // Set user status
+                document.getElementById('chatStatusText').textContent = 'Online';
+                document.getElementById('chatStatusIndicator').className = 'chat-status online';
                 
             } catch (error) {
                 console.error('Error opening chat panel:', error);
@@ -2418,11 +2329,6 @@
             // Initialize emoji picker
             initEmojiPicker();
             
-            // Check online status
-            updateOnlineStatus();
-            window.addEventListener('online', handleOnline);
-            window.addEventListener('offline', handleOffline);
-            
             // Check for auto-load parameters from URL
             const urlUser = getUserFromURL();
             if (urlUser) {
@@ -2438,18 +2344,11 @@
                 }
             }
             
-            // Start presence tracking
-            if (firebaseInitialized && currentUser) {
-                startPresenceTracking();
-            }
-            
-            // Start background sync if online
-            if (isOnline) {
-                startBackgroundSync();
-            }
-            
             showNotification('Chat system ready', 'success');
             updateChatCategoryBadges();
+            
+            // Start background sync
+            startBackgroundSync();
         });
         
         async function loadUser() {
@@ -2461,20 +2360,15 @@
                     console.log('Loaded user from cache:', currentUser.uid);
                 }
                 
-                // Try Firebase auth
-                if (firebaseInitialized && auth) {
-                    await new Promise((resolve) => {
-                        const unsubscribe = auth.onAuthStateChanged(user => {
-                            unsubscribe();
-                            if (user) {
-                                currentUser = user;
-                                console.log('User detected from Firebase:', currentUser.uid);
-                                resolve(user);
-                            } else {
-                                resolve();
-                            }
-                        });
-                    });
+                // Try API
+                try {
+                    const response = await api('/api/auth/me');
+                    if (response.success && response.user) {
+                        currentUser = response.user;
+                        console.log('User detected from API:', currentUser.uid);
+                    }
+                } catch (error) {
+                    console.log('No user from API');
                 }
                 
                 // Load user profile
@@ -2530,53 +2424,24 @@
                     renderContactsList();
                 }
                 
-                // Load from Firebase if online
-                if (isOnline && firebaseInitialized && currentUser) {
-                    await loadContactsFromFirebase();
-                }
+                // Load from API
+                await loadContactsFromAPI();
                 
             } catch (error) {
                 console.error('Error loading contacts:', error);
             }
         }
         
-        async function loadContactsFromFirebase() {
-            if (!firebaseInitialized || !currentUser) return;
-            
+        async function loadContactsFromAPI() {
             try {
-                // Load blocked users
-                const blockedUsers = JSON.parse(localStorage.getItem(LOCAL_STORAGE_KEYS.BLOCKED_USERS) || '[]');
-                
-                // Load users from Firebase
-                const usersSnapshot = await db.collection('users')
-                    .where('uid', '!=', currentUser.uid)
-                    .limit(100)
-                    .get();
-                
-                const newContacts = [];
-                
-                usersSnapshot.forEach(doc => {
-                    const userData = doc.data();
-                    if (!blockedUsers.includes(userData.uid)) {
-                        newContacts.push({
-                            uid: userData.uid,
-                            displayName: userData.displayName || 'Unknown User',
-                            username: userData.username || '',
-                            photoURL: userData.photoURL || '',
-                            email: userData.email || '',
-                            online: userData.online || false,
-                            lastSeen: userData.lastSeen?.toDate() || new Date(),
-                            isContact: true
-                        });
-                    }
-                });
-                
-                contacts = newContacts;
-                localStorage.setItem(LOCAL_STORAGE_KEYS.CONTACTS, JSON.stringify(contacts));
-                renderContactsList();
-                
+                const response = await api('/api/contacts');
+                if (response.success && response.contacts) {
+                    contacts = response.contacts;
+                    localStorage.setItem(LOCAL_STORAGE_KEYS.CONTACTS, JSON.stringify(contacts));
+                    renderContactsList();
+                }
             } catch (error) {
-                console.error('Error loading contacts from Firebase:', error);
+                console.error('Error loading contacts from API:', error);
             }
         }
         
@@ -2611,8 +2476,8 @@
                     <div class="contact-info">
                         <div class="contact-name">${contact.displayName}</div>
                         <div class="contact-status">
-                            <div class="status-indicator ${contact.online ? 'online' : 'offline'}"></div>
-                            <span>${contact.online ? 'Online' : 'Last seen ' + formatTime(contact.lastSeen)}</span>
+                            <div class="status-indicator online"></div>
+                            <span>Online</span>
                         </div>
                     </div>
                 `;
@@ -2656,84 +2521,24 @@
                     renderChatsList();
                 }
                 
-                // Load from Firebase if online
-                if (isOnline && firebaseInitialized && currentUser) {
-                    await loadChatsFromFirebase();
-                }
+                // Load from API
+                await loadChatsFromAPI();
                 
             } catch (error) {
                 console.error('Error loading chats:', error);
             }
         }
         
-        async function loadChatsFromFirebase() {
-            if (!firebaseInitialized || !currentUser) return;
-            
+        async function loadChatsFromAPI() {
             try {
-                const chatsSnapshot = await db.collection('chats')
-                    .where('participants', 'array-contains', currentUser.uid)
-                    .orderBy('lastMessageAt', 'desc')
-                    .limit(50)
-                    .get();
-                
-                const newChats = [];
-                const archivedChats = JSON.parse(localStorage.getItem(LOCAL_STORAGE_KEYS.ARCHIVED_CHATS) || '[]');
-                const blockedUsers = JSON.parse(localStorage.getItem(LOCAL_STORAGE_KEYS.BLOCKED_USERS) || '[]');
-                
-                for (const doc of chatsSnapshot.docs) {
-                    const chatData = doc.data();
-                    const otherParticipantId = chatData.participants.find(id => id !== currentUser.uid);
-                    
-                    if (otherParticipantId && !blockedUsers.includes(otherParticipantId)) {
-                        const userDoc = await db.collection('users').doc(otherParticipantId).get();
-                        if (userDoc.exists) {
-                            const userData = userDoc.data();
-                            const chat = {
-                                id: doc.id,
-                                friendId: otherParticipantId,
-                                friendName: userData.displayName || 'Unknown User',
-                                friendUsername: userData.username || '',
-                                friendAvatar: userData.photoURL || '',
-                                lastMessage: chatData.lastMessage || '',
-                                lastMessageAt: chatData.lastMessageAt?.toDate() || new Date(),
-                                unreadCount: chatData.unreadCount?.[currentUser.uid] || 0,
-                                type: chatData.type || 'direct',
-                                isTemporary: chatData.isTemporary || false,
-                                expiresAt: chatData.expiresAt || null,
-                                archived: archivedChats.includes(doc.id),
-                                blocked: false
-                            };
-                            newChats.push(chat);
-                        }
-                    }
+                const response = await api('/api/chats');
+                if (response.success && response.chats) {
+                    chats = response.chats;
+                    localStorage.setItem(LOCAL_STORAGE_KEYS.CHATS, JSON.stringify(chats));
+                    renderChatsList();
                 }
-                
-                // Add blocked users as "blocked" chats
-                blockedUsers.forEach(blockedId => {
-                    // Check if already in chats
-                    if (!newChats.find(chat => chat.friendId === blockedId)) {
-                        newChats.push({
-                            id: 'blocked_' + blockedId,
-                            friendId: blockedId,
-                            friendName: 'Blocked User',
-                            friendUsername: '',
-                            friendAvatar: '',
-                            lastMessage: 'This user is blocked',
-                            lastMessageAt: new Date(),
-                            unreadCount: 0,
-                            type: 'blocked',
-                            archived: false,
-                            blocked: true
-                        });
-                    }
-                });
-                
-                chats = newChats;
-                localStorage.setItem(LOCAL_STORAGE_KEYS.CHATS, JSON.stringify(chats));
-                renderChatsList();
-                
             } catch (error) {
-                console.error('Error loading chats from Firebase:', error);
+                console.error('Error loading chats from API:', error);
             }
         }
         
@@ -3019,12 +2824,14 @@
                     renderMessages();
                 }
                 
-                // Clear from Firebase if online
-                if (isOnline && firebaseInitialized) {
-                    // Note: In production, you might want to soft delete or archive messages
-                    // instead of actually deleting them
-                    showNotification('Chat history cleared locally', 'success');
+                // Call API to clear chat
+                try {
+                    await api(`/api/chats/${chatId}/clear`, 'POST');
+                } catch (error) {
+                    // Silently fail for API calls
                 }
+                
+                showNotification('Chat history cleared', 'success');
                 
             } catch (error) {
                 console.error('Error clearing chat history:', error);
@@ -3049,7 +2856,7 @@
                 
                 // Update UI
                 document.getElementById('chatFriendName').textContent = chat.friendName;
-                document.getElementById('chatStatusText').textContent = 'Loading...';
+                document.getElementById('chatStatusText').textContent = 'Online';
                 
                 const avatarEl = document.getElementById('chatFriendAvatar');
                 if (chat.friendAvatar) {
@@ -3078,15 +2885,6 @@
                 // Focus input
                 messageInput.focus();
                 
-                // Start listening for new messages
-                startMessageListener();
-                
-                // Start typing indicator listener
-                startTypingListener();
-                
-                // Start presence listener
-                startPresenceListener();
-                
             } catch (error) {
                 console.error('Error opening chat:', error);
                 showNotification('Error opening chat', 'error');
@@ -3103,54 +2901,36 @@
                     return;
                 }
                 
-                // Create new chat
-                if (firebaseInitialized && isOnline) {
-                    // Get friend info from Firebase
-                    const friendDoc = await db.collection('users').doc(friendId).get();
-                    if (friendDoc.exists) {
-                        const friendData = friendDoc.data();
+                // Get friend info from API
+                try {
+                    const response = await api(`/api/users/${friendId}`);
+                    if (response.success && response.user) {
+                        const friendData = response.user;
                         
-                        // Create chat in Firebase
-                        const chatData = {
-                            participants: [currentUser.uid, friendId],
-                            type: 'direct',
-                            createdAt: firebase.firestore.FieldValue.serverTimestamp(),
-                            lastMessageAt: firebase.firestore.FieldValue.serverTimestamp(),
-                            unreadCount: {
-                                [currentUser.uid]: 0,
-                                [friendId]: 0
-                            }
-                        };
+                        // Create chat via API
+                        const chatResponse = await api('/api/chats/create', 'POST', {
+                            friendId: friendId
+                        });
                         
-                        const chatRef = await db.collection('chats').add(chatData);
-                        
-                        const newChat = {
-                            id: chatRef.id,
-                            friendId: friendId,
-                            friendName: friendData.displayName || 'Unknown User',
-                            friendUsername: friendData.username || '',
-                            friendAvatar: friendData.photoURL || '',
-                            lastMessage: '',
-                            lastMessageAt: new Date(),
-                            unreadCount: 0,
-                            type: 'direct',
-                            archived: false,
-                            blocked: false
-                        };
-                        
-                        chats.unshift(newChat);
-                        localStorage.setItem(LOCAL_STORAGE_KEYS.CHATS, JSON.stringify(chats));
-                        renderChatsList();
-                        
-                        await openChat(newChat);
-                        
-                        // Clear session data
-                        localStorage.removeItem(LOCAL_STORAGE_KEYS.CURRENT_CHAT);
+                        if (chatResponse.success && chatResponse.chat) {
+                            const newChat = chatResponse.chat;
+                            chats.unshift(newChat);
+                            localStorage.setItem(LOCAL_STORAGE_KEYS.CHATS, JSON.stringify(chats));
+                            renderChatsList();
+                            
+                            await openChat(newChat);
+                            
+                            // Clear session data
+                            localStorage.removeItem(LOCAL_STORAGE_KEYS.CURRENT_CHAT);
+                        } else {
+                            showNotification('Failed to create chat', 'error');
+                        }
                     } else {
                         showNotification('Friend not found', 'error');
                     }
-                } else {
-                    showNotification('Cannot create chat while offline', 'warning');
+                } catch (error) {
+                    console.error('Error creating chat:', error);
+                    showNotification('Cannot create chat at the moment', 'warning');
                 }
                 
             } catch (error) {
@@ -3179,10 +2959,8 @@
                     renderMessages();
                 }
                 
-                // Load from Firebase if online
-                if (isOnline && firebaseInitialized && currentChat) {
-                    await loadMessagesFromFirebase();
-                }
+                // Load from API
+                await loadMessagesFromAPI();
                 
                 // Scroll to bottom
                 setTimeout(() => {
@@ -3201,37 +2979,21 @@
             }
         }
         
-        async function loadMessagesFromFirebase() {
-            if (!firebaseInitialized || !currentChat) return;
+        async function loadMessagesFromAPI() {
+            if (!currentChat) return;
             
             try {
-                const messagesSnapshot = await db.collection('chats')
-                    .doc(currentChat.id)
-                    .collection('messages')
-                    .orderBy('timestamp', 'desc')
-                    .limit(100)
-                    .get();
-                
-                const newMessages = [];
-                
-                messagesSnapshot.forEach(doc => {
-                    const messageData = doc.data();
-                    newMessages.push({
-                        id: doc.id,
-                        ...messageData,
-                        timestamp: messageData.timestamp?.toDate() || new Date()
-                    });
-                });
-                
-                messages = newMessages.reverse();
-                
-                // Save to localStorage
-                localStorage.setItem(`${LOCAL_STORAGE_KEYS.MESSAGES}${currentChat.id}`, JSON.stringify(messages));
-                
-                renderMessages();
-                
+                const response = await api(`/api/chats/${currentChat.id}/messages`);
+                if (response.success && response.messages) {
+                    messages = response.messages;
+                    
+                    // Save to localStorage
+                    localStorage.setItem(`${LOCAL_STORAGE_KEYS.MESSAGES}${currentChat.id}`, JSON.stringify(messages));
+                    
+                    renderMessages();
+                }
             } catch (error) {
-                console.error('Error loading messages from Firebase:', error);
+                console.error('Error loading messages from API:', error);
             }
         }
         
@@ -3524,11 +3286,6 @@
                 });
             });
             
-            // Add typing indicator if active
-            if (isTyping) {
-                addTypingIndicator();
-            }
-            
             // Initialize audio waveforms
             initializeAudioWaveforms();
         }
@@ -3595,32 +3352,6 @@
             });
         }
         
-        function addTypingIndicator() {
-            // Remove existing typing indicator
-            const existingTyping = document.querySelector('.typing-indicator-container');
-            if (existingTyping) {
-                existingTyping.remove();
-            }
-            
-            const typingContainer = document.createElement('div');
-            typingContainer.className = 'message-group received typing-indicator-container';
-            
-            const typingIndicator = document.createElement('div');
-            typingIndicator.className = 'typing-indicator';
-            typingIndicator.innerHTML = `
-                <span>${currentFriend.displayName} is typing</span>
-                <div class="typing-dots">
-                    <div class="typing-dot"></div>
-                    <div class="typing-dot"></div>
-                    <div class="typing-dot"></div>
-                </div>
-            `;
-            
-            typingContainer.appendChild(typingIndicator);
-            messagesContainer.appendChild(typingContainer);
-            messagesContainer.scrollTop = messagesContainer.scrollHeight;
-        }
-        
         async function sendMessage(content, type = 'text', options = {}) {
             if (!currentChat || !currentUser) {
                 showNotification('Please select a chat first', 'warning');
@@ -3640,7 +3371,7 @@
                     content: content,
                     type: type,
                     timestamp: new Date(),
-                    status: isOnline ? 'pending' : 'offline',
+                    status: 'sent',
                     chatId: currentChat.id,
                     edited: false,
                     deleted: false,
@@ -3668,7 +3399,6 @@
                 messageInput.value = '';
                 messageInput.style.height = 'auto';
                 replyToMessage = null;
-                updateReplyIndicator();
                 
                 // Save to localStorage
                 localStorage.setItem(`${LOCAL_STORAGE_KEYS.MESSAGES}${currentChat.id}`, JSON.stringify(messages));
@@ -3676,30 +3406,15 @@
                 // Update chat list
                 updateChatLastMessage(content, type);
                 
-                if (isOnline && firebaseInitialized) {
-                    // Send to Firebase
-                    const savedMessage = await sendMessageToFirebase(messageData);
-                    
-                    // Update message with real ID and status
-                    const messageIndex = messages.findIndex(m => m.id === messageData.id);
-                    if (messageIndex !== -1 && savedMessage) {
-                        messages[messageIndex].id = savedMessage.id;
-                        messages[messageIndex].status = 'sent';
-                        localStorage.setItem(`${LOCAL_STORAGE_KEYS.MESSAGES}${currentChat.id}`, JSON.stringify(messages));
-                        
-                        // Update UI
-                        renderMessages();
-                    }
-                } else {
-                    // Save offline message
-                    saveOfflineMessage(messageData);
-                    showNotification('Message saved offline', 'info');
-                }
+                // Send to API
+                const savedMessage = await sendMessageToAPI(messageData);
                 
-                // Reset typing indicator
-                if (typingTimeout) {
-                    clearTimeout(typingTimeout);
-                    typingTimeout = null;
+                // Update message with real ID and status
+                const messageIndex = messages.findIndex(m => m.id === messageData.id);
+                if (messageIndex !== -1 && savedMessage) {
+                    messages[messageIndex].id = savedMessage.id;
+                    messages[messageIndex].status = 'sent';
+                    localStorage.setItem(`${LOCAL_STORAGE_KEYS.MESSAGES}${currentChat.id}`, JSON.stringify(messages));
                 }
                 
             } catch (error) {
@@ -3708,68 +3423,36 @@
             }
         }
         
-        async function sendMessageToFirebase(messageData) {
-            if (!firebaseInitialized || !currentChat) return null;
+        async function sendMessageToAPI(messageData) {
+            if (!currentChat) return null;
             
             try {
-                // Prepare data for Firebase
-                const firebaseData = {
-                    senderId: messageData.senderId,
-                    senderName: messageData.senderName,
+                const response = await api(`/api/chats/${currentChat.id}/messages`, 'POST', {
                     content: messageData.content,
                     type: messageData.type,
-                    timestamp: firebase.firestore.FieldValue.serverTimestamp(),
-                    status: 'sent',
-                    chatId: messageData.chatId,
-                    edited: false,
-                    deleted: false
-                };
-                
-                // Add optional fields
-                if (messageData.replyTo) {
-                    firebaseData.replyTo = messageData.replyTo;
-                }
-                if (messageData.fileName) {
-                    firebaseData.fileName = messageData.fileName;
-                }
-                if (messageData.fileSize) {
-                    firebaseData.fileSize = messageData.fileSize;
-                }
-                if (messageData.duration) {
-                    firebaseData.duration = messageData.duration;
-                }
-                if (messageData.thumbnail) {
-                    firebaseData.thumbnail = messageData.thumbnail;
-                }
-                if (messageData.caption) {
-                    firebaseData.caption = messageData.caption;
-                }
-                
-                // Add message to Firebase
-                const messageRef = await db.collection('chats')
-                    .doc(currentChat.id)
-                    .collection('messages')
-                    .add(firebaseData);
-                
-                // Update chat last message
-                await db.collection('chats').doc(currentChat.id).update({
-                    lastMessage: messageData.type === 'text' ? messageData.content : `Sent a ${messageData.type}`,
-                    lastMessageAt: firebase.firestore.FieldValue.serverTimestamp(),
-                    [`unreadCount.${currentFriend.uid}`]: firebase.firestore.FieldValue.increment(1)
+                    replyTo: messageData.replyTo,
+                    fileName: messageData.fileName,
+                    fileSize: messageData.fileSize,
+                    duration: messageData.duration,
+                    thumbnail: messageData.thumbnail,
+                    caption: messageData.caption,
+                    latitude: messageData.latitude,
+                    longitude: messageData.longitude,
+                    locationName: messageData.locationName,
+                    address: messageData.address,
+                    question: messageData.question,
+                    options: messageData.options
                 });
                 
-                // Update message with real ID
-                messageData.id = messageRef.id;
-                
-                // Send push notification
-                if (messageData.type === 'text') {
-                    sendPushNotification(currentFriend.uid, currentUser.displayName, messageData.content);
+                if (response.success && response.message) {
+                    messageData.id = response.message.id;
+                    return messageData;
                 }
                 
-                return messageData;
+                return null;
                 
             } catch (error) {
-                console.error('Error sending message to Firebase:', error);
+                console.error('Error sending message to API:', error);
                 throw error;
             }
         }
@@ -3787,28 +3470,10 @@
                 // Save to localStorage
                 localStorage.setItem(`${LOCAL_STORAGE_KEYS.MESSAGES}${currentChat.id}`, JSON.stringify(messages));
                 
-                // Update Firebase if online
-                if (isOnline && firebaseInitialized) {
-                    await db.collection('chats')
-                        .doc(currentChat.id)
-                        .collection('messages')
-                        .doc(messageId)
-                        .update({
-                            content: newContent,
-                            edited: true,
-                            editedAt: firebase.firestore.FieldValue.serverTimestamp()
-                        });
-                } else {
-                    // Save edit for sync later
-                    const pendingEdits = JSON.parse(localStorage.getItem('knecta_pending_edits') || '[]');
-                    pendingEdits.push({
-                        messageId,
-                        chatId: currentChat.id,
-                        content: newContent,
-                        timestamp: new Date()
-                    });
-                    localStorage.setItem('knecta_pending_edits', JSON.stringify(pendingEdits));
-                }
+                // Update API
+                await api(`/api/messages/${messageId}`, 'PUT', {
+                    content: newContent
+                });
                 
                 // Re-render messages
                 editingMessageId = null;
@@ -3843,16 +3508,8 @@
                     // Delete for everyone
                     messages[messageIndex].deleted = true;
                     
-                    if (isOnline && firebaseInitialized) {
-                        await db.collection('chats')
-                            .doc(currentChat.id)
-                            .collection('messages')
-                            .doc(messageId)
-                            .update({
-                                deleted: true,
-                                deletedAt: firebase.firestore.FieldValue.serverTimestamp()
-                            });
-                    }
+                    // Call API to delete message
+                    await api(`/api/messages/${messageId}`, 'DELETE');
                     
                     showNotification('Message deleted for everyone', 'success');
                 } else {
@@ -3885,330 +3542,8 @@
             }
         }
         
-        function saveOfflineMessage(messageData) {
-            try {
-                const offlineMessages = JSON.parse(localStorage.getItem(LOCAL_STORAGE_KEYS.OFFLINE_MESSAGES) || '[]');
-                offlineMessages.push({
-                    ...messageData,
-                    chatId: currentChat.id,
-                    friendId: currentFriend.uid,
-                    timestamp: new Date().toISOString()
-                });
-                localStorage.setItem(LOCAL_STORAGE_KEYS.OFFLINE_MESSAGES, JSON.stringify(offlineMessages));
-            } catch (error) {
-                console.error('Error saving offline message:', error);
-            }
-        }
-        
-        async function sendOfflineMessages() {
-            if (!isOnline || !firebaseInitialized) return;
-            
-            try {
-                const offlineMessages = JSON.parse(localStorage.getItem(LOCAL_STORAGE_KEYS.OFFLINE_MESSAGES) || '[]');
-                
-                if (offlineMessages.length > 0) {
-                    syncingIndicator.classList.add('active');
-                    isSyncing = true;
-                    
-                    showNotification(`Syncing ${offlineMessages.length} offline messages...`, 'info');
-                    
-                    const failedMessages = [];
-                    
-                    for (const message of offlineMessages) {
-                        try {
-                            await sendMessageToFirebase(message);
-                        } catch (error) {
-                            console.error('Error sending offline message:', error);
-                            failedMessages.push(message);
-                        }
-                    }
-                    
-                    localStorage.setItem(LOCAL_STORAGE_KEYS.OFFLINE_MESSAGES, JSON.stringify(failedMessages));
-                    
-                    // Sync pending edits
-                    await syncPendingEdits();
-                    
-                    // Update last sync timestamp
-                    localStorage.setItem(LOCAL_STORAGE_KEYS.SYNC_TIMESTAMP, Date.now().toString());
-                    
-                    syncingIndicator.classList.remove('active');
-                    isSyncing = false;
-                    
-                    if (failedMessages.length === 0) {
-                        showNotification('All messages synced', 'success');
-                    } else {
-                        showNotification(`Synced ${offlineMessages.length - failedMessages.length} of ${offlineMessages.length} messages`, 'warning');
-                    }
-                    
-                    // Reload messages to get updated status
-                    if (currentChat) {
-                        await loadMessages();
-                    }
-                }
-            } catch (error) {
-                console.error('Error sending offline messages:', error);
-                syncingIndicator.classList.remove('active');
-                isSyncing = false;
-                showNotification('Sync failed', 'error');
-            }
-        }
-        
-        async function syncPendingEdits() {
-            try {
-                const pendingEdits = JSON.parse(localStorage.getItem('knecta_pending_edits') || '[]');
-                const failedEdits = [];
-                
-                for (const edit of pendingEdits) {
-                    try {
-                        await db.collection('chats')
-                            .doc(edit.chatId)
-                            .collection('messages')
-                            .doc(edit.messageId)
-                            .update({
-                                content: edit.content,
-                                edited: true,
-                                editedAt: firebase.firestore.FieldValue.serverTimestamp()
-                            });
-                    } catch (error) {
-                        console.error('Error syncing edit:', error);
-                        failedEdits.push(edit);
-                    }
-                }
-                
-                localStorage.setItem('knecta_pending_edits', JSON.stringify(failedEdits));
-                
-            } catch (error) {
-                console.error('Error syncing pending edits:', error);
-            }
-        }
-        
-        function startBackgroundSync() {
-            // Check for offline messages every 30 seconds
-            setInterval(() => {
-                if (isOnline && !isSyncing) {
-                    sendOfflineMessages();
-                }
-            }, 30000);
-            
-            // Auto-save to localStorage every minute
-            setInterval(() => {
-                if (currentChat) {
-                    localStorage.setItem(`${LOCAL_STORAGE_KEYS.MESSAGES}${currentChat.id}`, JSON.stringify(messages));
-                }
-                localStorage.setItem(LOCAL_STORAGE_KEYS.CHATS, JSON.stringify(chats));
-            }, 60000);
-        }
-        
-        function startMessageListener() {
-            if (!firebaseInitialized || !currentChat) return;
-            
-            // Listen for new messages
-            db.collection('chats')
-                .doc(currentChat.id)
-                .collection('messages')
-                .orderBy('timestamp', 'desc')
-                .limit(1)
-                .onSnapshot(snapshot => {
-                    snapshot.docChanges().forEach(change => {
-                        if (change.type === 'added') {
-                            const messageData = change.doc.data();
-                            
-                            // Check if message is not from current user
-                            if (messageData.senderId !== currentUser.uid) {
-                                // Add to messages
-                                const newMessage = {
-                                    id: change.doc.id,
-                                    ...messageData,
-                                    timestamp: messageData.timestamp?.toDate() || new Date()
-                                };
-                                
-                                // Check if already exists
-                                if (!messages.find(m => m.id === newMessage.id)) {
-                                    messages.push(newMessage);
-                                    
-                                    // Render updated messages
-                                    renderMessages();
-                                    messagesContainer.scrollTop = messagesContainer.scrollHeight;
-                                    
-                                    // Update chat list
-                                    updateChatLastMessage(
-                                        messageData.type === 'text' ? messageData.content : `Received a ${messageData.type}`,
-                                        messageData.type
-                                    );
-                                    
-                                    // Play notification sound
-                                    playNotificationSound();
-                                    
-                                    // Show desktop notification
-                                    if (document.hidden && Notification.permission === 'granted') {
-                                        new Notification(`${messageData.senderName}`, {
-                                            body: messageData.type === 'text' ? messageData.content : `Sent a ${messageData.type}`,
-                                            icon: currentFriend.photoURL || '../icons/moodchat-192.png'
-                                        });
-                                    }
-                                }
-                            }
-                        } else if (change.type === 'modified') {
-                            // Handle message updates (edits, deletions)
-                            const messageData = change.doc.data();
-                            const messageIndex = messages.findIndex(m => m.id === change.doc.id);
-                            
-                            if (messageIndex !== -1) {
-                                messages[messageIndex] = {
-                                    ...messages[messageIndex],
-                                    ...messageData,
-                                    timestamp: messageData.timestamp?.toDate() || messages[messageIndex].timestamp
-                                };
-                                
-                                // Re-render if needed
-                                if (messageData.deleted || messageData.edited) {
-                                    renderMessages();
-                                }
-                            }
-                        }
-                    });
-                });
-            
-            // Listen for message status updates (for sent messages)
-            if (currentUser) {
-                db.collection('chats')
-                    .doc(currentChat.id)
-                    .collection('messages')
-                    .where('senderId', '==', currentUser.uid)
-                    .where('status', 'in', ['sent', 'delivered', 'read'])
-                    .onSnapshot(snapshot => {
-                        snapshot.docChanges().forEach(change => {
-                            if (change.type === 'modified') {
-                                const messageData = change.doc.data();
-                                const messageIndex = messages.findIndex(m => m.id === change.doc.id);
-                                
-                                if (messageIndex !== -1) {
-                                    messages[messageIndex].status = messageData.status;
-                                    localStorage.setItem(`${LOCAL_STORAGE_KEYS.MESSAGES}${currentChat.id}`, JSON.stringify(messages));
-                                    
-                                    // Update UI if status changed to read
-                                    if (messageData.status === 'read') {
-                                        const messageElement = document.querySelector(`[data-message-id="${change.doc.id}"]`);
-                                        if (messageElement) {
-                                            const statusEl = messageElement.querySelector('.message-status');
-                                            if (statusEl) {
-                                                statusEl.innerHTML = '<i class="fas fa-check-double" style="color: #34c759;"></i>';
-                                            }
-                                        }
-                                    }
-                                }
-                            }
-                        });
-                    });
-            }
-        }
-        
-        function startTypingListener() {
-            if (!firebaseInitialized || !currentChat || !currentUser) return;
-            
-            // Listen for typing indicators
-            db.collection('chats')
-                .doc(currentChat.id)
-                .collection('typing')
-                .doc(currentFriend.uid)
-                .onSnapshot(doc => {
-                    if (doc.exists) {
-                        const data = doc.data();
-                        if (data.isTyping && data.timestamp > Date.now() - 3000) { // 3 second timeout
-                            isTyping = true;
-                            addTypingIndicator();
-                        } else {
-                            isTyping = false;
-                            const typingIndicator = document.querySelector('.typing-indicator-container');
-                            if (typingIndicator) {
-                                typingIndicator.remove();
-                            }
-                        }
-                    } else {
-                        isTyping = false;
-                        const typingIndicator = document.querySelector('.typing-indicator-container');
-                        if (typingIndicator) {
-                            typingIndicator.remove();
-                        }
-                    }
-                });
-        }
-        
-        function startPresenceListener() {
-            if (!firebaseInitialized || !currentFriend) return;
-            
-            // Listen for friend's presence
-            db.collection('users').doc(currentFriend.uid).onSnapshot(doc => {
-                if (doc.exists) {
-                    const data = doc.data();
-                    updateFriendPresence(data);
-                }
-            });
-        }
-        
-        function updateTypingStatus(isUserTyping) {
-            if (!firebaseInitialized || !currentChat || !currentUser) return;
-            
-            db.collection('chats')
-                .doc(currentChat.id)
-                .collection('typing')
-                .doc(currentUser.uid)
-                .set({
-                    isTyping: isUserTyping,
-                    timestamp: Date.now()
-                }, { merge: true });
-        }
-        
-        function startPresenceTracking() {
-            if (!firebaseInitialized || !currentUser) return;
-            
-            // Update user presence
-            db.collection('users').doc(currentUser.uid).update({
-                online: true,
-                lastSeen: firebase.firestore.FieldValue.serverTimestamp()
-            });
-            
-            // Update on interval
-            setInterval(() => {
-                if (isOnline && firebaseInitialized && currentUser) {
-                    db.collection('users').doc(currentUser.uid).update({
-                        online: true,
-                        lastSeen: firebase.firestore.FieldValue.serverTimestamp()
-                    });
-                }
-            }, 30000); // Every 30 seconds
-        }
-        
-        function updateFriendPresence(userData) {
-            const statusEl = document.getElementById('chatStatusText');
-            const indicatorEl = document.getElementById('chatStatusIndicator');
-            
-            if (userData.online) {
-                statusEl.textContent = 'Online';
-                indicatorEl.className = 'chat-status online';
-            } else if (userData.lastSeen) {
-                const lastSeen = userData.lastSeen.toDate();
-                const minutesAgo = Math.floor((new Date() - lastSeen) / 60000);
-                
-                if (minutesAgo < 1) {
-                    statusEl.textContent = 'Just now';
-                } else if (minutesAgo < 60) {
-                    statusEl.textContent = `${minutesAgo}m ago`;
-                } else {
-                    statusEl.textContent = formatTime(lastSeen);
-                }
-                indicatorEl.className = 'chat-status offline';
-            }
-        }
-        
         async function markChatAsRead(chatId) {
-            if (!firebaseInitialized || !currentUser) return;
-            
             try {
-                await db.collection('chats').doc(chatId).update({
-                    [`unreadCount.${currentUser.uid}`]: 0
-                });
-                
                 // Update local chat
                 const chatIndex = chats.findIndex(chat => chat.id === chatId);
                 if (chatIndex !== -1) {
@@ -4216,6 +3551,9 @@
                     localStorage.setItem(LOCAL_STORAGE_KEYS.CHATS, JSON.stringify(chats));
                     renderChatsList();
                 }
+                
+                // Call API to mark as read
+                await api(`/api/chats/${chatId}/read`, 'POST');
                 
             } catch (error) {
                 console.error('Error marking chat as read:', error);
@@ -4285,7 +3623,6 @@
             switch (action) {
                 case 'reply':
                     replyToMessage = selectedMessage;
-                    updateReplyIndicator();
                     messageInput.focus();
                     showNotification('Replying to message', 'info');
                     break;
@@ -4299,7 +3636,6 @@
                     break;
                     
                 case 'forward':
-                    // TODO: Implement forward functionality
                     showNotification('Forward functionality coming soon', 'info');
                     break;
                     
@@ -4410,10 +3746,8 @@ Message ID: ${message.id.substring(0, 8)}...
                 reports.push(reportData);
                 localStorage.setItem('knecta_reports', JSON.stringify(reports));
                 
-                // Send to Firebase if online
-                if (isOnline && firebaseInitialized) {
-                    db.collection('reports').add(reportData);
-                }
+                // Send to API
+                api('/api/reports', 'POST', reportData);
                 
                 reportModal.classList.remove('active');
                 showNotification('Report submitted. Thank you for helping keep our community safe.', 'success');
@@ -4424,11 +3758,7 @@ Message ID: ${message.id.substring(0, 8)}...
             }
         }
         
-        function updateReplyIndicator() {
-            // TODO: Implement reply indicator in input area
-        }
-        
-        function addReaction(messageId, emoji) {
+        async function addReaction(messageId, emoji) {
             if (!currentChat || !currentUser) return;
             
             try {
@@ -4463,16 +3793,11 @@ Message ID: ${message.id.substring(0, 8)}...
                 // Save locally
                 localStorage.setItem(`${LOCAL_STORAGE_KEYS.MESSAGES}${currentChat.id}`, JSON.stringify(messages));
                 
-                // Update Firebase if online
-                if (isOnline && firebaseInitialized) {
-                    db.collection('chats')
-                        .doc(currentChat.id)
-                        .collection('messages')
-                        .doc(messageId)
-                        .update({
-                            [`reactions.${emoji}`]: messages[messageIndex].reactions[emoji] || firebase.firestore.FieldValue.delete()
-                        });
-                }
+                // Update API
+                await api(`/api/messages/${messageId}/reactions`, 'POST', {
+                    emoji: emoji,
+                    action: userIndex > -1 ? 'remove' : 'add'
+                });
                 
                 // Re-render messages
                 renderMessages();
@@ -4732,17 +4057,6 @@ Message ID: ${message.id.substring(0, 8)}...
                     };
                     reader.readAsDataURL(file);
                     
-                    // Upload to Firebase Storage if online
-                    if (isOnline && firebaseInitialized && storage) {
-                        const storageRef = storage.ref();
-                        const imageRef = storageRef.child(`chats/${currentChat.id}/images/${Date.now()}_${file.name}`);
-                        await imageRef.put(file);
-                        const downloadURL = await imageRef.getDownloadURL();
-                        
-                        // Update message with Firebase URL
-                        // This would need additional logic to update the message after it's sent
-                    }
-                    
                 } catch (error) {
                     console.error('Error uploading image:', error);
                     showNotification('Error uploading image', 'error');
@@ -4935,18 +4249,10 @@ Message ID: ${message.id.substring(0, 8)}...
                 // Save locally
                 localStorage.setItem(`${LOCAL_STORAGE_KEYS.MESSAGES}${currentChat.id}`, JSON.stringify(messages));
                 
-                // Update Firebase if online
-                if (isOnline && firebaseInitialized) {
-                    await db.collection('chats')
-                        .doc(currentChat.id)
-                        .collection('messages')
-                        .doc(messageId)
-                        .update({
-                            [`options.${optionIndex}.votes`]: poll.options[optionIndex].votes,
-                            [`options.${optionIndex}.voters`]: poll.options[optionIndex].voters,
-                            userVote: optionIndex
-                        });
-                }
+                // Update API
+                await api(`/api/messages/${messageId}/vote`, 'POST', {
+                    optionIndex: optionIndex
+                });
                 
                 // Re-render messages
                 renderMessages();
@@ -5074,49 +4380,42 @@ Message ID: ${message.id.substring(0, 8)}...
             }
         }
         
-        function updateOnlineStatus() {
-            isOnline = navigator.onLine;
-            
-            if (isOnline) {
-                offlineIndicator.classList.remove('active');
-                offlineOverlay.classList.remove('active');
-                
-                // Send pending messages
-                sendOfflineMessages();
-                
-                // Update presence
-                if (firebaseInitialized && currentUser) {
-                    db.collection('users').doc(currentUser.uid).update({
-                        online: true,
-                        lastSeen: firebase.firestore.FieldValue.serverTimestamp()
-                    });
+        function startBackgroundSync() {
+            // Sync with API every 30 seconds
+            setInterval(async () => {
+                try {
+                    if (!isSyncing) {
+                        isSyncing = true;
+                        syncingIndicator.classList.add('active');
+                        
+                        // Sync chats
+                        await loadChatsFromAPI();
+                        
+                        // Sync contacts
+                        await loadContactsFromAPI();
+                        
+                        // Sync current chat messages if open
+                        if (currentChat) {
+                            await loadMessagesFromAPI();
+                        }
+                        
+                        isSyncing = false;
+                        syncingIndicator.classList.remove('active');
+                    }
+                } catch (error) {
+                    console.error('Background sync error:', error);
+                    isSyncing = false;
+                    syncingIndicator.classList.remove('active');
                 }
-                
-            } else {
-                offlineIndicator.classList.add('active');
-                
-                // Show offline overlay if not already dismissed
-                const overlayDismissed = localStorage.getItem('knecta_offline_overlay_dismissed');
-                if (overlayDismissed !== 'true') {
-                    offlineOverlay.classList.add('active');
-                }
-            }
-        }
-        
-        function handleOnline() {
-            console.log('App is now online');
-            updateOnlineStatus();
-            showNotification('You are back online', 'success');
+            }, 30000);
             
-            // Start syncing
-            startBackgroundSync();
-            sendOfflineMessages();
-        }
-        
-        function handleOffline() {
-            console.log('App is now offline');
-            updateOnlineStatus();
-            showNotification('You are offline. Messages will be sent when back online.', 'warning');
+            // Auto-save to localStorage every minute
+            setInterval(() => {
+                if (currentChat) {
+                    localStorage.setItem(`${LOCAL_STORAGE_KEYS.MESSAGES}${currentChat.id}`, JSON.stringify(messages));
+                }
+                localStorage.setItem(LOCAL_STORAGE_KEYS.CHATS, JSON.stringify(chats));
+            }, 60000);
         }
         
         function showNotification(message, type = 'success') {
@@ -5159,12 +4458,6 @@ Message ID: ${message.id.substring(0, 8)}...
             }
         }
         
-        function sendPushNotification(userId, senderName, message) {
-            // This is a placeholder for push notifications
-            // In a real app, you would use Firebase Cloud Messaging
-            console.log('Push notification:', { userId, senderName, message });
-        }
-        
         function showContactsSidebar() {
             sidebar.classList.add('hidden');
             contactsSidebar.classList.remove('hidden');
@@ -5174,12 +4467,6 @@ Message ID: ${message.id.substring(0, 8)}...
             sidebar.classList.add('active');
             chatPanel.classList.add('hidden');
             contactsSidebar.classList.add('hidden');
-            
-            // Stop listeners
-            if (typingTimeout) {
-                clearTimeout(typingTimeout);
-                updateTypingStatus(false);
-            }
             
             // Clear current chat
             currentChat = null;
@@ -5346,19 +4633,6 @@ Message ID: ${message.id.substring(0, 8)}...
                 // Auto-resize textarea
                 this.style.height = 'auto';
                 this.style.height = (this.scrollHeight) + 'px';
-                
-                // Update typing status
-                if (this.value.trim()) {
-                    updateTypingStatus(true);
-                    
-                    if (typingTimeout) {
-                        clearTimeout(typingTimeout);
-                    }
-                    
-                    typingTimeout = setTimeout(() => {
-                        updateTypingStatus(false);
-                    }, 1000);
-                }
             });
             
             messageInput.addEventListener('keydown', function(e) {
@@ -5576,24 +4850,16 @@ Message ID: ${message.id.substring(0, 8)}...
                 }
             });
             
-            // Dismiss offline overlay
-            document.getElementById('dismissOfflineBtn').addEventListener('click', () => {
-                offlineOverlay.classList.remove('active');
-                localStorage.setItem('knecta_offline_overlay_dismissed', 'true');
-            });
-            
             // Before unload
             window.addEventListener('beforeunload', () => {
-                if (firebaseInitialized && currentUser) {
-                    db.collection('users').doc(currentUser.uid).update({
-                        online: false,
-                        lastSeen: firebase.firestore.FieldValue.serverTimestamp()
-                    });
-                }
-                
-                if (typingTimeout) {
-                    clearTimeout(typingTimeout);
-                    updateTypingStatus(false);
+                // Save all data
+                localStorage.setItem(LOCAL_STORAGE_KEYS.CHATS, JSON.stringify(chats));
+                if (currentChat) {
+                    localStorage.setItem(`${LOCAL_STORAGE_KEYS.MESSAGES}${currentChat.id}`, JSON.stringify(messages));
+                    localStorage.setItem(LOCAL_STORAGE_KEYS.CURRENT_CHAT, JSON.stringify({
+                        friendId: currentFriend.uid,
+                        timestamp: Date.now()
+                    }));
                 }
                 
                 // Stop all audio
@@ -5602,41 +4868,6 @@ Message ID: ${message.id.substring(0, 8)}...
                         wavesurfer.pause();
                     }
                 });
-                
-                // Save current state
-                if (currentChat) {
-                    localStorage.setItem(LOCAL_STORAGE_KEYS.CURRENT_CHAT, JSON.stringify({
-                        friendId: currentFriend.uid,
-                        timestamp: Date.now()
-                    }));
-                }
-                
-                // Save all data
-                localStorage.setItem(LOCAL_STORAGE_KEYS.CHATS, JSON.stringify(chats));
-                if (currentChat) {
-                    localStorage.setItem(`${LOCAL_STORAGE_KEYS.MESSAGES}${currentChat.id}`, JSON.stringify(messages));
-                }
-            });
-            
-            // Handle visibility change
-            document.addEventListener('visibilitychange', () => {
-                if (document.hidden) {
-                    // Page is hidden, update last seen
-                    if (firebaseInitialized && currentUser) {
-                        db.collection('users').doc(currentUser.uid).update({
-                            online: false,
-                            lastSeen: firebase.firestore.FieldValue.serverTimestamp()
-                        });
-                    }
-                } else {
-                    // Page is visible, update online status
-                    if (firebaseInitialized && currentUser && isOnline) {
-                        db.collection('users').doc(currentUser.uid).update({
-                            online: true,
-                            lastSeen: firebase.firestore.FieldValue.serverTimestamp()
-                        });
-                    }
-                }
             });
             
             // Request notification permission

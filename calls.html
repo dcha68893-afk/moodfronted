@@ -10,12 +10,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Video Calls | Chat App</title>
     
-    <!-- Firebase SDK -->
-    <script src="https://www.gstatic.com/firebasejs/9.22.0/firebase-app-compat.js"></script>
-    <script src="https://www.gstatic.com/firebasejs/9.22.0/firebase-firestore-compat.js"></script>
-    <script src="https://www.gstatic.com/firebasejs/9.22.0/firebase-auth-compat.js"></script>
-    <script src="https://www.gstatic.com/firebasejs/9.22.0/firebase-database-compat.js"></script>
-    <script src="https://www.gstatic.com/firebasejs/9.22.0/firebase-functions-compat.js"></script>
+    <!-- Removed Firebase SDK imports -->
     
     <!-- Font Awesome -->
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
@@ -1965,7 +1960,7 @@
                     <div class="section-title">
                         <span>Recent Calls</span>
                         <span id="syncIndicator" class="sync-indicator">
-                            <i class="fas fa-check-circle"></i> Cached
+                            <i class="fas fa-check-circle"></i> Ready
                         </span>
                     </div>
                     <div class="call-list-content">
@@ -2013,9 +2008,8 @@
                 <!-- Video streams will be added here -->
                 <div class="offline-call-placeholder" id="offlineCallPlaceholder" style="display: none;">
                     <i class="fas fa-wifi-slash"></i>
-                    <h3>Offline Mode</h3>
-                    <p>You are currently offline. Call features require internet connection.</p>
-                    <p class="subtext">Call history is available for viewing only. Calls will work when connection is restored.</p>
+                    <h3>Connection Required</h3>
+                    <p>Call features require internet connection.</p>
                 </div>
             </div>
             
@@ -2605,42 +2599,6 @@
             }
         };
 
-        // Enhanced Firebase Configuration with offline support
-        const firebaseConfig = {
-            apiKey: "AIzaSyDHHyGgsSV18BcXrGgzi4C8frzDAE1C1zo",
-            authDomain: "uniconnect-ee95c.firebaseapp.com",
-            projectId: "uniconnect-ee95c",
-            storageBucket: "uniconnect-ee95c.firebasestorage.app",
-            messagingSenderId: "1003264444309",
-            appId: "1:1003264444309:web:9f0307516e44d21e97d89c"
-        };
-        
-        // Initialize Firebase
-        let firebaseApp;
-        let db;
-        let auth;
-        let rtdb;
-        let functions;
-        
-        try {
-            firebaseApp = firebase.initializeApp(firebaseConfig);
-            db = firebase.firestore();
-            auth = firebase.auth();
-            rtdb = firebase.database();
-            
-            // Enable offline persistence
-            db.enablePersistence().catch((err) => {
-                console.log("Firebase persistence error:", err);
-            });
-            
-            // Initialize Cloud Functions
-            if (firebase.functions) {
-                functions = firebase.functions();
-            }
-        } catch (error) {
-            console.log("Firebase initialization error (may be offline):", error);
-        }
-        
         // Global variables
         let currentUser = null;
         let peer = null;
@@ -2664,14 +2622,13 @@
         let currentTool = 'pencil';
         let callLink = null;
         let activeCalls = new Map();
-        let userPresenceRef = null;
         let dataConnections = new Map();
         let reactionsChannel = null;
         let chatChannel = null;
         
-        // Offline state management
+        // Connection state management
         let isOnline = navigator.onLine;
-        let offlineCheckInterval = null;
+        let connectionCheckInterval = null;
         
         // Premium subscription management
         let userSubscription = {
@@ -2736,8 +2693,8 @@
             // Initialize settings manager
             SettingsManager.initializeSettings();
             
-            // Initialize offline detection
-            initializeOfflineDetection();
+            // Initialize connection detection
+            initializeConnectionDetection();
             
             // First try to get user from localStorage for immediate UI
             const cachedUser = localStorage.getItem('currentUser');
@@ -2764,7 +2721,7 @@
                     // Check for URL parameters for call initiation
                     checkUrlForCallInitiation();
                     
-                    // Update UI for offline/online state
+                    // Update UI for connectivity state
                     updateUIForConnectivity();
                     
                     // STEP 2: Start background sync if online
@@ -2777,12 +2734,14 @@
                 }
             }
             
-            // Then try Firebase auth (works online/offline)
-            if (auth) {
-                auth.onAuthStateChanged(async user => {
+            // Then try auth from api.js
+            try {
+                // Check if user is logged in via api.js
+                if (typeof window !== 'undefined' && window.api && typeof window.api.getCurrentUser === 'function') {
+                    const user = await window.api.getCurrentUser();
                     if (user) {
                         currentUser = user;
-                        console.log('User detected via Firebase:', currentUser.uid);
+                        console.log('User detected via api:', currentUser.uid);
                         
                         // Cache user for offline use
                         localStorage.setItem('currentUser', JSON.stringify({
@@ -2809,9 +2768,6 @@
                             setTimeout(() => {
                                 initializePeerJS();
                             }, 1000);
-                        } else {
-                            console.log('Offline: Showing cached call history');
-                            showNotification('Using cached call history. Sync when online.', 'info');
                         }
                         
                         // Listen for incoming calls from friends.html
@@ -2833,12 +2789,13 @@
                             window.location.href = 'index.html';
                         }
                     }
-                });
-            } else {
-                // If Firebase fails (offline), use cached user
+                }
+            } catch (error) {
+                console.error('Error checking user via api:', error);
+                // If api fails, continue with cached user
                 if (!currentUser) {
                     console.log('No user available, showing login redirect');
-                    showNotification('Please login to continue', 'error');
+                    showNotification('Please login to continue', 'info');
                 }
             }
         }
@@ -2865,7 +2822,7 @@
                         if (isOnline) {
                             startCallFromFriend(callUserId, callType);
                         } else {
-                            showNotification('Call features require internet connection', 'error');
+                            showNotification('Call features require connection', 'info');
                         }
                     }, 2000);
                 }
@@ -2879,12 +2836,12 @@
             console.log('Starting call from friend request:', userId, type);
             
             if (!isOnline) {
-                showNotification('Call features require internet connection', 'error');
+                showNotification('Call features require connection', 'info');
                 return;
             }
             
             if (!currentUser) {
-                showNotification('Please login to make calls', 'error');
+                showNotification('Please login to make calls', 'info');
                 return;
             }
             
@@ -2936,7 +2893,7 @@
                 const groupCalls = calls.filter(call => call.group === true || (call.participants && call.participants.length > 2));
                 displayCallsFromCache(groupCalls, groupCallsList, 'group');
                 
-                updateSyncIndicator('cached', calls.length);
+                updateSyncIndicator('ready', calls.length);
                 
             } catch (error) {
                 console.error('Error loading calls from cache:', error);
@@ -3095,7 +3052,7 @@
                     syncIndicator.innerHTML = '<i class="fas fa-sync-alt fa-spin"></i> Syncing...';
                     syncIndicator.className = 'sync-indicator syncing';
                     break;
-                case 'cached':
+                case 'ready':
                     syncIndicator.innerHTML = `<i class="fas fa-check-circle"></i> ${count} calls`;
                     syncIndicator.className = 'sync-indicator';
                     break;
@@ -3119,7 +3076,7 @@
         }
         
         async function startBackgroundSync() {
-            if (!isOnline || !db || !currentUser) {
+            if (!isOnline || !currentUser) {
                 console.log('Cannot start background sync: offline or no user');
                 return;
             }
@@ -3128,135 +3085,48 @@
             updateSyncIndicator('syncing');
             
             try {
-                // Load calls from Firebase in background
-                const callsSnapshot = await db.collection('calls')
-                    .where('participants', 'array-contains', currentUser.uid)
-                    .orderBy('timestamp', 'desc')
-                    .limit(50)
-                    .get();
-                
-                if (callsSnapshot.empty) {
-                    console.log('No calls found on server');
-                    updateSyncIndicator('cached', 0);
-                    return;
-                }
-                
-                // Convert to cache format
-                const callsToSave = [];
-                callsSnapshot.forEach(doc => {
-                    const callData = doc.data();
-                    callsToSave.push({
-                        ...callData,
-                        id: doc.id,
-                        timestamp: callData.timestamp,
-                        isLocal: false
+                // Load calls from backend via api.js
+                if (window.api && typeof window.api.get === 'function') {
+                    const response = await window.api.get('/api/calls/history', {
+                        params: {
+                            limit: 50,
+                            orderBy: 'timestamp',
+                            order: 'desc'
+                        }
                     });
-                });
-                
-                // Save to cache
-                const savedCount = await saveCallsToCache(callsToSave);
-                
-                // Update UI with merged data
-                if (savedCount > 0) {
-                    // Reload from cache to show merged data
-                    await loadCallsFromCache();
                     
-                    // Show subtle notification
-                    if (callsSnapshot.size > 0) {
-                        showNotification(`Synced ${callsSnapshot.size} calls`, 'success');
+                    if (response && response.data) {
+                        const callsToSave = response.data.map(call => ({
+                            ...call,
+                            id: call._id || call.id,
+                            timestamp: call.timestamp || call.createdAt,
+                            isLocal: false
+                        }));
+                        
+                        // Save to cache
+                        const savedCount = await saveCallsToCache(callsToSave);
+                        
+                        // Update UI with merged data
+                        if (savedCount > 0) {
+                            // Reload from cache to show merged data
+                            await loadCallsFromCache();
+                            
+                            // Show subtle notification
+                            if (response.data.length > 0) {
+                                showNotification(`Synced ${response.data.length} calls`, 'success');
+                            }
+                        }
+                        
+                        updateSyncIndicator('online', savedCount);
                     }
                 }
-                
-                updateSyncIndicator('online', savedCount);
-                
-                // Also sync missed and group calls
-                syncMissedCalls();
-                syncGroupCalls();
                 
             } catch (error) {
                 console.error('Background sync error:', error);
-                updateSyncIndicator('cached', 0);
+                updateSyncIndicator('ready', 0);
                 
                 // Don't show error notification for background sync failures
                 // Just log it and continue with cached data
-            }
-        }
-        
-        async function syncMissedCalls() {
-            try {
-                if (!isOnline || !db) return;
-                
-                const missedSnapshot = await db.collection('calls')
-                    .where('participants', 'array-contains', currentUser.uid)
-                    .where('status', '==', 'missed')
-                    .orderBy('timestamp', 'desc')
-                    .limit(20)
-                    .get();
-                
-                if (!missedSnapshot.empty) {
-                    // Update cache with missed calls
-                    const missedCalls = [];
-                    missedSnapshot.forEach(doc => {
-                        const callData = doc.data();
-                        missedCalls.push({
-                            ...callData,
-                            id: doc.id,
-                            timestamp: callData.timestamp,
-                            isLocal: false
-                        });
-                    });
-                    
-                    // Merge with existing cache
-                    const cacheKey = `${CACHE_KEYS.CALLS_HISTORY}_${currentUser.uid}`;
-                    const existingCached = localStorage.getItem(cacheKey);
-                    if (existingCached) {
-                        const existingCalls = JSON.parse(existingCached);
-                        const mergedCalls = mergeCallsArrays(existingCalls, missedCalls);
-                        localStorage.setItem(cacheKey, JSON.stringify(mergedCalls.slice(0, 100)));
-                    }
-                }
-                
-            } catch (error) {
-                console.error('Error syncing missed calls:', error);
-            }
-        }
-        
-        async function syncGroupCalls() {
-            try {
-                if (!isOnline || !db) return;
-                
-                const groupSnapshot = await db.collection('calls')
-                    .where('participants', 'array-contains', currentUser.uid)
-                    .where('group', '==', true)
-                    .orderBy('timestamp', 'desc')
-                    .limit(20)
-                    .get();
-                
-                if (!groupSnapshot.empty) {
-                    // Update cache with group calls
-                    const groupCalls = [];
-                    groupSnapshot.forEach(doc => {
-                        const callData = doc.data();
-                        groupCalls.push({
-                            ...callData,
-                            id: doc.id,
-                            timestamp: callData.timestamp,
-                            isLocal: false
-                        });
-                    });
-                    
-                    // Merge with existing cache
-                    const cacheKey = `${CACHE_KEYS.CALLS_HISTORY}_${currentUser.uid}`;
-                    const existingCached = localStorage.getItem(cacheKey);
-                    if (existingCached) {
-                        const existingCalls = JSON.parse(existingCached);
-                        const mergedCalls = mergeCallsArrays(existingCalls, groupCalls);
-                        localStorage.setItem(cacheKey, JSON.stringify(mergedCalls.slice(0, 100)));
-                    }
-                }
-                
-            } catch (error) {
-                console.error('Error syncing group calls:', error);
             }
         }
         
@@ -3287,22 +3157,22 @@
             }
         }
         
-        function initializeOfflineDetection() {
+        function initializeConnectionDetection() {
             // Check initial online status
-            updateOnlineStatus();
+            updateConnectionStatus();
             
             // Listen for online/offline events
             window.addEventListener('online', handleOnline);
             window.addEventListener('offline', handleOffline);
             
             // Start periodic connectivity check
-            offlineCheckInterval = setInterval(checkConnectivity, 30000);
+            connectionCheckInterval = setInterval(checkConnectivity, 30000);
             
             // Initial UI update
             updateUIForConnectivity();
         }
         
-        function updateOnlineStatus() {
+        function updateConnectionStatus() {
             isOnline = navigator.onLine;
             console.log('Network status:', isOnline ? 'Online' : 'Offline');
         }
@@ -3328,14 +3198,11 @@
             }
             
             // Show notification
-            showNotification('You are back online. Syncing call history...', 'success');
+            showNotification('Connected. Syncing call history...', 'success');
             
             // Update user presence
-            if (userPresenceRef && currentUser) {
-                userPresenceRef.update({
-                    online: true,
-                    lastOnline: firebase.firestore.FieldValue.serverTimestamp()
-                });
+            if (currentUser) {
+                updateUserPresence(true);
             }
             
             // Remove offline UI state
@@ -3368,8 +3235,8 @@
             // Update sync indicator
             updateSyncIndicator('offline');
             
-            // Show notification - professional message
-            showNotification('You are offline. Using cached call history.', 'warning');
+            // Show notification
+            showNotification('Connection lost. Using local data.', 'warning');
 
             // End any active calls gracefully
             if (currentCall) {
@@ -3377,11 +3244,8 @@
             }
             
             // Update user presence
-            if (userPresenceRef && currentUser) {
-                userPresenceRef.update({
-                    online: false,
-                    lastOnline: firebase.firestore.FieldValue.serverTimestamp()
-                });
+            if (currentUser) {
+                updateUserPresence(false);
             }
             
             // Add offline UI state for visual indication
@@ -3393,33 +3257,38 @@
             }
         }
         
-        function checkConnectivity() {
-            // Simple connectivity check by trying to fetch a small resource
-            fetch('https://www.google.com/favicon.ico', { 
-                mode: 'no-cors',
-                cache: 'no-cache'
-            })
-            .then(() => {
-                if (!isOnline) {
-                    console.log('Connectivity check passed - switching to online');
-                    handleOnline();
+        async function updateUserPresence(online) {
+            try {
+                if (window.api && typeof window.api.post === 'function' && currentUser) {
+                    await window.api.post('/api/users/presence', {
+                        userId: currentUser.uid,
+                        online: online,
+                        lastOnline: new Date().toISOString()
+                    });
                 }
-            })
-            .catch(() => {
-                if (isOnline) {
-                    console.log('Connectivity check failed - switching to offline');
+            } catch (error) {
+                console.error('Error updating user presence:', error);
+            }
+        }
+        
+        function checkConnectivity() {
+            // Simple connectivity check
+            if (navigator.onLine !== isOnline) {
+                if (navigator.onLine) {
+                    handleOnline();
+                } else {
                     handleOffline();
                 }
-            });
+            }
         }
         
         function updateUIForConnectivity() {
             if (!isOnline) {
-                // Show offline banner - professional message
+                // Show offline banner
                 offlineBanner.classList.add('active');
                 offlineBanner.innerHTML = `
                     <i class="fas fa-wifi-slash"></i>
-                    <span>You are offline. Using cached call history.</span>
+                    <span>Connection lost. Using local data.</span>
                 `;
                 
                 // Disable call buttons when offline
@@ -3438,7 +3307,7 @@
                     const button = document.getElementById(buttonId);
                     if (button) {
                         button.disabled = true;
-                        button.title = 'Call features require internet connection';
+                        button.title = 'Call features require connection';
                     }
                 });
                 
@@ -3446,7 +3315,7 @@
                 const callbackButtons = document.querySelectorAll('.call-action-btn');
                 callbackButtons.forEach(button => {
                     button.disabled = true;
-                    button.title = 'Call features require internet connection';
+                    button.title = 'Call features require connection';
                 });
                 
                 // Disable contact checkboxes in new call modal
@@ -3458,7 +3327,7 @@
                 // Close new call modal if open
                 if (newCallModal.classList.contains('active')) {
                     newCallModal.classList.remove('active');
-                    showNotification('Call features require internet connection', 'warning');
+                    showNotification('Call features require connection', 'warning');
                 }
                 
                 // Close incoming call modal if open
@@ -3470,7 +3339,7 @@
                 // Close payment modal if open
                 if (paymentModal.classList.contains('active')) {
                     paymentModal.classList.remove('active');
-                    showNotification('Payment requires internet connection', 'warning');
+                    showNotification('Payment requires connection', 'warning');
                 }
                 
                 // Disable panel tabs that require internet
@@ -3484,8 +3353,8 @@
                 
                 // Update call status to show offline state
                 if (callContainer.classList.contains('active')) {
-                    document.getElementById('callParticipants').textContent = 'Offline Mode';
-                    document.getElementById('callStatus').textContent = 'Call features require internet connection';
+                    document.getElementById('callParticipants').textContent = 'Connection Required';
+                    document.getElementById('callStatus').textContent = 'Call features require connection';
                     offlineCallPlaceholder.style.display = 'flex';
                 }
                 
@@ -3559,7 +3428,7 @@
                     <div class="offline-contacts-message">
                         <i class="fas fa-wifi-slash"></i>
                         <p>Contacts unavailable while offline</p>
-                        <p class="subtext">Call features require internet connection</p>
+                        <p class="subtext">Call features require connection</p>
                     </div>
                 `;
             }
@@ -3569,7 +3438,7 @@
                     <div class="offline-contacts-message">
                         <i class="fas fa-wifi-slash"></i>
                         <p>Contacts unavailable while offline</p>
-                        <p class="subtext">Call features require internet connection</p>
+                        <p class="subtext">Call features require connection</p>
                     </div>
                 `;
             }
@@ -3590,7 +3459,7 @@
                 if (enhancedCallData.participants && !enhancedCallData.displayName) {
                     const otherParticipants = enhancedCallData.participants.filter(id => id !== currentUser.uid);
                     if (otherParticipants.length === 1) {
-                        // Try to get real name from Firebase or cache
+                        // Try to get real name from cache
                         const contactName = await getContactNameWithFallback(otherParticipants[0]);
                         enhancedCallData.displayName = contactName || 'Contact';
                     }
@@ -3642,7 +3511,7 @@
             }
         }
         
-        // Get contact name with fallback to Firebase
+        // Get contact name with fallback to backend
         async function getContactNameWithFallback(userId) {
             if (!userId || userId === currentUser.uid) return 'You';
             
@@ -3652,11 +3521,11 @@
                 () => localStorage.getItem(`contact_${userId}_name`),
                 () => localStorage.getItem(`friend_${userId}_name`),
                 async () => {
-                    if (isOnline && db) {
+                    if (isOnline && window.api && typeof window.api.get === 'function') {
                         try {
-                            const userDoc = await db.collection('users').doc(userId).get();
-                            if (userDoc.exists) {
-                                const userData = userDoc.data();
+                            const response = await window.api.get(`/api/users/${userId}`);
+                            if (response && response.data) {
+                                const userData = response.data;
                                 localStorage.setItem(`userInfo_${userId}_displayName`, userData.displayName || 'Contact');
                                 if (userData.photoURL) {
                                     localStorage.setItem(`userInfo_${userId}_photoURL`, userData.photoURL);
@@ -3664,7 +3533,7 @@
                                 return userData.displayName || 'Contact';
                             }
                         } catch (error) {
-                            console.error('Error fetching user from Firebase:', error);
+                            console.error('Error fetching user from backend:', error);
                         }
                     }
                     return null;
@@ -3786,7 +3655,7 @@
             callbackBtn.addEventListener('click', (e) => {
                 e.stopPropagation();
                 if (!isOnline) {
-                    showNotification('Call features require internet connection', 'error');
+                    showNotification('Call features require connection', 'info');
                     return;
                 }
                 
@@ -3797,7 +3666,7 @@
                         startCall(otherParticipantIds[0], callType);
                     }
                 } else {
-                    showNotification('Cannot call: No participant information', 'error');
+                    showNotification('Cannot call: No participant information', 'info');
                 }
             });
             
@@ -3811,7 +3680,7 @@
                 
                 // Check if offline before processing call requests
                 if (!isOnline) {
-                    showNotification('Call features require internet connection', 'error');
+                    showNotification('Call features require connection', 'info');
                     return;
                 }
                 
@@ -3882,74 +3751,19 @@
         }
         
         async function initializeUser() {
-            // Only initialize user if online and Firebase is available
-            if (!isOnline || !db) {
-                // Get user info from app.js context or local storage
-                const userInfo = localStorage.getItem(`userInfo_${currentUser.uid}`);
-                if (userInfo) {
-                    const userData = JSON.parse(userInfo);
-                    window.userInitials = userData.displayName 
-                        ? userData.displayName.split(' ').map(n => n[0]).join('').toUpperCase().substring(0, 2)
-                        : 'ME';
-                    window.userAvatar = userData.photoURL || '';
-                } else if (currentUser) {
-                    window.userInitials = currentUser.displayName 
-                        ? currentUser.displayName.split(' ').map(n => n[0]).join('').toUpperCase().substring(0, 2)
-                        : 'ME';
-                    window.userAvatar = currentUser.photoURL || '';
-                }
-                return;
-            }
-            
-            try {
-                const userRef = db.collection('users').doc(currentUser.uid);
-                const userDoc = await userRef.get();
-                
-                if (!userDoc.exists) {
-                    await userRef.set({
-                        uid: currentUser.uid,
-                        displayName: currentUser.displayName || `User_${currentUser.uid.substring(0, 8)}`,
-                        email: currentUser.email || '',
-                        photoURL: currentUser.photoURL || '',
-                        createdAt: firebase.firestore.FieldValue.serverTimestamp(),
-                        lastSeen: firebase.firestore.FieldValue.serverTimestamp(),
-                        online: true,
-                        trialStartDate: new Date().toISOString(),
-                        subscription: 'free'
-                    });
-                } else {
-                    await userRef.update({
-                        lastSeen: firebase.firestore.FieldValue.serverTimestamp(),
-                        online: true
-                    });
-                }
-                
-                const userData = userDoc.exists ? userDoc.data() : {
-                    displayName: currentUser.displayName || 'User'
-                };
-                
-                // Save user info to local storage for offline use
-                localStorage.setItem(`userInfo_${currentUser.uid}`, JSON.stringify({
-                    displayName: userData.displayName,
-                    photoURL: userData.photoURL || currentUser.photoURL || ''
-                }));
-                
+            // Get user info from app.js context or local storage
+            const userInfo = localStorage.getItem(`userInfo_${currentUser.uid}`);
+            if (userInfo) {
+                const userData = JSON.parse(userInfo);
                 window.userInitials = userData.displayName 
                     ? userData.displayName.split(' ').map(n => n[0]).join('').toUpperCase().substring(0, 2)
                     : 'ME';
-                window.userAvatar = userData.photoURL || currentUser.photoURL || '';
-                
-            } catch (error) {
-                console.error('Error initializing user:', error);
-                // Use cached data if available
-                const cachedUser = localStorage.getItem(`userInfo_${currentUser.uid}`);
-                if (cachedUser) {
-                    const userData = JSON.parse(cachedUser);
-                    window.userInitials = userData.displayName 
-                        ? userData.displayName.split(' ').map(n => n[0]).join('').toUpperCase().substring(0, 2)
-                        : 'ME';
-                    window.userAvatar = userData.photoURL || '';
-                }
+                window.userAvatar = userData.photoURL || '';
+            } else if (currentUser) {
+                window.userInitials = currentUser.displayName 
+                    ? currentUser.displayName.split(' ').map(n => n[0]).join('').toUpperCase().substring(0, 2)
+                    : 'ME';
+                window.userAvatar = currentUser.photoURL || '';
             }
         }
         
@@ -3975,38 +3789,26 @@
                     }
                 }
                 
-                // Only try Firebase if online
-                if (isOnline && db) {
-                    const subscriptionRef = db.collection('userSubscriptions').doc(currentUser.uid);
-                    const subscriptionDoc = await subscriptionRef.get();
-                    
-                    if (subscriptionDoc.exists) {
-                        const subscriptionData = subscriptionDoc.data();
-                        userSubscription = {
-                            isPremium: subscriptionData.isPremium || false,
-                            trialDaysLeft: subscriptionData.trialDaysLeft || 30,
-                            maxGroupParticipants: subscriptionData.maxGroupParticipants || 8,
-                            subscriptionType: subscriptionData.subscriptionType || 'free',
-                            trialStartDate: subscriptionData.trialStartDate || new Date().toISOString(),
-                            paymentHistory: subscriptionData.paymentHistory || []
-                        };
-                        
-                        // Save to localStorage for offline use
-                        localStorage.setItem(`subscription_${currentUser.uid}`, JSON.stringify(userSubscription));
-                    } else {
-                        // Create new subscription document for new user
-                        const trialStartDate = new Date().toISOString();
-                        userSubscription = {
-                            isPremium: false,
-                            trialDaysLeft: 30,
-                            maxGroupParticipants: 8,
-                            subscriptionType: 'free',
-                            trialStartDate: trialStartDate,
-                            paymentHistory: []
-                        };
-                        
-                        await subscriptionRef.set(userSubscription);
-                        localStorage.setItem(`subscription_${currentUser.uid}`, JSON.stringify(userSubscription));
+                // Only try backend if online
+                if (isOnline && window.api && typeof window.api.get === 'function') {
+                    try {
+                        const response = await window.api.get(`/api/users/${currentUser.uid}/subscription`);
+                        if (response && response.data) {
+                            const subscriptionData = response.data;
+                            userSubscription = {
+                                isPremium: subscriptionData.isPremium || false,
+                                trialDaysLeft: subscriptionData.trialDaysLeft || 30,
+                                maxGroupParticipants: subscriptionData.maxGroupParticipants || 8,
+                                subscriptionType: subscriptionData.subscriptionType || 'free',
+                                trialStartDate: subscriptionData.trialStartDate || new Date().toISOString(),
+                                paymentHistory: subscriptionData.paymentHistory || []
+                            };
+                            
+                            // Save to localStorage for offline use
+                            localStorage.setItem(`subscription_${currentUser.uid}`, JSON.stringify(userSubscription));
+                        }
+                    } catch (error) {
+                        console.error('Error loading subscription from backend:', error);
                     }
                 }
                 
@@ -4105,47 +3907,51 @@
         
         async function processPremiumPayment(phoneNumber, amount) {
             if (!isOnline) {
-                throw new Error('Payment requires internet connection');
+                throw new Error('Payment requires connection');
             }
             
             try {
                 showNotification('Processing payment...', 'success');
                 
-                // Simulate M-Pesa payment (in a real app, you'd call your backend)
-                // For demo purposes, we'll simulate a successful payment
-                
-                // Generate a fake transaction ID
-                const transactionId = `MPESA_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
-                
-                // Update user subscription
-                userSubscription.isPremium = true;
-                userSubscription.subscriptionType = 'premium_monthly';
-                userSubscription.maxGroupParticipants = 50; // Premium allows up to 50 participants
-                userSubscription.paymentHistory.push({
-                    transactionId: transactionId,
-                    amount: amount,
-                    phoneNumber: phoneNumber,
-                    date: new Date().toISOString(),
-                    status: 'completed'
-                });
-                
-                // Save to Firebase
-                if (db) {
-                    const subscriptionRef = db.collection('userSubscriptions').doc(currentUser.uid);
-                    await subscriptionRef.set(userSubscription, { merge: true });
+                // Call backend payment API
+                if (window.api && typeof window.api.post === 'function') {
+                    const response = await window.api.post('/api/payments/mpesa', {
+                        phoneNumber: phoneNumber,
+                        amount: amount,
+                        userId: currentUser.uid,
+                        service: 'premium_upgrade'
+                    });
+                    
+                    if (response && response.success) {
+                        // Update user subscription
+                        userSubscription.isPremium = true;
+                        userSubscription.subscriptionType = 'premium_monthly';
+                        userSubscription.maxGroupParticipants = 50; // Premium allows up to 50 participants
+                        userSubscription.paymentHistory.push({
+                            transactionId: response.transactionId,
+                            amount: amount,
+                            phoneNumber: phoneNumber,
+                            date: new Date().toISOString(),
+                            status: 'completed'
+                        });
+                        
+                        // Save to localStorage
+                        localStorage.setItem(`subscription_${currentUser.uid}`, JSON.stringify(userSubscription));
+                        
+                        // Update UI
+                        updateSubscriptionUI();
+                        
+                        return {
+                            success: true,
+                            transactionId: response.transactionId,
+                            message: 'Payment successful! Your account has been upgraded to Premium.'
+                        };
+                    } else {
+                        throw new Error(response?.message || 'Payment failed');
+                    }
+                } else {
+                    throw new Error('Payment API not available');
                 }
-                
-                // Save to localStorage
-                localStorage.setItem(`subscription_${currentUser.uid}`, JSON.stringify(userSubscription));
-                
-                // Update UI
-                updateSubscriptionUI();
-                
-                return {
-                    success: true,
-                    transactionId: transactionId,
-                    message: 'Payment successful! Your account has been upgraded to Premium.'
-                };
                 
             } catch (error) {
                 console.error('Payment error:', error);
@@ -4166,61 +3972,12 @@
         }
         
         function setupPresenceTracking() {
-            if (!currentUser || !isOnline || !db) return;
+            if (!currentUser || !isOnline) return;
             
-            try {
-                userPresenceRef = db.collection('userPresence').doc(currentUser.uid);
-                
-                const presenceData = {
-                    uid: currentUser.uid,
-                    online: true,
-                    lastOnline: firebase.firestore.FieldValue.serverTimestamp(),
-                    peerId: null
-                };
-                
-                userPresenceRef.set(presenceData, { merge: true });
-                
-                const updatePresenceWithPeerId = () => {
-                    if (peer && peer.id && isOnline && userPresenceRef) {
-                        userPresenceRef.update({
-                            peerId: peer.id,
-                            lastOnline: firebase.firestore.FieldValue.serverTimestamp()
-                        });
-                    }
-                };
-                
-                if (peer) {
-                    peer.on('open', updatePresenceWithPeerId);
-                }
-                
-                document.addEventListener('visibilitychange', () => {
-                    if (userPresenceRef && isOnline) {
-                        if (document.hidden) {
-                            userPresenceRef.update({
-                                online: false,
-                                lastOnline: firebase.firestore.FieldValue.serverTimestamp()
-                            });
-                        } else {
-                            userPresenceRef.update({
-                                online: true,
-                                lastOnline: firebase.firestore.FieldValue.serverTimestamp()
-                            });
-                        }
-                    }
-                });
-                
-                window.addEventListener('beforeunload', () => {
-                    if (userPresenceRef && isOnline) {
-                        userPresenceRef.update({
-                            online: false,
-                            lastOnline: firebase.firestore.FieldValue.serverTimestamp()
-                        });
-                    }
-                });
-                
-            } catch (error) {
-                console.error('Error setting up presence tracking:', error);
-            }
+            // Update presence periodically
+            setInterval(() => {
+                updateUserPresence(true);
+            }, 30000);
         }
         
         function initializePeerJS() {
@@ -4253,13 +4010,6 @@
                 
                 peer.on('open', (id) => {
                     console.log('✅ PeerJS connected successfully with ID:', id);
-                    
-                    if (userPresenceRef && isOnline) {
-                        userPresenceRef.update({
-                            peerId: id,
-                            lastOnline: firebase.firestore.FieldValue.serverTimestamp()
-                        });
-                    }
                     
                     showNotification('Connected to call server', 'success');
                 });
@@ -4310,19 +4060,19 @@
                         
                         let callerData = null;
                         
-                        // Try to get caller info from Firebase IMMEDIATELY
-                        if (db) {
+                        // Try to get caller info from backend IMMEDIATELY
+                        if (isOnline && window.api && typeof window.api.get === 'function') {
                             try {
-                                const callerDoc = await db.collection('users').doc(callerId).get();
-                                if (callerDoc.exists) {
-                                    callerData = callerDoc.data();
+                                const response = await window.api.get(`/api/users/${callerId}`);
+                                if (response && response.data) {
+                                    callerData = response.data;
                                 }
                             } catch (error) {
                                 console.error('Error fetching caller info:', error);
                             }
                         }
                         
-                        // If no Firebase data, check localStorage IMMEDIATELY
+                        // If no backend data, check localStorage IMMEDIATELY
                         if (!callerData) {
                             const cachedCaller = localStorage.getItem(`userInfo_${callerId}`);
                             if (cachedCaller) {
@@ -4408,23 +4158,25 @@
         
         async function checkUserOnlineStatus(userId) {
             // If we're offline, all users appear offline
-            if (!isOnline || !db) {
+            if (!isOnline) {
                 return { online: false, lastOnline: 999, peerId: null };
             }
             
             try {
-                const presenceDoc = await db.collection('userPresence').doc(userId).get();
-                if (presenceDoc.exists) {
-                    const presenceData = presenceDoc.data();
-                    const lastOnline = presenceData.lastOnline?.toDate();
-                    const now = new Date();
-                    const minutesAgo = lastOnline ? Math.floor((now - lastOnline) / 60000) : 999;
-                    
-                    return {
-                        online: presenceData.online === true,
-                        lastOnline: minutesAgo,
-                        peerId: presenceData.peerId
-                    };
+                if (window.api && typeof window.api.get === 'function') {
+                    const response = await window.api.get(`/api/users/${userId}/presence`);
+                    if (response && response.data) {
+                        const presenceData = response.data;
+                        const lastOnline = presenceData.lastOnline ? new Date(presenceData.lastOnline) : null;
+                        const now = new Date();
+                        const minutesAgo = lastOnline ? Math.floor((now - lastOnline) / 60000) : 999;
+                        
+                        return {
+                            online: presenceData.online === true,
+                            lastOnline: minutesAgo,
+                            peerId: presenceData.peerId
+                        };
+                    }
                 }
                 return { online: false, lastOnline: 999, peerId: null };
             } catch (error) {
@@ -4438,7 +4190,7 @@
             
             // Check if offline before starting call
             if (!isOnline) {
-                showNotification('Call features require internet connection', 'error');
+                showNotification('Call features require connection', 'info');
                 
                 // Save as missed call attempt to cache
                 await saveCallToLocalStorage({
@@ -4491,19 +4243,17 @@
                 });
                 
                 let callId = null;
-                if (db) {
-                    const callRef = db.collection('callInvitations').doc();
-                    callId = callRef.id;
-                    
-                    await callRef.set({
-                        callId: callId,
+                if (window.api && typeof window.api.post === 'function') {
+                    const response = await window.api.post('/api/calls/invite', {
                         from: currentUser.uid,
                         to: userId,
                         type: type,
-                        status: 'ringing',
-                        timestamp: firebase.firestore.FieldValue.serverTimestamp(),
-                        expiresAt: new Date(Date.now() + 60000)
+                        callId: `call_${Date.now()}`
                     });
+                    
+                    if (response && response.data) {
+                        callId = response.data.callId;
+                    }
                 }
                 
                 currentCallType = type;
@@ -4605,8 +4355,8 @@
                     });
                     document.getElementById('callStatus').textContent = 'In call';
                     
-                    if (callId && db) {
-                        db.collection('callInvitations').doc(callId).delete();
+                    if (callId && window.api && typeof window.api.delete === 'function') {
+                        window.api.delete(`/api/calls/invite/${callId}`);
                     }
                     
                     // Save connected call to cache
@@ -4795,7 +4545,7 @@
             
             // Check if offline
             if (!isOnline) {
-                showNotification('Call features require internet connection', 'error');
+                showNotification('Call features require connection', 'info');
                 
                 // Save group call attempt to cache
                 await saveCallToLocalStorage({
@@ -4944,7 +4694,7 @@
                 userName = 'You';
                 userAvatar = window.userAvatar;
             } else {
-                // Try to get user info from Firebase or localStorage
+                // Try to get user info from backend or localStorage
                 const getUserInfo = async () => {
                     try {
                         const contactName = await getContactNameWithFallback(userId);
@@ -5148,7 +4898,7 @@
             try {
                 // Check if offline before accepting call
                 if (!isOnline) {
-                    showNotification('Call features require internet connection', 'error');
+                    showNotification('Call features require connection', 'info');
                     declineCall();
                     return;
                 }
@@ -5205,8 +4955,8 @@
                 callStartTime = new Date();
                 startCallTimer();
                 
-                if (incomingCall.metadata && incomingCall.metadata.callId && db) {
-                    await db.collection('callInvitations').doc(incomingCall.metadata.callId).delete();
+                if (incomingCall.metadata && incomingCall.metadata.callId && window.api && typeof window.api.delete === 'function') {
+                    await window.api.delete(`/api/calls/invite/${incomingCall.metadata.callId}`);
                 }
                 
                 // Save accepted call to cache
@@ -5273,50 +5023,6 @@
             } catch (error) {
                 console.error('Error loading all calls:', error);
                 showNotification('Failed to load call history', 'error');
-            }
-        }
-        
-        async function loadMissedCalls() {
-            try {
-                // Load from cache first
-                const cacheKey = `${CACHE_KEYS.CALLS_HISTORY}_${currentUser.uid}`;
-                const cachedCalls = localStorage.getItem(cacheKey);
-                
-                if (cachedCalls) {
-                    const calls = JSON.parse(cachedCalls);
-                    const missedCalls = calls.filter(call => call.status === 'missed');
-                    displayCallsFromCache(missedCalls, missedCallsList, 'missed');
-                }
-                
-                // Then sync from server if online
-                if (isOnline) {
-                    syncMissedCalls();
-                }
-                
-            } catch (error) {
-                console.error('Error loading missed calls:', error);
-            }
-        }
-        
-        async function loadGroupCalls() {
-            try {
-                // Load from cache first
-                const cacheKey = `${CACHE_KEYS.CALLS_HISTORY}_${currentUser.uid}`;
-                const cachedCalls = localStorage.getItem(cacheKey);
-                
-                if (cachedCalls) {
-                    const calls = JSON.parse(cachedCalls);
-                    const groupCalls = calls.filter(call => call.group === true || (call.participants && call.participants.length > 2));
-                    displayCallsFromCache(groupCalls, groupCallsList, 'group');
-                }
-                
-                // Then sync from server if online
-                if (isOnline) {
-                    syncGroupCalls();
-                }
-                
-            } catch (error) {
-                console.error('Error loading group calls:', error);
             }
         }
         
@@ -5584,7 +5290,7 @@
             
             // If offline, show offline message
             if (!isOnline) {
-                const offlineMessage = '<div class="offline-contacts-message"><i class="fas fa-wifi-slash"></i><p>Contacts unavailable while offline</p><p class="subtext">Call features require internet connection</p></div>';
+                const offlineMessage = '<div class="offline-contacts-message"><i class="fas fa-wifi-slash"></i><p>Contacts unavailable while offline</p><p class="subtext">Call features require connection</p></div>';
                 contactsList.innerHTML = offlineMessage;
                 groupContactsList.innerHTML = offlineMessage;
                 return;
@@ -5594,27 +5300,28 @@
             groupContactsList.innerHTML = '<div style="text-align: center; padding: 20px; color: var(--text-secondary);">Loading contacts...</div>';
             
             try {
-                if (!db) {
-                    throw new Error('Database not available');
+                if (!window.api || typeof window.api.get !== 'function') {
+                    throw new Error('API not available');
                 }
                 
-                const usersSnapshot = await db.collection('users')
-                    .where('uid', '!=', currentUser.uid)
-                    .limit(50)
-                    .get();
+                const response = await window.api.get('/api/users/contacts', {
+                    params: {
+                        limit: 50,
+                        excludeSelf: true
+                    }
+                });
                 
                 contactsList.innerHTML = '';
                 groupContactsList.innerHTML = '';
                 
-                if (usersSnapshot.empty) {
+                if (!response || !response.data || response.data.length === 0) {
                     const emptyMessage = '<div class="offline-contacts-message"><i class="fas fa-users"></i><p>No contacts found</p></div>';
                     contactsList.innerHTML = emptyMessage;
                     groupContactsList.innerHTML = emptyMessage;
                     return;
                 }
                 
-                for (const doc of usersSnapshot.docs) {
-                    const userData = doc.data();
+                for (const userData of response.data) {
                     const status = await checkUserOnlineStatus(userData.uid);
                     userData.online = status.online;
                     userData.lastOnline = status.lastOnline;
@@ -5628,7 +5335,7 @@
                 showNotification('Failed to load contacts', 'error');
                 
                 // Show offline message
-                const offlineMessage = '<div class="offline-contacts-message"><i class="fas fa-wifi-slash"></i><p>Contacts unavailable while offline</p><p class="subtext">Call features require internet connection</p></div>';
+                const offlineMessage = '<div class="offline-contacts-message"><i class="fas fa-wifi-slash"></i><p>Contacts unavailable while offline</p><p class="subtext">Call features require connection</p></div>';
                 contactsList.innerHTML = offlineMessage;
                 groupContactsList.innerHTML = offlineMessage;
             }
@@ -5671,7 +5378,7 @@
             const checkbox = contactItem.querySelector('.contact-checkbox');
             checkbox.addEventListener('change', function() {
                 if (!isOnline) {
-                    showNotification('Cannot select contacts while offline', 'error');
+                    showNotification('Cannot select contacts while offline', 'info');
                     this.checked = false;
                     return;
                 }
@@ -5800,7 +5507,7 @@
             // New call button
             document.getElementById('newCallBtn').addEventListener('click', () => {
                 if (!isOnline) {
-                    showNotification('Call features require internet connection', 'error');
+                    showNotification('Call features require connection', 'info');
                     return;
                 }
                 
@@ -5812,7 +5519,7 @@
             // Quick action buttons
             document.getElementById('voiceCallBtn').addEventListener('click', () => {
                 if (!isOnline) {
-                    showNotification('Call features require internet connection', 'error');
+                    showNotification('Call features require connection', 'info');
                     return;
                 }
                 
@@ -5822,7 +5529,7 @@
             
             document.getElementById('videoCallBtn').addEventListener('click', () => {
                 if (!isOnline) {
-                    showNotification('Call features require internet connection', 'error');
+                    showNotification('Call features require connection', 'info');
                     return;
                 }
                 
@@ -5832,7 +5539,7 @@
             
             document.getElementById('groupCallBtn').addEventListener('click', () => {
                 if (!isOnline) {
-                    showNotification('Call features require internet connection', 'error');
+                    showNotification('Call features require connection', 'info');
                     return;
                 }
                 
@@ -5875,7 +5582,7 @@
             // Start call button
             document.getElementById('startCallBtn').addEventListener('click', async () => {
                 if (!isOnline) {
-                    showNotification('Call features require internet connection', 'error');
+                    showNotification('Call features require connection', 'info');
                     return;
                 }
                 
@@ -5886,7 +5593,7 @@
                 
                 if (activeTabName === 'contacts') {
                     if (selectedContacts.length === 0) {
-                        showNotification('Please select at least one contact', 'error');
+                        showNotification('Please select at least one contact', 'info');
                         return;
                     }
                     
@@ -5898,7 +5605,7 @@
                     
                 } else if (activeTabName === 'group') {
                     if (selectedContacts.length === 0) {
-                        showNotification('Please select participants', 'error');
+                        showNotification('Please select participants', 'info');
                         return;
                     }
                     
@@ -6029,7 +5736,7 @@
             
             document.getElementById('screenShareBtn').addEventListener('click', function() {
                 if (!isOnline) {
-                    showNotification('Screen sharing requires internet connection', 'error');
+                    showNotification('Screen sharing requires connection', 'info');
                     return;
                 }
                 
@@ -6061,7 +5768,7 @@
                     
                     // Check if offline and trying to access features that require internet
                     if (!isOnline && panelName !== 'participants') {
-                        showNotification('This feature requires internet connection', 'error');
+                        showNotification('This feature requires connection', 'info');
                         return;
                     }
                     
@@ -6110,7 +5817,7 @@
             // Add participants button
             document.getElementById('addParticipantsBtn').addEventListener('click', () => {
                 if (!isOnline) {
-                    showNotification('Cannot add participants while offline', 'error');
+                    showNotification('Cannot add participants while offline', 'info');
                     return;
                 }
                 
@@ -6126,7 +5833,7 @@
                 }
                 
                 if (!isOnline) {
-                    showNotification('Chat requires internet connection', 'error');
+                    showNotification('Chat requires connection', 'info');
                     return;
                 }
                 
@@ -6163,7 +5870,7 @@
                     }
                     
                     if (!isOnline) {
-                        showNotification('Whiteboard requires internet connection', 'error');
+                        showNotification('Whiteboard requires connection', 'info');
                         return;
                     }
                     
@@ -6288,7 +5995,7 @@
                 
                 // Load missed calls if not already loaded
                 if (missedCallsList.children.length === 0) {
-                    loadMissedCalls();
+                    loadAllCalls();
                 }
                 
                 // Ensure mobile layout is correct
@@ -6308,7 +6015,7 @@
                 
                 // Load group calls if not already loaded
                 if (groupCallsList.children.length === 0) {
-                    loadGroupCalls();
+                    loadAllCalls();
                 }
                 
                 // Ensure mobile layout is correct
@@ -6326,12 +6033,12 @@
                 const requiredLimit = paymentModal.dataset.requiredLimit;
                 
                 if (!phoneNumber || phoneNumber.length !== 10 || !phoneNumber.startsWith('07')) {
-                    showNotification('Please enter a valid Kenyan phone number (07XXXXXXXX)', 'error');
+                    showNotification('Please enter a valid Kenyan phone number (07XXXXXXXX)', 'info');
                     return;
                 }
                 
                 if (amount < 500) {
-                    showNotification('Minimum payment amount is KSh 500', 'error');
+                    showNotification('Minimum payment amount is KSh 500', 'info');
                     return;
                 }
                 
@@ -6349,10 +6056,10 @@
                             }, 1000);
                         }
                     } else {
-                        showNotification('Payment failed: ' + paymentResult.message, 'error');
+                        showNotification('Payment failed: ' + paymentResult.message, 'info');
                     }
                 } catch (error) {
-                    showNotification('Payment error: ' + error.message, 'error');
+                    showNotification('Payment error: ' + error.message, 'info');
                 }
             });
             
@@ -6372,27 +6079,22 @@
                     endCall();
                 }
                 
-                if (userPresenceRef && isOnline) {
-                    userPresenceRef.update({
-                        online: false,
-                        lastOnline: firebase.firestore.FieldValue.serverTimestamp()
-                    });
+                if (currentUser && isOnline) {
+                    updateUserPresence(false);
                 }
                 
-                // Clear offline check interval
-                if (offlineCheckInterval) {
-                    clearInterval(offlineCheckInterval);
+                // Clear connection check interval
+                if (connectionCheckInterval) {
+                    clearInterval(connectionCheckInterval);
                 }
             });
-            
-            setupCallInvitationListener();
             
             // Initialize call container in view-only mode when offline
             if (!isOnline) {
                 // Show call container with placeholder when offline
                 callContainer.classList.add('active');
-                document.getElementById('callParticipants').textContent = 'Offline Mode';
-                document.getElementById('callStatus').textContent = 'Call features require internet connection';
+                document.getElementById('callParticipants').textContent = 'Connection Required';
+                document.getElementById('callStatus').textContent = 'Call features require connection';
                 offlineCallPlaceholder.style.display = 'flex';
             }
             
@@ -6406,44 +6108,8 @@
             }
         }
         
-        function setupCallInvitationListener() {
-            if (!currentUser || !isOnline || !db) return;
-            
-            db.collection('callInvitations')
-                .where('to', '==', currentUser.uid)
-                .where('status', '==', 'ringing')
-                .where('expiresAt', '>', new Date())
-                .onSnapshot(snapshot => {
-                    snapshot.docChanges().forEach(change => {
-                        if (change.type === 'added') {
-                            const invitation = change.doc.data();
-                            console.log('New call invitation:', invitation);
-                            
-                            if (!window.incomingCall) {
-                                showNotification(`Incoming call from user`, 'warning');
-                                
-                                db.collection('users').doc(invitation.from).get().then(doc => {
-                                    if (doc.exists) {
-                                        const callerData = doc.data();
-                                        showNotification(`Missed call from ${callerData.displayName}`, 'warning');
-                                    }
-                                });
-                            }
-                        }
-                    });
-                });
-        }
-        
-        setInterval(() => {
-            if (userPresenceRef && currentUser && isOnline) {
-                userPresenceRef.update({
-                    lastOnline: firebase.firestore.FieldValue.serverTimestamp()
-                });
-            }
-        }, 30000);
-        
         console.log('Video call system initialized successfully');
-        showNotification('Call history loaded from cache', 'success');
+        showNotification('Call history loaded', 'success');
     </script>
 </body>
 </html>

@@ -3,6 +3,11 @@ class PWAManager {
   constructor() {
     this.registration = null;
     this.isUpdateAvailable = false;
+    this.authState = {
+      isAuthenticated: false,
+      user: null,
+      token: null
+    };
     this.init();
   }
 
@@ -10,6 +15,224 @@ class PWAManager {
     await this.registerServiceWorker();
     this.setupAppListeners();
     this.checkAppVersion();
+    this.checkAuthState(); // Check initial auth state
+  }
+
+  // Check initial authentication state
+  async checkAuthState() {
+    try {
+      // Check for stored token
+      const token = localStorage.getItem('auth_token');
+      const userData = localStorage.getItem('user_data');
+      
+      if (token && userData) {
+        // Verify token with backend
+        const isValid = await this.validateToken(token);
+        
+        if (isValid) {
+          this.authState = {
+            isAuthenticated: true,
+            user: JSON.parse(userData),
+            token: token
+          };
+          this.updateUIForAuthState();
+          console.log('kynecta: User authenticated from stored token');
+        } else {
+          this.clearAuthData();
+        }
+      } else {
+        this.clearAuthData();
+      }
+    } catch (error) {
+      console.error('kynecta: Error checking auth state:', error);
+      this.clearAuthData();
+    }
+  }
+
+  // Validate token with backend
+  async validateToken(token) {
+    try {
+      const response = await fetch('/api/auth/verify', {
+        headers: {
+          'Authorization': `Bearer ${token}`
+        }
+      });
+      
+      return response.ok;
+    } catch (error) {
+      console.error('kynecta: Token validation failed:', error);
+      return false;
+    }
+  }
+
+  // Listen for login and logout events
+  setupAuthListeners() {
+    // Listen for localStorage changes (cross-tab communication)
+    window.addEventListener('storage', (event) => {
+      if (event.key === 'auth_token' || event.key === 'user_data') {
+        console.log('kynecta: Auth storage changed, checking state');
+        this.checkAuthState();
+      }
+    });
+
+    // Listen for custom auth events
+    window.addEventListener('user-login', (event) => {
+      console.log('kynecta: User login event received');
+      this.handleUserLogin(event.detail);
+    });
+
+    window.addEventListener('user-logout', () => {
+      console.log('kynecta: User logout event received');
+      this.handleUserLogout();
+    });
+
+    // Listen for auth state changes from API calls
+    this.interceptAPICalls();
+  }
+
+  // Intercept API calls to detect auth state changes
+  interceptAPICalls() {
+    const originalFetch = window.fetch;
+    
+    window.fetch = async (...args) => {
+      const response = await originalFetch(...args);
+      
+      // Clone response to read it without consuming
+      const clonedResponse = response.clone();
+      
+      // Check for auth-related responses
+      if (args[0].includes('/api/auth/')) {
+        try {
+          const data = await clonedResponse.json();
+          
+          if (args[0].includes('/api/auth/login') && response.ok) {
+            // Login successful
+            setTimeout(() => {
+              this.checkAuthState();
+            }, 100);
+          }
+          
+          if (args[0].includes('/api/auth/logout') && response.ok) {
+            // Logout successful
+            setTimeout(() => {
+              this.clearAuthData();
+            }, 100);
+          }
+        } catch (error) {
+          // Response is not JSON, that's okay
+        }
+      }
+      
+      return response;
+    };
+  }
+
+  // Handle user login
+  handleUserLogin(userData) {
+    this.authState = {
+      isAuthenticated: true,
+      user: userData.user,
+      token: userData.token
+    };
+    
+    // Store auth data
+    localStorage.setItem('auth_token', userData.token);
+    localStorage.setItem('user_data', JSON.stringify(userData.user));
+    
+    // Update UI
+    this.updateUIForAuthState();
+    
+    // Notify service worker
+    this.sendMessageToServiceWorker({
+      type: 'AUTH_STATE_CHANGE',
+      isAuthenticated: true,
+      userId: userData.user.id
+    });
+    
+    console.log('kynecta: User logged in:', userData.user.email);
+  }
+
+  // Handle user logout
+  handleUserLogout() {
+    this.clearAuthData();
+    
+    // Notify service worker
+    this.sendMessageToServiceWorker({
+      type: 'AUTH_STATE_CHANGE',
+      isAuthenticated: false,
+      userId: null
+    });
+    
+    console.log('kynecta: User logged out');
+  }
+
+  // Clear all auth data
+  clearAuthData() {
+    this.authState = {
+      isAuthenticated: false,
+      user: null,
+      token: null
+    };
+    
+    localStorage.removeItem('auth_token');
+    localStorage.removeItem('user_data');
+    
+    this.updateUIForAuthState();
+  }
+
+  // Update UI based on auth state
+  updateUIForAuthState() {
+    const event = new CustomEvent('auth-state-changed', {
+      detail: this.authState
+    });
+    window.dispatchEvent(event);
+    
+    // Update navigation and UI elements
+    this.updateNavigation();
+    this.updateUserProfile();
+  }
+
+  // Update navigation based on auth state
+  updateNavigation() {
+    const authElements = document.querySelectorAll('[data-auth]');
+    
+    authElements.forEach(element => {
+      const authState = element.getAttribute('data-auth');
+      
+      if (authState === 'authenticated') {
+        element.style.display = this.authState.isAuthenticated ? '' : 'none';
+      } else if (authState === 'unauthenticated') {
+        element.style.display = this.authState.isAuthenticated ? 'none' : '';
+      }
+    });
+  }
+
+  // Update user profile in UI
+  updateUserProfile() {
+    const profileElements = document.querySelectorAll('[data-user-profile]');
+    
+    profileElements.forEach(element => {
+      const property = element.getAttribute('data-user-profile');
+      
+      if (this.authState.isAuthenticated && this.authState.user) {
+        if (property === 'name') {
+          element.textContent = this.authState.user.name || '';
+        } else if (property === 'email') {
+          element.textContent = this.authState.user.email || '';
+        } else if (property === 'avatar') {
+          element.src = this.authState.user.avatar || '/default-avatar.png';
+        } else if (property === 'initials') {
+          const name = this.authState.user.name || '';
+          element.textContent = name.split(' ').map(n => n[0]).join('').toUpperCase();
+        }
+      } else {
+        if (property === 'name' || property === 'email' || property === 'initials') {
+          element.textContent = '';
+        } else if (property === 'avatar') {
+          element.src = '/default-avatar.png';
+        }
+      }
+    });
   }
 
   // Service Worker Registration
@@ -58,6 +281,9 @@ class PWAManager {
 
   // Listen for controller changes
   setupAppListeners() {
+    // Setup auth listeners first
+    this.setupAuthListeners();
+
     // Controller change - reload page
     navigator.serviceWorker?.addEventListener('controllerchange', () => {
       console.log('kynecta: Controller changed - reloading page');
@@ -105,11 +331,13 @@ class PWAManager {
         break;
       
       case 'FIREBASE_AUTH_SYNC':
-        this.syncFirebaseAuth();
+        // Replaced with API-based auth sync
+        this.syncAuthState();
         break;
       
       case 'FIRESTORE_SYNC':
-        this.syncFirestoreData();
+        // Replaced with API-based data sync
+        this.syncUserData();
         break;
       
       case 'MESSAGE_SYNC':
@@ -120,9 +348,80 @@ class PWAManager {
         this.updateOfflineStatus(data.status);
         break;
       
+      case 'AUTH_REQUIRED':
+        // Service worker detected need for authentication
+        this.handleAuthRequired();
+        break;
+      
       default:
-        console.log('UniConnect: Unknown message type:', data.type);
+        console.log('kynecta: Unknown message type:', data.type);
     }
+  }
+
+  // Handle authentication required
+  handleAuthRequired() {
+    if (!this.authState.isAuthenticated) {
+      // Redirect to login or show login modal
+      if (window.location.pathname !== '/login') {
+        window.location.href = '/login?redirect=' + encodeURIComponent(window.location.pathname);
+      }
+    }
+  }
+
+  // Sync auth state with backend
+  async syncAuthState() {
+    if (this.authState.isAuthenticated && this.authState.token) {
+      try {
+        const response = await fetch('/api/auth/sync', {
+          headers: {
+            'Authorization': `Bearer ${this.authState.token}`
+          }
+        });
+        
+        if (response.ok) {
+          const data = await response.json();
+          console.log('kynecta: Auth sync successful');
+          return data;
+        } else if (response.status === 401) {
+          // Token expired or invalid
+          this.clearAuthData();
+          window.dispatchEvent(new CustomEvent('session-expired'));
+        }
+      } catch (error) {
+        console.error('kynecta: Auth sync failed:', error);
+      }
+    }
+    return null;
+  }
+
+  // Sync user data with backend
+  async syncUserData() {
+    if (!this.authState.isAuthenticated) return;
+    
+    try {
+      const response = await fetch('/api/user/data', {
+        headers: {
+          'Authorization': `Bearer ${this.authState.token}`
+        }
+      });
+      
+      if (response.ok) {
+        const data = await response.json();
+        console.log('kynecta: User data sync successful');
+        
+        // Update local user data
+        if (data.user) {
+          this.authState.user = { ...this.authState.user, ...data.user };
+          localStorage.setItem('user_data', JSON.stringify(this.authState.user));
+          this.updateUserProfile();
+        }
+        
+        return data;
+      }
+    } catch (error) {
+      console.error('kynecta: User data sync failed:', error);
+    }
+    return null;
   }
 
   // Update notification
@@ -187,7 +486,7 @@ class PWAManager {
           <div class="flex items-center">
             <span class="text-lg mr-2">📱</span>
             <div>
-              <p class="font-semibold">Install UniConnect</p>
+              <p class="font-semibold">Install kynecta</p>
               <p class="text-sm opacity-90">Use app offline</p>
             </div>
           </div>
@@ -294,27 +593,35 @@ class PWAManager {
   }
 
   // Data synchronization methods
-  async syncFirebaseAuth() {
-    console.log('kynecta: Syncing Firebase Auth...');
-    // Implement Firebase Auth sync logic
-  }
-
-  async syncFirestoreData() {
-    console.log('kynecta: Syncing Firestore data...');
-    // Implement Firestore sync logic
-  }
-
   async syncPendingMessages() {
     console.log('kynecta: Syncing pending messages...');
-    // Implement message sync logic
+    // Implement message sync logic with your backend API
+    if (this.authState.isAuthenticated) {
+      try {
+        const response = await fetch('/api/messages/sync', {
+          headers: {
+            'Authorization': `Bearer ${this.authState.token}`
+          }
+        });
+        
+        if (response.ok) {
+          const data = await response.json();
+          console.log('kynecta: Messages synced:', data.count);
+        }
+      } catch (error) {
+        console.error('kynecta: Message sync failed:', error);
+      }
+    }
   }
 
   async syncAllData() {
-    await Promise.all([
-      this.syncFirebaseAuth(),
-      this.syncFirestoreData(),
-      this.syncPendingMessages()
-    ]);
+    if (this.authState.isAuthenticated) {
+      await Promise.all([
+        this.syncAuthState(),
+        this.syncUserData(),
+        this.syncPendingMessages()
+      ]);
+    }
   }
 
   // Communication with service worker
@@ -328,7 +635,9 @@ class PWAManager {
     this.sendMessageToServiceWorker({ 
       type: 'CLIENT_READY',
       timestamp: Date.now(),
-      url: window.location.href
+      url: window.location.href,
+      isAuthenticated: this.authState.isAuthenticated,
+      userId: this.authState.user?.id
     });
   }
 
@@ -364,6 +673,12 @@ class PWAManager {
   onAppUpdated(oldVersion, newVersion) {
     console.log(`kynecta: App updated from ${oldVersion} to ${newVersion}`);
     // Perform any update-specific tasks
+    
+    // Clear old auth data on major version changes
+    if (oldVersion.split('.')[0] !== newVersion.split('.')[0]) {
+      console.log('kynecta: Major version change, clearing old auth data');
+      this.clearAuthData();
+    }
   }
 
   // Analytics and tracking
@@ -414,6 +729,14 @@ document.addEventListener('DOMContentLoaded', function() {
     const versionInfo = await window.pwaManager.getServiceWorkerVersion();
     console.log('kynecta: Service Worker Version:', versionInfo);
   }, 2000);
+  
+  // Add logout handler
+  document.addEventListener('click', (event) => {
+    if (event.target.matches('[data-action="logout"]')) {
+      event.preventDefault();
+      window.pwaManager.handleUserLogout();
+    }
+  });
 });
 
 // Export for module usage (if needed)

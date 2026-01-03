@@ -1728,6 +1728,49 @@
     let isInGroupView = false; // Track if we're in a group view
     let isInFullscreenView = false; // Track if we're in any fullscreen view
     
+    // API Helper function for backend calls
+    async function api(endpoint, method = 'GET', data = null) {
+        const baseUrl = 'https://your-backend-api.com'; // Replace with your actual backend URL
+        const url = `${baseUrl}${endpoint}`;
+        
+        const options = {
+            method,
+            headers: {
+                'Content-Type': 'application/json',
+                'Authorization': `Bearer ${localStorage.getItem('auth_token') || ''}`
+            }
+        };
+        
+        if (data) {
+            options.body = JSON.stringify(data);
+        }
+        
+        try {
+            const response = await fetch(url, options);
+            
+            if (!response.ok) {
+                throw new Error(`API error: ${response.status}`);
+            }
+            
+            return await response.json();
+        } catch (error) {
+            console.error('API call failed:', error);
+            // For offline mode, store in local storage queue
+            if (method === 'POST' && endpoint.includes('/messages/send')) {
+                const offlineQueueKey = 'kynecta_offline_queue_' + (currentUser?.id || 'guest');
+                const offlineQueue = JSON.parse(localStorage.getItem(offlineQueueKey) || '[]');
+                offlineQueue.push({
+                    endpoint,
+                    method,
+                    data,
+                    timestamp: Date.now()
+                });
+                localStorage.setItem(offlineQueueKey, JSON.stringify(offlineQueue));
+            }
+            throw error;
+        }
+    }
+    
     document.addEventListener('DOMContentLoaded', function() {
         console.log('DOM loaded, initializing iframe controller...');
         
@@ -2224,7 +2267,7 @@
         });
     }
     
-    function syncOfflineData() {
+    async function syncOfflineData() {
         if (!currentUser) return;
         
         // Check for offline messages to sync
@@ -2234,12 +2277,28 @@
         if (offlineQueue.length > 0) {
             console.log('Silently syncing', offlineQueue.length, 'offline messages');
             
-            // In a real app, this would sync with Firebase
-            // For now, we'll just clear the offline queue
-            localStorage.setItem(offlineQueueKey, JSON.stringify([]));
+            // Process offline queue with API calls
+            const successfulSyncs = [];
+            const failedSyncs = [];
             
-            // Show a subtle success notification for sync
-            showGlobalNotification(`${offlineQueue.length} messages synced`, 'success', 3000);
+            for (const item of offlineQueue) {
+                try {
+                    // Use the api() helper to send the queued request
+                    const result = await api(item.endpoint, item.method, item.data);
+                    successfulSyncs.push(item);
+                } catch (error) {
+                    console.error('Failed to sync item:', item, error);
+                    failedSyncs.push(item);
+                }
+            }
+            
+            // Update offline queue with failed items only
+            localStorage.setItem(offlineQueueKey, JSON.stringify(failedSyncs));
+            
+            // Show subtle success notification for sync
+            if (successfulSyncs.length > 0) {
+                showGlobalNotification(`${successfulSyncs.length} messages synced`, 'success', 3000);
+            }
         }
     }
     
@@ -2628,6 +2687,45 @@
                         showGlobalNotification(`${event.data.messageCount} messages synced`, 'success', 3000);
                     }
                     break;
+                    
+                case 'api_request':
+                    // Handle API requests from iframes
+                    if (event.data.endpoint && event.data.method) {
+                        handleApiRequest(event.data);
+                    }
+                    break;
+            }
+        }
+    }
+    
+    async function handleApiRequest(requestData) {
+        try {
+            const result = await api(
+                requestData.endpoint,
+                requestData.method,
+                requestData.data
+            );
+            
+            // Send result back to iframe
+            const iframe = document.querySelector('.content-area:not(.hidden) .content-iframe');
+            if (iframe && iframe.contentWindow) {
+                iframe.contentWindow.postMessage({
+                    type: 'api_response',
+                    requestId: requestData.requestId,
+                    success: true,
+                    data: result
+                }, '*');
+            }
+        } catch (error) {
+            // Send error back to iframe
+            const iframe = document.querySelector('.content-area:not(.hidden) .content-iframe');
+            if (iframe && iframe.contentWindow) {
+                iframe.contentWindow.postMessage({
+                    type: 'api_response',
+                    requestId: requestData.requestId,
+                    success: false,
+                    error: error.message
+                }, '*');
             }
         }
     }
@@ -2638,6 +2736,7 @@
         // Clear current user
         currentUser = null;
         localStorage.removeItem('kynecta_user');
+        localStorage.removeItem('auth_token');
         
         // Redirect back to index.html for login
         window.location.href = '../index.html';
@@ -2720,6 +2819,7 @@
     window.setIsInStatusView = setIsInStatusView;
     window.setIsInGroupView = setIsInGroupView;
     window.setIsInFullscreenView = setIsInFullscreenView;
+    window.api = api;
     
     // Handle window resize (WhatsApp behavior)
     window.addEventListener('resize', function() {
