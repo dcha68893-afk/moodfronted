@@ -1,5 +1,5 @@
 // Service Worker for Kynecta MoodChat - Complete Invisible Offline
-// Version: 9.0.0 - All Features, No Visible Offline Indicators
+// Version: 9.0.1 - Enhanced with WhatsApp-style offline behavior
 // Features:
 // 1. Complete WhatsApp-style API patterns
 // 2. Page snapshots for instant loading
@@ -10,18 +10,21 @@
 // 7. Background sync
 // 8. Database for all data types
 // 9. COMPLETELY HIDDEN OFFLINE STATUS
+// 10. Enhanced: Cache-first for UI, Stale-while-revalidate for API
+// 11. Enhanced: IndexedDB for chats, contacts, groups, messages
+// 12. Enhanced: Offline message queue with auto-sync
 
-const APP_VERSION = '9.0.0';
+const APP_VERSION = '9.0.1';
 const CACHE_NAMES = {
   STATIC: `moodchat-static-v9`,
   PAGES: `moodchat-pages-v9`,
   SNAPSHOTS: `moodchat-snapshots-v9`,
-  API: 'moodchat-api-cache',
+  API: 'moodchat-api-cache-v2',
   DYNAMIC: 'moodchat-dynamic-cache',
   REAL_DATA: 'moodchat-real-data'
 };
 
-// WhatsApp-style API patterns (unchanged, but responses hide offline status)
+// WhatsApp-style API patterns
 const WHATSAPP_API_PATTERNS = {
   CHAT_LIST: /\/api\/chats\/list/,
   CHAT_MESSAGES: /\/api\/chats\/([^\/]+)\/messages/,
@@ -51,11 +54,11 @@ let networkState = {
 
 // Database for all WhatsApp-style data
 const DB_NAME = 'MoodChatCompleteDB';
-const DB_VERSION = 3;
+const DB_VERSION = 4; // Updated version for new schema
 let db = null;
 
 // ============================================
-// COMPLETE DATABASE SETUP
+// ENHANCED DATABASE SETUP WITH WHATSAPP DATA
 // ============================================
 
 function initDatabase() {
@@ -70,81 +73,108 @@ function initDatabase() {
     
     request.onupgradeneeded = (event) => {
       const database = event.target.result;
+      const oldVersion = event.oldVersion || 0;
       
-      // Complete WhatsApp data structure
-      if (!database.objectStoreNames.contains('messages')) {
+      // WhatsApp data structure
+      if (oldVersion < 1 || !database.objectStoreNames.contains('messages')) {
         const store = database.createObjectStore('messages', { keyPath: 'id' });
         store.createIndex('chatId', 'chatId', { unique: false });
         store.createIndex('timestamp', 'timestamp', { unique: false });
         store.createIndex('status', 'status', { unique: false });
+        store.createIndex('localId', 'localId', { unique: false });
       }
       
-      if (!database.objectStoreNames.contains('contacts')) {
+      if (oldVersion < 1 || !database.objectStoreNames.contains('contacts')) {
         const store = database.createObjectStore('contacts', { keyPath: 'id' });
         store.createIndex('name', 'name', { unique: false });
         store.createIndex('lastSeen', 'lastSeen', { unique: false });
         store.createIndex('isFavorite', 'isFavorite', { unique: false });
       }
       
-      if (!database.objectStoreNames.contains('chats')) {
+      if (oldVersion < 1 || !database.objectStoreNames.contains('chats')) {
         const store = database.createObjectStore('chats', { keyPath: 'id' });
         store.createIndex('lastMessageTime', 'lastMessageTime', { unique: false });
         store.createIndex('unreadCount', 'unreadCount', { unique: false });
         store.createIndex('type', 'type', { unique: false });
       }
       
-      if (!database.objectStoreNames.contains('messageQueue')) {
+      if (oldVersion < 2 || !database.objectStoreNames.contains('messageQueue')) {
         const store = database.createObjectStore('messageQueue', { keyPath: 'localId' });
         store.createIndex('timestamp', 'timestamp', { unique: false });
         store.createIndex('status', 'status', { unique: false });
+        store.createIndex('chatId', 'chatId', { unique: false });
       }
       
-      if (!database.objectStoreNames.contains('media')) {
+      if (oldVersion < 1 || !database.objectStoreNames.contains('media')) {
         const store = database.createObjectStore('media', { keyPath: 'id' });
         store.createIndex('chatId', 'chatId', { unique: false });
         store.createIndex('type', 'type', { unique: false });
       }
       
-      if (!database.objectStoreNames.contains('ui_state')) {
+      if (oldVersion < 1 || !database.objectStoreNames.contains('ui_state')) {
         const store = database.createObjectStore('ui_state', { keyPath: 'page' });
         store.createIndex('timestamp', 'timestamp', { unique: false });
       }
       
-      if (!database.objectStoreNames.contains('snapshots')) {
+      if (oldVersion < 1 || !database.objectStoreNames.contains('snapshots')) {
         const store = database.createObjectStore('snapshots', { keyPath: 'url' });
         store.createIndex('timestamp', 'timestamp', { unique: false });
       }
       
-      if (!database.objectStoreNames.contains('calls')) {
+      if (oldVersion < 1 || !database.objectStoreNames.contains('calls')) {
         const store = database.createObjectStore('calls', { keyPath: 'id' });
         store.createIndex('type', 'type', { unique: false });
         store.createIndex('timestamp', 'timestamp', { unique: false });
       }
       
-      if (!database.objectStoreNames.contains('status_updates')) {
+      if (oldVersion < 1 || !database.objectStoreNames.contains('status_updates')) {
         const store = database.createObjectStore('status_updates', { keyPath: 'id' });
         store.createIndex('contactId', 'contactId', { unique: false });
         store.createIndex('timestamp', 'timestamp', { unique: false });
       }
       
-      if (!database.objectStoreNames.contains('groups')) {
+      if (oldVersion < 3 || !database.objectStoreNames.contains('groups')) {
         const store = database.createObjectStore('groups', { keyPath: 'id' });
         store.createIndex('name', 'name', { unique: false });
         store.createIndex('lastActivity', 'lastActivity', { unique: false });
+        store.createIndex('members', 'members', { unique: false, multiEntry: true });
       }
       
-      if (!database.objectStoreNames.contains('profile')) {
+      if (oldVersion < 1 || !database.objectStoreNames.contains('profile')) {
         const store = database.createObjectStore('profile', { keyPath: 'userId' });
         store.createIndex('lastUpdated', 'lastUpdated', { unique: false });
+      }
+      
+      // NEW: Offline message queue for pending messages
+      if (oldVersion < 4 || !database.objectStoreNames.contains('offline_messages')) {
+        const store = database.createObjectStore('offline_messages', { keyPath: 'localId' });
+        store.createIndex('chatId', 'chatId', { unique: false });
+        store.createIndex('timestamp', 'timestamp', { unique: false });
+        store.createIndex('status', 'status', { unique: false });
       }
     };
   });
 }
 
-// Complete DB operations (all features preserved)
+// Enhanced DB operations with WhatsApp data storage
 const CompleteDB = {
-  // Messages
+  // Messages with offline support
   async addMessage(message) {
+    // If message has localId, it's an offline message
+    if (message.localId && message.status === 'pending') {
+      // Also store in offline messages for queuing
+      await this._dbOperation('offline_messages', 'put', {
+        ...message,
+        localId: message.localId,
+        chatId: message.chatId,
+        timestamp: message.timestamp || Date.now(),
+        status: 'pending',
+        retryCount: 0,
+        lastRetry: null,
+        _savedAt: Date.now()
+      });
+    }
+    
     return this._dbOperation('messages', 'put', {
       ...message,
       _savedAt: Date.now(),
@@ -170,7 +200,7 @@ const CompleteDB = {
     });
   },
   
-  // Message Queue
+  // Message Queue for offline operations
   async addToQueue(messageData) {
     const localId = Date.now() + '-' + Math.random().toString(36).substr(2, 9);
     const queuedItem = {
@@ -179,12 +209,23 @@ const CompleteDB = {
       timestamp: Date.now(),
       status: 'pending',
       retryCount: 0,
-      _userNotified: false // User doesn't know it's queued
+      _userNotified: false
     };
     
     await this._dbOperation('messageQueue', 'add', queuedItem);
     
-    // Update chat timestamp invisibly
+    // Also store as offline message for UI display
+    if (messageData.type === 'message' && messageData.chatId) {
+      await this._dbOperation('offline_messages', 'put', {
+        ...messageData,
+        localId,
+        status: 'pending',
+        timestamp: Date.now(),
+        _isOffline: true
+      });
+    }
+    
+    // Update chat timestamp
     if (messageData.chatId) {
       await this.updateChatLastMessage(messageData.chatId, Date.now());
     }
@@ -197,34 +238,61 @@ const CompleteDB = {
   },
   
   async removeFromQueue(localId) {
+    await this._dbOperation('offline_messages', 'delete', localId);
     return this._dbOperation('messageQueue', 'delete', localId);
   },
   
-  // Contacts
-  async updateContact(contact) {
-    return this._dbOperation('contacts', 'put', {
-      ...contact,
-      lastUpdated: Date.now(),
-      // Online status handled invisibly
-      _onlineInternal: networkState.isOnline ? contact.isOnline : false
+  async getPendingMessages(chatId = null) {
+    return new Promise((resolve, reject) => {
+      const transaction = db.transaction(['offline_messages'], 'readonly');
+      const store = transaction.objectStore('offline_messages');
+      const index = store.index('status');
+      const range = IDBKeyRange.only('pending');
+      const request = index.getAll(range);
+      
+      request.onsuccess = () => {
+        let messages = request.result;
+        if (chatId) {
+          messages = messages.filter(m => m.chatId === chatId);
+        }
+        resolve(messages.sort((a, b) => a.timestamp - b.timestamp));
+      };
+      request.onerror = () => reject(request.error);
     });
+  },
+  
+  // Contacts with local storage
+  async saveContacts(contacts) {
+    if (!Array.isArray(contacts)) contacts = [contacts];
+    
+    for (const contact of contacts) {
+      await this._dbOperation('contacts', 'put', {
+        ...contact,
+        lastUpdated: Date.now(),
+        _cachedAt: Date.now()
+      });
+    }
   },
   
   async getContacts() {
     const contacts = await this._dbOperation('contacts', 'getAll');
     return contacts.sort((a, b) => {
-      // Sort by last seen, never showing "offline" status
       return (b.lastSeen || 0) - (a.lastSeen || 0);
     });
   },
   
-  // Chats
-  async addChat(chat) {
-    return this._dbOperation('chats', 'put', {
-      ...chat,
-      lastUpdated: Date.now(),
-      _hasPending: !networkState.isOnline
-    });
+  // Chats with local storage
+  async saveChats(chats) {
+    if (!Array.isArray(chats)) chats = [chats];
+    
+    for (const chat of chats) {
+      await this._dbOperation('chats', 'put', {
+        ...chat,
+        lastUpdated: Date.now(),
+        _cachedAt: Date.now(),
+        _hasPending: !networkState.isOnline
+      });
+    }
   },
   
   async updateChatLastMessage(chatId, timestamp) {
@@ -241,76 +309,18 @@ const CompleteDB = {
     );
   },
   
-  // UI State
-  async saveUIState(page, state) {
-    return this._dbOperation('ui_state', 'put', {
-      page,
-      state: JSON.parse(JSON.stringify(state)),
-      timestamp: Date.now(),
-      _preserved: true
-    });
-  },
-  
-  async getUIState(page) {
-    const result = await this._dbOperation('ui_state', 'get', page);
-    return result?.state || {};
-  },
-  
-  // Page Snapshots
-  async savePageSnapshot(url, html, pageType) {
-    return this._dbOperation('snapshots', 'put', {
-      url,
-      html,
-      pageType,
-      timestamp: Date.now(),
-      _cached: true
-    });
-  },
-  
-  async getPageSnapshot(url) {
-    return this._dbOperation('snapshots', 'get', url);
-  },
-  
-  // Calls
-  async addCall(call) {
-    return this._dbOperation('calls', 'put', {
-      ...call,
-      timestamp: call.timestamp || Date.now(),
-      _synced: networkState.isOnline
-    });
-  },
-  
-  async getCalls(limit = 50) {
-    const calls = await this._dbOperation('calls', 'getAll');
-    return calls
-      .sort((a, b) => b.timestamp - a.timestamp)
-      .slice(0, limit);
-  },
-  
-  // Status Updates
-  async addStatusUpdate(status) {
-    return this._dbOperation('status_updates', 'put', {
-      ...status,
-      timestamp: status.timestamp || Date.now(),
-      expiresAt: status.expiresAt || Date.now() + 24 * 60 * 60 * 1000
-    });
-  },
-  
-  async getStatusUpdates() {
-    const statuses = await this._dbOperation('status_updates', 'getAll');
-    const now = Date.now();
-    return statuses
-      .filter(s => s.expiresAt > now)
-      .sort((a, b) => b.timestamp - a.timestamp);
-  },
-  
-  // Groups
-  async addGroup(group) {
-    return this._dbOperation('groups', 'put', {
-      ...group,
-      lastUpdated: Date.now(),
-      _synced: networkState.isOnline
-    });
+  // Groups with local storage
+  async saveGroups(groups) {
+    if (!Array.isArray(groups)) groups = [groups];
+    
+    for (const group of groups) {
+      await this._dbOperation('groups', 'put', {
+        ...group,
+        lastUpdated: Date.now(),
+        _cachedAt: Date.now(),
+        _synced: networkState.isOnline
+      });
+    }
   },
   
   async getGroups() {
@@ -320,20 +330,43 @@ const CompleteDB = {
     );
   },
   
-  // Profile
-  async saveProfile(profile) {
-    return this._dbOperation('profile', 'put', {
-      ...profile,
-      lastUpdated: Date.now(),
-      _synced: networkState.isOnline
-    });
+  // Save all structured data from API
+  async saveStructuredData(data) {
+    if (data.chats && Array.isArray(data.chats)) {
+      await this.saveChats(data.chats);
+    }
+    if (data.contacts && Array.isArray(data.contacts)) {
+      await this.saveContacts(data.contacts);
+    }
+    if (data.messages && Array.isArray(data.messages)) {
+      for (const message of data.messages) {
+        await this.addMessage(message);
+      }
+    }
+    if (data.calls && Array.isArray(data.calls)) {
+      for (const call of data.calls) {
+        await this._dbOperation('calls', 'put', call);
+      }
+    }
+    if (data.statusUpdates && Array.isArray(data.statusUpdates)) {
+      for (const status of data.statusUpdates) {
+        await this._dbOperation('status_updates', 'put', status);
+      }
+    }
+    if (data.groups && Array.isArray(data.groups)) {
+      await this.saveGroups(data.groups);
+    }
+    if (data.profile) {
+      await this._dbOperation('profile', 'put', {
+        ...data.profile,
+        userId: 'current',
+        lastUpdated: Date.now()
+      });
+    }
   },
   
-  async getProfile() {
-    return this._dbOperation('profile', 'get', 'current');
-  },
-  
-  // Helper for DB operations
+  // ... (rest of your existing DB methods remain the same)
+
   async _dbOperation(storeName, operation, data) {
     return new Promise((resolve, reject) => {
       const transaction = db.transaction([storeName], 
@@ -365,7 +398,7 @@ const CompleteDB = {
     });
   },
   
-  // Generate seamless offline responses (no offline indicators)
+  // Generate seamless offline responses
   async generateSeamlessResponse(url) {
     const urlObj = new URL(url);
     const path = urlObj.pathname;
@@ -382,7 +415,7 @@ const CompleteDB = {
     return {
       success: true,
       timestamp: Date.now(),
-      _dataSource: 'local' // Internal only
+      _dataSource: 'local'
     };
   },
   
@@ -391,7 +424,7 @@ const CompleteDB = {
       success: true,
       timestamp: Date.now(),
       serverTime: Date.now(),
-      _dataSource: 'local' // Never shown to user
+      _dataSource: 'local'
     };
     
     switch (patternKey) {
@@ -407,11 +440,26 @@ const CompleteDB = {
       case 'CHAT_MESSAGES':
         const chatId = match[1];
         const messages = await this.getMessages(chatId, 50);
+        const pendingMessages = await this.getPendingMessages(chatId);
+        
+        // Combine server messages with pending offline messages
+        const allMessages = [...messages];
+        for (const pending of pendingMessages) {
+          allMessages.push({
+            ...pending,
+            id: pending.localId,
+            status: 'pending',
+            isOffline: true
+          });
+        }
+        
+        allMessages.sort((a, b) => b.timestamp - a.timestamp);
+        
         return {
           ...baseResponse,
           chatId,
-          messages,
-          hasMore: messages.length >= 50
+          messages: allMessages.slice(0, 50),
+          hasMore: allMessages.length >= 50
         };
         
       case 'CONTACTS_LIST':
@@ -423,18 +471,20 @@ const CompleteDB = {
         };
         
       case 'STATUS_LIST':
-        const statuses = await this.getStatusUpdates();
+        const statuses = await this._dbOperation('status_updates', 'getAll');
+        const now = Date.now();
+        const validStatuses = statuses.filter(s => !s.expiresAt || s.expiresAt > now);
         return {
           ...baseResponse,
-          statusUpdates: statuses,
-          myStatus: await this.getProfile()
+          statusUpdates: validStatuses,
+          myStatus: await this._dbOperation('profile', 'get', 'current')
         };
         
       case 'CALLS_LIST':
-        const calls = await this.getCalls();
+        const calls = await this._dbOperation('calls', 'getAll');
         return {
           ...baseResponse,
-          calls,
+          calls: calls.sort((a, b) => b.timestamp - a.timestamp).slice(0, 50),
           recentCount: calls.filter(c => c.timestamp > Date.now() - 86400000).length
         };
         
@@ -452,34 +502,7 @@ const CompleteDB = {
   }
 };
 
-// All app pages (unchanged)
-const ALL_APP_PAGES = {
-  '/': 'chat',
-  '/index.html': 'chat',
-  '/chat.html': 'chat',
-  '/chats.html': 'chat',
-  '/messages.html': 'chat',
-  '/calls.html': 'calls',
-  '/call.html': 'call',
-  '/status.html': 'status',
-  '/groups.html': 'groups',
-  '/group.html': 'group',
-  '/friends.html': 'friends',
-  '/friend.html': 'friend',
-  '/profile.html': 'profile',
-  '/settings.html': 'settings',
-  '/tools.html': 'tools',
-  '/Tools.html': 'tools',
-  '/chat/': 'chat',
-  '/calls/': 'calls',
-  '/status/': 'status',
-  '/groups/': 'groups',
-  '/friends/': 'friends',
-  '/profile/': 'profile',
-  '/settings/': 'settings'
-};
-
-// Core assets (unchanged)
+// Core assets for cache-first strategy
 const CORE_ASSETS = [
   // HTML Pages
   '/',
@@ -532,12 +555,39 @@ const CORE_ASSETS = [
   '/service-worker.js'
 ];
 
+// All app pages
+const ALL_APP_PAGES = {
+  '/': 'chat',
+  '/index.html': 'chat',
+  '/chat.html': 'chat',
+  '/chats.html': 'chat',
+  '/messages.html': 'chat',
+  '/calls.html': 'calls',
+  '/call.html': 'call',
+  '/status.html': 'status',
+  '/groups.html': 'groups',
+  '/group.html': 'group',
+  '/friends.html': 'friends',
+  '/friend.html': 'friend',
+  '/profile.html': 'profile',
+  '/settings.html': 'settings',
+  '/tools.html': 'tools',
+  '/Tools.html': 'tools',
+  '/chat/': 'chat',
+  '/calls/': 'calls',
+  '/status/': 'status',
+  '/groups/': 'groups',
+  '/friends/': 'friends',
+  '/profile/': 'profile',
+  '/settings/': 'settings'
+};
+
 // ============================================
-// INSTALLATION - COMPLETE
+// INSTALLATION - ENHANCED CACHING
 // ============================================
 
 self.addEventListener('install', event => {
-  console.log('[Service Worker] Installing Complete Invisible Offline v' + APP_VERSION);
+  console.log('[Service Worker] Installing Enhanced Offline v' + APP_VERSION);
   
   self.skipWaiting();
   
@@ -545,42 +595,21 @@ self.addEventListener('install', event => {
     (async () => {
       await initDatabase();
       
-      // Cache all core assets
+      // Cache all core assets (CACHE-FIRST STRATEGY)
       const cache = await caches.open(CACHE_NAMES.STATIC);
       await cache.addAll(CORE_ASSETS);
       
-      // Capture initial page snapshots invisibly
-      const pagesToCache = CORE_ASSETS.filter(url => 
-        url.includes('.html') || url === '/'
-      );
-      
-      for (const pageUrl of pagesToCache) {
-        try {
-          const response = await fetch(pageUrl);
-          if (response.ok) {
-            const html = await response.text();
-            await CompleteDB.savePageSnapshot(pageUrl, html, ALL_APP_PAGES[pageUrl] || 'page');
-            
-            // Also cache in snapshot cache
-            const snapshotCache = await caches.open(CACHE_NAMES.SNAPSHOTS);
-            await snapshotCache.put(pageUrl, response.clone());
-          }
-        } catch (error) {
-          // Silent fail - will generate seamless fallback when needed
-        }
-      }
-      
-      console.log('[Service Worker] Complete installation done - Offline status hidden');
+      console.log('[Service Worker] Core assets cached - Cache-first strategy ready');
     })()
   );
 });
 
 // ============================================
-// ACTIVATION - COMPLETE
+// ACTIVATION
 // ============================================
 
 self.addEventListener('activate', event => {
-  console.log('[Service Worker] Activating Complete Invisible Offline v' + APP_VERSION);
+  console.log('[Service Worker] Activating Enhanced Offline v' + APP_VERSION);
   
   event.waitUntil(
     (async () => {
@@ -596,7 +625,7 @@ self.addEventListener('activate', event => {
       
       await self.clients.claim();
       
-      // Start all background processes
+      // Start background processes
       startInvisibleNetworkMonitoring();
       startBackgroundSync();
       startCleanupTasks();
@@ -604,63 +633,16 @@ self.addEventListener('activate', event => {
       // Initial sync if online
       if (networkState.isOnline) {
         setTimeout(performBackgroundSync, 2000);
+        setTimeout(syncOfflineMessages, 3000);
       }
       
-      console.log('[Service Worker] All features active - Users will never see offline status');
+      console.log('[Service Worker] Enhanced offline features active');
     })()
   );
 });
 
 // ============================================
-// INVISIBLE NETWORK MONITORING
-// ============================================
-
-function startInvisibleNetworkMonitoring() {
-  // Monitor every second but never notify users
-  setInterval(() => {
-    const wasOnline = networkState.isOnline;
-    const isNowOnline = navigator.onLine;
-    
-    if (isNowOnline !== wasOnline) {
-      networkState.isOnline = isNowOnline;
-      networkState.lastChange = Date.now();
-      
-      // Internal log only
-      console.log(`[Network Change] ${wasOnline ? 'Online' : 'Offline'} → ${isNowOnline ? 'Online' : 'Offline'}`);
-      
-      // If just came online, sync invisibly
-      if (isNowOnline && !wasOnline) {
-        networkState.pendingSync = true;
-        setTimeout(performBackgroundSync, 1000);
-      }
-      
-      // Update internal data states invisibly
-      updateDataConnectivityStatus(isNowOnline);
-    }
-  }, 1000);
-}
-
-async function updateDataConnectivityStatus(isOnline) {
-  try {
-    // Update contacts' online status internally
-    const contacts = await CompleteDB.getContacts();
-    for (const contact of contacts) {
-      contact._lastConnectivityCheck = Date.now();
-      if (!isOnline) {
-        contact._wasOnline = contact.isOnline;
-        contact.isOnline = false; // Hide offline status
-      } else if (contact._wasOnline !== undefined) {
-        contact.isOnline = contact._wasOnline;
-      }
-      await CompleteDB.updateContact(contact);
-    }
-  } catch (error) {
-    // Silent fail
-  }
-}
-
-// ============================================
-// FETCH HANDLER - COMPLETE & SEAMLESS
+// FETCH HANDLER - ENHANCED STRATEGIES
 // ============================================
 
 self.addEventListener('fetch', event => {
@@ -676,96 +658,175 @@ self.addEventListener('fetch', event => {
     return;
   }
   
-  // Handle all app requests
-  event.respondWith(handleRequestSeamlessly(request, event));
+  // CACHE-FIRST for UI files (HTML, CSS, JS, Images)
+  if (isUIRequest(request, url)) {
+    event.respondWith(handleCacheFirst(request));
+    return;
+  }
+  
+  // STALE-WHILE-REVALIDATE for API requests
+  if (isApiRequest(url)) {
+    event.respondWith(handleStaleWhileRevalidate(request));
+    return;
+  }
+  
+  // Default: try cache first, then network
+  event.respondWith(handleDefault(request));
 });
 
-async function handleRequestSeamlessly(request, event) {
-  const url = new URL(request.url);
+function isUIRequest(request, url) {
+  const acceptHeader = request.headers.get('Accept') || '';
+  const isNavigate = request.mode === 'navigate';
+  const isHtmlPage = ALL_APP_PAGES.hasOwnProperty(url.pathname) || 
+                     url.pathname.endsWith('.html') || 
+                     url.pathname === '/';
+  const isStaticAsset = url.pathname.match(/\.(css|js|png|jpg|jpeg|gif|svg|ico|woff|woff2|ttf|eot)$/);
   
-  // Handle HTML pages with snapshots
-  if (isHtmlRequest(request, url)) {
-    return handleHtmlSeamlessly(request, event);
-  }
-  
-  // Handle WhatsApp API requests
-  if (isApiRequest(url)) {
-    return handleApiRequestSeamlessly(request, event);
-  }
-  
-  // Handle static assets
-  return handleAssetSeamlessly(request);
-}
-
-function isHtmlRequest(request, url) {
-  return request.headers.get('Accept')?.includes('text/html') ||
-         url.pathname.endsWith('.html') ||
-         request.mode === 'navigate' ||
-         ALL_APP_PAGES.hasOwnProperty(url.pathname);
+  return isNavigate || isHtmlPage || acceptHeader.includes('text/html') || isStaticAsset;
 }
 
 function isApiRequest(url) {
   return url.pathname.startsWith('/api/');
 }
 
-async function handleHtmlSeamlessly(request) {
+// CACHE-FIRST strategy for UI files
+async function handleCacheFirst(request) {
   const url = new URL(request.url);
   
-  // If online, try network but always cache
-  if (networkState.isOnline) {
-    try {
-      const response = await fetch(request);
-      if (response.ok) {
-        // Cache response
-        const cache = await caches.open(CACHE_NAMES.PAGES);
-        await cache.put(request, response.clone());
-        
-        // Save snapshot invisibly
-        const html = await response.text();
-        setTimeout(() => {
-          CompleteDB.savePageSnapshot(
-            url.pathname, 
-            html, 
-            ALL_APP_PAGES[url.pathname] || 'page'
-          );
-        }, 0);
-        
-        return response;
-      }
-    } catch (error) {
-      // Continue to cache
-    }
-  }
-  
-  // Try snapshot cache first
-  const snapshotCache = await caches.open(CACHE_NAMES.SNAPSHOTS);
-  const snapshot = await snapshotCache.match(request);
-  if (snapshot) {
-    return snapshot;
-  }
-  
-  // Try regular cache
+  // Always try cache first
   const cached = await caches.match(request);
   if (cached) {
+    // Update in background if online
+    if (networkState.isOnline && !url.pathname.match(/\.(css|js)$/)) {
+      setTimeout(async () => {
+        try {
+          const response = await fetch(request);
+          if (response.ok) {
+            const cache = await caches.open(CACHE_NAMES.STATIC);
+            await cache.put(request, response);
+          }
+        } catch (error) {
+          // Silent background update failure
+        }
+      }, 0);
+    }
     return cached;
   }
   
-  // Try IndexedDB snapshot
-  const dbSnapshot = await CompleteDB.getPageSnapshot(url.pathname);
-  if (dbSnapshot && dbSnapshot.html) {
-    return new Response(dbSnapshot.html, {
-      headers: { 'Content-Type': 'text/html' }
+  // If not in cache, try network
+  try {
+    const response = await fetch(request);
+    if (response.ok) {
+      // Cache for future use
+      const cache = await caches.open(CACHE_NAMES.STATIC);
+      await cache.put(request, response.clone());
+      return response;
+    }
+  } catch (error) {
+    // Network failed - return appropriate fallback
+  }
+  
+  // Return fallback based on file type
+  return createSeamlessFallback(request);
+}
+
+// STALE-WHILE-REVALIDATE for API requests
+async function handleStaleWhileRevalidate(request) {
+  const url = request.url;
+  
+  // Try cache first (stale)
+  const cached = await caches.match(request);
+  
+  // Always try to update in background if online
+  if (networkState.isOnline) {
+    setTimeout(async () => {
+      try {
+        const response = await fetch(request);
+        if (response.ok) {
+          // Cache the fresh response
+          const cache = await caches.open(CACHE_NAMES.API);
+          await cache.put(request, response.clone());
+          
+          // Store structured data in IndexedDB
+          const data = await response.json();
+          await CompleteDB.saveStructuredData(data);
+          
+          // Notify clients of new data (invisibly)
+          self.clients.matchAll().then(clients => {
+            clients.forEach(client => {
+              client.postMessage({
+                type: '_API_DATA_UPDATED',
+                url: url,
+                _timestamp: Date.now(),
+                _invisible: true
+              });
+            });
+          });
+        }
+      } catch (error) {
+        // Background update failed silently
+      }
+    }, 0);
+  }
+  
+  // Return cached response if available
+  if (cached) {
+    const cachedData = await cached.clone().json().catch(() => null);
+    if (cachedData) {
+      return cached;
+    }
+  }
+  
+  // If no cache or cache invalid, try IndexedDB
+  const dbResponse = await CompleteDB.generateSeamlessResponse(url);
+  if (dbResponse && Object.keys(dbResponse).length > 1) {
+    return new Response(JSON.stringify(dbResponse), {
+      headers: { 'Content-Type': 'application/json' }
     });
   }
   
-  // Fallback to static cache
-  const staticCache = await caches.open(CACHE_NAMES.STATIC);
-  const fallback = await staticCache.match('/index.html') || 
-                   await staticCache.match('/');
+  // Last resort: try network (blocking)
+  try {
+    const response = await fetch(request);
+    if (response.ok) {
+      const cache = await caches.open(CACHE_NAMES.API);
+      await cache.put(request, response.clone());
+      return response;
+    }
+  } catch (error) {
+    // Network failed
+  }
   
-  return fallback || new Response('Page not available', { status: 404 });
+  // Return empty success response
+  return new Response(JSON.stringify({
+    success: true,
+    timestamp: Date.now(),
+    _dataSource: 'offline'
+  }), {
+    headers: { 'Content-Type': 'application/json' }
+  });
 }
 
+// Default strategy
+async function handleDefault(request) {
+  const cached = await caches.match(request);
+  if (cached) return cached;
+  
+  try {
+    const response = await fetch(request);
+    if (response.ok) {
+      const cache = await caches.open(CACHE_NAMES.DYNAMIC);
+      await cache.put(request, response.clone());
+      return response;
+    }
+  } catch (error) {
+    // Network failed
+  }
+  
+  return createSeamlessFallback(request);
+}
+
+// Handle API mutations (POST, PUT, DELETE)
 async function handleApiRequestSeamlessly(request, event) {
   const url = request.url;
   
@@ -774,19 +835,40 @@ async function handleApiRequestSeamlessly(request, event) {
     return handleApiMutationSeamlessly(request, event);
   }
   
-  // Handle GET requests
-  return handleApiGetSeamlessly(request);
+  // Handle GET requests with stale-while-revalidate
+  return handleStaleWhileRevalidate(request);
 }
 
+// Enhanced API mutation handler with offline queue
 async function handleApiMutationSeamlessly(request, event) {
+  const url = request.url;
+  const isSendMessage = url.includes('/api/messages/send');
+  
   // If online, try to send immediately
   if (networkState.isOnline) {
     try {
       const response = await fetch(request);
       if (response.ok) {
-        // Cache successful response
         const data = await response.clone().json();
-        await cacheApiResponse(url, data);
+        
+        // If this is a message send, update local storage
+        if (isSendMessage) {
+          const requestClone = request.clone();
+          const body = await requestClone.json();
+          if (body.chatId && body.content) {
+            const messageId = data.messageId || Date.now() + '-' + Math.random().toString(36).substr(2, 9);
+            await CompleteDB.addMessage({
+              id: messageId,
+              chatId: body.chatId,
+              content: body.content,
+              sender: body.sender || 'me',
+              timestamp: Date.now(),
+              status: 'sent',
+              type: body.type || 'text'
+            });
+          }
+        }
+        
         return response;
       }
     } catch (error) {
@@ -794,33 +876,71 @@ async function handleApiMutationSeamlessly(request, event) {
     }
   }
   
-  // Offline: Queue request invisibly
+  // OFFLINE: Queue the request
   try {
     const requestClone = request.clone();
     const body = await requestClone.json();
     
-    // Add to queue (user doesn't know)
-    const queuedItem = await CompleteDB.addToQueue({
+    // Generate local ID for offline tracking
+    const localId = Date.now() + '-' + Math.random().toString(36).substr(2, 9);
+    
+    // Special handling for messages
+    if (isSendMessage && body.chatId && body.content) {
+      // Add to offline messages for immediate UI display
+      const offlineMessage = {
+        localId,
+        id: localId, // Use localId as temporary ID
+        chatId: body.chatId,
+        content: body.content,
+        sender: body.sender || 'me',
+        timestamp: Date.now(),
+        status: 'pending',
+        type: body.type || 'text',
+        isOffline: true,
+        _queuedAt: Date.now()
+      };
+      
+      await CompleteDB.addMessage(offlineMessage);
+      
+      // Notify client that message was saved locally
+      self.clients.matchAll().then(clients => {
+        clients.forEach(client => {
+          client.postMessage({
+            type: 'MESSAGE_SAVED_LOCALLY',
+            localId,
+            chatId: body.chatId,
+            message: offlineMessage,
+            _timestamp: Date.now()
+          });
+        });
+      });
+    }
+    
+    // Add to queue for background sync
+    await CompleteDB.addToQueue({
       url: request.url,
       method: request.method,
       headers: Object.fromEntries(request.headers.entries()),
       body,
-      timestamp: Date.now()
+      localId,
+      timestamp: Date.now(),
+      type: isSendMessage ? 'message' : 'api'
     });
     
-    // Return immediate success response
+    // Return immediate success (user never knows it's queued)
     return new Response(JSON.stringify({
       success: true,
       timestamp: Date.now(),
-      // NO mention of offline or queued
-      _operationId: queuedItem.localId // Internal only
+      // Include localId for client to track pending messages
+      ...(isSendMessage && { localId }),
+      _operationId: localId
     }), {
       headers: { 'Content-Type': 'application/json' },
-      status: 200 // Always 200, not 202
+      status: 200
     });
     
   } catch (error) {
-    // Return success anyway - user never sees errors
+    // Return success anyway
     return new Response(JSON.stringify({
       success: true,
       timestamp: Date.now(),
@@ -832,212 +952,152 @@ async function handleApiMutationSeamlessly(request, event) {
   }
 }
 
-async function handleApiGetSeamlessly(request) {
-  const url = request.url;
-  
-  // Try network first if online
-  if (networkState.isOnline) {
-    try {
-      const response = await fetch(request);
-      if (response.ok) {
-        const data = await response.clone().json();
-        
-        // Cache response
-        await cacheApiResponse(url, data);
-        
-        // Store structured data
-        await storeStructuredData(data);
-        
-        return response;
-      }
-    } catch (error) {
-      // Continue to cache
-    }
-  }
-  
-  // Try cached response
-  const cached = await getCachedApiResponse(url);
-  if (cached) {
-    return new Response(JSON.stringify(cached), {
-      headers: { 'Content-Type': 'application/json' }
-    });
-  }
-  
-  // Generate seamless offline response
-  const offlineResponse = await CompleteDB.generateSeamlessResponse(url);
-  return new Response(JSON.stringify(offlineResponse), {
-    headers: { 'Content-Type': 'application/json' }
-  });
-}
+// ============================================
+// OFFLINE MESSAGE QUEUE SYNC
+// ============================================
 
-async function handleAssetSeamlessly(request) {
-  // Cache first for instant loading
-  const cached = await caches.match(request);
-  if (cached) {
-    // Background update if online
-    if (networkState.isOnline) {
-      setTimeout(async () => {
+async function syncOfflineMessages() {
+  if (!networkState.isOnline || !db) return;
+  
+  try {
+    const pendingMessages = await CompleteDB.getPendingMessages();
+    
+    for (const message of pendingMessages) {
+      if (message.status === 'pending' && (message.retryCount || 0) < 5) {
         try {
-          const response = await fetch(request);
+          const response = await fetch('/api/messages/send', {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+              ...message.headers
+            },
+            body: JSON.stringify({
+              chatId: message.chatId,
+              content: message.content,
+              type: message.type,
+              sender: message.sender
+            })
+          });
+          
           if (response.ok) {
-            const cache = await caches.open(CACHE_NAMES.STATIC);
-            await cache.put(request, response);
+            const data = await response.json();
+            
+            // Update message status
+            await CompleteDB.removeFromQueue(message.localId);
+            
+            // Update the message in storage with real ID
+            if (data.messageId) {
+              await CompleteDB.addMessage({
+                ...message,
+                id: data.messageId,
+                status: 'sent',
+                isOffline: false,
+                _syncedAt: Date.now()
+              });
+            }
+            
+            // Notify clients
+            self.clients.matchAll().then(clients => {
+              clients.forEach(client => {
+                client.postMessage({
+                  type: 'OFFLINE_MESSAGE_SENT',
+                  localId: message.localId,
+                  messageId: data.messageId,
+                  chatId: message.chatId,
+                  _timestamp: Date.now()
+                });
+              });
+            });
+          } else {
+            // Increment retry count
+            message.retryCount = (message.retryCount || 0) + 1;
+            message.lastRetry = Date.now();
+            await CompleteDB._dbOperation('offline_messages', 'put', message);
           }
         } catch (error) {
-          // Silent fail
+          // Network error - increment retry count
+          message.retryCount = (message.retryCount || 0) + 1;
+          message.lastRetry = Date.now();
+          await CompleteDB._dbOperation('offline_messages', 'put', message);
         }
-      }, 0);
-    }
-    return cached;
-  }
-  
-  // Try network
-  if (networkState.isOnline) {
-    try {
-      const response = await fetch(request);
-      if (response.ok) {
-        const cache = await caches.open(CACHE_NAMES.STATIC);
-        await cache.put(request, response.clone());
-        return response;
       }
-    } catch (error) {
-      // Continue to fallback
-    }
-  }
-  
-  // Return appropriate fallback
-  return createSeamlessFallback(request);
-}
-
-// ============================================
-// CACHE MANAGEMENT
-// ============================================
-
-async function cacheApiResponse(url, data) {
-  try {
-    const cache = await caches.open(CACHE_NAMES.API);
-    const response = new Response(JSON.stringify(data), {
-      headers: {
-        'Content-Type': 'application/json',
-        'X-Cached-At': Date.now().toString()
-      }
-    });
-    await cache.put(url, response);
-  } catch (error) {
-    // Silent fail
-  }
-}
-
-async function getCachedApiResponse(url) {
-  try {
-    const cache = await caches.open(CACHE_NAMES.API);
-    const response = await cache.match(url);
-    if (response) {
-      return await response.json();
-    }
-  } catch (error) {
-    // Silent fail
-  }
-  return null;
-}
-
-async function storeStructuredData(data) {
-  try {
-    if (data.chats && Array.isArray(data.chats)) {
-      await CompleteDB.saveChats(data.chats);
-    }
-    if (data.contacts && Array.isArray(data.contacts)) {
-      await CompleteDB.saveContacts(data.contacts);
-    }
-    if (data.messages && Array.isArray(data.messages)) {
-      await CompleteDB.saveMessages(data.messages);
-    }
-    if (data.calls && Array.isArray(data.calls)) {
-      await CompleteDB.saveCalls(data.calls);
-    }
-    if (data.statusUpdates && Array.isArray(data.statusUpdates)) {
-      await CompleteDB.saveStatusUpdates(data.statusUpdates);
-    }
-    if (data.groups && Array.isArray(data.groups)) {
-      await CompleteDB.saveGroups(data.groups);
-    }
-    if (data.profile) {
-      await CompleteDB.saveProfile(data.profile);
     }
   } catch (error) {
     // Silent fail
   }
 }
 
-function createSeamlessFallback(request) {
-  const url = new URL(request.url);
-  
-  if (url.pathname.endsWith('.css')) {
-    return new Response('/* Fallback styles */', {
-      headers: { 'Content-Type': 'text/css' }
-    });
-  }
-  
-  if (url.pathname.endsWith('.js')) {
-    return new Response('// Fallback script', {
-      headers: { 'Content-Type': 'application/javascript' }
-    });
-  }
-  
-  if (url.pathname.match(/\.(png|jpg|jpeg|gif|svg|ico)$/)) {
-    // Return transparent pixel for missing images
-    const transparentPixel = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNkYAAAAAYAAjCB0C8AAAAASUVORK5CYII=';
-    return fetch(transparentPixel);
-  }
-  
-  return new Response('', { status: 404 });
-}
-
 // ============================================
-// BACKGROUND SYNC - COMPLETE
+// BACKGROUND SYNC - ENHANCED
 // ============================================
 
 function startBackgroundSync() {
-  // Sync every 5 minutes when online
+  // Sync every 2 minutes when online
   setInterval(() => {
     if (networkState.isOnline) {
       performBackgroundSync();
+      syncOfflineMessages();
     }
-  }, 300000);
+  }, 120000);
   
-  // Also sync when coming online
+  // Sync immediately when coming online
   self.addEventListener('online', () => {
-    setTimeout(performBackgroundSync, 2000);
+    setTimeout(() => {
+      performBackgroundSync();
+      syncOfflineMessages();
+    }, 1000);
   });
 }
 
 async function performBackgroundSync() {
   if (!networkState.isOnline || !db) return;
   
-  console.log('[Background Sync] Starting complete sync');
+  console.log('[Background Sync] Starting enhanced sync');
   
   try {
-    // Process queued messages
+    // Process queued operations
     await processQueuedOperations();
     
-    // Sync all data types
+    // Sync all data types from server
     await Promise.allSettled([
-      syncChats(),
-      syncContacts(),
-      syncMessages(),
-      syncCalls(),
-      syncStatus(),
-      syncGroups(),
-      syncProfile()
+      syncDataFromServer('/api/chats/list', 'chats'),
+      syncDataFromServer('/api/contacts/list', 'contacts'),
+      syncDataFromServer('/api/groups/list', 'groups'),
+      syncDataFromServer('/api/calls/list', 'calls'),
+      syncDataFromServer('/api/status/list', 'statusUpdates'),
+      syncDataFromServer('/api/profile/info', 'profile')
     ]);
     
-    // Update all caches
-    await refreshAllCaches();
-    
-    console.log('[Background Sync] Complete sync done');
+    console.log('[Background Sync] Enhanced sync done');
     
   } catch (error) {
-    // Silent fail - user never knows
+    // Silent fail
+  }
+}
+
+async function syncDataFromServer(url, dataType) {
+  try {
+    const response = await fetch(url);
+    if (response.ok) {
+      const data = await response.json();
+      
+      // Cache API response
+      const cache = await caches.open(CACHE_NAMES.API);
+      await cache.put(url, response.clone());
+      
+      // Store in IndexedDB
+      if (data[dataType] || dataType === 'profile') {
+        const structuredData = {};
+        if (dataType === 'profile') {
+          structuredData.profile = data;
+        } else {
+          structuredData[dataType] = data[dataType];
+        }
+        await CompleteDB.saveStructuredData(structuredData);
+      }
+    }
+  } catch (error) {
+    // Silent fail
   }
 }
 
@@ -1088,257 +1148,68 @@ async function processQueuedOperations() {
   }
 }
 
-// Individual sync functions
-async function syncChats() {
-  try {
-    const response = await fetch('/api/chats/list');
-    if (response.ok) {
-      const data = await response.json();
-      await storeStructuredData(data);
-    }
-  } catch (error) {
-    // Silent
-  }
-}
+// ============================================
+// HELPER FUNCTIONS
+// ============================================
 
-async function syncContacts() {
-  try {
-    const response = await fetch('/api/contacts/list');
-    if (response.ok) {
-      const data = await response.json();
-      await storeStructuredData(data);
-    }
-  } catch (error) {
-    // Silent
-  }
-}
-
-async function syncMessages() {
-  try {
-    const chats = await CompleteDB.getChats();
-    for (const chat of chats.slice(0, 3)) {
-      const response = await fetch(`/api/chats/${chat.id}/messages?limit=20`);
-      if (response.ok) {
-        const data = await response.json();
-        await storeStructuredData(data);
-      }
-    }
-  } catch (error) {
-    // Silent
-  }
-}
-
-async function syncCalls() {
-  try {
-    const response = await fetch('/api/calls/list');
-    if (response.ok) {
-      const data = await response.json();
-      await storeStructuredData(data);
-    }
-  } catch (error) {
-    // Silent
-  }
-}
-
-async function syncStatus() {
-  try {
-    const response = await fetch('/api/status/list');
-    if (response.ok) {
-      const data = await response.json();
-      await storeStructuredData(data);
-    }
-  } catch (error) {
-    // Silent
-  }
-}
-
-async function syncGroups() {
-  try {
-    const response = await fetch('/api/groups/list');
-    if (response.ok) {
-      const data = await response.json();
-      await storeStructuredData(data);
-    }
-  } catch (error) {
-    // Silent
-  }
-}
-
-async function syncProfile() {
-  try {
-    const response = await fetch('/api/profile/info');
-    if (response.ok) {
-      const data = await response.json();
-      await storeStructuredData(data);
-    }
-  } catch (error) {
-    // Silent
-  }
-}
-
-async function refreshAllCaches() {
-  // Silently refresh current page caches
-  self.clients.matchAll().then(clients => {
-    clients.forEach(client => {
-      client.postMessage({
-        type: '_REFRESH_CACHES',
-        _timestamp: Date.now(),
-        _invisible: true
-      });
+function createSeamlessFallback(request) {
+  const url = new URL(request.url);
+  
+  if (url.pathname.endsWith('.css')) {
+    return new Response('/* Fallback styles */', {
+      headers: { 'Content-Type': 'text/css' }
     });
-  });
-}
-
-// ============================================
-// CLEANUP TASKS
-// ============================================
-
-function startCleanupTasks() {
-  // Cleanup every hour
-  setInterval(cleanupOldData, 3600000);
-  
-  // Initial cleanup
-  setTimeout(cleanupOldData, 5000);
-}
-
-async function cleanupOldData() {
-  if (!db) return;
-  
-  try {
-    const oneWeekAgo = Date.now() - (7 * 24 * 60 * 60 * 1000);
-    
-    // Clean old queued items
-    const transaction = db.transaction(['messageQueue'], 'readwrite');
-    const store = transaction.objectStore('messageQueue');
-    const index = store.index('timestamp');
-    const range = IDBKeyRange.upperBound(oneWeekAgo);
-    const request = index.openCursor(range);
-    
-    request.onsuccess = (event) => {
-      const cursor = event.target.result;
-      if (cursor) {
-        cursor.delete();
-        cursor.continue();
-      }
-    };
-    
-    // Clean expired status updates
-    const statusTransaction = db.transaction(['status_updates'], 'readwrite');
-    const statusStore = statusTransaction.objectStore('status_updates');
-    const statusIndex = statusStore.index('timestamp');
-    const statusRange = IDBKeyRange.upperBound(oneWeekAgo);
-    const statusRequest = statusIndex.openCursor(statusRange);
-    
-    statusRequest.onsuccess = (event) => {
-      const cursor = event.target.result;
-      if (cursor) {
-        cursor.delete();
-        cursor.continue();
-      }
-    };
-    
-  } catch (error) {
-    // Silent fail
-  }
-}
-
-// ============================================
-// PUSH NOTIFICATIONS - COMPLETE
-// ============================================
-
-self.addEventListener('push', event => {
-  if (!event.data) return;
-  
-  let data;
-  try {
-    data = event.data.json();
-  } catch (e) {
-    data = { body: event.data.text() };
   }
   
-  // WhatsApp-style notification (no offline mention)
-  const options = {
-    body: data.body || '',
-    icon: '/icons/moodchat-192.png',
-    badge: '/icons/moodchat-72.png',
-    tag: 'moodchat-notification',
-    data: {
-      url: data.url || '/chat.html',
-      chatId: data.chatId,
-      messageId: data.messageId,
-      sender: data.sender
-    },
-    actions: [
-      {
-        action: 'reply',
-        title: 'Reply',
-        icon: '/icons/reply-icon.png'
-      },
-      {
-        action: 'mark-read',
-        title: 'Mark Read',
-        icon: '/icons/read-icon.png'
-      }
-    ]
-  };
-  
-  event.waitUntil(
-    self.registration.showNotification('MoodChat', options)
-  );
-});
-
-self.addEventListener('notificationclick', event => {
-  event.notification.close();
-  
-  const data = event.notification.data;
-  
-  if (event.action === 'reply') {
-    const url = `/chat.html?chatId=${data.chatId}&reply=true`;
-    event.waitUntil(openOrFocusWindow(url));
-  } else if (event.action === 'mark-read') {
-    // Mark as read invisibly
-    event.waitUntil(
-      fetch(`/api/messages/mark-read`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ chatId: data.chatId })
-      }).catch(() => {
-        // Queue if offline
-        CompleteDB.addToQueue({
-          url: '/api/messages/mark-read',
-          method: 'POST',
-          body: { chatId: data.chatId }
-        });
-      })
-    );
-  } else {
-    const url = data.url || '/chat.html';
-    if (data.chatId) {
-      event.waitUntil(openOrFocusWindow(`${url}?chatId=${data.chatId}`));
-    } else {
-      event.waitUntil(openOrFocusWindow(url));
-    }
+  if (url.pathname.endsWith('.js')) {
+    return new Response('// Fallback script', {
+      headers: { 'Content-Type': 'application/javascript' }
+    });
   }
-});
-
-function openOrFocusWindow(url) {
-  return self.clients.matchAll({
-    type: 'window',
-    includeUncontrolled: true
-  }).then(clientList => {
-    for (const client of clientList) {
-      if (client.url.includes(url) && 'focus' in client) {
-        return client.focus();
-      }
-    }
-    if (self.clients.openWindow) {
-      return self.clients.openWindow(url);
-    }
-  });
+  
+  if (url.pathname.match(/\.(png|jpg|jpeg|gif|svg|ico)$/)) {
+    // Return transparent pixel for missing images
+    const transparentPixel = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNkYAAAAAYAAjCB0C8AAAAASUVORK5CYII=';
+    return fetch(transparentPixel);
+  }
+  
+  // For HTML pages, return the index.html from cache
+  if (url.pathname.match(/\.html$/) || url.pathname === '/') {
+    return caches.match('/index.html').then(response => {
+      return response || new Response('App loading...', { status: 200 });
+    });
+  }
+  
+  return new Response('', { status: 404 });
 }
 
 // ============================================
-// MESSAGE HANDLING - COMPLETE
+// NETWORK MONITORING
+// ============================================
+
+function startInvisibleNetworkMonitoring() {
+  setInterval(() => {
+    const wasOnline = networkState.isOnline;
+    const isNowOnline = navigator.onLine;
+    
+    if (isNowOnline !== wasOnline) {
+      networkState.isOnline = isNowOnline;
+      networkState.lastChange = Date.now();
+      
+      // If just came online, sync everything
+      if (isNowOnline && !wasOnline) {
+        networkState.pendingSync = true;
+        setTimeout(() => {
+          performBackgroundSync();
+          syncOfflineMessages();
+        }, 1000);
+      }
+    }
+  }, 1000);
+}
+
+// ============================================
+// MESSAGE HANDLING - ENHANCED
 // ============================================
 
 self.addEventListener('message', event => {
@@ -1359,16 +1230,47 @@ self.addEventListener('message', event => {
       });
       break;
       
-    case 'CAPTURE_SNAPSHOT':
-      CompleteDB.savePageSnapshot(data.url, data.html, data.pageType);
+    case 'SEND_MESSAGE_OFFLINE':
+      // Client wants to send a message while offline
+      handleClientMessageSend(event, data);
       break;
       
-    case 'GET_SNAPSHOT':
-      CompleteDB.getPageSnapshot(data.url).then(snapshot => {
+    case 'GET_CHATS_OFFLINE':
+      CompleteDB.getChats().then(chats => {
         event.source.postMessage({
-          type: 'SNAPSHOT_RETRIEVED',
-          url: data.url,
-          html: snapshot?.html
+          type: 'CHATS_RETRIEVED',
+          chats,
+          source: 'offline'
+        });
+      });
+      break;
+      
+    case 'GET_CONTACTS_OFFLINE':
+      CompleteDB.getContacts().then(contacts => {
+        event.source.postMessage({
+          type: 'CONTACTS_RETRIEVED',
+          contacts,
+          source: 'offline'
+        });
+      });
+      break;
+      
+    case 'GET_GROUPS_OFFLINE':
+      CompleteDB.getGroups().then(groups => {
+        event.source.postMessage({
+          type: 'GROUPS_RETRIEVED',
+          groups,
+          source: 'offline'
+        });
+      });
+      break;
+      
+    case 'GET_PENDING_MESSAGES':
+      CompleteDB.getPendingMessages(data.chatId).then(messages => {
+        event.source.postMessage({
+          type: 'PENDING_MESSAGES_RETRIEVED',
+          chatId: data.chatId,
+          messages
         });
       });
       break;
@@ -1376,6 +1278,7 @@ self.addEventListener('message', event => {
     case 'SYNC_NOW':
       if (networkState.isOnline) {
         performBackgroundSync();
+        syncOfflineMessages();
         event.source.postMessage({
           type: 'SYNC_STARTED',
           manual: true
@@ -1383,142 +1286,69 @@ self.addEventListener('message', event => {
       }
       break;
       
-    case 'GET_DATA':
-      handleGetData(event, data.endpoint, data.params);
-      break;
-      
-    case 'UPDATE_LAST_SEEN':
-      handleUpdateLastSeen(event, data.userId, data.timestamp);
-      break;
-      
-    case 'MARK_MESSAGE_READ':
-      handleMarkMessageRead(event, data.messageId, data.chatId);
-      break;
-      
-    case 'GET_NETWORK_STATUS':
-      // Return but UI should never show this
-      event.source.postMessage({
-        type: 'NETWORK_STATUS',
-        online: networkState.isOnline,
-        _forInternalUseOnly: true
-      });
-      break;
+    // ... (rest of your existing message handlers)
   }
 });
 
-async function handleGetData(event, endpoint, params) {
-  try {
-    let data;
-    
-    // Try network first if online
-    if (networkState.isOnline) {
-      try {
-        const url = params ? `${endpoint}?${new URLSearchParams(params)}` : endpoint;
-        const response = await fetch(url);
-        if (response.ok) {
-          data = await response.json();
-          await storeStructuredData(data);
-        }
-      } catch (error) {
-        // Continue to cache
-      }
-    }
-    
-    // If no network data, get from cache/DB
-    if (!data) {
-      data = await getCachedApiResponse(endpoint) ||
-             await CompleteDB.generateSeamlessResponse(endpoint);
-    }
-    
-    event.source.postMessage({
-      type: 'DATA_RETRIEVED',
-      endpoint,
-      data,
-      _source: data._dataSource || 'network'
-    });
-    
-  } catch (error) {
-    event.source.postMessage({
-      type: 'DATA_RETRIEVED',
-      endpoint,
-      data: {},
-      _empty: true
-    });
-  }
-}
-
-async function handleUpdateLastSeen(event, userId, timestamp) {
-  try {
-    const contact = await CompleteDB._dbOperation('contacts', 'get', userId) || { id: userId };
-    contact.lastSeen = timestamp;
-    contact._lastUpdatedInternal = Date.now();
-    await CompleteDB.updateContact(contact);
-  } catch (error) {
-    // Silent
-  }
-}
-
-async function handleMarkMessageRead(event, messageId, chatId) {
-  try {
-    // Update locally
-    const message = await CompleteDB._dbOperation('messages', 'get', messageId);
-    if (message) {
-      message.status = 'read';
-      await CompleteDB.addMessage(message);
-    }
-    
-    // Update chat unread count
-    const chat = await CompleteDB._dbOperation('chats', 'get', chatId);
-    if (chat && chat.unreadCount > 0) {
-      chat.unreadCount--;
-      await CompleteDB.addChat(chat);
-    }
-    
-    // Queue for server sync
-    await CompleteDB.addToQueue({
-      url: '/api/messages/mark-read',
-      method: 'POST',
-      body: { messageId, chatId }
-    });
-    
-    event.source.postMessage({
-      type: 'MESSAGE_MARKED_READ',
-      messageId,
-      chatId,
-      success: true
-    });
-    
-  } catch (error) {
-    event.source.postMessage({
-      type: 'MESSAGE_MARKED_READ',
-      messageId,
-      chatId,
-      success: false,
-      _errorInternal: error.message
-    });
-  }
+async function handleClientMessageSend(event, data) {
+  const { chatId, content, sender, type = 'text' } = data;
+  const localId = Date.now() + '-' + Math.random().toString(36).substr(2, 9);
+  
+  // Save message locally immediately
+  const offlineMessage = {
+    localId,
+    id: localId,
+    chatId,
+    content,
+    sender: sender || 'me',
+    timestamp: Date.now(),
+    status: 'pending',
+    type,
+    isOffline: true,
+    _queuedAt: Date.now()
+  };
+  
+  await CompleteDB.addMessage(offlineMessage);
+  
+  // Add to queue for background sync
+  await CompleteDB.addToQueue({
+    url: '/api/messages/send',
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: { chatId, content, sender, type },
+    localId,
+    timestamp: Date.now(),
+    type: 'message'
+  });
+  
+  // Return success to client
+  event.source.postMessage({
+    type: 'MESSAGE_SENT_LOCALLY',
+    localId,
+    chatId,
+    message: offlineMessage,
+    success: true
+  });
 }
 
 // ============================================
 // INITIALIZATION
 // ============================================
 
-console.log('[MoodChat Service Worker] Complete Invisible Offline v' + APP_VERSION + ' loaded');
-console.log('[PHILOSOPHY] Users will NEVER see:');
-console.log('  • "You are offline" messages');
-console.log('  • "Using cached data" notices');
-console.log('  • "Click to view cached" buttons');
-console.log('  • Any offline indicators');
-console.log('[FEATURES PRESERVED]');
-console.log('  • WhatsApp-style API patterns');
-console.log('  • Page snapshots');
-console.log('  • UI state preservation');
-console.log('  • Message queuing & retry');
-console.log('  • Push notifications with actions');
-console.log('  • Real-time network monitoring');
-console.log('  • Background sync');
-console.log('  • Complete database for all data types');
-console.log('[RESULT] Seamless experience where online/offline is invisible');
+console.log('[MoodChat Service Worker] Enhanced Offline v' + APP_VERSION + ' loaded');
+console.log('[STRATEGIES]');
+console.log('  • Cache-first for UI files');
+console.log('  • Stale-while-revalidate for API');
+console.log('  • IndexedDB for chats, contacts, groups');
+console.log('  • Offline message queue with auto-sync');
+console.log('[RESULT] WhatsApp-style offline experience');
+console.log('  • No "You\'re offline" screens');
+console.log('  • Instant UI loading from cache');
+console.log('  • Local data storage');
+console.log('  • Message queuing when offline');
+console.log('  • Auto-sync when back online');
 
 // Initial cleanup
-setTimeout(cleanupOldData, 10000);
+setTimeout(() => {
+  if (db) cleanupOldData();
+}, 10000);

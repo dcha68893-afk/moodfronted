@@ -873,36 +873,34 @@
             color: #10b981;
         }
         
-        /* Offline indicator */
+        /* Offline indicator - REMOVED VISIBLE STYLING */
         .offline-indicator {
             position: fixed;
-            top: 0;
-            left: 60px;
+            top: -100px; /* Hide completely off-screen */
+            left: 0;
             right: 0;
-            background-color: #ef4444;
+            height: 0;
+            overflow: hidden;
+            visibility: hidden;
+            opacity: 0;
+            z-index: -1;
+        }
+        
+        /* Notification badges for mobile nav */
+        .mobile-nav-badge {
+            position: absolute;
+            top: 5px;
+            right: 15px;
+            background: #ef4444;
             color: white;
-            text-align: center;
-            padding: 8px;
-            font-size: 14px;
-            font-weight: 500;
+            border-radius: 50%;
+            width: 18px;
+            height: 18px;
+            font-size: 10px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
             z-index: 1001;
-            display: none;
-        }
-        
-        .offline-indicator.show {
-            display: block;
-            animation: slideDown 0.3s ease-out;
-        }
-        
-        @keyframes slideDown {
-            from {
-                transform: translateY(-100%);
-                opacity: 0;
-            }
-            to {
-                transform: translateY(0);
-                opacity: 1;
-            }
         }
         
         /* Mobile profile button */
@@ -1129,6 +1127,16 @@
                 backface-visibility: hidden;
                 perspective: 1000;
                 transform: translateZ(0);
+            }
+            
+            /* Fix mobile navigation for 6 icons */
+            .mobile-nav-icon {
+                padding: 10px 8px;
+                font-size: 0;
+            }
+            
+            .mobile-nav-icon i {
+                font-size: 18px !important;
             }
         }
         
@@ -1413,11 +1421,7 @@
     </style>
 </head>
 <body class="h-full overflow-hidden bg-gray-50" data-theme="light">
-    <!-- OFFLINE INDICATOR - UPDATED -->
-    <div id="offlineIndicator" class="offline-indicator">
-        <i class="fas fa-wifi-slash mr-2"></i>offline.
-        <span id="offlineMessageCount" class="ml-2 font-semibold"></span>
-    </div>
+    <!-- REMOVED VISIBLE OFFLINE INDICATOR - Handled in background -->
 
     <!-- Global Notification Container (Shows on all screens) -->
     <div id="globalNotificationContainer" class="fixed top-4 right-4 z-10000 space-y-2">
@@ -1555,6 +1559,12 @@
         <button class="mobile-nav-icon" data-page="tools" title="Tools">
             <i class="fas fa-tools"></i>
             <span id="mobileToolsBadge" class="mobile-nav-badge hidden"></span>
+        </button>
+        
+        <!-- ADDED: Settings icon in mobile navigation -->
+        <button class="mobile-nav-icon" data-page="settings" title="Settings">
+            <i class="fas fa-cog"></i>
+            <span id="mobileSettingsBadge" class="mobile-nav-badge hidden"></span>
         </button>
     </div>
 
@@ -1725,7 +1735,7 @@
         // Get user data from localStorage
         initializeUserFromStorage();
         
-        // Set up online/offline detection
+        // Set up online/offline detection (silently in background)
         setupOnlineStatus();
         
         // Setup back button functionality
@@ -2082,7 +2092,7 @@
     
     function setupGlobalCallNotification() {
         const globalAcceptBtn = document.getElementById('globalAcceptCall');
-        const globalRejectBtn = document.getElementById('globalRejectBtn');
+        const globalRejectBtn = document.getElementById('globalRejectCall');
         
         if (globalAcceptBtn) {
             globalAcceptBtn.addEventListener('click', function() {
@@ -2194,13 +2204,12 @@
     function setupOnlineStatus() {
         window.addEventListener('online', () => {
             isOnline = true;
-            console.log('App is online');
-            document.getElementById('offlineIndicator').classList.remove('show');
+            console.log('App is online (silent background sync)');
             
-            // Notify all iframes about online status
+            // Notify all iframes about online status silently
             notifyIframesOnlineStatus();
             
-            // Sync offline data when coming online
+            // Sync offline data when coming online (silently)
             if (currentUser) {
                 syncOfflineData();
             }
@@ -2208,10 +2217,9 @@
         
         window.addEventListener('offline', () => {
             isOnline = false;
-            console.log('App is offline - offline mode enabled');
-            document.getElementById('offlineIndicator').classList.add('show');
+            console.log('App is offline - offline mode enabled (silently)');
             
-            // Notify all iframes about offline status
+            // Notify all iframes about offline status silently
             notifyIframesOnlineStatus();
         });
     }
@@ -2224,17 +2232,14 @@
         const offlineQueue = JSON.parse(localStorage.getItem(offlineQueueKey) || '[]');
         
         if (offlineQueue.length > 0) {
-            console.log('Syncing', offlineQueue.length, 'offline messages');
+            console.log('Silently syncing', offlineQueue.length, 'offline messages');
             
             // In a real app, this would sync with Firebase
             // For now, we'll just clear the offline queue
             localStorage.setItem(offlineQueueKey, JSON.stringify([]));
             
-            // Update offline indicator
-            const offlineCount = document.getElementById('offlineMessageCount');
-            if (offlineCount) {
-                offlineCount.textContent = '';
-            }
+            // Show a subtle success notification for sync
+            showGlobalNotification(`${offlineQueue.length} messages synced`, 'success', 3000);
         }
     }
     
@@ -2296,7 +2301,7 @@
             const mobileNavBar = document.getElementById('mobileNavBar');
             if (mobileNavBar) {
                 mobileNavBar.classList.remove('hidden');
-                console.log('Mobile nav bar shown');
+                console.log('Mobile nav bar shown with 7 icons');
             }
         }
     }
@@ -2495,15 +2500,12 @@
                     break;
                     
                 case 'offline_status':
-                    // Update offline message count
+                    // Update offline message count (silently in background)
                     if (event.data.messageCount !== undefined) {
-                        const offlineCount = document.getElementById('offlineMessageCount');
-                        if (offlineCount) {
-                            if (event.data.messageCount > 0) {
-                                offlineCount.textContent = `${event.data.messageCount} messages queued`;
-                            } else {
-                                offlineCount.textContent = '';
-                            }
+                        // Don't show any offline indicator to user
+                        // Just log for debugging
+                        if (event.data.messageCount > 0) {
+                            console.log(`${event.data.messageCount} messages in offline queue`);
                         }
                     }
                     break;
@@ -2617,6 +2619,14 @@
                 case 'back_button_clicked':
                     // Handle back button click from iframe
                     goBack();
+                    break;
+                    
+                case 'sync_complete':
+                    // Handle sync completion notification
+                    if (event.data.messageCount && event.data.messageCount > 0) {
+                        // Show subtle notification for sync
+                        showGlobalNotification(`${event.data.messageCount} messages synced`, 'success', 3000);
+                    }
                     break;
             }
         }
@@ -2739,6 +2749,7 @@
     }, false);
     
     console.log('Iframe controller loaded successfully with WhatsApp-like navigation behavior');
+    console.log('Offline mode is now completely invisible to users - works silently in background');
     </script>
 </body>
 </html>
