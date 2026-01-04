@@ -1,4 +1,3 @@
-
 // app.js - MoodChat Application Shell & Tab Controller
 // Enhanced with custom backend API, offline detection, global state management
 // COMPLETE VERSION WITH USER ISOLATION AND REAL AUTHENTICATION
@@ -95,10 +94,12 @@ const AUTH_MANAGER = {
   token: null,
   user: null,
   tokenRefreshTimer: null,
+  authInitializing: false, // NEW: Track auth initialization
 
   // Initialize authentication manager
   initialize: function() {
     console.log('Initializing Authentication Manager...');
+    this.authInitializing = true;
     this.loadStoredAuth();
     this.setupTokenRefresh();
     this.exposeAuthMethods();
@@ -120,26 +121,55 @@ const AUTH_MANAGER = {
             if (isValid) {
               console.log('Stored authentication loaded and validated');
               this.setCurrentUser(this.user);
+              
+              // CRITICAL FIX: Only redirect to chat after successful validation
+              // Check if we're on login page and should redirect
+              const isLoginPage = window.location.pathname.includes('index.html') || 
+                                window.location.pathname.endsWith('/');
+              if (isLoginPage) {
+                console.log('Auto-login validated, redirecting to chat');
+                setTimeout(() => {
+                  window.location.href = 'chat.html';
+                }, 500);
+              }
             } else {
               console.log('Stored token is invalid, clearing authentication');
               this.clearAuth();
+              
+              // Show error if on chat page
+              if (window.location.pathname.includes('chat.html')) {
+                showError('Session expired. Please login again.');
+                setTimeout(() => {
+                  window.location.href = 'index.html';
+                }, 2000);
+              }
             }
-          }).catch(() => {
+            this.authInitializing = false;
+          }).catch((error) => {
             // If validation fails, still use stored data for offline mode
-            console.log('Token validation failed, using stored data for offline');
+            console.log('Token validation failed, using stored data for offline:', error);
             this.setCurrentUser(this.user, true);
+            this.authInitializing = false;
+            
+            // Show warning for offline mode
+            if (window.location.pathname.includes('chat.html')) {
+              showCachedDataIndicator(true);
+            }
           });
         } else {
           // Use stored data for offline mode
           console.log('Offline mode, using stored authentication');
           this.setCurrentUser(this.user, true);
+          this.authInitializing = false;
         }
       } else {
         console.log('No stored authentication found');
+        this.authInitializing = false;
       }
     } catch (error) {
       console.error('Error loading stored authentication:', error);
       this.clearAuth();
+      this.authInitializing = false;
     }
   },
 
@@ -211,8 +241,10 @@ const AUTH_MANAGER = {
       this.token = token;
       this.setCurrentUser(userData);
       console.log('Authentication stored for user:', userData.email);
+      return { success: true };
     } catch (error) {
       console.error('Error storing authentication:', error);
+      return { success: false, error: 'Failed to store authentication' };
     }
   },
 
@@ -296,85 +328,102 @@ const AUTH_MANAGER = {
       logout: this.logout.bind(this),
       isAuthenticated: () => !!this.user,
       getCurrentUser: () => this.user,
-      getToken: () => this.token
+      getToken: () => this.token,
+      isAuthInitializing: () => this.authInitializing // NEW: Expose initialization state
     };
   },
 
-  // Login function
+  // Login function - UPDATED to use api.js loginUser function
   login: async function(email, password) {
     try {
-      const response = await fetch(`${BACKEND_CONFIG.BASE_URL}${BACKEND_CONFIG.ENDPOINTS.LOGIN}`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json'
-        },
-        body: JSON.stringify({ email, password })
-      });
+      // Show loading state
+      if (window.showLoading) window.showLoading('Logging in...');
       
-      if (!response.ok) {
-        const errorData = await response.json();
-        throw new Error(errorData.message || 'Login failed');
+      // Check if api.js loginUser function is available
+      if (typeof window.loginUser !== 'function') {
+        throw new Error('Authentication API not available. Please refresh the page.');
       }
       
-      const data = await response.json();
+      // Call the api.js login function
+      const result = await window.loginUser(email, password);
       
-      if (data.token && data.user) {
-        this.storeAuth(data.token, data.user);
+      if (result.success && result.token && result.user) {
+        // Store authentication data
+        const storeResult = this.storeAuth(result.token, result.user);
+        if (!storeResult.success) {
+          throw new Error(storeResult.error);
+        }
+        
+        console.log('Login successful for user:', result.user.email);
+        
+        // Return success with user data
         return {
           success: true,
-          user: data.user,
-          token: data.token
+          user: result.user,
+          token: result.token,
+          message: result.message || 'Login successful'
         };
       } else {
-        throw new Error('Invalid response from server');
+        // Return the error from the API
+        throw new Error(result.message || result.error || 'Login failed');
       }
     } catch (error) {
       console.error('Login error:', error);
       return {
         success: false,
-        error: error.message
+        error: error.message,
+        message: error.message
       };
+    } finally {
+      // Hide loading state
+      if (window.hideLoading) window.hideLoading();
     }
   },
 
-  // Register function
+  // Register function - UPDATED to use api.js registerUser function
   register: async function(email, password, displayName) {
     try {
-      const response = await fetch(`${BACKEND_CONFIG.BASE_URL}${BACKEND_CONFIG.ENDPOINTS.REGISTER}`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json'
-        },
-        body: JSON.stringify({ 
-          email, 
-          password, 
-          displayName: displayName || email.split('@')[0] 
-        })
-      });
+      // Show loading state
+      if (window.showLoading) window.showLoading('Creating account...');
       
-      if (!response.ok) {
-        const errorData = await response.json();
-        throw new Error(errorData.message || 'Registration failed');
+      // Check if api.js registerUser function is available
+      if (typeof window.registerUser !== 'function') {
+        throw new Error('Registration API not available. Please refresh the page.');
       }
       
-      const data = await response.json();
+      // Call the api.js register function
+      const result = await window.registerUser(email, password, displayName);
       
-      if (data.token && data.user) {
-        this.storeAuth(data.token, data.user);
+      if (result.success && result.token && result.user) {
+        // Store authentication data
+        const storeResult = this.storeAuth(result.token, result.user);
+        if (!storeResult.success) {
+          throw new Error(storeResult.error);
+        }
+        
+        console.log('Registration successful for user:', result.user.email);
+        
+        // Return success with user data
         return {
           success: true,
-          user: data.user,
-          token: data.token
+          user: result.user,
+          token: result.token,
+          message: result.message || 'Registration successful'
         };
       } else {
-        throw new Error('Invalid response from server');
+        // Return the error from the API
+        throw new Error(result.message || result.error || 'Registration failed');
       }
     } catch (error) {
       console.error('Registration error:', error);
       return {
         success: false,
-        error: error.message
+        error: error.message,
+        message: error.message
       };
+    } finally {
+      // Hide loading state
+      if (window.hideLoading) window.hideLoading();
     }
   },
 
@@ -1396,24 +1445,24 @@ const SETTINGS_SERVICE = {
   // Find all changed keys between two settings objects
   findChangedKeys: function(obj1, obj2, prefix = '') {
     const keys = new Set([...Object.keys(obj1), ...Object.keys(obj2)]);
-    const changed = [];
+  const changed = [];
+  
+  for (const key of keys) {
+    const fullKey = prefix ? `${prefix}.${key}` : key;
+    const val1 = obj1[key];
+    const val2 = obj2[key];
     
-    for (const key of keys) {
-      const fullKey = prefix ? `${prefix}.${key}` : key;
-      const val1 = obj1[key];
-      const val2 = obj2[key];
-      
-      if (typeof val1 === 'object' && typeof val2 === 'object' && val1 !== null && val2 !== null) {
-        // Recursively check nested objects
-        changed.push(...this.findChangedKeys(val1, val2, fullKey));
-      } else if (JSON.stringify(val1) !== JSON.stringify(val2)) {
-        // Values are different
-        changed.push(fullKey);
-      }
+    if (typeof val1 === 'object' && typeof val2 === 'object' && val1 !== null && val2 !== null) {
+      // Recursively check nested objects
+      changed.push(...this.findChangedKeys(val1, val2, fullKey));
+    } else if (JSON.stringify(val1) !== JSON.stringify(val2)) {
+      // Values are different
+      changed.push(fullKey);
     }
-    
-    return changed;
-  },
+  }
+  
+  return changed;
+},
   
   // Get setting from a specific object
   getSettingFromObject: function(obj, key) {
@@ -2064,8 +2113,8 @@ function handleAuthStateChange(user, isOffline = false) {
   
   console.log('Auth state updated:', user ? `User ${userId} (${isOffline ? 'offline' : 'online'})` : 'No user');
   
-  // Update UI based on auth state
-  updateUIBasedOnAuthState(user);
+  // UPDATE: Don't update UI based on auth state here - let initialization handle it
+  // This prevents premature redirects before auth initialization completes
   
   // Load cached data instantly if we have a user
   if (user) {
@@ -2073,10 +2122,16 @@ function handleAuthStateChange(user, isOffline = false) {
   }
 }
 
-// Update UI based on authentication state
+// Update UI based on authentication state - FIXED VERSION
 function updateUIBasedOnAuthState(user) {
   const isChatPage = window.location.pathname.includes('chat.html') || 
                     document.querySelector(APP_CONFIG.contentArea)?.innerHTML.includes('chat-container');
+  
+  // NEW: Check if auth is still initializing
+  if (AUTH_MANAGER.authInitializing) {
+    console.log('Auth still initializing, delaying UI update');
+    return;
+  }
   
   if (user && isChatPage) {
     // User is authenticated and on chat page, show chat interface
@@ -2308,7 +2363,8 @@ function setupGlobalAuthAccess() {
     logout: window.logout,
     register: window.register,
     clearUserData: (userId) => USER_DATA_ISOLATION.clearUserData(userId),
-    getToken: () => AUTH_MANAGER.token
+    getToken: () => AUTH_MANAGER.token,
+    isAuthInitializing: () => AUTH_MANAGER.authInitializing // NEW: Expose initialization state
   };
 }
 
@@ -3244,7 +3300,8 @@ function exposeGlobalStateToIframes() {
     },
     clearUserData: (userId) => USER_DATA_ISOLATION.clearUserData(userId),
     getCachedUsers: () => USER_DATA_ISOLATION.getCachedUsers(),
-    getToken: () => AUTH_MANAGER.token
+    getToken: () => AUTH_MANAGER.token,
+    isAuthInitializing: () => AUTH_MANAGER.authInitializing // NEW: Expose initialization state
   };
   
   // Expose network state
@@ -4130,12 +4187,27 @@ function initializeApp() {
     }
   }
   
-  // STEP 9: Check authentication and update UI accordingly
-  setTimeout(() => {
+  // STEP 9: Check authentication and update UI accordingly - FIXED VERSION
+  // Wait for auth initialization to complete before checking auth state
+  const checkAuthAndUpdateUI = () => {
+    // If auth is still initializing, wait and check again
+    if (AUTH_MANAGER.authInitializing) {
+      console.log('Auth still initializing, waiting...');
+      setTimeout(checkAuthAndUpdateUI, 100);
+      return;
+    }
+    
     const isAuthenticated = !!currentUser;
     const isChatPage = window.location.pathname.includes('chat.html');
     const isIndexPage = window.location.pathname.includes('index.html') || 
                        window.location.pathname.endsWith('/');
+    
+    console.log('Auth check completed:', {
+      isAuthenticated,
+      isChatPage,
+      isIndexPage,
+      currentUser: currentUser ? currentUser.email : 'none'
+    });
     
     if (isAuthenticated && isIndexPage) {
       // User is authenticated but on login page, redirect to chat
@@ -4154,7 +4226,10 @@ function initializeApp() {
     // Mark auth as ready
     authStateRestored = true;
     broadcastAuthReady();
-  }, 100);
+  };
+  
+  // Start checking auth state after a short delay
+  setTimeout(checkAuthAndUpdateUI, 100);
   
   // STEP 10: Load default page (non-blocking) - only if on chat page
   setTimeout(() => {

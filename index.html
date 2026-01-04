@@ -19,7 +19,7 @@
     <link rel="icon" href="../icons/moodchat-512.png">
     
     <!-- Backend API Helper -->
-    <script src="api.js"></script>
+    
     
     <!-- Minimal Inline CSS for critical styles -->
     <style>
@@ -1536,7 +1536,8 @@
                         throw new Error('Backend services not available');
                     }
                     
-                    const response = await api('POST', '/auth/register', {
+                    // Use the api.js registerUser function
+                    const response = await registerUser({
                         email: email,
                         password: password,
                         displayName: displayName,
@@ -1750,7 +1751,8 @@
                         loginData.mobile = identifier;
                     }
                     
-                    const response = await api('POST', '/auth/login', loginData);
+                    // Use the api.js loginUser function
+                    const response = await loginUser(loginData);
                     
                     if (!response || !response.success) {
                         throw new Error(response?.message || 'Login failed');
@@ -1929,9 +1931,8 @@
                 }
 
                 try {
-                    const response = await api('POST', '/auth/reset-password', {
-                        email: email
-                    });
+                    // Use the api.js resetPassword function
+                    const response = await resetPassword(email);
                     
                     if (response && response.success) {
                         console.log('✅ Password reset email sent');
@@ -1966,9 +1967,7 @@
                         const token = localStorage.getItem('kynecta-chat-token');
                         if (token) {
                             // Call logout API in background
-                            api('POST', '/auth/logout', {}, {
-                                'Authorization': `Bearer ${token}`
-                            }).catch(() => {});
+                            logoutUser(token).catch(() => {});
                         }
                     }
                     
@@ -2986,5 +2985,9 @@
             });
         }
     </script>
+    <!-- CORRECT - same folder -->
+<script src="api.js"></script>
+<script src="settingsManager.js"></script>
+<script src="app.js"></script>
 </body>
 </html>
