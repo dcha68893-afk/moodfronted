@@ -18,9 +18,6 @@
     <link rel="icon" href="../icons/moodchat-192.png">
     <link rel="icon" href="../icons/moodchat-512.png">
     
-    <!-- Backend API Helper -->
-    
-    
     <!-- Minimal Inline CSS for critical styles -->
     <style>
         /* Critical CSS Variables for Dynamic Colors */
@@ -1206,12 +1203,13 @@
             console.log('🚀 ULTRA-FAST INSTANT AUTH DETECTION - Checking for logged-in user...');
             
             // Check if user is already logged in - IMMEDIATELY (no async, no waiting)
+            const token = localStorage.getItem("token");
             const isLoggedIn = localStorage.getItem("isLoggedIn");
             const userId = localStorage.getItem("userId");
             const userData = localStorage.getItem('kynecta-chat-user');
             const autoLogin = localStorage.getItem('kynecta-chat-auto-login');
             
-            if (isLoggedIn === "true" && userId && userData && autoLogin === 'true') {
+            if (isLoggedIn === "true" && userId && userData && autoLogin === 'true' && token) {
                 try {
                     const parsedUser = JSON.parse(userData);
                     
@@ -1242,7 +1240,7 @@
                         }));
                         
                         // Redirect IMMEDIATELY - no waiting for DOM
-                        window.location.href = `chat.html?auth=${encodeURIComponent(authToken)}&session=${parsedUser.session || false}`;
+                        window.location.href = `dashboard.html?auth=${encodeURIComponent(authToken)}&session=${parsedUser.session || false}`;
                         return;
                     } else {
                         console.log('ℹ️ Session expired or user logged out, showing auth UI');
@@ -1260,7 +1258,7 @@
             console.log('✅ UI rendering complete - layout visible');
         });
         
-        // BACKEND API AUTH SERVICE
+        // BACKEND API AUTH SERVICE - UPDATED TO USE apiRequest()
         class BackendAuthService {
             constructor() {
                 // UI FIRST: Don't block UI initialization
@@ -1314,16 +1312,16 @@
                     }
                     
                     // DEFENSIVE AUTH: Check if API helper is available
-                    if (typeof api === 'undefined') {
+                    if (typeof apiRequest === 'undefined') {
                         console.warn('⚠️ API helper not loaded, using local authentication');
                         this.offlineMode = true;
                         return;
                     }
                     
-                    // Try to test backend connection
+                    // Try to test backend connection using apiRequest
                     try {
                         // Test connection with a simple ping
-                        const testResponse = await api('GET', '/health');
+                        const testResponse = await apiRequest('GET', '/health');
                         if (testResponse && testResponse.status === 'ok') {
                             this.isInitialized = true;
                             console.log('✅ Backend connection established');
@@ -1352,11 +1350,11 @@
             async checkBackendSession() {
                 try {
                     // Check if we have a token
-                    const token = localStorage.getItem('kynecta-chat-token');
+                    const token = localStorage.getItem('token');
                     if (!token) return;
                     
-                    // Validate token with backend
-                    const response = await api('GET', '/auth/validate', {}, {
+                    // Validate token with backend using apiRequest
+                    const response = await apiRequest('GET', '/auth/validate', null, {
                         'Authorization': `Bearer ${token}`
                     });
                     
@@ -1372,8 +1370,7 @@
                             lastLogin: new Date().toISOString(),
                             isOfflineUser: false,
                             session: true,
-                            backendSession: true,
-                            token: token
+                            backendSession: true
                         };
                         localStorage.setItem('kynecta-chat-user', JSON.stringify(userData));
                         localStorage.setItem('kynecta-chat-auto-login', 'true');
@@ -1536,8 +1533,8 @@
                         throw new Error('Backend services not available');
                     }
                     
-                    // Use the api.js registerUser function
-                    const response = await registerUser({
+                    // Use apiRequest for registration
+                    const response = await apiRequest('POST', '/auth/register', {
                         email: email,
                         password: password,
                         displayName: displayName,
@@ -1549,9 +1546,10 @@
                         throw new Error(response?.message || 'Registration failed');
                     }
                     
-                    // Save token
+                    // Save JWT token to localStorage with key "token"
                     if (response.token) {
-                        localStorage.setItem('kynecta-chat-token', response.token);
+                        localStorage.setItem('token', response.token);
+                        console.log('✅ JWT token saved to localStorage');
                     }
                     
                     // Update localStorage with backend session
@@ -1560,7 +1558,6 @@
                     userData.isOfflineUser = false;
                     userData.session = true;
                     userData.backendSession = true;
-                    userData.token = response.token;
                     localStorage.setItem('kynecta-chat-user', JSON.stringify(userData));
                     localStorage.setItem('userId', userData.uid);
                     
@@ -1751,16 +1748,17 @@
                         loginData.mobile = identifier;
                     }
                     
-                    // Use the api.js loginUser function
-                    const response = await loginUser(loginData);
+                    // Use apiRequest for login
+                    const response = await apiRequest('POST', '/auth/login', loginData);
                     
                     if (!response || !response.success) {
                         throw new Error(response?.message || 'Login failed');
                     }
                     
-                    // Save token
+                    // Save JWT token to localStorage with key "token"
                     if (response.token) {
-                        localStorage.setItem('kynecta-chat-token', response.token);
+                        localStorage.setItem('token', response.token);
+                        console.log('✅ JWT token saved to localStorage');
                     }
                     
                     const user = response.user;
@@ -1779,7 +1777,6 @@
                         isOfflineUser: false,
                         session: true,
                         backendSession: true,
-                        token: response.token,
                         deviceId: this.getDeviceId()
                     };
                     
@@ -1816,6 +1813,7 @@
                     
                     // Check localStorage for saved user on this device
                     const savedUser = localStorage.getItem('kynecta-chat-user');
+                    const token = localStorage.getItem('token');
                     const autoLoginEnabled = localStorage.getItem('kynecta-chat-auto-login') === 'true';
                     const isLoggedIn = localStorage.getItem('isLoggedIn') === 'true';
                     const isLoggedOut = localStorage.getItem('kynecta-chat-logged-out') === 'true';
@@ -1845,12 +1843,12 @@
                     localStorage.setItem('kynecta-chat-user', JSON.stringify(userData));
                     
                     // Try to refresh backend session in background if available
-                    if (this.isOnline && this.isInitialized && userData.backendSession && userData.token) {
+                    if (this.isOnline && this.isInitialized && userData.backendSession && token) {
                         setTimeout(async () => {
                             try {
-                                // Validate token with backend
-                                const response = await api('GET', '/auth/validate', {}, {
-                                    'Authorization': `Bearer ${userData.token}`
+                                // Validate token with backend using apiRequest
+                                const response = await apiRequest('GET', '/auth/validate', null, {
+                                    'Authorization': `Bearer ${token}`
                                 });
                                 
                                 if (response && response.valid) {
@@ -1931,8 +1929,8 @@
                 }
 
                 try {
-                    // Use the api.js resetPassword function
-                    const response = await resetPassword(email);
+                    // Use apiRequest for password reset
+                    const response = await apiRequest('POST', '/auth/reset-password', { email });
                     
                     if (response && response.success) {
                         console.log('✅ Password reset email sent');
@@ -1946,13 +1944,16 @@
                 }
             }
             
-            logoutUser() {
+            async logoutUser() {
                 try {
                     // Mark as logged out
                     localStorage.setItem('kynecta-chat-logged-out', 'true');
                     localStorage.removeItem('isLoggedIn');
                     localStorage.removeItem('userId');
                     localStorage.removeItem('kynecta-chat-auto-login');
+                    
+                    // Remove JWT token
+                    localStorage.removeItem('token');
                     
                     // Keep user data but mark as logged out
                     const savedUser = localStorage.getItem('kynecta-chat-user');
@@ -1962,17 +1963,14 @@
                         localStorage.setItem('kynecta-chat-user', JSON.stringify(userData));
                     }
                     
-                    // Try backend logout if available
+                    // Try backend logout if available using apiRequest
                     if (this.isOnline && this.isInitialized) {
-                        const token = localStorage.getItem('kynecta-chat-token');
+                        const token = localStorage.getItem('token');
                         if (token) {
                             // Call logout API in background
-                            logoutUser(token).catch(() => {});
+                            apiRequest('POST', '/auth/logout', { token }).catch(() => {});
                         }
                     }
-                    
-                    // Clear token
-                    localStorage.removeItem('kynecta-chat-token');
                     
                     console.log('✅ User logged out');
                     return true;
@@ -2033,7 +2031,8 @@
             
             checkExistingUserOnDevice() {
                 const savedUser = localStorage.getItem('kynecta-chat-user');
-                if (!savedUser) return null;
+                const token = localStorage.getItem('token');
+                if (!savedUser || !token) return null;
                 
                 try {
                     const userData = JSON.parse(savedUser);
@@ -2063,22 +2062,9 @@
                 userData.lastLogin = new Date().toISOString();
                 localStorage.setItem('kynecta-chat-user', JSON.stringify(userData));
                 
-                // Prepare auth token
-                const authToken = btoa(JSON.stringify({
-                    uid: userData.uid,
-                    email: userData.email,
-                    displayName: userData.displayName,
-                    mobile: userData.mobile || '',
-                    isOffline: userData.isOfflineUser || false,
-                    hasPremiumTrial: userData.hasPremiumTrial || false,
-                    session: userData.session || false,
-                    deviceId: userData.deviceId,
-                    autoLoginAvailable: true
-                }));
-                
-                // INSTANT REDIRECT - no animations, no delays
-                console.log('🚀 INSTANT REDIRECT to chat for:', userData.email);
-                window.location.href = `chat.html?auth=${encodeURIComponent(authToken)}&session=${userData.session || false}`;
+                // Redirect to dashboard immediately
+                console.log('🚀 INSTANT REDIRECT to dashboard for:', userData.email);
+                window.location.href = 'dashboard.html';
             }
 
             init() {
@@ -2099,10 +2085,11 @@
                 try {
                     // Check for any saved user (not necessarily on this device)
                     const savedUser = localStorage.getItem('kynecta-chat-user');
+                    const token = localStorage.getItem('token');
                     const autoLogin = localStorage.getItem('kynecta-chat-auto-login') === 'true';
                     const isLoggedOut = localStorage.getItem('kynecta-chat-logged-out') === 'true';
                     
-                    if (savedUser && autoLogin && !isLoggedOut) {
+                    if (savedUser && token && autoLogin && !isLoggedOut) {
                         const userData = JSON.parse(savedUser);
                         
                         // Show quick login even if not same device (user can switch)
@@ -2317,8 +2304,8 @@
                     this.quickLoginUser.lastLogin = new Date().toISOString();
                     localStorage.setItem('kynecta-chat-user', JSON.stringify(this.quickLoginUser));
                     
-                    // Redirect
-                    this.redirectToChat();
+                    // Redirect to dashboard
+                    this.redirectToDashboard();
                     
                 } catch (error) {
                     this.hideLoading();
@@ -2620,8 +2607,8 @@
                     userData.deviceId = this.deviceId;
                     localStorage.setItem('kynecta-chat-user', JSON.stringify(userData));
                     
-                    this.showMessage('Login successful! Redirecting...', 'success');
-                    setTimeout(() => this.redirectToChat(), 1000);
+                    this.showMessage('Login successful! Redirecting to dashboard...', 'success');
+                    setTimeout(() => this.redirectToDashboard(), 1000);
                     
                 } catch (error) {
                     this.showMessage(error.message, 'error');
@@ -2717,7 +2704,7 @@
                         localStorage.setItem('kynecta-chat-user', JSON.stringify(userData));
                         
                         this.showMessage('🎉 Registration successful! Your 30-day premium trial is activated!', 'success');
-                        setTimeout(() => this.redirectToChat(), 1500);
+                        setTimeout(() => this.redirectToDashboard(), 1500);
                         
                     } catch (error) {
                         this.showMessage(error.message, 'error');
@@ -2928,20 +2915,23 @@
             }
 
             /**
-             * Enhanced redirect to chat
+             * Enhanced redirect to dashboard
              */
-            redirectToChat() {
+            redirectToDashboard() {
                 this.saveUserPreferences();
                 
                 const userData = JSON.parse(localStorage.getItem('kynecta-chat-user') || '{}');
-                const isOffline = userData.isOfflineUser;
-                const hasPremium = userData.hasPremiumTrial;
-                const session = userData.session || false;
+                const token = localStorage.getItem('token');
                 
-                let message = 'Welcome to kynecta Chat! Redirecting...';
-                if (isOffline) message = 'Welcome to kynecta Chat! (Local Mode)';
-                if (hasPremium) message = '🎉 Welcome to kynecta Chat Premium!';
-                if (session) message = '✅ Secure session active!';
+                if (!token) {
+                    this.showMessage('Authentication failed. Please try again.', 'error');
+                    return;
+                }
+                
+                let message = 'Welcome to kynecta! Redirecting to dashboard...';
+                if (userData.isOfflineUser) message = 'Welcome to kynecta! (Local Mode)';
+                if (userData.hasPremiumTrial) message = '🎉 Welcome to kynecta Premium!';
+                if (userData.session) message = '✅ Secure session active!';
                 
                 this.showMessage(message, 'success');
                 
@@ -2949,19 +2939,7 @@
                     document.body.classList.add('fade-out');
                     
                     setTimeout(() => {
-                        const authToken = btoa(JSON.stringify({
-                            uid: userData.uid,
-                            email: userData.email,
-                            displayName: userData.displayName,
-                            mobile: userData.mobile || '',
-                            isOffline: isOffline || userData.isOfflineUser,
-                            hasPremiumTrial: userData.hasPremiumTrial || false,
-                            session: session,
-                            deviceId: userData.deviceId || this.deviceId,
-                            autoLoginAvailable: true
-                        }));
-                        
-                        window.location.href = `chat.html?auth=${encodeURIComponent(authToken)}&session=${session}`;
+                        window.location.href = 'dashboard.html';
                     }, 500);
                 }, 1000);
             }
@@ -2986,8 +2964,9 @@
         }
     </script>
     <!-- CORRECT - same folder -->
-<script src="api.js"></script>
-<script src="settingsManager.js"></script>
-<script src="app.js"></script>
+ <script src="js/config.js"></script>
+<script src="js/api.js"></script>
+<script src="js/settingsManager.js"></script>
+<script src="js/app.js"></script>
 </body>
 </html>
