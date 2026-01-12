@@ -49,6 +49,11 @@
             --offline-overlay: rgba(255, 255, 255, 0.95);
             --premium-color: #FFD700;
             --premium-gradient: linear-gradient(135deg, #FFD700 0%, #FFA500 100%);
+            --happy-color: #FFD700;
+            --neutral-color: #A0A0A0;
+            --sad-color: #6495ED;
+            --angry-color: #FF4500;
+            --tired-color: #9370DB;
         }
         
         body {
@@ -1829,6 +1834,426 @@
         @keyframes spin {
             to { transform: rotate(360deg); }
         }
+        
+        /* ==================== NEW UNIQUE FEATURES STYLES ==================== */
+        
+        /* Emotional Context Styles */
+        .mood-indicator {
+            display: inline-flex;
+            align-items: center;
+            gap: 5px;
+            padding: 4px 8px;
+            border-radius: 12px;
+            font-size: 12px;
+            font-weight: 500;
+            margin-left: 8px;
+            background-color: rgba(255, 255, 255, 0.1);
+            backdrop-filter: blur(10px);
+        }
+        
+        .mood-happy {
+            background-color: rgba(255, 215, 0, 0.2);
+            color: var(--happy-color);
+        }
+        
+        .mood-neutral {
+            background-color: rgba(160, 160, 160, 0.2);
+            color: var(--neutral-color);
+        }
+        
+        .mood-sad {
+            background-color: rgba(100, 149, 237, 0.2);
+            color: var(--sad-color);
+        }
+        
+        .mood-angry {
+            background-color: rgba(255, 69, 0, 0.2);
+            color: var(--angry-color);
+        }
+        
+        .mood-tired {
+            background-color: rgba(147, 112, 219, 0.2);
+            color: var(--tired-color);
+        }
+        
+        /* Call Intention Styles */
+        .intention-indicator {
+            display: inline-flex;
+            align-items: center;
+            gap: 5px;
+            padding: 3px 10px;
+            border-radius: 15px;
+            font-size: 11px;
+            font-weight: 500;
+            margin-top: 3px;
+            background-color: rgba(255, 255, 255, 0.15);
+            backdrop-filter: blur(10px);
+            border: 1px solid rgba(255, 255, 255, 0.2);
+        }
+        
+        .intention-quick {
+            background-color: rgba(76, 175, 80, 0.3);
+            color: #4CAF50;
+        }
+        
+        .intention-important {
+            background-color: rgba(255, 152, 0, 0.3);
+            color: #FF9800;
+        }
+        
+        .intention-emergency {
+            background-color: rgba(244, 67, 54, 0.3);
+            color: #F44336;
+        }
+        
+        .intention-checkin {
+            background-color: rgba(33, 150, 243, 0.3);
+            color: #2196F3;
+        }
+        
+        .intention-work {
+            background-color: rgba(156, 39, 176, 0.3);
+            color: #9C27B0;
+        }
+        
+        /* Private Call Notes Styles */
+        .private-notes-container {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            width: 90%;
+            max-width: 500px;
+            background-color: rgba(26, 26, 26, 0.95);
+            border-radius: 16px;
+            padding: 25px;
+            z-index: 200;
+            display: none;
+            backdrop-filter: blur(20px);
+            border: 1px solid rgba(255, 255, 255, 0.1);
+            box-shadow: 0 20px 60px rgba(0, 0, 0, 0.5);
+        }
+        
+        .private-notes-container.active {
+            display: block;
+            animation: fadeIn 0.3s ease;
+        }
+        
+        .private-notes-header {
+            margin-bottom: 20px;
+            text-align: center;
+        }
+        
+        .private-notes-header h3 {
+            color: white;
+            font-size: 20px;
+            margin-bottom: 8px;
+        }
+        
+        .private-notes-header p {
+            color: rgba(255, 255, 255, 0.7);
+            font-size: 14px;
+        }
+        
+        .private-notes-textarea {
+            width: 100%;
+            min-height: 150px;
+            padding: 15px;
+            border-radius: 12px;
+            border: 1px solid rgba(255, 255, 255, 0.2);
+            background-color: rgba(255, 255, 255, 0.05);
+            color: white;
+            font-size: 14px;
+            resize: vertical;
+            margin-bottom: 20px;
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+        }
+        
+        .private-notes-textarea:focus {
+            outline: none;
+            border-color: var(--primary-color);
+            background-color: rgba(255, 255, 255, 0.08);
+        }
+        
+        .private-notes-buttons {
+            display: flex;
+            gap: 10px;
+            justify-content: flex-end;
+        }
+        
+        /* Call Summary Snapshot */
+        .call-summary-modal {
+            display: none;
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background-color: rgba(0, 0, 0, 0.9);
+            z-index: 1002;
+            align-items: center;
+            justify-content: center;
+        }
+        
+        .call-summary-modal.active {
+            display: flex;
+        }
+        
+        .call-summary-container {
+            width: 90%;
+            max-width: 500px;
+            background-color: var(--bg-color);
+            border-radius: 20px;
+            overflow: hidden;
+            box-shadow: var(--shadow-lg);
+        }
+        
+        .call-summary-header {
+            padding: 25px;
+            background: var(--call-gradient);
+            color: white;
+            text-align: center;
+        }
+        
+        .call-summary-header h3 {
+            font-size: 22px;
+            margin-bottom: 5px;
+        }
+        
+        .call-summary-content {
+            padding: 25px;
+        }
+        
+        .summary-item {
+            display: flex;
+            justify-content: space-between;
+            padding: 12px 0;
+            border-bottom: 1px solid var(--border-color);
+        }
+        
+        .summary-item:last-child {
+            border-bottom: none;
+        }
+        
+        .summary-label {
+            color: var(--text-secondary);
+            font-weight: 500;
+        }
+        
+        .summary-value {
+            font-weight: 500;
+        }
+        
+        /* Relationship Memory */
+        .relationship-memory {
+            font-size: 11px;
+            color: var(--text-secondary);
+            margin-top: 3px;
+            display: flex;
+            align-items: center;
+            gap: 5px;
+        }
+        
+        .relationship-memory i {
+            font-size: 10px;
+        }
+        
+        .frequent-contact {
+            color: var(--success-color);
+        }
+        
+        .recent-contact {
+            color: var(--primary-color);
+        }
+        
+        .occasional-contact {
+            color: var(--warning-color);
+        }
+        
+        /* Focus Mode */
+        .focus-mode-btn {
+            position: absolute;
+            top: 20px;
+            right: 90px;
+            z-index: 101;
+        }
+        
+        .focus-mode .video-overlay,
+        .focus-mode .reactions-container,
+        .focus-mode .call-side-panel:not(.collapsed) {
+            opacity: 0;
+            pointer-events: none;
+            transition: opacity 0.3s;
+        }
+        
+        .focus-mode .call-header {
+            background: rgba(0, 0, 0, 0.9);
+        }
+        
+        .focus-mode .call-controls {
+            opacity: 0.3;
+            transition: opacity 0.3s;
+        }
+        
+        .focus-mode .call-controls:hover {
+            opacity: 1;
+        }
+        
+        /* Mood Selection Modal */
+        .mood-selection-modal {
+            display: none;
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background-color: rgba(0, 0, 0, 0.8);
+            z-index: 1003;
+            align-items: center;
+            justify-content: center;
+        }
+        
+        .mood-selection-modal.active {
+            display: flex;
+        }
+        
+        .mood-selection-container {
+            width: 90%;
+            max-width: 400px;
+            background-color: var(--bg-color);
+            border-radius: 20px;
+            overflow: hidden;
+            padding: 30px;
+            text-align: center;
+            box-shadow: var(--shadow-lg);
+        }
+        
+        .mood-selection-title {
+            font-size: 20px;
+            margin-bottom: 20px;
+            font-weight: 600;
+        }
+        
+        .mood-options {
+            display: grid;
+            grid-template-columns: repeat(3, 1fr);
+            gap: 15px;
+            margin-bottom: 25px;
+        }
+        
+        .mood-option {
+            padding: 20px;
+            border: 2px solid var(--border-color);
+            border-radius: 12px;
+            cursor: pointer;
+            transition: all 0.2s;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            gap: 10px;
+        }
+        
+        .mood-option:hover {
+            transform: translateY(-2px);
+            border-color: var(--primary-color);
+        }
+        
+        .mood-option.selected {
+            border-color: var(--primary-color);
+            background-color: rgba(0, 132, 255, 0.1);
+        }
+        
+        .mood-emoji {
+            font-size: 32px;
+        }
+        
+        .mood-name {
+            font-size: 14px;
+            font-weight: 500;
+        }
+        
+        /* Intention Selection Modal */
+        .intention-selection-modal {
+            display: none;
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background-color: rgba(0, 0, 0, 0.8);
+            z-index: 1004;
+            align-items: center;
+            justify-content: center;
+        }
+        
+        .intention-selection-modal.active {
+            display: flex;
+        }
+        
+        .intention-selection-container {
+            width: 90%;
+            max-width: 450px;
+            background-color: var(--bg-color);
+            border-radius: 20px;
+            overflow: hidden;
+            padding: 30px;
+            text-align: center;
+            box-shadow: var(--shadow-lg);
+        }
+        
+        .intention-selection-title {
+            font-size: 20px;
+            margin-bottom: 20px;
+            font-weight: 600;
+        }
+        
+        .intention-options {
+            display: flex;
+            flex-direction: column;
+            gap: 10px;
+            margin-bottom: 25px;
+        }
+        
+        .intention-option {
+            padding: 15px;
+            border: 2px solid var(--border-color);
+            border-radius: 12px;
+            cursor: pointer;
+            transition: all 0.2s;
+            text-align: left;
+            display: flex;
+            align-items: center;
+            gap: 12px;
+        }
+        
+        .intention-option:hover {
+            transform: translateY(-2px);
+            border-color: var(--primary-color);
+        }
+        
+        .intention-option.selected {
+            border-color: var(--primary-color);
+            background-color: rgba(0, 132, 255, 0.1);
+        }
+        
+        .intention-icon {
+            font-size: 20px;
+            color: var(--primary-color);
+        }
+        
+        .intention-text {
+            flex: 1;
+        }
+        
+        .intention-title {
+            font-weight: 500;
+            margin-bottom: 3px;
+        }
+        
+        .intention-desc {
+            font-size: 12px;
+            color: var(--text-secondary);
+        }
     </style>
 </head>
 <body>
@@ -1948,6 +2373,45 @@
                             </label>
                         </div>
                         
+                        <!-- NEW: Emotional Context Setting -->
+                        <div class="settings-item">
+                            <div class="settings-item-label">
+                                <i class="fas fa-heart settings-item-icon"></i>
+                                <span>Emotional Context</span>
+                                <span class="premium-badge-small">Unique</span>
+                            </div>
+                            <label class="toggle-switch">
+                                <input type="checkbox" id="emotionalContextToggle" data-setting="emotionalContext">
+                                <span class="toggle-slider"></span>
+                            </label>
+                        </div>
+                        
+                        <!-- NEW: Call Intention Setting -->
+                        <div class="settings-item">
+                            <div class="settings-item-label">
+                                <i class="fas fa-bullseye settings-item-icon"></i>
+                                <span>Call Intention</span>
+                                <span class="premium-badge-small">Unique</span>
+                            </div>
+                            <label class="toggle-switch">
+                                <input type="checkbox" id="callIntentionToggle" data-setting="callIntention">
+                                <span class="toggle-slider"></span>
+                            </label>
+                        </div>
+                        
+                        <!-- NEW: Focus Mode Setting -->
+                        <div class="settings-item">
+                            <div class="settings-item-label">
+                                <i class="fas fa-eye settings-item-icon"></i>
+                                <span>Focus Mode</span>
+                                <span class="premium-badge-small">Unique</span>
+                            </div>
+                            <label class="toggle-switch">
+                                <input type="checkbox" id="focusModeToggle" data-setting="focusMode">
+                                <span class="toggle-slider"></span>
+                            </label>
+                        </div>
+                        
                         <div class="settings-item">
                             <button class="notes-btn" id="resetSettingsBtn" style="width: 100%; margin-top: 10px;">
                                 <i class="fas fa-undo"></i> Reset Call Settings
@@ -1991,6 +2455,10 @@
         
         <!-- Call Container -->
         <div class="call-container" id="callContainer">
+            <button class="control-btn focus-mode-btn" id="focusModeBtn" title="Toggle Focus Mode">
+                <i class="fas fa-eye"></i>
+            </button>
+            
             <div class="call-header">
                 <div class="call-info-bar">
                     <div class="call-type-icon" id="callTypeIcon">
@@ -1999,6 +2467,15 @@
                     <div class="call-info-text">
                         <h4 id="callParticipants">Ready to call</h4>
                         <p id="callStatus">Start a new call or wait for incoming calls</p>
+                        <!-- Emotional Context Display -->
+                        <div id="emotionalContextDisplay" style="display: none; margin-top: 5px;">
+                            <span class="mood-indicator mood-neutral" id="callMoodDisplay">
+                                <i class="fas fa-smile"></i> <span id="moodText">Neutral</span>
+                            </span>
+                            <span class="intention-indicator intention-checkin" id="callIntentionDisplay" style="display: none;">
+                                <i class="fas fa-bullseye"></i> <span id="intentionText">Just checking in</span>
+                            </span>
+                        </div>
                     </div>
                 </div>
                 <div class="call-duration" id="callDuration">00:00</div>
@@ -2037,6 +2514,14 @@
                 <button class="control-btn" id="effectsBtn" title="Effects">
                     <i class="fas fa-magic"></i>
                 </button>
+                <!-- NEW: Mood Button -->
+                <button class="control-btn" id="moodBtn" title="Set Mood">
+                    <i class="fas fa-smile"></i>
+                </button>
+                <!-- NEW: Intention Button -->
+                <button class="control-btn" id="intentionBtn" title="Set Intention">
+                    <i class="fas fa-bullseye"></i>
+                </button>
                 <button class="control-btn" id="moreBtn" title="More Options">
                     <i class="fas fa-ellipsis-h"></i>
                 </button>
@@ -2061,6 +2546,8 @@
                 <button class="panel-tab" data-panel="whiteboard">Whiteboard</button>
                 <button class="panel-tab" data-panel="notes">Notes</button>
                 <button class="panel-tab" data-panel="polls">Polls</button>
+                <!-- NEW: Relationship Memory Tab -->
+                <button class="panel-tab" data-panel="relationship">Memory</button>
             </div>
             
             <div class="panel-content" id="panelContent">
@@ -2148,6 +2635,18 @@
                                 <i class="fas fa-plus"></i> Create New Poll
                             </button>
                         </div>
+                    </div>
+                </div>
+                
+                <!-- NEW: Relationship Memory Panel -->
+                <div class="panel-section" id="relationshipPanel">
+                    <div style="text-align: center; padding: 20px; color: var(--text-secondary);">
+                        <i class="fas fa-brain" style="font-size: 48px; margin-bottom: 15px; opacity: 0.7;"></i>
+                        <h4 style="margin-bottom: 10px;">Relationship Memory</h4>
+                        <p style="margin-bottom: 20px; font-size: 14px;">See insights about your calling patterns</p>
+                    </div>
+                    <div id="relationshipInsights">
+                        <!-- Relationship insights will be loaded here -->
                     </div>
                 </div>
             </div>
@@ -2255,6 +2754,15 @@
             </div>
             <div class="incoming-call-name" id="incomingCallName">John Doe</div>
             <div class="incoming-call-type" id="incomingCallType">Incoming Video Call</div>
+            <!-- Emotional Context for Incoming Call -->
+            <div id="incomingCallEmotionalContext" style="margin-bottom: 20px; display: none;">
+                <span class="mood-indicator mood-neutral" id="incomingCallMood">
+                    <i class="fas fa-smile"></i> <span id="incomingMoodText">Neutral</span>
+                </span>
+                <span class="intention-indicator intention-checkin" id="incomingCallIntention" style="margin-left: 10px;">
+                    <i class="fas fa-bullseye"></i> <span id="incomingIntentionText">Just checking in</span>
+                </span>
+            </div>
             <div class="incoming-call-actions">
                 <button class="control-btn danger pulsing" id="declineCallBtn">
                     <i class="fas fa-phone-slash"></i>
@@ -2323,17 +2831,166 @@
             </button>
         </div>
     </div>
+    
+    <!-- ==================== NEW UNIQUE FEATURES MODALS ==================== -->
+    
+    <!-- Private Call Notes Modal -->
+    <div class="private-notes-container" id="privateNotesModal">
+        <div class="private-notes-header">
+            <h3>Private Call Notes</h3>
+            <p>Add private notes about this call. Only you can see these.</p>
+        </div>
+        <textarea class="private-notes-textarea" id="privateNotesTextarea" 
+                  placeholder="What did you discuss? Any follow-up actions? Personal thoughts..."></textarea>
+        <div class="private-notes-buttons">
+            <button class="notes-btn" id="skipNotesBtn">Skip</button>
+            <button class="notes-btn" id="savePrivateNotesBtn" style="background-color: var(--primary-color); color: white;">Save Notes</button>
+        </div>
+    </div>
+    
+    <!-- Call Summary Modal -->
+    <div class="call-summary-modal" id="callSummaryModal">
+        <div class="call-summary-container">
+            <div class="call-summary-header">
+                <h3>Call Summary</h3>
+                <p>Review your call details</p>
+            </div>
+            <div class="call-summary-content">
+                <div class="summary-item">
+                    <span class="summary-label">Duration:</span>
+                    <span class="summary-value" id="summaryDuration">00:00</span>
+                </div>
+                <div class="summary-item">
+                    <span class="summary-label">Time:</span>
+                    <span class="summary-value" id="summaryTime">Just now</span>
+                </div>
+                <div class="summary-item">
+                    <span class="summary-label">Type:</span>
+                    <span class="summary-value" id="summaryType">Video Call</span>
+                </div>
+                <div class="summary-item">
+                    <span class="summary-label">Mood:</span>
+                    <span class="summary-value" id="summaryMood">Neutral</span>
+                </div>
+                <div class="summary-item">
+                    <span class="summary-label">Intention:</span>
+                    <span class="summary-value" id="summaryIntention">Just checking in</span>
+                </div>
+                <div class="summary-item">
+                    <span class="summary-label">Participants:</span>
+                    <span class="summary-value" id="summaryParticipants">2</span>
+                </div>
+                <div style="margin-top: 25px; text-align: center;">
+                    <button class="notes-btn" id="closeSummaryBtn" style="width: 100%; background-color: var(--primary-color); color: white;">
+                        Done
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
+    
+    <!-- Mood Selection Modal -->
+    <div class="mood-selection-modal" id="moodSelectionModal">
+        <div class="mood-selection-container">
+            <div class="mood-selection-title">How are you feeling?</div>
+            <div class="mood-options">
+                <div class="mood-option" data-mood="happy">
+                    <div class="mood-emoji">😊</div>
+                    <div class="mood-name">Happy</div>
+                </div>
+                <div class="mood-option" data-mood="neutral">
+                    <div class="mood-emoji">😐</div>
+                    <div class="mood-name">Neutral</div>
+                </div>
+                <div class="mood-option" data-mood="sad">
+                    <div class="mood-emoji">😔</div>
+                    <div class="mood-name">Sad</div>
+                </div>
+                <div class="mood-option" data-mood="angry">
+                    <div class="mood-emoji">😡</div>
+                    <div class="mood-name">Angry</div>
+                </div>
+                <div class="mood-option" data-mood="tired">
+                    <div class="mood-emoji">😴</div>
+                    <div class="mood-name">Tired</div>
+                </div>
+                <div class="mood-option" data-mood="excited">
+                    <div class="mood-emoji">🤩</div>
+                    <div class="mood-name">Excited</div>
+                </div>
+            </div>
+            <div style="display: flex; gap: 10px;">
+                <button class="notes-btn" id="cancelMoodBtn" style="flex: 1;">Cancel</button>
+                <button class="notes-btn" id="confirmMoodBtn" style="flex: 1; background-color: var(--primary-color); color: white;">Set Mood</button>
+            </div>
+        </div>
+    </div>
+    
+    <!-- Intention Selection Modal -->
+    <div class="intention-selection-modal" id="intentionSelectionModal">
+        <div class="intention-selection-container">
+            <div class="intention-selection-title">Why are you calling?</div>
+            <div class="intention-options">
+                <div class="intention-option" data-intention="quick">
+                    <div class="intention-icon"><i class="fas fa-bolt"></i></div>
+                    <div class="intention-text">
+                        <div class="intention-title">Quick chat</div>
+                        <div class="intention-desc">Just a quick catch-up</div>
+                    </div>
+                </div>
+                <div class="intention-option" data-intention="important">
+                    <div class="intention-icon"><i class="fas fa-exclamation-circle"></i></div>
+                    <div class="intention-text">
+                        <div class="intention-title">Important</div>
+                        <div class="intention-desc">Need to discuss something serious</div>
+                    </div>
+                </div>
+                <div class="intention-option" data-intention="emergency">
+                    <div class="intention-icon"><i class="fas fa-ambulance"></i></div>
+                    <div class="intention-text">
+                        <div class="intention-title">Emergency</div>
+                        <div class="intention-desc">Urgent help needed</div>
+                    </div>
+                </div>
+                <div class="intention-option" data-intention="checkin">
+                    <div class="intention-icon"><i class="fas fa-heart"></i></div>
+                    <div class="intention-text">
+                        <div class="intention-title">Just checking in</div>
+                        <div class="intention-desc">Wanted to see how you're doing</div>
+                    </div>
+                </div>
+                <div class="intention-option" data-intention="work">
+                    <div class="intention-icon"><i class="fas fa-briefcase"></i></div>
+                    <div class="intention-text">
+                        <div class="intention-title">Work-related</div>
+                        <div class="intention-desc">Business or project discussion</div>
+                    </div>
+                </div>
+            </div>
+            <div style="display: flex; gap: 10px;">
+                <button class="notes-btn" id="cancelIntentionBtn" style="flex: 1;">Cancel</button>
+                <button class="notes-btn" id="confirmIntentionBtn" style="flex: 1; background-color: var(--primary-color); color: white;">Set Intention</button>
+            </div>
+        </div>
+    </div>
 
     <script>
+        // ==================== BACKEND MIGRATION CHANGES START ====================
+        // All Firebase references have been removed and replaced with API calls
+        // ========================================================================
+        
         // Import settingsManager.js
         const SettingsManager = {
-            // Default settings for calls
+            // Default settings for calls - UPDATED with new features
             defaultSettings: {
                 liveReactions: true,
                 inCallChat: true,
                 sharedWhiteboard: true,
                 polls: true,
                 sharedNotes: true,
+                emotionalContext: true,
+                callIntention: true,
+                focusMode: false,
                 theme: 'light',
                 notifications: true,
                 notificationSound: true,
@@ -2465,6 +3122,15 @@
                     case 'sharedNotes':
                         this.applyNotesSetting(value);
                         break;
+                    case 'emotionalContext':
+                        this.applyEmotionalContextSetting(value);
+                        break;
+                    case 'callIntention':
+                        this.applyCallIntentionSetting(value);
+                        break;
+                    case 'focusMode':
+                        this.applyFocusModeSetting(value);
+                        break;
                 }
             },
             
@@ -2539,6 +3205,54 @@
                 }
             },
             
+            // NEW: Apply emotional context setting
+            applyEmotionalContextSetting: function(enabled) {
+                const moodBtn = document.getElementById('moodBtn');
+                const emotionalContextDisplay = document.getElementById('emotionalContextDisplay');
+                
+                if (moodBtn) {
+                    moodBtn.style.display = enabled ? 'flex' : 'none';
+                }
+                
+                if (emotionalContextDisplay) {
+                    emotionalContextDisplay.style.display = enabled ? 'block' : 'none';
+                }
+                
+                // Update incoming call display
+                const incomingContext = document.getElementById('incomingCallEmotionalContext');
+                if (incomingContext) {
+                    incomingContext.style.display = enabled ? 'block' : 'none';
+                }
+            },
+            
+            // NEW: Apply call intention setting
+            applyCallIntentionSetting: function(enabled) {
+                const intentionBtn = document.getElementById('intentionBtn');
+                const callIntentionDisplay = document.getElementById('callIntentionDisplay');
+                
+                if (intentionBtn) {
+                    intentionBtn.style.display = enabled ? 'flex' : 'none';
+                }
+                
+                if (callIntentionDisplay) {
+                    callIntentionDisplay.style.display = enabled ? 'inline-flex' : 'none';
+                }
+            },
+            
+            // NEW: Apply focus mode setting
+            applyFocusModeSetting: function(enabled) {
+                const focusModeBtn = document.getElementById('focusModeBtn');
+                if (focusModeBtn) {
+                    focusModeBtn.style.display = enabled ? 'flex' : 'none';
+                }
+                
+                if (enabled && window.userSettings && window.userSettings.focusMode) {
+                    document.body.classList.add('focus-mode');
+                } else {
+                    document.body.classList.remove('focus-mode');
+                }
+            },
+            
             // Reset settings to defaults
             resetToDefaults: function() {
                 window.userSettings = { ...this.defaultSettings };
@@ -2550,7 +3264,7 @@
             
             // Reset call-specific settings to defaults
             resetCallSettings: function() {
-                const callSettings = ['liveReactions', 'inCallChat', 'sharedWhiteboard', 'polls', 'sharedNotes'];
+                const callSettings = ['liveReactions', 'inCallChat', 'sharedWhiteboard', 'polls', 'sharedNotes', 'emotionalContext', 'callIntention', 'focusMode'];
                 callSettings.forEach(setting => {
                     window.userSettings[setting] = this.defaultSettings[setting];
                 });
@@ -2626,6 +3340,14 @@
         let reactionsChannel = null;
         let chatChannel = null;
         
+        // NEW UNIQUE FEATURES VARIABLES
+        let currentMood = 'neutral';
+        let currentIntention = 'checkin';
+        let callContinuityData = null;
+        let lastNavigationContext = null;
+        let relationshipMemory = new Map();
+        let callNotes = new Map();
+        
         // Connection state management
         let isOnline = navigator.onLine;
         let connectionCheckInterval = null;
@@ -2664,6 +3386,15 @@
         const syncIndicator = document.getElementById('syncIndicator');
         const paymentModal = document.getElementById('paymentModal');
         
+        // NEW: Unique features DOM elements
+        const privateNotesModal = document.getElementById('privateNotesModal');
+        const callSummaryModal = document.getElementById('callSummaryModal');
+        const moodSelectionModal = document.getElementById('moodSelectionModal');
+        const intentionSelectionModal = document.getElementById('intentionSelectionModal');
+        const focusModeBtn = document.getElementById('focusModeBtn');
+        const moodBtn = document.getElementById('moodBtn');
+        const intentionBtn = document.getElementById('intentionBtn');
+        
         // Call sections
         const allCallsSection = document.getElementById('allCallsSection');
         const missedCallsSection = document.getElementById('missedCallsSection');
@@ -2673,12 +3404,14 @@
         const groupCallsList = document.getElementById('groupCallsList');
         
         // Enhanced Cache Management
-        const CACHE_VERSION = 'calls_v2';
+        const CACHE_VERSION = 'calls_v3';
         const CACHE_KEYS = {
             CALLS_HISTORY: 'calls_history',
             CONTACTS: 'calls_contacts',
             USER_DATA: 'calls_user_data',
-            LAST_SYNC: 'calls_last_sync'
+            LAST_SYNC: 'calls_last_sync',
+            RELATIONSHIP_MEMORY: 'calls_relationship_memory',
+            CALL_NOTES: 'calls_private_notes'
         };
         
         // Call initiation from friends.html
@@ -2690,54 +3423,84 @@
         });
         
         async function initializeApp() {
-            // Initialize settings manager
-            SettingsManager.initializeSettings();
-            
-            // Initialize connection detection
-            initializeConnectionDetection();
-            
-            // First try to get user from localStorage for immediate UI
-            const cachedUser = localStorage.getItem('currentUser');
-            if (cachedUser) {
-                try {
+            // ==================== BACKEND MIGRATION: Initialize with API system ====================
+            try {
+                // Check if running in iframe for token handling
+                if (window !== window.top) {
+                    console.log('Running in iframe, checking parent for authentication...');
+                    
+                    // Listen for authentication messages from parent
+                    window.addEventListener('message', async function(event) {
+                        if (event.data && event.data.type === 'authToken') {
+                            console.log('Received auth token from parent');
+                            // Store token for API calls
+                            localStorage.setItem('authToken', event.data.token);
+                            
+                            // Initialize user with token
+                            await initializeWithToken(event.data.token);
+                        }
+                    });
+                    
+                    // Request token from parent
+                    window.parent.postMessage({ type: 'requestAuthToken' }, '*');
+                    
+                } else {
+                    // Not in iframe, check localStorage for token
+                    const token = localStorage.getItem('authToken');
+                    if (token) {
+                        await initializeWithToken(token);
+                    } else {
+                        // Try to get current user from api.js
+                        await initializeWithAPI();
+                    }
+                }
+                
+            } catch (error) {
+                console.error('Error initializing app:', error);
+                // Fallback to offline mode
+                initializeOffline();
+            }
+        }
+        
+        // ==================== BACKEND MIGRATION: Token-based initialization ====================
+        async function initializeWithToken(token) {
+            try {
+                // Use api.js to get current user with token
+                if (window.api && typeof window.api.getCurrentUser === 'function') {
+                    const user = await window.api.getCurrentUser();
+                    if (user) {
+                        currentUser = user;
+                        console.log('User authenticated via token:', currentUser.uid);
+                        
+                        // Cache user for offline use
+                        localStorage.setItem('currentUser', JSON.stringify({
+                            uid: user.uid,
+                            displayName: user.displayName,
+                            email: user.email,
+                            photoURL: user.photoURL
+                        }));
+                        
+                        await completeInitialization();
+                    }
+                }
+            } catch (error) {
+                console.error('Error initializing with token:', error);
+                initializeOffline();
+            }
+        }
+        
+        // ==================== BACKEND MIGRATION: API-based initialization ====================
+        async function initializeWithAPI() {
+            try {
+                // First try to get user from localStorage for immediate UI
+                const cachedUser = localStorage.getItem('currentUser');
+                if (cachedUser) {
                     currentUser = JSON.parse(cachedUser);
                     console.log('Using cached user:', currentUser.uid);
-                    
-                    // Initialize UI immediately with cached user
-                    await initializeUser();
-                    await loadUserSubscription();
-                    setupEventListeners();
-                    initializeWhiteboard();
-                    
-                    // STEP 1: Load calls from cache instantly (fast)
-                    await loadCallsFromCache();
-                    
-                    // Show UI immediately
-                    fixMobileLayout();
-                    
-                    // Listen for external calls from friends.html
-                    listenForExternalCalls();
-                    
-                    // Check for URL parameters for call initiation
-                    checkUrlForCallInitiation();
-                    
-                    // Update UI for connectivity state
-                    updateUIForConnectivity();
-                    
-                    // STEP 2: Start background sync if online
-                    if (isOnline) {
-                        startBackgroundSync();
-                    }
-                    
-                } catch (error) {
-                    console.error('Error with cached user:', error);
                 }
-            }
-            
-            // Then try auth from api.js
-            try {
-                // Check if user is logged in via api.js
-                if (typeof window !== 'undefined' && window.api && typeof window.api.getCurrentUser === 'function') {
+                
+                // Then try auth from api.js
+                if (window.api && typeof window.api.getCurrentUser === 'function') {
                     const user = await window.api.getCurrentUser();
                     if (user) {
                         currentUser = user;
@@ -2750,54 +3513,127 @@
                             email: user.email,
                             photoURL: user.photoURL
                         }));
-                        
-                        await initializeUser();
-                        await loadUserSubscription();
-                        setupEventListeners();
-                        initializeWhiteboard();
-                        
-                        // STEP 1: Load calls from cache instantly (fast)
-                        await loadCallsFromCache();
-                        
-                        // STEP 2: Start background sync if online
-                        if (isOnline) {
-                            startBackgroundSync();
-                            setupPresenceTracking();
-                            
-                            // Only initialize PeerJS if online
-                            setTimeout(() => {
-                                initializePeerJS();
-                            }, 1000);
-                        }
-                        
-                        // Listen for incoming calls from friends.html
-                        listenForExternalCalls();
-                        
-                        // Check for URL parameters for call initiation
-                        checkUrlForCallInitiation();
-                        
-                        // Fix mobile layout on load
-                        setTimeout(fixMobileLayout, 100);
-                        
-                        // Update UI for connectivity state
-                        updateUIForConnectivity();
-                        
-                    } else if (!currentUser) {
-                        console.log('No user detected, redirecting to login');
-                        // Check if we're in the app.js context
-                        if (typeof window !== 'undefined' && window.location.pathname.includes('calls.html')) {
-                            window.location.href = 'index.html';
-                        }
+                    }
+                }
+                
+                if (currentUser) {
+                    await completeInitialization();
+                } else {
+                    console.log('No user detected, redirecting to login');
+                    // Check if we're in the app.js context
+                    if (typeof window !== 'undefined' && window.location.pathname.includes('calls.html')) {
+                        window.location.href = 'index.html';
                     }
                 }
             } catch (error) {
                 console.error('Error checking user via api:', error);
-                // If api fails, continue with cached user
-                if (!currentUser) {
-                    console.log('No user available, showing login redirect');
-                    showNotification('Please login to continue', 'info');
+                initializeOffline();
+            }
+        }
+        
+        // ==================== BACKEND MIGRATION: Offline initialization ====================
+        function initializeOffline() {
+            console.log('Initializing in offline mode');
+            
+            // Try to use cached user
+            const cachedUser = localStorage.getItem('currentUser');
+            if (cachedUser) {
+                try {
+                    currentUser = JSON.parse(cachedUser);
+                    console.log('Using cached user for offline mode:', currentUser.uid);
+                } catch (e) {
+                    console.error('Error parsing cached user:', e);
                 }
             }
+            
+            // Initialize settings
+            SettingsManager.initializeSettings();
+            
+            // Initialize connection detection
+            initializeConnectionDetection();
+            
+            // Setup event listeners
+            setupEventListeners();
+            
+            // Initialize UI with offline data
+            initializeOfflineUI();
+            
+            // Update UI for connectivity state
+            updateUIForConnectivity();
+        }
+        
+        async function completeInitialization() {
+            // Initialize settings manager
+            SettingsManager.initializeSettings();
+            
+            // Initialize connection detection
+            initializeConnectionDetection();
+            
+            // Initialize user data
+            await initializeUser();
+            await loadUserSubscription();
+            
+            // Setup event listeners
+            setupEventListeners();
+            initializeWhiteboard();
+            
+            // Load calls from cache instantly (fast)
+            await loadCallsFromCache();
+            
+            // Load relationship memory
+            await loadRelationshipMemory();
+            
+            // Fix mobile layout
+            fixMobileLayout();
+            
+            // Listen for external calls from friends.html
+            listenForExternalCalls();
+            
+            // Check for URL parameters for call initiation
+            checkUrlForCallInitiation();
+            
+            // Update UI for connectivity state
+            updateUIForConnectivity();
+            
+            // Check for call continuity data
+            checkCallContinuity();
+            
+            // Start background sync if online
+            if (isOnline) {
+                startBackgroundSync();
+            }
+            
+            // Initialize PeerJS if online
+            if (isOnline) {
+                setTimeout(() => {
+                    initializePeerJS();
+                    setupPresenceTracking();
+                }, 1000);
+            }
+            
+            console.log('App initialization complete');
+        }
+        
+        function initializeOfflineUI() {
+            // Load calls from cache
+            loadCallsFromCache();
+            
+            // Load relationship memory from cache
+            loadRelationshipMemory();
+            
+            // Fix mobile layout
+            fixMobileLayout();
+            
+            // Update UI for offline state
+            updateUIForConnectivity();
+            
+            // Show call container in view-only mode
+            callContainer.classList.add('active');
+            document.getElementById('callParticipants').textContent = 'Connection Required';
+            document.getElementById('callStatus').textContent = 'Call features require connection';
+            offlineCallPlaceholder.style.display = 'flex';
+            
+            console.log('Offline UI initialized');
         }
         
         function checkUrlForCallInitiation() {
@@ -2853,7 +3689,7 @@
             startCall(userId, type);
         }
         
-        // Enhanced Cache Management Functions
+        // ==================== BACKEND MIGRATION: Enhanced Cache Management ====================
         async function loadCallsFromCache() {
             console.log('Loading calls from cache...');
             
@@ -3085,10 +3921,11 @@
             updateSyncIndicator('syncing');
             
             try {
-                // Load calls from backend via api.js
+                // ==================== BACKEND MIGRATION: Use API instead of Firebase ====================
                 if (window.api && typeof window.api.get === 'function') {
                     const response = await window.api.get('/api/calls/history', {
                         params: {
+                            userId: currentUser.uid,
                             limit: 50,
                             orderBy: 'timestamp',
                             order: 'desc'
@@ -3127,6 +3964,531 @@
                 
                 // Don't show error notification for background sync failures
                 // Just log it and continue with cached data
+            }
+        }
+        
+        // ==================== NEW UNIQUE FEATURE: Call Continuity ====================
+        function checkCallContinuity() {
+            const continuityData = localStorage.getItem('callContinuityData');
+            if (continuityData) {
+                try {
+                    callContinuityData = JSON.parse(continuityData);
+                    console.log('Found call continuity data:', callContinuityData);
+                    
+                    // Check if call was active less than 5 minutes ago
+                    const now = Date.now();
+                    const lastActive = callContinuityData.timestamp;
+                    const fiveMinutes = 5 * 60 * 1000;
+                    
+                    if (now - lastActive < fiveMinutes) {
+                        showNotification('Resuming previous call session...', 'info');
+                        
+                        // Restore call state
+                        if (callContinuityData.active) {
+                            // Show call container
+                            callContainer.classList.add('active');
+                            document.querySelector('.sidebar').style.display = 'none';
+                            
+                            // Restore call info
+                            document.getElementById('callParticipants').textContent = callContinuityData.participants || 'Previous Call';
+                            document.getElementById('callStatus').textContent = 'Reconnecting...';
+                            document.getElementById('callDuration').textContent = callContinuityData.duration || '00:00';
+                            
+                            // Show connecting state
+                            offlineCallPlaceholder.style.display = 'none';
+                            
+                            // Attempt to reconnect if online
+                            if (isOnline && callContinuityData.targetId) {
+                                setTimeout(() => {
+                                    startCall(callContinuityData.targetId, callContinuityData.type || 'video');
+                                }, 1000);
+                            }
+                        }
+                    }
+                    
+                    // Clear continuity data after checking
+                    localStorage.removeItem('callContinuityData');
+                    
+                } catch (error) {
+                    console.error('Error parsing call continuity data:', error);
+                    localStorage.removeItem('callContinuityData');
+                }
+            }
+        }
+        
+        function saveCallContinuity() {
+            if (!currentCall) return;
+            
+            const continuityData = {
+                active: true,
+                timestamp: Date.now(),
+                targetId: currentCall.targetId,
+                type: currentCallType,
+                participants: document.getElementById('callParticipants').textContent,
+                duration: document.getElementById('callDuration').textContent,
+                startTime: callStartTime ? callStartTime.getTime() : null
+            };
+            
+            localStorage.setItem('callContinuityData', JSON.stringify(continuityData));
+            console.log('Call continuity data saved');
+        }
+        
+        // ==================== NEW UNIQUE FEATURE: Emotional Context ====================
+        function showMoodSelection() {
+            if (!window.userSettings || !window.userSettings.emotionalContext) {
+                showNotification('Emotional context is disabled in settings', 'info');
+                return;
+            }
+            
+            // Reset selection
+            document.querySelectorAll('.mood-option').forEach(option => {
+                option.classList.remove('selected');
+            });
+            
+            // Select current mood if exists
+            const currentMoodOption = document.querySelector(`.mood-option[data-mood="${currentMood}"]`);
+            if (currentMoodOption) {
+                currentMoodOption.classList.add('selected');
+            }
+            
+            // Show modal
+            moodSelectionModal.classList.add('active');
+        }
+        
+        function setMood(mood) {
+            currentMood = mood;
+            
+            // Update UI
+            const moodDisplay = document.getElementById('callMoodDisplay');
+            const moodText = document.getElementById('moodText');
+            
+            if (moodDisplay && moodText) {
+                // Remove all mood classes
+                moodDisplay.className = 'mood-indicator';
+                
+                // Add appropriate mood class
+                switch(mood) {
+                    case 'happy':
+                        moodDisplay.classList.add('mood-happy');
+                        moodText.textContent = 'Happy';
+                        break;
+                    case 'neutral':
+                        moodDisplay.classList.add('mood-neutral');
+                        moodText.textContent = 'Neutral';
+                        break;
+                    case 'sad':
+                        moodDisplay.classList.add('mood-sad');
+                        moodText.textContent = 'Sad';
+                        break;
+                    case 'angry':
+                        moodDisplay.classList.add('mood-angry');
+                        moodText.textContent = 'Angry';
+                        break;
+                    case 'tired':
+                        moodDisplay.classList.add('mood-tired');
+                        moodText.textContent = 'Tired';
+                        break;
+                    case 'excited':
+                        moodDisplay.classList.add('mood-happy'); // Use happy style for excited
+                        moodText.textContent = 'Excited';
+                        break;
+                }
+            }
+            
+            // Broadcast mood to other participants if in a call
+            if (currentCall && isOnline) {
+                broadcastDataMessage({
+                    type: 'mood',
+                    mood: mood,
+                    userId: currentUser.uid,
+                    timestamp: new Date().toISOString()
+                });
+            }
+            
+            showNotification(`Mood set to: ${mood}`, 'success');
+            moodSelectionModal.classList.remove('active');
+        }
+        
+        // ==================== NEW UNIQUE FEATURE: Call Intention ====================
+        function showIntentionSelection() {
+            if (!window.userSettings || !window.userSettings.callIntention) {
+                showNotification('Call intention is disabled in settings', 'info');
+                return;
+            }
+            
+            // Reset selection
+            document.querySelectorAll('.intention-option').forEach(option => {
+                option.classList.remove('selected');
+            });
+            
+            // Select current intention if exists
+            const currentIntentionOption = document.querySelector(`.intention-option[data-intention="${currentIntention}"]`);
+            if (currentIntentionOption) {
+                currentIntentionOption.classList.add('selected');
+            }
+            
+            // Show modal
+            intentionSelectionModal.classList.add('active');
+        }
+        
+        function setIntention(intention) {
+            currentIntention = intention;
+            
+            // Update UI
+            const intentionDisplay = document.getElementById('callIntentionDisplay');
+            const intentionText = document.getElementById('intentionText');
+            
+            if (intentionDisplay && intentionText) {
+                // Remove all intention classes
+                intentionDisplay.className = 'intention-indicator';
+                
+                // Add appropriate intention class and text
+                switch(intention) {
+                    case 'quick':
+                        intentionDisplay.classList.add('intention-quick');
+                        intentionText.textContent = 'Quick chat';
+                        break;
+                    case 'important':
+                        intentionDisplay.classList.add('intention-important');
+                        intentionText.textContent = 'Important';
+                        break;
+                    case 'emergency':
+                        intentionDisplay.classList.add('intention-emergency');
+                        intentionText.textContent = 'Emergency';
+                        break;
+                    case 'checkin':
+                        intentionDisplay.classList.add('intention-checkin');
+                        intentionText.textContent = 'Just checking in';
+                        break;
+                    case 'work':
+                        intentionDisplay.classList.add('intention-work');
+                        intentionText.textContent = 'Work-related';
+                        break;
+                }
+                
+                // Show intention display
+                intentionDisplay.style.display = 'inline-flex';
+            }
+            
+            // Broadcast intention to other participants if in a call
+            if (currentCall && isOnline) {
+                broadcastDataMessage({
+                    type: 'intention',
+                    intention: intention,
+                    userId: currentUser.uid,
+                    timestamp: new Date().toISOString()
+                });
+            }
+            
+            showNotification(`Call intention set: ${intention}`, 'success');
+            intentionSelectionModal.classList.remove('active');
+        }
+        
+        // ==================== NEW UNIQUE FEATURE: Private Call Notes ====================
+        function showPrivateNotesModal() {
+            privateNotesModal.classList.add('active');
+            
+            // Load previous notes if any
+            if (currentCall && currentCall.targetId) {
+                const noteKey = `call_note_${currentCall.targetId}_${currentCall.startTime?.getTime() || Date.now()}`;
+                const savedNote = localStorage.getItem(noteKey);
+                if (savedNote) {
+                    document.getElementById('privateNotesTextarea').value = savedNote;
+                }
+            }
+        }
+        
+        async function savePrivateNotes() {
+            const notes = document.getElementById('privateNotesTextarea').value.trim();
+            
+            if (!currentCall) return;
+            
+            // Save notes to localStorage
+            if (currentCall.targetId) {
+                const noteKey = `call_note_${currentCall.targetId}_${currentCall.startTime?.getTime() || Date.now()}`;
+                localStorage.setItem(noteKey, notes);
+                
+                // Also save to call notes map for current session
+                callNotes.set(currentCall.targetId, {
+                    notes: notes,
+                    timestamp: new Date().toISOString(),
+                    callId: currentCall.callId
+                });
+            }
+            
+            // ==================== BACKEND MIGRATION: Save to backend if online ====================
+            if (isOnline && window.api && typeof window.api.post === 'function') {
+                try {
+                    await window.api.post('/api/calls/notes', {
+                        userId: currentUser.uid,
+                        targetId: currentCall.targetId,
+                        notes: notes,
+                        callId: currentCall.callId,
+                        timestamp: new Date().toISOString()
+                    });
+                } catch (error) {
+                    console.error('Error saving notes to backend:', error);
+                }
+            }
+            
+            showNotification('Private notes saved', 'success');
+            privateNotesModal.classList.remove('active');
+        }
+        
+        // ==================== NEW UNIQUE FEATURE: Call Summary Snapshot ====================
+        function showCallSummary() {
+            if (!currentCall) return;
+            
+            // Calculate duration
+            let duration = '00:00';
+            if (callStartTime) {
+                const endTime = new Date();
+                const diffMs = endTime - callStartTime;
+                const minutes = Math.floor(diffMs / 60000);
+                const seconds = Math.floor((diffMs % 60000) / 1000);
+                duration = `${minutes.toString().padStart(2, '0')}:${seconds.toString().padStart(2, '0')}`;
+            }
+            
+            // Update summary elements
+            document.getElementById('summaryDuration').textContent = duration;
+            document.getElementById('summaryTime').textContent = formatTimeAgo(new Date());
+            document.getElementById('summaryType').textContent = currentCallType === 'video' ? 'Video Call' : 'Voice Call';
+            document.getElementById('summaryMood').textContent = currentMood.charAt(0).toUpperCase() + currentMood.slice(1);
+            document.getElementById('summaryIntention').textContent = 
+                currentIntention === 'checkin' ? 'Just checking in' : 
+                currentIntention === 'quick' ? 'Quick chat' :
+                currentIntention === 'important' ? 'Important' :
+                currentIntention === 'emergency' ? 'Emergency' :
+                currentIntention === 'work' ? 'Work-related' : 'Unknown';
+            document.getElementById('summaryParticipants').textContent = callParticipants.length;
+            
+            // Show modal
+            callSummaryModal.classList.add('active');
+        }
+        
+        // ==================== NEW UNIQUE FEATURE: Smart Call Return ====================
+        function smartReturnAfterCall() {
+            // Check where user came from
+            const lastContext = localStorage.getItem('lastNavigationContext');
+            
+            if (lastContext) {
+                try {
+                    const context = JSON.parse(lastContext);
+                    const now = Date.now();
+                    const fiveMinutes = 5 * 60 * 1000;
+                    
+                    // Only return if context is recent (less than 5 minutes ago)
+                    if (now - context.timestamp < fiveMinutes) {
+                        switch(context.page) {
+                            case 'friends':
+                                // Navigate back to friends page
+                                if (window !== window.top) {
+                                    // In iframe, send message to parent
+                                    window.parent.postMessage({ type: 'navigate', page: 'friends' }, '*');
+                                } else {
+                                    window.location.href = 'friends.html';
+                                }
+                                return;
+                            case 'chat':
+                                // Navigate back to chat
+                                if (window !== window.top) {
+                                    window.parent.postMessage({ 
+                                        type: 'navigate', 
+                                        page: 'chat',
+                                        userId: context.userId 
+                                    }, '*');
+                                }
+                                return;
+                            case 'groups':
+                                // Navigate back to groups
+                                if (window !== window.top) {
+                                    window.parent.postMessage({ type: 'navigate', page: 'groups' }, '*');
+                                }
+                                return;
+                        }
+                    }
+                } catch (error) {
+                    console.error('Error parsing navigation context:', error);
+                }
+            }
+            
+            // Default: Stay on calls page
+            localStorage.setItem('lastNavigationContext', JSON.stringify({
+                page: 'calls',
+                timestamp: Date.now()
+            }));
+        }
+        
+        // ==================== NEW UNIQUE FEATURE: Relationship Memory ====================
+        async function loadRelationshipMemory() {
+            try {
+                if (!currentUser) return;
+                
+                const cacheKey = `${CACHE_KEYS.RELATIONSHIP_MEMORY}_${currentUser.uid}`;
+                const cachedMemory = localStorage.getItem(cacheKey);
+                
+                if (cachedMemory) {
+                    const memoryData = JSON.parse(cachedMemory);
+                    relationshipMemory = new Map(Object.entries(memoryData));
+                    console.log('Loaded relationship memory from cache:', relationshipMemory.size, 'contacts');
+                }
+                
+                // ==================== BACKEND MIGRATION: Load from backend if online ====================
+                if (isOnline && window.api && typeof window.api.get === 'function') {
+                    try {
+                        const response = await window.api.get(`/api/users/${currentUser.uid}/relationship-memory`);
+                        if (response && response.data) {
+                            relationshipMemory = new Map(Object.entries(response.data));
+                            
+                            // Save to cache
+                            localStorage.setItem(cacheKey, JSON.stringify(Object.fromEntries(relationshipMemory)));
+                        }
+                    } catch (error) {
+                        console.error('Error loading relationship memory from backend:', error);
+                    }
+                }
+                
+            } catch (error) {
+                console.error('Error loading relationship memory:', error);
+            }
+        }
+        
+        function updateRelationshipMemory(userId, callData) {
+            if (!userId || userId === currentUser.uid) return;
+            
+            const now = new Date();
+            const today = now.toDateString();
+            
+            if (!relationshipMemory.has(userId)) {
+                relationshipMemory.set(userId, {
+                    totalCalls: 0,
+                    lastCall: now,
+                    firstCall: now,
+                    callHistory: [],
+                    moods: {},
+                    intentions: {}
+                });
+            }
+            
+            const userMemory = relationshipMemory.get(userId);
+            userMemory.totalCalls++;
+            userMemory.lastCall = now;
+            
+            // Add to call history (limit to last 20 calls)
+            userMemory.callHistory.unshift({
+                timestamp: now,
+                type: callData.type,
+                duration: callData.duration,
+                mood: callData.mood,
+                intention: callData.intention
+            });
+            
+            if (userMemory.callHistory.length > 20) {
+                userMemory.callHistory = userMemory.callHistory.slice(0, 20);
+            }
+            
+            // Track mood frequency
+            if (callData.mood) {
+                userMemory.moods[callData.mood] = (userMemory.moods[callData.mood] || 0) + 1;
+            }
+            
+            // Track intention frequency
+            if (callData.intention) {
+                userMemory.intentions[callData.intention] = (userMemory.intentions[callData.intention] || 0) + 1;
+            }
+            
+            // Save to cache
+            const cacheKey = `${CACHE_KEYS.RELATIONSHIP_MEMORY}_${currentUser.uid}`;
+            localStorage.setItem(cacheKey, JSON.stringify(Object.fromEntries(relationshipMemory)));
+            
+            // ==================== BACKEND MIGRATION: Save to backend if online ====================
+            if (isOnline && window.api && typeof window.api.post === 'function') {
+                try {
+                    window.api.post(`/api/users/${currentUser.uid}/relationship-memory`, {
+                        targetId: userId,
+                        memory: userMemory
+                    }).catch(error => {
+                        console.error('Error saving relationship memory to backend:', error);
+                    });
+                } catch (error) {
+                    console.error('Error saving relationship memory:', error);
+                }
+            }
+        }
+        
+        function getRelationshipInsights(userId) {
+            if (!relationshipMemory.has(userId)) {
+                return {
+                    frequency: 'First call',
+                    lastCall: null,
+                    totalCalls: 0,
+                    commonMood: null,
+                    commonIntention: null
+                };
+            }
+            
+            const memory = relationshipMemory.get(userId);
+            const now = new Date();
+            const lastCall = new Date(memory.lastCall);
+            const daysSinceLastCall = Math.floor((now - lastCall) / (1000 * 60 * 60 * 24));
+            
+            let frequency = 'First call';
+            if (memory.totalCalls > 10) {
+                frequency = 'Frequent contact';
+            } else if (memory.totalCalls > 3) {
+                frequency = 'Regular contact';
+            } else if (memory.totalCalls > 1) {
+                frequency = 'Occasional contact';
+            }
+            
+            // Find most common mood
+            let commonMood = null;
+            let maxMoodCount = 0;
+            for (const [mood, count] of Object.entries(memory.moods)) {
+                if (count > maxMoodCount) {
+                    maxMoodCount = count;
+                    commonMood = mood;
+                }
+            }
+            
+            // Find most common intention
+            let commonIntention = null;
+            let maxIntentionCount = 0;
+            for (const [intention, count] of Object.entries(memory.intentions)) {
+                if (count > maxIntentionCount) {
+                    maxIntentionCount = count;
+                    commonIntention = intention;
+                }
+            }
+            
+            return {
+                frequency: frequency,
+                lastCall: daysSinceLastCall,
+                totalCalls: memory.totalCalls,
+                commonMood: commonMood,
+                commonIntention: commonIntention
+            };
+        }
+        
+        // ==================== NEW UNIQUE FEATURE: Focus Mode ====================
+        function toggleFocusMode() {
+            document.body.classList.toggle('focus-mode');
+            
+            const isActive = document.body.classList.contains('focus-mode');
+            const icon = focusModeBtn.querySelector('i');
+            
+            if (isActive) {
+                icon.className = 'fas fa-eye-slash';
+                showNotification('Focus mode enabled', 'success');
+            } else {
+                icon.className = 'fas fa-eye';
+                showNotification('Focus mode disabled', 'success');
+            }
+            
+            // Save to settings
+            if (window.userSettings) {
+                window.userSettings.focusMode = isActive;
+                SettingsManager.saveSettings();
             }
         }
         
@@ -3225,6 +4587,9 @@
                     pendingCallRequest = null;
                 }, 1000);
             }
+            
+            // ==================== BACKEND MIGRATION: Sync data with backend ====================
+            syncOfflineData();
         }
         
         function handleOffline() {
@@ -3240,6 +4605,8 @@
 
             // End any active calls gracefully
             if (currentCall) {
+                // Save call continuity data before ending
+                saveCallContinuity();
                 endCall();
             }
             
@@ -3257,8 +4624,55 @@
             }
         }
         
+        // ==================== BACKEND MIGRATION: Sync offline data when back online ====================
+        async function syncOfflineData() {
+            if (!isOnline || !currentUser) return;
+            
+            try {
+                // Sync call notes
+                const notesToSync = [];
+                for (let i = 0; i < localStorage.length; i++) {
+                    const key = localStorage.key(i);
+                    if (key.startsWith('call_note_')) {
+                        const note = localStorage.getItem(key);
+                        const parts = key.split('_');
+                        const targetId = parts[2];
+                        const timestamp = parts[3];
+                        
+                        notesToSync.push({
+                            targetId: targetId,
+                            notes: note,
+                            timestamp: timestamp
+                        });
+                    }
+                }
+                
+                if (notesToSync.length > 0 && window.api && typeof window.api.post === 'function') {
+                    await window.api.post('/api/calls/sync-notes', {
+                        userId: currentUser.uid,
+                        notes: notesToSync
+                    });
+                    console.log(`Synced ${notesToSync.length} call notes`);
+                }
+                
+                // Sync relationship memory
+                const cacheKey = `${CACHE_KEYS.RELATIONSHIP_MEMORY}_${currentUser.uid}`;
+                const cachedMemory = localStorage.getItem(cacheKey);
+                if (cachedMemory && window.api && typeof window.api.post === 'function') {
+                    await window.api.post(`/api/users/${currentUser.uid}/sync-relationship-memory`, {
+                        memory: JSON.parse(cachedMemory)
+                    });
+                    console.log('Synced relationship memory');
+                }
+                
+            } catch (error) {
+                console.error('Error syncing offline data:', error);
+            }
+        }
+        
         async function updateUserPresence(online) {
             try {
+                // ==================== BACKEND MIGRATION: Use API instead of Firebase ====================
                 if (window.api && typeof window.api.post === 'function' && currentUser) {
                     await window.api.post('/api/users/presence', {
                         userId: currentUser.uid,
@@ -3465,6 +4879,15 @@
                     }
                 }
                 
+                // Add emotional context data if available
+                if (currentMood) {
+                    enhancedCallData.mood = currentMood;
+                }
+                
+                if (currentIntention) {
+                    enhancedCallData.intention = currentIntention;
+                }
+                
                 const storageKey = getLocalStorageKey('history');
                 const storedCalls = localStorage.getItem(storageKey);
                 let calls = [];
@@ -3497,6 +4920,14 @@
                 
                 // Update cache
                 await saveCallsToCache(calls);
+                
+                // Update relationship memory
+                if (callWithId.participants) {
+                    const otherParticipants = callWithId.participants.filter(id => id !== currentUser.uid);
+                    otherParticipants.forEach(userId => {
+                        updateRelationshipMemory(userId, callWithId);
+                    });
+                }
                 
                 // Update UI if we're on the calls page
                 if (window.location.pathname.includes('calls.html')) {
@@ -3599,6 +5030,17 @@
                 durationText = `${minutes}:${seconds.toString().padStart(2, '0')}`;
             }
             
+            // Get relationship insights
+            let relationshipInsight = '';
+            if (otherParticipantIds.length === 1) {
+                const insights = getRelationshipInsights(otherParticipantIds[0]);
+                if (insights.lastCall !== null && insights.lastCall > 0) {
+                    relationshipInsight = `Last call: ${insights.lastCall}d ago`;
+                } else if (insights.totalCalls > 1) {
+                    relationshipInsight = `Called ${insights.totalCalls} times`;
+                }
+            }
+            
             const callItem = document.createElement('div');
             callItem.className = 'call-item';
             callItem.dataset.callId = callData.id || `local_${Date.now()}`;
@@ -3644,7 +5086,9 @@
                         <span>${isMissed ? 'Missed' : (isOutgoing ? 'Outgoing' : 'Incoming')}</span>
                         ${durationText ? `<span>• ${durationText}</span>` : ''}
                         ${callData.isLocal ? '<span class="offline-badge" style="font-size: 10px; padding: 1px 6px;">Local</span>' : ''}
+                        ${callData.mood ? `<span class="mood-indicator mood-${callData.mood}" style="font-size: 10px; padding: 1px 6px;"><i class="fas fa-smile"></i> ${callData.mood.charAt(0).toUpperCase() + callData.mood.slice(1)}</span>` : ''}
                     </div>
+                    ${relationshipInsight ? `<div class="relationship-memory ${insights.frequency === 'Frequent contact' ? 'frequent-contact' : insights.frequency === 'Regular contact' ? 'recent-contact' : 'occasional-contact'}"><i class="fas fa-history"></i> ${relationshipInsight}</div>` : ''}
                 </div>
                 <button class="call-action-btn" title="Call Back" ${!isOnline ? 'disabled' : ''}>
                     <i class="fas fa-phone"></i>
@@ -3724,6 +5168,14 @@
                 // Handle settings updates
                 if (event.data && event.data.type === 'settingsUpdated') {
                     console.log('Settings updated from friends.html');
+                    // Reload settings
+                    SettingsManager.initializeSettings();
+                }
+                
+                // Handle navigation context
+                if (event.data && event.data.type === 'navigationContext') {
+                    lastNavigationContext = event.data.context;
+                    localStorage.setItem('lastNavigationContext', JSON.stringify(event.data.context));
                 }
             });
             
@@ -3913,7 +5365,7 @@
             try {
                 showNotification('Processing payment...', 'success');
                 
-                // Call backend payment API
+                // ==================== BACKEND MIGRATION: Use API for payment ====================
                 if (window.api && typeof window.api.post === 'function') {
                     const response = await window.api.post('/api/payments/mpesa', {
                         phoneNumber: phoneNumber,
@@ -4093,6 +5545,34 @@
                         document.getElementById('incomingCallType').textContent = 
                             metadata.type === 'video' ? 'Incoming Video Call' : 'Incoming Voice Call';
                         
+                        // NEW: Update emotional context for incoming call
+                        if (window.userSettings && window.userSettings.emotionalContext) {
+                            const emotionalContext = document.getElementById('incomingCallEmotionalContext');
+                            const moodDisplay = document.getElementById('incomingCallMood');
+                            const moodText = document.getElementById('incomingMoodText');
+                            const intentionDisplay = document.getElementById('incomingCallIntention');
+                            const intentionText = document.getElementById('incomingIntentionText');
+                            
+                            if (metadata.mood) {
+                                emotionalContext.style.display = 'block';
+                                moodDisplay.className = 'mood-indicator';
+                                moodDisplay.classList.add(`mood-${metadata.mood}`);
+                                moodText.textContent = metadata.mood.charAt(0).toUpperCase() + metadata.mood.slice(1);
+                            }
+                            
+                            if (metadata.intention) {
+                                emotionalContext.style.display = 'block';
+                                intentionDisplay.className = 'intention-indicator';
+                                intentionDisplay.classList.add(`intention-${metadata.intention}`);
+                                intentionText.textContent = 
+                                    metadata.intention === 'checkin' ? 'Just checking in' : 
+                                    metadata.intention === 'quick' ? 'Quick chat' :
+                                    metadata.intention === 'important' ? 'Important' :
+                                    metadata.intention === 'emergency' ? 'Emergency' :
+                                    metadata.intention === 'work' ? 'Work-related' : 'Unknown';
+                            }
+                        }
+                        
                         const incomingCallAvatar = document.getElementById('incomingCallAvatar');
                         if (callerData.photoURL) {
                             incomingCallAvatar.style.backgroundImage = `url('${callerData.photoURL}')`;
@@ -4110,7 +5590,9 @@
                             name: callerData.displayName,
                             avatar: callerData.photoURL,
                             peerId: incomingCall.peer,
-                            type: metadata.type || 'video'
+                            type: metadata.type || 'video',
+                            mood: metadata.mood,
+                            intention: metadata.intention
                         };
                         
                         // Show modal IMMEDIATELY
@@ -4163,6 +5645,7 @@
             }
             
             try {
+                // ==================== BACKEND MIGRATION: Use API instead of Firebase ====================
                 if (window.api && typeof window.api.get === 'function') {
                     const response = await window.api.get(`/api/users/${userId}/presence`);
                     if (response && response.data) {
@@ -4243,12 +5726,15 @@
                 });
                 
                 let callId = null;
+                // ==================== BACKEND MIGRATION: Use API for call invitation ====================
                 if (window.api && typeof window.api.post === 'function') {
                     const response = await window.api.post('/api/calls/invite', {
                         from: currentUser.uid,
                         to: userId,
                         type: type,
-                        callId: `call_${Date.now()}`
+                        callId: `call_${Date.now()}`,
+                        mood: currentMood,
+                        intention: currentIntention
                     });
                     
                     if (response && response.data) {
@@ -4267,6 +5753,12 @@
                 const contactName = await getContactNameWithFallback(userId);
                 document.getElementById('callParticipants').textContent = `Calling ${contactName}...`;
                 document.getElementById('callStatus').textContent = 'Connecting...';
+                
+                // Show emotional context if enabled
+                if (window.userSettings && window.userSettings.emotionalContext) {
+                    const emotionalContextDisplay = document.getElementById('emotionalContextDisplay');
+                    emotionalContextDisplay.style.display = 'block';
+                }
                 
                 addVideoStream(currentUser.uid, localStream, true);
                 
@@ -4331,7 +5823,9 @@
                         callerName: currentUser.displayName || 'User',
                         callerAvatar: currentUser.photoURL || '',
                         type: type,
-                        callId: callId
+                        callId: callId,
+                        mood: currentMood,
+                        intention: currentIntention
                     }
                 });
                 
@@ -4355,6 +5849,7 @@
                     });
                     document.getElementById('callStatus').textContent = 'In call';
                     
+                    // ==================== BACKEND MIGRATION: Use API to delete invitation ====================
                     if (callId && window.api && typeof window.api.delete === 'function') {
                         window.api.delete(`/api/calls/invite/${callId}`);
                     }
@@ -4367,7 +5862,9 @@
                         status: 'connected',
                         timestamp: new Date().toISOString(),
                         startTime: callStartTime,
-                        displayName: getContactNameWithFallback(userId)
+                        displayName: getContactNameWithFallback(userId),
+                        mood: currentMood,
+                        intention: currentIntention
                     });
                     
                     setupDataConnection(userId);
@@ -4436,7 +5933,9 @@
                             type: 'handshake',
                             userId: currentUser.uid,
                             userName: currentUser.displayName,
-                            timestamp: new Date().toISOString()
+                            timestamp: new Date().toISOString(),
+                            mood: currentMood,
+                            intention: currentIntention
                         });
                     });
                     
@@ -4496,6 +5995,10 @@
             switch(data.type) {
                 case 'handshake':
                     console.log('Handshake received from:', senderId);
+                    // Update participant's emotional context if provided
+                    if (data.mood || data.intention) {
+                        updateParticipantEmotionalContext(senderId, data.mood, data.intention);
+                    }
                     break;
                     
                 case 'reaction':
@@ -4521,6 +6024,60 @@
                 case 'call-control':
                     handleCallControlMessage(data, senderId);
                     break;
+                    
+                // NEW: Handle emotional context messages
+                case 'mood':
+                    if (window.userSettings && window.userSettings.emotionalContext) {
+                        updateParticipantEmotionalContext(senderId, data.mood, null);
+                    }
+                    break;
+                    
+                case 'intention':
+                    if (window.userSettings && window.userSettings.callIntention) {
+                        updateParticipantEmotionalContext(senderId, null, data.intention);
+                    }
+                    break;
+            }
+        }
+        
+        // NEW: Update participant emotional context in UI
+        function updateParticipantEmotionalContext(userId, mood, intention) {
+            const participantItem = document.querySelector(`.participant-item[data-user-id="${userId}"]`);
+            if (participantItem) {
+                let emotionalContext = participantItem.querySelector('.participant-emotional-context');
+                if (!emotionalContext) {
+                    emotionalContext = document.createElement('div');
+                    emotionalContext.className = 'participant-emotional-context';
+                    emotionalContext.style.fontSize = '11px';
+                    emotionalContext.style.marginTop = '3px';
+                    emotionalContext.style.display = 'flex';
+                    emotionalContext.style.gap = '5px';
+                    participantItem.querySelector('.participant-info').appendChild(emotionalContext);
+                }
+                
+                if (mood) {
+                    let moodElement = emotionalContext.querySelector('.participant-mood');
+                    if (!moodElement) {
+                        moodElement = document.createElement('span');
+                        moodElement.className = 'mood-indicator';
+                        emotionalContext.appendChild(moodElement);
+                    }
+                    moodElement.className = 'mood-indicator';
+                    moodElement.classList.add(`mood-${mood}`);
+                    moodElement.innerHTML = `<i class="fas fa-smile"></i> ${mood.charAt(0).toUpperCase() + mood.slice(1)}`;
+                }
+                
+                if (intention) {
+                    let intentionElement = emotionalContext.querySelector('.participant-intention');
+                    if (!intentionElement) {
+                        intentionElement = document.createElement('span');
+                        intentionElement.className = 'intention-indicator';
+                        emotionalContext.appendChild(intentionElement);
+                    }
+                    intentionElement.className = 'intention-indicator';
+                    intentionElement.classList.add(`intention-${intention}`);
+                    intentionElement.innerHTML = `<i class="fas fa-bullseye"></i> ${intention === 'checkin' ? 'Checking in' : intention}`;
+                }
             }
         }
         
@@ -4615,6 +6172,12 @@
                 document.getElementById('callParticipants').textContent = `Group Call (${callParticipants.length})`;
                 document.getElementById('callStatus').textContent = 'Starting...';
                 
+                // Show emotional context if enabled
+                if (window.userSettings && window.userSettings.emotionalContext) {
+                    const emotionalContextDisplay = document.getElementById('emotionalContextDisplay');
+                    emotionalContextDisplay.style.display = 'block';
+                }
+                
                 addVideoStream(currentUser.uid, localStream, true);
                 
                 currentCall = {
@@ -4645,7 +6208,9 @@
                     status: 'connected',
                     timestamp: new Date().toISOString(),
                     startTime: callStartTime,
-                    displayName: `Group Call (${callParticipants.length})`
+                    displayName: `Group Call (${callParticipants.length})`,
+                    mood: currentMood,
+                    intention: currentIntention
                 });
                 
                 updateParticipantsList();
@@ -4804,6 +6369,9 @@
         async function endCall() {
             console.log('Ending call...');
             
+            // Save call continuity data
+            saveCallContinuity();
+            
             if (localStream) {
                 localStream.getTracks().forEach(track => {
                     track.stop();
@@ -4867,7 +6435,9 @@
                     endTime: endTime,
                     duration: duration,
                     group: currentCall.group || false,
-                    displayName: displayName
+                    displayName: displayName,
+                    mood: currentMood,
+                    intention: currentIntention
                 });
             }
             
@@ -4883,6 +6453,22 @@
             
             document.getElementById('callDuration').textContent = '00:00';
             
+            // Reset emotional context for next call
+            currentMood = 'neutral';
+            currentIntention = 'checkin';
+            
+            // Show private notes modal if this was a meaningful call
+            if (currentCall && currentCall.duration > 60) { // More than 1 minute
+                setTimeout(() => {
+                    showPrivateNotesModal();
+                }, 500);
+            } else {
+                // Show call summary
+                setTimeout(() => {
+                    showCallSummary();
+                }, 500);
+            }
+            
             currentCall = null;
             callStartTime = null;
             currentCallType = null;
@@ -4891,7 +6477,10 @@
             // Reload call history from cache
             loadCallsFromCache();
             
-            showNotification('Call ended', 'success');
+            // Smart return after call
+            setTimeout(() => {
+                smartReturnAfterCall();
+            }, 1000);
         }
         
         async function acceptCall(type = 'voice') {
@@ -4919,7 +6508,9 @@
                 currentCall = {
                     targetId: window.callerData.id,
                     type: type,
-                    startTime: new Date()
+                    startTime: new Date(),
+                    mood: window.callerData.mood,
+                    intention: window.callerData.intention
                 };
                 
                 currentCallType = type;
@@ -4932,6 +6523,34 @@
                     `<i class="fas fa-${type === 'video' ? 'video' : 'phone'}"></i>`;
                 document.getElementById('callParticipants').textContent = window.callerData.name;
                 document.getElementById('callStatus').textContent = 'Connected';
+                
+                // Show emotional context if enabled and caller provided it
+                if (window.userSettings && window.userSettings.emotionalContext) {
+                    const emotionalContextDisplay = document.getElementById('emotionalContextDisplay');
+                    emotionalContextDisplay.style.display = 'block';
+                    
+                    if (window.callerData.mood) {
+                        const moodDisplay = document.getElementById('callMoodDisplay');
+                        const moodText = document.getElementById('moodText');
+                        moodDisplay.className = 'mood-indicator';
+                        moodDisplay.classList.add(`mood-${window.callerData.mood}`);
+                        moodText.textContent = window.callerData.mood.charAt(0).toUpperCase() + window.callerData.mood.slice(1);
+                    }
+                    
+                    if (window.callerData.intention) {
+                        const intentionDisplay = document.getElementById('callIntentionDisplay');
+                        const intentionText = document.getElementById('intentionText');
+                        intentionDisplay.className = 'intention-indicator';
+                        intentionDisplay.classList.add(`intention-${window.callerData.intention}`);
+                        intentionDisplay.style.display = 'inline-flex';
+                        intentionText.textContent = 
+                            window.callerData.intention === 'checkin' ? 'Just checking in' : 
+                            window.callerData.intention === 'quick' ? 'Quick chat' :
+                            window.callerData.intention === 'important' ? 'Important' :
+                            window.callerData.intention === 'emergency' ? 'Emergency' :
+                            window.callerData.intention === 'work' ? 'Work-related' : 'Unknown';
+                    }
+                }
                 
                 addVideoStream(currentUser.uid, localStream, true);
                 
@@ -4955,6 +6574,7 @@
                 callStartTime = new Date();
                 startCallTimer();
                 
+                // ==================== BACKEND MIGRATION: Use API to delete invitation ====================
                 if (incomingCall.metadata && incomingCall.metadata.callId && window.api && typeof window.api.delete === 'function') {
                     await window.api.delete(`/api/calls/invite/${incomingCall.metadata.callId}`);
                 }
@@ -4967,7 +6587,9 @@
                     status: 'completed',
                     timestamp: new Date().toISOString(),
                     startTime: callStartTime,
-                    displayName: window.callerData.name
+                    displayName: window.callerData.name,
+                    mood: window.callerData.mood,
+                    intention: window.callerData.intention
                 });
                 
                 window.incomingCall = null;
@@ -4998,7 +6620,9 @@
                         type: window.callerData.type,
                         status: 'missed',
                         timestamp: new Date().toISOString(),
-                        displayName: window.callerData.name
+                        displayName: window.callerData.name,
+                        mood: window.callerData.mood,
+                        intention: window.callerData.intention
                     });
                 }
                 
@@ -5194,11 +6818,11 @@
                     activeCalls.forEach(call => {
                         if (call.peerConnection) {
                             const senders = call.peerConnection.getSenders();
-                            senders.forEach(sender => {
-                                if (sender.track && sender.track.kind === 'video') {
-                                    sender.replaceTrack(screenTrack);
-                                }
-                            });
+                                senders.forEach(sender => {
+                                    if (sender.track && sender.track.kind === 'video') {
+                                        sender.replaceTrack(screenTrack);
+                                    }
+                                });
                         }
                     });
                     
@@ -5304,8 +6928,10 @@
                     throw new Error('API not available');
                 }
                 
+                // ==================== BACKEND MIGRATION: Use API for contacts ====================
                 const response = await window.api.get('/api/users/contacts', {
                     params: {
+                        userId: currentUser.uid,
                         limit: 50,
                         excludeSelf: true
                     }
@@ -5355,6 +6981,17 @@
                 userData.lastOnline < 60 ? `${userData.lastOnline}m ago` :
                 `${Math.floor(userData.lastOnline / 60)}h ago`;
             
+            // Get relationship insights
+            const insights = getRelationshipInsights(userData.uid);
+            let relationshipText = '';
+            if (insights.totalCalls > 0) {
+                if (insights.frequency === 'Frequent contact') {
+                    relationshipText = 'Frequent contact';
+                } else if (insights.lastCall !== null && insights.lastCall < 7) {
+                    relationshipText = `Last call: ${insights.lastCall}d ago`;
+                }
+            }
+            
             contactItem.innerHTML = `
                 <input type="checkbox" class="contact-checkbox" id="contact_${userData.uid}" ${!isOnline ? 'disabled' : ''}>
                 <div class="call-avatar" ${userData.photoURL ? `style="background-image: url('${userData.photoURL}')"` : ''}>
@@ -5371,6 +7008,7 @@
                         <span style="color: ${userData.online ? 'var(--success-color)' : 'var(--text-secondary)'}">
                             ${statusText}
                         </span>
+                        ${relationshipText ? `<span class="relationship-memory frequent-contact" style="font-size: 10px;"><i class="fas fa-history"></i> ${relationshipText}</span>` : ''}
                     </div>
                 </div>
             `;
@@ -5455,6 +7093,7 @@
             console.log('Whiteboard data received:', data, 'from:', senderId);
         }
         
+        // ==================== COMPLETE EVENT LISTENERS SETUP ====================
         function setupEventListeners() {
             // Store original button titles
             const callButtons = [
@@ -5503,6 +7142,85 @@
                     SettingsManager.resetCallSettings();
                 });
             }
+            
+            // NEW: Focus mode button
+            if (focusModeBtn) {
+                focusModeBtn.addEventListener('click', toggleFocusMode);
+            }
+            
+            // NEW: Mood button
+            if (moodBtn) {
+                moodBtn.addEventListener('click', showMoodSelection);
+            }
+            
+            // NEW: Intention button
+            if (intentionBtn) {
+                intentionBtn.addEventListener('click', showIntentionSelection);
+            }
+            
+            // Mood selection modal
+            document.querySelectorAll('.mood-option').forEach(option => {
+                option.addEventListener('click', function() {
+                    document.querySelectorAll('.mood-option').forEach(opt => {
+                        opt.classList.remove('selected');
+                    });
+                    this.classList.add('selected');
+                });
+            });
+            
+            document.getElementById('cancelMoodBtn').addEventListener('click', () => {
+                moodSelectionModal.classList.remove('active');
+            });
+            
+            document.getElementById('confirmMoodBtn').addEventListener('click', () => {
+                const selectedMood = document.querySelector('.mood-option.selected');
+                if (selectedMood) {
+                    setMood(selectedMood.dataset.mood);
+                }
+            });
+            
+            // Intention selection modal
+            document.querySelectorAll('.intention-option').forEach(option => {
+                option.addEventListener('click', function() {
+                    document.querySelectorAll('.intention-option').forEach(opt => {
+                        opt.classList.remove('selected');
+                    });
+                    this.classList.add('selected');
+                });
+            });
+            
+            document.getElementById('cancelIntentionBtn').addEventListener('click', () => {
+                intentionSelectionModal.classList.remove('active');
+            });
+            
+            document.getElementById('confirmIntentionBtn').addEventListener('click', () => {
+                const selectedIntention = document.querySelector('.intention-option.selected');
+                if (selectedIntention) {
+                    setIntention(selectedIntention.dataset.intention);
+                }
+            });
+            
+            // Private notes modal
+            document.getElementById('skipNotesBtn').addEventListener('click', () => {
+                privateNotesModal.classList.remove('active');
+                // Show call summary after skipping notes
+                setTimeout(() => {
+                    showCallSummary();
+                }, 300);
+            });
+            
+            document.getElementById('savePrivateNotesBtn').addEventListener('click', async () => {
+                await savePrivateNotes();
+                // Show call summary after saving notes
+                setTimeout(() => {
+                    showCallSummary();
+                }, 300);
+            });
+            
+            // Call summary modal
+            document.getElementById('closeSummaryBtn').addEventListener('click', () => {
+                callSummaryModal.classList.remove('active');
+            });
             
             // New call button
             document.getElementById('newCallBtn').addEventListener('click', () => {
@@ -5786,6 +7504,9 @@
                         case 'polls':
                             isEnabled = window.userSettings && window.userSettings.polls;
                             break;
+                        case 'relationship':
+                            isEnabled = true; // Always enabled
+                            break;
                     }
                     
                     if (!isEnabled) {
@@ -5810,6 +7531,11 @@
                     const panelElement = document.getElementById(`${panelName}Panel`);
                     if (panelElement) {
                         panelElement.classList.add('active');
+                    }
+                    
+                    // Load relationship insights if relationship panel
+                    if (panelName === 'relationship') {
+                        loadRelationshipInsights();
                     }
                 });
             });
@@ -6076,6 +7802,8 @@
             // Handle before unload
             window.addEventListener('beforeunload', () => {
                 if (currentCall) {
+                    // Save call continuity data
+                    saveCallContinuity();
                     endCall();
                 }
                 
@@ -6106,6 +7834,60 @@
                     }
                 }, 300000); // 5 minutes
             }
+        }
+        
+        // NEW: Load relationship insights for relationship panel
+        function loadRelationshipInsights() {
+            const insightsContainer = document.getElementById('relationshipInsights');
+            if (!insightsContainer) return;
+            
+            insightsContainer.innerHTML = '';
+            
+            if (relationshipMemory.size === 0) {
+                insightsContainer.innerHTML = `
+                    <div style="text-align: center; padding: 20px; color: var(--text-secondary);">
+                        <i class="fas fa-chart-line" style="font-size: 32px; margin-bottom: 10px; opacity: 0.5;"></i>
+                        <p>No relationship data yet</p>
+                        <p style="font-size: 12px; margin-top: 5px;">Make more calls to see insights here</p>
+                    </div>
+                `;
+                return;
+            }
+            
+            // Sort by most calls
+            const sortedMemories = Array.from(relationshipMemory.entries())
+                .sort((a, b) => b[1].totalCalls - a[1].totalCalls)
+                .slice(0, 10); // Top 10
+            
+            sortedMemories.forEach(([userId, memory]) => {
+                getContactNameWithFallback(userId).then(contactName => {
+                    const insights = getRelationshipInsights(userId);
+                    
+                    const insightItem = document.createElement('div');
+                    insightItem.className = 'participant-item';
+                    insightItem.innerHTML = `
+                        <div class="participant-avatar">
+                            <span>${contactName.split(' ').map(word => word[0]).join('').toUpperCase().substring(0, 2)}</span>
+                        </div>
+                        <div class="participant-info">
+                            <div class="participant-name">${contactName}</div>
+                            <div class="participant-status active">
+                                <i class="fas fa-phone"></i>
+                                Called ${memory.totalCalls} times
+                            </div>
+                            <div style="font-size: 11px; color: var(--text-secondary); margin-top: 3px;">
+                                ${insights.frequency === 'Frequent contact' ? '<i class="fas fa-star" style="color: var(--happy-color);"></i> Frequent contact' : 
+                                  insights.frequency === 'Regular contact' ? '<i class="fas fa-history" style="color: var(--primary-color);"></i> Regular contact' : 
+                                  '<i class="fas fa-user-clock" style="color: var(--neutral-color);"></i> Occasional contact'}
+                                ${insights.lastCall !== null ? ` • Last call: ${insights.lastCall}d ago` : ''}
+                                ${insights.commonMood ? ` • Usually ${insights.commonMood}` : ''}
+                            </div>
+                        </div>
+                    `;
+                    
+                    insightsContainer.appendChild(insightItem);
+                });
+            });
         }
         
         console.log('Video call system initialized successfully');

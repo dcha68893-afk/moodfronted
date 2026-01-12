@@ -477,9 +477,71 @@
             transform: translateX(-30px);
             position: absolute;
         }
+
+        /* NEW: Double Clock Element Styles */
+        .double-clock-container {
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            margin: 1rem 0 2rem;
+            padding: 1rem;
+            background: rgba(59, 130, 246, 0.1);
+            border-radius: 1rem;
+            border: 1px solid rgba(59, 130, 246, 0.3);
+        }
+
+        .double-clock {
+            position: relative;
+            width: 80px;
+            height: 80px;
+        }
+
+        .clock-face {
+            position: absolute;
+            width: 100%;
+            height: 100%;
+            border-radius: 50%;
+            background: linear-gradient(135deg, rgba(59, 130, 246, 0.2), rgba(139, 92, 246, 0.2));
+            border: 2px solid rgba(59, 130, 246, 0.5);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+
+        .clock-face.front {
+            z-index: 2;
+            transform: translate(-5px, -5px);
+        }
+
+        .clock-face.back {
+            z-index: 1;
+            transform: translate(5px, 5px);
+            background: linear-gradient(135deg, rgba(139, 92, 246, 0.2), rgba(59, 130, 246, 0.2));
+        }
+
+        .clock-icon {
+            font-size: 1.5rem;
+            color: #3B82F6;
+        }
+
+        .clock-text {
+            margin-left: 1rem;
+            color: #93c5fd;
+            font-size: 0.9rem;
+            text-align: center;
+        }
+
+        .clock-text span {
+            display: block;
+            font-weight: 600;
+            color: #60A5FA;
+            font-size: 1rem;
+        }
     </style>
 </head>
-<body class="h-full kynecta-auth-page theme-calm protected-content no-screenshot no-context-menu">
+<body class="h-full kynecta-auth-page theme-calm protected-content no-screenshot">
+    <!-- SECURITY SCRIPT REMOVED HERE - Was blocking user interactions -->
+    
     <!-- Main Layout -->
     <div id="mainLayout" class="flex min-h-screen">
         <!-- Permanent Advertisement Side (Left) -->
@@ -768,6 +830,22 @@
                             </div>
                         </div>
 
+                        <!-- NEW: Double Clock Element Added Here -->
+                        <div class="double-clock-container fade-in">
+                            <div class="double-clock">
+                                <div class="clock-face front">
+                                    <i class="fas fa-clock clock-icon"></i>
+                                </div>
+                                <div class="clock-face back">
+                                    <i class="fas fa-clock clock-icon"></i>
+                                </div>
+                            </div>
+                            <div class="clock-text">
+                                <span>Auto-login Enabled</span>
+                                Quick access to your conversations
+                            </div>
+                        </div>
+
                         <!-- Error/Success Messages -->
                         <div id="messageContainer" class="message-container mb-4"></div>
 
@@ -863,7 +941,7 @@
                                             <span class="required-star">*</span>
                                         </label>
                                         <div class="input-container">
-                                            <input id="loginPassword" name="password" type="password" autocomplete="off" required 
+                                            <input id="loginPassword" name="password" type="password" autocomplete="new-password" required 
                                                    class="form-input"
                                                    placeholder="Enter your password">
                                             <div class="input-icon">
@@ -917,7 +995,7 @@
                                             <span class="required-star">*</span>
                                         </label>
                                         <div class="input-container">
-                                            <input id="loginMobilePassword" name="password" type="password" autocomplete="off" required 
+                                            <input id="loginMobilePassword" name="password" type="password" autocomplete="new-password" required 
                                                    class="form-input"
                                                    placeholder="Enter your password">
                                             <div class="input-icon">
@@ -957,7 +1035,7 @@
                                         <div class="input-container">
                                             <input id="loginUsername" name="username" type="text" autocomplete="off" required 
                                                    class="form-input"
-                                                   placeholder="Enter your username">
+                                               placeholder="Enter your username">
                                             <div class="input-icon">
                                                 <i class="fas fa-user"></i>
                                             </div>
@@ -971,7 +1049,7 @@
                                             <span class="required-star">*</span>
                                         </label>
                                         <div class="input-container">
-                                            <input id="loginUsernamePassword" name="password" type="password" autocomplete="off" required 
+                                            <input id="loginUsernamePassword" name="password" type="password" autocomplete="new-password" required 
                                                    class="form-input"
                                                    placeholder="Enter your password">
                                             <div class="input-icon">
@@ -1079,35 +1157,35 @@
                             <!-- Registration Form -->
                             <form id="registration-form" class="registration-form">
                                 <div class="form-field">
-                                    <label for="displayName" class="form-label">
+                                    <label for="regUsername" class="form-label">
                                         Username
                                         <span class="required-star">*</span>
                                     </label>
                                     <div class="input-container">
-                                        <input type="text" id="displayName" name="displayName" required autocomplete="off"
+                                        <input type="text" id="regUsername" name="regUsername" required autocomplete="off"
                                                class="form-input"
                                                placeholder="Choose a username">
                                         <div class="input-icon">
                                             <i class="fas fa-user"></i>
                                         </div>
                                     </div>
-                                    <div id="displayNameError" class="error-message hidden"></div>
+                                    <div id="regUsernameError" class="error-message hidden"></div>
                                 </div>
                                 
                                 <div class="form-field">
-                                    <label for="registerEmail" class="form-label">
+                                    <label for="regEmail" class="form-label">
                                         Email Address
                                         <span class="required-star">*</span>
                                     </label>
                                     <div class="input-container">
-                                        <input type="email" id="registerEmail" name="email" required autocomplete="off"
+                                        <input type="email" id="regEmail" name="regEmail" required autocomplete="off"
                                                class="form-input"
                                                placeholder="Enter your email">
                                         <div class="input-icon">
                                             <i class="fas fa-envelope"></i>
                                         </div>
                                     </div>
-                                    <div id="registerEmailError" class="error-message hidden"></div>
+                                    <div id="regEmailError" class="error-message hidden"></div>
                                 </div>
 
                                 <div class="form-field">
@@ -1127,12 +1205,12 @@
                                 </div>
                                 
                                 <div class="form-field">
-                                    <label for="registerPassword" class="form-label">
+                                    <label for="regPassword" class="form-label">
                                         Password (8+ characters)
                                         <span class="required-star">*</span>
                                     </label>
                                     <div class="input-container">
-                                        <input type="password" id="registerPassword" name="password" required autocomplete="off"
+                                        <input type="password" id="regPassword" name="regPassword" required autocomplete="new-password"
                                                class="form-input"
                                                placeholder="Create a strong password">
                                         <div class="input-icon">
@@ -1142,7 +1220,7 @@
                                             <i class="fas fa-eye"></i>
                                         </button>
                                     </div>
-                                    <div id="registerPasswordError" class="error-message hidden"></div>
+                                    <div id="regPasswordError" class="error-message hidden"></div>
                                 </div>
                                 
                                 <div class="form-field">
@@ -1151,7 +1229,7 @@
                                         <span class="required-star">*</span>
                                     </label>
                                     <div class="input-container">
-                                        <input type="password" id="confirmPassword" name="confirmPassword" required autocomplete="off"
+                                        <input type="password" id="confirmPassword" name="confirmPassword" required autocomplete="new-password"
                                                class="form-input"
                                                placeholder="Confirm your password">
                                         <div class="input-icon">
@@ -1196,802 +1274,11 @@
         </div>
     </div>
 
-    <!-- Backend API Configuration and Initialization -->
-    <script>
-        // ULTRA-FAST INSTANT AUTH DETECTION - Runs before DOMContentLoaded
-        (function instantAuthDetection() {
-            console.log('🚀 ULTRA-FAST INSTANT AUTH DETECTION - Checking for logged-in user...');
-            
-            // Check if user is already logged in - IMMEDIATELY (no async, no waiting)
-            const token = localStorage.getItem("token");
-            const isLoggedIn = localStorage.getItem("isLoggedIn");
-            const userId = localStorage.getItem("userId");
-            const userData = localStorage.getItem('kynecta-chat-user');
-            const autoLogin = localStorage.getItem('kynecta-chat-auto-login');
-            
-            if (isLoggedIn === "true" && userId && userData && autoLogin === 'true' && token) {
-                try {
-                    const parsedUser = JSON.parse(userData);
-                    
-                    // Check if session is still valid (last login within 30 days)
-                    let sessionValid = true;
-                    if (parsedUser.lastLogin) {
-                        const lastLogin = new Date(parsedUser.lastLogin);
-                        const thirtyDaysAgo = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000);
-                        sessionValid = lastLogin > thirtyDaysAgo;
-                    }
-                    
-                    // Check if user is marked as logged out
-                    const isLoggedOut = localStorage.getItem('kynecta-chat-logged-out') === 'true';
-                    
-                    if (sessionValid && !isLoggedOut) {
-                        console.log('✅ INSTANT AUTH: User already logged in, redirecting immediately...');
-                        
-                        // INSTANT REDIRECT - No delay, no animations, just go!
-                        const authToken = btoa(JSON.stringify({
-                            uid: parsedUser.uid,
-                            email: parsedUser.email,
-                            displayName: parsedUser.displayName,
-                            mobile: parsedUser.mobile || '',
-                            isOffline: parsedUser.isOfflineUser || false,
-                            hasPremiumTrial: parsedUser.hasPremiumTrial || false,
-                            session: parsedUser.session || false,
-                            autoLoginAvailable: true
-                        }));
-                        
-                        // Redirect IMMEDIATELY - no waiting for DOM
-                        window.location.href = `dashboard.html?auth=${encodeURIComponent(authToken)}&session=${parsedUser.session || false}`;
-                        return;
-                    } else {
-                        console.log('ℹ️ Session expired or user logged out, showing auth UI');
-                    }
-                } catch (error) {
-                    console.error('❌ Error parsing user data:', error);
-                }
-            }
-            
-            console.log('ℹ️ No valid session found, continuing with auth UI');
-        })();
-
-        document.addEventListener('DOMContentLoaded', function() {
-            // UI FIRST: Show layout immediately
-            console.log('✅ UI rendering complete - layout visible');
-        });
-        
-        // BACKEND API AUTH SERVICE - UPDATED TO USE apiRequest()
-        class BackendAuthService {
-            constructor() {
-                // UI FIRST: Don't block UI initialization
-                this.isInitialized = false;
-                this.isOnline = navigator.onLine;
-                this.offlineMode = false;
-                this.persistentSession = false;
-                
-                // Initialize in background, don't block UI
-                setTimeout(() => this.init(), 100);
-                
-                // Listen for online/offline changes
-                window.addEventListener('online', () => this.handleOnline());
-                window.addEventListener('offline', () => this.handleOffline());
-            }
-            
-            handleOnline() {
-                this.isOnline = true;
-                console.log('🌐 Device is online');
-                this.updateConnectionStatus('connected', 'Online');
-            }
-            
-            handleOffline() {
-                this.isOnline = false;
-                this.offlineMode = true;
-                console.log('📴 Device is offline - switching to local mode');
-                this.updateConnectionStatus('offline', 'Offline - Local Mode');
-            }
-
-            async init() {
-                try {
-                    console.log('🔄 Starting authentication initialization (non-blocking)...');
-                    
-                    // Check online status
-                    this.isOnline = navigator.onLine;
-                    
-                    // Always show connection status to user
-                    if (this.isOnline) {
-                        this.updateConnectionStatus('connected', 'Online - Ready');
-                    } else {
-                        this.updateConnectionStatus('offline', 'Offline - Local Mode');
-                        this.offlineMode = true;
-                    }
-                    
-                    // Check if we should even try to initialize backend connection
-                    if (!this.isOnline) {
-                        console.log('📴 App starting with local authentication (no internet)');
-                        this.isInitialized = false;
-                        this.offlineMode = true;
-                        return;
-                    }
-                    
-                    // DEFENSIVE AUTH: Check if API helper is available
-                    if (typeof apiRequest === 'undefined') {
-                        console.warn('⚠️ API helper not loaded, using local authentication');
-                        this.offlineMode = true;
-                        return;
-                    }
-                    
-                    // Try to test backend connection using apiRequest
-                    try {
-                        // Test connection with a simple ping
-                        const testResponse = await apiRequest('GET', '/health');
-                        if (testResponse && testResponse.status === 'ok') {
-                            this.isInitialized = true;
-                            console.log('✅ Backend connection established');
-                            
-                            // Show security status briefly
-                            this.showSecurityStatus();
-                            
-                            // Check for existing session in background
-                            this.checkBackendSession();
-                        } else {
-                            throw new Error('Backend not responding');
-                        }
-                    } catch (backendError) {
-                        console.warn('⚠️ Backend initialization failed:', backendError);
-                        this.offlineMode = true;
-                        this.isInitialized = false;
-                    }
-                    
-                } catch (error) {
-                    // DEFENSIVE AUTH: Never crash on authentication errors
-                    console.error('❌ Authentication initialization failed:', error);
-                    this.offlineMode = true;
-                }
-            }
-            
-            async checkBackendSession() {
-                try {
-                    // Check if we have a token
-                    const token = localStorage.getItem('token');
-                    if (!token) return;
-                    
-                    // Validate token with backend using apiRequest
-                    const response = await apiRequest('GET', '/auth/validate', null, {
-                        'Authorization': `Bearer ${token}`
-                    });
-                    
-                    if (response && response.valid) {
-                        console.log('✅ Backend session validated:', response.user.email);
-                        // Update localStorage with backend session
-                        const userData = {
-                            uid: response.user.id,
-                            email: response.user.email,
-                            displayName: response.user.displayName || response.user.email.split('@')[0],
-                            isNewUser: false,
-                            autoLogin: true,
-                            lastLogin: new Date().toISOString(),
-                            isOfflineUser: false,
-                            session: true,
-                            backendSession: true
-                        };
-                        localStorage.setItem('kynecta-chat-user', JSON.stringify(userData));
-                        localStorage.setItem('kynecta-chat-auto-login', 'true');
-                    }
-                } catch (error) {
-                    console.warn('⚠️ Backend session check failed:', error);
-                }
-            }
-
-            showSecurityStatus() {
-                const securityStatus = document.getElementById('securityStatus');
-                if (securityStatus && this.isOnline) {
-                    securityStatus.classList.remove('hidden');
-                    // Auto-hide after 2 seconds
-                    setTimeout(() => {
-                        securityStatus.classList.add('hidden');
-                    }, 2000);
-                }
-            }
-
-            updateConnectionStatus(status, message) {
-                // Update login mode indicator
-                const loginIndicator = document.getElementById('loginModeIndicator');
-                const registerIndicator = document.getElementById('registerModeIndicator');
-                
-                if (loginIndicator) {
-                    if (status === 'connected') {
-                        loginIndicator.className = 'text-xs px-2 py-1 rounded-full bg-green-500/20 text-green-400 border border-green-500/30';
-                        loginIndicator.textContent = 'Online - Ready';
-                    } else {
-                        loginIndicator.className = 'text-xs px-2 py-1 rounded-full bg-yellow-500/20 text-yellow-400 border border-yellow-500/30';
-                        loginIndicator.textContent = 'Offline - Local Mode';
-                    }
-                }
-                
-                if (registerIndicator) {
-                    if (status === 'connected') {
-                        registerIndicator.className = 'text-xs px-2 py-1 rounded-full bg-green-500/20 text-green-400 border border-green-500/30';
-                        registerIndicator.textContent = 'Online - Ready';
-                    } else {
-                        registerIndicator.className = 'text-xs px-2 py-1 rounded-full bg-yellow-500/20 text-yellow-400 border border-yellow-500/30';
-                        registerIndicator.textContent = 'Offline - Local Mode';
-                    }
-                }
-                
-                console.log(`📡 Connection status: ${status} - ${message}`);
-            }
-
-            async registerUser(email, password, displayName, mobile = null) {
-                console.log('🔄 Starting registration process...');
-                
-                // Check if user already exists locally
-                const existingUser = this.checkExistingUser(email, displayName, mobile);
-                if (existingUser) {
-                    throw new Error('User already exists. Please log in instead.');
-                }
-                
-                // Always generate local user first for instant access
-                const localUser = await this.createLocalUser(email, password, displayName, mobile);
-                
-                // Try online registration in background if available
-                if (this.isOnline && this.isInitialized) {
-                    try {
-                        await this.registerUserBackend(email, password, displayName, mobile);
-                    } catch (backendError) {
-                        console.warn('⚠️ Backend registration failed, but local registration succeeded:', backendError);
-                        // Continue with local user
-                    }
-                }
-                
-                return localUser;
-            }
-            
-            checkExistingUser(email, displayName, mobile) {
-                // Check in localStorage
-                const savedUser = localStorage.getItem('kynecta-chat-user');
-                if (savedUser) {
-                    const userData = JSON.parse(savedUser);
-                    if (userData.email === email || userData.displayName === displayName) {
-                        return userData;
-                    }
-                }
-                
-                // Check in local users registry
-                const localUsers = JSON.parse(localStorage.getItem('kynecta-local-users') || '[]');
-                return localUsers.find(u => 
-                    u.email === email || 
-                    u.displayName === displayName || 
-                    (mobile && u.mobile === mobile)
-                );
-            }
-            
-            async createLocalUser(email, password, displayName, mobile = null) {
-                try {
-                    // Generate a unique local user ID
-                    const localUserId = 'local_' + Date.now() + '_' + 
-                        btoa(email).substr(0, 12).replace(/[^a-zA-Z0-9]/g, '') + '_' + 
-                        Math.random().toString(36).substr(2, 6);
-                    
-                    // Create user data object
-                    const userData = {
-                        uid: localUserId,
-                        email: email,
-                        displayName: displayName,
-                        mobile: mobile || '',
-                        isNewUser: true,
-                        autoLogin: true,
-                        lastLogin: new Date().toISOString(),
-                        passwordHash: btoa(password + '_' + email), // Secure hash with salt
-                        hasPremiumTrial: true,
-                        premiumExpiresAt: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString(),
-                        isOfflineUser: true,
-                        registeredLocal: true,
-                        localRegistrationDate: new Date().toISOString(),
-                        session: false,
-                        deviceId: this.getDeviceId()
-                    };
-                    
-                    // Store in localStorage
-                    localStorage.setItem('kynecta-chat-user', JSON.stringify(userData));
-                    localStorage.setItem('kynecta-chat-auto-login', 'true');
-                    localStorage.setItem('isLoggedIn', 'true');
-                    localStorage.setItem('userId', localUserId);
-                    
-                    // Add to local users registry
-                    const localUsers = JSON.parse(localStorage.getItem('kynecta-local-users') || '[]');
-                    localUsers.push({
-                        email,
-                        localUserId,
-                        displayName,
-                        mobile,
-                        registeredAt: new Date().toISOString(),
-                        deviceId: userData.deviceId
-                    });
-                    localStorage.setItem('kynecta-local-users', JSON.stringify(localUsers));
-                    
-                    console.log('✅ User registered locally:', email);
-                    
-                    return {
-                        user: {
-                            uid: localUserId,
-                            email: email,
-                            displayName: displayName,
-                            mobile: mobile || '',
-                            hasPremiumTrial: true,
-                            isOfflineUser: true,
-                            session: false
-                        }
-                    };
-                    
-                } catch (error) {
-                    console.error('❌ Local registration failed:', error);
-                    throw new Error('Registration failed. Please try again.');
-                }
-            }
-            
-            async registerUserBackend(email, password, displayName, mobile = null) {
-                try {
-                    if (!this.isInitialized) {
-                        throw new Error('Backend services not available');
-                    }
-                    
-                    // Use apiRequest for registration
-                    const response = await apiRequest('POST', '/auth/register', {
-                        email: email,
-                        password: password,
-                        displayName: displayName,
-                        mobile: mobile,
-                        deviceId: this.getDeviceId()
-                    });
-                    
-                    if (!response || !response.success) {
-                        throw new Error(response?.message || 'Registration failed');
-                    }
-                    
-                    // Save JWT token to localStorage with key "token"
-                    if (response.token) {
-                        localStorage.setItem('token', response.token);
-                        console.log('✅ JWT token saved to localStorage');
-                    }
-                    
-                    // Update localStorage with backend session
-                    const userData = JSON.parse(localStorage.getItem('kynecta-chat-user') || '{}');
-                    userData.uid = response.user.id || userData.uid;
-                    userData.isOfflineUser = false;
-                    userData.session = true;
-                    userData.backendSession = true;
-                    localStorage.setItem('kynecta-chat-user', JSON.stringify(userData));
-                    localStorage.setItem('userId', userData.uid);
-                    
-                    console.log('✅ User registered with backend:', email);
-                    
-                    return response;
-                    
-                } catch (error) {
-                    console.error('❌ Backend registration failed:', error);
-                    
-                    let errorMessage = 'Backend registration failed. ';
-                    
-                    if (error.message.includes('already exists') || error.message.includes('duplicate')) {
-                        errorMessage += 'This email is already registered.';
-                    } else if (error.message.includes('weak')) {
-                        errorMessage += 'Password is too weak.';
-                    } else if (error.message.includes('invalid')) {
-                        errorMessage += 'Invalid email address.';
-                    } else {
-                        errorMessage += error.message;
-                    }
-                    
-                    throw new Error(errorMessage);
-                }
-            }
-
-            async loginUser(identifier, password, method = 'email', rememberMe = true) {
-                console.log(`🔄 Starting login process (${method})...`);
-                
-                // First try local login (instant)
-                try {
-                    const localResult = await this.loginUserLocal(identifier, password, method, rememberMe);
-                    console.log('✅ Local login successful');
-                    
-                    // Try backend login in background if available
-                    if (this.isOnline && this.isInitialized && !localResult.user.isOfflineUser) {
-                        setTimeout(async () => {
-                            try {
-                                await this.loginUserBackend(identifier, password, method, rememberMe);
-                            } catch (backendError) {
-                                console.warn('⚠️ Backend login failed, but local login succeeded:', backendError);
-                            }
-                        }, 0);
-                    }
-                    
-                    return localResult;
-                    
-                } catch (localError) {
-                    console.log('⚠️ Local login failed:', localError.message);
-                    
-                    // If local fails and we're online, try backend login
-                    if (this.isOnline && this.isInitialized) {
-                        try {
-                            const backendResult = await this.loginUserBackend(identifier, password, method, rememberMe);
-                            console.log('✅ Backend login successful');
-                            return backendResult;
-                        } catch (backendError) {
-                            console.error('❌ Backend login failed:', backendError);
-                            throw localError; // Throw the original local error for consistency
-                        }
-                    }
-                    
-                    throw localError;
-                }
-            }
-            
-            async loginUserLocal(identifier, password, method = 'email', rememberMe = true) {
-                try {
-                    console.log(`🔄 Attempting local login (${method}) for:`, identifier);
-                    
-                    // Get device ID for this device
-                    const deviceId = this.getDeviceId();
-                    
-                    // Check in localStorage for cached user
-                    let userData = null;
-                    
-                    // First check main user storage
-                    const savedUser = localStorage.getItem('kynecta-chat-user');
-                    if (savedUser) {
-                        const parsed = JSON.parse(savedUser);
-                        
-                        // Check based on method and device
-                        const isSameDevice = parsed.deviceId === deviceId;
-                        
-                        if (method === 'email' && parsed.email === identifier && isSameDevice) {
-                            userData = parsed;
-                        } else if (method === 'username' && parsed.displayName === identifier && isSameDevice) {
-                            userData = parsed;
-                        } else if (method === 'mobile' && parsed.mobile === identifier && isSameDevice) {
-                            userData = parsed;
-                        }
-                    }
-                    
-                    // If not in main storage, check local users list
-                    if (!userData) {
-                        const localUsers = JSON.parse(localStorage.getItem('kynecta-local-users') || '[]');
-                        
-                        const localUser = localUsers.find(u => {
-                            const isSameDevice = u.deviceId === deviceId;
-                            if (method === 'email') return u.email === identifier && isSameDevice;
-                            if (method === 'username') return u.displayName === identifier && isSameDevice;
-                            if (method === 'mobile') return u.mobile === identifier && isSameDevice;
-                            return false;
-                        });
-                        
-                        if (localUser) {
-                            userData = {
-                                uid: localUser.localUserId,
-                                email: localUser.email,
-                                displayName: localUser.displayName,
-                                mobile: localUser.mobile || '',
-                                isNewUser: false,
-                                autoLogin: rememberMe,
-                                lastLogin: new Date().toISOString(),
-                                passwordHash: '', // Password not stored for security
-                                isOfflineUser: true,
-                                session: false,
-                                deviceId: localUser.deviceId
-                            };
-                        }
-                    }
-                    
-                    if (!userData) {
-                        throw new Error(`No account found on this device with this ${method}.`);
-                    }
-                    
-                    // Check password
-                    if (userData.passwordHash) {
-                        const inputHash = btoa(password + '_' + userData.email);
-                        if (inputHash !== userData.passwordHash) {
-                            throw new Error('Incorrect password.');
-                        }
-                    } else {
-                        // For users without password hash (old local users)
-                        throw new Error('Please log in with your registered credentials.');
-                    }
-                    
-                    // Update login info
-                    userData.lastLogin = new Date().toISOString();
-                    userData.autoLogin = rememberMe;
-                    userData.deviceId = deviceId;
-                    
-                    // Store in localStorage
-                    localStorage.setItem('kynecta-chat-user', JSON.stringify(userData));
-                    localStorage.setItem('isLoggedIn', 'true');
-                    localStorage.setItem('userId', userData.uid);
-                    
-                    if (rememberMe) {
-                        localStorage.setItem('kynecta-chat-auto-login', 'true');
-                    }
-                    
-                    // Clear logged-out flag
-                    localStorage.removeItem('kynecta-chat-logged-out');
-                    
-                    console.log('✅ Local login successful for:', identifier);
-                    
-                    return {
-                        user: {
-                            uid: userData.uid,
-                            email: userData.email,
-                            displayName: userData.displayName,
-                            mobile: userData.mobile || '',
-                            isOfflineUser: userData.isOfflineUser || false,
-                            session: userData.session || false
-                        }
-                    };
-                    
-                } catch (error) {
-                    console.error('❌ Local login failed:', error);
-                    throw error;
-                }
-            }
-            
-            async loginUserBackend(identifier, password, method = 'email', rememberMe = true) {
-                try {
-                    let loginData = {
-                        password: password,
-                        deviceId: this.getDeviceId(),
-                        rememberMe: rememberMe
-                    };
-                    
-                    // Set identifier based on method
-                    if (method === 'email') {
-                        loginData.email = identifier;
-                    } else if (method === 'username') {
-                        loginData.username = identifier;
-                    } else if (method === 'mobile') {
-                        loginData.mobile = identifier;
-                    }
-                    
-                    // Use apiRequest for login
-                    const response = await apiRequest('POST', '/auth/login', loginData);
-                    
-                    if (!response || !response.success) {
-                        throw new Error(response?.message || 'Login failed');
-                    }
-                    
-                    // Save JWT token to localStorage with key "token"
-                    if (response.token) {
-                        localStorage.setItem('token', response.token);
-                        console.log('✅ JWT token saved to localStorage');
-                    }
-                    
-                    const user = response.user;
-                    
-                    // Update localStorage with backend session
-                    const userData = {
-                        uid: user.id,
-                        email: user.email,
-                        displayName: user.displayName || user.email.split('@')[0],
-                        mobile: user.mobile || '',
-                        isNewUser: false,
-                        autoLogin: rememberMe,
-                        lastLogin: new Date().toISOString(),
-                        passwordHash: btoa(password + '_' + user.email),
-                        hasPremiumTrial: user.hasPremiumTrial || false,
-                        isOfflineUser: false,
-                        session: true,
-                        backendSession: true,
-                        deviceId: this.getDeviceId()
-                    };
-                    
-                    // Store in localStorage
-                    localStorage.setItem('kynecta-chat-user', JSON.stringify(userData));
-                    localStorage.setItem('isLoggedIn', 'true');
-                    localStorage.setItem('userId', user.id);
-                    
-                    if (rememberMe) {
-                        localStorage.setItem('kynecta-chat-auto-login', 'true');
-                    }
-                    
-                    // Clear logged-out flag
-                    localStorage.removeItem('kynecta-chat-logged-out');
-                    
-                    console.log('✅ Backend login successful for:', user.email);
-                    
-                    return {
-                        user: userData
-                    };
-                    
-                } catch (error) {
-                    console.error('❌ Backend login failed:', error);
-                    throw error;
-                }
-            }
-
-            async quickLogin() {
-                try {
-                    console.log('⚡ Attempting quick login...');
-                    
-                    // Get device ID
-                    const deviceId = this.getDeviceId();
-                    
-                    // Check localStorage for saved user on this device
-                    const savedUser = localStorage.getItem('kynecta-chat-user');
-                    const token = localStorage.getItem('token');
-                    const autoLoginEnabled = localStorage.getItem('kynecta-chat-auto-login') === 'true';
-                    const isLoggedIn = localStorage.getItem('isLoggedIn') === 'true';
-                    const isLoggedOut = localStorage.getItem('kynecta-chat-logged-out') === 'true';
-                    
-                    if (!savedUser || !autoLoginEnabled || !isLoggedIn || isLoggedOut) {
-                        throw new Error('No saved session found');
-                    }
-                    
-                    const userData = JSON.parse(savedUser);
-                    
-                    // Check if this is the same device
-                    if (userData.deviceId && userData.deviceId !== deviceId) {
-                        throw new Error('Session not available on this device');
-                    }
-                    
-                    // Check session validity
-                    if (userData.lastLogin) {
-                        const lastLogin = new Date(userData.lastLogin);
-                        const thirtyDaysAgo = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000);
-                        if (lastLogin < thirtyDaysAgo) {
-                            throw new Error('Session expired');
-                        }
-                    }
-                    
-                    // Update last login
-                    userData.lastLogin = new Date().toISOString();
-                    localStorage.setItem('kynecta-chat-user', JSON.stringify(userData));
-                    
-                    // Try to refresh backend session in background if available
-                    if (this.isOnline && this.isInitialized && userData.backendSession && token) {
-                        setTimeout(async () => {
-                            try {
-                                // Validate token with backend using apiRequest
-                                const response = await apiRequest('GET', '/auth/validate', null, {
-                                    'Authorization': `Bearer ${token}`
-                                });
-                                
-                                if (response && response.valid) {
-                                    console.log('✅ Backend session refreshed');
-                                }
-                            } catch (error) {
-                                console.warn('⚠️ Backend session refresh failed:', error);
-                            }
-                        }, 0);
-                    }
-                    
-                    console.log('✅ Quick login successful for:', userData.email);
-                    
-                    return {
-                        uid: userData.uid,
-                        email: userData.email,
-                        displayName: userData.displayName,
-                        mobile: userData.mobile || '',
-                        hasPremiumTrial: userData.hasPremiumTrial || false,
-                        isOfflineUser: userData.isOfflineUser || false,
-                        session: userData.session || false,
-                        deviceId: userData.deviceId
-                    };
-                    
-                } catch (error) {
-                    console.error('❌ Quick login failed:', error);
-                    throw error;
-                }
-            }
-            
-            getDeviceId() {
-                // Generate or retrieve a unique device ID
-                let deviceId = localStorage.getItem('kynecta-device-id');
-                if (!deviceId) {
-                    deviceId = 'device_' + Date.now() + '_' + Math.random().toString(36).substr(2, 9);
-                    localStorage.setItem('kynecta-device-id', deviceId);
-                }
-                return deviceId;
-            }
-            
-            // Method to check if user exists on this device
-            checkUserOnThisDevice() {
-                const deviceId = this.getDeviceId();
-                const savedUser = localStorage.getItem('kynecta-chat-user');
-                
-                if (!savedUser) return false;
-                
-                try {
-                    const userData = JSON.parse(savedUser);
-                    return userData.deviceId === deviceId;
-                } catch (error) {
-                    return false;
-                }
-            }
-            
-            // Method to get current device user
-            getCurrentDeviceUser() {
-                const deviceId = this.getDeviceId();
-                const savedUser = localStorage.getItem('kynecta-chat-user');
-                
-                if (!savedUser) return null;
-                
-                try {
-                    const userData = JSON.parse(savedUser);
-                    if (userData.deviceId === deviceId) {
-                        return userData;
-                    }
-                } catch (error) {
-                    return null;
-                }
-                
-                return null;
-            }
-
-            async sendPasswordResetEmail(email) {
-                if (!this.isInitialized || !this.isOnline) {
-                    throw new Error('Password reset requires internet connection.');
-                }
-
-                try {
-                    // Use apiRequest for password reset
-                    const response = await apiRequest('POST', '/auth/reset-password', { email });
-                    
-                    if (response && response.success) {
-                        console.log('✅ Password reset email sent');
-                        return true;
-                    } else {
-                        throw new Error(response?.message || 'Password reset failed');
-                    }
-                } catch (error) {
-                    console.error('❌ Password reset failed:', error);
-                    throw error;
-                }
-            }
-            
-            async logoutUser() {
-                try {
-                    // Mark as logged out
-                    localStorage.setItem('kynecta-chat-logged-out', 'true');
-                    localStorage.removeItem('isLoggedIn');
-                    localStorage.removeItem('userId');
-                    localStorage.removeItem('kynecta-chat-auto-login');
-                    
-                    // Remove JWT token
-                    localStorage.removeItem('token');
-                    
-                    // Keep user data but mark as logged out
-                    const savedUser = localStorage.getItem('kynecta-chat-user');
-                    if (savedUser) {
-                        const userData = JSON.parse(savedUser);
-                        userData.autoLogin = false;
-                        localStorage.setItem('kynecta-chat-user', JSON.stringify(userData));
-                    }
-                    
-                    // Try backend logout if available using apiRequest
-                    if (this.isOnline && this.isInitialized) {
-                        const token = localStorage.getItem('token');
-                        if (token) {
-                            // Call logout API in background
-                            apiRequest('POST', '/auth/logout', { token }).catch(() => {});
-                        }
-                    }
-                    
-                    console.log('✅ User logged out');
-                    return true;
-                } catch (error) {
-                    console.error('Error logging out:', error);
-                    return false;
-                }
-            }
-        }
-
-        // Initialize Authentication Service
-        setTimeout(() => {
-            window.authService = new BackendAuthService();
-        }, 500);
-    </script>
-    
     <!-- Application Script -->
     <script>
         /**
          * kynecta Chat - Main Application Script
-         * COMPLETE OFFLINE/ONLINE AUTHENTICATION
+         * BACKEND AUTHENTICATION VIA API.JS
          */
 
         class kynectaChatApp {
@@ -2062,9 +1349,9 @@
                 userData.lastLogin = new Date().toISOString();
                 localStorage.setItem('kynecta-chat-user', JSON.stringify(userData));
                 
-                // Redirect to dashboard immediately
-                console.log('🚀 INSTANT REDIRECT to dashboard for:', userData.email);
-                window.location.href = 'dashboard.html';
+                // Redirect to chat immediately
+                console.log('🚀 INSTANT REDIRECT to chat for:', userData.email);
+                window.location.href = 'chat.html';
             }
 
             init() {
@@ -2072,7 +1359,6 @@
                 this.setupEventListeners();
                 this.loadUserPreferences();
                 this.startCounterAnimations();
-                this.setupSecurityProtection();
                 this.disablePasswordManager();
                 
                 // Check for quick login after a short delay
@@ -2106,10 +1392,6 @@
             disablePasswordManager() {
                 document.querySelectorAll('input[type="password"]').forEach(input => {
                     input.setAttribute('autocomplete', 'new-password');
-                    input.setAttribute('readonly', 'true');
-                    input.addEventListener('focus', function() {
-                        this.removeAttribute('readonly');
-                    });
                 });
                 
                 console.log('🔒 Browser password manager disabled');
@@ -2152,30 +1434,6 @@
                     
                     console.log('✅ Quick login displayed');
                 }
-            }
-
-            /**
-             * Sets up security protection
-             */
-            setupSecurityProtection() {
-                document.addEventListener('contextmenu', (e) => {
-                    e.preventDefault();
-                    this.showToast('Right-click is disabled for security', 'warning');
-                    return false;
-                });
-                
-                document.addEventListener('selectstart', (e) => {
-                    e.preventDefault();
-                    return false;
-                });
-                
-                document.addEventListener('copy', (e) => {
-                    e.preventDefault();
-                    this.showToast('Copying is disabled for security', 'warning');
-                    return false;
-                });
-                
-                console.log('🔒 Security protection enabled');
             }
 
             /**
@@ -2285,15 +1543,6 @@
                     // Clear logged-out flag
                     localStorage.removeItem('kynecta-chat-logged-out');
                     
-                    // Try authentication service
-                    if (window.authService) {
-                        try {
-                            await window.authService.quickLogin();
-                        } catch (authError) {
-                            console.warn('Auth service quick login failed:', authError);
-                        }
-                    }
-                    
                     // Update localStorage
                     localStorage.setItem('isLoggedIn', 'true');
                     localStorage.setItem('userId', this.quickLoginUser.uid);
@@ -2348,7 +1597,7 @@
                 this.setupPasswordToggle('toggleLoginPassword', 'loginPassword');
                 this.setupPasswordToggle('toggleMobilePassword', 'loginMobilePassword');
                 this.setupPasswordToggle('toggleUsernamePassword', 'loginUsernamePassword');
-                this.setupPasswordToggle('toggleRegisterPassword', 'registerPassword');
+                this.setupPasswordToggle('toggleRegisterPassword', 'regPassword');
                 this.setupPasswordToggle('toggleConfirmPassword', 'confirmPassword');
             }
             
@@ -2515,9 +1764,9 @@
                         this.isTransitioning = false;
                         
                         if (panelId === 'register') {
-                            const displayNameInput = document.getElementById('displayName');
-                            if (displayNameInput) {
-                                setTimeout(() => displayNameInput.focus(), 100);
+                            const regUsernameInput = document.getElementById('regUsername');
+                            if (regUsernameInput) {
+                                setTimeout(() => regUsernameInput.focus(), 100);
                             }
                         }
                         
@@ -2594,21 +1843,48 @@
                 try {
                     localStorage.removeItem('kynecta-chat-logged-out');
                     
-                    let loginResult;
-                    if (window.authService) {
-                        loginResult = await window.authService.loginUser(identifier, password, method, rememberMe);
+                    // Use apiRequest for login
+                    const loginData = {
+                        identifier: identifier,
+                        password: password,
+                        method: method,
+                        rememberMe: rememberMe
+                    };
+                    
+                    const response = await apiRequest('POST', '/auth/login', loginData);
+                    
+                    if (response.success && response.token) {
+                        // Store token and user data
+                        localStorage.setItem('token', response.token);
+                        localStorage.setItem('isLoggedIn', 'true');
+                        localStorage.setItem('userId', response.user.id);
+                        
+                        const userData = {
+                            uid: response.user.id,
+                            email: response.user.email,
+                            displayName: response.user.displayName || response.user.username,
+                            mobile: response.user.mobile || '',
+                            isNewUser: false,
+                            autoLogin: rememberMe,
+                            lastLogin: new Date().toISOString(),
+                            hasPremiumTrial: response.user.hasPremiumTrial || false,
+                            isOfflineUser: false,
+                            session: true,
+                            backendSession: true,
+                            deviceId: this.deviceId
+                        };
+                        
+                        localStorage.setItem('kynecta-chat-user', JSON.stringify(userData));
+                        
+                        if (rememberMe) {
+                            localStorage.setItem('kynecta-chat-auto-login', 'true');
+                        }
+                        
+                        this.showMessage('Login successful! Redirecting to dashboard...', 'success');
+                        setTimeout(() => this.redirectToDashboard(), 1000);
                     } else {
-                        // Fallback local login
-                        throw new Error('Authentication service not available');
+                        throw new Error(response.message || 'Login failed');
                     }
-                    
-                    // Update device ID
-                    const userData = JSON.parse(localStorage.getItem('kynecta-chat-user') || '{}');
-                    userData.deviceId = this.deviceId;
-                    localStorage.setItem('kynecta-chat-user', JSON.stringify(userData));
-                    
-                    this.showMessage('Login successful! Redirecting to dashboard...', 'success');
-                    setTimeout(() => this.redirectToDashboard(), 1000);
                     
                 } catch (error) {
                     this.showMessage(error.message, 'error');
@@ -2630,32 +1906,32 @@
             async handleRegistration(e) {
                 e.preventDefault();
                 
-                const displayName = document.getElementById('displayName').value.trim();
-                const email = document.getElementById('registerEmail').value.trim();
+                const regUsername = document.getElementById('regUsername').value.trim();
+                const regEmail = document.getElementById('regEmail').value.trim();
                 const mobile = document.getElementById('registerMobile').value.trim();
-                const password = document.getElementById('registerPassword').value;
+                const regPassword = document.getElementById('regPassword').value;
                 const confirmPassword = document.getElementById('confirmPassword').value;
                 const termsAgreed = document.getElementById('termsAgreement').checked;
                 
-                this.clearFieldError('displayName');
-                this.clearFieldError('registerEmail');
+                this.clearFieldError('regUsername');
+                this.clearFieldError('regEmail');
                 this.clearFieldError('registerMobile');
-                this.clearFieldError('registerPassword');
+                this.clearFieldError('regPassword');
                 this.clearFieldError('confirmPassword');
                 this.clearFieldError('termsAgreement');
                 
                 let isValid = true;
                 
-                if (!displayName) {
-                    this.showFieldError('displayName', 'Username is required');
+                if (!regUsername) {
+                    this.showFieldError('regUsername', 'Username is required');
                     isValid = false;
                 }
                 
-                if (!email) {
-                    this.showFieldError('registerEmail', 'Email is required');
+                if (!regEmail) {
+                    this.showFieldError('regEmail', 'Email is required');
                     isValid = false;
-                } else if (!this.validateEmail(email)) {
-                    this.showFieldError('registerEmail', 'Please enter a valid email address');
+                } else if (!this.validateEmail(regEmail)) {
+                    this.showFieldError('regEmail', 'Please enter a valid email address');
                     isValid = false;
                 }
                 
@@ -2664,18 +1940,18 @@
                     isValid = false;
                 }
                 
-                if (!password) {
-                    this.showFieldError('registerPassword', 'Password is required');
+                if (!regPassword) {
+                    this.showFieldError('regPassword', 'Password is required');
                     isValid = false;
-                } else if (password.length < 8) {
-                    this.showFieldError('registerPassword', 'Password must be at least 8 characters');
+                } else if (regPassword.length < 8) {
+                    this.showFieldError('regPassword', 'Password must be at least 8 characters');
                     isValid = false;
                 }
                 
                 if (!confirmPassword) {
                     this.showFieldError('confirmPassword', 'Please confirm your password');
                     isValid = false;
-                } else if (password !== confirmPassword) {
+                } else if (regPassword !== confirmPassword) {
                     this.showFieldError('confirmPassword', 'Passwords do not match');
                     isValid = false;
                 }
@@ -2691,20 +1967,47 @@
                     this.setRegisterLoadingState(true);
                     
                     try {
-                        let registrationResult;
-                        if (window.authService) {
-                            registrationResult = await window.authService.registerUser(email, password, displayName, mobile);
+                        // Use apiRequest for registration
+                        const registerData = {
+                            username: regUsername,
+                            email: regEmail,
+                            password: regPassword,
+                            mobile: mobile || null
+                        };
+                        
+                        const response = await apiRequest('POST', '/auth/register', registerData);
+                        
+                        if (response.success && response.token) {
+                            // Store token and user data
+                            localStorage.setItem('token', response.token);
+                            localStorage.setItem('isLoggedIn', 'true');
+                            localStorage.setItem('userId', response.user.id);
+                            
+                            const userData = {
+                                uid: response.user.id,
+                                email: response.user.email,
+                                displayName: response.user.displayName || response.user.username,
+                                mobile: response.user.mobile || '',
+                                isNewUser: true,
+                                autoLogin: true,
+                                lastLogin: new Date().toISOString(),
+                                hasPremiumTrial: true, // New users get premium trial
+                                premiumExpiresAt: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString(),
+                                isOfflineUser: false,
+                                session: true,
+                                backendSession: true,
+                                deviceId: this.deviceId
+                            };
+                            
+                            localStorage.setItem('kynecta-chat-user', JSON.stringify(userData));
+                            localStorage.setItem('kynecta-chat-auto-login', 'true');
+                            
+                            this.showMessage('🎉 Registration successful! Your 30-day premium trial is activated!', 'success');
+                            setTimeout(() => this.redirectToDashboard(), 1500);
+                            
                         } else {
-                            throw new Error('Registration service not available');
+                            throw new Error(response.message || 'Registration failed');
                         }
-                        
-                        // Update device ID
-                        const userData = JSON.parse(localStorage.getItem('kynecta-chat-user') || '{}');
-                        userData.deviceId = this.deviceId;
-                        localStorage.setItem('kynecta-chat-user', JSON.stringify(userData));
-                        
-                        this.showMessage('🎉 Registration successful! Your 30-day premium trial is activated!', 'success');
-                        setTimeout(() => this.redirectToDashboard(), 1500);
                         
                     } catch (error) {
                         this.showMessage(error.message, 'error');
@@ -2939,7 +2242,7 @@
                     document.body.classList.add('fade-out');
                     
                     setTimeout(() => {
-                        window.location.href = 'dashboard.html';
+                        window.location.href = 'chat.html';
                     }, 500);
                 }, 1000);
             }
@@ -2963,10 +2266,9 @@
             });
         }
     </script>
-    <!-- CORRECT - same folder -->
- <script src="js/config.js"></script>
-<script src="js/api.js"></script>
-<script src="js/settingsManager.js"></script>
-<script src="js/app.js"></script>
+    
+    <!-- Scripts in correct order -->
+    <script src="js/api.js"></script>
+    <script src="js/app.js"></script>
 </body>
 </html>

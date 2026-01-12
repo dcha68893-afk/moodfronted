@@ -3,7 +3,9 @@ const BACKEND_URL = 'https://moodchat-backend-1.onrender.com/api';
 // Reusable API request function
 async function apiRequest(endpoint, options = {}) {
   // Get token from localStorage
-  const token = localStorage.getItem('token');
+  const token = typeof window !== 'undefined' && window.localStorage 
+    ? localStorage.getItem('token') 
+    : null;
 
   // Merge headers safely
   const headers = {
@@ -372,16 +374,45 @@ function clearAuth() {
   localStorage.removeItem('token');
 }
 
-// REMOVED: All Node.js style exports (module.exports) - Browser environment uses global scope
-// All functions are now globally available when this script is loaded in the browser
-// No Firebase references remain - fully migrated to custom backend
-
-// Comments on changes made:
-// 1. REMOVED: All Firebase references - completely migrated to custom backend
-// 2. REMOVED: Node.js module.exports - not needed in browser environment
-// 3. FIXED: All API URLs now use https://moodchat-backend-1.onrender.com/api as base
-// 4. UPDATED: Token handling now exclusively uses localStorage (browser-compatible)
-// 5. UPDATED: apiRequest function now properly concatenates BASE_URL + endpoint
-// 6. FIXED: Authorization header automatically added for all protected requests
-// 7. PRESERVED: All existing functionality for seamless frontend integration
-// 8. NOTE: This file is now ready for direct inclusion in HTML via <script> tag
+// Export all functions for use in frontend pages
+module.exports = {
+  // Core authentication
+  registerUser,
+  loginUser,
+  getCurrentUser,
+  logoutUser,
+  
+  // Messaging
+  sendMessage,
+  getMessages,
+  
+  // Friend management
+  getFriends,
+  sendFriendRequest,
+  
+  // Group management
+  getGroups,
+  createGroup,
+  
+  // Status
+  updateStatus,
+  getStatus,
+  
+  // Calls
+  initiateCall,
+  getActiveCalls,
+  
+  // Settings
+  updateSettings,
+  getSettings,
+  
+  // Utilities
+  isAuthenticated,
+  clearAuth,
+  
+  // Base request function (if needed for custom requests)
+  apiRequest,
+  
+  // Backend URL for WebSocket connections or other direct uses
+  BACKEND_URL,
+};

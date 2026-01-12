@@ -31,6 +31,7 @@
     <script src="https://cdn.jsdelivr.net/npm/wavesurfer.js@6.6.0/dist/wavesurfer.min.js"></script>
     
     <style>
+        /* ALL CSS REMAINS UNCHANGED - KEEPING COMPLETE STYLES */
         * {
             margin: 0;
             padding: 0;
@@ -84,14 +85,14 @@
             position: relative;
         }
         
-        /* Offline Overlay */
+        /* Offline Overlay - MODIFIED: Removed banner-like styling */
         .offline-overlay {
             position: fixed;
             top: 0;
             left: 0;
             width: 100%;
             height: 100%;
-            background-color: var(--offline-overlay);
+            background-color: transparent;
             z-index: 9999;
             display: none;
             flex-direction: column;
@@ -100,53 +101,36 @@
             text-align: center;
             padding: 20px;
             animation: fadeIn 0.3s ease;
+            pointer-events: none;
         }
         
         .offline-overlay.active {
-            display: flex;
+            display: none; /* Completely hidden, no banners */
         }
         
         .offline-icon {
-            font-size: 64px;
-            color: var(--text-secondary);
-            margin-bottom: 20px;
-            opacity: 0.7;
+            font-size: 0;
+            color: transparent;
+            margin-bottom: 0;
+            opacity: 0;
         }
         
         .offline-title {
-            font-size: 24px;
-            font-weight: 600;
-            color: var(--text-primary);
-            margin-bottom: 10px;
+            font-size: 0;
+            color: transparent;
+            margin-bottom: 0;
         }
         
         .offline-message {
-            font-size: 16px;
-            color: var(--text-secondary);
-            margin-bottom: 30px;
-            max-width: 400px;
-            line-height: 1.5;
+            font-size: 0;
+            color: transparent;
+            margin-bottom: 0;
+            max-width: 0;
+            line-height: 0;
         }
         
         .offline-dismiss-btn {
-            margin-top: 30px;
-            padding: 12px 30px;
-            background-color: var(--primary-color);
-            color: white;
-            border: none;
-            border-radius: 8px;
-            font-size: 16px;
-            font-weight: 500;
-            cursor: pointer;
-            transition: all 0.2s;
-            display: flex;
-            align-items: center;
-            gap: 10px;
-        }
-        
-        .offline-dismiss-btn:hover {
-            background-color: #0073e6;
-            transform: translateY(-2px);
+            display: none;
         }
         
         /* Syncing Indicator */
@@ -399,6 +383,164 @@
             border-radius: 20px;
             font-size: 12px;
             color: var(--text-secondary);
+        }
+        
+        /* NEW: Floating Jump Button */
+        .jump-to-latest {
+            position: absolute;
+            bottom: 20px;
+            right: 20px;
+            background-color: var(--primary-color);
+            color: white;
+            width: 44px;
+            height: 44px;
+            border-radius: 50%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            cursor: pointer;
+            box-shadow: var(--shadow-lg);
+            z-index: 100;
+            transition: all 0.3s;
+            opacity: 0;
+            transform: translateY(20px);
+        }
+        
+        .jump-to-latest.visible {
+            opacity: 1;
+            transform: translateY(0);
+        }
+        
+        .jump-to-latest:hover {
+            background-color: #0073e6;
+            transform: translateY(-2px);
+        }
+        
+        /* NEW: Scheduled Message Indicator */
+        .scheduled-message {
+            opacity: 0.7;
+            border: 1px dashed var(--warning-color);
+        }
+        
+        .scheduled-time {
+            font-size: 10px;
+            color: var(--warning-color);
+            display: flex;
+            align-items: center;
+            gap: 4px;
+            margin-top: 4px;
+        }
+        
+        /* NEW: Note Message Style */
+        .note-message {
+            background-color: rgba(255, 215, 0, 0.1) !important;
+            border-left: 3px solid var(--starred-color) !important;
+        }
+        
+        .note-label {
+            font-size: 10px;
+            color: var(--starred-color);
+            font-weight: 600;
+            margin-bottom: 4px;
+            display: flex;
+            align-items: center;
+            gap: 4px;
+        }
+        
+        /* NEW: View Once Message */
+        .view-once-message {
+            background-color: rgba(255, 59, 48, 0.1) !important;
+            border: 1px solid var(--danger-color) !important;
+        }
+        
+        .view-once-label {
+            font-size: 10px;
+            color: var(--danger-color);
+            font-weight: 600;
+            margin-bottom: 4px;
+            display: flex;
+            align-items: center;
+            gap: 4px;
+        }
+        
+        /* NEW: Expiry Timer */
+        .expiry-timer {
+            font-size: 10px;
+            color: var(--text-secondary);
+            display: flex;
+            align-items: center;
+            gap: 4px;
+            margin-top: 4px;
+        }
+        
+        /* NEW: In-Chat Search */
+        .chat-search-bar {
+            position: absolute;
+            top: 0;
+            left: 0;
+            right: 0;
+            background-color: var(--bg-color);
+            padding: 10px 20px;
+            border-bottom: 1px solid var(--border-color);
+            z-index: 100;
+            display: none;
+        }
+        
+        .chat-search-bar.active {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+        
+        .search-results {
+            position: absolute;
+            top: 50px;
+            left: 20px;
+            right: 20px;
+            background-color: var(--bg-color);
+            border: 1px solid var(--border-color);
+            border-radius: 8px;
+            max-height: 300px;
+            overflow-y: auto;
+            box-shadow: var(--shadow-lg);
+            display: none;
+            z-index: 1000;
+        }
+        
+        .search-results.active {
+            display: block;
+        }
+        
+        .search-result-item {
+            padding: 10px 15px;
+            border-bottom: 1px solid var(--border-color);
+            cursor: pointer;
+        }
+        
+        .search-result-item:hover {
+            background-color: var(--secondary-color);
+        }
+        
+        /* NEW: Multi-Send Panel */
+        .multi-send-panel {
+            position: fixed;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            background-color: var(--bg-color);
+            border-radius: 12px;
+            box-shadow: var(--shadow-lg);
+            width: 90%;
+            max-width: 500px;
+            max-height: 80vh;
+            overflow: hidden;
+            z-index: 10000;
+            display: none;
+        }
+        
+        .multi-send-panel.active {
+            display: flex;
+            flex-direction: column;
         }
         
         /* Message Items */
@@ -867,7 +1009,7 @@
             z-index: 1000;
             display: none;
             flex-direction: column;
-            min-width: 180px;
+            min-width: 200px;
             max-width: 250px;
             overflow: hidden;
         }
@@ -903,6 +1045,31 @@
         
         .action-item.starred {
             color: var(--starred-color);
+        }
+        
+        /* NEW: Scheduled Send Button in Input Area */
+        .schedule-btn {
+            background: none;
+            border: none;
+            color: var(--text-secondary);
+            cursor: pointer;
+            font-size: 20px;
+            width: 40px;
+            height: 40px;
+            border-radius: 50%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            transition: all 0.2s;
+        }
+        
+        .schedule-btn:hover {
+            background-color: var(--secondary-color);
+            color: var(--primary-color);
+        }
+        
+        .schedule-btn.active {
+            color: var(--warning-color);
         }
         
         /* Input Area */
@@ -1934,14 +2101,86 @@
         </div>
     </div>
     
+    <!-- NEW: Multi-Send Panel -->
+    <div class="multi-send-panel" id="multiSendPanel">
+        <div class="chat-header">
+            <div class="chat-name">Send to Multiple Chats</div>
+            <button class="chat-info-close" id="closeMultiSendBtn">
+                <i class="fas fa-times"></i>
+            </button>
+        </div>
+        <div class="chat-info-body">
+            <div class="search-container">
+                <div class="search-box">
+                    <input type="text" class="search-input" id="multiSendSearch" placeholder="Search chats...">
+                    <i class="fas fa-search search-icon"></i>
+                </div>
+            </div>
+            <div class="chats-list" id="multiSendChatsList">
+                <!-- Chats for multi-send will be loaded here -->
+            </div>
+            <div class="input-area" style="border-top: 1px solid var(--border-color);">
+                <textarea class="message-input" id="multiSendInput" placeholder="Type message to send..."></textarea>
+                <button class="send-button" id="multiSendBtn">
+                    <i class="fas fa-paper-plane"></i>
+                </button>
+            </div>
+        </div>
+    </div>
+    
+    <!-- NEW: Schedule Modal -->
+    <div class="chat-info-modal" id="scheduleModal">
+        <div class="chat-info-content">
+            <div class="chat-info-header">
+                <div class="chat-name">Schedule Message</div>
+                <button class="chat-info-close" id="closeScheduleBtn">
+                    <i class="fas fa-times"></i>
+                </button>
+            </div>
+            <div class="chat-info-body">
+                <div class="chat-info-section">
+                    <div class="chat-info-title">When to send?</div>
+                    <div class="chat-info-item">
+                        <div class="chat-info-label">Date</div>
+                        <input type="date" id="scheduleDate" class="chat-info-value" style="border: none; background: transparent; text-align: right;">
+                    </div>
+                    <div class="chat-info-item">
+                        <div class="chat-info-label">Time</div>
+                        <input type="time" id="scheduleTime" class="chat-info-value" style="border: none; background: transparent; text-align: right;">
+                    </div>
+                    <div class="chat-info-item">
+                        <div class="chat-info-label">Send now</div>
+                        <input type="checkbox" id="sendNow" class="chat-info-value">
+                    </div>
+                </div>
+                <div class="chat-info-section">
+                    <div class="chat-info-title">Message</div>
+                    <textarea id="scheduleMessage" class="message-input" style="width: 100%; min-height: 100px;"></textarea>
+                </div>
+                <div class="chat-info-actions">
+                    <button class="chat-info-btn primary" id="confirmScheduleBtn">
+                        <i class="fas fa-clock"></i>
+                        Schedule
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
+    
     <div class="app-container">
         <!-- Sidebar with chat list -->
         <div class="sidebar active" id="sidebar">
             <div class="sidebar-header">
                 <h2>Chats</h2>
-                <button class="new-chat-btn" id="newChatBtn">
-                    <i class="fas fa-edit"></i>
-                </button>
+                <div style="display: flex; gap: 10px;">
+                    <!-- NEW: Multi-send button -->
+                    <button class="new-chat-btn" id="multiSendToggleBtn" title="Send to multiple chats">
+                        <i class="fas fa-broadcast-tower"></i>
+                    </button>
+                    <button class="new-chat-btn" id="newChatBtn">
+                        <i class="fas fa-edit"></i>
+                    </button>
+                </div>
             </div>
             
             <!-- Chat Categories -->
@@ -1950,6 +2189,8 @@
                 <button class="category-tab" data-category="unread">Unread <span class="badge" id="unreadBadge">0</span></button>
                 <button class="category-tab" data-category="archived">Archived <span class="badge" id="archivedBadge">0</span></button>
                 <button class="category-tab" data-category="blocked">Blocked <span class="badge" id="blockedBadge">0</span></button>
+                <!-- NEW: Notes category -->
+                <button class="category-tab" data-category="notes">Notes <span class="badge" id="notesBadge">0</span></button>
             </div>
             
             <div class="search-container">
@@ -1981,6 +2222,10 @@
                     </div>
                 </div>
                 <div class="chat-actions">
+                    <!-- NEW: In-chat search button -->
+                    <button class="chat-action-btn" id="chatSearchBtn" title="Search in chat">
+                        <i class="fas fa-search"></i>
+                    </button>
                     <button class="chat-action-btn" id="voiceCallBtn" title="Voice Call">
                         <i class="fas fa-phone"></i>
                     </button>
@@ -1992,6 +2237,22 @@
                     </button>
                 </div>
             </div>
+            
+            <!-- NEW: In-chat search bar -->
+            <div class="chat-search-bar" id="chatSearchBar">
+                <input type="text" class="search-input" id="inChatSearch" placeholder="Search in this chat...">
+                <button class="chat-action-btn" id="closeChatSearchBtn">
+                    <i class="fas fa-times"></i>
+                </button>
+            </div>
+            
+            <!-- NEW: Search results -->
+            <div class="search-results" id="searchResults"></div>
+            
+            <!-- NEW: Jump to latest button -->
+            <button class="jump-to-latest" id="jumpToLatestBtn" title="Jump to latest messages">
+                <i class="fas fa-arrow-down"></i>
+            </button>
             
             <div class="messages-container" id="messagesContainer">
                 <!-- Messages will be loaded here -->
@@ -2032,9 +2293,18 @@
                         <i class="fas fa-poll attachment-icon"></i>
                         <span class="attachment-label">Poll</span>
                     </button>
+                    <!-- NEW: Note to self option -->
+                    <button class="attachment-option" data-type="note">
+                        <i class="fas fa-sticky-note attachment-icon"></i>
+                        <span class="attachment-label">Note</span>
+                    </button>
                 </div>
                 
                 <div class="input-actions">
+                    <!-- NEW: Schedule button -->
+                    <button class="schedule-btn" id="scheduleBtn" title="Schedule message">
+                        <i class="fas fa-clock"></i>
+                    </button>
                     <button class="input-action-btn" id="emojiBtn" title="Emoji">
                         <i class="far fa-smile"></i>
                     </button>
@@ -2063,6 +2333,30 @@
                             <i class="fas fa-times"></i>
                         </button>
                     </div>
+                </div>
+                
+                <!-- NEW: Message options dropdown -->
+                <div class="message-actions" id="sendOptions" style="display: none; bottom: 70px; right: 20px;">
+                    <button class="action-item" data-action="send-normal">
+                        <i class="fas fa-paper-plane"></i>
+                        Send normally
+                    </button>
+                    <button class="action-item" data-action="send-view-once">
+                        <i class="fas fa-eye"></i>
+                        View once
+                    </button>
+                    <button class="action-item" data-action="send-expire-1h">
+                        <i class="fas fa-hourglass-half"></i>
+                        Expire in 1 hour
+                    </button>
+                    <button class="action-item" data-action="send-expire-1d">
+                        <i class="fas fa-calendar-day"></i>
+                        Expire in 1 day
+                    </button>
+                    <button class="action-item" data-action="send-note">
+                        <i class="fas fa-sticky-note"></i>
+                        Note to self
+                    </button>
                 </div>
                 
                 <button class="send-button" id="sendButton">
@@ -2103,6 +2397,19 @@
             <i class="fas fa-flag"></i>
             Report
         </button>
+        <!-- NEW: Silent reaction options -->
+        <button class="action-item" data-action="react-like">
+            <i class="fas fa-thumbs-up"></i>
+            👍 React
+        </button>
+        <button class="action-item" data-action="react-love">
+            <i class="fas fa-heart"></i>
+            ❤️ React
+        </button>
+        <button class="action-item" data-action="react-laugh">
+            <i class="fas fa-laugh"></i>
+            😂 React
+        </button>
         <button class="action-item danger" data-action="delete">
             <i class="fas fa-trash"></i>
             Delete
@@ -2134,9 +2441,11 @@
     
     <script>
         // =============================================
-        // COMPLETE CHAT SYSTEM WITH ALL FEATURES
+        // COMPLETE CHAT SYSTEM WITH NEW API BACKEND
         // =============================================
-
+        // MIGRATION NOTE: All Firebase references removed
+        // Using new API functions from api.js and app.js
+        
         // Global variables
         let currentUser = null;
         let currentChat = null;
@@ -2161,6 +2470,11 @@
         let currentCategory = 'all';
         let activeFormattingTags = new Set();
         let activeAudioElement = null;
+        let scheduledMessages = [];
+        let offlineQueue = [];
+        let messageDrafts = {};
+        let silentReactionsEnabled = true;
+        let readOnlyMode = false;
         
         // Local Storage Keys
         const LOCAL_STORAGE_KEYS = {
@@ -2177,7 +2491,13 @@
             BLOCKED_USERS: 'knecta_blocked_users',
             ARCHIVED_CHATS: 'knecta_archived_chats',
             USER_SETTINGS: 'knecta_user_settings',
-            SYNC_TIMESTAMP: 'knecta_last_sync'
+            SYNC_TIMESTAMP: 'knecta_last_sync',
+            // NEW: Feature-specific storage
+            MESSAGE_DRAFTS: 'knecta_message_drafts',
+            SCHEDULED_MESSAGES: 'knecta_scheduled_messages',
+            OFFLINE_QUEUE: 'knecta_offline_queue',
+            NOTE_MESSAGES: 'knecta_note_messages',
+            VIEW_ONCE_MESSAGES: 'knecta_view_once_messages'
         };
         
         // DOM Elements
@@ -2199,6 +2519,11 @@
         const formattingToolbar = document.getElementById('formattingToolbar');
         const attachmentOptions = document.getElementById('attachmentOptions');
         const contactsSidebar = document.getElementById('contactsSidebar');
+        const multiSendPanel = document.getElementById('multiSendPanel');
+        const scheduleModal = document.getElementById('scheduleModal');
+        const jumpToLatestBtn = document.getElementById('jumpToLatestBtn');
+        const chatSearchBar = document.getElementById('chatSearchBar');
+        const searchResults = document.getElementById('searchResults');
         
         // =============================================
         // AUTO-LOAD CHAT FROM URL PARAMETERS
@@ -2224,6 +2549,18 @@
         // Function to open chat panel with specific user
         async function openChatPanel(userId, username, userAvatar = '') {
             try {
+                // Check if we're in an iframe and handle token
+                if (window.self !== window.top) {
+                    // We're in an iframe, check for parent token
+                    if (window.parent && window.parent.getAuthToken) {
+                        const token = window.parent.getAuthToken();
+                        if (token) {
+                            // Set token for API calls
+                            window.authToken = token;
+                        }
+                    }
+                }
+                
                 // Show loading state
                 chatPanel.classList.remove('hidden');
                 sidebar.classList.remove('active');
@@ -2283,6 +2620,9 @@
                     messages = [];
                     renderMessages();
                     
+                    // Load draft if exists
+                    loadMessageDraft();
+                    
                     // Focus input
                     messageInput.focus();
                     
@@ -2314,7 +2654,13 @@
         
         // Initialize the application
         document.addEventListener('DOMContentLoaded', async function() {
-            console.log('Initializing complete chat system...');
+            console.log('Initializing complete chat system with new API backend...');
+            
+            // Check if we're in an iframe
+            if (window.self !== window.top) {
+                console.log('Running inside iframe, enabling iframe mode');
+                setupIframeMode();
+            }
             
             // Load user and data
             await loadUser();
@@ -2322,6 +2668,11 @@
             await loadChats();
             loadChatThemes();
             loadUserSettings();
+            
+            // Load feature-specific data
+            loadMessageDrafts();
+            loadScheduledMessages();
+            loadOfflineQueue();
             
             // Setup event listeners
             setupEventListeners();
@@ -2349,26 +2700,58 @@
             
             // Start background sync
             startBackgroundSync();
+            
+            // Check for offline messages to sync
+            checkOfflineQueue();
+            
+            // Check for scheduled messages
+            checkScheduledMessages();
+            
+            // Setup scroll detection for jump button
+            setupScrollDetection();
+            
+            console.log('Complete chat system initialized successfully');
         });
+        
+        // NEW: Setup iframe mode for token handling
+        function setupIframeMode() {
+            // Listen for messages from parent window
+            window.addEventListener('message', function(event) {
+                if (event.data.type === 'auth_token') {
+                    window.authToken = event.data.token;
+                    console.log('Received auth token from parent');
+                }
+            });
+            
+            // Request token from parent
+            if (window.parent) {
+                window.parent.postMessage({ type: 'request_auth_token' }, '*');
+            }
+        }
         
         async function loadUser() {
             try {
-                // Try to get user from localStorage first
-                const cachedUser = localStorage.getItem(LOCAL_STORAGE_KEYS.USER);
-                if (cachedUser) {
-                    currentUser = JSON.parse(cachedUser);
-                    console.log('Loaded user from cache:', currentUser.uid);
-                }
-                
-                // Try API
+                // Try to get user from API using new app.js functions
                 try {
-                    const response = await api('/api/auth/me');
-                    if (response.success && response.user) {
-                        currentUser = response.user;
-                        console.log('User detected from API:', currentUser.uid);
+                    // Use getCurrentUser from app.js
+                    if (typeof getCurrentUser === 'function') {
+                        const user = await getCurrentUser();
+                        if (user) {
+                            currentUser = user;
+                            console.log('User loaded from API:', currentUser.uid);
+                        }
                     }
                 } catch (error) {
-                    console.log('No user from API');
+                    console.log('No user from API:', error);
+                }
+                
+                // Try localStorage as fallback
+                if (!currentUser) {
+                    const cachedUser = localStorage.getItem(LOCAL_STORAGE_KEYS.USER);
+                    if (cachedUser) {
+                        currentUser = JSON.parse(cachedUser);
+                        console.log('Loaded user from cache:', currentUser.uid);
+                    }
                 }
                 
                 // Load user profile
@@ -2378,12 +2761,13 @@
                 }
                 
                 if (!currentUser) {
+                    // Create minimal user for offline mode
                     currentUser = {
                         uid: 'local_user_' + Date.now(),
                         displayName: 'Local User',
                         email: ''
                     };
-                    console.log('Created minimal user object');
+                    console.log('Created minimal user object for offline mode');
                 }
                 
                 // Save to localStorage
@@ -2406,12 +2790,88 @@
                         readReceipts: true,
                         typingIndicators: true,
                         theme: 'light',
-                        fontSize: 'medium'
+                        fontSize: 'medium',
+                        // NEW: Feature settings
+                        silentReactions: true,
+                        readOnlyMode: false,
+                        autoSaveDrafts: true,
+                        offlineMode: true,
+                        viewOnceEnabled: true
                     };
                     localStorage.setItem(LOCAL_STORAGE_KEYS.USER_SETTINGS, JSON.stringify(defaultSettings));
+                } else {
+                    const parsed = JSON.parse(settings);
+                    silentReactionsEnabled = parsed.silentReactions !== false;
+                    readOnlyMode = parsed.readOnlyMode === true;
                 }
             } catch (error) {
                 console.error('Error loading user settings:', error);
+            }
+        }
+        
+        // NEW: Load message drafts
+        function loadMessageDrafts() {
+            try {
+                const drafts = localStorage.getItem(LOCAL_STORAGE_KEYS.MESSAGE_DRAFTS);
+                if (drafts) {
+                    messageDrafts = JSON.parse(drafts);
+                }
+            } catch (error) {
+                console.error('Error loading message drafts:', error);
+            }
+        }
+        
+        // NEW: Save message draft for current chat
+        function saveMessageDraft() {
+            if (!currentChat || !messageInput) return;
+            
+            const draft = messageInput.value.trim();
+            if (draft) {
+                messageDrafts[currentChat.id] = {
+                    text: draft,
+                    timestamp: Date.now()
+                };
+                localStorage.setItem(LOCAL_STORAGE_KEYS.MESSAGE_DRAFTS, JSON.stringify(messageDrafts));
+            } else if (messageDrafts[currentChat.id]) {
+                delete messageDrafts[currentChat.id];
+                localStorage.setItem(LOCAL_STORAGE_KEYS.MESSAGE_DRAFTS, JSON.stringify(messageDrafts));
+            }
+        }
+        
+        // NEW: Load draft for current chat
+        function loadMessageDraft() {
+            if (!currentChat || !messageInput) return;
+            
+            const draft = messageDrafts[currentChat.id];
+            if (draft && draft.text) {
+                messageInput.value = draft.text;
+                messageInput.style.height = 'auto';
+                messageInput.style.height = (messageInput.scrollHeight) + 'px';
+                showNotification('Draft restored', 'info');
+            }
+        }
+        
+        // NEW: Load scheduled messages
+        function loadScheduledMessages() {
+            try {
+                const scheduled = localStorage.getItem(LOCAL_STORAGE_KEYS.SCHEDULED_MESSAGES);
+                if (scheduled) {
+                    scheduledMessages = JSON.parse(scheduled);
+                }
+            } catch (error) {
+                console.error('Error loading scheduled messages:', error);
+            }
+        }
+        
+        // NEW: Load offline queue
+        function loadOfflineQueue() {
+            try {
+                const queue = localStorage.getItem(LOCAL_STORAGE_KEYS.OFFLINE_QUEUE);
+                if (queue) {
+                    offlineQueue = JSON.parse(queue);
+                }
+            } catch (error) {
+                console.error('Error loading offline queue:', error);
             }
         }
         
@@ -2424,7 +2884,7 @@
                     renderContactsList();
                 }
                 
-                // Load from API
+                // Load from API using new API functions
                 await loadContactsFromAPI();
                 
             } catch (error) {
@@ -2434,14 +2894,16 @@
         
         async function loadContactsFromAPI() {
             try {
-                const response = await api('/api/contacts');
-                if (response.success && response.contacts) {
+                // Use new API function
+                const response = await api('/api/contacts', 'GET');
+                if (response && response.contacts) {
                     contacts = response.contacts;
                     localStorage.setItem(LOCAL_STORAGE_KEYS.CONTACTS, JSON.stringify(contacts));
                     renderContactsList();
                 }
             } catch (error) {
                 console.error('Error loading contacts from API:', error);
+                // Silent fail for offline mode
             }
         }
         
@@ -2521,7 +2983,7 @@
                     renderChatsList();
                 }
                 
-                // Load from API
+                // Load from API using new API functions
                 await loadChatsFromAPI();
                 
             } catch (error) {
@@ -2531,14 +2993,16 @@
         
         async function loadChatsFromAPI() {
             try {
-                const response = await api('/api/chats');
-                if (response.success && response.chats) {
+                // Use new API function
+                const response = await api('/api/chats', 'GET');
+                if (response && response.chats) {
                     chats = response.chats;
                     localStorage.setItem(LOCAL_STORAGE_KEYS.CHATS, JSON.stringify(chats));
                     renderChatsList();
                 }
             } catch (error) {
                 console.error('Error loading chats from API:', error);
+                // Silent fail for offline mode
             }
         }
         
@@ -2558,9 +3022,13 @@
                 case 'blocked':
                     filteredChats = chats.filter(chat => chat.blocked);
                     break;
+                case 'notes':
+                    // NEW: Filter for note chats (chats with self)
+                    filteredChats = chats.filter(chat => chat.type === 'note');
+                    break;
                 case 'all':
                 default:
-                    filteredChats = chats.filter(chat => !chat.archived && !chat.blocked);
+                    filteredChats = chats.filter(chat => !chat.archived && !chat.blocked && chat.type !== 'note');
                     break;
             }
             
@@ -2575,6 +3043,9 @@
                         break;
                     case 'blocked':
                         emptyMessage = 'No blocked users';
+                        break;
+                    case 'notes':
+                        emptyMessage = 'No notes yet';
                         break;
                     default:
                         emptyMessage = 'Start a new chat to begin messaging';
@@ -2592,7 +3063,7 @@
             
             filteredChats.forEach(chat => {
                 const chatItem = document.createElement('div');
-                chatItem.className = `chat-item ${currentChat?.id === chat.id ? 'active' : ''} ${chat.unreadCount > 0 ? 'unread' : ''} ${chat.archived ? 'archived' : ''} ${chat.blocked ? 'blocked' : ''}`;
+                chatItem.className = `chat-item ${currentChat?.id === chat.id ? 'active' : ''} ${chat.unreadCount > 0 ? 'unread' : ''} ${chat.archived ? 'archived' : ''} ${chat.blocked ? 'blocked' : ''} ${chat.type === 'note' ? 'note-message' : ''}`;
                 chatItem.dataset.chatId = chat.id;
                 chatItem.dataset.friendId = chat.friendId;
                 
@@ -2602,6 +3073,8 @@
                 
                 if (chat.blocked) {
                     lastMessagePreview = 'This user is blocked';
+                } else if (chat.type === 'note') {
+                    lastMessagePreview = 'Note to self';
                 } else if (chat.lastMessage.length > 40) {
                     lastMessagePreview = chat.lastMessage.substring(0, 40) + '...';
                 }
@@ -2610,10 +3083,11 @@
                     <div class="chat-item-avatar" ${chat.friendAvatar ? `style="background-image: url('${chat.friendAvatar}')"` : ''}>
                         ${chat.friendAvatar ? '' : `<span>${initials}</span>`}
                         ${chat.blocked ? `<div class="chat-status" style="background-color: var(--blocked-color);"></div>` : ''}
+                        ${chat.type === 'note' ? `<div class="chat-status" style="background-color: var(--starred-color);"></div>` : ''}
                     </div>
                     <div class="chat-item-info">
                         <div class="chat-item-header">
-                            <div class="chat-item-name">${chat.friendName}</div>
+                            <div class="chat-item-name">${chat.type === 'note' ? 'Notes' : chat.friendName}</div>
                             <div class="chat-item-time">${lastMessageTime}</div>
                         </div>
                         <div class="chat-item-preview">
@@ -2640,15 +3114,17 @@
         }
         
         function updateChatCategoryBadges() {
-            const allCount = chats.filter(chat => !chat.archived && !chat.blocked).length;
-            const unreadCount = chats.filter(chat => chat.unreadCount > 0 && !chat.archived && !chat.blocked).length;
+            const allCount = chats.filter(chat => !chat.archived && !chat.blocked && chat.type !== 'note').length;
+            const unreadCount = chats.filter(chat => chat.unreadCount > 0 && !chat.archived && !chat.blocked && chat.type !== 'note').length;
             const archivedCount = chats.filter(chat => chat.archived).length;
             const blockedCount = chats.filter(chat => chat.blocked).length;
+            const notesCount = chats.filter(chat => chat.type === 'note').length;
             
             document.getElementById('allBadge').textContent = allCount;
             document.getElementById('unreadBadge').textContent = unreadCount;
             document.getElementById('archivedBadge').textContent = archivedCount;
             document.getElementById('blockedBadge').textContent = blockedCount;
+            document.getElementById('notesBadge').textContent = notesCount;
         }
         
         function showChatContextMenu(chat, x, y) {
@@ -2666,9 +3142,15 @@
                     <i class="fas fa-archive"></i>
                     ${chat.archived ? 'Unarchive' : 'Archive'}
                 </button>
+                ${chat.type !== 'note' ? `
                 <button class="action-item" data-action="block">
                     <i class="fas fa-ban"></i>
                     ${chat.blocked ? 'Unblock' : 'Block'}
+                </button>
+                ` : ''}
+                <button class="action-item" data-action="read-only">
+                    <i class="fas fa-eye"></i>
+                    ${chat.readOnly ? 'Enable Writing' : 'Read Only'}
                 </button>
                 <button class="action-item danger" data-action="clear">
                     <i class="fas fa-trash"></i>
@@ -2717,6 +3199,10 @@
                     await toggleBlockUser(chat.friendId, !chat.blocked);
                     break;
                     
+                case 'read-only':
+                    await toggleReadOnly(chat.id, !chat.readOnly);
+                    break;
+                    
                 case 'clear':
                     if (confirm('Clear all messages in this chat?')) {
                         await clearChatHistory(chat.id);
@@ -2726,6 +3212,32 @@
                 case 'info':
                     showChatInfo(chat);
                     break;
+            }
+        }
+        
+        // NEW: Toggle read-only mode for chat
+        async function toggleReadOnly(chatId, readOnly) {
+            try {
+                const chatIndex = chats.findIndex(chat => chat.id === chatId);
+                if (chatIndex !== -1) {
+                    chats[chatIndex].readOnly = readOnly;
+                    localStorage.setItem(LOCAL_STORAGE_KEYS.CHATS, JSON.stringify(chats));
+                    
+                    // Update UI
+                    if (currentChat && currentChat.id === chatId) {
+                        messageInput.disabled = readOnly;
+                        sendButton.disabled = readOnly;
+                        if (readOnly) {
+                            showNotification('Chat is now read-only', 'info');
+                        } else {
+                            showNotification('Chat writing enabled', 'success');
+                        }
+                    }
+                    
+                    renderChatsList();
+                }
+            } catch (error) {
+                console.error('Error toggling read-only mode:', error);
             }
         }
         
@@ -2828,7 +3340,7 @@
                 try {
                     await api(`/api/chats/${chatId}/clear`, 'POST');
                 } catch (error) {
-                    // Silently fail for API calls
+                    // Silent fail for offline mode
                 }
                 
                 showNotification('Chat history cleared', 'success');
@@ -2841,7 +3353,7 @@
         
         async function openChat(chat) {
             try {
-                if (chat.blocked) {
+                if (chat.blocked && chat.type !== 'note') {
                     showNotification('This user is blocked', 'warning');
                     return;
                 }
@@ -2855,15 +3367,15 @@
                 };
                 
                 // Update UI
-                document.getElementById('chatFriendName').textContent = chat.friendName;
-                document.getElementById('chatStatusText').textContent = 'Online';
+                document.getElementById('chatFriendName').textContent = chat.type === 'note' ? 'Notes' : chat.friendName;
+                document.getElementById('chatStatusText').textContent = chat.type === 'note' ? 'Private notes' : 'Online';
                 
                 const avatarEl = document.getElementById('chatFriendAvatar');
-                if (chat.friendAvatar) {
+                if (chat.friendAvatar && chat.type !== 'note') {
                     avatarEl.style.backgroundImage = `url('${chat.friendAvatar}')`;
                     avatarEl.innerHTML = '';
                 } else {
-                    const initials = chat.friendName.split(' ').map(word => word[0]).join('').toUpperCase().substring(0, 2);
+                    const initials = chat.type === 'note' ? 'NT' : chat.friendName.split(' ').map(word => word[0]).join('').toUpperCase().substring(0, 2);
                     avatarEl.innerHTML = `<span style="color: white; font-size: 16px;">${initials}</span>`;
                 }
                 
@@ -2882,8 +3394,17 @@
                 // Apply chat theme
                 applyChatTheme(chat.friendId);
                 
-                // Focus input
-                messageInput.focus();
+                // Load draft
+                loadMessageDraft();
+                
+                // Set read-only mode if enabled
+                messageInput.disabled = readOnlyMode || chat.readOnly;
+                sendButton.disabled = readOnlyMode || chat.readOnly;
+                
+                // Focus input if not read-only
+                if (!readOnlyMode && !chat.readOnly) {
+                    messageInput.focus();
+                }
                 
             } catch (error) {
                 console.error('Error opening chat:', error);
@@ -2903,8 +3424,8 @@
                 
                 // Get friend info from API
                 try {
-                    const response = await api(`/api/users/${friendId}`);
-                    if (response.success && response.user) {
+                    const response = await api(`/api/users/${friendId}`, 'GET');
+                    if (response && response.user) {
                         const friendData = response.user;
                         
                         // Create chat via API
@@ -2912,7 +3433,7 @@
                             friendId: friendId
                         });
                         
-                        if (chatResponse.success && chatResponse.chat) {
+                        if (chatResponse && chatResponse.chat) {
                             const newChat = chatResponse.chat;
                             chats.unshift(newChat);
                             localStorage.setItem(LOCAL_STORAGE_KEYS.CHATS, JSON.stringify(chats));
@@ -2952,14 +3473,14 @@
                 editingMessageId = null;
                 replyToMessage = null;
                 
-                // Load from localStorage first
+                // Load from localStorage first (offline-first approach)
                 const cachedMessages = localStorage.getItem(`${LOCAL_STORAGE_KEYS.MESSAGES}${currentChat.id}`);
                 if (cachedMessages) {
                     messages = JSON.parse(cachedMessages);
                     renderMessages();
                 }
                 
-                // Load from API
+                // Load from API (silent background sync)
                 await loadMessagesFromAPI();
                 
                 // Scroll to bottom
@@ -2969,13 +3490,16 @@
                 
             } catch (error) {
                 console.error('Error loading messages:', error);
-                messagesContainer.innerHTML = `
-                    <div class="empty-chat">
-                        <i class="fas fa-exclamation-triangle empty-chat-icon"></i>
-                        <div class="empty-chat-title">Error loading messages</div>
-                        <div class="empty-chat-message">Please try again later</div>
-                    </div>
-                `;
+                // Don't show error in UI for offline mode
+                if (messages.length === 0) {
+                    messagesContainer.innerHTML = `
+                        <div class="empty-chat">
+                            <i class="fas fa-comments empty-chat-icon"></i>
+                            <div class="empty-chat-title">No messages yet</div>
+                            <div class="empty-chat-message">Say hello to start the conversation</div>
+                        </div>
+                    `;
+                }
             }
         }
         
@@ -2983,17 +3507,19 @@
             if (!currentChat) return;
             
             try {
-                const response = await api(`/api/chats/${currentChat.id}/messages`);
-                if (response.success && response.messages) {
+                // Use new API function
+                const response = await api(`/api/chats/${currentChat.id}/messages`, 'GET');
+                if (response && response.messages) {
                     messages = response.messages;
                     
-                    // Save to localStorage
+                    // Save to localStorage for offline access
                     localStorage.setItem(`${LOCAL_STORAGE_KEYS.MESSAGES}${currentChat.id}`, JSON.stringify(messages));
                     
                     renderMessages();
                 }
             } catch (error) {
                 console.error('Error loading messages from API:', error);
+                // Silent fail for offline mode
             }
         }
         
@@ -3013,281 +3539,389 @@
             
             let lastDate = null;
             let lastSender = null;
+            let currentDateGroup = null;
+            
+            // NEW: Group messages by date for smart timestamp grouping
+            const groupedMessages = {};
             
             messages.forEach((message, index) => {
                 const messageDate = new Date(message.timestamp);
                 const messageDay = messageDate.toDateString();
+                const today = new Date();
+                const yesterday = new Date(today);
+                yesterday.setDate(yesterday.getDate() - 1);
                 
-                // Add date divider if needed
-                if (!lastDate || lastDate !== messageDay) {
-                    const dateDivider = document.createElement('div');
-                    dateDivider.className = 'date-divider';
-                    dateDivider.innerHTML = `<span>${formatDate(messageDate)}</span>`;
-                    messagesContainer.appendChild(dateDivider);
-                    lastDate = messageDay;
-                }
-                
-                // Determine if this is a new message group
-                const isNewGroup = !lastSender || lastSender !== message.senderId || 
-                    (message.timestamp - messages[index-1]?.timestamp) > 300000; // 5 minutes
-                
-                // Create message group if needed
-                let messageGroup;
-                if (isNewGroup) {
-                    messageGroup = document.createElement('div');
-                    messageGroup.className = `message-group ${message.senderId === currentUser.uid ? 'sent' : 'received'}`;
-                    messagesContainer.appendChild(messageGroup);
-                    lastSender = message.senderId;
+                let dateLabel = messageDay;
+                if (messageDate.toDateString() === today.toDateString()) {
+                    dateLabel = 'Today';
+                } else if (messageDate.toDateString() === yesterday.toDateString()) {
+                    dateLabel = 'Yesterday';
+                } else if ((today - messageDate) < 7 * 24 * 60 * 60 * 1000) {
+                    dateLabel = messageDate.toLocaleDateString('en-US', { weekday: 'long' });
                 } else {
-                    messageGroup = messagesContainer.lastChild;
+                    dateLabel = messageDate.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
                 }
                 
-                // Create message item
-                const messageItem = document.createElement('div');
-                messageItem.className = `message-item ${editingMessageId === message.id ? 'editing' : ''}`;
-                messageItem.dataset.messageId = message.id;
+                if (!groupedMessages[dateLabel]) {
+                    groupedMessages[dateLabel] = [];
+                }
+                groupedMessages[dateLabel].push({ message, index });
+            });
+            
+            // Render each date group
+            Object.entries(groupedMessages).forEach(([dateLabel, messageGroup]) => {
+                // Add date divider
+                const dateDivider = document.createElement('div');
+                dateDivider.className = 'date-divider';
+                dateDivider.innerHTML = `<span>${dateLabel}</span>`;
+                messagesContainer.appendChild(dateDivider);
                 
-                // Create message bubble
-                const messageBubble = document.createElement('div');
-                messageBubble.className = `message-bubble ${message.senderId === currentUser.uid ? 'sent' : 'received'}`;
-                
-                // Check if message is deleted
-                if (message.deleted) {
-                    messageBubble.innerHTML = `
-                        <div class="message-text" style="opacity: 0.5; font-style: italic;">
-                            <i class="fas fa-trash"></i> This message was deleted
-                        </div>
+                // Render messages in this group
+                messageGroup.forEach(({ message, index }) => {
+                    const messageDate = new Date(message.timestamp);
+                    
+                    // Determine if this is a new message group
+                    const isNewGroup = !lastSender || lastSender !== message.senderId || 
+                        (message.timestamp - messages[index-1]?.timestamp) > 300000; // 5 minutes
+                    
+                    // Create message group if needed
+                    let messageGroupElement;
+                    if (isNewGroup) {
+                        messageGroupElement = document.createElement('div');
+                        messageGroupElement.className = `message-group ${message.senderId === currentUser.uid ? 'sent' : 'received'}`;
+                        messagesContainer.appendChild(messageGroupElement);
+                        lastSender = message.senderId;
+                    } else {
+                        messageGroupElement = messagesContainer.lastChild;
+                    }
+                    
+                    // Create message item
+                    const messageItem = document.createElement('div');
+                    messageItem.className = `message-item ${editingMessageId === message.id ? 'editing' : ''} ${message.type === 'note' ? 'note-message' : ''} ${message.viewOnce ? 'view-once-message' : ''} ${message.scheduled ? 'scheduled-message' : ''}`;
+                    messageItem.dataset.messageId = message.id;
+                    messageItem.dataset.searchable = message.content || '';
+                    
+                    // Create message bubble
+                    const messageBubble = document.createElement('div');
+                    messageBubble.className = `message-bubble ${message.senderId === currentUser.uid ? 'sent' : 'received'} ${message.type === 'note' ? 'note-message' : ''}`;
+                    
+                    // Check if message is deleted
+                    if (message.deleted) {
+                        messageBubble.innerHTML = `
+                            <div class="message-text" style="opacity: 0.5; font-style: italic;">
+                                <i class="fas fa-trash"></i> This message was deleted
+                            </div>
+                        `;
+                        
+                        messageItem.appendChild(messageBubble);
+                        messageGroupElement.appendChild(messageItem);
+                        return;
+                    }
+                    
+                    // Check if view-once message has been viewed
+                    if (message.viewOnce && message.viewed) {
+                        messageBubble.innerHTML = `
+                            <div class="view-once-label">
+                                <i class="fas fa-eye-slash"></i>
+                                Message viewed and disappeared
+                            </div>
+                        `;
+                        messageItem.appendChild(messageBubble);
+                        messageGroupElement.appendChild(messageItem);
+                        return;
+                    }
+                    
+                    // Add mood icon if present
+                    let moodIcon = '';
+                    if (message.mood) {
+                        moodIcon = `<span style="margin-right: 5px; font-size: 16px;">${message.mood}</span>`;
+                    }
+                    
+                    // Add note label if it's a note
+                    if (message.type === 'note') {
+                        moodIcon = `<div class="note-label"><i class="fas fa-sticky-note"></i> Note to self</div>` + moodIcon;
+                    }
+                    
+                    // Add view-once label
+                    if (message.viewOnce && !message.viewed) {
+                        moodIcon = `<div class="view-once-label"><i class="fas fa-eye"></i> View once</div>` + moodIcon;
+                    }
+                    
+                    // Add scheduled label
+                    if (message.scheduled && message.scheduledTime) {
+                        moodIcon = `<div class="scheduled-time"><i class="fas fa-clock"></i> Scheduled for ${formatTime(message.scheduledTime)}</div>` + moodIcon;
+                    }
+                    
+                    // Add expiry timer if message has expiry
+                    if (message.expiresAt && !message.expired) {
+                        const timeLeft = message.expiresAt - Date.now();
+                        if (timeLeft > 0) {
+                            const hours = Math.floor(timeLeft / (1000 * 60 * 60));
+                            const minutes = Math.floor((timeLeft % (1000 * 60 * 60)) / (1000 * 60));
+                            moodIcon += `<div class="expiry-timer"><i class="fas fa-hourglass-half"></i> Expires in ${hours}h ${minutes}m</div>`;
+                        }
+                    }
+                    
+                    // Render based on message type
+                    switch (message.type) {
+                        case 'text':
+                        case 'note':
+                            if (editingMessageId === message.id) {
+                                // Show edit input
+                                messageBubble.innerHTML = `
+                                    <textarea class="edit-message-input" id="editMessageInput_${message.id}">${escapeHtml(message.content)}</textarea>
+                                    <div class="edit-actions">
+                                        <button class="edit-btn save" onclick="saveEditedMessage('${message.id}')">Save</button>
+                                        <button class="edit-btn cancel" onclick="cancelEditMessage()">Cancel</button>
+                                    </div>
+                                `;
+                            } else {
+                                // Show formatted text
+                                const formattedContent = formatMessageText(message.content);
+                                messageBubble.innerHTML = `
+                                    ${moodIcon}
+                                    <div class="message-text formatted">${formattedContent}</div>
+                                `;
+                            }
+                            break;
+                            
+                        case 'image':
+                            messageBubble.innerHTML = `
+                                ${moodIcon}
+                                <img src="${message.content}" alt="Image" class="message-image" onclick="viewMedia('${message.content}', '${message.fileName || 'Image'}')">
+                                ${message.caption ? `<div class="message-text" style="margin-top: 8px;">${escapeHtml(message.caption)}</div>` : ''}
+                            `;
+                            break;
+                            
+                        case 'video':
+                            messageBubble.innerHTML = `
+                                ${moodIcon}
+                                <div class="message-video">
+                                    <video src="${message.content}" poster="${message.thumbnail}" style="width: 100%; border-radius: 8px;"></video>
+                                    <div class="video-play-btn" onclick="playVideo('${message.content}')">
+                                        <i class="fas fa-play"></i>
+                                    </div>
+                                </div>
+                                ${message.caption ? `<div class="message-text" style="margin-top: 8px;">${escapeHtml(message.caption)}</div>` : ''}
+                            `;
+                            break;
+                            
+                        case 'audio':
+                            const duration = message.duration || 0;
+                            const minutes = Math.floor(duration / 60);
+                            const seconds = Math.floor(duration % 60);
+                            
+                            messageBubble.innerHTML = `
+                                ${moodIcon}
+                                <div class="message-audio">
+                                    <button class="audio-play-btn" onclick="playAudio('${message.id}', '${message.content}', ${duration})">
+                                        <i class="fas fa-play"></i>
+                                    </button>
+                                    <div class="audio-waveform" id="waveform_${message.id}"></div>
+                                    <div class="audio-duration" id="duration_${message.id}">${minutes}:${seconds.toString().padStart(2, '0')}</div>
+                                    <div class="audio-progress-bar">
+                                        <div class="audio-progress" id="progress_${message.id}"></div>
+                                    </div>
+                                </div>
+                            `;
+                            break;
+                            
+                        case 'file':
+                            const fileSize = formatFileSize(message.fileSize || 0);
+                            messageBubble.innerHTML = `
+                                ${moodIcon}
+                                <div class="message-file">
+                                    <i class="fas fa-file file-icon"></i>
+                                    <div class="file-info">
+                                        <div class="file-name">${escapeHtml(message.fileName)}</div>
+                                        <div class="file-size">${fileSize}</div>
+                                    </div>
+                                    <button class="file-download" onclick="downloadFile('${message.content}', '${message.fileName}')">
+                                        <i class="fas fa-download"></i>
+                                    </button>
+                                </div>
+                            `;
+                            break;
+                            
+                        case 'location':
+                            messageBubble.innerHTML = `
+                                ${moodIcon}
+                                <div class="message-location" onclick="openLocation('${message.latitude}', '${message.longitude}')">
+                                    <div class="location-map">
+                                        <i class="fas fa-map-marker-alt" style="font-size: 32px;"></i>
+                                    </div>
+                                    <div class="location-info">
+                                        <div class="location-name">${message.locationName || 'Location'}</div>
+                                        <div class="location-address">${message.address || 'Tap to view'}</div>
+                                    </div>
+                                </div>
+                            `;
+                            break;
+                            
+                        case 'poll':
+                            const totalVotes = message.options?.reduce((sum, opt) => sum + (opt.votes || 0), 0) || 0;
+                            messageBubble.innerHTML = `
+                                ${moodIcon}
+                                <div class="message-poll">
+                                    <div class="poll-question">${escapeHtml(message.question)}</div>
+                                    <div class="poll-options">
+                                        ${message.options?.map((option, idx) => {
+                                            const percentage = totalVotes > 0 ? (option.votes || 0) / totalVotes * 100 : 0;
+                                            const isSelected = message.userVote === idx;
+                                            return `
+                                                <div class="poll-option ${isSelected ? 'selected' : ''}" onclick="voteInPoll('${message.id}', ${idx})">
+                                                    <div class="poll-bar" style="width: ${percentage}%"></div>
+                                                    <div class="poll-text">
+                                                        <span>${escapeHtml(option.text)}</span>
+                                                        <span class="poll-percentage">${percentage.toFixed(0)}% (${option.votes || 0})</span>
+                                                    </div>
+                                                </div>
+                                            `;
+                                        }).join('')}
+                                    </div>
+                                    <div style="font-size: 12px; color: var(--text-secondary); margin-top: 8px;">
+                                        ${totalVotes} vote${totalVotes !== 1 ? 's' : ''}
+                                    </div>
+                                </div>
+                            `;
+                            break;
+                    }
+                    
+                    // Add reply wrapper if needed (with context label)
+                    if (message.replyTo && !message.deleted) {
+                        const replyWrapper = document.createElement('div');
+                        replyWrapper.className = 'reply-wrapper';
+                        const replyText = message.replyTo.content || 'Media message';
+                        const contextLabel = message.replyTo.contextLabel || 'Replying to:';
+                        replyWrapper.innerHTML = `
+                            <div class="reply-sender">${contextLabel} ${message.replyTo.senderName}</div>
+                            <div class="reply-text">${escapeHtml(replyText.substring(0, 100))}${replyText.length > 100 ? '...' : ''}</div>
+                        `;
+                        messageBubble.insertBefore(replyWrapper, messageBubble.firstChild);
+                    }
+                    
+                    // Add message metadata
+                    const messageMeta = document.createElement('div');
+                    messageMeta.className = 'message-meta';
+                    
+                    const timeStr = formatTime(message.timestamp);
+                    let statusIcon = '';
+                    
+                    if (message.senderId === currentUser.uid) {
+                        if (message.status === 'read') {
+                            statusIcon = '<i class="fas fa-check-double" style="color: #34c759;"></i>';
+                        } else if (message.status === 'delivered') {
+                            statusIcon = '<i class="fas fa-check-double"></i>';
+                        } else if (message.status === 'sent') {
+                            statusIcon = '<i class="fas fa-check"></i>';
+                        } else {
+                            statusIcon = '<i class="far fa-clock"></i>';
+                        }
+                    }
+                    
+                    messageMeta.innerHTML = `
+                        <span class="message-time">${timeStr}</span>
+                        ${statusIcon ? `<span class="message-status">${statusIcon}</span>` : ''}
                     `;
+                    
+                    messageBubble.appendChild(messageMeta);
+                    
+                    // Add reactions if present
+                    if (message.reactions && Object.keys(message.reactions).length > 0) {
+                        const reactionsContainer = document.createElement('div');
+                        reactionsContainer.className = 'message-reactions';
+                        
+                        Object.entries(message.reactions).forEach(([emoji, users]) => {
+                            if (users && users.length > 0) {
+                                const reaction = document.createElement('div');
+                                reaction.className = `reaction ${users.includes(currentUser.uid) ? 'active' : ''}`;
+                                reaction.innerHTML = `
+                                    <span>${emoji}</span>
+                                    <span class="reaction-count">${users.length}</span>
+                                `;
+                                reaction.onclick = () => addReaction(message.id, emoji, true); // silent reaction
+                                reactionsContainer.appendChild(reaction);
+                            }
+                        });
+                        
+                        messageBubble.appendChild(reactionsContainer);
+                    }
+                    
+                    // Add thread indicator if needed
+                    if (message.threadCount && message.threadCount > 0) {
+                        const threadIndicator = document.createElement('div');
+                        threadIndicator.className = 'thread-indicator';
+                        threadIndicator.innerHTML = `
+                            <i class="fas fa-comment-alt"></i>
+                            <span>${message.threadCount} repl${message.threadCount === 1 ? 'y' : 'ies'}</span>
+                            <span class="thread-count">${message.threadCount}</span>
+                        `;
+                        threadIndicator.onclick = () => openThread(message.id);
+                        messageBubble.appendChild(threadIndicator);
+                    }
+                    
+                    // Add edit indicator if message was edited
+                    if (message.edited) {
+                        const editIndicator = document.createElement('div');
+                        editIndicator.className = 'message-meta';
+                        editIndicator.innerHTML = '<span style="font-size: 10px; opacity: 0.7;">Edited</span>';
+                        messageBubble.appendChild(editIndicator);
+                    }
                     
                     messageItem.appendChild(messageBubble);
-                    messageGroup.appendChild(messageItem);
-                    return;
-                }
-                
-                // Add mood icon if present
-                let moodIcon = '';
-                if (message.mood) {
-                    moodIcon = `<span style="margin-right: 5px; font-size: 16px;">${message.mood}</span>`;
-                }
-                
-                // Render based on message type
-                switch (message.type) {
-                    case 'text':
-                        if (editingMessageId === message.id) {
-                            // Show edit input
-                            messageBubble.innerHTML = `
-                                <textarea class="edit-message-input" id="editMessageInput_${message.id}">${escapeHtml(message.content)}</textarea>
-                                <div class="edit-actions">
-                                    <button class="edit-btn save" onclick="saveEditedMessage('${message.id}')">Save</button>
-                                    <button class="edit-btn cancel" onclick="cancelEditMessage()">Cancel</button>
-                                </div>
-                            `;
-                        } else {
-                            // Show formatted text
-                            const formattedContent = formatMessageText(message.content);
-                            messageBubble.innerHTML = `
-                                <div class="message-text formatted">${moodIcon}${formattedContent}</div>
-                            `;
-                        }
-                        break;
-                        
-                    case 'image':
-                        messageBubble.innerHTML = `
-                            <img src="${message.content}" alt="Image" class="message-image" onclick="viewMedia('${message.content}', '${message.fileName || 'Image'}')">
-                            ${message.caption ? `<div class="message-text" style="margin-top: 8px;">${escapeHtml(message.caption)}</div>` : ''}
-                        `;
-                        break;
-                        
-                    case 'video':
-                        messageBubble.innerHTML = `
-                            <div class="message-video">
-                                <video src="${message.content}" poster="${message.thumbnail}" style="width: 100%; border-radius: 8px;"></video>
-                                <div class="video-play-btn" onclick="playVideo('${message.content}')">
-                                    <i class="fas fa-play"></i>
-                                </div>
-                            </div>
-                            ${message.caption ? `<div class="message-text" style="margin-top: 8px;">${escapeHtml(message.caption)}</div>` : ''}
-                        `;
-                        break;
-                        
-                    case 'audio':
-                        const duration = message.duration || 0;
-                        const minutes = Math.floor(duration / 60);
-                        const seconds = Math.floor(duration % 60);
-                        
-                        messageBubble.innerHTML = `
-                            <div class="message-audio">
-                                <button class="audio-play-btn" onclick="playAudio('${message.id}', '${message.content}', ${duration})">
-                                    <i class="fas fa-play"></i>
-                                </button>
-                                <div class="audio-waveform" id="waveform_${message.id}"></div>
-                                <div class="audio-duration" id="duration_${message.id}">${minutes}:${seconds.toString().padStart(2, '0')}</div>
-                                <div class="audio-progress-bar">
-                                    <div class="audio-progress" id="progress_${message.id}"></div>
-                                </div>
-                            </div>
-                        `;
-                        break;
-                        
-                    case 'file':
-                        const fileSize = formatFileSize(message.fileSize || 0);
-                        messageBubble.innerHTML = `
-                            <div class="message-file">
-                                <i class="fas fa-file file-icon"></i>
-                                <div class="file-info">
-                                    <div class="file-name">${escapeHtml(message.fileName)}</div>
-                                    <div class="file-size">${fileSize}</div>
-                                </div>
-                                <button class="file-download" onclick="downloadFile('${message.content}', '${message.fileName}')">
-                                    <i class="fas fa-download"></i>
-                                </button>
-                            </div>
-                        `;
-                        break;
-                        
-                    case 'location':
-                        messageBubble.innerHTML = `
-                            <div class="message-location" onclick="openLocation('${message.latitude}', '${message.longitude}')">
-                                <div class="location-map">
-                                    <i class="fas fa-map-marker-alt" style="font-size: 32px;"></i>
-                                </div>
-                                <div class="location-info">
-                                    <div class="location-name">${message.locationName || 'Location'}</div>
-                                    <div class="location-address">${message.address || 'Tap to view'}</div>
-                                </div>
-                            </div>
-                        `;
-                        break;
-                        
-                    case 'poll':
-                        const totalVotes = message.options?.reduce((sum, opt) => sum + (opt.votes || 0), 0) || 0;
-                        messageBubble.innerHTML = `
-                            <div class="message-poll">
-                                <div class="poll-question">${escapeHtml(message.question)}</div>
-                                <div class="poll-options">
-                                    ${message.options?.map((option, idx) => {
-                                        const percentage = totalVotes > 0 ? (option.votes || 0) / totalVotes * 100 : 0;
-                                        const isSelected = message.userVote === idx;
-                                        return `
-                                            <div class="poll-option ${isSelected ? 'selected' : ''}" onclick="voteInPoll('${message.id}', ${idx})">
-                                                <div class="poll-bar" style="width: ${percentage}%"></div>
-                                                <div class="poll-text">
-                                                    <span>${escapeHtml(option.text)}</span>
-                                                    <span class="poll-percentage">${percentage.toFixed(0)}% (${option.votes || 0})</span>
-                                                </div>
-                                            </div>
-                                        `;
-                                    }).join('')}
-                                </div>
-                                <div style="font-size: 12px; color: var(--text-secondary); margin-top: 8px;">
-                                    ${totalVotes} vote${totalVotes !== 1 ? 's' : ''}
-                                </div>
-                            </div>
-                        `;
-                        break;
-                }
-                
-                // Add reply wrapper if needed
-                if (message.replyTo && !message.deleted) {
-                    const replyWrapper = document.createElement('div');
-                    replyWrapper.className = 'reply-wrapper';
-                    const replyText = message.replyTo.content || 'Media message';
-                    replyWrapper.innerHTML = `
-                        <div class="reply-sender">${message.replyTo.senderName}</div>
-                        <div class="reply-text">${escapeHtml(replyText.substring(0, 100))}${replyText.length > 100 ? '...' : ''}</div>
-                    `;
-                    messageBubble.insertBefore(replyWrapper, messageBubble.firstChild);
-                }
-                
-                // Add message metadata
-                const messageMeta = document.createElement('div');
-                messageMeta.className = 'message-meta';
-                
-                const timeStr = formatTime(message.timestamp);
-                let statusIcon = '';
-                
-                if (message.senderId === currentUser.uid) {
-                    if (message.status === 'read') {
-                        statusIcon = '<i class="fas fa-check-double" style="color: #34c759;"></i>';
-                    } else if (message.status === 'delivered') {
-                        statusIcon = '<i class="fas fa-check-double"></i>';
-                    } else if (message.status === 'sent') {
-                        statusIcon = '<i class="fas fa-check"></i>';
-                    } else {
-                        statusIcon = '<i class="far fa-clock"></i>';
-                    }
-                }
-                
-                messageMeta.innerHTML = `
-                    <span class="message-time">${timeStr}</span>
-                    ${statusIcon ? `<span class="message-status">${statusIcon}</span>` : ''}
-                `;
-                
-                messageBubble.appendChild(messageMeta);
-                
-                // Add reactions if present
-                if (message.reactions && Object.keys(message.reactions).length > 0) {
-                    const reactionsContainer = document.createElement('div');
-                    reactionsContainer.className = 'message-reactions';
+                    messageGroupElement.appendChild(messageItem);
                     
-                    Object.entries(message.reactions).forEach(([emoji, users]) => {
-                        if (users && users.length > 0) {
-                            const reaction = document.createElement('div');
-                            reaction.className = `reaction ${users.includes(currentUser.uid) ? 'active' : ''}`;
-                            reaction.innerHTML = `
-                                <span>${emoji}</span>
-                                <span class="reaction-count">${users.length}</span>
-                            `;
-                            reaction.onclick = () => addReaction(message.id, emoji);
-                            reactionsContainer.appendChild(reaction);
-                        }
+                    // Add context menu
+                    messageItem.addEventListener('contextmenu', (e) => {
+                        e.preventDefault();
+                        showMessageActions(message, e.clientX, e.clientY);
                     });
                     
-                    messageBubble.appendChild(reactionsContainer);
-                }
-                
-                // Add thread indicator if needed
-                if (message.threadCount && message.threadCount > 0) {
-                    const threadIndicator = document.createElement('div');
-                    threadIndicator.className = 'thread-indicator';
-                    threadIndicator.innerHTML = `
-                        <i class="fas fa-comment-alt"></i>
-                        <span>${message.threadCount} repl${message.threadCount === 1 ? 'y' : 'ies'}</span>
-                        <span class="thread-count">${message.threadCount}</span>
-                    `;
-                    threadIndicator.onclick = () => openThread(message.id);
-                    messageBubble.appendChild(threadIndicator);
-                }
-                
-                // Add edit indicator if message was edited
-                if (message.edited) {
-                    const editIndicator = document.createElement('div');
-                    editIndicator.className = 'message-meta';
-                    editIndicator.innerHTML = '<span style="font-size: 10px; opacity: 0.7;">Edited</span>';
-                    messageBubble.appendChild(editIndicator);
-                }
-                
-                messageItem.appendChild(messageBubble);
-                messageGroup.appendChild(messageItem);
-                
-                // Add context menu
-                messageItem.addEventListener('contextmenu', (e) => {
-                    e.preventDefault();
-                    showMessageActions(message, e.clientX, e.clientY);
-                });
-                
-                messageItem.addEventListener('click', (e) => {
-                    if (!e.target.closest('.reaction') && !e.target.closest('.thread-indicator') && 
-                        !e.target.closest('.video-play-btn') && !e.target.closest('.audio-play-btn') &&
-                        !e.target.closest('.file-download') && !e.target.closest('.poll-option') &&
-                        !e.target.closest('.message-location') && !e.target.closest('.edit-btn')) {
-                        showMessageActions(message, e.clientX, e.clientY);
-                    }
+                    messageItem.addEventListener('click', (e) => {
+                        if (!e.target.closest('.reaction') && !e.target.closest('.thread-indicator') && 
+                            !e.target.closest('.video-play-btn') && !e.target.closest('.audio-play-btn') &&
+                            !e.target.closest('.file-download') && !e.target.closest('.poll-option') &&
+                            !e.target.closest('.message-location') && !e.target.closest('.edit-btn')) {
+                            
+                            // Handle view-once messages
+                            if (message.viewOnce && !message.viewed) {
+                                markMessageAsViewed(message.id);
+                            }
+                            
+                            showMessageActions(message, e.clientX, e.clientY);
+                        }
+                    });
                 });
             });
             
             // Initialize audio waveforms
             initializeAudioWaveforms();
+            
+            // Update jump button visibility
+            updateJumpButtonVisibility();
+        }
+        
+        // NEW: Mark view-once message as viewed
+        function markMessageAsViewed(messageId) {
+            const messageIndex = messages.findIndex(m => m.id === messageId);
+            if (messageIndex !== -1) {
+                messages[messageIndex].viewed = true;
+                messages[messageIndex].viewedAt = new Date();
+                
+                // Save to localStorage
+                localStorage.setItem(`${LOCAL_STORAGE_KEYS.MESSAGES}${currentChat.id}`, JSON.stringify(messages));
+                
+                // Update view-once messages list
+                const viewedMessages = JSON.parse(localStorage.getItem(LOCAL_STORAGE_KEYS.VIEW_ONCE_MESSAGES) || '[]');
+                viewedMessages.push({
+                    messageId: messageId,
+                    viewedAt: new Date()
+                });
+                localStorage.setItem(LOCAL_STORAGE_KEYS.VIEW_ONCE_MESSAGES, JSON.stringify(viewedMessages));
+                
+                // Re-render
+                renderMessages();
+            }
         }
         
         function formatMessageText(text) {
@@ -3352,6 +3986,7 @@
             });
         }
         
+        // NEW: Enhanced sendMessage function with all features
         async function sendMessage(content, type = 'text', options = {}) {
             if (!currentChat || !currentUser) {
                 showNotification('Please select a chat first', 'warning');
@@ -3363,6 +3998,12 @@
                 return;
             }
             
+            // Check if chat is read-only
+            if (readOnlyMode || currentChat.readOnly) {
+                showNotification('Chat is read-only', 'warning');
+                return;
+            }
+            
             try {
                 const messageData = {
                     id: 'temp_' + Date.now(),
@@ -3371,25 +4012,38 @@
                     content: content,
                     type: type,
                     timestamp: new Date(),
-                    status: 'sent',
+                    status: 'sending',
                     chatId: currentChat.id,
                     edited: false,
                     deleted: false,
                     ...options
                 };
                 
-                // Add reply info if replying to a message
+                // Add reply info if replying to a message (with context label)
                 if (replyToMessage) {
                     messageData.replyTo = {
                         messageId: replyToMessage.id,
                         senderId: replyToMessage.senderId,
                         senderName: replyToMessage.senderName,
                         content: replyToMessage.content,
-                        type: replyToMessage.type
+                        type: replyToMessage.type,
+                        contextLabel: 'Replying to:'
                     };
                 }
                 
-                // Add to local messages
+                // Check if we're offline
+                const isOnline = navigator.onLine;
+                
+                if (!isOnline) {
+                    // Add to offline queue
+                    offlineQueue.push(messageData);
+                    localStorage.setItem(LOCAL_STORAGE_KEYS.OFFLINE_QUEUE, JSON.stringify(offlineQueue));
+                    
+                    // Show offline sent notification
+                    showNotification('Message queued for sending', 'info');
+                }
+                
+                // Add to local messages immediately for instant feedback
                 messages.push(messageData);
                 
                 renderMessages();
@@ -3400,26 +4054,151 @@
                 messageInput.style.height = 'auto';
                 replyToMessage = null;
                 
-                // Save to localStorage
+                // Clear draft
+                saveMessageDraft();
+                
+                // Save to localStorage for offline access
                 localStorage.setItem(`${LOCAL_STORAGE_KEYS.MESSAGES}${currentChat.id}`, JSON.stringify(messages));
                 
                 // Update chat list
                 updateChatLastMessage(content, type);
                 
-                // Send to API
-                const savedMessage = await sendMessageToAPI(messageData);
-                
-                // Update message with real ID and status
-                const messageIndex = messages.findIndex(m => m.id === messageData.id);
-                if (messageIndex !== -1 && savedMessage) {
-                    messages[messageIndex].id = savedMessage.id;
-                    messages[messageIndex].status = 'sent';
-                    localStorage.setItem(`${LOCAL_STORAGE_KEYS.MESSAGES}${currentChat.id}`, JSON.stringify(messages));
+                if (isOnline) {
+                    // Send to API
+                    const savedMessage = await sendMessageToAPI(messageData);
+                    
+                    // Update message with real ID and status
+                    const messageIndex = messages.findIndex(m => m.id === messageData.id);
+                    if (messageIndex !== -1 && savedMessage) {
+                        messages[messageIndex].id = savedMessage.id;
+                        messages[messageIndex].status = 'sent';
+                        localStorage.setItem(`${LOCAL_STORAGE_KEYS.MESSAGES}${currentChat.id}`, JSON.stringify(messages));
+                    }
                 }
                 
             } catch (error) {
                 console.error('Error sending message:', error);
-                showNotification('Error sending message', 'error');
+                // Don't show error for offline mode
+                if (navigator.onLine) {
+                    showNotification('Error sending message', 'error');
+                }
+            }
+        }
+        
+        // NEW: Send message with special options
+        async function sendMessageWithOptions(content, options = {}) {
+            const messageOptions = {
+                viewOnce: options.viewOnce || false,
+                expiresAt: options.expiresAt || null,
+                type: options.type || 'text',
+                isNote: options.isNote || false
+            };
+            
+            // Handle note to self
+            if (options.isNote) {
+                messageOptions.type = 'note';
+                // Create or find notes chat
+                let notesChat = chats.find(chat => chat.type === 'note');
+                if (!notesChat) {
+                    notesChat = {
+                        id: 'notes_' + Date.now(),
+                        friendId: currentUser.uid,
+                        friendName: 'Notes',
+                        friendUsername: 'notes',
+                        friendAvatar: '',
+                        lastMessage: content,
+                        lastMessageAt: new Date(),
+                        unreadCount: 0,
+                        type: 'note',
+                        archived: false,
+                        blocked: false
+                    };
+                    chats.push(notesChat);
+                    localStorage.setItem(LOCAL_STORAGE_KEYS.CHATS, JSON.stringify(chats));
+                    renderChatsList();
+                }
+                
+                // Switch to notes chat
+                currentChat = notesChat;
+                await loadMessages();
+            }
+            
+            await sendMessage(content, messageOptions.type, messageOptions);
+        }
+        
+        // NEW: Schedule a message
+        async function scheduleMessage(content, scheduleTime, options = {}) {
+            if (!scheduleTime || scheduleTime <= Date.now()) {
+                await sendMessageWithOptions(content, options);
+                return;
+            }
+            
+            const scheduledMessage = {
+                id: 'scheduled_' + Date.now(),
+                content: content,
+                scheduleTime: scheduleTime,
+                chatId: currentChat.id,
+                options: options,
+                status: 'scheduled'
+            };
+            
+            scheduledMessages.push(scheduledMessage);
+            localStorage.setItem(LOCAL_STORAGE_KEYS.SCHEDULED_MESSAGES, JSON.stringify(scheduledMessages));
+            
+            showNotification(`Message scheduled for ${formatTime(scheduleTime)}`, 'success');
+        }
+        
+        // NEW: Check and send scheduled messages
+        function checkScheduledMessages() {
+            const now = Date.now();
+            const toSend = [];
+            
+            scheduledMessages = scheduledMessages.filter(msg => {
+                if (msg.scheduleTime <= now && msg.status === 'scheduled') {
+                    toSend.push(msg);
+                    return false;
+                }
+                return true;
+            });
+            
+            // Send scheduled messages
+            toSend.forEach(async (msg) => {
+                if (msg.chatId === currentChat?.id) {
+                    await sendMessageWithOptions(msg.content, msg.options);
+                }
+                // Update in localStorage
+                localStorage.setItem(LOCAL_STORAGE_KEYS.SCHEDULED_MESSAGES, JSON.stringify(scheduledMessages));
+            });
+            
+            // Schedule next check
+            setTimeout(checkScheduledMessages, 60000); // Check every minute
+        }
+        
+        // NEW: Check and send offline queue
+        async function checkOfflineQueue() {
+            if (!navigator.onLine || offlineQueue.length === 0) return;
+            
+            const failedMessages = [];
+            
+            for (const message of offlineQueue) {
+                try {
+                    await sendMessageToAPI(message);
+                    // Remove from local messages if it's a temp message
+                    const localIndex = messages.findIndex(m => m.id === message.id);
+                    if (localIndex !== -1) {
+                        messages.splice(localIndex, 1);
+                    }
+                } catch (error) {
+                    console.error('Failed to send queued message:', error);
+                    failedMessages.push(message);
+                }
+            }
+            
+            offlineQueue = failedMessages;
+            localStorage.setItem(LOCAL_STORAGE_KEYS.OFFLINE_QUEUE, JSON.stringify(offlineQueue));
+            
+            if (failedMessages.length === 0) {
+                showNotification('All queued messages sent', 'success');
             }
         }
         
@@ -3427,7 +4206,9 @@
             if (!currentChat) return null;
             
             try {
-                const response = await api(`/api/chats/${currentChat.id}/messages`, 'POST', {
+                // Use new API function from api.js
+                const response = await api('/api/messages/send', 'POST', {
+                    chatId: currentChat.id,
                     content: messageData.content,
                     type: messageData.type,
                     replyTo: messageData.replyTo,
@@ -3441,10 +4222,12 @@
                     locationName: messageData.locationName,
                     address: messageData.address,
                     question: messageData.question,
-                    options: messageData.options
+                    options: messageData.options,
+                    viewOnce: messageData.viewOnce,
+                    expiresAt: messageData.expiresAt
                 });
                 
-                if (response.success && response.message) {
+                if (response && response.message) {
                     messageData.id = response.message.id;
                     return messageData;
                 }
@@ -3455,6 +4238,36 @@
                 console.error('Error sending message to API:', error);
                 throw error;
             }
+        }
+        
+        // NEW: Multi-send functionality
+        async function sendToMultipleChats(content, chatIds) {
+            if (!content || chatIds.length === 0) return;
+            
+            const results = [];
+            
+            for (const chatId of chatIds) {
+                try {
+                    const response = await api('/api/messages/send', 'POST', {
+                        chatId: chatId,
+                        content: content,
+                        type: 'text',
+                        isBroadcast: true // Mark as broadcast to avoid "forwarded" label
+                    });
+                    
+                    if (response && response.message) {
+                        results.push({ chatId, success: true });
+                    } else {
+                        results.push({ chatId, success: false });
+                    }
+                } catch (error) {
+                    console.error(`Error sending to chat ${chatId}:`, error);
+                    results.push({ chatId, success: false });
+                }
+            }
+            
+            const successCount = results.filter(r => r.success).length;
+            showNotification(`Sent to ${successCount} of ${chatIds.length} chats`, 'success');
         }
         
         async function editMessage(messageId, newContent) {
@@ -3573,6 +4386,9 @@
             const editBtn = actionsMenu.querySelector('[data-action="edit"]');
             const deleteBtn = actionsMenu.querySelector('[data-action="delete"]');
             const reportBtn = actionsMenu.querySelector('[data-action="report"]');
+            const reactLikeBtn = actionsMenu.querySelector('[data-action="react-like"]');
+            const reactLoveBtn = actionsMenu.querySelector('[data-action="react-love"]');
+            const reactLaughBtn = actionsMenu.querySelector('[data-action="react-laugh"]');
             
             // Check if message is starred
             const starredMessages = JSON.parse(localStorage.getItem(LOCAL_STORAGE_KEYS.STARRED_MESSAGES) || '{}');
@@ -3585,7 +4401,7 @@
             }
             
             // Only show edit button for user's own text messages that aren't deleted
-            if (message.senderId === currentUser.uid && message.type === 'text' && !message.deleted) {
+            if (message.senderId === currentUser.uid && (message.type === 'text' || message.type === 'note') && !message.deleted) {
                 editBtn.style.display = 'flex';
             } else {
                 editBtn.style.display = 'none';
@@ -3599,10 +4415,21 @@
             }
             
             // Only show report button for other people's messages
-            if (message.senderId !== currentUser.uid) {
+            if (message.senderId !== currentUser.uid && message.type !== 'note') {
                 reportBtn.style.display = 'flex';
             } else {
                 reportBtn.style.display = 'none';
+            }
+            
+            // Show reaction buttons for silent reactions
+            if (silentReactionsEnabled && !message.deleted) {
+                reactLikeBtn.style.display = 'flex';
+                reactLoveBtn.style.display = 'flex';
+                reactLaughBtn.style.display = 'flex';
+            } else {
+                reactLikeBtn.style.display = 'none';
+                reactLoveBtn.style.display = 'none';
+                reactLaughBtn.style.display = 'none';
             }
             
             // Close menu when clicking elsewhere
@@ -3628,7 +4455,7 @@
                     break;
                     
                 case 'edit':
-                    if (selectedMessage.senderId === currentUser.uid && selectedMessage.type === 'text') {
+                    if (selectedMessage.senderId === currentUser.uid && (selectedMessage.type === 'text' || selectedMessage.type === 'note')) {
                         editingMessageId = selectedMessage.id;
                         renderMessages();
                         messageInput.focus();
@@ -3636,11 +4463,11 @@
                     break;
                     
                 case 'forward':
-                    showNotification('Forward functionality coming soon', 'info');
+                    showForwardMessage(selectedMessage);
                     break;
                     
                 case 'copy':
-                    if (selectedMessage.type === 'text') {
+                    if (selectedMessage.type === 'text' || selectedMessage.type === 'note') {
                         navigator.clipboard.writeText(selectedMessage.content);
                         showNotification('Copied to clipboard', 'success');
                     } else if (selectedMessage.type === 'image' || selectedMessage.type === 'file') {
@@ -3657,6 +4484,18 @@
                     showReportModal(selectedMessage);
                     break;
                     
+                case 'react-like':
+                    addReaction(selectedMessage.id, '👍', true); // silent reaction
+                    break;
+                    
+                case 'react-love':
+                    addReaction(selectedMessage.id, '❤️', true); // silent reaction
+                    break;
+                    
+                case 'react-laugh':
+                    addReaction(selectedMessage.id, '😂', true); // silent reaction
+                    break;
+                    
                 case 'delete':
                     const forEveryone = selectedMessage.senderId === currentUser.uid;
                     if (confirm(`Delete this message${forEveryone ? ' for everyone?' : ' for you?'}`)) {
@@ -3670,6 +4509,14 @@
             }
             
             closeMessageActions();
+        }
+        
+        // NEW: Show forward message interface
+        function showForwardMessage(message) {
+            // For simplicity, just copy to clipboard with forward context
+            const forwardText = `[Forwarded] ${message.content}`;
+            navigator.clipboard.writeText(forwardText);
+            showNotification('Message copied for forwarding', 'success');
         }
         
         function toggleStarMessage(messageId) {
@@ -3699,6 +4546,8 @@ Message Information:
 Sent: ${formatDateTime(message.timestamp)}
 ${message.edited ? `Edited: ${formatDateTime(message.editedAt)}\n` : ''}
 ${message.deleted ? `Deleted: ${formatDateTime(message.deletedAt)}\n` : ''}
+${message.viewOnce ? `View once: ${message.viewed ? 'Viewed' : 'Not viewed'}\n` : ''}
+${message.expiresAt ? `Expires: ${formatDateTime(message.expiresAt)}\n` : ''}
 Status: ${message.status || 'unknown'}
 Type: ${message.type}
 ${message.fileName ? `File: ${message.fileName}\n` : ''}
@@ -3758,7 +4607,7 @@ Message ID: ${message.id.substring(0, 8)}...
             }
         }
         
-        async function addReaction(messageId, emoji) {
+        async function addReaction(messageId, emoji, silent = false) {
             if (!currentChat || !currentUser) return;
             
             try {
@@ -3793,14 +4642,20 @@ Message ID: ${message.id.substring(0, 8)}...
                 // Save locally
                 localStorage.setItem(`${LOCAL_STORAGE_KEYS.MESSAGES}${currentChat.id}`, JSON.stringify(messages));
                 
-                // Update API
-                await api(`/api/messages/${messageId}/reactions`, 'POST', {
-                    emoji: emoji,
-                    action: userIndex > -1 ? 'remove' : 'add'
-                });
+                // Update API (silently if requested)
+                if (!silent) {
+                    await api(`/api/messages/${messageId}/reactions`, 'POST', {
+                        emoji: emoji,
+                        action: userIndex > -1 ? 'remove' : 'add'
+                    });
+                }
                 
                 // Re-render messages
                 renderMessages();
+                
+                if (!silent) {
+                    showNotification(userIndex > -1 ? 'Reaction removed' : 'Reaction added', 'success');
+                }
                 
             } catch (error) {
                 console.error('Error adding reaction:', error);
@@ -3909,6 +4764,75 @@ Message ID: ${message.id.substring(0, 8)}...
                 activeFormattingTags.add(tag);
                 document.querySelector(`.format-btn[data-tag="${tag}"]`).classList.add('active');
             }
+        }
+        
+        // NEW: Setup scroll detection for jump button
+        function setupScrollDetection() {
+            messagesContainer.addEventListener('scroll', updateJumpButtonVisibility);
+        }
+        
+        // NEW: Update jump button visibility
+        function updateJumpButtonVisibility() {
+            const container = messagesContainer;
+            const scrollBottom = container.scrollHeight - container.scrollTop - container.clientHeight;
+            
+            if (scrollBottom > 300) {
+                jumpToLatestBtn.classList.add('visible');
+            } else {
+                jumpToLatestBtn.classList.remove('visible');
+            }
+        }
+        
+        // NEW: Jump to latest messages
+        function jumpToLatest() {
+            messagesContainer.scrollTop = messagesContainer.scrollHeight;
+            jumpToLatestBtn.classList.remove('visible');
+        }
+        
+        // NEW: In-chat search
+        function searchInChat(query) {
+            if (!query.trim()) {
+                searchResults.classList.remove('active');
+                return;
+            }
+            
+            const results = messages.filter(msg => 
+                !msg.deleted && 
+                msg.content && 
+                msg.content.toLowerCase().includes(query.toLowerCase())
+            );
+            
+            const resultsHtml = results.map(msg => `
+                <div class="search-result-item" onclick="scrollToMessage('${msg.id}')">
+                    <div style="font-weight: 500; margin-bottom: 4px;">
+                        ${msg.senderId === currentUser.uid ? 'You' : currentFriend?.displayName || 'Unknown'}
+                    </div>
+                    <div style="font-size: 13px; color: var(--text-secondary);">
+                        ${msg.content.substring(0, 100)}${msg.content.length > 100 ? '...' : ''}
+                    </div>
+                    <div style="font-size: 11px; color: var(--text-secondary); margin-top: 4px;">
+                        ${formatTime(msg.timestamp)}
+                    </div>
+                </div>
+            `).join('');
+            
+            searchResults.innerHTML = resultsHtml;
+            searchResults.classList.add('active');
+        }
+        
+        // NEW: Scroll to specific message
+        function scrollToMessage(messageId) {
+            const messageElement = document.querySelector(`[data-message-id="${messageId}"]`);
+            if (messageElement) {
+                messageElement.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                // Highlight the message
+                messageElement.style.backgroundColor = 'rgba(0, 132, 255, 0.1)';
+                setTimeout(() => {
+                    messageElement.style.backgroundColor = '';
+                }, 2000);
+            }
+            searchResults.classList.remove('active');
+            chatSearchBar.classList.remove('active');
         }
         
         async function startRecording() {
@@ -4022,9 +4946,24 @@ Message ID: ${message.id.substring(0, 8)}...
                 case 'poll':
                     createPoll();
                     break;
+                case 'note':
+                    createNote();
+                    break;
             }
             
             attachmentOptions.classList.remove('active');
+        }
+        
+        // NEW: Create note to self
+        function createNote() {
+            const noteContent = messageInput.value.trim();
+            if (!noteContent) {
+                showNotification('Enter note content first', 'warning');
+                return;
+            }
+            
+            sendMessageWithOptions(noteContent, { isNote: true });
+            messageInput.value = '';
         }
         
         function selectImage() {
@@ -4289,11 +5228,11 @@ Message ID: ${message.id.substring(0, 8)}...
                     <div class="chat-info-title">Chat Information</div>
                     <div class="chat-info-item">
                         <div class="chat-info-label">Name</div>
-                        <div class="chat-info-value">${chat.friendName}</div>
+                        <div class="chat-info-value">${chat.type === 'note' ? 'Notes' : chat.friendName}</div>
                     </div>
                     <div class="chat-info-item">
                         <div class="chat-info-label">Status</div>
-                        <div class="chat-info-value">${chat.blocked ? 'Blocked' : chat.archived ? 'Archived' : 'Active'}</div>
+                        <div class="chat-info-value">${chat.blocked ? 'Blocked' : chat.archived ? 'Archived' : chat.type === 'note' ? 'Notes' : 'Active'}</div>
                     </div>
                     <div class="chat-info-item">
                         <div class="chat-info-label">Last Message</div>
@@ -4305,20 +5244,30 @@ Message ID: ${message.id.substring(0, 8)}...
                     </div>
                     <div class="chat-info-item">
                         <div class="chat-info-label">Chat Type</div>
-                        <div class="chat-info-value">${chat.type === 'group' ? 'Group' : 'Direct'}</div>
+                        <div class="chat-info-value">${chat.type === 'group' ? 'Group' : chat.type === 'note' ? 'Notes' : 'Direct'}</div>
+                    </div>
+                    <div class="chat-info-item">
+                        <div class="chat-info-label">Read Only</div>
+                        <div class="chat-info-value">${chat.readOnly ? 'Yes' : 'No'}</div>
                     </div>
                 </div>
                 
                 <div class="chat-info-section">
                     <div class="chat-info-title">Actions</div>
                     <div class="chat-info-actions">
+                        ${chat.type !== 'note' ? `
                         <button class="chat-info-btn primary" id="chatInfoBlockBtn">
                             <i class="fas fa-ban"></i>
                             ${chat.blocked ? 'Unblock User' : 'Block User'}
                         </button>
+                        ` : ''}
                         <button class="chat-info-btn warning" id="chatInfoArchiveBtn">
                             <i class="fas fa-archive"></i>
                             ${chat.archived ? 'Unarchive Chat' : 'Archive Chat'}
+                        </button>
+                        <button class="chat-info-btn warning" id="chatInfoReadOnlyBtn">
+                            <i class="fas fa-eye"></i>
+                            ${chat.readOnly ? 'Enable Writing' : 'Read Only'}
                         </button>
                         <button class="chat-info-btn danger" id="chatInfoClearBtn">
                             <i class="fas fa-trash"></i>
@@ -4329,19 +5278,26 @@ Message ID: ${message.id.substring(0, 8)}...
             `;
             
             // Update modal title
-            document.getElementById('chatInfoName').textContent = chat.friendName;
+            document.getElementById('chatInfoName').textContent = chat.type === 'note' ? 'Notes' : chat.friendName;
             
             // Show modal
             chatInfoModal.classList.add('active');
             
             // Add event listeners
-            document.getElementById('chatInfoBlockBtn').addEventListener('click', () => {
-                toggleBlockUser(chat.friendId, !chat.blocked);
-                chatInfoModal.classList.remove('active');
-            });
+            if (chat.type !== 'note') {
+                document.getElementById('chatInfoBlockBtn').addEventListener('click', () => {
+                    toggleBlockUser(chat.friendId, !chat.blocked);
+                    chatInfoModal.classList.remove('active');
+                });
+            }
             
             document.getElementById('chatInfoArchiveBtn').addEventListener('click', () => {
                 toggleArchiveChat(chat.id, !chat.archived);
+                chatInfoModal.classList.remove('active');
+            });
+            
+            document.getElementById('chatInfoReadOnlyBtn').addEventListener('click', () => {
+                toggleReadOnly(chat.id, !chat.readOnly);
                 chatInfoModal.classList.remove('active');
             });
             
@@ -4381,10 +5337,10 @@ Message ID: ${message.id.substring(0, 8)}...
         }
         
         function startBackgroundSync() {
-            // Sync with API every 30 seconds
+            // Sync with API every 30 seconds (silently)
             setInterval(async () => {
                 try {
-                    if (!isSyncing) {
+                    if (!isSyncing && navigator.onLine) {
                         isSyncing = true;
                         syncingIndicator.classList.add('active');
                         
@@ -4398,6 +5354,9 @@ Message ID: ${message.id.substring(0, 8)}...
                         if (currentChat) {
                             await loadMessagesFromAPI();
                         }
+                        
+                        // Check offline queue
+                        await checkOfflineQueue();
                         
                         isSyncing = false;
                         syncingIndicator.classList.remove('active');
@@ -4413,9 +5372,23 @@ Message ID: ${message.id.substring(0, 8)}...
             setInterval(() => {
                 if (currentChat) {
                     localStorage.setItem(`${LOCAL_STORAGE_KEYS.MESSAGES}${currentChat.id}`, JSON.stringify(messages));
+                    
+                    // Auto-save draft
+                    saveMessageDraft();
                 }
                 localStorage.setItem(LOCAL_STORAGE_KEYS.CHATS, JSON.stringify(chats));
             }, 60000);
+            
+            // Listen for online/offline events
+            window.addEventListener('online', () => {
+                // Silent reconnect, no banners
+                checkOfflineQueue();
+            });
+            
+            window.addEventListener('offline', () => {
+                // Silent offline mode, no banners
+                showNotification('Working offline', 'info');
+            });
         }
         
         function showNotification(message, type = 'success') {
@@ -4468,6 +5441,9 @@ Message ID: ${message.id.substring(0, 8)}...
             chatPanel.classList.add('hidden');
             contactsSidebar.classList.add('hidden');
             
+            // Save draft before leaving
+            saveMessageDraft();
+            
             // Clear current chat
             currentChat = null;
             currentFriend = null;
@@ -4475,6 +5451,10 @@ Message ID: ${message.id.substring(0, 8)}...
             // Update UI
             document.getElementById('chatFriendName').textContent = 'Select a chat';
             document.getElementById('chatStatusText').textContent = 'Tap on a chat to start messaging';
+            
+            // Hide search if active
+            chatSearchBar.classList.remove('active');
+            searchResults.classList.remove('active');
         }
         
         // Utility functions
@@ -4626,6 +5606,8 @@ Message ID: ${message.id.substring(0, 8)}...
         
         window.saveEditedMessage = saveEditedMessage;
         window.cancelEditMessage = cancelEditMessage;
+        window.jumpToLatest = jumpToLatest;
+        window.scrollToMessage = scrollToMessage;
         
         function setupEventListeners() {
             // Message input
@@ -4633,6 +5615,10 @@ Message ID: ${message.id.substring(0, 8)}...
                 // Auto-resize textarea
                 this.style.height = 'auto';
                 this.style.height = (this.scrollHeight) + 'px';
+                
+                // Auto-save draft (debounced)
+                clearTimeout(window.draftSaveTimeout);
+                window.draftSaveTimeout = setTimeout(saveMessageDraft, 1000);
             });
             
             messageInput.addEventListener('keydown', function(e) {
@@ -4657,6 +5643,56 @@ Message ID: ${message.id.substring(0, 8)}...
                 }
             });
             
+            // Send button with long press for options
+            let sendPressTimer;
+            sendButton.addEventListener('mousedown', () => {
+                sendPressTimer = setTimeout(() => {
+                    document.getElementById('sendOptions').classList.add('active');
+                }, 500);
+            });
+            
+            sendButton.addEventListener('mouseup', () => {
+                clearTimeout(sendPressTimer);
+            });
+            
+            sendButton.addEventListener('mouseleave', () => {
+                clearTimeout(sendPressTimer);
+            });
+            
+            // Send options
+            document.querySelectorAll('#sendOptions .action-item').forEach(item => {
+                item.addEventListener('click', (e) => {
+                    const action = e.currentTarget.dataset.action;
+                    const content = messageInput.value.trim();
+                    
+                    if (!content) {
+                        showNotification('Message cannot be empty', 'warning');
+                        return;
+                    }
+                    
+                    switch (action) {
+                        case 'send-normal':
+                            sendMessage(content);
+                            break;
+                        case 'send-view-once':
+                            sendMessageWithOptions(content, { viewOnce: true });
+                            break;
+                        case 'send-expire-1h':
+                            sendMessageWithOptions(content, { expiresAt: Date.now() + 3600000 });
+                            break;
+                        case 'send-expire-1d':
+                            sendMessageWithOptions(content, { expiresAt: Date.now() + 86400000 });
+                            break;
+                        case 'send-note':
+                            sendMessageWithOptions(content, { isNote: true });
+                            break;
+                    }
+                    
+                    messageInput.value = '';
+                    document.getElementById('sendOptions').classList.remove('active');
+                });
+            });
+            
             // Emoji button
             document.getElementById('emojiBtn').addEventListener('click', toggleEmojiPicker);
             
@@ -4669,6 +5705,51 @@ Message ID: ${message.id.substring(0, 8)}...
                     const tag = btn.dataset.tag;
                     applyFormatting(tag);
                 });
+            });
+            
+            // Schedule button
+            document.getElementById('scheduleBtn').addEventListener('click', () => {
+                const content = messageInput.value.trim();
+                if (!content) {
+                    showNotification('Enter message first', 'warning');
+                    return;
+                }
+                
+                document.getElementById('scheduleMessage').value = content;
+                scheduleModal.classList.add('active');
+            });
+            
+            // Confirm schedule button
+            document.getElementById('confirmScheduleBtn').addEventListener('click', () => {
+                const content = document.getElementById('scheduleMessage').value.trim();
+                const date = document.getElementById('scheduleDate').value;
+                const time = document.getElementById('scheduleTime').value;
+                const sendNow = document.getElementById('sendNow').checked;
+                
+                if (!content) {
+                    showNotification('Message cannot be empty', 'warning');
+                    return;
+                }
+                
+                if (sendNow || (!date && !time)) {
+                    sendMessage(content);
+                } else {
+                    const scheduleTime = new Date(`${date}T${time}`).getTime();
+                    if (scheduleTime <= Date.now()) {
+                        showNotification('Schedule time must be in the future', 'warning');
+                        return;
+                    }
+                    
+                    scheduleMessage(content, scheduleTime);
+                }
+                
+                scheduleModal.classList.remove('active');
+                messageInput.value = '';
+            });
+            
+            // Close schedule modal
+            document.getElementById('closeScheduleBtn').addEventListener('click', () => {
+                scheduleModal.classList.remove('active');
             });
             
             // Attach button (with press-and-hold for voice)
@@ -4722,6 +5803,26 @@ Message ID: ${message.id.substring(0, 8)}...
             // Cancel recording button
             document.getElementById('cancelRecordingBtn').addEventListener('click', cancelRecording);
             
+            // Jump to latest button
+            document.getElementById('jumpToLatestBtn').addEventListener('click', jumpToLatest);
+            
+            // In-chat search button
+            document.getElementById('chatSearchBtn').addEventListener('click', () => {
+                chatSearchBar.classList.add('active');
+                document.getElementById('inChatSearch').focus();
+            });
+            
+            // Close in-chat search
+            document.getElementById('closeChatSearchBtn').addEventListener('click', () => {
+                chatSearchBar.classList.remove('active');
+                searchResults.classList.remove('active');
+            });
+            
+            // In-chat search input
+            document.getElementById('inChatSearch').addEventListener('input', function() {
+                searchInChat(this.value);
+            });
+            
             // Back to chats button
             document.getElementById('backToChatsBtn').addEventListener('click', backToChatList);
             
@@ -4734,6 +5835,38 @@ Message ID: ${message.id.substring(0, 8)}...
             // New chat button
             document.getElementById('newChatBtn').addEventListener('click', () => {
                 window.location.href = '../friend.html?startChat=true';
+            });
+            
+            // Multi-send toggle button
+            document.getElementById('multiSendToggleBtn').addEventListener('click', () => {
+                multiSendPanel.classList.add('active');
+                loadMultiSendChats();
+            });
+            
+            // Close multi-send panel
+            document.getElementById('closeMultiSendBtn').addEventListener('click', () => {
+                multiSendPanel.classList.remove('active');
+            });
+            
+            // Multi-send button
+            document.getElementById('multiSendBtn').addEventListener('click', () => {
+                const content = document.getElementById('multiSendInput').value.trim();
+                if (!content) {
+                    showNotification('Enter message first', 'warning');
+                    return;
+                }
+                
+                const selectedChats = Array.from(document.querySelectorAll('#multiSendChatsList .chat-item.selected'))
+                    .map(item => item.dataset.chatId);
+                
+                if (selectedChats.length === 0) {
+                    showNotification('Select at least one chat', 'warning');
+                    return;
+                }
+                
+                sendToMultipleChats(content, selectedChats);
+                multiSendPanel.classList.remove('active');
+                document.getElementById('multiSendInput').value = '';
             });
             
             // Chat search
@@ -4772,6 +5905,21 @@ Message ID: ${message.id.substring(0, 8)}...
                     });
                 });
             }
+            
+            // Multi-send search
+            document.getElementById('multiSendSearch').addEventListener('input', function() {
+                const searchTerm = this.value.toLowerCase();
+                const chatItems = document.querySelectorAll('#multiSendChatsList .chat-item');
+                
+                chatItems.forEach(item => {
+                    const name = item.querySelector('.chat-item-name').textContent.toLowerCase();
+                    if (name.includes(searchTerm)) {
+                        item.style.display = 'flex';
+                    } else {
+                        item.style.display = 'none';
+                    }
+                });
+            });
             
             // Chat categories
             document.querySelectorAll('.category-tab').forEach(tab => {
@@ -4825,7 +5973,7 @@ Message ID: ${message.id.substring(0, 8)}...
             
             // Voice call button
             document.getElementById('voiceCallBtn').addEventListener('click', () => {
-                if (currentFriend) {
+                if (currentFriend && currentChat.type !== 'note') {
                     window.location.href = `../calls.html?call=${currentFriend.uid}&type=voice`;
                 } else {
                     showNotification('Please select a chat first', 'warning');
@@ -4834,7 +5982,7 @@ Message ID: ${message.id.substring(0, 8)}...
             
             // Video call button
             document.getElementById('videoCallBtn').addEventListener('click', () => {
-                if (currentFriend) {
+                if (currentFriend && currentChat.type !== 'note') {
                     window.location.href = `../calls.html?call=${currentFriend.uid}&type=video`;
                 } else {
                     showNotification('Please select a chat first', 'warning');
@@ -4853,11 +6001,12 @@ Message ID: ${message.id.substring(0, 8)}...
             // Before unload
             window.addEventListener('beforeunload', () => {
                 // Save all data
+                saveMessageDraft();
                 localStorage.setItem(LOCAL_STORAGE_KEYS.CHATS, JSON.stringify(chats));
                 if (currentChat) {
                     localStorage.setItem(`${LOCAL_STORAGE_KEYS.MESSAGES}${currentChat.id}`, JSON.stringify(messages));
                     localStorage.setItem(LOCAL_STORAGE_KEYS.CURRENT_CHAT, JSON.stringify({
-                        friendId: currentFriend.uid,
+                        friendId: currentFriend?.uid,
                         timestamp: Date.now()
                     }));
                 }
@@ -4874,13 +6023,91 @@ Message ID: ${message.id.substring(0, 8)}...
             if (Notification.permission === 'default') {
                 Notification.requestPermission();
             }
+            
+            // Online/offline detection (silent)
+            window.addEventListener('online', () => {
+                // Auto-sync without banners
+                checkOfflineQueue();
+                if (currentChat) {
+                    loadMessagesFromAPI();
+                }
+            });
+            
+            window.addEventListener('offline', () => {
+                // Silent offline mode
+                console.log('Working offline');
+            });
         }
         
-        console.log('Complete chat system initialized successfully');
+        // NEW: Load chats for multi-send
+        function loadMultiSendChats() {
+            const multiSendList = document.getElementById('multiSendChatsList');
+            if (!multiSendList) return;
+            
+            multiSendList.innerHTML = '';
+            
+            const availableChats = chats.filter(chat => 
+                !chat.archived && !chat.blocked && chat.type !== 'note'
+            );
+            
+            if (availableChats.length === 0) {
+                multiSendList.innerHTML = `
+                    <div class="empty-chat">
+                        <i class="fas fa-comments empty-chat-icon"></i>
+                        <div class="empty-chat-title">No chats available</div>
+                        <div class="empty-chat-message">Create chats to use multi-send</div>
+                    </div>
+                `;
+                return;
+            }
+            
+            availableChats.forEach(chat => {
+                const chatItem = document.createElement('div');
+                chatItem.className = 'chat-item';
+                chatItem.dataset.chatId = chat.id;
+                
+                const initials = chat.friendName.split(' ').map(word => word[0]).join('').toUpperCase().substring(0, 2);
+                
+                chatItem.innerHTML = `
+                    <div class="chat-item-avatar" ${chat.friendAvatar ? `style="background-image: url('${chat.friendAvatar}')"` : ''}>
+                        ${chat.friendAvatar ? '' : `<span>${initials}</span>`}
+                    </div>
+                    <div class="chat-item-info">
+                        <div class="chat-item-header">
+                            <div class="chat-item-name">${chat.friendName}</div>
+                            <div class="chat-item-checkbox">
+                                <input type="checkbox" class="multi-send-checkbox" data-chat-id="${chat.id}">
+                            </div>
+                        </div>
+                        <div class="chat-item-preview">
+                            <div class="chat-item-message">${chat.lastMessage.substring(0, 40)}${chat.lastMessage.length > 40 ? '...' : ''}</div>
+                        </div>
+                    </div>
+                `;
+                
+                chatItem.addEventListener('click', (e) => {
+                    if (!e.target.classList.contains('multi-send-checkbox')) {
+                        const checkbox = chatItem.querySelector('.multi-send-checkbox');
+                        checkbox.checked = !checkbox.checked;
+                        chatItem.classList.toggle('selected', checkbox.checked);
+                    }
+                });
+                
+                const checkbox = chatItem.querySelector('.multi-send-checkbox');
+                checkbox.addEventListener('click', (e) => {
+                    e.stopPropagation();
+                    chatItem.classList.toggle('selected', checkbox.checked);
+                });
+                
+                multiSendList.appendChild(chatItem);
+            });
+        }
+        
+        console.log('Complete chat system with new API backend initialized successfully');
     </script>
     <script src="js/config.js"></script>
-<script src="js/api.js"></script>
-<script src="js/settingsManager.js"></script>
-<script src="js/app.js"></script>
+    <script src="js/api.js"></script>
+    <script src="js/settingsManager.js"></script>
+    <script src="js/app.js"></script>
 </body>
 </html>

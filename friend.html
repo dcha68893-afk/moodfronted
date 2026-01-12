@@ -1669,6 +1669,8 @@
                 <button class="category-btn" id="friendsTab">Friends <span class="badge" id="friendsCount">0</span></button>
                 <button class="category-btn" id="requestsTab">Requests <span class="badge" id="requestsCount">0</span></button>
                 <button class="category-btn" id="temporaryTab">Temporary</button>
+                <button class="category-btn" id="pinnedTab">Pinned <span class="badge" id="pinnedCount">0</span></button>
+                <button class="category-btn" id="mutedTab">Muted <span class="badge" id="mutedCount">0</span></button>
             </div>
             
             <div class="search-container">
@@ -1714,8 +1716,8 @@
                             <div class="stat-label">Online</div>
                         </div>
                         <div class="stat-item">
-                            <div class="stat-number" id="mutualTotal">0</div>
-                            <div class="stat-label">Mutual</div>
+                            <div class="stat-number" id="pinnedFriends">0</div>
+                            <div class="stat-label">Pinned</div>
                         </div>
                     </div>
                 </div>
@@ -1729,6 +1731,8 @@
                         <button class="category-filter-btn close-friend" data-category="close-friend">Close Friend</button>
                         <button class="category-filter-btn family" data-category="family">Family</button>
                         <button class="category-filter-btn business" data-category="business">Business</button>
+                        <button class="category-filter-btn pinned" data-category="pinned">⭐ Pinned</button>
+                        <button class="category-filter-btn muted" data-category="muted">🔇 Muted</button>
                     </div>
                 </div>
                 
@@ -1780,6 +1784,20 @@
                     <div class="friends-section" id="temporarySection">
                         <div class="friends-list" id="temporaryList">
                             <!-- Temporary friends will be loaded here -->
+                        </div>
+                    </div>
+                    
+                    <!-- Pinned Friends Section -->
+                    <div class="friends-section" id="pinnedSection">
+                        <div class="friends-list" id="pinnedList">
+                            <!-- Pinned friends will be loaded here -->
+                        </div>
+                    </div>
+                    
+                    <!-- Muted Friends Section -->
+                    <div class="friends-section" id="mutedSection">
+                        <div class="friends-list" id="mutedList">
+                            <!-- Muted friends will be loaded here -->
                         </div>
                     </div>
                 </div>
@@ -2059,12 +2077,10 @@
         <span id="notificationText">Operation completed successfully</span>
     </div>
 
-    <!-- Import settingsManager.js -->
-    
-
     <script>
         // =============================================
         // UPDATED FRIENDS SYSTEM - USING BACKEND API
+        // No Firebase references - Backend Migration
         // =============================================
 
         // Global variables
@@ -2075,6 +2091,8 @@
         let friendRequests = [];
         let sentRequests = [];
         let temporaryFriends = [];
+        let pinnedFriends = [];
+        let mutedFriends = [];
         let selectedFriend = null;
         let currentCategoryFilter = 'all';
         let currentSearchTerm = '';
@@ -2115,6 +2133,18 @@
                 color: 'var(--category-business)',
                 icon: 'fas fa-briefcase',
                 description: 'Business contact'
+            },
+            'pinned': {
+                name: 'Pinned',
+                color: 'var(--warning-color)',
+                icon: 'fas fa-thumbtack',
+                description: 'Pinned friend'
+            },
+            'muted': {
+                name: 'Muted',
+                color: 'var(--text-secondary)',
+                icon: 'fas fa-volume-mute',
+                description: 'Muted friend'
             }
         };
         
@@ -2139,6 +2169,8 @@
         const friendsSection = document.getElementById('friendsSection');
         const requestsSection = document.getElementById('requestsSection');
         const temporarySection = document.getElementById('temporarySection');
+        const pinnedSection = document.getElementById('pinnedSection');
+        const mutedSection = document.getElementById('mutedSection');
         
         const allFriendsList = document.getElementById('allFriendsList');
         const contactsList = document.getElementById('contactsList');
@@ -2146,31 +2178,41 @@
         const requestsList = document.getElementById('requestsList');
         const sentRequestsList = document.getElementById('sentRequestsList');
         const temporaryList = document.getElementById('temporaryList');
+        const pinnedList = document.getElementById('pinnedList');
+        const mutedList = document.getElementById('mutedList');
         
-        // Local Storage Keys
+        // Local Storage Keys - Backend Migration: Updated storage keys for new structure
         const LOCAL_STORAGE_KEYS = {
             USER: 'knecta_current_user',
-            FRIENDS: 'knecta_friends',
-            CONTACTS: 'knecta_contacts',
-            REQUESTS: 'knecta_friend_requests',
-            SENT_REQUESTS: 'knecta_sent_requests',
-            TEMPORARY_FRIENDS: 'knecta_temporary_friends',
+            USER_TOKEN: 'knecta_user_token',
+            FRIENDS: 'knecta_friends_cache',
+            CONTACTS: 'knecta_contacts_cache',
+            REQUESTS: 'knecta_friend_requests_cache',
+            SENT_REQUESTS: 'knecta_sent_requests_cache',
+            TEMPORARY_FRIENDS: 'knecta_temporary_friends_cache',
+            PINNED_FRIENDS: 'knecta_pinned_friends_cache',
+            MUTED_FRIENDS: 'knecta_muted_friends_cache',
             LAST_SYNC: 'knecta_friends_last_sync',
-            USER_PROFILE: 'knecta_user_profile',
+            USER_PROFILE: 'knecta_user_profile_cache',
             UNIQUE_QR_CODE: 'knecta_unique_qr_code',
             MUTUAL_FRIENDS_CACHE: 'knecta_mutual_friends_cache',
-            USER_GROUPS: 'knecta_user_groups'
+            USER_GROUPS: 'knecta_user_groups_cache',
+            LAST_INTERACTIONS: 'knecta_last_interactions',
+            PRIVATE_NOTES: 'knecta_private_notes'
         };
         
         // Initialize the application
         document.addEventListener('DOMContentLoaded', function() {
+            // Load cached data instantly for offline experience
             loadCachedDataInstantly();
             
+            // Initialize the app after a short delay
             setTimeout(() => {
                 initializeApp();
             }, 100);
         });
         
+        // Load cached data instantly for offline use
         function loadCachedDataInstantly() {
             console.log('=== INSTANT CACHE LOAD START ===');
             
@@ -2180,6 +2222,12 @@
                 if (cachedUser) {
                     currentUser = JSON.parse(cachedUser);
                     console.log('✓ Instant: User loaded from cache');
+                }
+                
+                // Load user token for API calls
+                const userToken = localStorage.getItem(LOCAL_STORAGE_KEYS.USER_TOKEN);
+                if (userToken) {
+                    window.userToken = userToken;
                 }
                 
                 // Load user profile from cache
@@ -2206,7 +2254,7 @@
                     renderFriendsListInstantly();
                 }
                 
-                // Load other data
+                // Load other cached data
                 const contactsData = localStorage.getItem(LOCAL_STORAGE_KEYS.CONTACTS);
                 if (contactsData) {
                     contacts = JSON.parse(contactsData);
@@ -2231,6 +2279,18 @@
                     console.log(`✓ Instant: ${temporaryFriends.length} temporary friends loaded`);
                 }
                 
+                const pinnedData = localStorage.getItem(LOCAL_STORAGE_KEYS.PINNED_FRIENDS);
+                if (pinnedData) {
+                    pinnedFriends = JSON.parse(pinnedData);
+                    console.log(`✓ Instant: ${pinnedFriends.length} pinned friends loaded`);
+                }
+                
+                const mutedData = localStorage.getItem(LOCAL_STORAGE_KEYS.MUTED_FRIENDS);
+                if (mutedData) {
+                    mutedFriends = JSON.parse(mutedData);
+                    console.log(`✓ Instant: ${mutedFriends.length} muted friends loaded`);
+                }
+                
                 // Load mutual friends cache
                 const mutualCache = localStorage.getItem(LOCAL_STORAGE_KEYS.MUTUAL_FRIENDS_CACHE);
                 if (mutualCache) {
@@ -2244,6 +2304,18 @@
                     console.log(`✓ Instant: ${groups.length} groups loaded from cache`);
                 }
                 
+                // Load last interactions
+                const interactionsData = localStorage.getItem(LOCAL_STORAGE_KEYS.LAST_INTERACTIONS);
+                if (interactionsData) {
+                    window.lastInteractions = JSON.parse(interactionsData);
+                }
+                
+                // Load private notes
+                const notesData = localStorage.getItem(LOCAL_STORAGE_KEYS.PRIVATE_NOTES);
+                if (notesData) {
+                    window.privateNotes = JSON.parse(notesData);
+                }
+                
                 console.log('=== INSTANT CACHE LOAD COMPLETE ===');
                 
             } catch (error) {
@@ -2251,14 +2323,21 @@
             }
         }
         
+        // Render friends list instantly from cache
         function renderFriendsListInstantly() {
             if (!allFriendsList) return;
             
             // Clear the loading placeholder
             allFriendsList.innerHTML = '';
             
-            // Render cached friends immediately
-            if (friends.length === 0 && contacts.length === 0) {
+            // Combine all friends, contacts, and pinned friends for display
+            const allToDisplay = [
+                ...pinnedFriends.filter(f => f.isPinned), // Pinned friends first
+                ...friends,
+                ...contacts
+            ].slice(0, 25);
+            
+            if (allToDisplay.length === 0) {
                 allFriendsList.innerHTML = `
                     <div class="empty-state">
                         <i class="fas fa-user-friends"></i>
@@ -2272,29 +2351,19 @@
             // Create a container for instant rendering
             const fragment = document.createDocumentFragment();
             
-            // Combine all friends and contacts for display
-            const allToDisplay = [...friends, ...contacts].slice(0, 20);
-            
             allToDisplay.forEach(item => {
-                addFriendItemInstant(item, fragment, friends.some(f => f.uid === item.uid) ? 'friend' : 'contact');
+                addFriendItemInstant(item, fragment, 
+                    item.isPinned ? 'pinned' : 
+                    friends.some(f => f.uid === item.uid) ? 'friend' : 'contact');
             });
             
             allFriendsList.appendChild(fragment);
-            
-            // If there are more, render them in the background
-            const remaining = [...friends, ...contacts].slice(20);
-            if (remaining.length > 0) {
-                setTimeout(() => {
-                    remaining.forEach(item => {
-                        addFriendItemInstant(item, allFriendsList, friends.some(f => f.uid === item.uid) ? 'friend' : 'contact');
-                    });
-                }, 100);
-            }
             
             // Add instant load animation class
             allFriendsList.classList.add('instant-load');
         }
         
+        // Add friend item instantly (for offline cache display)
         function addFriendItemInstant(friendData, container, type) {
             const friendItem = document.createElement('div');
             friendItem.className = 'friend-item';
@@ -2315,6 +2384,12 @@
                 statusText = 'Online now';
             }
             
+            // Get last interaction if available
+            const lastInteraction = getLastInteraction(friendData.uid || friendData.id);
+            if (lastInteraction) {
+                statusText = lastInteraction;
+            }
+            
             // Get mutual friends count from cache
             const userId = friendData.uid || friendData.id;
             const mutualCount = mutualFriendsCache[userId] || 0;
@@ -2323,13 +2398,16 @@
             const category = friendData.category || 'friend';
             const categoryInfo = friendCategories[category];
             
+            // Check if friend is muted
+            const isMuted = mutedFriends.some(f => (f.uid || f.id) === userId);
+            
             friendItem.innerHTML = `
                 <div class="friend-avatar" ${friendData.photoURL ? `style="background-image: url('${escapeHtml(friendData.photoURL)}')"` : ''}>
                     ${friendData.photoURL ? '' : `<span>${initials}</span>`}
                     <div class="friend-status ${statusClass}"></div>
-                    <div class="friend-category-badge ${category}" title="${categoryInfo ? categoryInfo.name : 'Friend'}">
-                        <i class="${categoryInfo ? categoryInfo.icon : 'fas fa-user'}"></i>
-                    </div>
+                    ${type === 'pinned' ? '<div class="friend-category-badge pinned" title="Pinned Friend"><i class="fas fa-thumbtack"></i></div>' : 
+                     isMuted ? '<div class="friend-category-badge muted" title="Muted Friend"><i class="fas fa-volume-mute"></i></div>' :
+                     categoryInfo ? `<div class="friend-category-badge ${category}" title="${categoryInfo.name}"><i class="${categoryInfo.icon}"></i></div>` : ''}
                 </div>
                 <div class="friend-info">
                     <div class="friend-name">
@@ -2337,6 +2415,8 @@
                         <span class="friend-details">
                             ${friendData.isTemporary ? '<span class="temp-friend-badge"><i class="fas fa-clock"></i> Temp</span>' : ''}
                             ${friendData.isBusiness ? '<span class="business-badge"><i class="fas fa-briefcase"></i> Business</span>' : ''}
+                            ${type === 'pinned' ? '<span class="temp-friend-badge"><i class="fas fa-thumbtack"></i> Pinned</span>' : ''}
+                            ${isMuted ? '<span class="temp-friend-badge"><i class="fas fa-volume-mute"></i> Muted</span>' : ''}
                         </span>
                     </div>
                     <div class="friend-details">
@@ -2394,20 +2474,9 @@
             container.appendChild(friendItem);
         }
         
-        // FIXED: Call function that properly navigates to calls page
-        function openCall(userId, userName) {
-            console.log('Opening call with:', userId, userName);
-            
-            // Encode parameters for URL
-            const encodedName = encodeURIComponent(userName);
-            
-            // Navigate to calls.html in the same window/tab
-            window.location.href = `../calls.html?user=${userId}&name=${encodedName}`;
-        }
-        
-        // FIXED: Chat function that properly navigates to chat page
-        function openChat(userId, userName) {
-            console.log('Opening chat with:', userId, userName);
+        // FIXED: Smart Navigation Functions - No iframe confusion
+        function navigateToChat(userId, userName) {
+            console.log('Navigating to chat with:', userId, userName);
             
             // Encode parameters for URL
             const encodedName = encodeURIComponent(userName);
@@ -2416,10 +2485,27 @@
             window.location.href = `../message.html?user=${userId}&name=${encodedName}`;
         }
         
+        function navigateToCall(userId, userName, callType = 'voice') {
+            console.log('Navigating to call with:', userId, userName, callType);
+            
+            // Encode parameters for URL
+            const encodedName = encodeURIComponent(userName);
+            
+            // Navigate to calls.html in the same window/tab
+            window.location.href = `../calls.html?user=${userId}&name=${encodedName}&type=${callType}`;
+        }
+        
+        // Initialize the app
         async function initializeApp() {
             console.log('=== FULL APP INITIALIZATION START ===');
             
-            // Initialize settings manager
+            // Check if we're in an iframe and handle token
+            if (window.self !== window.top) {
+                console.log('Running in iframe - checking for token');
+                handleIframeToken();
+            }
+            
+            // Initialize settings manager if available
             if (typeof settingsManager !== 'undefined') {
                 settingsManager.initializeSettings();
             }
@@ -2432,15 +2518,8 @@
             checkMobile();
             window.addEventListener('resize', checkMobile);
             
-            // Load user from cache first
-            await loadUserFromCache();
-            
-            // Try to load from backend in the background
-            setTimeout(() => {
-                tryLoadUserFromBackend().catch(() => {
-                    console.log('Backend user load failed, continuing with cached data');
-                });
-            }, 500);
+            // Try to get current user from app.js or API
+            await getCurrentUserData();
             
             // Setup event listeners
             setupEventListeners();
@@ -2463,6 +2542,114 @@
             console.log('=== FULL APP INITIALIZATION COMPLETE ===');
         }
         
+        // Handle iframe token passing
+        function handleIframeToken() {
+            try {
+                // Check if token is in URL (passed from parent)
+                const urlParams = new URLSearchParams(window.location.search);
+                const token = urlParams.get('token');
+                
+                if (token) {
+                    // Save token for API calls
+                    localStorage.setItem(LOCAL_STORAGE_KEYS.USER_TOKEN, token);
+                    window.userToken = token;
+                    console.log('Token received via iframe URL');
+                }
+                
+                // Also check parent window for user data
+                if (window.parent && window.parent.appState) {
+                    console.log('Parent appState available');
+                }
+                
+            } catch (error) {
+                console.log('Iframe token handling error:', error);
+            }
+        }
+        
+        // Get current user data from app.js or API
+        async function getCurrentUserData() {
+            try {
+                // First try to get from app.js
+                if (window.appState && window.appState.currentUser) {
+                    currentUser = window.appState.currentUser;
+                    console.log('User detected from app.js:', currentUser.uid || currentUser.id);
+                    
+                    // Save to cache
+                    localStorage.setItem(LOCAL_STORAGE_KEYS.USER, JSON.stringify({
+                        uid: currentUser.uid || currentUser.id,
+                        id: currentUser.id || currentUser.uid,
+                        displayName: currentUser.displayName,
+                        email: currentUser.email,
+                        photoURL: currentUser.photoURL
+                    }));
+                    
+                    return;
+                }
+                
+                // Try to get from API
+                const response = await api('GET', '/api/auth/user');
+                
+                if (response && response.user) {
+                    currentUser = response.user;
+                    console.log('User detected from backend API:', currentUser.uid || currentUser.id);
+                    
+                    // Save to cache
+                    localStorage.setItem(LOCAL_STORAGE_KEYS.USER, JSON.stringify({
+                        uid: currentUser.uid || currentUser.id,
+                        id: currentUser.id || currentUser.uid,
+                        displayName: currentUser.displayName,
+                        email: currentUser.email,
+                        photoURL: currentUser.photoURL
+                    }));
+                    
+                    // Save user profile
+                    if (!userData) {
+                        userData = currentUser;
+                        localStorage.setItem(LOCAL_STORAGE_KEYS.USER_PROFILE, JSON.stringify(userData));
+                    }
+                }
+                
+            } catch (error) {
+                console.log('Could not load user from backend:', error.message);
+                // Use cached user data
+                await loadUserFromCache();
+            }
+        }
+        
+        // Load user from cache
+        async function loadUserFromCache() {
+            try {
+                const cachedUser = localStorage.getItem(LOCAL_STORAGE_KEYS.USER);
+                if (cachedUser) {
+                    currentUser = JSON.parse(cachedUser);
+                    console.log('Loaded user from cache:', currentUser.uid || currentUser.id);
+                }
+                
+                // If no user found, create a minimal user object
+                if (!currentUser) {
+                    currentUser = {
+                        id: 'local_user_' + Date.now(),
+                        uid: 'local_user_' + Date.now(),
+                        displayName: 'Local User',
+                        email: '',
+                        photoURL: ''
+                    };
+                    console.log('Created minimal user object for offline use');
+                }
+                
+            } catch (error) {
+                console.error('Error loading user from cache:', error);
+                currentUser = {
+                    id: 'fallback_user_' + Date.now(),
+                    uid: 'fallback_user_' + Date.now(),
+                    displayName: 'User',
+                    email: '',
+                    photoURL: ''
+                };
+            }
+        }
+        
+        // Sync all data from backend
         async function syncAllDataFromBackend() {
             try {
                 console.log('Syncing all data from backend...');
@@ -2472,7 +2659,9 @@
                     syncContactsFromServer(),
                     syncFriendRequestsFromServer(),
                     syncSentRequestsFromServer(),
-                    syncTemporaryFriendsFromServer()
+                    syncTemporaryFriendsFromServer(),
+                    syncPinnedFriendsFromServer(),
+                    syncMutedFriendsFromServer()
                 ]);
                 
                 // Calculate mutual friends in background
@@ -2490,54 +2679,7 @@
             }
         }
         
-        async function calculateAllMutualFriends() {
-            if (!currentUser) return;
-            
-            try {
-                console.log('Calculating mutual friends in background...');
-                
-                // Get current user's friends list
-                const myFriendIds = friends.map(f => f.uid || f.id);
-                
-                // Calculate mutual friends for each contact and friend
-                const allUsers = [...friends, ...contacts];
-                
-                for (const user of allUsers) {
-                    const userId = user.uid || user.id;
-                    if (!mutualFriendsCache[userId] || Math.random() < 0.3) { // Refresh cache sometimes
-                        const mutualCount = await calculateMutualFriendsReal(userId, myFriendIds);
-                        mutualFriendsCache[userId] = mutualCount;
-                    }
-                }
-                
-                // Save cache
-                localStorage.setItem(LOCAL_STORAGE_KEYS.MUTUAL_FRIENDS_CACHE, JSON.stringify(mutualFriendsCache));
-                
-                // Update UI with new mutual counts
-                updateCurrentSection();
-                
-            } catch (error) {
-                console.error('Error calculating mutual friends:', error);
-            }
-        }
-        
-        async function calculateMutualFriendsReal(friendId, myFriendIds) {
-            try {
-                // Get friend's friends from backend
-                const response = await api('GET', `/api/friends/mutual/${friendId}`);
-                
-                if (response && response.mutualFriends) {
-                    return response.mutualFriends.length;
-                }
-                
-                return 0;
-                
-            } catch (error) {
-                console.error('Error calculating mutual friends for', friendId, error);
-                return Math.floor(Math.random() * 10); // Fallback
-            }
-        }
-        
+        // Sync friends from server
         async function syncFriendsFromServer() {
             if (!currentUser) return;
             
@@ -2569,6 +2711,7 @@
             }
         }
         
+        // Sync contacts from server
         async function syncContactsFromServer() {
             if (!currentUser) return;
             
@@ -2606,6 +2749,7 @@
             }
         }
         
+        // Sync friend requests from server
         async function syncFriendRequestsFromServer() {
             if (!currentUser) return;
             
@@ -2633,6 +2777,7 @@
             }
         }
         
+        // Sync sent requests from server
         async function syncSentRequestsFromServer() {
             if (!currentUser) return;
             
@@ -2658,6 +2803,7 @@
             }
         }
         
+        // Sync temporary friends from server
         async function syncTemporaryFriendsFromServer() {
             try {
                 console.log('Syncing temporary friends from server...');
@@ -2680,163 +2826,106 @@
             }
         }
         
-        async function loadGroupsData() {
+        // Sync pinned friends from server
+        async function syncPinnedFriendsFromServer() {
+            try {
+                console.log('Syncing pinned friends from server...');
+                
+                const response = await api('GET', '/api/friends/pinned');
+                
+                if (response && response.friends) {
+                    pinnedFriends = response.friends;
+                    
+                    document.getElementById('pinnedCount').textContent = pinnedFriends.length;
+                    document.getElementById('pinnedFriends').textContent = pinnedFriends.length;
+                    console.log(`Synced ${pinnedFriends.length} pinned friends from server`);
+                    
+                    // Update UI if on pinned tab
+                    if (pinnedSection.classList.contains('active')) {
+                        renderPinnedFriends();
+                    }
+                }
+                
+            } catch (error) {
+                console.error('Error syncing pinned friends:', error);
+            }
+        }
+        
+        // Sync muted friends from server
+        async function syncMutedFriendsFromServer() {
+            try {
+                console.log('Syncing muted friends from server...');
+                
+                const response = await api('GET', '/api/friends/muted');
+                
+                if (response && response.friends) {
+                    mutedFriends = response.friends;
+                    
+                    document.getElementById('mutedCount').textContent = mutedFriends.length;
+                    console.log(`Synced ${mutedFriends.length} muted friends from server`);
+                    
+                    // Update UI if on muted tab
+                    if (mutedSection.classList.contains('active')) {
+                        renderMutedFriends();
+                    }
+                }
+                
+            } catch (error) {
+                console.error('Error syncing muted friends:', error);
+            }
+        }
+        
+        // Calculate all mutual friends
+        async function calculateAllMutualFriends() {
             if (!currentUser) return;
             
             try {
-                console.log('Loading groups data...');
+                console.log('Calculating mutual friends in background...');
                 
-                const response = await api('GET', '/api/groups');
+                // Get current user's friends list
+                const myFriendIds = friends.map(f => f.uid || f.id);
                 
-                if (response && response.groups) {
-                    groups = response.groups;
-                    
-                    // Update group select in add friend modal
-                    updateGroupSelect();
-                    
-                    // Save to local storage
-                    localStorage.setItem(LOCAL_STORAGE_KEYS.USER_GROUPS, JSON.stringify(groups));
-                    
-                    console.log(`Loaded ${groups.length} groups`);
+                // Calculate mutual friends for each contact and friend
+                const allUsers = [...friends, ...contacts, ...pinnedFriends];
+                
+                for (const user of allUsers) {
+                    const userId = user.uid || user.id;
+                    if (!mutualFriendsCache[userId] || Math.random() < 0.3) { // Refresh cache sometimes
+                        const mutualCount = await calculateMutualFriendsReal(userId, myFriendIds);
+                        mutualFriendsCache[userId] = mutualCount;
+                    }
                 }
+                
+                // Save cache
+                localStorage.setItem(LOCAL_STORAGE_KEYS.MUTUAL_FRIENDS_CACHE, JSON.stringify(mutualFriendsCache));
+                
+                // Update UI with new mutual counts
+                updateCurrentSection();
                 
             } catch (error) {
-                console.error('Error loading groups data:', error);
+                console.error('Error calculating mutual friends:', error);
             }
         }
         
-        function updateGroupSelect() {
-            const groupSelect = document.getElementById('groupSelect');
-            if (!groupSelect) return;
-            
-            groupSelect.innerHTML = '<option value="">Select a group</option>';
-            
-            if (groups.length === 0) {
-                groupSelect.innerHTML = '<option value="">No groups found</option>';
-                return;
-            }
-            
-            groups.forEach(group => {
-                const option = document.createElement('option');
-                option.value = group.id;
-                option.textContent = `${group.name} (${group.memberCount || group.members?.length || 0} members)`;
-                groupSelect.appendChild(option);
-            });
-            
-            // Add event listener for group selection
-            groupSelect.addEventListener('change', async function() {
-                const groupId = this.value;
-                if (groupId) {
-                    await loadGroupMembers(groupId);
-                }
-            });
-        }
-        
-        async function loadGroupMembers(groupId) {
+        // Calculate mutual friends with real API call
+        async function calculateMutualFriendsReal(friendId, myFriendIds) {
             try {
-                const group = groups.find(g => g.id === groupId);
-                if (!group) return;
+                // Get friend's friends from backend
+                const response = await api('GET', `/api/friends/mutual/${friendId}`);
                 
-                const membersList = document.getElementById('groupMembersList');
-                membersList.innerHTML = '<div style="text-align: center; padding: 20px; color: var(--text-secondary);"><i class="fas fa-spinner fa-spin"></i><p>Loading members...</p></div>';
-                
-                // Get member details
-                const response = await api('GET', `/api/groups/${groupId}/members`);
-                
-                if (response && response.members) {
-                    // Filter out current user and users who are already friends or have pending requests
-                    const filteredMembers = response.members.filter(member => {
-                        const memberId = member.uid || member.id;
-                        const isCurrentUser = memberId === currentUser.uid || memberId === currentUser.id;
-                        const isFriend = friends.some(f => (f.uid || f.id) === memberId);
-                        const hasIncomingRequest = friendRequests.some(r => (r.from || r.senderId) === memberId);
-                        const hasSentRequest = sentRequests.some(r => (r.to || r.receiverId) === memberId);
-                        
-                        return !isCurrentUser && !isFriend && !hasIncomingRequest && !hasSentRequest;
-                    });
-                    
-                    // Render members list
-                    renderGroupMembers(filteredMembers);
+                if (response && response.mutualFriends) {
+                    return response.mutualFriends.length;
                 }
                 
+                return 0;
+                
             } catch (error) {
-                console.error('Error loading group members:', error);
-                const membersList = document.getElementById('groupMembersList');
-                membersList.innerHTML = '<div style="text-align: center; padding: 20px; color: var(--danger-color);"><i class="fas fa-exclamation-triangle"></i><p>Error loading members</p></div>';
+                console.error('Error calculating mutual friends for', friendId, error);
+                return Math.floor(Math.random() * 10); // Fallback
             }
         }
         
-        function renderGroupMembers(members) {
-            const membersList = document.getElementById('groupMembersList');
-            
-            if (members.length === 0) {
-                membersList.innerHTML = `
-                    <div style="text-align: center; padding: 30px; color: var(--text-secondary);">
-                        <i class="fas fa-users" style="font-size: 32px; margin-bottom: 10px;"></i>
-                        <p>No new members to add</p>
-                        <p style="font-size: 14px; margin-top: 10px;">All group members are already friends or have pending requests</p>
-                    </div>
-                `;
-                return;
-            }
-            
-            membersList.innerHTML = '';
-            
-            members.forEach(member => {
-                const memberId = member.uid || member.id;
-                const initials = member.displayName ? 
-                    member.displayName.split(' ').map(word => word[0]).join('').toUpperCase().substring(0, 2) : 
-                    'U';
-                
-                const memberItem = document.createElement('div');
-                memberItem.className = 'friend-item';
-                memberItem.style.marginBottom = '8px';
-                memberItem.innerHTML = `
-                    <div class="friend-avatar" ${member.photoURL ? `style="background-image: url('${escapeHtml(member.photoURL)}')"` : ''}>
-                        ${member.photoURL ? '' : `<span>${initials}</span>`}
-                    </div>
-                    <div class="friend-info">
-                        <div class="friend-name">
-                            <span class="friend-name-text">${escapeHtml(member.displayName || 'Unknown User')}</span>
-                        </div>
-                        <div class="friend-details">
-                            ${member.username ? `<span class="friend-username">${escapeHtml(member.username)}</span>` : ''}
-                            <span>Group Member</span>
-                        </div>
-                    </div>
-                    <div class="friend-actions">
-                        <button class="friend-action-btn success" data-action="add-from-group" data-user-id="${memberId}" title="Add as Friend">
-                            <i class="fas fa-user-plus"></i>
-                        </button>
-                    </div>
-                `;
-                
-                // Add event listener for add button
-                const addBtn = memberItem.querySelector('.friend-action-btn[data-action="add-from-group"]');
-                addBtn.addEventListener('click', (e) => {
-                    e.stopPropagation();
-                    if (typeof settingsManager !== 'undefined') {
-                        const allowFriendRequests = settingsManager.getSetting('allowFriendRequests');
-                        if (allowFriendRequests === false) {
-                            showNotification('Friend requests are currently disabled', 'warning');
-                            return;
-                        }
-                    }
-                    
-                    sendFriendRequest(memberId);
-                });
-                
-                // Add click listener to view profile
-                memberItem.addEventListener('click', (e) => {
-                    if (!e.target.closest('.friend-actions')) {
-                        showFriendDetails(member, 'contact');
-                    }
-                });
-                
-                membersList.appendChild(memberItem);
-            });
-        }
-        
+        // Generate unique QR code
         function generateUniqueQRCode() {
             try {
                 const qrContainer = document.getElementById('qrCodeContainer');
@@ -2887,10 +2976,6 @@
                             <i class="fas fa-qrcode" style="font-size: 48px; margin-bottom: 15px; color: var(--primary-color);"></i>
                             <p>Your unique QR code</p>
                             <p style="font-size: 12px; margin-top: 10px;">Scan to add as friend</p>
-                            <div style="margin-top: 20px; padding: 10px; background: var(--secondary-color); border-radius: 8px;">
-                                <p style="font-size: 11px; color: var(--text-secondary);">QR Code Data:</p>
-                                <p style="font-size: 10px; font-family: monospace; word-break: break-all;">${escapeHtml(qrData.substring(0, 50))}...</p>
-                            </div>
                         </div>
                     `;
                 }
@@ -2903,102 +2988,13 @@
                         <div style="text-align: center; padding: 40px; color: var(--text-secondary);">
                             <i class="fas fa-qrcode" style="font-size: 48px; margin-bottom: 15px;"></i>
                             <p>Your QR Code</p>
-                            <button onclick="window.location.reload()" style="margin-top: 10px; padding: 8px 16px; background: var(--primary-color); color: white; border: none; border-radius: 8px; cursor: pointer;">
-                                Refresh to Generate
-                            </button>
                         </div>
                     `;
                 }
             }
         }
         
-        async function loadUserFromCache() {
-            try {
-                // Try to get user from localStorage first
-                const cachedUser = localStorage.getItem(LOCAL_STORAGE_KEYS.USER);
-                if (cachedUser) {
-                    currentUser = JSON.parse(cachedUser);
-                    console.log('Loaded user from cache:', currentUser.uid || currentUser.id);
-                }
-                
-                // Try to get user data from app.js
-                if (window.appState && window.appState.currentUser) {
-                    currentUser = window.appState.currentUser;
-                    console.log('User detected from app.js:', currentUser.uid || currentUser.id);
-                }
-                
-                // Load user profile from cache
-                const cachedProfile = localStorage.getItem(LOCAL_STORAGE_KEYS.USER_PROFILE);
-                if (cachedProfile) {
-                    userData = JSON.parse(cachedProfile);
-                    window.userInitials = userData.displayName 
-                        ? userData.displayName.split(' ').map(n => n[0]).join('').toUpperCase().substring(0, 2)
-                        : 'ME';
-                    window.userAvatar = userData.photoURL || '';
-                    window.userUsername = userData.username || '';
-                }
-                
-                // If no user found, create a minimal user object
-                if (!currentUser) {
-                    currentUser = {
-                        id: 'local_user_' + Date.now(),
-                        uid: 'local_user_' + Date.now(),
-                        displayName: 'Local User',
-                        email: '',
-                        photoURL: ''
-                    };
-                    console.log('Created minimal user object for offline use');
-                }
-                
-            } catch (error) {
-                console.error('Error loading user from cache:', error);
-                currentUser = {
-                    id: 'fallback_user_' + Date.now(),
-                    uid: 'fallback_user_' + Date.now(),
-                    displayName: 'User',
-                    email: '',
-                    photoURL: ''
-                };
-            }
-        }
-        
-        async function tryLoadUserFromBackend() {
-            try {
-                const response = await api('GET', '/api/auth/user');
-                
-                if (response && response.user) {
-                    currentUser = response.user;
-                    console.log('User detected from backend:', currentUser.uid || currentUser.id);
-                    
-                    // Save to cache
-                    localStorage.setItem(LOCAL_STORAGE_KEYS.USER, JSON.stringify({
-                        uid: currentUser.uid || currentUser.id,
-                        id: currentUser.id || currentUser.uid,
-                        displayName: currentUser.displayName,
-                        email: currentUser.email,
-                        photoURL: currentUser.photoURL
-                    }));
-                    
-                    // Save user profile
-                    if (!userData) {
-                        userData = currentUser;
-                        localStorage.setItem(LOCAL_STORAGE_KEYS.USER_PROFILE, JSON.stringify(userData));
-                    }
-                }
-            } catch (error) {
-                console.log('Could not load user from backend:', error.message);
-            }
-        }
-        
-        function checkMobile() {
-            isMobile = window.innerWidth <= 768;
-            if (isMobile) {
-                document.body.classList.add('mobile');
-            } else {
-                document.body.classList.remove('mobile');
-            }
-        }
-        
+        // Save friends to local storage
         function saveFriendsToLocalStorage() {
             try {
                 localStorage.setItem(LOCAL_STORAGE_KEYS.FRIENDS, JSON.stringify(friends));
@@ -3006,6 +3002,8 @@
                 localStorage.setItem(LOCAL_STORAGE_KEYS.REQUESTS, JSON.stringify(friendRequests));
                 localStorage.setItem(LOCAL_STORAGE_KEYS.SENT_REQUESTS, JSON.stringify(sentRequests));
                 localStorage.setItem(LOCAL_STORAGE_KEYS.TEMPORARY_FRIENDS, JSON.stringify(temporaryFriends));
+                localStorage.setItem(LOCAL_STORAGE_KEYS.PINNED_FRIENDS, JSON.stringify(pinnedFriends));
+                localStorage.setItem(LOCAL_STORAGE_KEYS.MUTED_FRIENDS, JSON.stringify(mutedFriends));
                 localStorage.setItem(LOCAL_STORAGE_KEYS.LAST_SYNC, Date.now().toString());
                 console.log('Friends saved to local storage');
             } catch (error) {
@@ -3013,6 +3011,7 @@
             }
         }
         
+        // Render contacts
         function renderContacts() {
             contactsList.innerHTML = '';
             
@@ -3032,6 +3031,7 @@
             });
         }
         
+        // Render friends
         function renderFriends() {
             friendsList.innerHTML = '';
             
@@ -3046,11 +3046,22 @@
                 return;
             }
             
-            friends.forEach(friend => {
+            // Sort: pinned first, then online, then alphabetical
+            const sortedFriends = [...friends].sort((a, b) => {
+                const aPinned = pinnedFriends.some(f => (f.uid || f.id) === (a.uid || a.id));
+                const bPinned = pinnedFriends.some(f => (f.uid || f.id) === (b.uid || b.id));
+                
+                if (aPinned !== bPinned) return bPinned ? 1 : -1;
+                if (a.online !== b.online) return b.online ? 1 : -1;
+                return (a.displayName || '').localeCompare(b.displayName || '');
+            });
+            
+            sortedFriends.forEach(friend => {
                 addFriendItem(friend, friendsList, 'friend');
             });
         }
         
+        // Render friend requests
         function renderFriendRequests() {
             requestsList.innerHTML = '';
             
@@ -3070,6 +3081,7 @@
             });
         }
         
+        // Render sent requests
         function renderSentRequests() {
             sentRequestsList.innerHTML = '';
             
@@ -3089,6 +3101,7 @@
             });
         }
         
+        // Render temporary friends
         function renderTemporaryFriends() {
             temporaryList.innerHTML = '';
             
@@ -3108,9 +3121,58 @@
             });
         }
         
+        // Render pinned friends
+        function renderPinnedFriends() {
+            pinnedList.innerHTML = '';
+            
+            if (pinnedFriends.length === 0) {
+                pinnedList.innerHTML = `
+                    <div class="empty-state">
+                        <i class="fas fa-thumbtack"></i>
+                        <p>No pinned friends</p>
+                        <p class="subtext">Pin important friends to keep them at the top</p>
+                    </div>
+                `;
+                return;
+            }
+            
+            pinnedFriends.forEach(friend => {
+                addFriendItem(friend, pinnedList, 'pinned');
+            });
+        }
+        
+        // Render muted friends
+        function renderMutedFriends() {
+            mutedList.innerHTML = '';
+            
+            if (mutedFriends.length === 0) {
+                mutedList.innerHTML = `
+                    <div class="empty-state">
+                        <i class="fas fa-volume-mute"></i>
+                        <p>No muted friends</p>
+                        <p class="subtext">Mute friends to disable notifications</p>
+                    </div>
+                `;
+                return;
+            }
+            
+            mutedFriends.forEach(friend => {
+                addFriendItem(friend, mutedList, 'muted');
+            });
+        }
+        
+        // Add friend item to list
         function addFriendItem(friendData, container, type) {
             if (currentCategoryFilter !== 'all' && friendData.category !== currentCategoryFilter) {
-                return;
+                if (currentCategoryFilter === 'pinned' && !pinnedFriends.some(f => (f.uid || f.id) === (friendData.uid || friendData.id))) {
+                    return;
+                }
+                if (currentCategoryFilter === 'muted' && !mutedFriends.some(f => (f.uid || f.id) === (friendData.uid || friendData.id))) {
+                    return;
+                }
+                if (!['pinned', 'muted'].includes(currentCategoryFilter) && friendData.category !== currentCategoryFilter) {
+                    return;
+                }
             }
             
             if (currentSearchTerm && !matchesSearch(friendData, currentSearchTerm)) {
@@ -3153,18 +3215,27 @@
                 }
             }
             
+            // Get last interaction
+            const lastInteraction = getLastInteraction(friendId);
+            if (lastInteraction) {
+                statusText = lastInteraction;
+            }
+            
             const mutualCount = mutualFriendsCache[friendId] || 0;
             
             const category = friendData.category || 'friend';
             const categoryInfo = friendCategories[category];
             
+            const isPinned = pinnedFriends.some(f => (f.uid || f.id) === friendId);
+            const isMuted = mutedFriends.some(f => (f.uid || f.id) === friendId);
+            
             friendItem.innerHTML = `
                 <div class="friend-avatar" ${friendData.photoURL ? `style="background-image: url('${escapeHtml(friendData.photoURL)}')"` : ''}>
                     ${friendData.photoURL ? '' : `<span>${initials}</span>`}
                     <div class="friend-status ${statusClass}"></div>
-                    <div class="friend-category-badge ${category}" title="${categoryInfo ? categoryInfo.name : 'Friend'}">
-                        <i class="${categoryInfo ? categoryInfo.icon : 'fas fa-user'}"></i>
-                    </div>
+                    ${isPinned ? '<div class="friend-category-badge pinned" title="Pinned Friend"><i class="fas fa-thumbtack"></i></div>' : 
+                     isMuted ? '<div class="friend-category-badge muted" title="Muted Friend"><i class="fas fa-volume-mute"></i></div>' :
+                     categoryInfo ? `<div class="friend-category-badge ${category}" title="${categoryInfo.name}"><i class="${categoryInfo.icon}"></i></div>` : ''}
                 </div>
                 <div class="friend-info">
                     <div class="friend-name">
@@ -3172,6 +3243,8 @@
                         <span class="friend-details">
                             ${friendData.isTemporary ? '<span class="temp-friend-badge"><i class="fas fa-clock"></i> Temp</span>' : ''}
                             ${friendData.isBusiness ? '<span class="business-badge"><i class="fas fa-briefcase"></i> Business</span>' : ''}
+                            ${isPinned ? '<span class="temp-friend-badge"><i class="fas fa-thumbtack"></i> Pinned</span>' : ''}
+                            ${isMuted ? '<span class="temp-friend-badge"><i class="fas fa-volume-mute"></i> Muted</span>' : ''}
                         </span>
                     </div>
                     <div class="friend-details">
@@ -3194,7 +3267,7 @@
                         </button>
                     ` : ''}
                     
-                    ${type === 'friend' ? `
+                    ${type === 'friend' || type === 'pinned' || type === 'muted' || type === 'temporary' ? `
                         <button class="friend-action-btn chat" data-action="start-chat" data-user-id="${friendId}" data-user-name="${escapeHtml(friendData.displayName || 'User')}" title="Start Chat">
                             <i class="fas fa-comments"></i>
                         </button>
@@ -3205,27 +3278,17 @@
                             <i class="fas fa-ellipsis-v"></i>
                         </button>
                     ` : ''}
-                    
-                    ${type === 'temporary' ? `
-                        <button class="friend-action-btn chat" data-action="start-chat" data-user-id="${friendId}" data-user-name="${escapeHtml(friendData.displayName || 'User')}" title="Start Chat">
-                            <i class="fas fa-comments"></i>
-                        </button>
-                        <button class="friend-action-btn call" data-action="call" data-user-id="${friendId}" data-user-name="${escapeHtml(friendData.displayName || 'User')}" title="Start Call">
-                            <i class="fas fa-phone"></i>
-                        </button>
-                        <button class="friend-action-btn" data-action="extend" title="Extend">
-                            <i class="fas fa-clock"></i>
-                        </button>
-                    ` : ''}
                 </div>
             `;
             
+            // Add click listener for friend item
             friendItem.addEventListener('click', (e) => {
                 if (!e.target.closest('.friend-actions') && !e.target.closest('.mutual-friends')) {
                     showFriendDetails(friendData, type);
                 }
             });
             
+            // Add action button listeners
             const actionButtons = friendItem.querySelectorAll('.friend-action-btn');
             actionButtons.forEach(btn => {
                 btn.addEventListener('click', (e) => {
@@ -3249,6 +3312,7 @@
             container.appendChild(friendItem);
         }
         
+        // Add friend request item
         function addFriendRequestItem(requestData, container, type) {
             const requestItem = document.createElement('div');
             requestItem.className = 'friend-item';
@@ -3336,19 +3400,20 @@
             container.appendChild(requestItem);
         }
         
-        // FIXED: Handle friend actions - CALL NOW OPENS CALL.HTML
+        // Handle friend actions - SMART NAVIGATION IMPLEMENTED
         function handleFriendAction(action, friendData, type, button) {
+            const userId = button.dataset.userId;
+            const userName = button.dataset.userName;
+            
             switch(action) {
                 case 'start-chat':
-                    const userId = button.dataset.userId;
-                    const userName = button.dataset.userName;
-                    openChat(userId, userName);
+                    // SMART NAVIGATION: Direct navigation to chat
+                    navigateToChat(userId, userName);
                     break;
                     
                 case 'call':
-                    const callUserId = button.dataset.userId;
-                    const callUserName = button.dataset.userName;
-                    openCall(callUserId, callUserName);
+                    // SMART NAVIGATION: Direct navigation to call
+                    navigateToCall(userId, userName);
                     break;
                     
                 case 'add':
@@ -3395,6 +3460,7 @@
             }
         }
         
+        // Handle request actions
         function handleRequestAction(action, requestData, button) {
             switch(action) {
                 case 'accept':
@@ -3415,6 +3481,7 @@
             }
         }
         
+        // Show mutual friends
         async function showMutualFriends(userId, userName) {
             if (!currentUser) {
                 showNotification('Cannot view mutual friends', 'warning');
@@ -3445,6 +3512,7 @@
             }
         }
         
+        // Display mutual friends modal
         function displayMutualFriendsModal(mutualFriends, userName) {
             const mutualCountText = document.getElementById('mutualCountText');
             const mutualFriendsList = document.getElementById('mutualFriendsList');
@@ -3490,6 +3558,7 @@
             mutualFriendsModal.classList.add('active');
         }
         
+        // Send friend request
         async function sendFriendRequest(friendId, category = 'friend', note = '', isTemporary = false, duration = null, isBusiness = false) {
             if (typeof settingsManager !== 'undefined') {
                 const allowFriendRequests = settingsManager.getSetting('allowFriendRequests');
@@ -3530,6 +3599,7 @@
             }
         }
         
+        // Accept friend request
         async function acceptFriendRequestOnline(requestId, friendId) {
             try {
                 const response = await api('POST', `/api/friend-requests/${requestId}/accept`);
@@ -3553,6 +3623,7 @@
             }
         }
         
+        // Decline friend request
         async function declineFriendRequest(requestData) {
             try {
                 const requestId = requestData.id;
@@ -3578,6 +3649,7 @@
             }
         }
         
+        // Cancel friend request
         async function cancelFriendRequest(requestData) {
             try {
                 const requestId = requestData.id;
@@ -3602,6 +3674,7 @@
             }
         }
         
+        // Show friend details
         function showFriendDetails(friendData, type) {
             selectedFriend = friendData;
             
@@ -3612,7 +3685,7 @@
             loadFriendDetails(friendData, type);
         }
         
-        // Show friend request profile before accepting/declining
+        // Show friend request profile
         function showFriendRequestProfile(requestData) {
             const userData = requestData.user || requestData.sender || requestData.receiver || requestData;
             const userId = userData.uid || userData.id;
@@ -3749,6 +3822,7 @@
             }
         }
         
+        // Load friend details
         async function loadFriendDetails(friendData, type) {
             const detailsContent = document.getElementById('friendDetailsContent');
             detailsContent.innerHTML = '<div style="text-align: center; padding: 40px 20px; color: var(--text-secondary);"><i class="fas fa-spinner fa-spin" style="font-size: 24px; margin-bottom: 15px;"></i><p>Loading friend details...</p></div>';
@@ -3809,6 +3883,12 @@
                     }
                 }
                 
+                // Get last interaction
+                const lastInteraction = getLastInteraction(friendId);
+                if (lastInteraction) {
+                    statusText = lastInteraction;
+                }
+                
                 const category = friendshipData?.category || 'friend';
                 const categoryInfo = friendCategories[category];
                 
@@ -3817,11 +3897,20 @@
                     'U';
                 
                 let notes = friendshipData?.notes || '';
+                // Check for private notes
+                if (window.privateNotes && window.privateNotes[friendId]) {
+                    notes = window.privateNotes[friendId];
+                }
+                
+                const isPinned = pinnedFriends.some(f => (f.uid || f.id) === friendId);
+                const isMuted = mutedFriends.some(f => (f.uid || f.id) === friendId);
                 
                 detailsContent.innerHTML = `
                     <div class="friend-profile-header">
                         <div class="friend-profile-avatar" ${detailedData.photoURL ? `style="background-image: url('${escapeHtml(detailedData.photoURL)}')"` : ''}>
                             ${detailedData.photoURL ? '' : `<span style="color: white; font-size: 36px;">${initials}</span>`}
+                            ${isPinned ? '<div class="friend-category-badge pinned" style="width: 30px; height: 30px; font-size: 12px;"><i class="fas fa-thumbtack"></i></div>' : ''}
+                            ${isMuted ? '<div class="friend-category-badge muted" style="width: 30px; height: 30px; font-size: 12px;"><i class="fas fa-volume-mute"></i></div>' : ''}
                         </div>
                         <div class="friend-profile-name">${escapeHtml(detailedData.displayName || 'Unknown User')}</div>
                         <div class="friend-profile-username">${escapeHtml(detailedData.username || 'No username')}</div>
@@ -3907,7 +3996,6 @@
                         ` : ''}
                     </div>
                     
-                    ${friendshipData ? `
                     <div class="friend-info-section">
                         <div class="info-section-title">
                             <i class="fas fa-sticky-note"></i>
@@ -3918,10 +4006,9 @@
                             <i class="fas fa-save"></i> Save Notes
                         </button>
                     </div>
-                    ` : ''}
                     
                     <div class="action-buttons">
-                        ${type === 'friend' ? `
+                        ${type === 'friend' || type === 'pinned' || type === 'muted' ? `
                         <button class="action-btn success" id="startChatDetailsBtn" data-user-id="${friendId}" data-user-name="${escapeHtml(friendData.displayName || 'User')}">
                             <i class="fas fa-comments"></i> Start Chat
                         </button>
@@ -3957,17 +4044,17 @@
                 `;
                 
                 // Add event listeners for action buttons
-                if (type === 'friend') {
+                if (type === 'friend' || type === 'pinned' || type === 'muted') {
                     document.getElementById('startChatDetailsBtn').addEventListener('click', function() {
                         const userId = this.dataset.userId;
                         const userName = this.dataset.userName;
-                        openChat(userId, userName);
+                        navigateToChat(userId, userName);
                     });
                     
                     document.getElementById('callFriendBtn').addEventListener('click', function() {
                         const userId = this.dataset.userId;
                         const userName = this.dataset.userName;
-                        openCall(userId, userName);
+                        navigateToCall(userId, userName);
                     });
                     
                     document.getElementById('friendOptionsBtn').addEventListener('click', () => {
@@ -3977,7 +4064,7 @@
                     if (document.getElementById('saveNotesBtn')) {
                         document.getElementById('saveNotesBtn').addEventListener('click', () => {
                             const notes = document.getElementById('friendNotesTextarea').value;
-                            updateFriendNotes(friendId, notes);
+                            savePrivateNote(friendId, notes);
                         });
                     }
                     
@@ -3996,7 +4083,7 @@
                     document.getElementById('startChatWithContactBtn').addEventListener('click', function() {
                         const userId = this.dataset.userId;
                         const userName = this.dataset.userName;
-                        openChat(userId, userName);
+                        navigateToChat(userId, userName);
                     });
                     
                     document.getElementById('addContactBtn').addEventListener('click', () => {
@@ -4037,6 +4124,7 @@
             }
         }
         
+        // Show friend options
         function showFriendOptions(friendData) {
             // Create options modal
             const optionsModal = document.createElement('div');
@@ -4060,6 +4148,12 @@
                         <div class="action-buttons" style="flex-direction: column; gap: 10px;">
                             <button class="action-btn secondary" id="changeCategoryBtn">
                                 <i class="fas fa-tag"></i> Change Category
+                            </button>
+                            <button class="action-btn secondary" id="togglePinBtn">
+                                <i class="fas fa-thumbtack"></i> ${pinnedFriends.some(f => (f.uid || f.id) === (friendData.uid || friendData.id)) ? 'Unpin Friend' : 'Pin Friend'}
+                            </button>
+                            <button class="action-btn secondary" id="toggleMuteBtn">
+                                <i class="fas fa-volume-mute"></i> ${mutedFriends.some(f => (f.uid || f.id) === (friendData.uid || friendData.id)) ? 'Unmute Friend' : 'Mute Friend'}
                             </button>
                             <button class="action-btn secondary" id="viewChatHistoryBtn">
                                 <i class="fas fa-history"></i> View Chat History
@@ -4099,6 +4193,16 @@
                 document.body.removeChild(optionsModal);
             });
             
+            optionsModal.querySelector('#togglePinBtn').addEventListener('click', () => {
+                togglePinFriend(friendData);
+                document.body.removeChild(optionsModal);
+            });
+            
+            optionsModal.querySelector('#toggleMuteBtn').addEventListener('click', () => {
+                toggleMuteFriend(friendData);
+                document.body.removeChild(optionsModal);
+            });
+            
             optionsModal.querySelector('#viewChatHistoryBtn').addEventListener('click', () => {
                 viewChatHistory(friendData);
                 document.body.removeChild(optionsModal);
@@ -4120,235 +4224,134 @@
             });
         }
         
-        function showChangeCategoryModal(friendData) {
-            const categoryModal = document.createElement('div');
-            categoryModal.className = 'add-friend-modal active';
-            categoryModal.innerHTML = `
-                <div class="add-friend-container">
-                    <div class="add-friend-header">
-                        <h3>Change Category</h3>
-                        <button class="add-friend-btn close-category-modal">
-                            <i class="fas fa-times"></i>
-                        </button>
-                    </div>
-                    <div style="padding: 25px;">
-                        <div style="text-align: center; margin-bottom: 20px;">
-                            <div class="friend-profile-avatar" ${friendData.photoURL ? `style="background-image: url('${escapeHtml(friendData.photoURL)}'); width: 60px; height: 60px; margin: 0 auto 10px;"` : 'style="width: 60px; height: 60px; margin: 0 auto 10px;"'}>
-                                ${friendData.photoURL ? '' : `<span style="color: white; font-size: 18px;">${friendData.displayName ? friendData.displayName.split(' ').map(word => word[0]).join('').toUpperCase().substring(0, 2) : 'U'}</span>`}
-                            </div>
-                            <div class="friend-profile-name" style="font-size: 16px;">${escapeHtml(friendData.displayName || 'Unknown User')}</div>
-                        </div>
-                        
-                        <div class="input-group">
-                            <label class="input-label">Select New Category</label>
-                            <select class="text-input" id="newCategorySelect">
-                                <option value="acquaintance" ${friendData.category === 'acquaintance' ? 'selected' : ''}>Acquaintance</option>
-                                <option value="friend" ${(!friendData.category || friendData.category === 'friend') ? 'selected' : ''}>Friend</option>
-                                <option value="close-friend" ${friendData.category === 'close-friend' ? 'selected' : ''}>Close Friend</option>
-                                <option value="family" ${friendData.category === 'family' ? 'selected' : ''}>Family</option>
-                                <option value="business" ${friendData.category === 'business' ? 'selected' : ''}>Business</option>
-                            </select>
-                        </div>
-                        
-                        <div class="action-buttons" style="margin-top: 20px;">
-                            <button class="action-btn secondary close-category-btn" style="flex: 1;">
-                                <i class="fas fa-times"></i> Cancel
-                            </button>
-                            <button class="action-btn primary" id="saveCategoryBtn" style="flex: 1;">
-                                <i class="fas fa-save"></i> Save
-                            </button>
-                        </div>
-                    </div>
-                </div>
-            `;
-            
-            document.body.appendChild(categoryModal);
-            
-            // Add event listeners
-            categoryModal.querySelector('.close-category-modal').addEventListener('click', () => {
-                document.body.removeChild(categoryModal);
-            });
-            
-            categoryModal.querySelector('.close-category-btn').addEventListener('click', () => {
-                document.body.removeChild(categoryModal);
-            });
-            
-            categoryModal.querySelector('#saveCategoryBtn').addEventListener('click', () => {
-                const newCategory = categoryModal.querySelector('#newCategorySelect').value;
-                changeFriendCategory(friendData, newCategory);
-                document.body.removeChild(categoryModal);
-            });
-        }
-        
-        async function changeFriendCategory(friendData, newCategory) {
+        // Toggle pin friend
+        async function togglePinFriend(friendData) {
             try {
                 const friendId = friendData.uid || friendData.id;
-                const response = await api('PUT', `/api/friends/${friendId}/category`, { category: newCategory });
+                const isPinned = pinnedFriends.some(f => (f.uid || f.id) === friendId);
                 
-                if (response && response.success) {
-                    // Update local data
-                    await syncFriendsFromServer();
-                    updateCurrentSection();
-                    
-                    showNotification('Friend category updated', 'success');
+                if (isPinned) {
+                    // Unpin
+                    const response = await api('DELETE', `/api/friends/${friendId}/pin`);
+                    if (response && response.success) {
+                        pinnedFriends = pinnedFriends.filter(f => (f.uid || f.id) !== friendId);
+                        showNotification('Friend unpinned', 'success');
+                    }
                 } else {
-                    showNotification('Failed to update category', 'error');
+                    // Pin
+                    const response = await api('POST', `/api/friends/${friendId}/pin`);
+                    if (response && response.success) {
+                        pinnedFriends.push(friendData);
+                        showNotification('Friend pinned', 'success');
+                    }
                 }
                 
+                // Update local storage
+                localStorage.setItem(LOCAL_STORAGE_KEYS.PINNED_FRIENDS, JSON.stringify(pinnedFriends));
+                
+                // Update UI
+                updateCurrentSection();
+                updateFriendCounts();
+                
             } catch (error) {
-                console.error('Error changing friend category:', error);
-                showNotification('Failed to update category', 'error');
+                console.error('Error toggling pin:', error);
+                showNotification('Failed to update pin status', 'error');
             }
         }
         
-        function viewChatHistory(friendData) {
-            // Navigate to chat history
-            const friendId = friendData.uid || friendData.id;
-            const encodedName = encodeURIComponent(friendData.displayName || 'Friend');
-            window.location.href = `../message.html?user=${friendId}&name=${encodedName}&view=history`;
-        }
-        
-        function viewCallHistory(friendData) {
-            // Navigate to call history
-            const friendId = friendData.uid || friendData.id;
-            const encodedName = encodeURIComponent(friendData.displayName || 'Friend');
-            window.location.href = `../calls.html?user=${friendId}&name=${encodedName}&view=history`;
-        }
-        
-        async function removeFriend(friendData) {
+        // Toggle mute friend
+        async function toggleMuteFriend(friendData) {
             try {
                 const friendId = friendData.uid || friendData.id;
-                const response = await api('DELETE', `/api/friends/${friendId}`);
+                const isMuted = mutedFriends.some(f => (f.uid || f.id) === friendId);
                 
-                if (response && response.success) {
-                    // Update local data
-                    await syncFriendsFromServer();
-                    updateCurrentSection();
-                    
-                    showNotification('Friend removed', 'success');
+                if (isMuted) {
+                    // Unmute
+                    const response = await api('DELETE', `/api/friends/${friendId}/mute`);
+                    if (response && response.success) {
+                        mutedFriends = mutedFriends.filter(f => (f.uid || f.id) !== friendId);
+                        showNotification('Friend unmuted', 'success');
+                    }
                 } else {
-                    showNotification('Failed to remove friend', 'error');
+                    // Mute
+                    const response = await api('POST', `/api/friends/${friendId}/mute`);
+                    if (response && response.success) {
+                        mutedFriends.push(friendData);
+                        showNotification('Friend muted', 'success');
+                    }
                 }
                 
+                // Update local storage
+                localStorage.setItem(LOCAL_STORAGE_KEYS.MUTED_FRIENDS, JSON.stringify(mutedFriends));
+                
+                // Update UI
+                updateCurrentSection();
+                updateFriendCounts();
+                
             } catch (error) {
-                console.error('Error removing friend:', error);
-                showNotification('Failed to remove friend', 'error');
+                console.error('Error toggling mute:', error);
+                showNotification('Failed to update mute status', 'error');
             }
         }
         
-        async function blockUser(friendData) {
+        // Save private note
+        function savePrivateNote(friendId, note) {
             try {
-                const friendId = friendData.uid || friendData.id;
-                const response = await api('POST', '/api/users/block', { userId: friendId });
-                
-                if (response && response.success) {
-                    // Update local data
-                    await syncFriendsFromServer();
-                    updateCurrentSection();
-                    
-                    showNotification('User blocked successfully', 'success');
-                } else {
-                    showNotification('Failed to block user', 'error');
+                // Initialize private notes object if not exists
+                if (!window.privateNotes) {
+                    window.privateNotes = {};
                 }
                 
-            } catch (error) {
-                console.error('Error blocking user:', error);
-                showNotification('Failed to block user', 'error');
-            }
-        }
-        
-        async function updateFriendNotes(friendId, notes) {
-            try {
-                const response = await api('PUT', `/api/friends/${friendId}/notes`, { notes: notes });
+                // Save note
+                window.privateNotes[friendId] = note;
                 
-                if (response && response.success) {
-                    showNotification('Notes updated successfully', 'success');
-                } else {
-                    showNotification('Failed to update notes', 'error');
-                }
+                // Save to local storage
+                localStorage.setItem(LOCAL_STORAGE_KEYS.PRIVATE_NOTES, JSON.stringify(window.privateNotes));
+                
+                showNotification('Note saved', 'success');
                 
             } catch (error) {
-                console.error('Error updating notes:', error);
-                showNotification('Failed to update notes', 'error');
+                console.error('Error saving note:', error);
+                showNotification('Failed to save note', 'error');
             }
         }
         
-        function showFriendRequestDetails(requestData) {
-            const userData = requestData.user || requestData.sender || requestData;
-            const userId = userData.uid || userData.id;
-            
-            document.getElementById('requestName').textContent = userData.displayName || 'Unknown User';
-            document.getElementById('requestUsername').textContent = userData.username || 'No username';
-            
-            const avatar = document.getElementById('requestAvatar');
-            if (userData.photoURL) {
-                avatar.style.backgroundImage = `url('${escapeHtml(userData.photoURL)}')`;
-                avatar.innerHTML = '';
-            } else {
-                const initials = userData.displayName ? 
-                    userData.displayName.split(' ').map(word => word[0]).join('').toUpperCase().substring(0, 2) : 
-                    'U';
-                avatar.innerHTML = `<span style="color: white; font-size: 24px;">${initials}</span>`;
+        // Get last interaction text
+        function getLastInteraction(friendId) {
+            if (!window.lastInteractions) {
+                window.lastInteractions = {};
             }
             
-            const mutualCount = mutualFriendsCache[userId] || 0;
-            const mutualElement = document.getElementById('mutualCount');
-            mutualElement.textContent = mutualCount;
+            const interaction = window.lastInteractions[friendId];
+            if (!interaction) return null;
             
-            // Add click listener to mutual friends count
-            const mutualContainer = document.getElementById('mutualFriendsCount');
-            mutualContainer.addEventListener('click', () => {
-                showMutualFriends(userId, userData.displayName || 'User');
-            });
+            const now = new Date();
+            const interactionTime = new Date(interaction.timestamp);
+            const minutesAgo = Math.floor((now - interactionTime) / 60000);
             
-            window.currentRequest = requestData;
+            if (minutesAgo < 1) return 'Just now';
+            if (minutesAgo < 60) return `${minutesAgo}m ago`;
             
-            friendRequestModal.classList.add('active');
+            const hoursAgo = Math.floor(minutesAgo / 60);
+            if (hoursAgo < 24) return `${hoursAgo}h ago`;
+            
+            const daysAgo = Math.floor(hoursAgo / 24);
+            if (daysAgo < 7) return `${daysAgo}d ago`;
+            
+            return `${Math.floor(daysAgo / 7)}w ago`;
         }
         
-        function calculateMutualFriends(friendData) {
-            // Use cached value or calculate
-            const friendId = friendData.uid || friendData.id;
-            return mutualFriendsCache[friendId] || 0;
-        }
-        
-        function calculateTrustScore(userData) {
-            let score = 5;
-            
-            if (userData.createdAt) {
-                const created = new Date(userData.createdAt);
-                const monthsOld = (new Date() - created) / (1000 * 60 * 60 * 24 * 30);
-                score += Math.min(monthsOld / 6, 2);
-            }
-            
-            if (userData.emailVerified) score += 1;
-            
-            if (userData.photoURL) score += 1;
-            if (userData.displayName && userData.displayName.length > 1) score += 1;
-            
-            const userId = userData.uid || userData.id;
-            const mutualCount = calculateMutualFriends(userData);
-            score += Math.min(mutualCount * 0.5, 2);
-            
-            return Math.min(Math.round(score), 10);
-        }
-        
-        function getTrustScoreClass(score) {
-            if (score >= 8) return 'high';
-            if (score >= 5) return 'medium';
-            return 'low';
-        }
-        
+        // Update friend counts
         function updateFriendCounts() {
             document.getElementById('totalFriends').textContent = friends.length;
             
             const onlineCount = friends.filter(f => f.online).length;
             document.getElementById('onlineFriends').textContent = onlineCount;
             
-            const totalMutual = Object.values(mutualFriendsCache).reduce((sum, count) => sum + count, 0);
-            document.getElementById('mutualTotal').textContent = totalMutual;
+            document.getElementById('pinnedFriends').textContent = pinnedFriends.length;
         }
         
+        // Update current section
         function updateCurrentSection() {
             updateFriendCounts();
             
@@ -4360,19 +4363,15 @@
                     case 'allFriendsSection':
                         allFriendsList.innerHTML = '';
                         
-                        contacts.forEach(contact => {
-                            addFriendItem(contact, allFriendsList, 'contact');
-                        });
+                        // Show pinned first, then friends, then contacts
+                        const allToDisplay = [
+                            ...pinnedFriends,
+                            ...friends,
+                            ...contacts,
+                            ...temporaryFriends
+                        ];
                         
-                        friends.forEach(friend => {
-                            addFriendItem(friend, allFriendsList, 'friend');
-                        });
-                        
-                        temporaryFriends.forEach(friend => {
-                            addFriendItem(friend, allFriendsList, 'temporary');
-                        });
-                        
-                        if (contacts.length === 0 && friends.length === 0 && temporaryFriends.length === 0) {
+                        if (allToDisplay.length === 0) {
                             allFriendsList.innerHTML = `
                                 <div class="empty-state">
                                     <i class="fas fa-user-friends"></i>
@@ -4380,6 +4379,12 @@
                                     <p class="subtext">Add friends to start connecting</p>
                                 </div>
                             `;
+                        } else {
+                            allToDisplay.forEach(item => {
+                                const type = pinnedFriends.some(f => (f.uid || f.id) === (item.uid || item.id)) ? 'pinned' :
+                                           friends.some(f => f.uid === item.uid) ? 'friend' : 'contact';
+                                addFriendItem(item, allFriendsList, type);
+                            });
                         }
                         break;
                         
@@ -4399,10 +4404,19 @@
                     case 'temporarySection':
                         renderTemporaryFriends();
                         break;
+                        
+                    case 'pinnedSection':
+                        renderPinnedFriends();
+                        break;
+                        
+                    case 'mutedSection':
+                        renderMutedFriends();
+                        break;
                 }
             }
         }
         
+        // Filter friends by category
         function filterFriendsByCategory(category) {
             currentCategoryFilter = category;
             updateCurrentSection();
@@ -4417,11 +4431,13 @@
             }
         }
         
+        // Search friends
         function searchFriends(searchTerm) {
             currentSearchTerm = searchTerm.toLowerCase().trim();
             updateCurrentSection();
         }
         
+        // Check if friend matches search
         function matchesSearch(friendData, searchTerm) {
             if (!searchTerm) return true;
             
@@ -4435,47 +4451,7 @@
             return searchIn.includes(searchTerm);
         }
         
-        async function simulateContactSync() {
-            showNotification('Syncing contacts...', 'info');
-            
-            try {
-                await syncContactsFromServer();
-                
-                // If on contacts tab, refresh
-                if (contactsSection.classList.contains('active')) {
-                    renderContacts();
-                }
-                
-                showNotification(`Found ${contacts.length} contacts`, 'success');
-                
-            } catch (error) {
-                console.error('Error syncing contacts:', error);
-                showNotification('Error syncing contacts', 'error');
-            }
-        }
-        
-        function formatTimeAgo(date) {
-            const now = new Date();
-            const diffMs = now - date;
-            const diffMins = Math.floor(diffMs / 60000);
-            const diffHours = Math.floor(diffMs / 3600000);
-            const diffDays = Math.floor(diffMs / 86400000);
-            
-            if (diffMins < 1) return 'Just now';
-            if (diffMins < 60) return `${diffMins}m ago`;
-            if (diffHours < 24) return `${diffHours}h ago`;
-            if (diffDays < 7) return `${diffDays}d ago`;
-            return `${Math.floor(diffDays / 7)}w ago`;
-        }
-        
-        function formatDate(date) {
-            return date.toLocaleDateString('en-US', {
-                year: 'numeric',
-                month: 'short',
-                day: 'numeric'
-            });
-        }
-        
+        // Show notification
         function showNotification(message, type = 'success') {
             const notificationText = document.getElementById('notificationText');
             if (!notificationText) return;
@@ -4492,6 +4468,7 @@
             }, 3000);
         }
         
+        // Show start chat modal
         function showStartChatModal() {
             startChatModal.classList.add('active');
             populateChatFriendsList();
@@ -4501,13 +4478,20 @@
             document.getElementById('searchChatUser').value = '';
         }
         
+        // Populate chat friends list
         function populateChatFriendsList() {
             const chatFriendsList = document.getElementById('chatFriendsList');
             if (!chatFriendsList) return;
             
             chatFriendsList.innerHTML = '';
             
-            const allChattableFriends = [...friends, ...contacts];
+            // Combine all chattable friends (pinned first, then online, then others)
+            const allChattableFriends = [
+                ...pinnedFriends,
+                ...friends.filter(f => f.online),
+                ...friends.filter(f => !f.online),
+                ...contacts
+            ];
             
             if (allChattableFriends.length === 0) {
                 chatFriendsList.innerHTML = `
@@ -4561,6 +4545,7 @@
             });
         }
         
+        // Search chat friends
         function searchChatFriends(searchTerm) {
             const items = document.querySelectorAll('#chatFriendsList .friend-item');
             const term = searchTerm.toLowerCase();
@@ -4577,7 +4562,7 @@
             });
         }
         
-        // Utility function to escape HTML
+        // Utility functions
         function escapeHtml(text) {
             if (!text) return '';
             const div = document.createElement('div');
@@ -4585,6 +4570,44 @@
             return div.innerHTML;
         }
         
+        function formatTimeAgo(date) {
+            const now = new Date();
+            const diffMs = now - date;
+            const diffMins = Math.floor(diffMs / 60000);
+            const diffHours = Math.floor(diffMs / 3600000);
+            const diffDays = Math.floor(diffMs / 86400000);
+            
+            if (diffMins < 1) return 'Just now';
+            if (diffMins < 60) return `${diffMins}m ago`;
+            if (diffHours < 24) return `${diffHours}h ago`;
+            if (diffDays < 7) return `${diffDays}d ago`;
+            return `${Math.floor(diffDays / 7)}w ago`;
+        }
+        
+        function formatDate(date) {
+            return date.toLocaleDateString('en-US', {
+                year: 'numeric',
+                month: 'short',
+                day: 'numeric'
+            });
+        }
+        
+        function getTrustScoreClass(score) {
+            if (score >= 8) return 'high';
+            if (score >= 5) return 'medium';
+            return 'low';
+        }
+        
+        function checkMobile() {
+            isMobile = window.innerWidth <= 768;
+            if (isMobile) {
+                document.body.classList.add('mobile');
+            } else {
+                document.body.classList.remove('mobile');
+            }
+        }
+        
+        // Setup event listeners
         function setupEventListeners() {
             // Close mutual friends modal
             document.getElementById('closeMutualFriendsModal').addEventListener('click', () => {
@@ -4592,66 +4615,32 @@
             });
             
             // Category tabs
-            document.getElementById('allTab').addEventListener('click', function() {
-                document.querySelectorAll('.category-btn').forEach(btn => {
-                    btn.classList.remove('active');
-                });
-                this.classList.add('active');
-                
-                document.querySelectorAll('.friends-section').forEach(section => {
-                    section.classList.remove('active');
-                });
-                allFriendsSection.classList.add('active');
-                
-                updateCurrentSection();
-            });
+            const categoryTabs = {
+                'allTab': 'allFriendsSection',
+                'contactsTab': 'contactsSection',
+                'friendsTab': 'friendsSection',
+                'requestsTab': 'requestsSection',
+                'temporaryTab': 'temporarySection',
+                'pinnedTab': 'pinnedSection',
+                'mutedTab': 'mutedSection'
+            };
             
-            document.getElementById('contactsTab').addEventListener('click', function() {
-                document.querySelectorAll('.category-btn').forEach(btn => {
-                    btn.classList.remove('active');
+            Object.keys(categoryTabs).forEach(tabId => {
+                document.getElementById(tabId).addEventListener('click', function() {
+                    document.querySelectorAll('.category-btn').forEach(btn => {
+                        btn.classList.remove('active');
+                    });
+                    this.classList.add('active');
+                    
+                    document.querySelectorAll('.friends-section').forEach(section => {
+                        section.classList.remove('active');
+                    });
+                    
+                    const sectionId = categoryTabs[tabId];
+                    document.getElementById(sectionId).classList.add('active');
+                    
+                    updateCurrentSection();
                 });
-                this.classList.add('active');
-                
-                document.querySelectorAll('.friends-section').forEach(section => {
-                    section.classList.remove('active');
-                });
-                contactsSection.classList.add('active');
-            });
-            
-            document.getElementById('friendsTab').addEventListener('click', function() {
-                document.querySelectorAll('.category-btn').forEach(btn => {
-                    btn.classList.remove('active');
-                });
-                this.classList.add('active');
-                
-                document.querySelectorAll('.friends-section').forEach(section => {
-                    section.classList.remove('active');
-                });
-                friendsSection.classList.add('active');
-            });
-            
-            document.getElementById('requestsTab').addEventListener('click', function() {
-                document.querySelectorAll('.category-btn').forEach(btn => {
-                    btn.classList.remove('active');
-                });
-                this.classList.add('active');
-                
-                document.querySelectorAll('.friends-section').forEach(section => {
-                    section.classList.remove('active');
-                });
-                requestsSection.classList.add('active');
-            });
-            
-            document.getElementById('temporaryTab').addEventListener('click', function() {
-                document.querySelectorAll('.category-btn').forEach(btn => {
-                    btn.classList.remove('active');
-                });
-                this.classList.add('active');
-                
-                document.querySelectorAll('.friends-section').forEach(section => {
-                    section.classList.remove('active');
-                });
-                temporarySection.classList.add('active');
             });
             
             // Category filter buttons
@@ -4718,35 +4707,6 @@
                     const tabContent = document.getElementById(`${tabName}Tab`);
                     if (tabContent) {
                         tabContent.classList.add('active');
-                    }
-                    
-                    // Load groups data when groups tab is clicked
-                    if (tabName === 'groups') {
-                        loadGroupsData();
-                    }
-                });
-            });
-            
-            // Add friend method selection
-            document.querySelectorAll('.method-item').forEach(item => {
-                item.addEventListener('click', function() {
-                    const method = this.dataset.method;
-                    
-                    document.querySelectorAll('.method-item').forEach(i => {
-                        i.classList.remove('selected');
-                    });
-                    this.classList.add('selected');
-                    
-                    if (method === 'username') {
-                        document.querySelector('.add-friend-tab[data-tab="username"]').click();
-                    } else if (method === 'qr') {
-                        document.querySelector('.add-friend-tab[data-tab="qr"]').click();
-                    } else if (method === 'nearby') {
-                        document.querySelector('.add-friend-tab[data-tab="nearby"]').click();
-                    } else if (method === 'contacts') {
-                        simulateContactSync();
-                    } else if (method === 'groups') {
-                        document.querySelector('.add-friend-tab[data-tab="groups"]').click();
                     }
                 });
             });
@@ -4834,7 +4794,7 @@
                 if (window.selectedChatFriend) {
                     const userId = window.selectedChatFriend.uid || window.selectedChatFriend.id;
                     const userName = window.selectedChatFriend.displayName || 'User';
-                    openChat(userId, userName);
+                    navigateToChat(userId, userName);
                     startChatModal.classList.remove('active');
                 }
             });
@@ -4849,42 +4809,8 @@
                 selectedFriend = null;
             });
             
-            // Friend request modal buttons
-            document.getElementById('acceptRequestBtn').addEventListener('click', () => {
-                if (window.currentRequest) {
-                    acceptFriendRequestOnline(window.currentRequest.id, window.currentRequest.from || window.currentRequest.senderId);
-                }
-            });
-            
-            document.getElementById('declineRequestBtn').addEventListener('click', () => {
-                if (window.currentRequest) {
-                    declineFriendRequest(window.currentRequest);
-                }
-            });
-            
-            // Nearby discovery
-            document.getElementById('startNearbyBtn').addEventListener('click', () => {
-                if (navigator.bluetooth) {
-                    showNotification('Nearby discovery would use Bluetooth here', 'info');
-                    document.getElementById('nearbyStatusText').textContent = 'Searching...';
-                } else {
-                    showNotification('Bluetooth not supported in this browser', 'error');
-                }
-            });
-            
-            document.getElementById('stopNearbyBtn').addEventListener('click', () => {
-                document.getElementById('nearbyStatusText').textContent = 'Not searching';
-            });
-            
-            // Scan QR button in modal
-            document.getElementById('scanQRBtnModal').addEventListener('click', () => {
-                showNotification('QR code scanner would open here', 'info');
-            });
-            
             // Window resize
-            window.addEventListener('resize', () => {
-                checkMobile();
-            });
+            window.addEventListener('resize', checkMobile);
             
             // Before unload
             window.addEventListener('beforeunload', () => {
@@ -4892,11 +4818,27 @@
             });
         }
         
-        console.log('Complete friends system initialized successfully with all features working');
+        // Simulate contact sync
+        async function simulateContactSync() {
+            showNotification('Syncing contacts...', 'info');
+            
+            try {
+                await syncContactsFromServer();
+                
+                showNotification(`Found ${contacts.length} contacts`, 'success');
+                
+            } catch (error) {
+                console.error('Error syncing contacts:', error);
+                showNotification('Error syncing contacts', 'error');
+            }
+        }
+        
+        console.log('Friends system initialized successfully with backend API integration');
     </script>
-    <!-- CORRECT - same folder -->
-<script src="js/api.js"></script>
-<script src="js/settingsManager.js"></script>
-<script src="js/app.js"></script>
+    
+    <!-- External scripts -->
+    <script src="js/api.js"></script>
+    <script src="js/settingsManager.js"></script>
+    <script src="js/app.js"></script>
 </body>
 </html>
