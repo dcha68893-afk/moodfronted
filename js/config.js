@@ -1,12 +1,14 @@
-﻿// js/config.js - SIMPLE VERSION
+﻿﻿// js/config.js - SIMPLE VERSION
 console.log('🔧 Loading configuration...');
 
-// ALWAYS use localhost:4000 for now
-window.API_BASE_URL = 'http://localhost:4000';
+// REMOVED hardcoded localhost URL - using api.js BACKEND_URL instead
+// Backend URL should be set in api.js or by main application
 
 // Helper function
 window.apiCall = async function(endpoint, options = {}) {
-    const url = `${window.API_BASE_URL}${endpoint}`;
+    // Use BACKEND_URL from api.js or fallback to Render URL if not set
+    const baseUrl = window.BACKEND_URL || 'https://moodchat-backend-1.onrender.com/api';
+    const url = `${baseUrl}${endpoint}`;
     console.log('📡 Calling:', url);
     
     const defaultOptions = {
@@ -40,4 +42,4 @@ window.apiCall = async function(endpoint, options = {}) {
     }
 };
 
-console.log('✅ Config loaded. Backend URL:', window.API_BASE_URL);
+console.log('✅ Config loaded.');

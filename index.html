@@ -1286,6 +1286,12 @@
                 // Ultra-fast device detection
                 this.deviceId = this.getDeviceId();
                 
+                // Track submission states to prevent double submission
+                this.isLoginSubmitting = false;
+                this.isMobileLoginSubmitting = false;
+                this.isUsernameLoginSubmitting = false;
+                this.isRegisterSubmitting = false;
+                
                 // Check for existing user on this device - INSTANTLY
                 const existingUser = this.checkExistingUserOnDevice();
                 if (existingUser) {
@@ -1474,11 +1480,34 @@
                     this.showPanel('register');
                 });
                 
-                // Form submissions
-                document.getElementById('loginForm').addEventListener('submit', (e) => this.handleLogin(e, 'email'));
-                document.getElementById('mobileLoginFormElement').addEventListener('submit', (e) => this.handleLogin(e, 'mobile'));
-                document.getElementById('usernameLoginFormElement').addEventListener('submit', (e) => this.handleLogin(e, 'username'));
-                document.getElementById('registration-form').addEventListener('submit', (e) => this.handleRegistration(e));
+                // Form submissions - with double submission prevention
+                document.getElementById('loginForm').addEventListener('submit', (e) => {
+                    e.preventDefault();
+                    if (!this.isLoginSubmitting) {
+                        this.handleLogin(e, 'email');
+                    }
+                });
+                
+                document.getElementById('mobileLoginFormElement').addEventListener('submit', (e) => {
+                    e.preventDefault();
+                    if (!this.isMobileLoginSubmitting) {
+                        this.handleLogin(e, 'mobile');
+                    }
+                });
+                
+                document.getElementById('usernameLoginFormElement').addEventListener('submit', (e) => {
+                    e.preventDefault();
+                    if (!this.isUsernameLoginSubmitting) {
+                        this.handleLogin(e, 'username');
+                    }
+                });
+                
+                document.getElementById('registration-form').addEventListener('submit', (e) => {
+                    e.preventDefault();
+                    if (!this.isRegisterSubmitting) {
+                        this.handleRegistration(e);
+                    }
+                });
                 
                 // Cookie consent
                 const cookieAccept = document.getElementById('cookieAccept');
@@ -1558,7 +1587,7 @@
                     
                 } catch (error) {
                     this.hideLoading();
-                    this.showToast('Quick login failed. Please sign in manually.', 'error');
+                    this.showMessage('Quick login failed. Please sign in manually.', 'error');
                     this.hideQuickLoginWithAnimation();
                 }
             }
@@ -1786,7 +1815,15 @@
              * Handles login form submission
              */
             async handleLogin(e, method = 'email') {
-                e.preventDefault();
+                // Prevent double submission
+                if (method === 'email' && this.isLoginSubmitting) return;
+                if (method === 'mobile' && this.isMobileLoginSubmitting) return;
+                if (method === 'username' && this.isUsernameLoginSubmitting) return;
+                
+                // Set submitting state
+                if (method === 'email') this.isLoginSubmitting = true;
+                if (method === 'mobile') this.isMobileLoginSubmitting = true;
+                if (method === 'username') this.isUsernameLoginSubmitting = true;
                 
                 let identifier, password, rememberMe;
                 
@@ -1800,9 +1837,11 @@
                     
                     if (!identifier) {
                         this.showFieldError('loginEmail', 'Email is required');
+                        this.isLoginSubmitting = false;
                         return;
                     } else if (!this.validateEmail(identifier)) {
                         this.showFieldError('loginEmail', 'Please enter a valid email address');
+                        this.isLoginSubmitting = false;
                         return;
                     }
                 } else if (method === 'mobile') {
@@ -1815,6 +1854,7 @@
                     
                     if (!identifier) {
                         this.showFieldError('loginMobile', 'Mobile number is required');
+                        this.isMobileLoginSubmitting = false;
                         return;
                     }
                 } else if (method === 'username') {
@@ -1827,6 +1867,7 @@
                     
                     if (!identifier) {
                         this.showFieldError('loginUsername', 'Username is required');
+                        this.isUsernameLoginSubmitting = false;
                         return;
                     }
                 }
@@ -1835,6 +1876,9 @@
                     const fieldId = method === 'email' ? 'loginPassword' : 
                                   method === 'mobile' ? 'loginMobilePassword' : 'loginUsernamePassword';
                     this.showFieldError(fieldId, 'Password is required');
+                    if (method === 'email') this.isLoginSubmitting = false;
+                    if (method === 'mobile') this.isMobileLoginSubmitting = false;
+                    if (method === 'username') this.isUsernameLoginSubmitting = false;
                     return;
                 }
                 
@@ -1843,7 +1887,7 @@
                 try {
                     localStorage.removeItem('kynecta-chat-logged-out');
                     
-                    // Use apiRequest for login
+                    // Use apiRequest for login - ONLY ONCE
                     const loginData = {
                         identifier: identifier,
                         password: password,
@@ -1881,14 +1925,27 @@
                         }
                         
                         this.showMessage('Login successful! Redirecting to dashboard...', 'success');
+                        
+                        // Reset submitting state
+                        if (method === 'email') this.isLoginSubmitting = false;
+                        if (method === 'mobile') this.isMobileLoginSubmitting = false;
+                        if (method === 'username') this.isUsernameLoginSubmitting = false;
+                        
+                        // Redirect ONLY on success
                         setTimeout(() => this.redirectToDashboard(), 1000);
                     } else {
                         throw new Error(response.message || 'Login failed');
                     }
                     
                 } catch (error) {
+                    // Show error message - NO RETRY
                     this.showMessage(error.message, 'error');
                     this.setLoginLoadingState(false, method);
+                    
+                    // Reset submitting state
+                    if (method === 'email') this.isLoginSubmitting = false;
+                    if (method === 'mobile') this.isMobileLoginSubmitting = false;
+                    if (method === 'username') this.isUsernameLoginSubmitting = false;
                     
                     const formId = method === 'email' ? 'loginForm' : 
                                  method === 'mobile' ? 'mobileLoginFormElement' : 'usernameLoginFormElement';
@@ -1897,6 +1954,9 @@
                         form.classList.add('shake');
                         setTimeout(() => form.classList.remove('shake'), 500);
                     }
+                    
+                    // DO NOT clear localStorage on error
+                    console.error('Login error:', error.message);
                 }
             }
 
@@ -1904,7 +1964,9 @@
              * Handles registration form submission
              */
             async handleRegistration(e) {
-                e.preventDefault();
+                // Prevent double submission
+                if (this.isRegisterSubmitting) return;
+                this.isRegisterSubmitting = true;
                 
                 const regUsername = document.getElementById('regUsername').value.trim();
                 const regEmail = document.getElementById('regEmail').value.trim();
@@ -1962,61 +2024,79 @@
                     isValid = false;
                 }
                 
-                if (isValid) {
-                    localStorage.removeItem('kynecta-chat-logged-out');
-                    this.setRegisterLoadingState(true);
+                if (!isValid) {
+                    this.isRegisterSubmitting = false;
+                    return;
+                }
+                
+                localStorage.removeItem('kynecta-chat-logged-out');
+                this.setRegisterLoadingState(true);
+                
+                try {
+                    // Use apiRequest for registration - ONLY ONCE
+                    const registerData = {
+                        username: regUsername,
+                        email: regEmail,
+                        password: regPassword,
+                        mobile: mobile || null
+                    };
                     
-                    try {
-                        // Use apiRequest for registration
-                        const registerData = {
-                            username: regUsername,
-                            email: regEmail,
-                            password: regPassword,
-                            mobile: mobile || null
+                    const response = await apiRequest('/auth/register', {
+                        method: 'POST',
+                        body: JSON.stringify(registerData)
+                    });
+                    
+                    if (response.success && response.token) {
+                        // Store token and user data
+                        localStorage.setItem('token', response.token);
+                        localStorage.setItem('isLoggedIn', 'true');
+                        localStorage.setItem('userId', response.user.id);
+                        
+                        const userData = {
+                            uid: response.user.id,
+                            email: response.user.email,
+                            displayName: response.user.displayName || response.user.username,
+                            mobile: response.user.mobile || '',
+                            isNewUser: true,
+                            autoLogin: true,
+                            lastLogin: new Date().toISOString(),
+                            hasPremiumTrial: true, // New users get premium trial
+                            premiumExpiresAt: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString(),
+                            isOfflineUser: false,
+                            session: true,
+                            backendSession: true,
+                            deviceId: this.deviceId
                         };
                         
-                        const response = await apiRequest('POST', '/auth/register', registerData);
+                        localStorage.setItem('kynecta-chat-user', JSON.stringify(userData));
+                        localStorage.setItem('kynecta-chat-auto-login', 'true');
                         
-                        if (response.success && response.token) {
-                            // Store token and user data
-                            localStorage.setItem('token', response.token);
-                            localStorage.setItem('isLoggedIn', 'true');
-                            localStorage.setItem('userId', response.user.id);
-                            
-                            const userData = {
-                                uid: response.user.id,
-                                email: response.user.email,
-                                displayName: response.user.displayName || response.user.username,
-                                mobile: response.user.mobile || '',
-                                isNewUser: true,
-                                autoLogin: true,
-                                lastLogin: new Date().toISOString(),
-                                hasPremiumTrial: true, // New users get premium trial
-                                premiumExpiresAt: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString(),
-                                isOfflineUser: false,
-                                session: true,
-                                backendSession: true,
-                                deviceId: this.deviceId
-                            };
-                            
-                            localStorage.setItem('kynecta-chat-user', JSON.stringify(userData));
-                            localStorage.setItem('kynecta-chat-auto-login', 'true');
-                            
-                            this.showMessage('🎉 Registration successful! Your 30-day premium trial is activated!', 'success');
-                            setTimeout(() => this.redirectToDashboard(), 1500);
-                            
-                        } else {
-                            throw new Error(response.message || 'Registration failed');
-                        }
+                        this.showMessage('🎉 Registration successful! Your 30-day premium trial is activated!', 'success');
                         
-                    } catch (error) {
-                        this.showMessage(error.message, 'error');
-                        this.setRegisterLoadingState(false);
+                        // Reset submitting state
+                        this.isRegisterSubmitting = false;
                         
-                        const registrationForm = document.getElementById('registration-form');
-                        registrationForm.classList.add('shake');
-                        setTimeout(() => registrationForm.classList.remove('shake'), 500);
+                        // Redirect ONLY on success
+                        setTimeout(() => this.redirectToDashboard(), 1500);
+                        
+                    } else {
+                        throw new Error(response.message || 'Registration failed');
                     }
+                    
+                } catch (error) {
+                    // Show error message - NO RETRY
+                    this.showMessage(error.message, 'error');
+                    this.setRegisterLoadingState(false);
+                    
+                    // Reset submitting state
+                    this.isRegisterSubmitting = false;
+                    
+                    const registrationForm = document.getElementById('registration-form');
+                    registrationForm.classList.add('shake');
+                    setTimeout(() => registrationForm.classList.remove('shake'), 500);
+                    
+                    // DO NOT clear localStorage on error
+                    console.error('Registration error:', error.message);
                 }
             }
 

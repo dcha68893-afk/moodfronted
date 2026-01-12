@@ -51,11 +51,13 @@ const EXTERNAL_TABS = {
 };
 
 // ============================================================================
-// JWT TOKEN VALIDATION WITH DOMContentLoaded CHECK
+// JWT TOKEN VALIDATION WITH SINGLE STARTUP CHECK
 // ============================================================================
 
 const JWT_VALIDATION = {
   TOKEN_KEY: 'moodchat_jwt_token',
+  VALIDATED_KEY: 'moodchat_jwt_validated',
+  VALIDATION_LOCK: 'moodchat_validation_in_progress',
   
   // Check if token exists
   hasToken: function() {
@@ -70,11 +72,36 @@ const JWT_VALIDATION = {
   // Clear token
   clearToken: function() {
     localStorage.removeItem(this.TOKEN_KEY);
+    localStorage.removeItem(this.VALIDATED_KEY);
   },
   
   // Store token
   storeToken: function(token) {
     localStorage.setItem(this.TOKEN_KEY, token);
+  },
+  
+  // Check if validation is already in progress
+  isValidationInProgress: function() {
+    return localStorage.getItem(this.VALIDATION_LOCK) === 'true';
+  },
+  
+  // Set validation lock
+  setValidationLock: function(state) {
+    if (state) {
+      localStorage.setItem(this.VALIDATION_LOCK, 'true');
+    } else {
+      localStorage.removeItem(this.VALIDATION_LOCK);
+    }
+  },
+  
+  // Check if token was already validated
+  isAlreadyValidated: function() {
+    return localStorage.getItem(this.VALIDATED_KEY) === 'true';
+  },
+  
+  // Mark token as validated
+  markAsValidated: function() {
+    localStorage.setItem(this.VALIDATED_KEY, 'true');
   },
   
   // Validate token by calling protected endpoint using apiRequest
@@ -136,37 +163,60 @@ const JWT_VALIDATION = {
     }
   },
   
-  // Perform full authentication check and redirect if needed
+  // Perform authentication check - SINGLE RUN on startup
   performAuthCheck: async function() {
-    console.log('Performing JWT authentication check...');
+    console.log('Performing JWT authentication check (single run)...');
     
-    if (!this.hasToken()) {
-      console.log('No JWT token found, redirecting to login...');
-      this.redirectToLogin();
-      return false;
+    // Check if we're already validating or validated
+    if (this.isValidationInProgress()) {
+      console.log('Validation already in progress, skipping duplicate check');
+      return { validated: false, skipped: true };
     }
     
+    if (this.isAlreadyValidated()) {
+      console.log('Token already validated in this session');
+      return { validated: true, cached: true };
+    }
+    
+    // Set validation lock to prevent duplicate checks
+    this.setValidationLock(true);
+    
     try {
+      if (!this.hasToken()) {
+        console.log('No JWT token found, using cached auth state');
+        this.setValidationLock(false);
+        return { validated: false, noToken: true };
+      }
+      
       const validation = await this.validateToken();
       
       if (!validation.valid) {
         console.log('Token validation failed:', validation.reason);
-        this.clearAllAuthData();
-        this.redirectToLogin();
-        return false;
+        
+        // Only clear auth data if api.js explicitly signals auth failure
+        // Don't clear localStorage automatically
+        if (validation.reason.includes('Invalid token') || validation.reason.includes('Token expired')) {
+          console.log('Token invalid, will require re-authentication');
+          // Don't clear localStorage - let api.js handle it
+        }
+        
+        this.setValidationLock(false);
+        return { validated: false, invalid: true, reason: validation.reason };
       }
       
       console.log('Token validation successful');
-      return true;
+      this.markAsValidated();
+      this.setValidationLock(false);
+      return { validated: true, user: validation.user };
+      
     } catch (error) {
       console.error('Auth check error:', error);
-      this.clearAllAuthData();
-      this.redirectToLogin();
-      return false;
+      this.setValidationLock(false);
+      return { validated: false, error: error.message };
     }
   },
   
-  // Clear all authentication data
+  // Clear all authentication data (only when explicitly called)
   clearAllAuthData: function() {
     this.clearToken();
     localStorage.removeItem('moodchat_device_session');
@@ -179,26 +229,37 @@ const JWT_VALIDATION = {
     }
   },
   
-  // Redirect to login page
-  redirectToLogin: function() {
-    // Check if we're already on the login page to avoid infinite redirect
+  // Soft redirect to login (non-intrusive)
+  suggestLoginRedirect: function() {
+    // Only redirect if we're on a protected page and not already on login
     if (window.location.pathname.endsWith('index.html') || 
         window.location.pathname.endsWith('/')) {
-      return;
+      return false;
     }
     
     // Use replace to prevent back navigation to protected page
     window.location.replace('/index.html');
+    return true;
   }
 };
 
 // ============================================================================
-// DOMContentLoaded JWT VALIDATION
+// SINGLE DOMContentLoaded JWT VALIDATION
 // ============================================================================
 
-// Execute JWT validation immediately on DOMContentLoaded
+// Execute JWT validation only once on DOMContentLoaded
+let authCheckPerformed = false;
+
 document.addEventListener('DOMContentLoaded', async function() {
-  console.log('DOMContentLoaded - Starting JWT token validation');
+  console.log('DOMContentLoaded - Starting single JWT token validation');
+  
+  // Prevent duplicate auth checks
+  if (authCheckPerformed) {
+    console.log('Auth check already performed, skipping');
+    return;
+  }
+  
+  authCheckPerformed = true;
   
   // Check if we're on the login page (no validation needed)
   if (window.location.pathname.endsWith('index.html') || 
@@ -207,17 +268,111 @@ document.addEventListener('DOMContentLoaded', async function() {
     return;
   }
   
-  // Perform JWT validation
-  const isValid = await JWT_VALIDATION.performAuthCheck();
-  
-  if (!isValid) {
-    console.log('JWT validation failed, stopping further initialization');
-    return;
+  // Check for cached auth state first
+  const cachedAuthState = localStorage.getItem('moodchat-auth-state');
+  if (cachedAuthState) {
+    try {
+      const authData = JSON.parse(cachedAuthState);
+      if (authData && authData.isAuthenticated && authData.user) {
+        console.log('Using cached auth state for initial UI');
+        
+        // Create user object from cached data
+        const user = {
+          uid: authData.user.uid,
+          email: authData.user.email,
+          displayName: authData.user.displayName,
+          photoURL: authData.user.photoURL,
+          emailVerified: authData.user.emailVerified || false,
+          isOffline: authData.user.authMethod === 'device',
+          providerId: authData.user.authMethod === 'device' ? 'device' : 'api',
+          refreshToken: 'cached-token',
+          getIdToken: () => Promise.resolve('cached-token')
+        };
+        
+        // Set initial auth state from cache
+        handleAuthStateChange(user, true);
+        
+        // Initialize app immediately with cached data
+        initializeApp();
+        
+        // Validate token in background (non-blocking)
+        setTimeout(async () => {
+          const validationResult = await JWT_VALIDATION.performAuthCheck();
+          
+          if (!validationResult.validated && validationResult.invalid) {
+            console.log('Background token validation failed, but UI remains');
+            // Don't redirect - let user continue with cached state
+            // api.js will handle auth failures during actual API calls
+          } else if (validationResult.validated && validationResult.user) {
+            console.log('Background token validation successful');
+            // Update user with fresh data from validation
+            const validatedUser = {
+              uid: validationResult.user.id || validationResult.user._id || validationResult.user.sub,
+              email: validationResult.user.email,
+              displayName: validationResult.user.name || validationResult.user.username || 'User',
+              photoURL: validationResult.user.avatar || user.photoURL,
+              emailVerified: validationResult.user.emailVerified || false,
+              isOffline: false,
+              providerId: 'api',
+              refreshToken: JWT_VALIDATION.getToken(),
+              getIdToken: () => Promise.resolve(JWT_VALIDATION.getToken()),
+              ...validationResult.user
+            };
+            
+            // Update auth state with validated user
+            handleAuthStateChange(validatedUser);
+          }
+        }, 1000);
+        
+        return; // Exit early, don't wait for validation
+      }
+    } catch (error) {
+      console.log('Error parsing cached auth state:', error);
+    }
   }
   
-  console.log('JWT validation passed, continuing with app initialization');
-  // Initialize app after successful JWT validation
-  initializeApp();
+  // No cached auth state - perform validation
+  const validationResult = await JWT_VALIDATION.performAuthCheck();
+  
+  if (!validationResult.validated && validationResult.noToken) {
+    console.log('No JWT token found, using device-based auth');
+    handleDeviceBasedAuth();
+    initializeApp();
+  } else if (validationResult.validated && validationResult.user) {
+    console.log('JWT validation passed, continuing with app initialization');
+    
+    // Create user object from validated token
+    const user = {
+      uid: validationResult.user.id || validationResult.user._id || validationResult.user.sub,
+      email: validationResult.user.email,
+      displayName: validationResult.user.name || validationResult.user.username || 'User',
+      photoURL: validationResult.user.avatar || `https://ui-avatars.com/api/?name=${encodeURIComponent(validationResult.user.name || 'User')}&background=8b5cf6&color=fff`,
+      emailVerified: validationResult.user.emailVerified || false,
+      isOffline: false,
+      providerId: 'api',
+      refreshToken: JWT_VALIDATION.getToken(),
+      getIdToken: () => Promise.resolve(JWT_VALIDATION.getToken()),
+      ...validationResult.user
+    };
+    
+    handleAuthStateChange(user);
+    initializeApp();
+  } else {
+    // Validation failed but don't redirect immediately
+    console.log('JWT validation failed but not redirecting:', validationResult.reason || 'Unknown error');
+    
+    // Try device-based auth as fallback
+    const deviceAuthSuccess = handleDeviceBasedAuth();
+    
+    if (deviceAuthSuccess) {
+      console.log('Using device-based auth as fallback');
+      initializeApp();
+    } else {
+      // Only redirect if no auth method works
+      console.log('All auth methods failed, suggesting login');
+      JWT_VALIDATION.suggestLoginRedirect();
+    }
+  }
 });
 
 // ============================================================================
@@ -4340,51 +4495,9 @@ function initializeApp() {
     }
   }, 100);
   
-  // STEP 11: Check for existing JWT token and restore auth state
-  setTimeout(() => {
-    // If we have a JWT token, try to restore the session
-    if (JWT_VALIDATION.hasToken()) {
-      console.log('Found JWT token, attempting to restore session...');
-      JWT_VALIDATION.validateToken()
-        .then(validation => {
-          if (validation.valid && validation.user) {
-            // Create user object from validated token
-            const user = {
-              uid: validation.user.id || validation.user._id || validation.user.sub,
-              email: validation.user.email,
-              displayName: validation.user.name || validation.user.username || 'User',
-              photoURL: validation.user.avatar || `https://ui-avatars.com/api/?name=${encodeURIComponent(validation.user.name || 'User')}&background=8b5cf6&color=fff`,
-              emailVerified: validation.user.emailVerified || false,
-              isOffline: false,
-              providerId: 'api',
-              refreshToken: JWT_VALIDATION.getToken(),
-              getIdToken: () => Promise.resolve(JWT_VALIDATION.getToken()),
-              ...validation.user
-            };
-            
-            handleAuthStateChange(user);
-            authStateRestored = true;
-            broadcastAuthReady();
-          } else {
-            // Token invalid, use device auth
-            handleDeviceBasedAuth();
-            authStateRestored = true;
-            broadcastAuthReady();
-          }
-        })
-        .catch(error => {
-          console.log('Token validation error, using device auth:', error);
-          handleDeviceBasedAuth();
-          authStateRestored = true;
-          broadcastAuthReady();
-        });
-    } else {
-      // No JWT token, use device-based auth
-      handleDeviceBasedAuth();
-      authStateRestored = true;
-      broadcastAuthReady();
-    }
-  }, 200);
+  // STEP 11: Mark auth state as restored and broadcast
+  authStateRestored = true;
+  broadcastAuthReady();
   
   // STEP 12: Start background services after a delay
   setTimeout(() => {
@@ -4414,7 +4527,7 @@ function initializeApp() {
   console.log('  ✓ Background server connection when online');
   console.log('  ✓ Silent UI updates when new data arrives');
   console.log('  ✓ Full offline functionality');
-  console.log('  ✓ JWT-based authentication');
+  console.log('  ✓ JWT-based authentication (single check on startup)');
   console.log('  ✓ api.js integration for all API calls');
   console.log('  ✓ User data isolation');
   console.log('  ✓ Real API calls with offline queuing');
@@ -5141,9 +5254,10 @@ window.isInstantUILoaded = function() {
 console.log('MoodChat app.js loaded - JWT validation will run on DOMContentLoaded');
 console.log('Application shell ready with api.js integration and full offline support');
 console.log('Enhanced startup flow:');
-console.log('  ✓ JWT token validation on DOMContentLoaded');
-console.log('  ✓ Redirect to /index.html if no token or token invalid');
-console.log('  ✓ Clear localStorage on token verification failure');
+console.log('  ✓ Single JWT token validation on DOMContentLoaded');
+console.log('  ✓ Uses cached auth state first for instant UI');
+console.log('  ✓ Validates token in background (non-blocking)');
+console.log('  ✓ Does not force redirects while child pages load');
 console.log('  ✓ UI displays instantly after successful validation');
 console.log('  ✓ Cached data loads immediately');
 console.log('  ✓ Offline data generated if no cache');

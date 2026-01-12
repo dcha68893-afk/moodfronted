@@ -1422,6 +1422,72 @@
     </style>
 </head>
 <body class="h-full overflow-hidden bg-gray-50" data-theme="light">
+    <!-- Soft Authentication Check Script -->
+    <script>
+        // Suppress console warnings for CDN
+        const originalWarn = console.warn;
+        console.warn = function(...args) {
+            if (typeof args[0] === 'string') {
+                // Suppress Tailwind CDN warnings
+                if (args[0].includes('Tailwind') && args[0].includes('CDN')) {
+                    return;
+                }
+                // Suppress other CDN warnings
+                if (args[0].includes('CDN') || args[0].includes('Content Security Policy')) {
+                    return;
+                }
+            }
+            originalWarn.apply(console, args);
+        };
+
+        // Soft authentication check - does NOT block UI rendering
+        function performSoftAuthCheck() {
+            try {
+                // Check for auth token in localStorage (silent check)
+                const authToken = localStorage.getItem('auth_token');
+                const storedUser = localStorage.getItem('kynecta_user');
+                
+                if (!authToken || !storedUser) {
+                    console.log('Soft auth check: Missing token or user data');
+                    // Notify parent window instead of redirecting
+                    if (window.parent !== window) {
+                        window.parent.postMessage({
+                            type: 'auth_required',
+                            reason: 'missing_token_or_user'
+                        }, '*');
+                    }
+                    return false;
+                }
+                
+                console.log('Soft auth check: Token and user data found');
+                return true;
+                
+            } catch (error) {
+                console.error('Soft auth check failed:', error);
+                return false;
+            }
+        }
+
+        // Execute soft authentication check on page load (non-blocking)
+        document.addEventListener('DOMContentLoaded', function() {
+            console.log('DOM loaded, performing soft auth check...');
+            
+            // Perform soft auth check without blocking
+            setTimeout(() => {
+                const hasAuthData = performSoftAuthCheck();
+                if (!hasAuthData) {
+                    console.log('Soft auth check failed - UI will still load');
+                    // UI will still load, api.js will handle authentication failures
+                } else {
+                    console.log('Soft auth check passed');
+                }
+            }, 100);
+            
+            // Continue with normal page initialization regardless of auth status
+            // The rest of the page will load normally
+        });
+    </script>
+
     <!-- REMOVED VISIBLE OFFLINE INDICATOR - Handled in background -->
 
     <!-- Global Notification Container (Shows on all screens) -->
@@ -1772,79 +1838,36 @@
         }
     }
     
-    document.addEventListener('DOMContentLoaded', function() {
+    document.addEventListener('DOMContentLoaded', async function() {
         console.log('DOM loaded, initializing iframe controller...');
         
-        // User is already authenticated from index.html
-        // Get user data from localStorage
-        initializeUserFromStorage();
-        
-        // Set up online/offline detection (silently in background)
-        setupOnlineStatus();
-        
-        // Setup back button functionality
-        setupBackButton();
-        
-        // Setup fullscreen page detection
-        setupFullscreenPageDetection();
-    });
-    
-    function initializeUserFromStorage() {
-        // Get user data from localStorage (set by index.html)
-        const userData = localStorage.getItem('kynecta_user');
-        if (userData) {
-            try {
-                currentUser = JSON.parse(userData);
-                console.log('User authenticated:', currentUser.name);
-                
-                // Initialize chat app immediately
-                initializeChatApp();
-                
-                return;
-            } catch (e) {
-                console.error('Error parsing user data:', e);
-                // Fallback to default user if needed
-                createDefaultUser();
+        // Soft authentication check - no blocking redirects
+        try {
+            // Try to get user from localStorage first (non-blocking)
+            const storedUser = localStorage.getItem('kynecta_user');
+            const authToken = localStorage.getItem('auth_token');
+            
+            if (storedUser && authToken) {
+                try {
+                    currentUser = JSON.parse(storedUser);
+                    console.log('User loaded from localStorage:', currentUser.name);
+                } catch (e) {
+                    console.log('Could not parse stored user data');
+                }
+            } else {
+                console.log('No stored user or auth token found - proceeding in offline/partial mode');
+                // Don't redirect - let api.js handle authentication failures
             }
-        } else {
-            // No user in localStorage, create default user
-            console.log('No user found in localStorage, creating default user');
-            createDefaultUser();
+            
+            // Initialize chat app immediately (non-blocking)
+            initializeChatApp();
+            
+        } catch (error) {
+            console.error('Error during initialization:', error);
+            // Don't redirect - continue with initialization
+            initializeChatApp();
         }
-    }
-    
-    function createDefaultUser() {
-        // Create a default user for testing
-        currentUser = {
-            id: 'user_' + Date.now(),
-            name: 'User',
-            email: 'user@kynecta.com',
-            password: 'password',
-            createdAt: new Date().toISOString(),
-            avatar: null,
-            status: 'online',
-            lastSeen: null,
-            mood: 'happy',
-            interests: [],
-            settings: {
-                theme: 'light',
-                fontSize: 'medium',
-                notifications: true,
-                chatWallpaper: 'default'
-            }
-        };
-        
-        // Save user to localStorage
-        localStorage.setItem('kynecta_user', JSON.stringify(currentUser));
-        
-        // Initialize user data
-        initializeUserData(currentUser.id);
-        
-        console.log('Default user created:', currentUser.name);
-        
-        // Initialize chat app
-        initializeChatApp();
-    }
+    });
     
     function initializeUserData(userId) {
         // Initialize empty data structures for the user
@@ -1878,7 +1901,14 @@
     }
     
     function initializeChatApp() {
-        console.log('Initializing chat app for user:', currentUser.name);
+        console.log('Initializing chat app...');
+        
+        // Initialize user data structures if we have a user
+        if (currentUser && currentUser.id) {
+            initializeUserData(currentUser.id);
+        } else {
+            console.log('No user ID available - skipping user data initialization');
+        }
         
         // Show loading screen initially
         showLoading();
@@ -2435,6 +2465,9 @@
             }
         });
     }
+    function goBack() {
+    window.history.back();
+}
     
     function reloadIframes() {
         console.log('Reloading iframes due to app update...');
@@ -2449,11 +2482,7 @@
     }
     
     function switchPage(pageName) {
-        if (!currentUser) {
-            console.log('Cannot switch page: No user logged in');
-            return;
-        }
-        
+        // Allow switching pages even without currentUser
         console.log('Switching to page:', pageName);
         currentPage = pageName;
         
@@ -2543,8 +2572,15 @@
                     break;
                     
                 case 'auth_required':
-                    // Handle auth requirement - user should already be authenticated
-                    console.log('Auth required, but user should already be authenticated');
+                    // Handle auth requirement - api.js will handle this
+                    console.log('Auth required message received from iframe');
+                    // Notify parent window if we're in an iframe
+                    if (window.parent !== window) {
+                        window.parent.postMessage({
+                            type: 'auth_required',
+                            reason: 'iframe_request'
+                        }, '*');
+                    }
                     break;
                     
                 case 'navigate_to':
@@ -2693,6 +2729,14 @@
                     // Handle API requests from iframes
                     if (event.data.endpoint && event.data.method) {
                         handleApiRequest(event.data);
+                    }
+                    break;
+                    
+                case 'user_data_updated':
+                    // Update currentUser when iframe sends updated user data
+                    if (event.data.user) {
+                        currentUser = event.data.user;
+                        console.log('User data updated from iframe:', currentUser.name);
                     }
                     break;
             }
@@ -2850,7 +2894,7 @@
     }, false);
     
     console.log('Iframe controller loaded successfully with WhatsApp-like navigation behavior');
-    console.log('Offline mode is now completely invisible to users - works silently in background');
+    console.log('Soft authentication mode enabled - api.js handles auth failures');
     </script>
 </body>
 </html>
