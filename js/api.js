@@ -1,6 +1,6 @@
 // api.js - MoodChat Backend API Integration
-// UPDATED: Fixed duplicate declarations, proper endpoint URLs, and error handling
-// VERSION: 2.0 - Production Ready
+// UPDATED: Fixed authentication and endpoint handling
+// VERSION: 2.1 - Production Ready with Strict Compliance
 
 // ============================================================================
 // CONFIGURATION
@@ -13,7 +13,7 @@ if (typeof window.MOODCHAT_API !== 'undefined') {
     console.log('📡 Loading MoodChat API...');
 }
 
-// Backend configuration
+// Backend configuration - STRICT: Fixed base URL
 const BACKEND_URL = 'https://moodchat-backend-1.onrender.com/api';
 const API_TIMEOUT = 10000; // 10 seconds
 
@@ -23,8 +23,9 @@ const API_ENDPOINTS = {
     REGISTER: '/auth/register',
     LOGIN: '/auth/login',
     LOGOUT: '/auth/logout',
-    ME: '/auth/me',
+    VALIDATE_TOKEN: '/auth/validate',
     REFRESH_TOKEN: '/auth/refresh',
+    ME: '/auth/me',
     
     // User endpoints
     USER_PROFILE: '/user/profile',
@@ -66,177 +67,266 @@ const API_ENDPOINTS = {
     STATUS: '/status'
 };
 
-// Local storage keys
+// Local storage keys - STRICT: Single token storage
 const STORAGE_KEYS = {
-    AUTH_TOKEN: 'moodchat_jwt_token',
-    REFRESH_TOKEN: 'moodchat_refresh_token',
+    AUTH_TOKEN: 'moodchat_token', // STRICT: Only one token stored
     USER_DATA: 'moodchat_user_data',
     LAST_API_CHECK: 'moodchat_last_api_check'
 };
 
 // ============================================================================
-// CORE API REQUEST FUNCTION
+// CORE API REQUEST FUNCTION - STRICT COMPLIANCE
 // ============================================================================
 
 /**
  * Make an API request with proper error handling and timeout
+ * STRICT: Fixed signature: apiRequest(endpoint, method = "GET", data = null, auth = true)
  * @param {string} endpoint - API endpoint (without base URL)
- * @param {Object} options - Fetch options
+ * @param {string} method - HTTP method (GET, POST, PUT, DELETE, PATCH)
+ * @param {Object|null} data - Request data for POST/PUT/PATCH
+ * @param {boolean} auth - Whether to include authorization header
  * @returns {Promise<Object>} API response
  */
-async function apiRequest(endpoint, options = {}) {
-    const url = `${BACKEND_URL}${endpoint}`;
+async function apiRequest(endpoint, method = "GET", data = null, auth = true) {
+    // STRICT: Validate endpoint format
+    if (!endpoint || typeof endpoint !== 'string') {
+        console.error('❌ Invalid endpoint:', endpoint);
+        throw new Error('API endpoint must be a non-empty string');
+    }
+    
+    // STRICT: Validate HTTP method
+    const validMethods = ['GET', 'POST', 'PUT', 'DELETE', 'PATCH'];
+    const upperMethod = method.toUpperCase();
+    if (!validMethods.includes(upperMethod)) {
+        console.error('❌ Invalid HTTP method:', method);
+        throw new Error(`HTTP method must be one of: ${validMethods.join(', ')}`);
+    }
+    
+    // STRICT: Ensure endpoint starts with "/" and NEVER concatenates method
+    const cleanEndpoint = endpoint.startsWith('/') ? endpoint : `/${endpoint}`;
+    
+    // STRICT: Validate that endpoint doesn't contain malformed patterns
+    if (cleanEndpoint.includes('POST') || cleanEndpoint.includes('GET') || 
+        cleanEndpoint.includes('PUT') || cleanEndpoint.includes('DELETE') ||
+        cleanEndpoint.includes('PATCH')) {
+        console.error('❌ Malformed endpoint - contains HTTP method:', cleanEndpoint);
+        throw new Error('API endpoint must not contain HTTP methods. Use the method parameter instead.');
+    }
+    
+    const url = `${BACKEND_URL}${cleanEndpoint}`; // STRICT: Proper URL construction
+    
+    console.log(`🌐 API Request: ${upperMethod} ${url}`);
+    
+    // STRICT: Show warning for potential malformed URLs
+    if (url.includes('/api/api') || url.includes('//api')) {
+        console.warn('⚠️ Potential double /api in URL:', url);
+    }
+    
     const controller = new AbortController();
     const timeoutId = setTimeout(() => controller.abort(), API_TIMEOUT);
     
-    const defaultHeaders = {
+    // Build headers - STRICT: Always include credentials
+    const headers = {
         'Content-Type': 'application/json',
         'Accept': 'application/json'
     };
     
-    // Add authorization header if token exists
-    const token = localStorage.getItem(STORAGE_KEYS.AUTH_TOKEN);
-    if (token) {
-        defaultHeaders['Authorization'] = `Bearer ${token}`;
+    // Add authorization header if requested and token exists
+    if (auth) {
+        const token = localStorage.getItem(STORAGE_KEYS.AUTH_TOKEN);
+        if (token) {
+            headers['Authorization'] = `Bearer ${token}`;
+            console.log('🔑 Attached auth token to request');
+        } else {
+            console.warn('⚠️ Auth requested but no token found in localStorage');
+        }
     }
     
+    // Build fetch options - STRICT: Proper fetch structure
     const fetchOptions = {
-        ...options,
-        headers: { ...defaultHeaders, ...options.headers },
+        method: upperMethod,
+        headers: headers,
+        credentials: "include", // STRICT: Always include credentials
         signal: controller.signal
     };
     
-    // Add body if provided (and not a GET/HEAD request)
-    if (options.body && !['GET', 'HEAD'].includes(options.method?.toUpperCase() || 'GET')) {
-        if (typeof options.body === 'object' && !(options.body instanceof FormData)) {
-            fetchOptions.body = JSON.stringify(options.body);
-        } else {
-            fetchOptions.body = options.body;
-        }
+    // Add body for methods that support it
+    if (data && ['POST', 'PUT', 'PATCH'].includes(upperMethod)) {
+        fetchOptions.body = JSON.stringify(data);
+        console.log('📦 Request body:', data);
     }
     
     try {
-        console.log(`🌐 API Request: ${options.method || 'GET'} ${url}`);
-        
         const response = await fetch(url, fetchOptions);
         clearTimeout(timeoutId);
         
-        // Handle non-JSON responses
-        const contentType = response.headers.get('content-type');
-        if (!contentType || !contentType.includes('application/json')) {
-            const text = await response.text();
-            console.warn(`⚠️ Non-JSON response received from ${endpoint}:`, text.substring(0, 200));
+        // Check for HTTP success (200-299)
+        const isHttpSuccess = response.ok;
+        
+        // Try to parse response as JSON, but handle non-JSON responses
+        let responseData = null;
+        let responseText = '';
+        
+        try {
+            // First, try to get the response as text
+            responseText = await response.text();
             
-            // Try to parse as JSON anyway (some APIs send JSON without proper headers)
-            try {
-                const data = JSON.parse(text);
-                return {
-                    success: response.ok,
-                    status: response.status,
-                    data: data,
-                    message: response.ok ? 'Success' : data.message || 'Request failed'
-                };
-            } catch {
-                // If not JSON, return as text
-                return {
-                    success: false,
-                    status: response.status,
-                    data: { raw: text },
-                    message: `Server returned non-JSON response: ${response.status} ${response.statusText}`
-                };
+            // Try to parse as JSON if text exists
+            if (responseText && responseText.trim() !== '') {
+                responseData = JSON.parse(responseText);
             }
+        } catch (jsonError) {
+            // Response is not JSON or empty - that's OK
+            console.log(`📄 Response is not JSON or empty for ${url}`);
         }
         
-        const data = await response.json();
-        
-        const result = {
-            success: response.ok,
+        // Build base response structure
+        const baseResponse = {
+            success: isHttpSuccess,
             status: response.status,
-            data: data.data || data,
-            message: data.message || (response.ok ? 'Success' : 'Request failed'),
+            statusText: response.statusText,
             timestamp: new Date().toISOString()
         };
         
-        // Handle token refresh if needed
-        if (response.status === 401 && data.code === 'TOKEN_EXPIRED') {
-            console.log('🔄 Token expired, attempting refresh...');
-            const refreshSuccess = await refreshAuthToken();
-            if (refreshSuccess) {
-                // Retry the original request with new token
-                return apiRequest(endpoint, options);
+        // Handle successful responses (HTTP 200-299)
+        if (isHttpSuccess) {
+            // Check if responseData exists (parsed from JSON)
+            if (responseData) {
+                // Extract token and user from various possible response structures
+                const token = responseData.token || responseData.access_token || responseData.accessToken;
+                const user = responseData.user || responseData.data || responseData;
+                const message = responseData.message || responseData.msg || 'Success';
+                
+                return {
+                    ...baseResponse,
+                    message: message,
+                    token: token,
+                    user: user,
+                    data: responseData
+                };
+            } else {
+                // Empty or non-JSON successful response
+                return {
+                    ...baseResponse,
+                    message: response.status === 204 ? 'No Content' : 'Success',
+                    token: null,
+                    user: null,
+                    data: null
+                };
+            }
+        } else {
+            // Handle error responses (HTTP 400+)
+            let errorMessage = `HTTP ${response.status}: ${response.statusText}`;
+            
+            if (responseData) {
+                // Use backend error message if available
+                errorMessage = responseData.message || responseData.error || responseData.msg || errorMessage;
+                
+                return {
+                    ...baseResponse,
+                    message: errorMessage,
+                    error: responseData,
+                    data: responseData
+                };
+            } else if (responseText) {
+                // Non-JSON error response
+                return {
+                    ...baseResponse,
+                    message: errorMessage,
+                    error: { raw: responseText },
+                    data: { raw: responseText }
+                };
+            } else {
+                // Empty error response
+                return {
+                    ...baseResponse,
+                    message: errorMessage,
+                    error: null,
+                    data: null
+                };
             }
         }
-        
-        return result;
         
     } catch (error) {
         clearTimeout(timeoutId);
         
-        // Handle specific error types
+        // STRICT: Handle all errors gracefully with specific messages
         let errorMessage = 'Network request failed';
-        let errorCode = 'NETWORK_ERROR';
+        let errorType = 'NetworkError';
         
         if (error.name === 'AbortError') {
-            errorMessage = 'Request timeout - server not responding';
-            errorCode = 'TIMEOUT';
+            errorMessage = `Request timeout after ${API_TIMEOUT}ms - server not responding`;
+            errorType = 'TimeoutError';
         } else if (error.name === 'TypeError' && error.message.includes('fetch')) {
-            errorMessage = 'Network error - check your connection';
-            errorCode = 'NETWORK_OFFLINE';
+            errorMessage = 'Network error - check your connection or CORS settings';
+            errorType = 'ConnectionError';
+        } else if (error.name === 'SyntaxError') {
+            errorMessage = 'Invalid JSON response from server';
+            errorType = 'ParseError';
         } else {
             errorMessage = error.message;
+            errorType = error.name;
         }
         
-        console.error(`❌ API request failed: ${errorMessage}`, {
-            endpoint,
-            error: error.name,
-            code: errorCode
+        console.error(`❌ API request failed (${errorType}): ${errorMessage}`, {
+            endpoint: cleanEndpoint,
+            method: method,
+            url: url,
+            error: error
         });
         
+        // STRICT: Always return structured error response
         return {
             success: false,
             error: errorMessage,
-            code: errorCode,
+            errorType: errorType,
             offline: true,
-            message: 'Offline mode - using cached data',
+            message: 'Unable to reach API service',
             timestamp: new Date().toISOString()
         };
     }
 }
 
 // ============================================================================
-// AUTHENTICATION FUNCTIONS
+// AUTHENTICATION FUNCTIONS - STRICT COMPLIANCE
 // ============================================================================
 
 /**
- * Register a new user
+ * Register a new user - STRICT: Normalized to POST /auth/register
  * @param {Object} userData - User registration data
  * @returns {Promise<Object>} Registration result
  */
 async function registerUser(userData) {
     console.log('👤 Registering new user:', userData.email);
     
-    const response = await apiRequest(API_ENDPOINTS.REGISTER, {
-        method: 'POST',
-        body: userData
-    });
+    // STRICT: Use the correct endpoint
+    const response = await apiRequest(API_ENDPOINTS.REGISTER, "POST", userData, false);
     
-    if (response.success && response.data?.token) {
-        // Store authentication data
-        localStorage.setItem(STORAGE_KEYS.AUTH_TOKEN, response.data.token);
-        localStorage.setItem(STORAGE_KEYS.REFRESH_TOKEN, response.data.refreshToken || '');
+    // Save token if present in response
+    if (response.success && response.token) {
+        localStorage.setItem(STORAGE_KEYS.AUTH_TOKEN, response.token);
         
-        if (response.data.user) {
-            localStorage.setItem(STORAGE_KEYS.USER_DATA, JSON.stringify(response.data.user));
+        if (response.user) {
+            localStorage.setItem(STORAGE_KEYS.USER_DATA, JSON.stringify(response.user));
         }
         
         console.log('✅ User registered successfully');
+        console.log('💾 Token saved to localStorage');
     }
     
-    return response;
+    // Ensure consistent response format
+    return {
+        success: response.success,
+        message: response.message || (response.success ? 'Registration successful' : 'Registration failed'),
+        token: response.token || null,
+        user: response.user || null,
+        data: response.data || null,
+        status: response.status
+    };
 }
 
 /**
- * Login user
+ * Login user - STRICT: Normalized to POST /auth/login
  * @param {string} email - User email
  * @param {string} password - User password
  * @returns {Promise<Object>} Login result
@@ -244,43 +334,69 @@ async function registerUser(userData) {
 async function loginUser(email, password) {
     console.log('🔐 Logging in user:', email);
     
-    const response = await apiRequest(API_ENDPOINTS.LOGIN, {
-        method: 'POST',
-        body: { email, password }
-    });
+    // STRICT: Use the correct endpoint with correct method
+    const response = await apiRequest(API_ENDPOINTS.LOGIN, "POST", { email, password }, false);
     
-    if (response.success && response.data?.token) {
-        // Store authentication data
-        localStorage.setItem(STORAGE_KEYS.AUTH_TOKEN, response.data.token);
-        localStorage.setItem(STORAGE_KEYS.REFRESH_TOKEN, response.data.refreshToken || '');
+    // Save token if present in response
+    if (response.success && response.token) {
+        localStorage.setItem(STORAGE_KEYS.AUTH_TOKEN, response.token);
         
-        if (response.data.user) {
-            localStorage.setItem(STORAGE_KEYS.USER_DATA, JSON.stringify(response.data.user));
+        if (response.user) {
+            localStorage.setItem(STORAGE_KEYS.USER_DATA, JSON.stringify(response.user));
         }
         
         console.log('✅ User logged in successfully');
+        console.log('💾 Token saved to localStorage');
     }
     
-    return response;
+    // Ensure consistent response format
+    return {
+        success: response.success,
+        message: response.message || (response.success ? 'Login successful' : 'Authentication failed'),
+        token: response.token || null,
+        user: response.user || null,
+        data: response.data || null,
+        status: response.status
+    };
 }
 
 /**
- * Logout user
+ * Validate authentication token - STRICT: Normalized to GET /auth/validate
+ * @returns {Promise<Object>} Validation result
+ */
+async function validateToken() {
+    console.log('🔑 Validating authentication token');
+    
+    const response = await apiRequest(API_ENDPOINTS.VALIDATE_TOKEN, "GET", null, true);
+    
+    // Ensure consistent response format
+    return {
+        success: response.success,
+        message: response.message || (response.success ? 'Token valid' : 'Token validation failed'),
+        data: response.data || null,
+        status: response.status
+    };
+}
+
+/**
+ * Logout user - STRICT: Normalized to POST /auth/logout
  * @returns {Promise<Object>} Logout result
  */
 async function logoutUser() {
     console.log('👋 Logging out user');
     
-    const response = await apiRequest(API_ENDPOINTS.LOGOUT, {
-        method: 'POST'
-    });
+    const response = await apiRequest(API_ENDPOINTS.LOGOUT, "POST", null, true);
     
     // Clear local storage regardless of API response
-    clearAuth();
+    localStorage.removeItem(STORAGE_KEYS.AUTH_TOKEN);
+    localStorage.removeItem(STORAGE_KEYS.USER_DATA);
+    console.log('🧹 Cleared localStorage tokens');
     
     return {
-        ...response,
-        message: response.success ? 'Logged out successfully' : 'Logged out locally (API may have failed)'
+        success: response.success,
+        message: response.message || (response.success ? 'Logged out successfully' : 'Logged out locally (API may have failed)'),
+        data: response.data || null,
+        status: response.status
     };
 }
 
@@ -291,48 +407,22 @@ async function logoutUser() {
 async function getCurrentUser() {
     console.log('👤 Fetching current user profile');
     
-    const response = await apiRequest(API_ENDPOINTS.ME, {
-        method: 'GET'
-    });
+    const response = await apiRequest(API_ENDPOINTS.ME, "GET", null, true);
     
     if (response.success && response.data) {
         // Update stored user data
         localStorage.setItem(STORAGE_KEYS.USER_DATA, JSON.stringify(response.data));
+        console.log('💾 Updated user data in localStorage');
     }
     
-    return response;
-}
-
-/**
- * Refresh authentication token
- * @returns {Promise<boolean>} Whether refresh was successful
- */
-async function refreshAuthToken() {
-    const refreshToken = localStorage.getItem(STORAGE_KEYS.REFRESH_TOKEN);
-    
-    if (!refreshToken) {
-        console.warn('⚠️ No refresh token available');
-        return false;
-    }
-    
-    try {
-        const response = await apiRequest(API_ENDPOINTS.REFRESH_TOKEN, {
-            method: 'POST',
-            body: { refreshToken }
-        });
-        
-        if (response.success && response.data?.token) {
-            localStorage.setItem(STORAGE_KEYS.AUTH_TOKEN, response.data.token);
-            console.log('✅ Token refreshed successfully');
-            return true;
-        }
-        
-        console.warn('⚠️ Token refresh failed:', response.message);
-        return false;
-    } catch (error) {
-        console.error('❌ Token refresh error:', error);
-        return false;
-    }
+    // Ensure consistent response format
+    return {
+        success: response.success,
+        message: response.message || (response.success ? 'Profile fetched' : 'Failed to fetch profile'),
+        user: response.user || response.data || null,
+        data: response.data || null,
+        status: response.status
+    };
 }
 
 // ============================================================================
@@ -347,10 +437,7 @@ async function refreshAuthToken() {
 async function updateUserProfile(updates) {
     console.log('📝 Updating user profile:', updates);
     
-    const response = await apiRequest(API_ENDPOINTS.USER_UPDATE, {
-        method: 'PUT',
-        body: updates
-    });
+    const response = await apiRequest(API_ENDPOINTS.USER_UPDATE, "PUT", updates, true);
     
     if (response.success && response.data) {
         // Update stored user data
@@ -373,10 +460,7 @@ async function updateUserProfile(updates) {
 async function updateUserStatus(status, emoji = '') {
     console.log('🔄 Updating user status:', status);
     
-    const response = await apiRequest(API_ENDPOINTS.USER_STATUS, {
-        method: 'POST',
-        body: { status, emoji }
-    });
+    const response = await apiRequest(API_ENDPOINTS.USER_STATUS, "POST", { status, emoji }, true);
     
     return response;
 }
@@ -392,9 +476,7 @@ async function updateUserStatus(status, emoji = '') {
 async function getFriends() {
     console.log('👥 Fetching friends list');
     
-    const response = await apiRequest(API_ENDPOINTS.FRIENDS_LIST, {
-        method: 'GET'
-    });
+    const response = await apiRequest(API_ENDPOINTS.FRIENDS_LIST, "GET", null, true);
     
     return response;
 }
@@ -408,10 +490,7 @@ async function getFriends() {
 async function addFriend(userId, message = '') {
     console.log('➕ Adding friend:', userId);
     
-    const response = await apiRequest(API_ENDPOINTS.FRIENDS_ADD, {
-        method: 'POST',
-        body: { userId, message }
-    });
+    const response = await apiRequest(API_ENDPOINTS.FRIENDS_ADD, "POST", { userId, message }, true);
     
     return response;
 }
@@ -423,9 +502,7 @@ async function addFriend(userId, message = '') {
 async function getFriendRequests() {
     console.log('📨 Fetching friend requests');
     
-    const response = await apiRequest(API_ENDPOINTS.FRIENDS_REQUESTS, {
-        method: 'GET'
-    });
+    const response = await apiRequest(API_ENDPOINTS.FRIENDS_REQUESTS, "GET", null, true);
     
     return response;
 }
@@ -438,10 +515,33 @@ async function getFriendRequests() {
 async function acceptFriendRequest(requestId) {
     console.log('✅ Accepting friend request:', requestId);
     
-    const response = await apiRequest(API_ENDPOINTS.FRIENDS_ACCEPT, {
-        method: 'POST',
-        body: { requestId }
-    });
+    const response = await apiRequest(API_ENDPOINTS.FRIENDS_ACCEPT, "POST", { requestId }, true);
+    
+    return response;
+}
+
+/**
+ * Reject friend request
+ * @param {string} requestId - Request ID
+ * @returns {Promise<Object>} Rejection result
+ */
+async function rejectFriendRequest(requestId) {
+    console.log('❌ Rejecting friend request:', requestId);
+    
+    const response = await apiRequest(API_ENDPOINTS.FRIENDS_REJECT, "POST", { requestId }, true);
+    
+    return response;
+}
+
+/**
+ * Remove friend
+ * @param {string} friendId - Friend ID to remove
+ * @returns {Promise<Object>} Removal result
+ */
+async function removeFriend(friendId) {
+    console.log('➖ Removing friend:', friendId);
+    
+    const response = await apiRequest(API_ENDPOINTS.FRIENDS_REMOVE, "POST", { friendId }, true);
     
     return response;
 }
@@ -457,9 +557,20 @@ async function acceptFriendRequest(requestId) {
 async function getChatRooms() {
     console.log('💬 Fetching chat rooms');
     
-    const response = await apiRequest(API_ENDPOINTS.CHATS_LIST, {
-        method: 'GET'
-    });
+    const response = await apiRequest(API_ENDPOINTS.CHATS_LIST, "GET", null, true);
+    
+    return response;
+}
+
+/**
+ * Create a new chat
+ * @param {Object} chatData - Chat creation data
+ * @returns {Promise<Object>} Creation result
+ */
+async function createChat(chatData) {
+    console.log('💬 Creating new chat:', chatData.name);
+    
+    const response = await apiRequest(API_ENDPOINTS.CHAT_CREATE, "POST", chatData, true);
     
     return response;
 }
@@ -473,10 +584,9 @@ async function getChatRooms() {
 async function getRoomMessages(chatId, limit = 50) {
     console.log(`📨 Fetching messages for chat ${chatId}`);
     
-    const endpoint = API_ENDPOINTS.CHAT_MESSAGES.replace('{id}', chatId);
-    const response = await apiRequest(`${endpoint}?limit=${limit}`, {
-        method: 'GET'
-    });
+    // STRICT: Proper endpoint construction without method in URL
+    const endpoint = API_ENDPOINTS.CHAT_MESSAGES.replace('{id}', chatId) + `?limit=${limit}`;
+    const response = await apiRequest(endpoint, "GET", null, true);
     
     return response;
 }
@@ -492,10 +602,35 @@ async function sendMessage(chatId, message, type = 'text') {
     console.log(`📤 Sending message to chat ${chatId}:`, message.substring(0, 50) + '...');
     
     const endpoint = API_ENDPOINTS.CHAT_SEND.replace('{id}', chatId);
-    const response = await apiRequest(endpoint, {
-        method: 'POST',
-        body: { message, type }
-    });
+    const response = await apiRequest(endpoint, "POST", { message, type }, true);
+    
+    return response;
+}
+
+/**
+ * Join a chat room
+ * @param {string} chatId - Chat ID
+ * @returns {Promise<Object>} Join result
+ */
+async function joinChat(chatId) {
+    console.log(`➕ Joining chat: ${chatId}`);
+    
+    const endpoint = API_ENDPOINTS.CHAT_JOIN.replace('{id}', chatId);
+    const response = await apiRequest(endpoint, "POST", null, true);
+    
+    return response;
+}
+
+/**
+ * Leave a chat room
+ * @param {string} chatId - Chat ID
+ * @returns {Promise<Object>} Leave result
+ */
+async function leaveChat(chatId) {
+    console.log(`➖ Leaving chat: ${chatId}`);
+    
+    const endpoint = API_ENDPOINTS.CHAT_LEAVE.replace('{id}', chatId);
+    const response = await apiRequest(endpoint, "POST", null, true);
     
     return response;
 }
@@ -511,9 +646,7 @@ async function sendMessage(chatId, message, type = 'text') {
 async function getGroups() {
     console.log('👥 Fetching groups list');
     
-    const response = await apiRequest(API_ENDPOINTS.GROUPS_LIST, {
-        method: 'GET'
-    });
+    const response = await apiRequest(API_ENDPOINTS.GROUPS_LIST, "GET", null, true);
     
     return response;
 }
@@ -526,10 +659,7 @@ async function getGroups() {
 async function createGroup(groupData) {
     console.log('🏗️ Creating new group:', groupData.name);
     
-    const response = await apiRequest(API_ENDPOINTS.GROUP_CREATE, {
-        method: 'POST',
-        body: groupData
-    });
+    const response = await apiRequest(API_ENDPOINTS.GROUP_CREATE, "POST", groupData, true);
     
     return response;
 }
@@ -543,9 +673,80 @@ async function getGroupDetails(groupId) {
     console.log(`ℹ️ Fetching group details: ${groupId}`);
     
     const endpoint = API_ENDPOINTS.GROUP_DETAILS.replace('{id}', groupId);
-    const response = await apiRequest(endpoint, {
-        method: 'GET'
-    });
+    const response = await apiRequest(endpoint, "GET", null, true);
+    
+    return response;
+}
+
+/**
+ * Join a group
+ * @param {string} groupId - Group ID
+ * @returns {Promise<Object>} Join result
+ */
+async function joinGroup(groupId) {
+    console.log(`➕ Joining group: ${groupId}`);
+    
+    const endpoint = API_ENDPOINTS.GROUP_JOIN.replace('{id}', groupId);
+    const response = await apiRequest(endpoint, "POST", null, true);
+    
+    return response;
+}
+
+/**
+ * Leave a group
+ * @param {string} groupId - Group ID
+ * @returns {Promise<Object>} Leave result
+ */
+async function leaveGroup(groupId) {
+    console.log(`➖ Leaving group: ${groupId}`);
+    
+    const endpoint = API_ENDPOINTS.GROUP_LEAVE.replace('{id}', groupId);
+    const response = await apiRequest(endpoint, "POST", null, true);
+    
+    return response;
+}
+
+/**
+ * Get group members
+ * @param {string} groupId - Group ID
+ * @returns {Promise<Object>} Group members
+ */
+async function getGroupMembers(groupId) {
+    console.log(`👥 Fetching group members: ${groupId}`);
+    
+    const endpoint = API_ENDPOINTS.GROUP_MEMBERS.replace('{id}', groupId);
+    const response = await apiRequest(endpoint, "GET", null, true);
+    
+    return response;
+}
+
+/**
+ * Get group messages
+ * @param {string} groupId - Group ID
+ * @param {number} limit - Number of messages to fetch
+ * @returns {Promise<Object>} Group messages
+ */
+async function getGroupMessages(groupId, limit = 50) {
+    console.log(`📨 Fetching messages for group ${groupId}`);
+    
+    const endpoint = API_ENDPOINTS.GROUP_MESSAGES.replace('{id}', groupId) + `?limit=${limit}`;
+    const response = await apiRequest(endpoint, "GET", null, true);
+    
+    return response;
+}
+
+/**
+ * Send message to group
+ * @param {string} groupId - Group ID
+ * @param {string} message - Message content
+ * @param {string} type - Message type
+ * @returns {Promise<Object>} Send result
+ */
+async function sendGroupMessage(groupId, message, type = 'text') {
+    console.log(`📤 Sending message to group ${groupId}:`, message.substring(0, 50) + '...');
+    
+    const endpoint = API_ENDPOINTS.GROUP_SEND.replace('{id}', groupId);
+    const response = await apiRequest(endpoint, "POST", { message, type }, true);
     
     return response;
 }
@@ -561,9 +762,33 @@ async function getGroupDetails(groupId) {
 async function getCallHistory() {
     console.log('📞 Fetching call history');
     
-    const response = await apiRequest(API_ENDPOINTS.CALLS_HISTORY, {
-        method: 'GET'
-    });
+    const response = await apiRequest(API_ENDPOINTS.CALLS_HISTORY, "GET", null, true);
+    
+    return response;
+}
+
+/**
+ * Start a call
+ * @param {Object} callData - Call data (receiverId, type, etc.)
+ * @returns {Promise<Object>} Call start result
+ */
+async function startCall(callData) {
+    console.log('📞 Starting call:', callData);
+    
+    const response = await apiRequest(API_ENDPOINTS.CALL_START, "POST", callData, true);
+    
+    return response;
+}
+
+/**
+ * End a call
+ * @param {string} callId - Call ID
+ * @returns {Promise<Object>} Call end result
+ */
+async function endCall(callId) {
+    console.log('📞 Ending call:', callId);
+    
+    const response = await apiRequest(API_ENDPOINTS.CALL_END, "POST", { callId }, true);
     
     return response;
 }
@@ -579,9 +804,7 @@ async function getCallHistory() {
 async function checkHealth() {
     console.log('🏥 Checking API health');
     
-    const response = await apiRequest(API_ENDPOINTS.STATUS, {
-        method: 'GET'
-    });
+    const response = await apiRequest(API_ENDPOINTS.STATUS, "GET", null, false);
     
     return response;
 }
@@ -604,21 +827,6 @@ async function testConnection() {
                 timestamp: new Date().toISOString()
             };
         } else {
-            // Try an alternative endpoint if /status doesn't work
-            const meResponse = await apiRequest(API_ENDPOINTS.ME, {
-                method: 'GET'
-            });
-            
-            if (meResponse.success || meResponse.status === 401) {
-                // 401 means API is reachable but auth is required
-                return {
-                    success: true,
-                    message: 'API connection successful (requires authentication)',
-                    data: { reachable: true },
-                    timestamp: new Date().toISOString()
-                };
-            }
-            
             return {
                 success: false,
                 message: 'API connection failed',
@@ -655,9 +863,7 @@ async function testAuth() {
     }
     
     try {
-        const response = await apiRequest(API_ENDPOINTS.ME, {
-            method: 'GET'
-        });
+        const response = await validateToken();
         
         return {
             success: response.success,
@@ -696,7 +902,13 @@ function getStoredUser() {
  * @returns {string|null} Token or null
  */
 function getStoredToken() {
-    return localStorage.getItem(STORAGE_KEYS.AUTH_TOKEN);
+    const token = localStorage.getItem(STORAGE_KEYS.AUTH_TOKEN);
+    if (token) {
+        console.log('🔍 Found stored token (length):', token.length);
+    } else {
+        console.log('🔍 No stored token found');
+    }
+    return token;
 }
 
 /**
@@ -706,7 +918,9 @@ function getStoredToken() {
 function isAuthenticated() {
     const token = getStoredToken();
     const user = getStoredUser();
-    return !!(token && user);
+    const authenticated = !!(token && user);
+    console.log('🔐 Authentication check:', { hasToken: !!token, hasUser: !!user, authenticated });
+    return authenticated;
 }
 
 /**
@@ -735,12 +949,7 @@ function clearAuth() {
     console.log('🧹 Clearing authentication data');
     
     localStorage.removeItem(STORAGE_KEYS.AUTH_TOKEN);
-    localStorage.removeItem(STORAGE_KEYS.REFRESH_TOKEN);
     localStorage.removeItem(STORAGE_KEYS.USER_DATA);
-    
-    // Also clear any app-specific auth data
-    localStorage.removeItem('moodchat-auth-state');
-    localStorage.removeItem('moodchat_device_session');
 }
 
 /**
@@ -779,6 +988,25 @@ function validatePassword(password) {
 }
 
 // ============================================================================
+// API STATUS AND INITIALIZATION
+// ============================================================================
+
+/**
+ * Get API status
+ * @returns {Object} API status information
+ */
+function getApiStatus() {
+    return {
+        backendUrl: BACKEND_URL,
+        endpoints: Object.keys(API_ENDPOINTS).length,
+        authenticated: isAuthenticated(),
+        user: getStoredUser() ? 'Logged in' : 'Not logged in',
+        tokenExists: !!getStoredToken(),
+        timestamp: new Date().toISOString()
+    };
+}
+
+// ============================================================================
 // AVAILABLE ROOMS (For testing/demo)
 // ============================================================================
 
@@ -794,23 +1022,24 @@ const AVAILABLE_ROOMS = [
 ];
 
 // ============================================================================
-// API STATUS AND INITIALIZATION
+// DEFENSIVE GUARDS
 // ============================================================================
 
-/**
- * Get API status
- * @returns {Object} API status information
- */
-function getApiStatus() {
-    return {
-        backendUrl: BACKEND_URL,
-        endpoints: Object.keys(API_ENDPOINTS).length,
-        authenticated: isAuthenticated(),
-        user: getStoredUser() ? 'Logged in' : 'Not logged in',
-        tokenExists: !!getStoredToken(),
-        timestamp: new Date().toISOString(),
-        availableRooms: AVAILABLE_ROOMS.length
-    };
+// Guard against common malformed endpoint patterns
+function validateEndpointPattern(endpoint) {
+    const malformedPatterns = [
+        /\/api\/?[A-Z]+\//i, // Matches /apiPOST/ or /apiGET/
+        /\/[A-Z]+\/api/i,   // Matches /POST/api or /GET/api
+        /\/api\/api\//i,     // Matches double /api/api/
+    ];
+    
+    for (const pattern of malformedPatterns) {
+        if (pattern.test(endpoint)) {
+            throw new Error(`Malformed endpoint detected: ${endpoint}. Endpoints should not contain HTTP methods.`);
+        }
+    }
+    
+    return true;
 }
 
 // ============================================================================
@@ -827,9 +1056,9 @@ const MoodChatAPI = {
     // Authentication
     registerUser,
     loginUser,
+    validateToken,
     logoutUser,
     getCurrentUser,
-    refreshAuthToken,
     
     // User management
     updateUserProfile,
@@ -840,22 +1069,36 @@ const MoodChatAPI = {
     addFriend,
     getFriendRequests,
     acceptFriendRequest,
+    rejectFriendRequest,
+    removeFriend,
     
     // Chats
     getChatRooms,
+    createChat,
     getRoomMessages,
     sendMessage,
+    joinChat,
+    leaveChat,
     
     // Groups
     getGroups,
     createGroup,
     getGroupDetails,
+    joinGroup,
+    leaveGroup,
+    getGroupMembers,
+    getGroupMessages,
+    sendGroupMessage,
     
     // Calls
     getCallHistory,
+    startCall,
+    endCall,
     
     // Utilities
     checkHealth,
+    testConnection,
+    testAuth,
     getApiStatus,
     getStoredUser,
     getStoredToken,
@@ -867,12 +1110,11 @@ const MoodChatAPI = {
     isValidEmail,
     validatePassword,
     
-    // Testing
-    testConnection,
-    testAuth,
-    
     // Data
-    AVAILABLE_ROOMS
+    AVAILABLE_ROOMS,
+    
+    // Defensive guards
+    validateEndpointPattern
 };
 
 // Export to window object
@@ -885,25 +1127,84 @@ if (typeof window !== 'undefined') {
     
     console.log('✅ MoodChat API loaded successfully');
     console.log('🌐 Backend URL:', BACKEND_URL);
+    console.log('🔑 Token storage key:', STORAGE_KEYS.AUTH_TOKEN);
     console.log('📋 Available functions:', Object.keys(MoodChatAPI).filter(key => typeof MoodChatAPI[key] === 'function').length, 'functions');
+    console.log('📊 API Status:', getApiStatus());
     
     // Auto-test connection on load (but don't block)
     setTimeout(async () => {
         try {
             const connectionTest = await testConnection();
-            console.log('🔌 Auto-connection test:', connectionTest);
+            console.log('🔌 Auto-connection test:', connectionTest.success ? '✅ Connected' : '❌ Failed');
             
             if (isAuthenticated()) {
                 const authTest = await testAuth();
-                console.log('🔑 Auto-auth test:', authTest);
+                console.log('🔑 Auto-auth test:', authTest.authenticated ? '✅ Valid' : '❌ Invalid');
             }
         } catch (error) {
-            console.log('⚠️ Auto-test skipped or failed:', error.message);
+            console.log('⚠️ Auto-test skipped:', error.message);
         }
     }, 1000);
 }
 
-// Export for module systems
-if (typeof module !== 'undefined' && module.exports) {
-    module.exports = MoodChatAPI;
+/**
+ * Debug the exact API request being made
+ */
+async function debugApiRequest() {
+    console.log('🔍 Debugging API request...');
+    
+    const testCases = [
+        { 
+            url: 'https://moodchat-backend-1.onrender.com/status',
+            description: 'Direct to status (no /api)' 
+        },
+        { 
+            url: 'https://moodchat-backend-1.onrender.com/api/status',
+            description: 'With /api prefix' 
+        },
+        { 
+            url: 'https://moodchat-backend-1.onrender.com/api/auth/register',
+            description: 'Auth register endpoint',
+            options: { method: 'OPTIONS' } // Preflight request
+        }
+    ];
+    
+    for (const test of testCases) {
+        console.log(`\n🧪 Testing: ${test.description}`);
+        console.log(`🔗 URL: ${test.url}`);
+        
+        try {
+            const startTime = Date.now();
+            const response = await fetch(test.url, {
+                method: test.options?.method || 'GET',
+                headers: {
+                    'Content-Type': 'application/json',
+                },
+                mode: 'cors'
+            });
+            const responseTime = Date.now() - startTime;
+            
+            console.log(`✅ Response: ${response.status} ${response.statusText}`);
+            console.log(`⏱️ Time: ${responseTime}ms`);
+            
+            // Try to get response text
+            const text = await response.text();
+            console.log(`📄 Response preview: ${text.substring(0, 100)}...`);
+            
+            // Check CORS headers
+            console.log('🔒 CORS Headers:');
+            console.log('  Access-Control-Allow-Origin:', response.headers.get('Access-Control-Allow-Origin'));
+            console.log('  Access-Control-Allow-Methods:', response.headers.get('Access-Control-Allow-Methods'));
+            console.log('  Access-Control-Allow-Headers:', response.headers.get('Access-Control-Allow-Headers'));
+            
+        } catch (error) {
+            console.error(`❌ Error: ${error.name}: ${error.message}`);
+            console.error('Full error:', error);
+        }
+    }
 }
+
+// Add to MoodChatAPI
+MoodChatAPI.debugApiRequest = debugApiRequest;
+
+// Browser-only, no Node.js exports

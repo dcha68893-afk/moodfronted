@@ -1,8 +1,7 @@
 // app.js - MoodChat Application Shell & Tab Controller
-// UPDATED: Removed Firebase, integrated with api.js functions
-// ENHANCED: All authentication and chat functions now use api.js
-// OFFLINE-FIRST: Load instantly from cache, sync in background
-// ADDED: JWT token validation on DOMContentLoaded
+// UPDATED: WhatsApp-style instant loading with background validation
+// ENHANCED: UI loads instantly from cache, token validates in background
+// REQUIREMENT: Never wait for server during initial render
 
 // ============================================================================
 // CONFIGURATION
@@ -51,13 +50,14 @@ const EXTERNAL_TABS = {
 };
 
 // ============================================================================
-// JWT TOKEN VALIDATION WITH SINGLE STARTUP CHECK
+// JWT TOKEN VALIDATION - BACKGROUND ONLY
 // ============================================================================
 
 const JWT_VALIDATION = {
   TOKEN_KEY: 'moodchat_jwt_token',
   VALIDATED_KEY: 'moodchat_jwt_validated',
   VALIDATION_LOCK: 'moodchat_validation_in_progress',
+  BACKGROUND_CHECKED: 'moodchat_background_checked',
   
   // Check if token exists
   hasToken: function() {
@@ -73,11 +73,22 @@ const JWT_VALIDATION = {
   clearToken: function() {
     localStorage.removeItem(this.TOKEN_KEY);
     localStorage.removeItem(this.VALIDATED_KEY);
+    localStorage.removeItem(this.BACKGROUND_CHECKED);
   },
   
   // Store token
   storeToken: function(token) {
     localStorage.setItem(this.TOKEN_KEY, token);
+  },
+  
+  // Check if background validation was already performed
+  isBackgroundChecked: function() {
+    return localStorage.getItem(this.BACKGROUND_CHECKED) === 'true';
+  },
+  
+  // Mark background validation as completed
+  markBackgroundChecked: function() {
+    localStorage.setItem(this.BACKGROUND_CHECKED, 'true');
   },
   
   // Check if validation is already in progress
@@ -163,118 +174,165 @@ const JWT_VALIDATION = {
     }
   },
   
-  // Perform authentication check - SINGLE RUN on startup
-  performAuthCheck: async function() {
-    console.log('Performing JWT authentication check (single run)...');
+  // Perform BACKGROUND authentication check - NON-BLOCKING
+  performBackgroundAuthCheck: async function() {
+    console.log('Starting BACKGROUND JWT token validation...');
     
-    // Check if we're already validating or validated
-    if (this.isValidationInProgress()) {
-      console.log('Validation already in progress, skipping duplicate check');
+    // Check if we already validated in background
+    if (this.isBackgroundChecked()) {
+      console.log('Background validation already performed, skipping');
       return { validated: false, skipped: true };
     }
     
-    if (this.isAlreadyValidated()) {
-      console.log('Token already validated in this session');
-      return { validated: true, cached: true };
+    // Check if we're already validating
+    if (this.isValidationInProgress()) {
+      console.log('Validation already in progress, skipping duplicate');
+      return { validated: false, skipped: true };
     }
     
-    // Set validation lock to prevent duplicate checks
+    // Set validation lock
     this.setValidationLock(true);
     
     try {
       if (!this.hasToken()) {
-        console.log('No JWT token found, using cached auth state');
+        console.log('No JWT token found in background check');
         this.setValidationLock(false);
+        this.markBackgroundChecked();
         return { validated: false, noToken: true };
       }
       
       const validation = await this.validateToken();
       
       if (!validation.valid) {
-        console.log('Token validation failed:', validation.reason);
-        
-        // Only clear auth data if api.js explicitly signals auth failure
-        // Don't clear localStorage automatically
-        if (validation.reason.includes('Invalid token') || validation.reason.includes('Token expired')) {
-          console.log('Token invalid, will require re-authentication');
-          // Don't clear localStorage - let api.js handle it
-        }
-        
+        console.log('Background token validation failed:', validation.reason);
         this.setValidationLock(false);
+        this.markBackgroundChecked();
         return { validated: false, invalid: true, reason: validation.reason };
       }
       
-      console.log('Token validation successful');
+      console.log('Background token validation successful');
       this.markAsValidated();
       this.setValidationLock(false);
+      this.markBackgroundChecked();
       return { validated: true, user: validation.user };
       
     } catch (error) {
-      console.error('Auth check error:', error);
+      console.error('Background auth check error:', error);
       this.setValidationLock(false);
+      this.markBackgroundChecked();
       return { validated: false, error: error.message };
     }
   },
   
-  // Clear all authentication data (only when explicitly called)
-  clearAllAuthData: function() {
-    this.clearToken();
-    localStorage.removeItem('moodchat_device_session');
-    localStorage.removeItem('moodchat-auth-state');
-    localStorage.removeItem('moodchat-auth');
-    
-    // Clear user-specific data
-    if (currentUser && currentUser.uid) {
-      USER_DATA_ISOLATION.clearUserData(currentUser.uid);
-    }
-  },
-  
-  // Soft redirect to login (non-intrusive)
+  // Soft redirect to login (non-intrusive) - ONLY for missing tokens
   suggestLoginRedirect: function() {
-    // Only redirect if we're on a protected page and not already on login
-    if (window.location.pathname.endsWith('index.html') || 
-        window.location.pathname.endsWith('/')) {
+    // Don't redirect during iframe/child page loads
+    if (window !== window.top || window.location.pathname.includes('chat.html') || 
+        window.location.pathname.includes('group.html')) {
+      console.log('Skipping redirect during iframe/child page load');
       return false;
     }
     
-    // Use replace to prevent back navigation to protected page
-    window.location.replace('/index.html');
-    return true;
+    // Only redirect if we have NO token at all (not just expired)
+    if (!this.hasToken() && 
+        !localStorage.getItem('moodchat_device_session') &&
+        !localStorage.getItem('moodchat-auth-state')) {
+      
+      // Check if we're already on login page
+      if (window.location.pathname.endsWith('index.html') || 
+          window.location.pathname.endsWith('/')) {
+        return false;
+      }
+      
+      console.log('No auth data found, redirecting to login...');
+      setTimeout(() => {
+        window.location.replace('/index.html');
+      }, 100);
+      return true;
+    }
+    
+    return false;
   }
 };
 
 // ============================================================================
-// SINGLE DOMContentLoaded JWT VALIDATION
+// INSTANT STARTUP SYSTEM - WHATSAPP-STYLE LOADING
 // ============================================================================
 
-// Execute JWT validation only once on DOMContentLoaded
-let authCheckPerformed = false;
+// Global state
+let currentTab = 'groups';
+let isLoading = false;
+let isSidebarOpen = true;
+let currentUser = null;
+let authStateRestored = false;
+let isOnline = navigator.onLine;
+let syncQueue = [];
+let instantUILoaded = false;
+let backgroundSyncInProgress = false;
+let pendingUIUpdates = [];
 
-document.addEventListener('DOMContentLoaded', async function() {
-  console.log('DOMContentLoaded - Starting single JWT token validation');
+// Track startup state
+let appStartupPerformed = false;
+let backgroundValidationScheduled = false;
+
+// ============================================================================
+// INSTANT AUTH STATE RESTORATION (CRITICAL - RUNS FIRST)
+// ============================================================================
+
+function restoreAuthStateInstantly() {
+  console.log('INSTANT START: Restoring auth state from cache...');
   
-  // Prevent duplicate auth checks
-  if (authCheckPerformed) {
-    console.log('Auth check already performed, skipping');
-    return;
+  // FIRST: Check for JWT token - if exists, UI loads instantly
+  if (JWT_VALIDATION.hasToken()) {
+    console.log('✓ JWT token found, allowing instant UI load');
+    
+    // Create a provisional user from token (fast, non-blocking)
+    try {
+      const token = JWT_VALIDATION.getToken();
+      const tokenParts = token.split('.');
+      if (tokenParts.length === 3) {
+        const payload = JSON.parse(atob(tokenParts[1]));
+        
+        const provisionalUser = {
+          uid: payload.sub || payload.id || payload._id || 'temp_user_' + Date.now(),
+          email: payload.email || 'user@example.com',
+          displayName: payload.name || payload.username || 'User',
+          photoURL: payload.avatar || `https://ui-avatars.com/api/?name=User&background=8b5cf6&color=fff`,
+          emailVerified: payload.emailVerified || false,
+          isOffline: false,
+          providerId: 'api',
+          refreshToken: token,
+          getIdToken: () => Promise.resolve(token),
+          isProvisional: true // Mark as provisional until background validation
+        };
+        
+        // Set user immediately
+        currentUser = provisionalUser;
+        authStateRestored = true;
+        
+        // Setup user isolation
+        USER_DATA_ISOLATION.setCurrentUser(provisionalUser.uid);
+        DATA_CACHE.setCurrentUser(provisionalUser.uid);
+        SETTINGS_SERVICE.setCurrentUser(provisionalUser.uid);
+        
+        // Update global state
+        updateGlobalAuthState(provisionalUser);
+        
+        console.log('✓ Provisional user created from JWT token');
+        return true;
+      }
+    } catch (error) {
+      console.log('Error parsing JWT token for provisional user:', error);
+    }
   }
   
-  authCheckPerformed = true;
-  
-  // Check if we're on the login page (no validation needed)
-  if (window.location.pathname.endsWith('index.html') || 
-      window.location.pathname.endsWith('/')) {
-    console.log('On login page, skipping JWT validation');
-    return;
-  }
-  
-  // Check for cached auth state first
+  // SECOND: Check cached auth state (fastest)
   const cachedAuthState = localStorage.getItem('moodchat-auth-state');
   if (cachedAuthState) {
     try {
       const authData = JSON.parse(cachedAuthState);
       if (authData && authData.isAuthenticated && authData.user) {
-        console.log('Using cached auth state for initial UI');
+        console.log('✓ Using cached auth state for instant UI');
         
         // Create user object from cached data
         const user = {
@@ -289,91 +347,449 @@ document.addEventListener('DOMContentLoaded', async function() {
           getIdToken: () => Promise.resolve('cached-token')
         };
         
-        // Set initial auth state from cache
-        handleAuthStateChange(user, true);
+        // Set user immediately
+        currentUser = user;
+        authStateRestored = true;
         
-        // Initialize app immediately with cached data
-        initializeApp();
+        // Setup user isolation
+        USER_DATA_ISOLATION.setCurrentUser(user.uid);
+        DATA_CACHE.setCurrentUser(user.uid);
+        SETTINGS_SERVICE.setCurrentUser(user.uid);
         
-        // Validate token in background (non-blocking)
-        setTimeout(async () => {
-          const validationResult = await JWT_VALIDATION.performAuthCheck();
-          
-          if (!validationResult.validated && validationResult.invalid) {
-            console.log('Background token validation failed, but UI remains');
-            // Don't redirect - let user continue with cached state
-            // api.js will handle auth failures during actual API calls
-          } else if (validationResult.validated && validationResult.user) {
-            console.log('Background token validation successful');
-            // Update user with fresh data from validation
-            const validatedUser = {
-              uid: validationResult.user.id || validationResult.user._id || validationResult.user.sub,
-              email: validationResult.user.email,
-              displayName: validationResult.user.name || validationResult.user.username || 'User',
-              photoURL: validationResult.user.avatar || user.photoURL,
-              emailVerified: validationResult.user.emailVerified || false,
-              isOffline: false,
-              providerId: 'api',
-              refreshToken: JWT_VALIDATION.getToken(),
-              getIdToken: () => Promise.resolve(JWT_VALIDATION.getToken()),
-              ...validationResult.user
-            };
-            
-            // Update auth state with validated user
-            handleAuthStateChange(validatedUser);
-          }
-        }, 1000);
+        // Update global state
+        updateGlobalAuthState(user);
         
-        return; // Exit early, don't wait for validation
+        console.log('✓ Auth state restored instantly from cache');
+        return true;
       }
     } catch (error) {
       console.log('Error parsing cached auth state:', error);
     }
   }
   
-  // No cached auth state - perform validation
-  const validationResult = await JWT_VALIDATION.performAuthCheck();
-  
-  if (!validationResult.validated && validationResult.noToken) {
-    console.log('No JWT token found, using device-based auth');
-    handleDeviceBasedAuth();
-    initializeApp();
-  } else if (validationResult.validated && validationResult.user) {
-    console.log('JWT validation passed, continuing with app initialization');
-    
-    // Create user object from validated token
-    const user = {
-      uid: validationResult.user.id || validationResult.user._id || validationResult.user.sub,
-      email: validationResult.user.email,
-      displayName: validationResult.user.name || validationResult.user.username || 'User',
-      photoURL: validationResult.user.avatar || `https://ui-avatars.com/api/?name=${encodeURIComponent(validationResult.user.name || 'User')}&background=8b5cf6&color=fff`,
-      emailVerified: validationResult.user.emailVerified || false,
-      isOffline: false,
-      providerId: 'api',
-      refreshToken: JWT_VALIDATION.getToken(),
-      getIdToken: () => Promise.resolve(JWT_VALIDATION.getToken()),
-      ...validationResult.user
-    };
-    
-    handleAuthStateChange(user);
-    initializeApp();
-  } else {
-    // Validation failed but don't redirect immediately
-    console.log('JWT validation failed but not redirecting:', validationResult.reason || 'Unknown error');
-    
-    // Try device-based auth as fallback
-    const deviceAuthSuccess = handleDeviceBasedAuth();
-    
-    if (deviceAuthSuccess) {
-      console.log('Using device-based auth as fallback');
-      initializeApp();
-    } else {
-      // Only redirect if no auth method works
-      console.log('All auth methods failed, suggesting login');
-      JWT_VALIDATION.suggestLoginRedirect();
+  // THIRD: Check device-based session
+  const storedSession = localStorage.getItem('moodchat_device_session');
+  if (storedSession) {
+    try {
+      const session = JSON.parse(storedSession);
+      const currentDeviceId = getDeviceId();
+      
+      // Validate session
+      if (session.userId && 
+          session.deviceId === currentDeviceId && 
+          !session.loggedOut) {
+        
+        console.log('✓ Using device-based session for instant UI');
+        
+        // Create user object from session
+        const user = {
+          uid: session.userId,
+          email: session.email || null,
+          displayName: session.displayName || null,
+          photoURL: session.photoURL || null,
+          emailVerified: session.emailVerified || false,
+          providerId: session.providerId || 'device',
+          isAnonymous: false,
+          metadata: session.metadata || {},
+          isOffline: true,
+          deviceId: session.deviceId,
+          refreshToken: 'device-token',
+          getIdToken: () => Promise.resolve('device-token')
+        };
+        
+        // Set user immediately
+        currentUser = user;
+        authStateRestored = true;
+        
+        // Setup user isolation
+        USER_DATA_ISOLATION.setCurrentUser(user.uid);
+        DATA_CACHE.setCurrentUser(user.uid);
+        SETTINGS_SERVICE.setCurrentUser(user.uid);
+        
+        // Update global state
+        updateGlobalAuthState(user);
+        
+        console.log('✓ Device session restored instantly');
+        return true;
+      }
+    } catch (error) {
+      console.log('Error parsing device session:', error);
     }
   }
+  
+  // FOURTH: No auth data at all - check if we should redirect
+  console.log('No auth data found in any cache');
+  
+  // Only suggest redirect if we're on a main page (not iframe)
+  if (window === window.top && !window.location.pathname.includes('chat.html') &&
+      !window.location.pathname.includes('group.html')) {
+    
+    // Check if we're already on login page
+    if (!window.location.pathname.endsWith('index.html') && 
+        !window.location.pathname.endsWith('/')) {
+      
+      console.log('No auth data, creating offline user to avoid redirect loop');
+      createOfflineUserForUI();
+      return true;
+    }
+  }
+  
+  // FIFTH: Create offline user for UI (non-blocking)
+  createOfflineUserForUI();
+  return true;
+}
+
+// Create offline user for UI (non-blocking)
+function createOfflineUserForUI() {
+  const offlineUserId = 'offline_user_' + getDeviceId() + '_' + Date.now();
+  const offlineUser = {
+    uid: offlineUserId,
+    email: 'offline@moodchat.app',
+    displayName: 'Offline User',
+    photoURL: `https://ui-avatars.com/api/?name=Offline+User&background=8b5cf6&color=fff`,
+    emailVerified: false,
+    isOffline: true,
+    providerId: 'offline',
+    isAnonymous: true,
+    metadata: {
+      creationTime: new Date().toISOString(),
+      lastSignInTime: new Date().toISOString()
+    },
+    refreshToken: 'offline-token',
+    getIdToken: () => Promise.resolve('offline-token'),
+    isOfflineMode: true
+  };
+  
+  // Set user immediately
+  currentUser = offlineUser;
+  authStateRestored = true;
+  
+  // Setup user isolation
+  USER_DATA_ISOLATION.setCurrentUser(offlineUser.uid);
+  DATA_CACHE.setCurrentUser(offlineUser.uid);
+  SETTINGS_SERVICE.setCurrentUser(offlineUser.uid);
+  
+  // Update global state
+  updateGlobalAuthState(offlineUser);
+  
+  console.log('✓ Offline user created for instant UI');
+}
+
+// ============================================================================
+// BACKGROUND VALIDATION (NON-BLOCKING)
+// ============================================================================
+
+function scheduleBackgroundValidation() {
+  if (backgroundValidationScheduled) {
+    console.log('Background validation already scheduled');
+    return;
+  }
+  
+  backgroundValidationScheduled = true;
+  
+  // Wait for UI to load first, then validate
+  setTimeout(() => {
+    console.log('Starting background token validation...');
+    
+    // Perform validation in background
+    JWT_VALIDATION.performBackgroundAuthCheck()
+      .then(validationResult => {
+        if (validationResult.validated && validationResult.user) {
+          console.log('✓ Background token validation successful');
+          
+          // Update user with fresh data from validation
+          const validatedUser = {
+            uid: validationResult.user.id || validationResult.user._id || validationResult.user.sub,
+            email: validationResult.user.email,
+            displayName: validationResult.user.name || validationResult.user.username || 'User',
+            photoURL: validationResult.user.avatar || currentUser?.photoURL,
+            emailVerified: validationResult.user.emailVerified || false,
+            isOffline: false,
+            providerId: 'api',
+            refreshToken: JWT_VALIDATION.getToken(),
+            getIdToken: () => Promise.resolve(JWT_VALIDATION.getToken()),
+            ...validationResult.user
+          };
+          
+          // Update auth state silently
+          handleAuthStateChange(validatedUser);
+          
+          // Broadcast silent update
+          broadcastSilentAuthUpdate(validatedUser);
+          
+          console.log('✓ User updated with validated token data');
+        } else if (validationResult.invalid) {
+          console.log('✗ Background token validation failed:', validationResult.reason);
+          
+          // Don't logout immediately, just mark as needing re-auth
+          // Schedule notification after UI is fully loaded (non-intrusive)
+          setTimeout(() => {
+            console.log('Scheduling re-auth notification due to invalid token...');
+            showReauthNotification();
+          }, 5000);
+        } else if (validationResult.noToken) {
+          console.log('No JWT token found in background check');
+          // No token but we might have device session - that's fine
+        }
+      })
+      .catch(error => {
+        console.log('Background validation error:', error);
+      });
+  }, 3000); // Wait 3 seconds for UI to stabilize
+}
+
+// Update auth state without disrupting UI
+function handleAuthStateChange(user, fromDeviceAuth = false) {
+  const userId = user ? user.uid : null;
+  const currentUserId = currentUser ? currentUser.uid : null;
+  
+  // If user is changing, clear old user's data
+  if (userId !== currentUserId && currentUserId) {
+    console.log(`User changed from ${currentUserId} to ${userId}, clearing old user data`);
+    
+    // Clear old user's cached data
+    USER_DATA_ISOLATION.clearUserData(currentUserId);
+    
+    // Clear settings for old user
+    SETTINGS_SERVICE.clearUserSettings();
+  }
+  
+  // Update current user
+  currentUser = user;
+  
+  // Update user isolation service
+  if (userId) {
+    USER_DATA_ISOLATION.setCurrentUser(userId);
+    DATA_CACHE.setCurrentUser(userId);
+    SETTINGS_SERVICE.setCurrentUser(userId);
+    
+    // Ensure offline data is available for this user
+    DATA_CACHE.ensureOfflineDataAvailable();
+  } else {
+    USER_DATA_ISOLATION.clearCurrentUser();
+    DATA_CACHE.setCurrentUser(null);
+    SETTINGS_SERVICE.setCurrentUser(null);
+  }
+  
+  // Update global auth state
+  updateGlobalAuthState(user);
+  
+  // Broadcast auth change to other components
+  broadcastAuthChange(user);
+  
+  console.log('Auth state updated:', user ? `User ${user.uid} (${fromDeviceAuth ? 'device' : 'api'})` : 'No user');
+}
+
+// Broadcast silent auth update
+function broadcastSilentAuthUpdate(user) {
+  const event = new CustomEvent('moodchat-auth-silent-update', {
+    detail: { 
+      user: user,
+      timestamp: new Date().toISOString(),
+      source: 'background-validation'
+    }
+  });
+  window.dispatchEvent(event);
+}
+
+// Show reauth notification (non-intrusive)
+function showReauthNotification() {
+  // Don't show notification if user is already offline/device user
+  if (currentUser && (currentUser.isOffline || currentUser.providerId === 'device')) {
+    return;
+  }
+  
+  // Create subtle notification
+  const notification = document.createElement('div');
+  notification.id = 'reauth-notification';
+  notification.style.cssText = `
+    position: fixed;
+    bottom: 20px;
+    right: 20px;
+    background: #f59e0b;
+    color: white;
+    padding: 12px 16px;
+    border-radius: 8px;
+    z-index: 1000;
+    box-shadow: 0 4px 6px rgba(0,0,0,0.1);
+    animation: slideInUp 0.3s ease-out;
+    max-width: 300px;
+  `;
+  notification.innerHTML = `
+    <div style="font-weight: 600; margin-bottom: 4px;">Session Expired</div>
+    <div style="font-size: 14px; opacity: 0.9;">Please sign in again to continue</div>
+    <button id="reauth-action" style="margin-top: 8px; background: rgba(255,255,255,0.2); border: none; color: white; padding: 6px 12px; border-radius: 4px; font-size: 14px; cursor: pointer;">
+      Sign In
+    </button>
+  `;
+  
+  document.body.appendChild(notification);
+  
+  // Add click handler
+  document.getElementById('reauth-action').addEventListener('click', () => {
+    window.logout().then(() => {
+      window.location.href = '/index.html';
+    });
+  });
+  
+  // Auto-remove after 30 seconds
+  setTimeout(() => {
+    if (notification.parentNode) {
+      notification.style.animation = 'slideOutDown 0.3s ease-in';
+      setTimeout(() => notification.remove(), 300);
+    }
+  }, 30000);
+}
+
+// ============================================================================
+// SINGLE DOMContentLoaded INSTANT STARTUP
+// ============================================================================
+
+document.addEventListener('DOMContentLoaded', function() {
+  console.log('🚀 DOMContentLoaded - Starting instant WhatsApp-style loading');
+  
+  // Prevent duplicate startup
+  if (appStartupPerformed) {
+    console.log('App startup already performed, skipping');
+    return;
+  }
+  
+  appStartupPerformed = true;
+  
+  // STEP 1: Hide loading screen IMMEDIATELY
+  const loadingScreen = document.getElementById('loadingScreen');
+  if (loadingScreen) {
+    loadingScreen.classList.add('hidden');
+    setTimeout(() => {
+      if (loadingScreen.parentNode) {
+        loadingScreen.parentNode.removeChild(loadingScreen);
+      }
+    }, 300);
+  }
+  
+  // STEP 2: Restore auth state INSTANTLY from cache (NON-BLOCKING)
+  const authRestored = restoreAuthStateInstantly();
+  
+  // STEP 3: Initialize core services (non-blocking)
+  setTimeout(() => {
+    // Initialize settings
+    SETTINGS_SERVICE.initialize();
+    
+    // Setup global auth access
+    setupGlobalAuthAccess();
+    
+    // Initialize network detection
+    initializeNetworkDetection();
+    
+    // Expose global state
+    exposeGlobalStateToIframes();
+    
+    // Setup event listeners
+    setupEventListeners();
+    
+    // Setup cross-page communication
+    setupCrossPageCommunication();
+    
+    console.log('✓ Core services initialized');
+  }, 50);
+  
+  // STEP 4: Initialize UI IMMEDIATELY (NON-BLOCKING)
+  setTimeout(() => {
+    initializeAppUI();
+  }, 100);
+  
+  // STEP 5: Schedule background validation (NON-BLOCKING, DELAYED)
+  setTimeout(() => {
+    // Only validate if we have a JWT token
+    if (JWT_VALIDATION.hasToken()) {
+      console.log('Scheduling background token validation...');
+      scheduleBackgroundValidation();
+    } else {
+      console.log('No JWT token found, skipping background validation');
+    }
+  }, 2000);
+  
+  console.log('✓ Instant startup completed - UI should be visible now');
 });
+
+// Initialize app UI (non-blocking)
+function initializeAppUI() {
+  console.log('Initializing app UI instantly...');
+  
+  // Apply minimal styling
+  injectStyles();
+  
+  // Initialize sidebar
+  const sidebar = document.querySelector(APP_CONFIG.sidebar);
+  if (sidebar) {
+    sidebar.classList.remove('hidden');
+    
+    if (window.innerWidth >= 768) {
+      sidebar.classList.remove('translate-x-full');
+      sidebar.classList.add('translate-x-0');
+      isSidebarOpen = true;
+    } else {
+      sidebar.classList.remove('translate-x-0');
+      sidebar.classList.add('translate-x-full');
+      isSidebarOpen = false;
+    }
+  }
+  
+  // Ensure content area exists
+  let contentArea = document.querySelector(APP_CONFIG.contentArea);
+  if (!contentArea) {
+    contentArea = document.createElement('main');
+    contentArea.id = 'content-area';
+    contentArea.className = 'flex-1 overflow-auto bg-gray-50 dark:bg-gray-900';
+    document.body.appendChild(contentArea);
+  }
+  
+  // Load default page (non-blocking)
+  setTimeout(() => {
+    loadPage(APP_CONFIG.defaultPage);
+  }, 150);
+  
+  // Set default tab (non-blocking)
+  setTimeout(() => {
+    try {
+      const groupsTab = document.querySelector(TAB_CONFIG.groups.container);
+      if (groupsTab) {
+        showTab('groups');
+      } else {
+        console.log('Groups tab not found, loading as external...');
+        loadExternalTab('groups', EXTERNAL_TABS.groups);
+      }
+    } catch (error) {
+      console.log('Error setting default tab:', error);
+      // Fallback to chats tab
+      if (TAB_CONFIG.chats.container && document.querySelector(TAB_CONFIG.chats.container)) {
+        showTab('chats');
+      }
+    }
+  }, 200);
+  
+  // Mark auth as ready and broadcast
+  authStateRestored = true;
+  broadcastAuthReady();
+  
+  // Load cached data instantly
+  setTimeout(() => {
+    if (currentUser) {
+      loadCachedDataInstantly();
+    }
+  }, 300);
+  
+  // Start background services after delay
+  setTimeout(() => {
+    NETWORK_SERVICE_MANAGER.startAllServices();
+    
+    if (isOnline) {
+      NETWORK_SERVICE_MANAGER.startBackgroundSync();
+    }
+  }, 1000);
+  
+  console.log('✓ App UI initialized instantly');
+}
 
 // ============================================================================
 // OFFLINE MOCK DATA GENERATOR (FOR WHEN NO SERVER CONNECTION)
@@ -1671,34 +2087,6 @@ const DATA_CACHE = {
 };
 
 // ============================================================================
-// STATE MANAGEMENT
-// ============================================================================
-
-let currentTab = 'groups';
-let isLoading = false;
-let isSidebarOpen = true;
-
-// AUTH STATE (UPDATED: No Firebase, using JWT from api.js)
-let currentUser = null;
-let authStateRestored = false;
-
-// NETWORK CONNECTIVITY STATE
-let isOnline = navigator.onLine;
-let syncQueue = [];
-
-// NETWORK-DEPENDENT SERVICES STATE
-let networkDependentServices = {
-  websocket: false,
-  api: false,
-  realtimeUpdates: false
-};
-
-// INSTANT LOADING STATE
-let instantUILoaded = false;
-let backgroundSyncInProgress = false;
-let pendingUIUpdates = [];
-
-// ============================================================================
 // ENHANCED NETWORK-DEPENDENT SERVICE MANAGER WITH BACKGROUND SYNC
 // ============================================================================
 
@@ -1869,91 +2257,17 @@ const NETWORK_SERVICE_MANAGER = {
 };
 
 // ============================================================================
-// AUTHENTICATION HANDLERS (UPDATED: Using api.js instead of Firebase)
+// AUTHENTICATION HANDLERS
 // ============================================================================
 
-// CHANGED: Removed Firebase initialization and replaced with api.js integration
-
-// Handle device-based authentication (from index.html system)
-function handleDeviceBasedAuth() {
-  console.log('Checking device-based authentication...');
-  
-  // Check for stored session
-  const storedSession = localStorage.getItem('moodchat_device_session');
-  
-  if (storedSession) {
-    try {
-      const session = JSON.parse(storedSession);
-      const currentDeviceId = getDeviceId();
-      
-      // Validate session
-      if (session.userId && 
-          session.deviceId === currentDeviceId && 
-          !session.loggedOut &&
-          (!session.expiresAt || new Date(session.expiresAt) > new Date())) {
-        
-        console.log('Valid device-based session found for user:', session.userId);
-        
-        // Create user object from session
-        const user = {
-          uid: session.userId,
-          email: session.email || null,
-          displayName: session.displayName || null,
-          photoURL: session.photoURL || null,
-          emailVerified: session.emailVerified || false,
-          providerId: session.providerId || 'device',
-          isAnonymous: false,
-          metadata: session.metadata || {},
-          isOffline: true,
-          deviceId: session.deviceId,
-          refreshToken: 'device-token',
-          getIdToken: () => Promise.resolve('device-token')
-        };
-        
-        handleAuthStateChange(user, true);
-        return true;
-      } else {
-        console.log('Device session invalid or expired');
-        localStorage.removeItem('moodchat_device_session');
-      }
-    } catch (error) {
-      console.log('Error parsing device session:', error);
-      localStorage.removeItem('moodchat_device_session');
-    }
+// Get device ID (consistent across sessions)
+function getDeviceId() {
+  let deviceId = localStorage.getItem('moodchat_device_id');
+  if (!deviceId) {
+    deviceId = 'device_' + Date.now() + '_' + Math.random().toString(36).substr(2, 9);
+    localStorage.setItem('moodchat_device_id', deviceId);
   }
-  
-  // No valid session found - create offline user
-  console.log('No valid device-based session, creating offline user');
-  createOfflineUser();
-  return false;
-}
-
-// Create an offline user for instant UI
-function createOfflineUser() {
-  const offlineUserId = 'offline_user_' + getDeviceId() + '_' + Date.now();
-  const offlineUser = {
-    uid: offlineUserId,
-    email: 'offline@moodchat.app',
-    displayName: 'Offline User',
-    photoURL: `https://ui-avatars.com/api/?name=Offline+User&background=8b5cf6&color=fff`,
-    emailVerified: false,
-    isOffline: true,
-    providerId: 'offline',
-    isAnonymous: true,
-    metadata: {
-      creationTime: new Date().toISOString(),
-      lastSignInTime: new Date().toISOString()
-    },
-    refreshToken: 'offline-token',
-    getIdToken: () => Promise.resolve('offline-token'),
-    isOfflineMode: true
-  };
-  
-  // Store as device session for consistency
-  storeDeviceBasedSession(offlineUser);
-  
-  handleAuthStateChange(offlineUser, true);
-  return offlineUser;
+  return deviceId;
 }
 
 // Store device-based session
@@ -1976,63 +2290,6 @@ function storeDeviceBasedSession(user) {
     console.log('Device-based session stored for user:', user.uid);
   } catch (error) {
     console.log('Error storing device session:', error);
-  }
-}
-
-// Get device ID (consistent across sessions)
-function getDeviceId() {
-  let deviceId = localStorage.getItem('moodchat_device_id');
-  if (!deviceId) {
-    deviceId = 'device_' + Date.now() + '_' + Math.random().toString(36).substr(2, 9);
-    localStorage.setItem('moodchat_device_id', deviceId);
-  }
-  return deviceId;
-}
-
-// Handle auth state changes with user data isolation
-function handleAuthStateChange(user, fromDeviceAuth = false) {
-  const userId = user ? user.uid : null;
-  const currentUserId = currentUser ? currentUser.uid : null;
-  
-  // If user is changing, clear old user's data
-  if (userId !== currentUserId && currentUserId) {
-    console.log(`User changed from ${currentUserId} to ${userId}, clearing old user data`);
-    
-    // Clear old user's cached data
-    USER_DATA_ISOLATION.clearUserData(currentUserId);
-    
-    // Clear settings for old user
-    SETTINGS_SERVICE.clearUserSettings();
-  }
-  
-  // Update current user
-  currentUser = user;
-  
-  // Update user isolation service
-  if (userId) {
-    USER_DATA_ISOLATION.setCurrentUser(userId);
-    DATA_CACHE.setCurrentUser(userId);
-    SETTINGS_SERVICE.setCurrentUser(userId);
-    
-    // Ensure offline data is available for this user
-    DATA_CACHE.ensureOfflineDataAvailable();
-  } else {
-    USER_DATA_ISOLATION.clearCurrentUser();
-    DATA_CACHE.setCurrentUser(null);
-    SETTINGS_SERVICE.setCurrentUser(null);
-  }
-  
-  // Update global auth state
-  updateGlobalAuthState(user);
-  
-  // Broadcast auth change to other components
-  broadcastAuthChange(user);
-  
-  console.log('Auth state updated:', user ? `User ${user.uid} (${fromDeviceAuth ? 'device' : 'api'})` : 'No user');
-  
-  // Load cached data instantly if we have a user
-  if (user) {
-    loadCachedDataInstantly();
   }
 }
 
@@ -2106,7 +2363,7 @@ function broadcastAuthReady() {
 }
 
 // ============================================================================
-// ENHANCED GLOBAL AUTH ACCESS WITH API.JS INTEGRATION (UPDATED)
+// ENHANCED GLOBAL AUTH ACCESS WITH API.JS INTEGRATION
 // ============================================================================
 
 function setupGlobalAuthAccess() {
@@ -2129,7 +2386,7 @@ function setupGlobalAuthAccess() {
     });
   };
   
-  // CHANGED: Enhanced login function using api.js
+  // Enhanced login function using api.js
   window.login = function(email, password) {
     return new Promise((resolve, reject) => {
       // Clear any existing user data before login
@@ -2254,7 +2511,7 @@ function setupGlobalAuthAccess() {
     });
   };
   
-  // CHANGED: Enhanced logout function using api.js
+  // Enhanced logout function using api.js
   window.logout = function() {
     return new Promise((resolve) => {
       const userId = currentUser ? currentUser.uid : null;
@@ -2321,7 +2578,7 @@ function setupGlobalAuthAccess() {
     });
   };
   
-  // CHANGED: Enhanced register function using api.js
+  // Enhanced register function using api.js
   window.register = function(email, password, displayName) {
     return new Promise((resolve, reject) => {
       // Clear any existing user data before registration
@@ -2558,7 +2815,7 @@ function showOfflinePlaceholderUI() {
   
   // Expose the continue offline function
   window.createOfflineUserAndContinue = function() {
-    createOfflineUser();
+    createOfflineUserForUI();
     setTimeout(() => {
       loadCachedDataInstantly();
       // Switch to groups tab
@@ -2691,7 +2948,7 @@ function initializeNetworkDetection() {
     () => stopWebSocketService()
   );
   
-  // CHANGED: Register API service using api.js
+  // Register API service using api.js
   NETWORK_SERVICE_MANAGER.registerService('api',
     () => startApiService(),
     () => stopApiService()
@@ -2884,22 +3141,19 @@ function stopWebSocketService() {
   }
 }
 
-// CHANGED: API service functions using api.js
+// API service functions using api.js
 function startApiService() {
   console.log('Starting API service using api.js...');
-  networkDependentServices.api = true;
   window.dispatchEvent(new CustomEvent('api-service-ready'));
 }
 
 function stopApiService() {
   console.log('Stopping API service...');
-  networkDependentServices.api = false;
 }
 
 // Realtime updates service
 function startRealtimeUpdates() {
   console.log('Starting realtime updates service...');
-  networkDependentServices.realtimeUpdates = true;
   
   if (typeof window.startRealtimeListeners === 'function') {
     window.startRealtimeListeners();
@@ -2908,7 +3162,6 @@ function startRealtimeUpdates() {
 
 function stopRealtimeUpdates() {
   console.log('Stopping realtime updates service...');
-  networkDependentServices.realtimeUpdates = false;
   
   if (typeof window.stopRealtimeListeners === 'function') {
     window.stopRealtimeListeners();
@@ -3201,10 +3454,10 @@ function getSendFunctionForType(type) {
   }
 }
 
-// Default send functions (CHANGED: Updated to use api.js where possible)
+// Default send functions (Updated to use api.js where possible)
 function defaultSendMessage(message) {
   console.log('Sending queued message:', message);
-  // CHANGED: Use api.js to send message if available
+  // Use api.js to send message if available
   if (typeof window.apiRequest === 'function' && isOnline && currentUser) {
     return window.apiRequest('/chat/send', {
       method: 'POST',
@@ -3223,7 +3476,7 @@ function defaultSendMessage(message) {
 
 function defaultSendStatus(status) {
   console.log('Sending queued status:', status);
-  // CHANGED: Use api.js to update status if available
+  // Use api.js to update status if available
   if (typeof window.apiRequest === 'function' && isOnline && currentUser) {
     return window.apiRequest('/user/status', {
       method: 'POST',
@@ -3241,7 +3494,7 @@ function defaultSendStatus(status) {
 
 function defaultSendFriendRequest(request) {
   console.log('Sending queued friend request:', request);
-  // CHANGED: Use api.js to send friend request if available
+  // Use api.js to send friend request if available
   if (typeof window.apiRequest === 'function' && isOnline && currentUser) {
     return window.apiRequest('/friends/request', {
       method: 'POST',
@@ -3259,7 +3512,7 @@ function defaultSendFriendRequest(request) {
 
 function defaultSendCallLog(callLog) {
   console.log('Sending queued call log:', callLog);
-  // CHANGED: Use api.js to log call if available
+  // Use api.js to log call if available
   if (typeof window.apiRequest === 'function' && isOnline && currentUser) {
     return window.apiRequest('/calls/log', {
       method: 'POST',
@@ -3346,7 +3599,7 @@ function updateItemAttempts(itemId, db, storeName, attempts, userId) {
   };
 }
 
-// CHANGED: Enhanced Safe API call wrapper using api.js functions
+// Enhanced Safe API call wrapper using api.js functions
 function safeApiCall(apiFunction, data, type = 'action', cacheKey = null) {
   return new Promise((resolve, reject) => {
     // Always try cache first for GET-like operations (INSTANT LOADING)
@@ -3364,7 +3617,7 @@ function safeApiCall(apiFunction, data, type = 'action', cacheKey = null) {
         });
         
         // Also try to get fresh data in background if online
-        if (isOnline && networkDependentServices.api) {
+        if (isOnline) {
           setTimeout(() => {
             fetchFreshDataInBackground(apiFunction, data, cacheKey);
           }, 1000);
@@ -3408,7 +3661,7 @@ function safeApiCall(apiFunction, data, type = 'action', cacheKey = null) {
     }
     
     // For online operations
-    if (isOnline && networkDependentServices.api) {
+    if (isOnline) {
       // Make real API call using api.js
       try {
         const result = apiFunction(data);
@@ -3508,7 +3761,7 @@ function safeApiCall(apiFunction, data, type = 'action', cacheKey = null) {
 
 // Fetch fresh data in background using api.js
 function fetchFreshDataInBackground(apiFunction, data, cacheKey) {
-  if (!isOnline || !networkDependentServices.api) return;
+  if (!isOnline) return;
   
   console.log(`Fetching fresh data in background for: ${cacheKey}`);
   
@@ -3659,7 +3912,7 @@ function exposeGlobalStateToIframes() {
     },
     // NEW: Offline data functions
     getOfflineDataGenerator: () => OFFLINE_DATA_GENERATOR,
-    createOfflineUser: () => createOfflineUser()
+    createOfflineUser: () => createOfflineUserForUI()
   };
 }
 
@@ -4401,377 +4654,6 @@ window.triggerFileInput = function(inputId) {
 };
 
 // ============================================================================
-// ENHANCED INITIALIZATION WITH INSTANT UI DISPLAY (FULL OFFLINE SUPPORT)
-// ============================================================================
-
-function initializeApp() {
-  console.log('Initializing MoodChat Application Shell with instant UI and full offline support...');
-  console.log('USING API.JS FOR ALL AUTHENTICATION AND DATA FETCHING');
-  
-  // CRITICAL: Setup global state immediately
-  window.MOODCHAT_GLOBAL = window.MOODCHAT_GLOBAL || {};
-  window.MOODCHAT_AUTH = window.MOODCHAT_AUTH || {
-    currentUser: null,
-    isAuthenticated: false,
-    userId: null,
-    isAuthReady: false
-  };
-  
-  // STEP 0: Hide loading screen immediately
-  const loadingScreen = document.getElementById('loadingScreen');
-  if (loadingScreen) {
-    loadingScreen.classList.add('hidden');
-    setTimeout(() => {
-      if (loadingScreen.parentNode) {
-        loadingScreen.parentNode.removeChild(loadingScreen);
-      }
-    }, 300);
-  }
-  
-  // STEP 1: Apply minimal styling immediately
-  injectStyles();
-  
-  // STEP 2: Initialize Settings Service (non-blocking)
-  SETTINGS_SERVICE.initialize();
-  
-  // STEP 3: Setup global auth access with api.js integration
-  setupGlobalAuthAccess();
-  
-  // STEP 4: Initialize network detection
-  initializeNetworkDetection();
-  
-  // STEP 5: Expose global state
-  exposeGlobalStateToIframes();
-  
-  // STEP 6: Setup event listeners
-  setupEventListeners();
-  
-  // STEP 7: Initialize sidebar immediately
-  const sidebar = document.querySelector(APP_CONFIG.sidebar);
-  if (sidebar) {
-    sidebar.classList.remove('hidden');
-    
-    if (window.innerWidth >= 768) {
-      sidebar.classList.remove('translate-x-full');
-      sidebar.classList.add('translate-x-0');
-      isSidebarOpen = true;
-    } else {
-      sidebar.classList.remove('translate-x-0');
-      sidebar.classList.add('translate-x-full');
-      isSidebarOpen = false;
-    }
-  }
-  
-  // STEP 8: Ensure content area exists
-  let contentArea = document.querySelector(APP_CONFIG.contentArea);
-  if (!contentArea) {
-    contentArea = document.createElement('main');
-    contentArea.id = 'content-area';
-    contentArea.className = 'flex-1 overflow-auto bg-gray-50 dark:bg-gray-900';
-    document.body.appendChild(contentArea);
-  }
-  
-  // STEP 9: Load default page (non-blocking)
-  setTimeout(() => {
-    loadPage(APP_CONFIG.defaultPage);
-  }, 50);
-  
-  // STEP 10: Set default tab immediately (non-blocking)
-  setTimeout(() => {
-    try {
-      const groupsTab = document.querySelector(TAB_CONFIG.groups.container);
-      if (groupsTab) {
-        showTab('groups');
-      } else {
-        console.log('Groups tab not found in DOM, loading as external...');
-        loadExternalTab('groups', EXTERNAL_TABS.groups);
-      }
-    } catch (error) {
-      console.log('Error setting default tab:', error);
-      // Fallback to chats tab
-      if (TAB_CONFIG.chats.container && document.querySelector(TAB_CONFIG.chats.container)) {
-        showTab('chats');
-      }
-    }
-  }, 100);
-  
-  // STEP 11: Mark auth state as restored and broadcast
-  authStateRestored = true;
-  broadcastAuthReady();
-  
-  // STEP 12: Start background services after a delay
-  setTimeout(() => {
-    NETWORK_SERVICE_MANAGER.startAllServices();
-  }, 1000);
-  
-  // STEP 13: Trigger initial background sync if online
-  setTimeout(() => {
-    if (isOnline) {
-      NETWORK_SERVICE_MANAGER.startBackgroundSync();
-    }
-  }, 2000);
-  
-  // STEP 14: Ensure UI is loaded even if everything else fails
-  setTimeout(() => {
-    if (!instantUILoaded && currentUser) {
-      console.log('Forcing UI load after timeout');
-      loadCachedDataInstantly();
-    }
-  }, 3000);
-  
-  console.log('MoodChat Application Shell initialized with full offline support');
-  console.log('Key features:');
-  console.log('  ✓ Instant UI display (no waiting)');
-  console.log('  ✓ Cached data loaded immediately');
-  console.log('  ✓ Offline data generator for instant UI');
-  console.log('  ✓ Background server connection when online');
-  console.log('  ✓ Silent UI updates when new data arrives');
-  console.log('  ✓ Full offline functionality');
-  console.log('  ✓ JWT-based authentication (single check on startup)');
-  console.log('  ✓ api.js integration for all API calls');
-  console.log('  ✓ User data isolation');
-  console.log('  ✓ Real API calls with offline queuing');
-  console.log('  ✓ Graceful degradation when completely offline');
-  
-  // Mark app as initialized
-  DATA_CACHE.cacheAppInitialized(true);
-}
-
-function injectStyles() {
-  if (document.getElementById('app-styles')) return;
-  
-  const styles = `
-    /* Critical styles for immediate UI */
-    * {
-      box-sizing: border-box;
-      margin: 0;
-      padding: 0;
-    }
-    
-    body {
-      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, sans-serif;
-      min-height: 100vh;
-      overflow-x: hidden;
-    }
-    
-    #content-area {
-      flex: 1;
-      min-height: 100vh;
-      background: #f9fafb;
-      color: #111827;
-      transition: background-color 0.3s, color 0.3s;
-    }
-    
-    .dark #content-area {
-      background: #111827;
-      color: #f9fafb;
-    }
-    
-    .tab-loading-indicator {
-      position: fixed;
-      top: 0;
-      left: 0;
-      right: 0;
-      bottom: 0;
-      background: rgba(0, 0, 0, 0.7);
-      display: none;
-      flex-direction: column;
-      align-items: center;
-      justify-content: center;
-      z-index: 9999;
-      color: white;
-      font-size: 16px;
-      backdrop-filter: blur(4px);
-    }
-    
-    .loading-spinner {
-      width: 40px;
-      height: 40px;
-      border: 4px solid rgba(255, 255, 255, 0.3);
-      border-radius: 50%;
-      border-top-color: #8b5cf6;
-      animation: spin 1s ease-in-out infinite;
-      margin-bottom: 15px;
-    }
-    
-    .loading-text {
-      margin-top: 10px;
-      font-size: 14px;
-      opacity: 0.9;
-    }
-    
-    @keyframes spin {
-      to { transform: rotate(360deg); }
-    }
-    
-    @keyframes slideIn {
-      from {
-        transform: translateX(100%);
-        opacity: 0;
-      }
-      to {
-        transform: translateX(0);
-        opacity: 1;
-      }
-    }
-    
-    @keyframes slideOut {
-      from {
-        transform: translateX(0);
-        opacity: 1;
-      }
-      to {
-        transform: translateX(100%);
-        opacity: 0;
-      }
-    }
-    
-    #sidebar {
-      transition: transform 0.3s ease-in-out;
-    }
-    
-    .tab-panel {
-      display: none;
-      height: 100%;
-    }
-    
-    .tab-panel.active {
-      display: block;
-    }
-    
-    .hidden {
-      display: none !important;
-    }
-    
-    /* Theme classes */
-    .theme-dark {
-      color-scheme: dark;
-    }
-    
-    .theme-light {
-      color-scheme: light;
-    }
-    
-    /* Font size classes */
-    .font-small {
-      font-size: 0.875rem;
-    }
-    
-    .font-medium {
-      font-size: 1rem;
-    }
-    
-    .font-large {
-      font-size: 1.125rem;
-    }
-    
-    .font-xlarge {
-      font-size: 1.25rem;
-    }
-    
-    /* Wallpaper classes */
-    .wallpaper-gradient1 {
-      background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-    }
-    
-    .wallpaper-gradient2 {
-      background: linear-gradient(135deg, #f093fb 0%, #f5576c 100%);
-    }
-    
-    .wallpaper-pattern1 {
-      background-image: radial-gradient(circle at 1px 1px, rgba(0,0,0,0.1) 1px, transparent 0);
-      background-size: 20px 20px;
-    }
-    
-    /* Accessibility classes */
-    .high-contrast {
-      --contrast-multiplier: 1.5;
-      filter: contrast(var(--contrast-multiplier));
-    }
-    
-    .reduce-motion * {
-      animation-duration: 0.01ms !important;
-      animation-iteration-count: 1 !important;
-      transition-duration: 0.01ms !important;
-    }
-    
-    /* Offline placeholder */
-    .offline-placeholder {
-      max-width: 400px;
-      margin: 0 auto;
-      padding-top: 100px;
-    }
-    
-    .btn-primary {
-      background: #8b5cf6;
-      color: white;
-      border: none;
-      padding: 12px 24px;
-      border-radius: 8px;
-      font-size: 16px;
-      cursor: pointer;
-      transition: opacity 0.2s;
-      width: 100%;
-    }
-    
-    .btn-primary:hover {
-      opacity: 0.9;
-    }
-    
-    .btn-secondary {
-      background: transparent;
-      color: #8b5cf6;
-      border: 2px solid #8b5cf6;
-      padding: 10px 24px;
-      border-radius: 8px;
-      font-size: 16px;
-      cursor: pointer;
-      transition: background 0.2s;
-      width: 100%;
-    }
-    
-    .btn-secondary:hover {
-      background: rgba(139, 92, 246, 0.1);
-    }
-    
-    @media (max-width: 767px) {
-      #sidebar {
-        position: fixed;
-        top: 0;
-        left: 0;
-        bottom: 0;
-        z-index: 50;
-        transform: translateX(-100%);
-      }
-      
-      #sidebar.open {
-        transform: translateX(0);
-      }
-      
-      #sidebar-overlay {
-        position: fixed;
-        top: 0;
-        left: 0;
-        right: 0;
-        bottom: 0;
-        background: rgba(0, 0, 0, 0.5);
-        z-index: 49;
-        display: none;
-      }
-      
-      #sidebar.open + #sidebar-overlay {
-        display: block;
-      }
-    }
-  `;
-  
-  const styleSheet = document.createElement('style');
-  styleSheet.id = 'app-styles';
-  styleSheet.textContent = styles;
-  document.head.appendChild(styleSheet);
-}
-
-// ============================================================================
 // CROSS-PAGE COMMUNICATION SETUP
 // ============================================================================
 
@@ -4908,7 +4790,7 @@ window.clearMessageQueue = function() {
 
 window.processQueuedMessages = processQueuedMessages;
 
-// CHANGED: Data loading functions using api.js
+// Data loading functions using api.js
 window.loadTabData = function(tabName, forceRefresh = false) {
   return new Promise((resolve) => {
     const userId = currentUser ? currentUser.uid : null;
@@ -4987,12 +4869,12 @@ window.loadCachedDataInstantly = loadCachedDataInstantly;
 window.refreshCachedDataInBackground = refreshCachedDataInBackground;
 
 // OFFLINE SUPPORT FUNCTIONS
-window.createOfflineUser = createOfflineUser;
+window.createOfflineUser = createOfflineUserForUI;
 window.getOfflineData = function(tabName) {
   return DATA_CACHE.getOfflineTabData(tabName);
 };
 
-// CHANGED: Chat message functions using api.js
+// Chat message functions using api.js
 window.sendChatMessage = function(chatId, message, type = 'text') {
   return new Promise((resolve) => {
     if (!currentUser || !chatId || !message) {
@@ -5078,7 +4960,7 @@ window.sendChatMessage = function(chatId, message, type = 'text') {
   });
 };
 
-// CHANGED: Get chat messages using api.js
+// Get chat messages using api.js
 window.getChatMessages = function(chatId, limit = 50) {
   return new Promise((resolve) => {
     if (!currentUser || !chatId) {
@@ -5247,30 +5129,279 @@ window.isInstantUILoaded = function() {
 };
 
 // ============================================================================
-// MAIN STARTUP
+// STYLES INJECTION
 // ============================================================================
 
-// Note: The app initialization is now triggered after JWT validation in DOMContentLoaded
-console.log('MoodChat app.js loaded - JWT validation will run on DOMContentLoaded');
-console.log('Application shell ready with api.js integration and full offline support');
-console.log('Enhanced startup flow:');
-console.log('  ✓ Single JWT token validation on DOMContentLoaded');
-console.log('  ✓ Uses cached auth state first for instant UI');
-console.log('  ✓ Validates token in background (non-blocking)');
-console.log('  ✓ Does not force redirects while child pages load');
-console.log('  ✓ UI displays instantly after successful validation');
-console.log('  ✓ Cached data loads immediately');
-console.log('  ✓ Offline data generated if no cache');
-console.log('  ✓ api.js used for all server communication');
-console.log('  ✓ UI updates silently when new data arrives');
-console.log('  ✓ Full offline functionality preserved');
-console.log('  ✓ Works identically online and offline');
+function injectStyles() {
+  if (document.getElementById('app-styles')) return;
+  
+  const styles = `
+    /* Critical styles for immediate UI */
+    * {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+    }
+    
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, sans-serif;
+      min-height: 100vh;
+      overflow-x: hidden;
+    }
+    
+    #content-area {
+      flex: 1;
+      min-height: 100vh;
+      background: #f9fafb;
+      color: #111827;
+      transition: background-color 0.3s, color 0.3s;
+    }
+    
+    .dark #content-area {
+      background: #111827;
+      color: #f9fafb;
+    }
+    
+    .tab-loading-indicator {
+      position: fixed;
+      top: 0;
+      left: 0;
+      right: 0;
+      bottom: 0;
+      background: rgba(0, 0, 0, 0.7);
+      display: none;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      z-index: 9999;
+      color: white;
+      font-size: 16px;
+      backdrop-filter: blur(4px);
+    }
+    
+    .loading-spinner {
+      width: 40px;
+      height: 40px;
+      border: 4px solid rgba(255, 255, 255, 0.3);
+      border-radius: 50%;
+      border-top-color: #8b5cf6;
+      animation: spin 1s ease-in-out infinite;
+      margin-bottom: 15px;
+    }
+    
+    .loading-text {
+      margin-top: 10px;
+      font-size: 14px;
+      opacity: 0.9;
+    }
+    
+    @keyframes spin {
+      to { transform: rotate(360deg); }
+    }
+    
+    @keyframes slideIn {
+      from {
+        transform: translateX(100%);
+        opacity: 0;
+      }
+      to {
+        transform: translateX(0);
+        opacity: 1;
+      }
+    }
+    
+    @keyframes slideOut {
+      from {
+        transform: translateX(0);
+        opacity: 1;
+      }
+      to {
+        transform: translateX(100%);
+        opacity: 0;
+      }
+    }
+    
+    @keyframes slideInUp {
+      from {
+        transform: translateY(100%);
+        opacity: 0;
+      }
+      to {
+        transform: translateY(0);
+        opacity: 1;
+      }
+    }
+    
+    @keyframes slideOutDown {
+      from {
+        transform: translateY(0);
+        opacity: 1;
+      }
+      to {
+        transform: translateY(100%);
+        opacity: 0;
+      }
+    }
+    
+    #sidebar {
+      transition: transform 0.3s ease-in-out;
+    }
+    
+    .tab-panel {
+      display: none;
+      height: 100%;
+    }
+    
+    .tab-panel.active {
+      display: block;
+    }
+    
+    .hidden {
+      display: none !important;
+    }
+    
+    /* Theme classes */
+    .theme-dark {
+      color-scheme: dark;
+    }
+    
+    .theme-light {
+      color-scheme: light;
+    }
+    
+    /* Font size classes */
+    .font-small {
+      font-size: 0.875rem;
+    }
+    
+    .font-medium {
+      font-size: 1rem;
+    }
+    
+    .font-large {
+      font-size: 1.125rem;
+    }
+    
+    .font-xlarge {
+      font-size: 1.25rem;
+    }
+    
+    /* Wallpaper classes */
+    .wallpaper-gradient1 {
+      background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+    }
+    
+    .wallpaper-gradient2 {
+      background: linear-gradient(135deg, #f093fb 0%, #f5576c 100%);
+    }
+    
+    .wallpaper-pattern1 {
+      background-image: radial-gradient(circle at 1px 1px, rgba(0,0,0,0.1) 1px, transparent 0);
+      background-size: 20px 20px;
+    }
+    
+    /* Accessibility classes */
+    .high-contrast {
+      --contrast-multiplier: 1.5;
+      filter: contrast(var(--contrast-multiplier));
+    }
+    
+    .reduce-motion * {
+      animation-duration: 0.01ms !important;
+      animation-iteration-count: 1 !important;
+      transition-duration: 0.01ms !important;
+    }
+    
+    /* Offline placeholder */
+    .offline-placeholder {
+      max-width: 400px;
+      margin: 0 auto;
+      padding-top: 100px;
+    }
+    
+    .btn-primary {
+      background: #8b5cf6;
+      color: white;
+      border: none;
+      padding: 12px 24px;
+      border-radius: 8px;
+      font-size: 16px;
+      cursor: pointer;
+      transition: opacity 0.2s;
+      width: 100%;
+    }
+    
+    .btn-primary:hover {
+      opacity: 0.9;
+    }
+    
+    .btn-secondary {
+      background: transparent;
+      color: #8b5cf6;
+      border: 2px solid #8b5cf6;
+      padding: 10px 24px;
+      border-radius: 8px;
+      font-size: 16px;
+      cursor: pointer;
+      transition: background 0.2s;
+      width: 100%;
+    }
+    
+    .btn-secondary:hover {
+      background: rgba(139, 92, 246, 0.1);
+    }
+    
+    @media (max-width: 767px) {
+      #sidebar {
+        position: fixed;
+        top: 0;
+        left: 0;
+        bottom: 0;
+        z-index: 50;
+        transform: translateX(-100%);
+      }
+      
+      #sidebar.open {
+        transform: translateX(0);
+      }
+      
+      #sidebar-overlay {
+        position: fixed;
+        top: 0;
+        left: 0;
+        right: 0;
+        bottom: 0;
+        background: rgba(0, 0, 0, 0.5);
+        z-index: 49;
+        display: none;
+      }
+      
+      #sidebar.open + #sidebar-overlay {
+        display: block;
+      }
+    }
+  `;
+  
+  const styleSheet = document.createElement('style');
+  styleSheet.id = 'app-styles';
+  styleSheet.textContent = styles;
+  document.head.appendChild(styleSheet);
+}
 
-// Setup cross-page communication
-setupCrossPageCommunication();
+// ============================================================================
+// MAIN STARTUP LOG
+// ============================================================================
 
-// CHANGED: Removed Firebase initialization entirely
-// CHANGED: All authentication now uses api.js functions
-// CHANGED: All chat functions now use api.js
-// CHANGED: All data fetching now uses api.js
-// CHANGED: Maintained all existing UI, offline support, and instant loading features
+console.log('MoodChat app.js loaded - WhatsApp-style instant loading enabled');
+console.log('Key improvements:');
+console.log('  ✓ UI loads INSTANTLY from cache');
+console.log('  ✓ JWT validation happens in BACKGROUND only');
+console.log('  ✓ NO waiting for server during initial render');
+console.log('  ✓ Single auth check per app load');
+console.log('  ✓ All pages (friends, chats, calls) load UI instantly');
+console.log('  ✓ Background data fetching after UI is shown');
+console.log('  ✓ Never force redirects during initial render');
+console.log('  ✓ Clear logging: "Using cached auth", "Validating token in background"');
+
+// Initial logging
+console.log('🚀 MoodChat ready for instant startup');

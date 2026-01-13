@@ -996,277 +996,276 @@
                                         </label>
                                         <div class="input-container">
                                             <input id="loginMobilePassword" name="password" type="password" autocomplete="new-password" required 
-                                                   class="form-input"
-                                                   placeholder="Enter your password">
-                                            <div class="input-icon">
-                                                <i class="fas fa-lock"></i>
-                                            </div>
-                                            <button type="button" id="toggleMobilePassword" class="password-toggle">
-                                                <i class="fas fa-eye"></i>
-                                            </button>
+                                               class="form-input"
+                                               placeholder="Enter your password">
+                                        <div class="input-icon">
+                                            <i class="fas fa-lock"></i>
                                         </div>
-                                        <div id="loginMobilePasswordError" class="error-message hidden"></div>
+                                        <button type="button" id="toggleMobilePassword" class="password-toggle">
+                                            <i class="fas fa-eye"></i>
+                                        </button>
                                     </div>
-
-                                    <div class="form-options">
-                                        <div class="remember-me">
-                                            <input id="remember-me-mobile" name="remember-me-mobile" type="checkbox" 
-                                                   class="remember-checkbox" checked>
-                                            <label for="remember-me-mobile" class="remember-label">Remember me (Auto-login)</label>
-                                        </div>
-                                        <button type="button" id="forgotPasswordMobileBtn" class="forgot-password">Forgot password?</button>
-                                    </div>
-
-                                    <button type="submit" id="mobileLoginBtn" class="submit-btn">
-                                        <span id="mobileLoginBtnText">Sign In with Mobile</span>
-                                        <div id="mobileLoginSpinner" class="loading-spinner hidden"></div>
-                                    </button>
-                                </form>
-                            </div>
-
-                            <!-- Username Login Form -->
-                            <div id="usernameLoginForm" class="login-form hidden">
-                                <form id="usernameLoginFormElement">
-                                    <div class="form-field">
-                                        <label for="loginUsername" class="form-label">
-                                            Username
-                                            <span class="required-star">*</span>
-                                        </label>
-                                        <div class="input-container">
-                                            <input id="loginUsername" name="username" type="text" autocomplete="off" required 
-                                                   class="form-input"
-                                               placeholder="Enter your username">
-                                            <div class="input-icon">
-                                                <i class="fas fa-user"></i>
-                                            </div>
-                                        </div>
-                                        <div id="loginUsernameError" class="error-message hidden"></div>
-                                    </div>
-
-                                    <div class="form-field">
-                                        <label for="loginUsernamePassword" class="form-label">
-                                            Password
-                                            <span class="required-star">*</span>
-                                        </label>
-                                        <div class="input-container">
-                                            <input id="loginUsernamePassword" name="password" type="password" autocomplete="new-password" required 
-                                                   class="form-input"
-                                                   placeholder="Enter your password">
-                                            <div class="input-icon">
-                                                <i class="fas fa-lock"></i>
-                                            </div>
-                                            <button type="button" id="toggleUsernamePassword" class="password-toggle">
-                                                <i class="fas fa-eye"></i>
-                                            </button>
-                                        </div>
-                                        <div id="loginUsernamePasswordError" class="error-message hidden"></div>
-                                    </div>
-
-                                    <div class="form-options">
-                                        <div class="remember-me">
-                                            <input id="remember-me-username" name="remember-me-username" type="checkbox" 
-                                                   class="remember-checkbox" checked>
-                                            <label for="remember-me-username" class="remember-label">Remember me (Auto-login)</label>
-                                        </div>
-                                        <button type="button" id="forgotPasswordUsernameBtn" class="forgot-password">Forgot password?</button>
-                                    </div>
-
-                                    <button type="submit" id="usernameLoginBtn" class="submit-btn">
-                                        <span id="usernameLoginBtnText">Sign In with Username</span>
-                                        <div id="usernameLoginSpinner" class="loading-spinner hidden"></div>
-                                    </button>
-                                </form>
-                            </div>
-
-                            <!-- Switch to Register -->
-                            <div class="auth-navigation fade-in mt-8">
-                                <p class="text-blue-300 text-xs md:text-sm text-center mb-4">
-                                    Don't have an account?{' '}
-                                    <button id="switchToRegisterFromLogin" class="switch-auth-link">
-                                        Join now for free premium trial!
-                                    </button>
-                                </p>
-                                <div class="text-center">
-                                    <button id="showRegistrationIncentives" class="text-purple-400 hover:text-purple-300 text-sm">
-                                        <i class="fas fa-gift mr-1"></i> See what you get when you register
-                                    </button>
+                                    <div id="loginMobilePasswordError" class="error-message hidden"></div>
                                 </div>
-                            </div>
-                        </div>
-                    </div>
-                </div>
 
-                <!-- Register Panel -->
-                <div id="registerPanel" class="auth-panel">
-                    <div class="auth-content">
-                        <!-- Mobile Header -->
-                        <div class="mobile-header lg:hidden mb-8">
-                            <div class="flex items-center justify-center space-x-3 mb-4 md:mb-6">
-                                <div class="w-12 h-12 md:w-16 md:h-16 cyber-gradient rounded-xl flex items-center justify-center quantum-glow">
-                                    <i class="fas fa-comments text-white text-xl md:text-2xl"></i>
+                                <div class="form-options">
+                                    <div class="remember-me">
+                                        <input id="remember-me-mobile" name="remember-me-mobile" type="checkbox" 
+                                               class="remember-checkbox" checked>
+                                        <label for="remember-me-mobile" class="remember-label">Remember me (Auto-login)</label>
+                                    </div>
+                                    <button type="button" id="forgotPasswordMobileBtn" class="forgot-password">Forgot password?</button>
                                 </div>
-                                <div>
-                                    <span class="text-2xl md:text-3xl font-bold text-transparent bg-clip-text bg-gradient-to-r from-blue-400 to-purple-400 neon-text">
-                                        kynecta Chat
-                                    </span>
-                                    <p class="text-blue-300 text-xs md:text-sm">Global Chat Platform</p>
-                                </div>
-                            </div>
+
+                                <button type="submit" id="mobileLoginBtn" class="submit-btn">
+                                    <span id="mobileLoginBtnText">Sign In with Mobile</span>
+                                    <div id="mobileLoginSpinner" class="loading-spinner hidden"></div>
+                                </button>
+                            </form>
                         </div>
 
-                        <!-- Registration Incentives -->
-                        <div class="registration-incentive fade-in mb-6">
-                            <h3 class="text-lg font-bold text-white mb-3">🎁 Free Premium Benefits for New Users!</h3>
-                            <div class="incentive-item">
-                                <div class="incentive-icon">
-                                    <i class="fas fa-crown text-xs"></i>
-                                </div>
-                                <span class="text-blue-200 text-sm">30 days of premium features</span>
-                            </div>
-                            <div class="incentive-item">
-                                <div class="incentive-icon">
-                                    <i class="fas fa-video text-xs"></i>
-                                </div>
-                                <span class="text-blue-200 text-sm">HD video calls with up to 8 people</span>
-                            </div>
-                            <div class="incentive-item">
-                                <div class="incentive-icon">
-                                    <i class="fas fa-robot text-xs"></i>
-                                </div>
-                                <span class="text-blue-200 text-sm">AI chat assistant for smart replies</span>
-                            </div>
-                            <div class="incentive-item">
-                                <div class="incentive-icon">
-                                    <i class="fas fa-palette text-xs"></i>
-                                </div>
-                                <span class="text-blue-200 text-sm">Custom themes and chat backgrounds</span>
-                            </div>
-                        </div>
-
-                        <div class="register-container">
-                            <div class="register-header fade-in mb-8">
-                                <h2 class="text-2xl md:text-3xl font-bold text-white mb-2">Join kynecta Chat</h2>
-                                <p class="text-blue-300 text-sm md:text-base mb-3">
-                                    Start connecting with people worldwide today
-                                </p>
-                                <div class="mt-2">
-                                    <span id="registerModeIndicator" class="text-xs px-2 py-1 rounded-full bg-green-500/20 text-green-400 border border-green-500/30">Always Available</span>
-                                </div>
-                            </div>
-
-                            <!-- Registration Form -->
-                            <form id="registration-form" class="registration-form">
+                        <!-- Username Login Form -->
+                        <div id="usernameLoginForm" class="login-form hidden">
+                            <form id="usernameLoginFormElement">
                                 <div class="form-field">
-                                    <label for="regUsername" class="form-label">
+                                    <label for="loginUsername" class="form-label">
                                         Username
                                         <span class="required-star">*</span>
                                     </label>
                                     <div class="input-container">
-                                        <input type="text" id="regUsername" name="regUsername" required autocomplete="off"
+                                        <input id="loginUsername" name="username" type="text" autocomplete="off" required 
                                                class="form-input"
-                                               placeholder="Choose a username">
+                                           placeholder="Enter your username">
                                         <div class="input-icon">
                                             <i class="fas fa-user"></i>
                                         </div>
                                     </div>
-                                    <div id="regUsernameError" class="error-message hidden"></div>
-                                </div>
-                                
-                                <div class="form-field">
-                                    <label for="regEmail" class="form-label">
-                                        Email Address
-                                        <span class="required-star">*</span>
-                                    </label>
-                                    <div class="input-container">
-                                        <input type="email" id="regEmail" name="regEmail" required autocomplete="off"
-                                               class="form-input"
-                                               placeholder="Enter your email">
-                                        <div class="input-icon">
-                                            <i class="fas fa-envelope"></i>
-                                        </div>
-                                    </div>
-                                    <div id="regEmailError" class="error-message hidden"></div>
+                                    <div id="loginUsernameError" class="error-message hidden"></div>
                                 </div>
 
                                 <div class="form-field">
-                                    <label for="registerMobile" class="form-label">
-                                        Mobile Number (Optional)
-                                    </label>
-                                    <div class="input-container">
-                                        <input type="tel" id="registerMobile" name="mobile" autocomplete="off"
-                                               class="form-input"
-                                               placeholder="+1 (555) 123-4567">
-                                        <div class="input-icon">
-                                            <i class="fas fa-mobile-alt"></i>
-                                        </div>
-                                    </div>
-                                    <p class="text-blue-300 text-xs mt-1">Add mobile for faster login and recovery</p>
-                                    <div id="registerMobileError" class="error-message hidden"></div>
-                                </div>
-                                
-                                <div class="form-field">
-                                    <label for="regPassword" class="form-label">
-                                        Password (8+ characters)
+                                    <label for="loginUsernamePassword" class="form-label">
+                                        Password
                                         <span class="required-star">*</span>
                                     </label>
                                     <div class="input-container">
-                                        <input type="password" id="regPassword" name="regPassword" required autocomplete="new-password"
+                                        <input id="loginUsernamePassword" name="password" type="password" autocomplete="new-password" required 
                                                class="form-input"
-                                               placeholder="Create a strong password">
+                                               placeholder="Enter your password">
                                         <div class="input-icon">
                                             <i class="fas fa-lock"></i>
                                         </div>
-                                        <button type="button" id="toggleRegisterPassword" class="password-toggle">
+                                        <button type="button" id="toggleUsernamePassword" class="password-toggle">
                                             <i class="fas fa-eye"></i>
                                         </button>
                                     </div>
-                                    <div id="regPasswordError" class="error-message hidden"></div>
+                                    <div id="loginUsernamePasswordError" class="error-message hidden"></div>
                                 </div>
-                                
-                                <div class="form-field">
-                                    <label for="confirmPassword" class="form-label">
-                                        Confirm Password
-                                        <span class="required-star">*</span>
-                                    </label>
-                                    <div class="input-container">
-                                        <input type="password" id="confirmPassword" name="confirmPassword" required autocomplete="new-password"
-                                               class="form-input"
-                                               placeholder="Confirm your password">
-                                        <div class="input-icon">
-                                            <i class="fas fa-lock"></i>
-                                        </div>
-                                        <button type="button" id="toggleConfirmPassword" class="password-toggle">
-                                            <i class="fas fa-eye"></i>
-                                        </button>
+
+                                <div class="form-options">
+                                    <div class="remember-me">
+                                        <input id="remember-me-username" name="remember-me-username" type="checkbox" 
+                                               class="remember-checkbox" checked>
+                                        <label for="remember-me-username" class="remember-label">Remember me (Auto-login)</label>
                                     </div>
-                                    <div id="confirmPasswordError" class="error-message hidden"></div>
+                                    <button type="button" id="forgotPasswordUsernameBtn" class="forgot-password">Forgot password?</button>
                                 </div>
 
-                                <!-- Terms Agreement -->
-                                <div class="terms-agreement">
-                                    <input type="checkbox" id="termsAgreement" required
-                                           class="terms-checkbox" checked>
-                                    <label for="termsAgreement" class="terms-label">
-                                        I agree to the <a href="#" class="terms-link">Terms of Service</a> and <a href="#" class="terms-link">Privacy Policy</a>
-                                    </label>
-                                </div>
-                                <div id="termsError" class="terms-error hidden">Please accept the terms and conditions</div>
-
-                                <button type="submit" id="registerBtn" class="submit-btn mt-6">
-                                    <span id="registerBtnText">Create Account & Get Free Premium</span>
-                                    <div id="registerSpinner" class="loading-spinner hidden"></div>
+                                <button type="submit" id="usernameLoginBtn" class="submit-btn">
+                                    <span id="usernameLoginBtnText">Sign In with Username</span>
+                                    <div id="usernameLoginSpinner" class="loading-spinner hidden"></div>
                                 </button>
                             </form>
+                        </div>
 
-                            <!-- Switch to Login -->
-                            <div class="auth-navigation fade-in mt-8">
-                                <p class="text-blue-300 text-xs md:text-sm text-center">
-                                    Already have an account?{' '}
-                                    <button id="switchToLoginFromRegister" class="switch-auth-link">
-                                        Sign in here
-                                    </button>
-                                </p>
+                        <!-- Switch to Register -->
+                        <div class="auth-navigation fade-in mt-8">
+                            <p class="text-blue-300 text-xs md:text-sm text-center mb-4">
+                                Don't have an account?{' '}
+                                <button id="switchToRegisterFromLogin" class="switch-auth-link">
+                                    Join now for free premium trial!
+                                </button>
+                            </p>
+                            <div class="text-center">
+                                <button id="showRegistrationIncentives" class="text-purple-400 hover:text-purple-300 text-sm">
+                                    <i class="fas fa-gift mr-1"></i> See what you get when you register
+                                </button>
                             </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Register Panel -->
+            <div id="registerPanel" class="auth-panel">
+                <div class="auth-content">
+                    <!-- Mobile Header -->
+                    <div class="mobile-header lg:hidden mb-8">
+                        <div class="flex items-center justify-center space-x-3 mb-4 md:mb-6">
+                            <div class="w-12 h-12 md:w-16 md:h-16 cyber-gradient rounded-xl flex items-center justify-center quantum-glow">
+                                <i class="fas fa-comments text-white text-xl md:text-2xl"></i>
+                            </div>
+                            <div>
+                                <span class="text-2xl md:text-3xl font-bold text-transparent bg-clip-text bg-gradient-to-r from-blue-400 to-purple-400 neon-text">
+                                    kynecta Chat
+                                </span>
+                                <p class="text-blue-300 text-xs md:text-sm">Global Chat Platform</p>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Registration Incentives -->
+                    <div class="registration-incentive fade-in mb-6">
+                        <h3 class="text-lg font-bold text-white mb-3">🎁 Free Premium Benefits for New Users!</h3>
+                        <div class="incentive-item">
+                            <div class="incentive-icon">
+                                <i class="fas fa-crown text-xs"></i>
+                            </div>
+                            <span class="text-blue-200 text-sm">30 days of premium features</span>
+                        </div>
+                        <div class="incentive-item">
+                            <div class="incentive-icon">
+                                <i class="fas fa-video text-xs"></i>
+                            </div>
+                            <span class="text-blue-200 text-sm">HD video calls with up to 8 people</span>
+                        </div>
+                        <div class="incentive-item">
+                            <div class="incentive-icon">
+                                <i class="fas fa-robot text-xs"></i>
+                            </div>
+                            <span class="text-blue-200 text-sm">AI chat assistant for smart replies</span>
+                        </div>
+                        <div class="incentive-item">
+                            <div class="incentive-icon">
+                                <i class="fas fa-palette text-xs"></i>
+                            </div>
+                            <span class="text-blue-200 text-sm">Custom themes and chat backgrounds</span>
+                        </div>
+                    </div>
+
+                    <div class="register-container">
+                        <div class="register-header fade-in mb-8">
+                            <h2 class="text-2xl md:text-3xl font-bold text-white mb-2">Join kynecta Chat</h2>
+                            <p class="text-blue-300 text-sm md:text-base mb-3">
+                                Start connecting with people worldwide today
+                            </p>
+                            <div class="mt-2">
+                                <span id="registerModeIndicator" class="text-xs px-2 py-1 rounded-full bg-green-500/20 text-green-400 border border-green-500/30">Always Available</span>
+                            </div>
+                        </div>
+
+                        <!-- Registration Form -->
+                        <form id="registration-form" class="registration-form">
+                            <div class="form-field">
+                                <label for="regUsername" class="form-label">
+                                    Username
+                                    <span class="required-star">*</span>
+                                </label>
+                                <div class="input-container">
+                                    <input type="text" id="regUsername" name="regUsername" required autocomplete="off"
+                                           class="form-input"
+                                           placeholder="Choose a username">
+                                    <div class="input-icon">
+                                        <i class="fas fa-user"></i>
+                                    </div>
+                                </div>
+                                <div id="regUsernameError" class="error-message hidden"></div>
+                            </div>
+                            
+                            <div class="form-field">
+                                <label for="regEmail" class="form-label">
+                                    Email Address
+                                    <span class="required-star">*</span>
+                                </label>
+                                <div class="input-container">
+                                    <input type="email" id="regEmail" name="regEmail" required autocomplete="off"
+                                           class="form-input"
+                                           placeholder="Enter your email">
+                                    <div class="input-icon">
+                                        <i class="fas fa-envelope"></i>
+                                    </div>
+                                </div>
+                                <div id="regEmailError" class="error-message hidden"></div>
+                            </div>
+
+                            <div class="form-field">
+                                <label for="registerMobile" class="form-label">
+                                    Mobile Number (Optional)
+                                </label>
+                                <div class="input-container">
+                                    <input type="tel" id="registerMobile" name="mobile" autocomplete="off"
+                                           class="form-input"
+                                           placeholder="+1 (555) 123-4567">
+                                    <div class="input-icon">
+                                        <i class="fas fa-mobile-alt"></i>
+                                    </div>
+                                </div>
+                                <p class="text-blue-300 text-xs mt-1">Add mobile for faster login and recovery</p>
+                                <div id="registerMobileError" class="error-message hidden"></div>
+                            </div>
+                            
+                            <div class="form-field">
+                                <label for="regPassword" class="form-label">
+                                    Password (8+ characters)
+                                    <span class="required-star">*</span>
+                                </label>
+                                <div class="input-container">
+                                    <input type="password" id="regPassword" name="regPassword" required autocomplete="new-password"
+                                           class="form-input"
+                                           placeholder="Create a strong password">
+                                    <div class="input-icon">
+                                        <i class="fas fa-lock"></i>
+                                    </div>
+                                    <button type="button" id="toggleRegisterPassword" class="password-toggle">
+                                        <i class="fas fa-eye"></i>
+                                    </button>
+                                </div>
+                                <div id="regPasswordError" class="error-message hidden"></div>
+                            </div>
+                            
+                            <div class="form-field">
+                                <label for="confirmPassword" class="form-label">
+                                    Confirm Password
+                                    <span class="required-star">*</span>
+                                </label>
+                                <div class="input-container">
+                                    <input type="password" id="confirmPassword" name="confirmPassword" required autocomplete="new-password"
+                                           class="form-input"
+                                           placeholder="Confirm your password">
+                                    <div class="input-icon">
+                                        <i class="fas fa-lock"></i>
+                                    </div>
+                                    <button type="button" id="toggleConfirmPassword" class="password-toggle">
+                                        <i class="fas fa-eye"></i>
+                                    </button>
+                                </div>
+                                <div id="confirmPasswordError" class="error-message hidden"></div>
+                            </div>
+
+                            <!-- Terms Agreement -->
+                            <div class="terms-agreement">
+                                <input type="checkbox" id="termsAgreement" required
+                                       class="terms-checkbox" checked>
+                                <label for="termsAgreement" class="terms-label">
+                                    I agree to the <a href="#" class="terms-link">Terms of Service</a> and <a href="#" class="terms-link">Privacy Policy</a>
+                                </label>
+                            </div>
+                            <div id="termsError" class="terms-error hidden">Please accept the terms and conditions</div>
+
+                            <button type="submit" id="registerBtn" class="submit-btn mt-6">
+                                <span id="registerBtnText">Create Account & Get Free Premium</span>
+                                <div id="registerSpinner" class="loading-spinner hidden"></div>
+                            </button>
+                        </form>
+
+                        <!-- Switch to Login -->
+                        <div class="auth-navigation fade-in mt-8">
+                            <p class="text-blue-300 text-xs md:text-sm text-center">
+                                Already have an account?{' '}
+                                <button id="switchToLoginFromRegister" class="switch-auth-link">
+                                    Sign in here
+                                </button>
+                            </p>
                         </div>
                     </div>
                 </div>
@@ -1292,13 +1291,11 @@
                 this.isUsernameLoginSubmitting = false;
                 this.isRegisterSubmitting = false;
                 
-                // Check for existing user on this device - INSTANTLY
-                const existingUser = this.checkExistingUserOnDevice();
-                if (existingUser) {
-                    console.log('✅ Existing user found on this device:', existingUser.email);
-                    this.instantRedirect(existingUser);
-                    return; // Stop initialization - redirecting
-                }
+                // Track redirect to prevent multiple redirects
+                this.isRedirecting = false;
+                
+                // Auto-login check - INSTANTLY
+                this.checkAutoLogin();
                 
                 // Normal initialization
                 this.currentPanel = 'login';
@@ -1309,7 +1306,7 @@
                 this.quickLoginUser = null;
                 this.currentLoginMethod = 'email';
                 
-                // Initialize
+                // Initialize after a tiny delay to ensure DOM is ready
                 setTimeout(() => this.init(), 50);
             }
             
@@ -1322,42 +1319,50 @@
                 return deviceId;
             }
             
-            checkExistingUserOnDevice() {
-                const savedUser = localStorage.getItem('kynecta-chat-user');
+            checkAutoLogin() {
+                // Check if we have a valid token
                 const token = localStorage.getItem('token');
-                if (!savedUser || !token) return null;
+                const isLoggedIn = localStorage.getItem('isLoggedIn') === 'true';
+                const autoLogin = localStorage.getItem('kynecta-chat-auto-login') === 'true';
                 
-                try {
-                    const userData = JSON.parse(savedUser);
-                    const isLoggedOut = localStorage.getItem('kynecta-chat-logged-out') === 'true';
-                    const autoLogin = localStorage.getItem('kynecta-chat-auto-login') === 'true';
+                if (token && isLoggedIn && autoLogin) {
+                    console.log('🔑 Auto-login token found, validating in background...');
                     
-                    // Check if user is on this device and session is valid
-                    if (userData.deviceId === this.deviceId && !isLoggedOut && autoLogin) {
-                        // Check session expiration
-                        if (userData.lastLogin) {
-                            const lastLogin = new Date(userData.lastLogin);
-                            const thirtyDaysAgo = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000);
-                            if (lastLogin > thirtyDaysAgo) {
-                                return userData;
-                            }
+                    // Validate token in background WITHOUT blocking UI
+                    this.validateTokenInBackground(token);
+                    
+                    // Show dashboard immediately (WhatsApp-like experience)
+                    const savedUser = localStorage.getItem('kynecta-chat-user');
+                    if (savedUser) {
+                        try {
+                            const userData = JSON.parse(savedUser);
+                            this.showQuickLogin(userData);
+                        } catch (e) {
+                            console.log('Could not parse user data for quick login');
+                        }
+                    }
+                }
+            }
+            
+            async validateTokenInBackground(token) {
+                try {
+                    // Use api.js for token validation
+                    if (typeof window.api !== 'undefined' && window.api.validateToken) {
+                        const isValid = await window.api.validateToken(token);
+                        if (!isValid) {
+                            console.log('⚠️ Token invalid, removing...');
+                            localStorage.removeItem('token');
+                            localStorage.removeItem('isLoggedIn');
+                            localStorage.removeItem('kynecta-chat-auto-login');
+                            this.hideQuickLoginWithAnimation();
+                        } else {
+                            console.log('✅ Token valid');
                         }
                     }
                 } catch (error) {
-                    return null;
+                    console.log('Token validation failed:', error);
+                    // Don't logout user on network errors
                 }
-                
-                return null;
-            }
-            
-            instantRedirect(userData) {
-                // Update last login
-                userData.lastLogin = new Date().toISOString();
-                localStorage.setItem('kynecta-chat-user', JSON.stringify(userData));
-                
-                // Redirect to chat immediately
-                console.log('🚀 INSTANT REDIRECT to chat for:', userData.email);
-                window.location.href = 'chat.html';
             }
 
             init() {
@@ -1367,29 +1372,7 @@
                 this.startCounterAnimations();
                 this.disablePasswordManager();
                 
-                // Check for quick login after a short delay
-                setTimeout(() => this.checkForQuickLogin(), 500);
-                
                 console.log('💬 kynecta Chat app initialized');
-            }
-            
-            checkForQuickLogin() {
-                try {
-                    // Check for any saved user (not necessarily on this device)
-                    const savedUser = localStorage.getItem('kynecta-chat-user');
-                    const token = localStorage.getItem('token');
-                    const autoLogin = localStorage.getItem('kynecta-chat-auto-login') === 'true';
-                    const isLoggedOut = localStorage.getItem('kynecta-chat-logged-out') === 'true';
-                    
-                    if (savedUser && token && autoLogin && !isLoggedOut) {
-                        const userData = JSON.parse(savedUser);
-                        
-                        // Show quick login even if not same device (user can switch)
-                        this.showQuickLogin(userData);
-                    }
-                } catch (error) {
-                    console.error('Quick login check failed:', error);
-                }
             }
             
             /**
@@ -1423,19 +1406,8 @@
                     // Update connection badge
                     const connectionBadge = document.getElementById('connectionTypeBadge');
                     if (connectionBadge) {
-                        if (userData.isOfflineUser) {
-                            connectionBadge.className = 'text-xs px-2 py-1 rounded-full bg-yellow-500/20 text-yellow-400 border border-yellow-500/30';
-                            connectionBadge.textContent = 'Local Account';
-                        } else if (userData.session) {
-                            connectionBadge.className = 'text-xs px-2 py-1 rounded-full bg-green-500/20 text-green-400 border border-green-500/30';
-                            connectionBadge.textContent = 'Secure Session';
-                        } else if (userData.hasPremiumTrial) {
-                            connectionBadge.className = 'text-xs px-2 py-1 rounded-full bg-yellow-500/20 text-yellow-400 border border-yellow-500/30';
-                            connectionBadge.textContent = 'Premium Trial';
-                        } else {
-                            connectionBadge.className = 'text-xs px-2 py-1 rounded-full bg-blue-500/20 text-blue-400 border border-blue-500/30';
-                            connectionBadge.textContent = 'Ready';
-                        }
+                        connectionBadge.className = 'text-xs px-2 py-1 rounded-full bg-green-500/20 text-green-400 border border-green-500/30';
+                        connectionBadge.textContent = 'Ready to Chat';
                     }
                     
                     console.log('✅ Quick login displayed');
@@ -1455,65 +1427,86 @@
                 });
                 
                 // Quick login button
-                document.getElementById('quickLoginBtn').addEventListener('click', () => {
-                    this.handleQuickLogin();
-                });
+                const quickLoginBtn = document.getElementById('quickLoginBtn');
+                if (quickLoginBtn) {
+                    quickLoginBtn.addEventListener('click', () => {
+                        this.handleQuickLogin();
+                    });
+                }
                 
                 // Switch account button
-                document.getElementById('switchAccountBtn').addEventListener('click', () => {
-                    this.hideQuickLogin();
-                });
+                const switchAccountBtn = document.getElementById('switchAccountBtn');
+                if (switchAccountBtn) {
+                    switchAccountBtn.addEventListener('click', () => {
+                        this.hideQuickLogin();
+                    });
+                }
                 
                 // Switch between login and register
-                document.getElementById('switchToRegisterFromLogin').addEventListener('click', () => {
-                    this.showCookieBannerForNewUsers();
-                    this.showPanel('register');
-                });
+                const switchToRegisterBtn = document.getElementById('switchToRegisterFromLogin');
+                if (switchToRegisterBtn) {
+                    switchToRegisterBtn.addEventListener('click', () => {
+                        this.showCookieBannerForNewUsers();
+                        this.showPanel('register');
+                    });
+                }
                 
-                document.getElementById('switchToLoginFromRegister').addEventListener('click', () => {
-                    this.hideCookieBanner();
-                    this.showPanel('login');
-                });
+                const switchToLoginBtn = document.getElementById('switchToLoginFromRegister');
+                if (switchToLoginBtn) {
+                    switchToLoginBtn.addEventListener('click', () => {
+                        this.hideCookieBanner();
+                        this.showPanel('login');
+                    });
+                }
                 
                 // Show registration incentives
-                document.getElementById('showRegistrationIncentives').addEventListener('click', () => {
-                    this.showPanel('register');
-                });
+                const showIncentivesBtn = document.getElementById('showRegistrationIncentives');
+                if (showIncentivesBtn) {
+                    showIncentivesBtn.addEventListener('click', () => {
+                        this.showPanel('register');
+                    });
+                }
                 
                 // Form submissions - with double submission prevention
-                document.getElementById('loginForm').addEventListener('submit', (e) => {
-                    e.preventDefault();
-                    if (!this.isLoginSubmitting) {
-                        this.handleLogin(e, 'email');
-                    }
-                });
+                const loginForm = document.getElementById('loginForm');
+                if (loginForm) {
+                    loginForm.addEventListener('submit', (e) => {
+                        e.preventDefault();
+                        if (!this.isLoginSubmitting) {
+                            this.handleLogin(e, 'email');
+                        }
+                    });
+                }
                 
-                document.getElementById('mobileLoginFormElement').addEventListener('submit', (e) => {
-                    e.preventDefault();
-                    if (!this.isMobileLoginSubmitting) {
-                        this.handleLogin(e, 'mobile');
-                    }
-                });
+                const mobileLoginForm = document.getElementById('mobileLoginFormElement');
+                if (mobileLoginForm) {
+                    mobileLoginForm.addEventListener('submit', (e) => {
+                        e.preventDefault();
+                        if (!this.isMobileLoginSubmitting) {
+                            this.handleLogin(e, 'mobile');
+                        }
+                    });
+                }
                 
-                document.getElementById('usernameLoginFormElement').addEventListener('submit', (e) => {
-                    e.preventDefault();
-                    if (!this.isUsernameLoginSubmitting) {
-                        this.handleLogin(e, 'username');
-                    }
-                });
+                const usernameLoginForm = document.getElementById('usernameLoginFormElement');
+                if (usernameLoginForm) {
+                    usernameLoginForm.addEventListener('submit', (e) => {
+                        e.preventDefault();
+                        if (!this.isUsernameLoginSubmitting) {
+                            this.handleLogin(e, 'username');
+                        }
+                    });
+                }
                 
-                document.getElementById('registration-form').addEventListener('submit', (e) => {
-                    e.preventDefault();
-                    if (!this.isRegisterSubmitting) {
-                        this.handleRegistration(e);
-                    }
-                });
-                
-                // Cookie consent
-                const cookieAccept = document.getElementById('cookieAccept');
-                const cookieReject = document.getElementById('cookieReject');
-                if (cookieAccept) cookieAccept.addEventListener('click', () => this.acceptCookies());
-                if (cookieReject) cookieReject.addEventListener('click', () => this.rejectCookies());
+                const registrationForm = document.getElementById('registration-form');
+                if (registrationForm) {
+                    registrationForm.addEventListener('submit', (e) => {
+                        e.preventDefault();
+                        if (!this.isRegisterSubmitting) {
+                            this.handleRegistration(e);
+                        }
+                    });
+                }
                 
                 // Password visibility toggles
                 this.setupPasswordToggles();
@@ -1529,12 +1522,17 @@
                 document.querySelectorAll('.auth-method-tab').forEach(tab => {
                     tab.classList.remove('active');
                 });
-                document.querySelector(`.auth-method-tab[data-method="${method}"]`).classList.add('active');
+                const activeTab = document.querySelector(`.auth-method-tab[data-method="${method}"]`);
+                if (activeTab) {
+                    activeTab.classList.add('active');
+                }
                 
                 // Hide all forms
-                document.getElementById('emailLoginForm').classList.add('hidden');
-                document.getElementById('mobileLoginForm').classList.add('hidden');
-                document.getElementById('usernameLoginForm').classList.add('hidden');
+                const forms = ['emailLoginForm', 'mobileLoginForm', 'usernameLoginForm'];
+                forms.forEach(formId => {
+                    const form = document.getElementById(formId);
+                    if (form) form.classList.add('hidden');
+                });
                 
                 // Show selected form
                 setTimeout(() => {
@@ -1547,12 +1545,14 @@
                     
                     if (formId) {
                         const form = document.getElementById(formId);
-                        form.classList.remove('hidden');
-                        form.classList.add('fade-in');
-                        
-                        const firstInput = form.querySelector('input');
-                        if (firstInput) {
-                            setTimeout(() => firstInput.focus(), 100);
+                        if (form) {
+                            form.classList.remove('hidden');
+                            form.classList.add('fade-in');
+                            
+                            const firstInput = form.querySelector('input');
+                            if (firstInput) {
+                                setTimeout(() => firstInput.focus(), 100);
+                            }
                         }
                     }
                     
@@ -1564,18 +1564,14 @@
              * Handle quick login
              */
             async handleQuickLogin() {
-                if (!this.quickLoginUser) return;
+                if (!this.quickLoginUser || this.isRedirecting) return;
                 
+                this.isRedirecting = true;
                 this.showLoading('Logging in...');
                 
                 try {
                     // Clear logged-out flag
                     localStorage.removeItem('kynecta-chat-logged-out');
-                    
-                    // Update localStorage
-                    localStorage.setItem('isLoggedIn', 'true');
-                    localStorage.setItem('userId', this.quickLoginUser.uid);
-                    localStorage.setItem('kynecta-chat-auto-login', 'true');
                     
                     // Update user data with device ID
                     this.quickLoginUser.deviceId = this.deviceId;
@@ -1586,6 +1582,7 @@
                     this.redirectToDashboard();
                     
                 } catch (error) {
+                    this.isRedirecting = false;
                     this.hideLoading();
                     this.showMessage('Quick login failed. Please sign in manually.', 'error');
                     this.hideQuickLoginWithAnimation();
@@ -1688,7 +1685,6 @@
                 const cookieDecision = localStorage.getItem('kynecta-chat-cookies');
                 if (!cookieDecision && !this.showingCookieBanner) {
                     this.showingCookieBanner = true;
-                    // Note: Cookie banner HTML not in provided code, so this is a placeholder
                     console.log('Cookie banner would show for new users');
                 }
             }
@@ -1724,7 +1720,6 @@
              * Shows the forgot password modal
              */
             showForgotPasswordModal() {
-                // Note: Forgot password modal HTML not in provided code
                 this.showToast('Password reset requires internet connection.', 'info');
             }
 
@@ -1885,33 +1880,39 @@
                 this.setLoginLoadingState(true, method);
                 
                 try {
+                    // Use api.js for login - CORRECTED
+                    if (typeof window.api === 'undefined' || !window.api.loginUser) {
+                        this.showMessage('API service not available. Please check your connection.', 'error');
+                        throw new Error('API service not available');
+                    }
+                    
                     localStorage.removeItem('kynecta-chat-logged-out');
                     
-                    // Use apiRequest for login - ONLY ONCE
-                    const loginData = {
-                        identifier: identifier,
-                        password: password,
-                        method: method,
-                        rememberMe: rememberMe
-                    };
+                    // CORRECTED: Call api.loginUser() directly with email and password
+                    const response = await window.api.loginUser(identifier, password);
                     
-                    const response = await apiRequest('POST', '/auth/login', loginData);
-                    
-                    if (response.success && response.token) {
-                        // Store token and user data
-                        localStorage.setItem('token', response.token);
-                        localStorage.setItem('isLoggedIn', 'true');
-                        localStorage.setItem('userId', response.user.id);
+                    if (response && response.success) {
+                        // Store token from response - CRITICAL STEP
+                        if (response.token) {
+                            localStorage.setItem('token', response.token);
+                        } else {
+                            // Check if api.js already stored it
+                            const storedToken = localStorage.getItem('token');
+                            if (!storedToken) {
+                                throw new Error('Authentication failed - no token received');
+                            }
+                        }
                         
+                        // Save user data
                         const userData = {
-                            uid: response.user.id,
-                            email: response.user.email,
-                            displayName: response.user.displayName || response.user.username,
-                            mobile: response.user.mobile || '',
+                            uid: response.user?.id || 'user_' + Date.now(),
+                            email: response.user?.email || identifier,
+                            displayName: response.user?.displayName || response.user?.username || identifier.split('@')[0],
+                            mobile: response.user?.mobile || '',
                             isNewUser: false,
                             autoLogin: rememberMe,
                             lastLogin: new Date().toISOString(),
-                            hasPremiumTrial: response.user.hasPremiumTrial || false,
+                            hasPremiumTrial: response.user?.hasPremiumTrial || false,
                             isOfflineUser: false,
                             session: true,
                             backendSession: true,
@@ -1919,26 +1920,27 @@
                         };
                         
                         localStorage.setItem('kynecta-chat-user', JSON.stringify(userData));
+                        localStorage.setItem('isLoggedIn', 'true');
                         
                         if (rememberMe) {
                             localStorage.setItem('kynecta-chat-auto-login', 'true');
                         }
                         
-                        this.showMessage('Login successful! Redirecting to dashboard...', 'success');
+                        this.showMessage('Login successful! Redirecting...', 'success');
                         
                         // Reset submitting state
                         if (method === 'email') this.isLoginSubmitting = false;
                         if (method === 'mobile') this.isMobileLoginSubmitting = false;
                         if (method === 'username') this.isUsernameLoginSubmitting = false;
                         
-                        // Redirect ONLY on success
+                        // Redirect to dashboard
                         setTimeout(() => this.redirectToDashboard(), 1000);
                     } else {
-                        throw new Error(response.message || 'Login failed');
+                        throw new Error(response?.message || 'Login failed');
                     }
                     
                 } catch (error) {
-                    // Show error message - NO RETRY
+                    // Show error message
                     this.showMessage(error.message, 'error');
                     this.setLoginLoadingState(false, method);
                     
@@ -1947,6 +1949,7 @@
                     if (method === 'mobile') this.isMobileLoginSubmitting = false;
                     if (method === 'username') this.isUsernameLoginSubmitting = false;
                     
+                    // Shake animation for form
                     const formId = method === 'email' ? 'loginForm' : 
                                  method === 'mobile' ? 'mobileLoginFormElement' : 'usernameLoginFormElement';
                     const form = document.getElementById(formId);
@@ -1955,7 +1958,6 @@
                         setTimeout(() => form.classList.remove('shake'), 500);
                     }
                     
-                    // DO NOT clear localStorage on error
                     console.error('Login error:', error.message);
                 }
             }
@@ -1964,7 +1966,6 @@
              * Handles registration form submission
              */
             async handleRegistration(e) {
-                // Prevent double submission
                 if (this.isRegisterSubmitting) return;
                 this.isRegisterSubmitting = true;
                 
@@ -2033,34 +2034,37 @@
                 this.setRegisterLoadingState(true);
                 
                 try {
-                    // Use apiRequest for registration - ONLY ONCE
-                    const registerData = {
-                        username: regUsername,
-                        email: regEmail,
-                        password: regPassword,
-                        mobile: mobile || null
-                    };
+                    // Use api.js for registration - CORRECTED
+                    if (typeof window.api === 'undefined' || !window.api.registerUser) {
+                        this.showMessage('API service not available. Please check your connection.', 'error');
+                        throw new Error('API service not available');
+                    }
                     
-                    const response = await apiRequest('/auth/register', {
-                        method: 'POST',
-                        body: JSON.stringify(registerData)
-                    });
+                    // CORRECTED: Call api.registerUser() directly with username, email, password
+                    const response = await window.api.registerUser(regUsername, regEmail, regPassword);
                     
-                    if (response.success && response.token) {
-                        // Store token and user data
-                        localStorage.setItem('token', response.token);
-                        localStorage.setItem('isLoggedIn', 'true');
-                        localStorage.setItem('userId', response.user.id);
+                    if (response && response.success) {
+                        // Store token from response - CRITICAL STEP
+                        if (response.token) {
+                            localStorage.setItem('token', response.token);
+                        } else {
+                            // Check if api.js already stored it
+                            const storedToken = localStorage.getItem('token');
+                            if (!storedToken) {
+                                throw new Error('Registration failed - no token received');
+                            }
+                        }
                         
-                        const userData = {
-                            uid: response.user.id,
-                            email: response.user.email,
-                            displayName: response.user.displayName || response.user.username,
-                            mobile: response.user.mobile || '',
+                        // Save user data
+                        const fullUserData = {
+                            uid: response.user?.id || 'user_' + Date.now(),
+                            email: regEmail,
+                            displayName: regUsername,
+                            mobile: mobile || '',
                             isNewUser: true,
                             autoLogin: true,
                             lastLogin: new Date().toISOString(),
-                            hasPremiumTrial: true, // New users get premium trial
+                            hasPremiumTrial: true,
                             premiumExpiresAt: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString(),
                             isOfflineUser: false,
                             session: true,
@@ -2068,34 +2072,45 @@
                             deviceId: this.deviceId
                         };
                         
-                        localStorage.setItem('kynecta-chat-user', JSON.stringify(userData));
+                        localStorage.setItem('kynecta-chat-user', JSON.stringify(fullUserData));
+                        localStorage.setItem('isLoggedIn', 'true');
                         localStorage.setItem('kynecta-chat-auto-login', 'true');
                         
-                        this.showMessage('🎉 Registration successful! Your 30-day premium trial is activated!', 'success');
+                        // Show success message safely
+                        let successMessage = '🎉 Registration successful!';
+                        if (response.message) {
+                            successMessage += ' ' + response.message;
+                        } else {
+                            successMessage += ' Your 30-day premium trial is activated!';
+                        }
+                        
+                        this.showMessage(successMessage, 'success');
                         
                         // Reset submitting state
                         this.isRegisterSubmitting = false;
                         
-                        // Redirect ONLY on success
+                        // Redirect to dashboard
                         setTimeout(() => this.redirectToDashboard(), 1500);
                         
                     } else {
-                        throw new Error(response.message || 'Registration failed');
+                        throw new Error(response?.message || 'Registration failed');
                     }
                     
                 } catch (error) {
-                    // Show error message - NO RETRY
+                    // Show error message
                     this.showMessage(error.message, 'error');
                     this.setRegisterLoadingState(false);
                     
                     // Reset submitting state
                     this.isRegisterSubmitting = false;
                     
+                    // Shake animation
                     const registrationForm = document.getElementById('registration-form');
-                    registrationForm.classList.add('shake');
-                    setTimeout(() => registrationForm.classList.remove('shake'), 500);
+                    if (registrationForm) {
+                        registrationForm.classList.add('shake');
+                        setTimeout(() => registrationForm.classList.remove('shake'), 500);
+                    }
                     
-                    // DO NOT clear localStorage on error
                     console.error('Registration error:', error.message);
                 }
             }
@@ -2248,7 +2263,6 @@
              */
             showToast(message, type = 'info') {
                 console.log(`Toast (${type}): ${message}`);
-                // Toast container not in provided HTML, so using console
             }
 
             /**
@@ -2256,7 +2270,6 @@
              */
             showLoading(text = 'Processing...') {
                 console.log(`Loading: ${text}`);
-                // Loading modal not in provided HTML
             }
 
             /**
@@ -2285,8 +2298,8 @@
              * Saves user preferences to localStorage
              */
             saveUserPreferences() {
-                const email = document.getElementById('loginEmail').value;
-                const rememberMe = document.getElementById('remember-me').checked;
+                const email = document.getElementById('loginEmail')?.value;
+                const rememberMe = document.getElementById('remember-me')?.checked;
                 
                 if (rememberMe && email) {
                     localStorage.setItem('kynecta-chat-email', email);
@@ -2301,22 +2314,20 @@
              * Enhanced redirect to dashboard
              */
             redirectToDashboard() {
+                if (this.isRedirecting) return;
+                this.isRedirecting = true;
+                
                 this.saveUserPreferences();
                 
-                const userData = JSON.parse(localStorage.getItem('kynecta-chat-user') || '{}');
                 const token = localStorage.getItem('token');
                 
                 if (!token) {
+                    this.isRedirecting = false;
                     this.showMessage('Authentication failed. Please try again.', 'error');
                     return;
                 }
                 
-                let message = 'Welcome to kynecta! Redirecting to dashboard...';
-                if (userData.isOfflineUser) message = 'Welcome to kynecta! (Local Mode)';
-                if (userData.hasPremiumTrial) message = '🎉 Welcome to kynecta Premium!';
-                if (userData.session) message = '✅ Secure session active!';
-                
-                this.showMessage(message, 'success');
+                this.showMessage('Welcome to kynecta! Redirecting...', 'success');
                 
                 setTimeout(() => {
                     document.body.classList.add('fade-out');
@@ -2328,7 +2339,7 @@
             }
         }
 
-        // Initialize the app
+        // Initialize the app when DOM is ready
         document.addEventListener('DOMContentLoaded', () => {
             window.kynectaChatApp = new kynectaChatApp();
         });

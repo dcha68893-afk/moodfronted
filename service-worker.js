@@ -1,15 +1,16 @@
 // Service Worker for PWA Chat Application
-// Version: 3.1.2 - Enhanced auth and redirect handling
-// Cache Strategy: Cache-First for static assets, Network-First for auth/navigation
+// Version: 3.1.5 - Fixed critical caching rules for auth and API endpoints
+// Cache Strategy: Cache-First for static assets, Network-First for API/HTML
 
-const CACHE_NAME = 'pwa-chat-v3.1.2';
-const API_CACHE_NAME = 'pwa-chat-api-v3.1.2';
-const OFFLINE_CACHE_NAME = 'pwa-chat-offline-v3.1.2';
+const CACHE_NAME = 'pwa-chat-v3.1.5';
+const API_CACHE_NAME = 'pwa-chat-api-v3.1.5';
+const OFFLINE_CACHE_NAME = 'pwa-chat-offline-v3.1.5';
 
 // App shell - all static assets that make up the UI
 const APP_SHELL_ASSETS = [
-  // Core files (excluding index.html from app shell - will be handled specially)
+  // Core files (INCLUDING index.html for offline use)
   '/',
+  '/index.html',
   '/chat.html',
   '/status.html',
   '/friend.html',
@@ -67,26 +68,32 @@ const API_ENDPOINTS = [
   '/api/calls'
 ];
 
-// Authentication-related endpoints - NEVER cache these
-const AUTH_ENDPOINTS = [
+// CRITICAL: Authentication and sensitive endpoints - NEVER cache these
+const NEVER_CACHE_ENDPOINTS = [
+  // Auth API endpoints
   '/api/auth',
   '/api/login',
   '/api/register',
+  '/api/validate',
   '/api/logout',
   '/api/verify',
   '/api/token',
-  '/api/session'
+  '/api/session',
+  '/api/auth/'
 ];
 
-// Paths that should NEVER be cached
-const NEVER_CACHE_PATHS = [
-  '/index.html',
-  '/api/auth/'
+// Authentication HTML pages - NEVER cache these (to prevent auth loops)
+const NEVER_CACHE_HTML = [
+  '/login.html',
+  '/register.html',
+  '/auth.html',
+  '/validate.html',
+  '/auth/'
 ];
 
 // Install event - cache app shell with error handling
 self.addEventListener('install', event => {
-  console.log('[Service Worker] Installing v3.1.2...');
+  console.log('[Service Worker] Installing v3.1.5...');
   
   event.waitUntil(
     (async () => {
@@ -97,17 +104,30 @@ self.addEventListener('install', event => {
         // Cache core assets with error handling for each
         const cachePromises = APP_SHELL_ASSETS.map(async (asset) => {
           try {
-            // Skip index.html from app shell caching
-            if (asset === '/index.html') {
-              console.log('[Service Worker] Skipping index.html from app shell cache');
+            // Skip if asset is a never-cache HTML page
+            if (isNeverCacheHtml(asset)) {
+              console.log('[Service Worker] Skipping never-cache HTML:', asset);
               return false;
             }
             
-            // For root path, DO NOT cache index.html as part of app shell
-            const assetUrl = asset === '/' ? '/' : asset;
+            // Skip if asset starts with auth path
+            if (asset.startsWith('/auth/')) {
+              console.log('[Service Worker] Skipping auth path:', asset);
+              return false;
+            }
+            
+            const assetUrl = asset === '/' ? '/index.html' : asset;
+            
+            // Skip invalid URLs
+            if (!isValidUrl(assetUrl)) {
+              console.log('[Service Worker] Skipping invalid URL:', assetUrl);
+              return false;
+            }
+            
             const response = await fetch(assetUrl);
+            
             if (response.ok && !shouldNeverCache(response.url)) {
-              await cache.put(assetUrl, response);
+              await cache.put(assetUrl === '/index.html' ? '/' : assetUrl, response);
               console.log(`[Service Worker] Cached: ${assetUrl}`);
               return true;
             } else {
@@ -120,8 +140,17 @@ self.addEventListener('install', event => {
           }
         });
         
-        // Try to cache optional assets
+        // Try to cache optional assets (skip never-cache assets)
         const optionalPromises = OPTIONAL_ASSETS.map(async (asset) => {
+          if (shouldNeverCache(asset) || asset.startsWith('/auth/')) {
+            return; // Skip never-cache assets
+          }
+          
+          // Skip invalid URLs
+          if (!isValidUrl(asset)) {
+            return;
+          }
+          
           try {
             const response = await fetch(asset);
             if (response.ok && !shouldNeverCache(response.url)) {
@@ -147,18 +176,17 @@ self.addEventListener('install', event => {
 
 // Activate event - clean up old caches
 self.addEventListener('activate', event => {
-  console.log('[Service Worker] Activating v3.1.2...');
+  console.log('[Service Worker] Activating v3.1.5...');
   
   event.waitUntil(
     Promise.all([
-      // Clean up old caches
+      // Clean up ALL old caches
       caches.keys().then(cacheNames => {
         return Promise.all(
           cacheNames.map(cacheName => {
             if (cacheName !== CACHE_NAME && 
                 cacheName !== API_CACHE_NAME && 
-                cacheName !== OFFLINE_CACHE_NAME &&
-                cacheName.startsWith('pwa-chat-')) {
+                cacheName !== OFFLINE_CACHE_NAME) {
               console.log('[Service Worker] Deleting old cache:', cacheName);
               return caches.delete(cacheName);
             }
@@ -176,7 +204,7 @@ self.addEventListener('activate', event => {
         clients.forEach(client => {
           client.postMessage({
             type: 'SW_ACTIVATED',
-            version: '3.1.2',
+            version: '3.1.5',
             timestamp: Date.now()
           });
         });
@@ -185,25 +213,78 @@ self.addEventListener('activate', event => {
   );
 });
 
+// Helper: Check if request should NEVER be cached
+function shouldNeverCache(requestUrl) {
+  const url = new URL(requestUrl, self.location.origin);
+  
+  // NEVER cache POST requests
+  if (typeof requestUrl === 'object' && requestUrl.method === 'POST') {
+    return true;
+  }
+  
+  // Skip auth paths entirely
+  if (url.pathname.startsWith('/auth/')) {
+    return true;
+  }
+  
+  // Check for never-cache API endpoints
+  const isNeverCacheEndpoint = NEVER_CACHE_ENDPOINTS.some(endpoint => {
+    // Exact match
+    if (endpoint === url.pathname) {
+      return true;
+    }
+    
+    // Pattern match (ends with / means startsWith)
+    if (endpoint.endsWith('/') && url.pathname.startsWith(endpoint)) {
+      return true;
+    }
+    
+    // Starts with match
+    if (url.pathname.startsWith(endpoint)) {
+      return true;
+    }
+    
+    return false;
+  });
+  
+  if (isNeverCacheEndpoint) {
+    return true;
+  }
+  
+  // Check for never-cache HTML pages
+  if (isNeverCacheHtml(url.pathname)) {
+    return true;
+  }
+  
+  return false;
+}
+
+// Helper: Check if path is a never-cache HTML page
+function isNeverCacheHtml(path) {
+  return NEVER_CACHE_HTML.some(page => {
+    // Exact match
+    if (path === page) {
+      return true;
+    }
+    
+    // Ends with match for specific pages
+    if (page.endsWith('.html') && path.endsWith(page)) {
+      return true;
+    }
+    
+    // Starts with match for paths
+    if (page.endsWith('/') && path.startsWith(page)) {
+      return true;
+    }
+    
+    return false;
+  });
+}
+
 // Helper: Check if request is for API
 function isApiRequest(request) {
   const url = new URL(request.url);
-  return API_ENDPOINTS.some(endpoint => url.pathname.includes(endpoint));
-}
-
-// Helper: Check if request is for authentication
-function isAuthRequest(request) {
-  const url = new URL(request.url);
-  return AUTH_ENDPOINTS.some(endpoint => url.pathname.includes(endpoint));
-}
-
-// Helper: Check if request should NEVER be cached
-function shouldNeverCache(requestUrl) {
-  const url = new URL(requestUrl);
-  return NEVER_CACHE_PATHS.some(path => 
-    url.pathname.includes(path) || 
-    (path.endsWith('/') && url.pathname.startsWith(path))
-  );
+  return API_ENDPOINTS.some(endpoint => url.pathname.startsWith(endpoint));
 }
 
 // Helper: Check if request is for static asset
@@ -222,161 +303,111 @@ function isHtmlRequest(request) {
   return extension === 'html' || request.headers.get('Accept')?.includes('text/html');
 }
 
-// Helper: Check if request is authentication-sensitive HTML page
-function isAuthSensitivePage(request) {
-  const url = new URL(request.url);
-  const authSensitivePages = ['/chat.html', '/status.html', '/friend.html', '/group.html', '/calls.html', '/tools.html', '/settings.html'];
-  return authSensitivePages.some(page => url.pathname.endsWith(page));
+// Helper: Check if response should not be cached
+function shouldNotCacheResponse(response) {
+  // Never cache redirect responses
+  if (response.status >= 300 && response.status < 400) {
+    return true;
+  }
+  
+  // Never cache authentication errors (401, 403)
+  if (response.status === 401 || response.status === 403) {
+    return true;
+  }
+  
+  // Never cache server errors (500+)
+  if (response.status >= 500) {
+    return true;
+  }
+  
+  // Never cache opaque responses
+  if (response.type === 'opaqueredirect' || response.type === 'opaque') {
+    return true;
+  }
+  
+  return false;
 }
 
-// Helper: Check if request is index.html or root
-function isIndexPage(request) {
-  const url = new URL(request.url);
-  return url.pathname === '/' || url.pathname.endsWith('/index.html');
+// Helper: Check if URL is valid for caching
+function isValidUrl(url) {
+  try {
+    const parsed = new URL(url, self.location.origin);
+    return parsed.origin === self.location.origin;
+  } catch (e) {
+    return false;
+  }
 }
 
-// Helper: Check if request should be cached
-function shouldCache(request) {
+// CRITICAL: Handle HTML page requests with network-first strategy
+async function handleHtmlRequest(request) {
   const url = new URL(request.url);
   
-  // Don't cache non-GET requests
-  if (request.method !== 'GET') return false;
-  
-  // Don't cache external resources unless they're from our domain
-  if (url.origin !== self.location.origin) return false;
-  
-  // Never cache authentication requests
-  if (isAuthRequest(request)) return false;
-  
-  // Never cache paths in NEVER_CACHE_PATHS
-  if (shouldNeverCache(request.url)) return false;
-  
-  return true;
-}
-
-// Smart Network-First strategy for HTML pages
-async function smartNetworkFirstForHtml(request) {
-  const url = new URL(request.url);
-  
-  // NEVER cache index.html
-  if (isIndexPage(request)) {
-    console.log('[Service Worker] Index page request - never cache:', url.pathname);
+  // NEVER cache authentication HTML pages or auth paths
+  if (isNeverCacheHtml(url.pathname) || url.pathname.startsWith('/auth/')) {
+    console.log('[Service Worker] Never-cache HTML - fetch only:', url.pathname);
     try {
       return await fetch(request);
     } catch (error) {
-      console.log('[Service Worker] Offline and requesting index - serving offline UI');
-      // For index page when offline, serve a basic offline page
-      const cache = await caches.open(CACHE_NAME);
-      return new Response(
-        '<html><body><h1>Offline</h1><p>Please check your internet connection</p></body></html>',
-        { 
-          status: 200,
-          headers: { 'Content-Type': 'text/html' }
-        }
-      );
+      // When offline, show offline page for auth pages
+      return getOfflineHtmlResponse('Authentication pages require network connection');
     }
   }
   
   try {
-    console.log('[Service Worker] Smart network-first for HTML:', url.pathname);
-    
-    // Always try network first for HTML to get fresh authentication state
+    // Network first for HTML to get fresh authentication state
     const networkResponse = await fetch(request);
     
-    // Check if this is a redirect
-    if (networkResponse.status >= 300 && networkResponse.status < 400) {
-      console.log('[Service Worker] Redirect detected, not caching:', url.pathname);
-      
-      // NEVER cache redirect responses
-      // DO NOT replay cached redirects
+    // CRITICAL: Don't cache error responses or redirects
+    if (shouldNotCacheResponse(networkResponse)) {
+      console.log('[Service Worker] Not caching HTML response:', url.pathname, networkResponse.status);
       return networkResponse;
     }
     
-    // Only cache successful non-redirect responses that are allowed
-    if (networkResponse.ok && 
-        networkResponse.status === 200 && 
-        networkResponse.type !== 'opaqueredirect' &&
-        !shouldNeverCache(request.url)) {
-      
-      // For auth-sensitive pages, be conservative with caching
-      if (isAuthSensitivePage(request)) {
-        console.log('[Service Worker] Auth-sensitive page - limited caching:', url.pathname);
-        // Still cache, but the app logic will handle auth redirects
-        const cache = await caches.open(CACHE_NAME);
-        await cache.put(request, networkResponse.clone());
-      } else {
-        // Regular HTML page - cache it
-        const cache = await caches.open(CACHE_NAME);
-        await cache.put(request, networkResponse.clone());
-      }
+    // Only cache successful responses that aren't auth-related
+    if (networkResponse.ok && !shouldNeverCache(request.url) && !url.pathname.startsWith('/auth/')) {
+      const cache = await caches.open(CACHE_NAME);
+      await cache.put(request, networkResponse.clone());
     }
     
     return networkResponse;
   } catch (error) {
-    console.log('[Service Worker] Network failed for HTML, smart cache fallback:', error.message);
+    console.log('[Service Worker] Network failed for HTML, cache fallback:', error.message);
     
-    // When offline, handle different page types differently
-    if (isAuthSensitivePage(request)) {
-      console.log('[Service Worker] Offline and auth-sensitive - DO NOT redirect, serve cached or offline');
-      
-      // Try to get cached version
-      const cache = await caches.open(CACHE_NAME);
-      const cachedResponse = await cache.match(request);
-      
-      if (cachedResponse) {
-        // We have a cached version, but add header to indicate it's cached
-        const response = new Response(cachedResponse.body, {
-          status: cachedResponse.status,
-          statusText: cachedResponse.statusText,
-          headers: new Headers(cachedResponse.headers)
-        });
-        response.headers.set('X-SW-Offline', 'true');
-        return response;
-      }
-      
-      // No cached version - show offline message
-      return new Response(
-        '<html><body><h1>Offline</h1><p>This page requires authentication and you are offline.</p></body></html>',
-        { 
-          status: 200,
-          headers: { 'Content-Type': 'text/html' }
-        }
-      );
-    }
-    
-    // For non-auth pages, try cache
+    // When offline, serve cached version if available
     const cache = await caches.open(CACHE_NAME);
-    const cachedResponse = await cache.match(request);
+    const cachedResponse = await cache.match(request) || await cache.match('/');
     
     if (cachedResponse) {
       return cachedResponse;
     }
     
-    // Ultimate fallback: basic offline page
-    return new Response(
-      '<html><body><h1>Offline</h1><p>Please check your internet connection</p></body></html>',
-      { 
-        status: 200,
-        headers: { 'Content-Type': 'text/html' }
-      }
-    );
+    // Ultimate fallback
+    return getOfflineHtmlResponse('Please check your internet connection');
   }
 }
 
-// Network-First for API requests
-async function networkFirstForApi(request) {
-  // NEVER cache auth API requests
-  if (isAuthRequest(request)) {
-    console.log('[Service Worker] Auth API request - never cache:', request.url);
+// CRITICAL: Handle API requests with network-first, cache-fallback only for GET
+async function handleApiRequest(request) {
+  const url = new URL(request.url);
+  
+  // NEVER cache POST requests or auth endpoints
+  if (request.method !== 'GET' || shouldNeverCache(request.url) || url.pathname.startsWith('/auth/')) {
+    console.log('[Service Worker] Never-cache API (POST/auth):', request.method, url.pathname);
     return fetch(request);
   }
   
   try {
-    // Try network first
+    // Network first for API
     const networkResponse = await fetch(request);
     
-    // Cache successful responses (except auth)
-    if (networkResponse.ok && !isAuthRequest(request)) {
+    // CRITICAL: Don't cache error responses
+    if (shouldNotCacheResponse(networkResponse)) {
+      console.log('[Service Worker] Not caching API error:', url.pathname, networkResponse.status);
+      return networkResponse;
+    }
+    
+    // Only cache successful GET responses
+    if (networkResponse.ok && !shouldNeverCache(request.url) && !url.pathname.startsWith('/auth/')) {
       const cache = await caches.open(API_CACHE_NAME);
       await cache.put(request, networkResponse.clone());
     }
@@ -385,25 +416,22 @@ async function networkFirstForApi(request) {
   } catch (error) {
     console.log('[Service Worker] API network failed, trying cache:', error);
     
-    // Fall back to cache (except for auth)
-    if (!isAuthRequest(request)) {
-      const cache = await caches.open(API_CACHE_NAME);
-      const cachedResponse = await cache.match(request);
+    // Fall back to cache ONLY for GET non-auth requests
+    const cache = await caches.open(API_CACHE_NAME);
+    const cachedResponse = await cache.match(request);
+    
+    if (cachedResponse) {
+      // Add cache indicator header
+      const response = new Response(cachedResponse.body, {
+        status: cachedResponse.status,
+        statusText: cachedResponse.statusText,
+        headers: new Headers(cachedResponse.headers)
+      });
       
-      if (cachedResponse) {
-        // Add cache indicator header
-        const response = new Response(cachedResponse.body, {
-          status: cachedResponse.status,
-          statusText: cachedResponse.statusText,
-          headers: new Headers(cachedResponse.headers)
-        });
-        
-        // Add custom header to indicate this is cached data
-        response.headers.set('X-Cache', 'HIT');
-        response.headers.set('X-SW-Cached', 'true');
-        
-        return response;
-      }
+      response.headers.set('X-Cache', 'HIT');
+      response.headers.set('X-SW-Cached', 'true');
+      
+      return response;
     }
     
     // Return offline response
@@ -424,10 +452,16 @@ async function networkFirstForApi(request) {
 }
 
 // Cache-First strategy for static assets
-async function cacheFirstForAssets(request) {
-  // NEVER cache certain paths
+async function handleStaticAsset(request) {
+  // NEVER cache assets from never-cache paths
   if (shouldNeverCache(request.url)) {
-    console.log('[Service Worker] Never-cache path for asset:', request.url);
+    console.log('[Service Worker] Never-cache static asset:', request.url);
+    return fetch(request);
+  }
+  
+  const url = new URL(request.url);
+  if (url.pathname.startsWith('/auth/')) {
+    console.log('[Service Worker] Never-cache auth asset:', request.url);
     return fetch(request);
   }
   
@@ -438,7 +472,7 @@ async function cacheFirstForAssets(request) {
     // Update cache in background
     fetch(request)
       .then(async networkResponse => {
-        if (networkResponse.ok && !shouldNeverCache(request.url)) {
+        if (networkResponse.ok && !shouldNeverCache(request.url) && !url.pathname.startsWith('/auth/')) {
           await cache.put(request, networkResponse.clone());
         }
       })
@@ -453,11 +487,31 @@ async function cacheFirstForAssets(request) {
   return fetch(request);
 }
 
-// Handle authentication requests - never cache
-async function handleAuthRequest(request) {
-  console.log('[Service Worker] Handling auth request, no caching:', request.url);
-  // Always go directly to network, no caching
-  return fetch(request);
+// Helper: Get offline HTML response
+function getOfflineHtmlResponse(message) {
+  return new Response(
+    `<!DOCTYPE html>
+    <html>
+      <head>
+        <meta charset="UTF-8">
+        <meta name="viewport" content="width=device-width, initial-scale=1.0">
+        <title>Offline - MoodChat</title>
+        <style>
+          body { font-family: Arial, sans-serif; text-align: center; padding: 50px; }
+          h1 { color: #666; }
+          p { color: #999; }
+        </style>
+      </head>
+      <body>
+        <h1>Offline</h1>
+        <p>${message}</p>
+      </body>
+    </html>`,
+    { 
+      status: 200,
+      headers: { 'Content-Type': 'text/html' }
+    }
+  );
 }
 
 // Fetch event - main request handler
@@ -465,36 +519,41 @@ self.addEventListener('fetch', event => {
   const request = event.request;
   const url = new URL(request.url);
   
-  // Skip non-GET requests and cross-origin requests
-  if (request.method !== 'GET' || url.origin !== self.location.origin) {
+  // Skip non-GET requests for non-static assets
+  if (request.method !== 'GET' && !isStaticAssetRequest(request)) {
     return;
   }
   
-  // Handle authentication requests - NEVER cache these
-  if (isAuthRequest(request) || shouldNeverCache(request.url)) {
-    console.log('[Service Worker] Never-cache request:', url.pathname);
+  // Skip cross-origin requests
+  if (url.origin !== self.location.origin) {
+    return;
+  }
+  
+  // CRITICAL: Handle never-cache requests immediately
+  if (shouldNeverCache(request.url) || request.method === 'POST' || url.pathname.startsWith('/auth/')) {
+    console.log('[Service Worker] Never-cache request:', request.method, url.pathname);
     event.respondWith(fetch(request));
     return;
   }
   
   // Handle HTML page requests (navigation)
   if (request.mode === 'navigate' || isHtmlRequest(request)) {
-    console.log('[Service Worker] HTML navigation request:', url.pathname);
-    event.respondWith(smartNetworkFirstForHtml(request));
+    console.log('[Service Worker] HTML request:', url.pathname);
+    event.respondWith(handleHtmlRequest(request));
     return;
   }
   
   // Handle API requests
   if (isApiRequest(request)) {
     console.log('[Service Worker] API request:', url.pathname);
-    event.respondWith(networkFirstForApi(request));
+    event.respondWith(handleApiRequest(request));
     return;
   }
   
   // Handle static assets
   if (isStaticAssetRequest(request)) {
-    console.log('[Service Worker] Static asset request:', url.pathname);
-    event.respondWith(cacheFirstForAssets(request));
+    console.log('[Service Worker] Static asset:', url.pathname);
+    event.respondWith(handleStaticAsset(request));
     return;
   }
   
@@ -508,7 +567,7 @@ self.addEventListener('fetch', event => {
   );
 });
 
-// Background Sync for failed API requests
+// Background Sync for failed API requests (unchanged)
 self.addEventListener('sync', event => {
   if (event.tag === 'sync-messages') {
     console.log('[Service Worker] Background sync: sync-messages');
@@ -521,7 +580,7 @@ self.addEventListener('sync', event => {
   }
 });
 
-// Sync pending messages when back online
+// Sync pending messages when back online (unchanged)
 async function syncPendingMessages() {
   try {
     const db = await openMessageDatabase();
@@ -551,7 +610,7 @@ async function syncPendingMessages() {
   }
 }
 
-// Sync pending API requests
+// Sync pending API requests (unchanged)
 async function syncPendingApiRequests() {
   try {
     const cache = await caches.open(OFFLINE_CACHE_NAME);
@@ -561,7 +620,7 @@ async function syncPendingApiRequests() {
       try {
         const response = await fetch(request);
         if (response.ok) {
-          if (isApiRequest(request) && !isAuthRequest(request)) {
+          if (isApiRequest(request) && !shouldNeverCache(request.url)) {
             const apiCache = await caches.open(API_CACHE_NAME);
             await apiCache.put(request, response.clone());
           }
@@ -577,7 +636,7 @@ async function syncPendingApiRequests() {
   }
 }
 
-// Handle push notifications
+// Handle push notifications (unchanged)
 self.addEventListener('push', event => {
   if (!event.data) return;
   
@@ -604,7 +663,7 @@ self.addEventListener('push', event => {
   }
 });
 
-// Handle notification clicks
+// Handle notification clicks (unchanged)
 self.addEventListener('notificationclick', event => {
   event.notification.close();
   
@@ -629,7 +688,7 @@ self.addEventListener('notificationclick', event => {
   );
 });
 
-// IndexedDB helper functions
+// IndexedDB helper functions (unchanged)
 function openMessageDatabase() {
   return new Promise((resolve, reject) => {
     const request = indexedDB.open('chat-messages', 2);
@@ -698,7 +757,7 @@ function markMessageAsSent(db, messageId) {
   });
 }
 
-// Message event handler for communication with main app
+// Message event handler for communication with main app (unchanged)
 self.addEventListener('message', event => {
   const data = event.data;
   
@@ -722,7 +781,6 @@ self.addEventListener('message', event => {
       
     case 'UPDATE_AUTH_STATE':
       console.log('[Service Worker] Received auth state update:', data.authenticated);
-      // Store auth state for future requests
       event.waitUntil(storeAuthState(data.authenticated, data.token));
       break;
       
@@ -734,14 +792,14 @@ self.addEventListener('message', event => {
       event.ports[0].postMessage({
         type: 'HEALTH_RESPONSE',
         status: 'healthy',
-        version: '3.1.2',
+        version: '3.1.5',
         timestamp: Date.now()
       });
       break;
   }
 });
 
-// Store authentication state
+// Store authentication state (unchanged)
 async function storeAuthState(isAuthenticated, token) {
   try {
     const db = await openMessageDatabase();
@@ -758,9 +816,10 @@ async function storeAuthState(isAuthenticated, token) {
 // Cache API data from main thread
 async function cacheApiData(url, data) {
   try {
-    // Don't cache auth-related data
-    if (isAuthRequest(new Request(url)) || shouldNeverCache(url)) {
-      console.log('[Service Worker] Skipping cache for auth/never-cache data:', url);
+    // CRITICAL: Don't cache auth-related data
+    const request = new Request(url);
+    if (shouldNeverCache(url) || url.startsWith('/auth/')) {
+      console.log('[Service Worker] Skipping cache for never-cache data:', url);
       return;
     }
     
@@ -776,14 +835,14 @@ async function cacheApiData(url, data) {
       }
     });
     
-    await cache.put(new Request(url), response);
+    await cache.put(request, response);
     console.log('[Service Worker] Cached API data for:', url);
   } catch (error) {
     console.error('[Service Worker] Failed to cache API data:', error);
   }
 }
 
-// Clear all caches
+// Clear all caches (unchanged)
 async function clearAllCaches() {
   try {
     const cacheNames = await caches.keys();
@@ -803,7 +862,7 @@ async function clearAllCaches() {
   }
 }
 
-// Get cache information
+// Get cache information (unchanged)
 async function getCacheInfo(event) {
   try {
     const cacheNames = await caches.keys();
@@ -846,6 +905,13 @@ async function cleanupOldCacheEntries() {
     let cleanedCount = 0;
     
     for (const request of keys) {
+      // Skip never-cache endpoints
+      if (shouldNeverCache(request.url) || request.url.includes('/auth/')) {
+        await cache.delete(request);
+        cleanedCount++;
+        continue;
+      }
+      
       const response = await cache.match(request);
       if (response) {
         const dateHeader = response.headers.get('date');
@@ -853,7 +919,7 @@ async function cleanupOldCacheEntries() {
           const cachedDate = new Date(dateHeader).getTime();
           const age = now - cachedDate;
           
-          // Remove entries older than 1 hour for API cache
+          // Remove API cache entries older than 1 hour
           if (age > 60 * 60 * 1000) {
             await cache.delete(request);
             cleanedCount++;
@@ -868,7 +934,7 @@ async function cleanupOldCacheEntries() {
   }
 }
 
-// Error handling
+// Error handling (unchanged)
 self.addEventListener('error', event => {
   console.error('[Service Worker] Error:', event.error);
 });
