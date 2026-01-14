@@ -21,24 +21,20 @@ const APP_SHELL_ASSETS = [
   
   // CSS files (assuming these exist locally)
   '/layout.css',
-  '/css/chat.css',
-  '/css/components.css',
-  '/css/theme.css',
-  '/css/group.css',
+  '/chat.css',
+  '/group.css',
   
   // JavaScript files (assuming these exist locally)
   '/js/app.js',
-  '/js/chat.js',
+  '/chat.js',
   '/js/api.js',
   
   
   // Manifest and icons
   '/manifest.json',
-  '/favicon.ico',
   
   // Fonts (assuming these exist locally)
-  '/fonts/roboto.woff2',
-  '/fonts/icons.woff2'
+  
 ];
 
 // Optional assets - try to cache if they exist, but don't fail if they don't
