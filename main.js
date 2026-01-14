@@ -8,14 +8,46 @@ class PWAManager {
       user: null,
       token: null
     };
+    this.apiReady = false; // Track if API is loaded
     this.init();
   }
 
   async init() {
+    // CRITICAL FIX: Wait for api.js to load before initializing
+    await this.waitForAPI();
+    
     await this.registerServiceWorker();
     this.setupAppListeners();
     this.checkAppVersion();
     this.checkAuthState(); // Check initial auth state
+  }
+
+  // CRITICAL FIX: Ensure api.js is loaded before using window.api
+  async waitForAPI() {
+    const maxAttempts = 10;
+    const delay = 200;
+    
+    for (let i = 0; i < maxAttempts; i++) {
+      if (window.api && typeof window.api === 'object') {
+        console.log('kynecta: API loaded successfully');
+        this.apiReady = true;
+        return;
+      }
+      await new Promise(resolve => setTimeout(resolve, delay));
+    }
+    
+    console.warn('kynecta: API not loaded after max attempts, proceeding anyway');
+    this.apiReady = true; // Proceed to avoid blocking app
+  }
+
+  // Safe API call wrapper - prevents "window.api is not a function" errors
+  safeApiCall(method, ...args) {
+    if (window.api && typeof window.api[method] === 'function') {
+      return window.api[method](...args);
+    } else {
+      console.warn(`kynecta: window.api.${method} not available yet`);
+      return Promise.reject(new Error(`API method ${method} not available`));
+    }
   }
 
   // Check initial authentication state
@@ -37,6 +69,9 @@ class PWAManager {
           };
           this.updateUIForAuthState();
           console.log('kynecta: User authenticated from stored token');
+          
+          // CRITICAL FIX: Initialize status-related functions after auth
+          this.initializeStatusFunctions();
         } else {
           this.clearAuthData();
         }
@@ -46,6 +81,20 @@ class PWAManager {
     } catch (error) {
       console.error('kynecta: Error checking auth state:', error);
       this.clearAuthData();
+    }
+  }
+
+  // Initialize status-related functions using safe API calls
+  async initializeStatusFunctions() {
+    if (!this.authState.isAuthenticated || !this.apiReady) return;
+    
+    try {
+      // CRITICAL FIX: Safely call status-related functions
+      await this.safeApiCall('getUserStatus').catch(() => {});
+      await this.safeApiCall('getFriendsStatuses').catch(() => {});
+      console.log('kynecta: Status functions initialized');
+    } catch (error) {
+      console.warn('kynecta: Status functions not available:', error.message);
     }
   }
 
@@ -141,6 +190,9 @@ class PWAManager {
     
     // Update UI
     this.updateUIForAuthState();
+    
+    // Initialize status functions after login
+    this.initializeStatusFunctions();
     
     // Notify service worker
     this.sendMessageToServiceWorker({
@@ -284,21 +336,13 @@ class PWAManager {
     // Setup auth listeners first
     this.setupAuthListeners();
 
+    // CRITICAL FIX: Enhanced real-time online/offline detection
+    this.setupEnhancedNetworkListeners();
+
     // Controller change - reload page
     navigator.serviceWorker?.addEventListener('controllerchange', () => {
       console.log('kynecta: Controller changed - reloading page');
       this.showReloadNotification();
-    });
-
-    // Online/offline events
-    window.addEventListener('online', () => {
-      console.log('kynecta: App came online');
-      this.handleOnline();
-    });
-
-    window.addEventListener('offline', () => {
-      console.log('kynecta: App went offline');
-      this.handleOffline();
     });
 
     // Before install prompt
@@ -318,6 +362,99 @@ class PWAManager {
     navigator.serviceWorker?.addEventListener('message', (event) => {
       this.handleServiceWorkerMessage(event);
     });
+  }
+
+  // CRITICAL FIX: Enhanced network status detection with UI updates
+  setupEnhancedNetworkListeners() {
+    // Standard online/offline events
+    window.addEventListener('online', () => {
+      console.log('kynecta: App came online');
+      this.handleOnline();
+    });
+
+    window.addEventListener('offline', () => {
+      console.log('kynecta: App went offline');
+      this.handleOffline();
+    });
+
+    // Real-time network quality detection
+    this.setupNetworkQualityDetection();
+    
+    // Periodic connectivity checks
+    this.startConnectivityMonitoring();
+  }
+
+  // Setup network quality detection
+  setupNetworkQualityDetection() {
+    // Use Network Information API if available
+    if ('connection' in navigator) {
+      const connection = navigator.connection;
+      
+      connection.addEventListener('change', () => {
+        console.log('kynecta: Network connection changed:', {
+          effectiveType: connection.effectiveType,
+          downlink: connection.downlink,
+          rtt: connection.rtt,
+          saveData: connection.saveData
+        });
+        
+        this.updateNetworkQualityUI(connection);
+      });
+    }
+  }
+
+  // Update UI based on network quality
+  updateNetworkQualityUI(connection) {
+    let statusText = '🟢 Online';
+    let statusClass = 'bg-green-500';
+    
+    if (connection) {
+      if (connection.effectiveType === 'slow-2g' || connection.effectiveType === '2g') {
+        statusText = '🐌 Slow Connection';
+        statusClass = 'bg-yellow-600';
+      } else if (connection.effectiveType === '3g') {
+        statusText = '🟡 Fair Connection';
+        statusClass = 'bg-yellow-500';
+      } else if (connection.effectiveType === '4g') {
+        statusText = '🟢 Good Connection';
+        statusClass = 'bg-green-500';
+      }
+    }
+    
+    this.showStatusIndicator(statusText, statusClass, 5000);
+  }
+
+  // Start periodic connectivity monitoring
+  startConnectivityMonitoring() {
+    setInterval(async () => {
+      const isOnline = await this.checkConnectivity();
+      if (isOnline !== navigator.onLine) {
+        console.log('kynecta: Connectivity state mismatch detected');
+        if (isOnline) {
+          this.handleOnline();
+        } else {
+          this.handleOffline();
+        }
+      }
+    }, 30000); // Check every 30 seconds
+  }
+
+  // Enhanced connectivity check
+  async checkConnectivity() {
+    try {
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 5000);
+      
+      const response = await fetch('/api/health', {
+        method: 'HEAD',
+        signal: controller.signal
+      });
+      
+      clearTimeout(timeoutId);
+      return response.ok;
+    } catch (error) {
+      return false;
+    }
   }
 
   // Handle service worker messages
@@ -353,8 +490,23 @@ class PWAManager {
         this.handleAuthRequired();
         break;
       
+      case 'UPDATE_STATUS':
+        // CRITICAL FIX: Handle status updates via API
+        this.handleStatusUpdate(data);
+        break;
+      
       default:
         console.log('kynecta: Unknown message type:', data.type);
+    }
+  }
+
+  // Handle status updates from service worker
+  handleStatusUpdate(data) {
+    if (this.apiReady && this.authState.isAuthenticated) {
+      // Safely update status using API
+      this.safeApiCall('updateStatus', data.status).catch(() => {
+        console.warn('kynecta: Could not update status, API not available');
+      });
     }
   }
 
@@ -561,18 +713,33 @@ class PWAManager {
     this.sendMessageToServiceWorker({ type: 'ONLINE_STATUS', status: true });
     
     // Show online indicator
-    this.showStatusIndicator('🟢 Online', 'bg-green-500');
+    this.showStatusIndicator('🟢 Online', 'bg-green-500', 3000);
+    
+    // Update connection quality UI
+    if ('connection' in navigator) {
+      this.updateNetworkQualityUI(navigator.connection);
+    }
     
     // Sync any pending data
     this.syncAllData();
+    
+    // CRITICAL FIX: Update user status via API when coming online
+    if (this.authState.isAuthenticated && this.apiReady) {
+      this.safeApiCall('updateStatus', 'online').catch(() => {});
+    }
   }
 
   handleOffline() {
     this.sendMessageToServiceWorker({ type: 'ONLINE_STATUS', status: false });
-    this.showStatusIndicator('🔴 Offline', 'bg-red-500');
+    this.showStatusIndicator('🔴 Offline', 'bg-red-500', 3000);
+    
+    // CRITICAL FIX: Update user status via API when going offline
+    if (this.authState.isAuthenticated && this.apiReady) {
+      this.safeApiCall('updateStatus', 'offline').catch(() => {});
+    }
   }
 
-  showStatusIndicator(text, bgColor) {
+  showStatusIndicator(text, bgColor, duration = 3000) {
     let indicator = document.querySelector('.network-status');
     
     if (!indicator) {
@@ -589,7 +756,7 @@ class PWAManager {
       if (indicator.parentNode) {
         indicator.remove();
       }
-    }, 3000);
+    }, duration);
   }
 
   // Data synchronization methods
@@ -711,35 +878,69 @@ class PWAManager {
   }
 }
 
+// CRITICAL FIX: Ensure proper initialization order
+function initializeApp() {
+  // Check if api.js is loaded first
+  if (window.api && typeof window.api === 'object') {
+    console.log('kynecta: API already loaded, initializing app');
+    window.pwaManager = new PWAManager();
+    console.log('kynecta: App initialized');
+    
+    // Check if we're in standalone mode
+    if (window.pwaManager.isAppInstalled()) {
+      document.documentElement.classList.add('standalone-mode');
+      console.log('kynecta: Running in standalone mode');
+    }
+  } else {
+    console.log('kynecta: Waiting for API to load...');
+    // Wait for API to load, then initialize
+    const checkApiInterval = setInterval(() => {
+      if (window.api && typeof window.api === 'object') {
+        clearInterval(checkApiInterval);
+        console.log('kynecta: API loaded, now initializing app');
+        window.pwaManager = new PWAManager();
+        console.log('kynecta: App initialized');
+        
+        if (window.pwaManager.isAppInstalled()) {
+          document.documentElement.classList.add('standalone-mode');
+          console.log('kynecta: Running in standalone mode');
+        }
+      }
+    }, 100);
+  }
+}
+
 // Initialize app features
 document.addEventListener('DOMContentLoaded', function() {
-  // Initialize PWA Manager
-  window.pwaManager = new PWAManager();
+  console.log('kynecta: DOM loaded, starting app initialization');
   
-  console.log('kynecta: App initialized');
-  
-  // Check if we're in standalone mode
-  if (window.pwaManager.isAppInstalled()) {
-    document.documentElement.classList.add('standalone-mode');
-    console.log('kynecta: Running in standalone mode');
-  }
+  // Initialize app with proper ordering
+  initializeApp();
   
   // Display service worker version info
   setTimeout(async () => {
-    const versionInfo = await window.pwaManager.getServiceWorkerVersion();
-    console.log('kynecta: Service Worker Version:', versionInfo);
+    if (window.pwaManager) {
+      const versionInfo = await window.pwaManager.getServiceWorkerVersion();
+      console.log('kynecta: Service Worker Version:', versionInfo);
+    }
   }, 2000);
   
   // Add logout handler
   document.addEventListener('click', (event) => {
     if (event.target.matches('[data-action="logout"]')) {
       event.preventDefault();
-      window.pwaManager.handleUserLogout();
+      if (window.pwaManager) {
+        window.pwaManager.handleUserLogout();
+      }
     }
   });
 });
 
-// Export for module usage (if needed)
+// CRITICAL FIX: Remove module.exports to prevent "import outside module" errors
+// This prevents the file from being treated as an ES module when it's not
+// Commenting out module.exports since we're not using modules in this context
+/*
 if (typeof module !== 'undefined' && module.exports) {
   module.exports = PWAManager;
 }
+*/

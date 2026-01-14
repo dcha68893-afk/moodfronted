@@ -889,6 +889,164 @@
             color: var(--text-primary);
         }
         
+        /* NEW: Status Intent Styles */
+        .intent-options {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 10px;
+            margin-top: 10px;
+        }
+        
+        .intent-chip {
+            padding: 8px 16px;
+            background-color: var(--secondary-color);
+            border: 1px solid var(--border-color);
+            border-radius: 20px;
+            cursor: pointer;
+            transition: all 0.2s;
+            font-size: 14px;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+        
+        .intent-chip:hover {
+            background-color: #e4e6e9;
+        }
+        
+        .intent-chip.selected {
+            background-color: var(--primary-color);
+            color: white;
+            border-color: var(--primary-color);
+        }
+        
+        /* NEW: Mood Styles */
+        .mood-options {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 10px;
+            margin-top: 10px;
+        }
+        
+        .mood-chip {
+            padding: 8px 16px;
+            background-color: var(--secondary-color);
+            border: 1px solid var(--border-color);
+            border-radius: 20px;
+            cursor: pointer;
+            transition: all 0.2s;
+            font-size: 14px;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+        
+        .mood-chip:hover {
+            background-color: #e4e6e9;
+        }
+        
+        .mood-chip.selected {
+            color: white;
+            border-color: transparent;
+        }
+        
+        .mood-chip.happy.selected { background-color: #4caf50; }
+        .mood-chip.stressed.selected { background-color: #ff9800; }
+        .mood-chip.motivated.selected { background-color: #2196f3; }
+        .mood-chip.lonely.selected { background-color: #9c27b0; }
+        .mood-chip.excited.selected { background-color: #ffeb3b; color: #000; }
+        .mood-chip.calm.selected { background-color: #00bcd4; }
+        .mood-chip.sad.selected { background-color: #607d8b; }
+        .mood-chip.angry.selected { background-color: #f44336; }
+        
+        /* NEW: Action Buttons Styles */
+        .action-buttons-container {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 10px;
+            margin-top: 10px;
+        }
+        
+        .action-button-chip {
+            padding: 8px 16px;
+            background-color: var(--secondary-color);
+            border: 1px solid var(--border-color);
+            border-radius: 20px;
+            cursor: pointer;
+            transition: all 0.2s;
+            font-size: 14px;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+        
+        .action-button-chip:hover {
+            background-color: #e4e6e9;
+        }
+        
+        .action-button-chip.selected {
+            background-color: var(--primary-color);
+            color: white;
+            border-color: var(--primary-color);
+        }
+        
+        /* NEW: Micro Circle Styles */
+        .circle-options {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 10px;
+            margin-top: 10px;
+        }
+        
+        .circle-chip {
+            padding: 8px 16px;
+            background-color: var(--secondary-color);
+            border: 1px solid var(--border-color);
+            border-radius: 20px;
+            cursor: pointer;
+            transition: all 0.2s;
+            font-size: 14px;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+        
+        .circle-chip:hover {
+            background-color: #e4e6e9;
+        }
+        
+        .circle-chip.selected {
+            background-color: #9c27b0;
+            color: white;
+            border-color: #9c27b0;
+        }
+        
+        /* NEW: Offline Indicator */
+        .offline-indicator {
+            display: inline-flex;
+            align-items: center;
+            gap: 5px;
+            font-size: 12px;
+            color: #ff9800;
+            background-color: rgba(255, 152, 0, 0.1);
+            padding: 3px 8px;
+            border-radius: 10px;
+            margin-left: 5px;
+        }
+        
+        /* NEW: Silent Mode Indicator */
+        .silent-mode-indicator {
+            display: inline-flex;
+            align-items: center;
+            gap: 5px;
+            font-size: 12px;
+            color: #607d8b;
+            background-color: rgba(96, 125, 139, 0.1);
+            padding: 3px 8px;
+            border-radius: 10px;
+            margin-left: 5px;
+        }
+        
         /* Category Select */
         .category-select-container {
             display: flex;
@@ -1092,6 +1250,66 @@
             background-color: var(--secondary-color);
             font-size: 12px;
             color: var(--text-secondary);
+        }
+        
+        /* NEW: Memory Timeline Styles */
+        .timeline-filters {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 10px;
+            margin-top: 15px;
+            margin-bottom: 15px;
+        }
+        
+        .timeline-filter-chip {
+            padding: 6px 12px;
+            background-color: var(--secondary-color);
+            border: 1px solid var(--border-color);
+            border-radius: 15px;
+            cursor: pointer;
+            transition: all 0.2s;
+            font-size: 13px;
+        }
+        
+        .timeline-filter-chip:hover {
+            background-color: #e4e6e9;
+        }
+        
+        .timeline-filter-chip.selected {
+            background-color: var(--primary-color);
+            color: white;
+            border-color: var(--primary-color);
+        }
+        
+        /* NEW: User Controlled Discovery Styles */
+        .discovery-filters {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 10px;
+            margin: 15px 0;
+        }
+        
+        .discovery-filter-chip {
+            padding: 6px 12px;
+            background-color: var(--secondary-color);
+            border: 1px solid var(--border-color);
+            border-radius: 15px;
+            cursor: pointer;
+            transition: all 0.2s;
+            font-size: 13px;
+            display: flex;
+            align-items: center;
+            gap: 5px;
+        }
+        
+        .discovery-filter-chip:hover {
+            background-color: #e4e6e9;
+        }
+        
+        .discovery-filter-chip.selected {
+            background-color: #4caf50;
+            color: white;
+            border-color: #4caf50;
         }
         
         /* Action Buttons */
@@ -1516,6 +1734,12 @@
                     <button class="add-status-btn" id="createStatusBtn" title="Create Status">
                         <i class="fas fa-plus"></i>
                     </button>
+                    <button class="add-status-btn" id="viewMemoryTimelineBtn" title="Memory Timeline">
+                        <i class="fas fa-history"></i>
+                    </button>
+                    <button class="add-status-btn" id="viewDiscoveryBtn" title="Browse by Intent">
+                        <i class="fas fa-compass"></i>
+                    </button>
                 </div>
             </div>
             
@@ -1525,6 +1749,29 @@
                 <button class="category-btn" id="closeTab">Close Friends</button>
                 <button class="category-btn" id="pinnedTab">Pinned</button>
                 <button class="category-btn" id="mutedTab">Muted</button>
+                <button class="category-btn" id="microCircleTab">Micro Circles</button>
+            </div>
+            
+            <!-- NEW: Discovery Filters -->
+            <div class="discovery-filters" id="discoveryFilters" style="display: none; padding: 10px 20px; border-bottom: 1px solid var(--border-color);">
+                <div class="discovery-filter-chip" data-filter="intent:feedback">
+                    <i class="fas fa-comment-medical"></i> Feedback
+                </div>
+                <div class="discovery-filter-chip" data-filter="intent:achievement">
+                    <i class="fas fa-trophy"></i> Achievement
+                </div>
+                <div class="discovery-filter-chip" data-filter="intent:advice">
+                    <i class="fas fa-hands-helping"></i> Need Advice
+                </div>
+                <div class="discovery-filter-chip" data-filter="intent:chat">
+                    <i class="fas fa-comments"></i> Available to Chat
+                </div>
+                <div class="discovery-filter-chip" data-filter="mood:happy">
+                    <i class="fas fa-smile"></i> Happy
+                </div>
+                <div class="discovery-filter-chip" data-filter="mood:motivated">
+                    <i class="fas fa-rocket"></i> Motivated
+                </div>
             </div>
             
             <!-- My Status Section -->
@@ -1536,6 +1783,9 @@
                     <div class="my-status-info">
                         <div class="my-status-name" id="myStatusName">My Status</div>
                         <div class="my-status-text" id="myStatusText">Tap to add status update</div>
+                        <div id="myStatusStreak" style="font-size: 12px; color: var(--primary-color); margin-top: 5px; display: none;">
+                            <i class="fas fa-fire"></i> <span id="streakCount">0</span> day streak
+                        </div>
                     </div>
                 </div>
                 <div class="my-status-actions">
@@ -1624,6 +1874,11 @@
                     </button>
                 </div>
             </div>
+            
+            <!-- NEW: Action Buttons in Status Viewer -->
+            <div id="statusActionButtons" style="position: absolute; bottom: 150px; left: 0; right: 0; padding: 0 20px; display: none; flex-wrap: wrap; gap: 10px; justify-content: center; z-index: 100;">
+                <!-- Action buttons will be dynamically added here -->
+            </div>
         </div>
     </div>
     
@@ -1640,6 +1895,7 @@
             <div class="create-status-tabs">
                 <button class="create-status-tab active" data-tab="text">Text</button>
                 <button class="create-status-tab" data-tab="media">Media</button>
+                <button class="create-status-tab" data-tab="intent">Intent & Mood</button>
                 <button class="create-status-tab" data-tab="options">Options</button>
                 <button class="create-status-tab" data-tab="templates">Templates</button>
                 <button class="create-status-tab" data-tab="drafts">Drafts</button>
@@ -1709,13 +1965,120 @@
                     </div>
                 </div>
                 
+                <!-- NEW: Intent & Mood Tab -->
+                <div class="create-status-tab-content" id="intentTab">
+                    <div class="status-options-container">
+                        <div class="option-group">
+                            <div class="option-title">
+                                <i class="fas fa-bullseye"></i>
+                                <span>Status Intent / Purpose</span>
+                            </div>
+                            <p style="color: var(--text-secondary); margin-bottom: 10px; font-size: 14px;">What's the purpose of this status?</p>
+                            <div class="intent-options" id="intentOptions">
+                                <div class="intent-chip" data-intent="feedback">
+                                    <i class="fas fa-comment-medical"></i> Looking for feedback
+                                </div>
+                                <div class="intent-chip" data-intent="achievement">
+                                    <i class="fas fa-trophy"></i> Sharing achievement
+                                </div>
+                                <div class="intent-chip" data-intent="advice">
+                                    <i class="fas fa-hands-helping"></i> Need advice
+                                </div>
+                                <div class="intent-chip" data-intent="chat">
+                                    <i class="fas fa-comments"></i> Available to chat
+                                </div>
+                                <div class="intent-chip" data-intent="venting">
+                                    <i class="fas fa-wind"></i> Just venting
+                                </div>
+                                <div class="intent-chip" data-intent="reflection">
+                                    <i class="fas fa-brain"></i> Personal reflection
+                                </div>
+                                <div class="intent-chip" data-intent="question">
+                                    <i class="fas fa-question-circle"></i> Asking a question
+                                </div>
+                                <div class="intent-chip" data-intent="celebration">
+                                    <i class="fas fa-birthday-cake"></i> Celebration
+                                </div>
+                            </div>
+                        </div>
+                        
+                        <div class="option-group">
+                            <div class="option-title">
+                                <i class="fas fa-smile"></i>
+                                <span>Emotional / Mood Layer</span>
+                            </div>
+                            <p style="color: var(--text-secondary); margin-bottom: 10px; font-size: 14px;">How are you feeling?</p>
+                            <div class="mood-options" id="moodOptions">
+                                <div class="mood-chip happy" data-mood="happy">
+                                    <i class="fas fa-smile"></i> Happy
+                                </div>
+                                <div class="mood-chip stressed" data-mood="stressed">
+                                    <i class="fas fa-tired"></i> Stressed
+                                </div>
+                                <div class="mood-chip motivated" data-mood="motivated">
+                                    <i class="fas fa-rocket"></i> Motivated
+                                </div>
+                                <div class="mood-chip lonely" data-mood="lonely">
+                                    <i class="fas fa-user-alone"></i> Lonely
+                                </div>
+                                <div class="mood-chip excited" data-mood="excited">
+                                    <i class="fas fa-star"></i> Excited
+                                </div>
+                                <div class="mood-chip calm" data-mood="calm">
+                                    <i class="fas fa-spa"></i> Calm
+                                </div>
+                                <div class="mood-chip sad" data-mood="sad">
+                                    <i class="fas fa-sad-tear"></i> Sad
+                                </div>
+                                <div class="mood-chip angry" data-mood="angry">
+                                    <i class="fas fa-angry"></i> Angry
+                                </div>
+                            </div>
+                        </div>
+                        
+                        <div class="option-group">
+                            <div class="option-title">
+                                <i class="fas fa-hand-pointer"></i>
+                                <span>Action Buttons</span>
+                            </div>
+                            <p style="color: var(--text-secondary); margin-bottom: 10px; font-size: 14px;">Add clickable actions to your status</p>
+                            <div class="action-buttons-container" id="actionButtonsContainer">
+                                <div class="action-button-chip" data-action="message">
+                                    <i class="fas fa-comment-dots"></i> Message me
+                                </div>
+                                <div class="action-button-chip" data-action="join">
+                                    <i class="fas fa-users"></i> Join discussion
+                                </div>
+                                <div class="action-button-chip" data-action="vote">
+                                    <i class="fas fa-vote-yea"></i> Vote now
+                                </div>
+                                <div class="action-button-chip" data-action="call">
+                                    <i class="fas fa-phone-alt"></i> Book a call
+                                </div>
+                                <div class="action-button-chip" data-action="learn">
+                                    <i class="fas fa-book-open"></i> Learn more
+                                </div>
+                                <div class="action-button-chip" data-action="support">
+                                    <i class="fas fa-hands"></i> Show support
+                                </div>
+                                <div class="action-button-chip" data-action="collab">
+                                    <i class="fas fa-handshake"></i> Collaborate
+                                </div>
+                                <div class="action-button-chip" data-action="resource">
+                                    <i class="fas fa-link"></i> View resource
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+                
                 <!-- Options Tab -->
                 <div class="create-status-tab-content" id="optionsTab">
                     <div class="status-options-container">
                         <div class="option-group">
                             <div class="option-title">
                                 <i class="fas fa-user-friends"></i>
-                                <span>Privacy</span>
+                                <span>Privacy & Audience</span>
                             </div>
                             <div class="option-item">
                                 <div class="option-label">
@@ -1728,8 +2091,38 @@
                                     <option value="close">Close Friends</option>
                                     <option value="except">All Except...</option>
                                     <option value="specific">Specific People...</option>
+                                    <option value="circle">Micro Circle</option>
                                 </select>
                             </div>
+                            
+                            <!-- NEW: Micro Circle Selection -->
+                            <div class="option-item" id="microCircleSelection" style="display: none;">
+                                <div class="option-label">
+                                    <i class="fas fa-users option-icon"></i>
+                                    <span>Select Micro Circle</span>
+                                </div>
+                                <div class="circle-options" id="circleOptions">
+                                    <div class="circle-chip" data-circle="study">
+                                        <i class="fas fa-graduation-cap"></i> Study Circle
+                                    </div>
+                                    <div class="circle-chip" data-circle="family">
+                                        <i class="fas fa-home"></i> Family Only
+                                    </div>
+                                    <div class="circle-chip" data-circle="mentors">
+                                        <i class="fas fa-chalkboard-teacher"></i> Mentors
+                                    </div>
+                                    <div class="circle-chip" data-circle="project">
+                                        <i class="fas fa-project-diagram"></i> Project Team
+                                    </div>
+                                    <div class="circle-chip" data-circle="hobby">
+                                        <i class="fas fa-paint-brush"></i> Hobby Group
+                                    </div>
+                                    <div class="circle-chip" data-circle="custom">
+                                        <i class="fas fa-plus"></i> Create New
+                                    </div>
+                                </div>
+                            </div>
+                            
                             <div class="option-item">
                                 <div class="option-label">
                                     <i class="fas fa-clock option-icon"></i>
@@ -1798,7 +2191,7 @@
                         <div class="option-group">
                             <div class="option-title">
                                 <i class="fas fa-eye"></i>
-                                <span>Sensitivity</span>
+                                <span>Sensitivity & Modes</span>
                             </div>
                             <div class="option-item">
                                 <div class="option-label">
@@ -1812,6 +2205,16 @@
                             </div>
                             <div class="option-item">
                                 <div class="option-label">
+                                    <i class="fas fa-volume-mute option-icon"></i>
+                                    <span>Silent / Safe Mode</span>
+                                </div>
+                                <label class="switch">
+                                    <input type="checkbox" id="silentModeToggle">
+                                    <span class="slider"></span>
+                                </label>
+                            </div>
+                            <div class="option-item">
+                                <div class="option-label">
                                     <i class="fas fa-language option-icon"></i>
                                     <span>Auto-translate</span>
                                 </div>
@@ -1819,6 +2222,51 @@
                                     <input type="checkbox" id="translateToggle" checked>
                                     <span class="slider"></span>
                                 </label>
+                            </div>
+                            <div class="option-item">
+                                <div class="option-label">
+                                    <i class="fas fa-street-view option-icon"></i>
+                                    <span>Offline Mode</span>
+                                </div>
+                                <label class="switch">
+                                    <input type="checkbox" id="offlineModeToggle">
+                                    <span class="slider"></span>
+                                </label>
+                            </div>
+                        </div>
+                        
+                        <!-- NEW: Status Tools Section -->
+                        <div class="option-group">
+                            <div class="option-title">
+                                <i class="fas fa-tools"></i>
+                                <span>Status as Tool</span>
+                            </div>
+                            <div class="option-item">
+                                <div class="option-label">
+                                    <i class="fas fa-fire option-icon"></i>
+                                    <span>Daily Streak</span>
+                                </div>
+                                <div style="font-size: 14px; color: var(--text-secondary);">
+                                    Current streak: <span id="currentStreakDisplay">0 days</span>
+                                </div>
+                            </div>
+                            <div class="option-item">
+                                <div class="option-label">
+                                    <i class="fas fa-chart-line option-icon"></i>
+                                    <span>Mood Trends</span>
+                                </div>
+                                <div style="font-size: 14px; color: var(--text-secondary);">
+                                    Track your emotional patterns
+                                </div>
+                            </div>
+                            <div class="option-item">
+                                <div class="option-label">
+                                    <i class="fas fa-check-circle option-icon"></i>
+                                    <span>Daily Check-in</span>
+                                </div>
+                                <div style="font-size: 14px; color: var(--text-secondary);">
+                                    Mark as daily reflection
+                                </div>
                             </div>
                         </div>
                     </div>
@@ -1870,6 +2318,31 @@
         </div>
     </div>
     
+    <!-- NEW: Memory Timeline Modal -->
+    <div class="highlights-modal" id="memoryTimelineModal">
+        <div class="highlights-container">
+            <div class="highlights-header">
+                <h3>Memory Timeline</h3>
+                <button class="add-status-btn" id="closeMemoryTimelineModal">
+                    <i class="fas fa-times"></i>
+                </button>
+            </div>
+            <div class="timeline-filters" id="timelineFilters">
+                <div class="timeline-filter-chip" data-filter="all">All Statuses</div>
+                <div class="timeline-filter-chip" data-filter="motivational">Motivational</div>
+                <div class="timeline-filter-chip" data-filter="reflective">Reflective</div>
+                <div class="timeline-filter-chip" data-filter="achievement">Achievements</div>
+                <div class="timeline-filter-chip" data-filter="mood:happy">Happy Moments</div>
+                <div class="timeline-filter-chip" data-filter="mood:motivated">Motivated Days</div>
+                <div class="timeline-filter-chip" data-filter="lastweek">Last Week</div>
+                <div class="timeline-filter-chip" data-filter="lastmonth">Last Month</div>
+            </div>
+            <div class="highlights-grid" id="memoryTimelineGrid">
+                <!-- Memory timeline items will be added here -->
+            </div>
+        </div>
+    </div>
+    
     <!-- Stats Modal -->
     <div class="stats-modal" id="statsModal">
         <div class="stats-container">
@@ -1899,6 +2372,21 @@
                     <span class="stat-value" id="totalShares">0</span>
                 </div>
                 
+                <!-- NEW: Silent Mode Stats -->
+                <div id="silentModeStats" style="display: none;">
+                    <h4 style="margin-top: 20px; color: var(--primary-color);">
+                        <i class="fas fa-eye-slash"></i> Silent Mode Analytics
+                    </h4>
+                    <div class="stat-item">
+                        <span class="stat-label">Private Views</span>
+                        <span class="stat-value" id="privateViews">0</span>
+                    </div>
+                    <div class="stat-item">
+                        <span class="stat-label">Self-Reflection Time</span>
+                        <span class="stat-value" id="reflectionTime">0min</span>
+                    </div>
+                </div>
+                
                 <h4 style="margin-top: 20px;">Recent Viewers</h4>
                 <div class="viewers-list" id="viewersList">
                     <!-- Viewers will be added here -->
@@ -1921,7 +2409,11 @@
     <!-- Upload Progress Bar -->
     <div class="upload-progress" id="uploadProgress"></div>
 
-    <script>
+    <!-- Load scripts in correct order with defer -->
+    <script src="./js/api.js" defer></script>
+    <script src="./js/app.js" defer></script>
+
+    <script defer>
         // =============================================
         // COMPLETE STATUS SYSTEM - BACKEND MIGRATION
         // =============================================
@@ -1949,6 +2441,17 @@
         let emojiPicker = null;
         let colorPicker = null;
         
+        // NEW: Enhanced feature variables
+        let statusIntents = [];
+        let statusMoods = [];
+        let microCircles = [];
+        let actionButtons = [];
+        let dailyStreak = 0;
+        let moodTrends = [];
+        let silentModeStatuses = [];
+        let offlineQueue = [];
+        let discoveryFilters = {};
+        
         // Status types
         const STATUS_TYPES = {
             TEXT: 'text',
@@ -1963,8 +2466,54 @@
             FRIENDS: 'friends',
             CLOSE_FRIENDS: 'close',
             EXCEPT: 'except',
-            SPECIFIC: 'specific'
+            SPECIFIC: 'specific',
+            CIRCLE: 'circle'
         };
+        
+        // NEW: Status Intent Options
+        const STATUS_INTENTS = [
+            { id: 'feedback', name: 'Looking for feedback', icon: 'fas fa-comment-medical', color: '#4caf50' },
+            { id: 'achievement', name: 'Sharing achievement', icon: 'fas fa-trophy', color: '#ff9800' },
+            { id: 'advice', name: 'Need advice', icon: 'fas fa-hands-helping', color: '#2196f3' },
+            { id: 'chat', name: 'Available to chat', icon: 'fas fa-comments', color: '#9c27b0' },
+            { id: 'venting', name: 'Just venting', icon: 'fas fa-wind', color: '#607d8b' },
+            { id: 'reflection', name: 'Personal reflection', icon: 'fas fa-brain', color: '#795548' },
+            { id: 'question', name: 'Asking a question', icon: 'fas fa-question-circle', color: '#00bcd4' },
+            { id: 'celebration', name: 'Celebration', icon: 'fas fa-birthday-cake', color: '#e91e63' }
+        ];
+        
+        // NEW: Mood Options with colors
+        const MOOD_OPTIONS = [
+            { id: 'happy', name: 'Happy', icon: 'fas fa-smile', color: '#4caf50', bgColor: '#4caf50' },
+            { id: 'stressed', name: 'Stressed', icon: 'fas fa-tired', color: '#ff9800', bgColor: '#ff9800' },
+            { id: 'motivated', name: 'Motivated', icon: 'fas fa-rocket', color: '#2196f3', bgColor: '#2196f3' },
+            { id: 'lonely', name: 'Lonely', icon: 'fas fa-user-alone', color: '#9c27b0', bgColor: '#9c27b0' },
+            { id: 'excited', name: 'Excited', icon: 'fas fa-star', color: '#ffeb3b', bgColor: '#ffeb3b' },
+            { id: 'calm', name: 'Calm', icon: 'fas fa-spa', color: '#00bcd4', bgColor: '#00bcd4' },
+            { id: 'sad', name: 'Sad', icon: 'fas fa-sad-tear', color: '#607d8b', bgColor: '#607d8b' },
+            { id: 'angry', name: 'Angry', icon: 'fas fa-angry', color: '#f44336', bgColor: '#f44336' }
+        ];
+        
+        // NEW: Action Button Options
+        const ACTION_BUTTONS = [
+            { id: 'message', name: 'Message me', icon: 'fas fa-comment-dots', color: '#0084ff' },
+            { id: 'join', name: 'Join discussion', icon: 'fas fa-users', color: '#4caf50' },
+            { id: 'vote', name: 'Vote now', icon: 'fas fa-vote-yea', color: '#9c27b0' },
+            { id: 'call', name: 'Book a call', icon: 'fas fa-phone-alt', color: '#ff9800' },
+            { id: 'learn', name: 'Learn more', icon: 'fas fa-book-open', color: '#00bcd4' },
+            { id: 'support', name: 'Show support', icon: 'fas fa-hands', color: '#ff6b6b' },
+            { id: 'collab', name: 'Collaborate', icon: 'fas fa-handshake', color: '#795548' },
+            { id: 'resource', name: 'View resource', icon: 'fas fa-link', color: '#607d8b' }
+        ];
+        
+        // NEW: Micro Circle Options
+        const MICRO_CIRCLES = [
+            { id: 'study', name: 'Study Circle', icon: 'fas fa-graduation-cap', color: '#4caf50' },
+            { id: 'family', name: 'Family Only', icon: 'fas fa-home', color: '#ff9800' },
+            { id: 'mentors', name: 'Mentors', icon: 'fas fa-chalkboard-teacher', color: '#2196f3' },
+            { id: 'project', name: 'Project Team', icon: 'fas fa-project-diagram', color: '#9c27b0' },
+            { id: 'hobby', name: 'Hobby Group', icon: 'fas fa-paint-brush', color: '#00bcd4' }
+        ];
         
         // Duration options
         const DURATION_OPTIONS = {
@@ -2024,12 +2573,15 @@
         const highlightsModal = document.getElementById('highlightsModal');
         const statsModal = document.getElementById('statsModal');
         const notification = document.getElementById('notification');
+        const memoryTimelineModal = document.getElementById('memoryTimelineModal');
+        const discoveryFiltersElement = document.getElementById('discoveryFilters');
         
         // Status sections
         const statusListContent = document.getElementById('statusListContent');
         const myStatusAvatar = document.getElementById('myStatusAvatar');
         const myStatusName = document.getElementById('myStatusName');
         const myStatusText = document.getElementById('myStatusText');
+        const myStatusStreak = document.getElementById('myStatusStreak');
         
         // Local Storage Keys
         const LOCAL_STORAGE_KEYS = {
@@ -2042,11 +2594,26 @@
             STATUS_HIGHLIGHTS: 'knecta_status_highlights',
             STATUS_DRAFTS: 'knecta_status_drafts',
             STATUS_SETTINGS: 'knecta_status_settings',
-            STATUS_STATS: 'knecta_status_stats'
+            STATUS_STATS: 'knecta_status_stats',
+            STATUS_INTENTS: 'knecta_status_intents',
+            STATUS_MOODS: 'knecta_status_moods',
+            MICRO_CIRCLES: 'knecta_micro_circles',
+            ACTION_BUTTONS: 'knecta_action_buttons',
+            DAILY_STREAK: 'knecta_daily_streak',
+            MOOD_TRENDS: 'knecta_mood_trends',
+            SILENT_MODE_STATUSES: 'knecta_silent_mode_statuses',
+            OFFLINE_QUEUE: 'knecta_offline_queue',
+            DISCOVERY_FILTERS: 'knecta_discovery_filters'
         };
         
         // Initialize the application
         document.addEventListener('DOMContentLoaded', function() {
+            // Defensive check for required DOM elements
+            if (!statusListContent || !createStatusModal || !statusViewerPanel) {
+                console.error('Required DOM elements not found. Status system may not work correctly.');
+                return;
+            }
+            
             // Handle iframe token passing - BACKEND MIGRATION FIX
             if (window.self !== window.top) {
                 // Running in iframe
@@ -2163,6 +2730,53 @@
                     statusDrafts = JSON.parse(draftsData);
                 }
                 
+                // NEW: Load enhanced features
+                const intentsData = localStorage.getItem(LOCAL_STORAGE_KEYS.STATUS_INTENTS);
+                if (intentsData) {
+                    statusIntents = JSON.parse(intentsData);
+                }
+                
+                const moodsData = localStorage.getItem(LOCAL_STORAGE_KEYS.STATUS_MOODS);
+                if (moodsData) {
+                    statusMoods = JSON.parse(moodsData);
+                }
+                
+                const circlesData = localStorage.getItem(LOCAL_STORAGE_KEYS.MICRO_CIRCLES);
+                if (circlesData) {
+                    microCircles = JSON.parse(circlesData);
+                }
+                
+                const actionsData = localStorage.getItem(LOCAL_STORAGE_KEYS.ACTION_BUTTONS);
+                if (actionsData) {
+                    actionButtons = JSON.parse(actionsData);
+                }
+                
+                const streakData = localStorage.getItem(LOCAL_STORAGE_KEYS.DAILY_STREAK);
+                if (streakData) {
+                    dailyStreak = parseInt(streakData) || 0;
+                    updateStreakDisplay();
+                }
+                
+                const trendsData = localStorage.getItem(LOCAL_STORAGE_KEYS.MOOD_TRENDS);
+                if (trendsData) {
+                    moodTrends = JSON.parse(trendsData);
+                }
+                
+                const silentData = localStorage.getItem(LOCAL_STORAGE_KEYS.SILENT_MODE_STATUSES);
+                if (silentData) {
+                    silentModeStatuses = JSON.parse(silentData);
+                }
+                
+                const offlineData = localStorage.getItem(LOCAL_STORAGE_KEYS.OFFLINE_QUEUE);
+                if (offlineData) {
+                    offlineQueue = JSON.parse(offlineData);
+                }
+                
+                const discoveryData = localStorage.getItem(LOCAL_STORAGE_KEYS.DISCOVERY_FILTERS);
+                if (discoveryData) {
+                    discoveryFilters = JSON.parse(discoveryData);
+                }
+                
                 console.log('=== INSTANT STATUS CACHE LOAD COMPLETE ===');
                 
             } catch (error) {
@@ -2172,11 +2786,6 @@
         
         async function initializeApp() {
             console.log('=== STATUS SYSTEM INITIALIZATION START ===');
-            
-            // Initialize settings manager
-            if (typeof settingsManager !== 'undefined') {
-                settingsManager.initializeSettings();
-            }
             
             // Check for dark mode preference
             checkDarkMode();
@@ -2197,13 +2806,24 @@
             loadMusicTracks();
             loadCategories();
             
+            // NEW: Load enhanced features
+            loadIntentsAndMoods();
+            loadMicroCircles();
+            loadActionButtons();
+            calculateDailyStreak();
+            loadMoodTrends();
+            
             // Load drafts into modal - ENHANCED FEATURE
             loadDraftsIntoModal();
             
             // Check for auto-schedule
             checkScheduledStatuses();
             
+            // Check for offline sync
+            checkOfflineSync();
+            
             console.log('=== STATUS SYSTEM INITIALIZATION COMPLETE ===');
+            console.log('Enhanced features loaded: Intents, Moods, Micro Circles, Action Buttons, Daily Streak, Mood Trends');
         }
         
         async function loadUserFromCache() {
@@ -2230,13 +2850,15 @@
                 // If no user found, try to fetch from backend - BACKEND MIGRATION
                 if (!currentUser || !currentUser.id) {
                     try {
-                        // Use getCurrentUser from api.js
-                        const response = await api('GET', '/api/auth/me');
-                        if (response && response.user) {
-                            currentUser = response.user;
-                            userData = response.user;
-                            localStorage.setItem(LOCAL_STORAGE_KEYS.USER, JSON.stringify(currentUser));
-                            localStorage.setItem(LOCAL_STORAGE_KEYS.USER_PROFILE, JSON.stringify(userData));
+                        // Use window.api instead of just api
+                        if (window.api) {
+                            const response = await window.api('GET', '/api/auth/me');
+                            if (response && response.user) {
+                                currentUser = response.user;
+                                userData = response.user;
+                                localStorage.setItem(LOCAL_STORAGE_KEYS.USER, JSON.stringify(currentUser));
+                                localStorage.setItem(LOCAL_STORAGE_KEYS.USER_PROFILE, JSON.stringify(userData));
+                            }
                         }
                     } catch (error) {
                         console.log('No authenticated user found, will use offline mode');
@@ -2282,32 +2904,35 @@
         
         async function loadStatusesFromBackend() {
             try {
-                const response = await api('GET', '/api/status');
-                
-                if (response && response.statuses) {
-                    allStatuses = response.statuses;
+                // Use window.api instead of just api
+                if (window.api) {
+                    const response = await window.api('GET', '/api/status');
                     
-                    // Filter out expired statuses
-                    allStatuses = allStatuses.filter(status => !isStatusExpired(status));
-                    
-                    // Update UI
-                    renderStatusList();
-                    updateRecentUpdatesCount();
-                    
-                    console.log(`Loaded ${allStatuses.length} statuses from backend`);
-                } else {
-                    // If no statuses from backend, try to load from cache
-                    const cachedStatuses = localStorage.getItem('knecta_all_statuses');
-                    if (cachedStatuses) {
-                        allStatuses = JSON.parse(cachedStatuses);
+                    if (response && response.statuses) {
+                        allStatuses = response.statuses;
+                        
+                        // Filter out expired statuses
                         allStatuses = allStatuses.filter(status => !isStatusExpired(status));
+                        
+                        // Update UI
                         renderStatusList();
                         updateRecentUpdatesCount();
+                        
+                        console.log(`Loaded ${allStatuses.length} statuses from backend`);
+                    } else {
+                        // If no statuses from backend, try to load from cache
+                        const cachedStatuses = localStorage.getItem('knecta_all_statuses');
+                        if (cachedStatuses) {
+                            allStatuses = JSON.parse(cachedStatuses);
+                            allStatuses = allStatuses.filter(status => !isStatusExpired(status));
+                            renderStatusList();
+                            updateRecentUpdatesCount();
+                        }
                     }
+                    
+                    // Save to cache
+                    localStorage.setItem('knecta_all_statuses', JSON.stringify(allStatuses));
                 }
-                
-                // Save to cache
-                localStorage.setItem('knecta_all_statuses', JSON.stringify(allStatuses));
                 
             } catch (error) {
                 console.error('Error loading statuses from backend:', error);
@@ -2324,18 +2949,21 @@
         
         async function loadFriendsStatuses() {
             try {
-                const response = await api('GET', '/api/status/friends');
-                
-                if (response && response.statuses) {
-                    friendsStatuses = response.statuses.filter(status => !isStatusExpired(status));
+                // Use window.api instead of just api
+                if (window.api) {
+                    const response = await window.api('GET', '/api/status/friends');
                     
-                    // Update friends status count
-                    document.getElementById('friendsStatusCount').textContent = friendsStatuses.length;
-                    
-                    console.log(`Loaded ${friendsStatuses.length} friends statuses`);
-                    
-                    // Save to cache
-                    localStorage.setItem('knecta_friends_statuses', JSON.stringify(friendsStatuses));
+                    if (response && response.statuses) {
+                        friendsStatuses = response.statuses.filter(status => !isStatusExpired(status));
+                        
+                        // Update friends status count
+                        document.getElementById('friendsStatusCount').textContent = friendsStatuses.length;
+                        
+                        console.log(`Loaded ${friendsStatuses.length} friends statuses`);
+                        
+                        // Save to cache
+                        localStorage.setItem('knecta_friends_statuses', JSON.stringify(friendsStatuses));
+                    }
                 }
                 
             } catch (error) {
@@ -2365,6 +2993,23 @@
                 } else {
                     myStatusAvatar.classList.remove('seen');
                 }
+                
+                // NEW: Show intent/mood badges if available
+                if (latestStatus.intent || latestStatus.mood) {
+                    let badges = [];
+                    if (latestStatus.intent) {
+                        const intent = STATUS_INTENTS.find(i => i.id === latestStatus.intent);
+                        if (intent) badges.push(`<span style="color: ${intent.color};"><i class="${intent.icon}"></i></span>`);
+                    }
+                    if (latestStatus.mood) {
+                        const mood = MOOD_OPTIONS.find(m => m.id === latestStatus.mood);
+                        if (mood) badges.push(`<span style="color: ${mood.color};"><i class="${mood.icon}"></i></span>`);
+                    }
+                    if (badges.length > 0) {
+                        myStatusText.innerHTML += ` <span style="margin-left: 5px;">${badges.join(' ')}</span>`;
+                    }
+                }
+                
             } else {
                 myStatusText.textContent = 'Tap to add status update';
                 myStatusAvatar.classList.remove('has-status', 'seen');
@@ -2387,6 +3032,8 @@
         }
         
         function renderStatusList() {
+            if (!statusListContent) return;
+            
             statusListContent.innerHTML = '';
             
             if (allStatuses.length === 0) {
@@ -2430,13 +3077,29 @@
             const isViewed = viewedStatusIds.has(statusData.id);
             const isMuted = mutedUsers.has(statusData.userId);
             
+            // NEW: Check for enhanced features
+            const isSilentMode = statusData.silentMode || false;
+            const isOfflineCreated = statusData.offlineCreated || false;
+            const isMicroCircle = statusData.privacy === PRIVACY_SETTINGS.CIRCLE;
+            
+            let badges = '';
+            if (isSilentMode) {
+                badges += '<span class="silent-mode-indicator"><i class="fas fa-eye-slash"></i> Silent</span>';
+            }
+            if (isOfflineCreated) {
+                badges += '<span class="offline-indicator"><i class="fas fa-wifi-slash"></i> Offline</span>';
+            }
+            if (isMicroCircle) {
+                badges += '<span style="color: #9c27b0; font-size: 12px; background-color: rgba(156, 39, 176, 0.1); padding: 2px 8px; border-radius: 10px; margin-left: 5px;"><i class="fas fa-users"></i> Circle</span>';
+            }
+            
             statusItem.innerHTML = `
                 <div class="status-avatar ${statusCount > 0 ? 'has-status' : ''} ${isViewed ? 'seen' : ''}">
                     ${userAvatar ? '' : `<span style="color: white; font-size: 18px;">${userInitials}</span>`}
                 </div>
                 <div class="status-info">
                     <div class="status-name">
-                        <span>${escapeHtml(userName)}</span>
+                        <span>${escapeHtml(userName)} ${badges}</span>
                         ${statusCount > 1 ? `<span class="status-count">${statusCount}</span>` : ''}
                     </div>
                     <div class="status-time">
@@ -2451,6 +3114,21 @@
             
             if (userAvatar) {
                 statusItem.querySelector('.status-avatar').style.backgroundImage = `url('${escapeHtml(userAvatar)}')`;
+            }
+            
+            // NEW: Add intent/mood indicators
+            if (statusData.intent || statusData.mood) {
+                const previewDiv = statusItem.querySelector('.status-preview');
+                let indicators = '';
+                if (statusData.intent) {
+                    const intent = STATUS_INTENTS.find(i => i.id === statusData.intent);
+                    if (intent) indicators += `<span style="color: ${intent.color}; margin-left: 5px;"><i class="${intent.icon}"></i></span>`;
+                }
+                if (statusData.mood) {
+                    const mood = MOOD_OPTIONS.find(m => m.id === statusData.mood);
+                    if (mood) indicators += `<span style="color: ${mood.color}; margin-left: 5px;"><i class="${mood.icon}"></i></span>`;
+                }
+                previewDiv.innerHTML += indicators;
             }
             
             statusItem.addEventListener('click', () => {
@@ -2493,6 +3171,7 @@
         }
         
         function showStatusViewer() {
+            if (!statusViewerPanel) return;
             statusViewerPanel.classList.add('active');
             setupStatusViewerControls();
         }
@@ -2519,6 +3198,7 @@
             
             // Clear previous content
             const viewerContent = document.getElementById('statusViewerContent');
+            if (!viewerContent) return;
             viewerContent.innerHTML = '';
             
             // Load status content based on type
@@ -2535,6 +3215,11 @@
                 case STATUS_TYPES.POLL:
                     loadPollStatus(status, viewerContent);
                     break;
+            }
+            
+            // NEW: Load action buttons if available
+            if (status.actionButtons && status.actionButtons.length > 0) {
+                loadActionButtonsInViewer(status.actionButtons);
             }
             
             // Setup progress bars with pause capability - ENHANCED FEATURE
@@ -2577,6 +3262,28 @@
                         <i class="${category.icon}"></i> ${category.name}
                     </div>`;
                 }
+            }
+            
+            // NEW: Add intent and mood badges
+            if (status.intent || status.mood) {
+                let badges = '';
+                if (status.intent) {
+                    const intent = STATUS_INTENTS.find(i => i.id === status.intent);
+                    if (intent) {
+                        badges += `<div style="position: absolute; top: 20px; left: 20px; background: rgba(0,0,0,0.7); color: white; padding: 5px 10px; border-radius: 15px; font-size: 12px;">
+                            <i class="${intent.icon}"></i> ${intent.name}
+                        </div>`;
+                    }
+                }
+                if (status.mood) {
+                    const mood = MOOD_OPTIONS.find(m => m.id === status.mood);
+                    if (mood) {
+                        badges += `<div style="position: absolute; top: 50px; left: 20px; background: ${mood.bgColor}; color: white; padding: 5px 10px; border-radius: 15px; font-size: 12px;">
+                            <i class="${mood.icon}"></i> ${mood.name}
+                        </div>`;
+                    }
+                }
+                textContent.innerHTML += badges;
             }
             
             container.appendChild(textContent);
@@ -2745,10 +3452,92 @@
             container.appendChild(pollContainer);
         }
         
+        // NEW: Load action buttons in viewer
+        function loadActionButtonsInViewer(actionButtons) {
+            const actionContainer = document.getElementById('statusActionButtons');
+            if (!actionContainer) return;
+            
+            actionContainer.innerHTML = '';
+            actionContainer.style.display = 'flex';
+            
+            actionButtons.forEach(buttonId => {
+                const action = ACTION_BUTTONS.find(a => a.id === buttonId);
+                if (action) {
+                    const button = document.createElement('button');
+                    button.className = 'action-button-chip';
+                    button.style.backgroundColor = action.color;
+                    button.style.color = 'white';
+                    button.style.border = 'none';
+                    button.style.padding = '10px 15px';
+                    button.style.borderRadius = '20px';
+                    button.style.cursor = 'pointer';
+                    button.style.display = 'flex';
+                    button.style.alignItems = 'center';
+                    button.style.gap = '8px';
+                    button.style.fontSize = '14px';
+                    button.style.margin = '5px';
+                    
+                    button.innerHTML = `<i class="${action.icon}"></i> ${action.name}`;
+                    
+                    button.addEventListener('click', () => {
+                        handleActionButtonClick(buttonId, currentViewerStatus);
+                    });
+                    
+                    actionContainer.appendChild(button);
+                }
+            });
+        }
+        
+        // NEW: Handle action button clicks
+        function handleActionButtonClick(actionId, viewerStatus) {
+            if (!viewerStatus) return;
+            
+            const currentStatus = viewerStatus.statuses[viewerStatus.currentIndex];
+            
+            switch (actionId) {
+                case 'message':
+                    openChat(viewerStatus.userId, viewerStatus.userName);
+                    break;
+                case 'join':
+                    showNotification('Joining discussion...', 'info');
+                    // In a real app, this would open a group chat or discussion thread
+                    break;
+                case 'vote':
+                    if (currentStatus.type === STATUS_TYPES.POLL) {
+                        // Already handled in poll click
+                    } else {
+                        showNotification('Vote action not available for this status', 'info');
+                    }
+                    break;
+                case 'call':
+                    showNotification('Opening call scheduler...', 'info');
+                    // In a real app, this would open a scheduling interface
+                    break;
+                case 'learn':
+                    showNotification('Opening resource...', 'info');
+                    // In a real app, this would open a link or resource
+                    break;
+                case 'support':
+                    showNotification('Sending support...', 'success');
+                    // In a real app, this would send a support reaction or message
+                    break;
+                case 'collab':
+                    showNotification('Opening collaboration tools...', 'info');
+                    // In a real app, this would open collaboration interface
+                    break;
+                case 'resource':
+                    showNotification('Opening resource link...', 'info');
+                    // In a real app, this would open a URL
+                    break;
+            }
+        }
+        
         function setupProgressBars() {
             if (!currentViewerStatus) return;
             
             const progressContainer = document.getElementById('statusProgressContainer');
+            if (!progressContainer) return;
+            
             progressContainer.innerHTML = '';
             
             currentViewerStatus.statuses.forEach((status, index) => {
@@ -2820,16 +3609,25 @@
         }
         
         function closeStatusViewer() {
+            if (!statusViewerPanel) return;
             statusViewerPanel.classList.remove('active');
             if (statusTimer) clearTimeout(statusTimer);
             currentViewerStatus = null;
+            
+            // Hide action buttons
+            const actionContainer = document.getElementById('statusActionButtons');
+            if (actionContainer) {
+                actionContainer.style.display = 'none';
+            }
         }
         
         // ENHANCED FEATURE: View Duration Tracking
         async function trackStatusView(statusId) {
             // Send view tracking to backend
             try {
-                await api('POST', `/api/status/${statusId}/view`);
+                if (window.api) {
+                    await window.api('POST', `/api/status/${statusId}/view`);
+                }
             } catch (error) {
                 console.log('Offline: View tracking saved locally');
             }
@@ -2867,9 +3665,12 @@
             }
         }
         
-        // ENHANCED FEATURE: Offline Status Creation
+        // ENHANCED FEATURE: Offline Status Creation with new features
         async function createTextStatus(text, options = {}) {
             const statusId = 'status_' + Date.now() + '_' + Math.random().toString(36).substr(2, 9);
+            
+            // NEW: Check for daily streak
+            updateDailyStreak();
             
             const status = {
                 id: statusId,
@@ -2882,11 +3683,17 @@
                 fontSize: options.fontSize || '24px',
                 backgroundImage: options.backgroundImage,
                 emoji: options.emoji,
-                category: options.category, // ENHANCED FEATURE: Category
+                category: options.category,
+                intent: options.intent, // NEW: Status intent
+                mood: options.mood, // NEW: Mood tag
+                actionButtons: options.actionButtons || [], // NEW: Action buttons
+                microCircle: options.microCircle, // NEW: Micro circle
                 privacy: options.privacy || PRIVACY_SETTINGS.FRIENDS,
                 expiresAt: options.expiresAt || new Date(Date.now() + DURATION_OPTIONS['24h']).toISOString(),
-                isPinned: options.isPinned || false, // ENHANCED FEATURE: Pin status
+                isPinned: options.isPinned || false,
                 isSensitive: options.isSensitive || false,
+                silentMode: options.silentMode || false, // NEW: Silent mode
+                offlineCreated: options.offlineCreated || false, // NEW: Offline creation
                 autoTranslate: options.autoTranslate || false,
                 createdAt: new Date().toISOString(),
                 updatedAt: new Date().toISOString()
@@ -2898,17 +3705,39 @@
             // Update local storage
             saveToLocalStorage(LOCAL_STORAGE_KEYS.MY_STATUSES, myStatuses);
             
+            // Save enhanced features
+            if (options.intent) {
+                statusIntents.push({ statusId: statusId, intent: options.intent, createdAt: new Date().toISOString() });
+                saveToLocalStorage(LOCAL_STORAGE_KEYS.STATUS_INTENTS, statusIntents);
+            }
+            
+            if (options.mood) {
+                statusMoods.push({ statusId: statusId, mood: options.mood, createdAt: new Date().toISOString() });
+                saveToLocalStorage(LOCAL_STORAGE_KEYS.STATUS_MOODS, statusMoods);
+                
+                // Update mood trends
+                updateMoodTrends(options.mood);
+            }
+            
+            if (options.silentMode) {
+                silentModeStatuses.push(statusId);
+                saveToLocalStorage(LOCAL_STORAGE_KEYS.SILENT_MODE_STATUSES, silentModeStatuses);
+            }
+            
             // Send to backend - OFFLINE SUPPORT
             try {
-                const response = await api('POST', '/api/status', status);
-                if (response && response.status) {
-                    status.id = response.status.id || statusId;
-                    console.log('Status posted to backend');
+                if (window.api) {
+                    const response = await window.api('POST', '/api/status', status);
+                    if (response && response.status) {
+                        status.id = response.status.id || statusId;
+                        console.log('Status posted to backend');
+                    }
                 }
             } catch (error) {
                 console.log('Offline: Status saved locally, will sync when online');
                 // Queue for sync when online
                 queueForSync(status);
+                status.offlineCreated = true;
             }
             
             // Update UI
@@ -2935,6 +3764,9 @@
         async function createMediaStatus(mediaUrl, type, options = {}) {
             const statusId = 'status_' + Date.now() + '_' + Math.random().toString(36).substr(2, 9);
             
+            // NEW: Check for daily streak
+            updateDailyStreak();
+            
             const status = {
                 id: statusId,
                 userId: currentUser.id || currentUser._id,
@@ -2943,11 +3775,17 @@
                 mediaUrl: mediaUrl,
                 caption: options.caption,
                 musicTrack: options.musicTrack,
-                category: options.category, // ENHANCED FEATURE: Category
+                category: options.category,
+                intent: options.intent, // NEW: Status intent
+                mood: options.mood, // NEW: Mood tag
+                actionButtons: options.actionButtons || [], // NEW: Action buttons
+                microCircle: options.microCircle, // NEW: Micro circle
                 privacy: options.privacy || PRIVACY_SETTINGS.FRIENDS,
                 expiresAt: options.expiresAt || new Date(Date.now() + DURATION_OPTIONS['24h']).toISOString(),
-                isPinned: options.isPinned || false, // ENHANCED FEATURE: Pin status
+                isPinned: options.isPinned || false,
                 isSensitive: options.isSensitive || false,
+                silentMode: options.silentMode || false, // NEW: Silent mode
+                offlineCreated: options.offlineCreated || false, // NEW: Offline creation
                 createdAt: new Date().toISOString(),
                 updatedAt: new Date().toISOString()
             };
@@ -2958,15 +3796,37 @@
             // Update local storage
             saveToLocalStorage(LOCAL_STORAGE_KEYS.MY_STATUSES, myStatuses);
             
+            // Save enhanced features
+            if (options.intent) {
+                statusIntents.push({ statusId: statusId, intent: options.intent, createdAt: new Date().toISOString() });
+                saveToLocalStorage(LOCAL_STORAGE_KEYS.STATUS_INTENTS, statusIntents);
+            }
+            
+            if (options.mood) {
+                statusMoods.push({ statusId: statusId, mood: options.mood, createdAt: new Date().toISOString() });
+                saveToLocalStorage(LOCAL_STORAGE_KEYS.STATUS_MOODS, statusMoods);
+                
+                // Update mood trends
+                updateMoodTrends(options.mood);
+            }
+            
+            if (options.silentMode) {
+                silentModeStatuses.push(statusId);
+                saveToLocalStorage(LOCAL_STORAGE_KEYS.SILENT_MODE_STATUSES, silentModeStatuses);
+            }
+            
             // Send to backend - OFFLINE SUPPORT
             try {
-                const response = await api('POST', '/api/status', status);
-                if (response && response.status) {
-                    status.id = response.status.id || statusId;
+                if (window.api) {
+                    const response = await window.api('POST', '/api/status', status);
+                    if (response && response.status) {
+                        status.id = response.status.id || statusId;
+                    }
                 }
             } catch (error) {
                 console.log('Offline: Media status saved locally');
                 queueForSync(status);
+                status.offlineCreated = true;
             }
             
             // Update UI
@@ -2983,9 +3843,12 @@
             return status;
         }
         
-        // ENHANCED FEATURE: Poll Status
+        // ENHANCED FEATURE: Poll Status with new features
         async function createPollStatus(question, options, pollOptions = {}) {
             const statusId = 'status_' + Date.now() + '_' + Math.random().toString(36).substr(2, 9);
+            
+            // NEW: Check for daily streak
+            updateDailyStreak();
             
             const status = {
                 id: statusId,
@@ -2996,10 +3859,16 @@
                 pollOptions: options.map(opt => ({ text: opt, votes: 0 })),
                 totalVotes: 0,
                 pollExpires: pollOptions.expiresAt || new Date(Date.now() + DURATION_OPTIONS['24h']).toISOString(),
-                category: pollOptions.category, // ENHANCED FEATURE: Category
+                category: pollOptions.category,
+                intent: pollOptions.intent, // NEW: Status intent
+                mood: pollOptions.mood, // NEW: Mood tag
+                actionButtons: pollOptions.actionButtons || [], // NEW: Action buttons
+                microCircle: pollOptions.microCircle, // NEW: Micro circle
                 privacy: pollOptions.privacy || PRIVACY_SETTINGS.FRIENDS,
                 expiresAt: pollOptions.expiresAt || new Date(Date.now() + DURATION_OPTIONS['24h']).toISOString(),
-                isPinned: pollOptions.isPinned || false, // ENHANCED FEATURE: Pin status
+                isPinned: pollOptions.isPinned || false,
+                silentMode: pollOptions.silentMode || false, // NEW: Silent mode
+                offlineCreated: pollOptions.offlineCreated || false, // NEW: Offline creation
                 createdAt: new Date().toISOString(),
                 updatedAt: new Date().toISOString()
             };
@@ -3012,13 +3881,16 @@
             
             // Send to backend - OFFLINE SUPPORT
             try {
-                const response = await api('POST', '/api/status', status);
-                if (response && response.status) {
-                    status.id = response.status.id || statusId;
+                if (window.api) {
+                    const response = await window.api('POST', '/api/status', status);
+                    if (response && response.status) {
+                        status.id = response.status.id || statusId;
+                    }
                 }
             } catch (error) {
                 console.log('Offline: Poll saved locally');
                 queueForSync(status);
+                status.offlineCreated = true;
             }
             
             // Update UI
@@ -3037,17 +3909,19 @@
         
         async function voteOnPoll(statusId, optionIndex) {
             try {
-                const response = await api('POST', `/api/status/${statusId}/vote`, { optionIndex });
-                
-                if (response && response.success) {
-                    // Update local data
-                    const status = allStatuses.find(s => s.id === statusId);
-                    if (status && status.pollOptions) {
-                        status.pollOptions[optionIndex].votes = (status.pollOptions[optionIndex].votes || 0) + 1;
-                        status.totalVotes = (status.totalVotes || 0) + 1;
-                    }
+                if (window.api) {
+                    const response = await window.api('POST', `/api/status/${statusId}/vote`, { optionIndex });
                     
-                    showNotification('Vote recorded', 'success');
+                    if (response && response.success) {
+                        // Update local data
+                        const status = allStatuses.find(s => s.id === statusId);
+                        if (status && status.pollOptions) {
+                            status.pollOptions[optionIndex].votes = (status.pollOptions[optionIndex].votes || 0) + 1;
+                            status.totalVotes = (status.totalVotes || 0) + 1;
+                        }
+                        
+                        showNotification('Vote recorded', 'success');
+                    }
                 }
                 
             } catch (error) {
@@ -3056,7 +3930,7 @@
             }
         }
         
-        // ENHANCED FEATURE: Save Drafts
+        // ENHANCED FEATURE: Save Drafts with new features
         function saveStatusDraft(statusData) {
             const draftId = 'draft_' + Date.now();
             const draft = {
@@ -3105,6 +3979,30 @@
             } else if (draft.type === STATUS_TYPES.PHOTO || draft.type === STATUS_TYPES.VIDEO) {
                 document.querySelector('.create-status-tab[data-tab="media"]').click();
                 // Would need to handle media loading
+            }
+            
+            // Load enhanced features
+            if (draft.intent) {
+                const intentChip = document.querySelector(`.intent-chip[data-intent="${draft.intent}"]`);
+                if (intentChip) intentChip.click();
+            }
+            
+            if (draft.mood) {
+                const moodChip = document.querySelector(`.mood-chip[data-mood="${draft.mood}"]`);
+                if (moodChip) moodChip.click();
+            }
+            
+            if (draft.actionButtons && draft.actionButtons.length > 0) {
+                draft.actionButtons.forEach(actionId => {
+                    const actionChip = document.querySelector(`.action-button-chip[data-action="${actionId}"]`);
+                    if (actionChip) actionChip.click();
+                });
+            }
+            
+            if (draft.microCircle) {
+                document.getElementById('privacySelect').value = PRIVACY_SETTINGS.CIRCLE;
+                const circleChip = document.querySelector(`.circle-chip[data-circle="${draft.microCircle}"]`);
+                if (circleChip) circleChip.click();
             }
             
             // Load other options
@@ -3239,11 +4137,123 @@
         
         function reportStatus(statusId, reason) {
             // Send report to backend
-            api('POST', `/api/status/${statusId}/report`, { reason }).catch(console.error);
+            if (window.api) {
+                window.api('POST', `/api/status/${statusId}/report`, { reason }).catch(console.error);
+            }
             
             showNotification('Status reported', 'success');
         }
         
+        // NEW: Load enhanced features
+        function loadIntentsAndMoods() {
+            // Intents are already defined in STATUS_INTENTS constant
+            // Moods are already defined in MOOD_OPTIONS constant
+            console.log('Intents and moods loaded:', STATUS_INTENTS.length, MOOD_OPTIONS.length);
+        }
+        
+        function loadMicroCircles() {
+            // Micro circles are already defined in MICRO_CIRCLES constant
+            console.log('Micro circles loaded:', MICRO_CIRCLES.length);
+        }
+        
+        function loadActionButtons() {
+            // Action buttons are already defined in ACTION_BUTTONS constant
+            console.log('Action buttons loaded:', ACTION_BUTTONS.length);
+        }
+        
+        // NEW: Daily Streak Feature
+        function calculateDailyStreak() {
+            const today = new Date().toDateString();
+            const lastStatusDate = myStatuses.length > 0 ? new Date(myStatuses[0].createdAt).toDateString() : null;
+            
+            if (lastStatusDate === today) {
+                // User has posted today, streak continues
+                const lastStreakUpdate = localStorage.getItem('knecta_last_streak_update');
+                if (lastStreakUpdate !== today) {
+                    dailyStreak += 1;
+                    localStorage.setItem(LOCAL_STORAGE_KEYS.DAILY_STREAK, dailyStreak.toString());
+                    localStorage.setItem('knecta_last_streak_update', today);
+                    updateStreakDisplay();
+                }
+            }
+        }
+        
+        function updateDailyStreak() {
+            const today = new Date().toDateString();
+            const lastStreakUpdate = localStorage.getItem('knecta_last_streak_update');
+            
+            if (lastStreakUpdate !== today) {
+                // Check if user posted yesterday
+                const yesterday = new Date();
+                yesterday.setDate(yesterday.getDate() - 1);
+                const yesterdayStr = yesterday.toDateString();
+                
+                const hasPostedYesterday = myStatuses.some(status => {
+                    const statusDate = new Date(status.createdAt).toDateString();
+                    return statusDate === yesterdayStr;
+                });
+                
+                if (hasPostedYesterday || dailyStreak === 0) {
+                    dailyStreak += 1;
+                } else {
+                    dailyStreak = 1; // Reset streak
+                }
+                
+                localStorage.setItem(LOCAL_STORAGE_KEYS.DAILY_STREAK, dailyStreak.toString());
+                localStorage.setItem('knecta_last_streak_update', today);
+                updateStreakDisplay();
+            }
+        }
+        
+        function updateStreakDisplay() {
+            if (!myStatusStreak) return;
+            
+            if (dailyStreak > 0) {
+                myStatusStreak.style.display = 'block';
+                document.getElementById('streakCount').textContent = dailyStreak;
+                document.getElementById('currentStreakDisplay').textContent = `${dailyStreak} days`;
+            } else {
+                myStatusStreak.style.display = 'none';
+            }
+        }
+        
+        // NEW: Mood Trends Feature
+        function updateMoodTrends(mood) {
+            const today = new Date().toDateString();
+            const existingTrend = moodTrends.find(trend => trend.date === today);
+            
+            if (existingTrend) {
+                existingTrend.mood = mood;
+                existingTrend.count = (existingTrend.count || 0) + 1;
+            } else {
+                moodTrends.push({
+                    date: today,
+                    mood: mood,
+                    count: 1
+                });
+            }
+            
+            // Keep only last 30 days
+            if (moodTrends.length > 30) {
+                moodTrends = moodTrends.slice(-30);
+            }
+            
+            saveToLocalStorage(LOCAL_STORAGE_KEYS.MOOD_TRENDS, moodTrends);
+        }
+        
+        function loadMoodTrends() {
+            // Mood trends are loaded from localStorage in loadCachedDataInstantly
+            console.log('Mood trends loaded:', moodTrends.length);
+        }
+        
+        // NEW: Offline Sync
+        function checkOfflineSync() {
+            if (offlineQueue.length > 0 && navigator.onLine) {
+                syncOfflineData();
+            }
+        }
+        
+        // Initialize Color Picker
         function initializeColorPicker() {
             const colorInput = document.getElementById('textStatusColor');
             if (colorInput && typeof jQuery !== 'undefined' && jQuery.fn.spectrum) {
@@ -3448,7 +4458,10 @@
         }
         
         function updateStatusCounts() {
-            document.getElementById('friendsStatusCount').textContent = friendsStatuses.length;
+            const friendsCount = document.getElementById('friendsStatusCount');
+            if (friendsCount) {
+                friendsCount.textContent = friendsStatuses.length;
+            }
             updateRecentUpdatesCount();
         }
         
@@ -3525,17 +4538,1405 @@
         
         // ENHANCED FEATURE: Offline Sync Queue
         function queueForSync(status) {
-            const syncQueue = JSON.parse(localStorage.getItem('knecta_sync_queue') || '[]');
-            syncQueue.push({
+            offlineQueue.push({
                 type: 'status',
                 data: status,
                 timestamp: Date.now(),
                 retryCount: 0
             });
-            localStorage.setItem('knecta_sync_queue', JSON.stringify(syncQueue));
+            saveToLocalStorage(LOCAL_STORAGE_KEYS.OFFLINE_QUEUE, offlineQueue);
         }
         
+        function setupEventListeners() {
+            // Defensive checks for DOM elements
+            if (!document.getElementById('allTab') || !document.getElementById('createStatusBtn')) {
+                console.error('Required DOM elements for event listeners not found');
+                return;
+            }
+            
+            // Category tabs
+            document.getElementById('allTab').addEventListener('click', function() {
+                document.querySelectorAll('.category-btn').forEach(btn => {
+                    btn.classList.remove('active');
+                });
+                this.classList.add('active');
+                renderStatusList();
+            });
+            
+            document.getElementById('friendsTab').addEventListener('click', function() {
+                document.querySelectorAll('.category-btn').forEach(btn => {
+                    btn.classList.remove('active');
+                });
+                this.classList.add('active');
+                // Filter to show only friends statuses
+                renderFriendsStatuses();
+            });
+            
+            document.getElementById('closeTab').addEventListener('click', function() {
+                document.querySelectorAll('.category-btn').forEach(btn => {
+                    btn.classList.remove('active');
+                });
+                this.classList.add('active');
+                // Filter to show only close friends
+                renderCloseFriendsStatuses();
+            });
+            
+            document.getElementById('pinnedTab').addEventListener('click', function() {
+                document.querySelectorAll('.category-btn').forEach(btn => {
+                    btn.classList.remove('active');
+                });
+                this.classList.add('active');
+                // Show pinned statuses - ENHANCED FEATURE
+                renderPinnedStatuses();
+            });
+            
+            document.getElementById('mutedTab').addEventListener('click', function() {
+                document.querySelectorAll('.category-btn').forEach(btn => {
+                    btn.classList.remove('active');
+                });
+                this.classList.add('active');
+                // Show muted users' statuses
+                renderMutedStatuses();
+            });
+            
+            // NEW: Micro Circle Tab
+            document.getElementById('microCircleTab').addEventListener('click', function() {
+                document.querySelectorAll('.category-btn').forEach(btn => {
+                    btn.classList.remove('active');
+                });
+                this.classList.add('active');
+                // Show micro circle statuses
+                renderMicroCircleStatuses();
+            });
+            
+            // Create status buttons
+            document.getElementById('createStatusBtn').addEventListener('click', () => {
+                showCreateStatusModal();
+            });
+            
+            document.getElementById('createStatusQuickBtn').addEventListener('click', () => {
+                showCreateStatusModal();
+            });
+            
+            document.getElementById('textStatusBtn').addEventListener('click', () => {
+                showCreateStatusModal();
+                document.querySelector('.create-status-tab[data-tab="text"]').click();
+            });
+            
+            document.getElementById('photoStatusBtn').addEventListener('click', () => {
+                showCreateStatusModal();
+                document.querySelector('.create-status-tab[data-tab="media"]').click();
+            });
+            
+            // NEW: View Memory Timeline Button
+            document.getElementById('viewMemoryTimelineBtn').addEventListener('click', () => {
+                showMemoryTimelineModal();
+            });
+            
+            // NEW: View Discovery Button
+            document.getElementById('viewDiscoveryBtn').addEventListener('click', () => {
+                toggleDiscoveryFilters();
+            });
+            
+            // View highlights button - ENHANCED FEATURE
+            document.getElementById('viewHighlightsBtn').addEventListener('click', () => {
+                showHighlightsModal();
+            });
+            
+            // View stats button - ENHANCED FEATURE
+            document.getElementById('viewStatsBtn').addEventListener('click', () => {
+                showStatsModal();
+            });
+            
+            // Create status modal tabs
+            document.querySelectorAll('.create-status-tab').forEach(tab => {
+                tab.addEventListener('click', function() {
+                    const tabName = this.dataset.tab;
+                    
+                    document.querySelectorAll('.create-status-tab').forEach(t => {
+                        t.classList.remove('active');
+                    });
+                    this.classList.add('active');
+                    
+                    document.querySelectorAll('.create-status-tab-content').forEach(content => {
+                        content.classList.remove('active');
+                    });
+                    
+                    const tabContent = document.getElementById(`${tabName}Tab`);
+                    if (tabContent) {
+                        tabContent.classList.add('active');
+                    }
+                    
+                    // Load drafts when drafts tab is selected - ENHANCED FEATURE
+                    if (tabName === 'drafts') {
+                        loadDraftsIntoModal();
+                    }
+                    
+                    // Show/hide micro circle selection based on privacy
+                    if (tabName === 'options') {
+                        const privacySelect = document.getElementById('privacySelect');
+                        const microCircleSelection = document.getElementById('microCircleSelection');
+                        if (privacySelect && microCircleSelection) {
+                            privacySelect.addEventListener('change', function() {
+                                microCircleSelection.style.display = this.value === PRIVACY_SETTINGS.CIRCLE ? 'block' : 'none';
+                            });
+                        }
+                    }
+                });
+            });
+            
+            // Text status input
+            const textStatusInput = document.getElementById('textStatusInput');
+            if (textStatusInput) {
+                textStatusInput.addEventListener('input', updateTextStatusPreview);
+                
+                // Initialize background options
+                const textStatusOptions = document.getElementById('textStatusOptions');
+                if (textStatusOptions) {
+                    BACKGROUND_COLORS.forEach(color => {
+                        const bgOption = document.createElement('div');
+                        bgOption.className = 'text-status-bg';
+                        bgOption.style.backgroundColor = color;
+                        bgOption.dataset.color = color;
+                        
+                        bgOption.addEventListener('click', function() {
+                            document.querySelectorAll('.text-status-bg').forEach(opt => {
+                                opt.classList.remove('selected');
+                            });
+                            this.classList.add('selected');
+                            
+                            // Update color picker
+                            if (colorPicker && colorPicker.spectrum) {
+                                colorPicker.spectrum('set', color);
+                            } else {
+                                document.getElementById('textStatusColor').value = color;
+                            }
+                            
+                            updateTextStatusPreview();
+                        });
+                        
+                        textStatusOptions.appendChild(bgOption);
+                    });
+                }
+            }
+            
+            // NEW: Intent selection
+            document.querySelectorAll('.intent-chip').forEach(chip => {
+                chip.addEventListener('click', function() {
+                    this.classList.toggle('selected');
+                });
+            });
+            
+            // NEW: Mood selection
+            document.querySelectorAll('.mood-chip').forEach(chip => {
+                chip.addEventListener('click', function() {
+                    document.querySelectorAll('.mood-chip').forEach(m => {
+                        m.classList.remove('selected');
+                    });
+                    this.classList.add('selected');
+                });
+            });
+            
+            // NEW: Action button selection
+            document.querySelectorAll('.action-button-chip').forEach(chip => {
+                chip.addEventListener('click', function() {
+                    this.classList.toggle('selected');
+                });
+            });
+            
+            // NEW: Micro circle selection
+            document.querySelectorAll('.circle-chip').forEach(chip => {
+                chip.addEventListener('click', function() {
+                    document.querySelectorAll('.circle-chip').forEach(c => {
+                        c.classList.remove('selected');
+                    });
+                    this.classList.add('selected');
+                });
+            });
+            
+            // Media upload
+            const mediaUploadArea = document.getElementById('mediaUploadArea');
+            const mediaUploadInput = document.getElementById('mediaUploadInput');
+            
+            if (mediaUploadArea && mediaUploadInput) {
+                mediaUploadArea.addEventListener('click', () => {
+                    mediaUploadInput.click();
+                });
+                
+                mediaUploadArea.addEventListener('dragover', (e) => {
+                    e.preventDefault();
+                    mediaUploadArea.style.borderColor = 'var(--primary-color)';
+                    mediaUploadArea.style.backgroundColor = 'rgba(0, 132, 255, 0.05)';
+                });
+                
+                mediaUploadArea.addEventListener('dragleave', () => {
+                    mediaUploadArea.style.borderColor = '';
+                    mediaUploadArea.style.backgroundColor = '';
+                });
+                
+                mediaUploadArea.addEventListener('drop', (e) => {
+                    e.preventDefault();
+                    mediaUploadArea.style.borderColor = '';
+                    mediaUploadArea.style.backgroundColor = '';
+                    
+                    if (e.dataTransfer.files.length > 0) {
+                        handleMediaUpload(e.dataTransfer.files[0]);
+                    }
+                });
+                
+                mediaUploadInput.addEventListener('change', (e) => {
+                    if (e.target.files.length > 0) {
+                        handleMediaUpload(e.target.files[0]);
+                    }
+                });
+            }
+            
+            // Add poll option - ENHANCED FEATURE
+            const addPollOptionBtn = document.getElementById('addPollOptionBtn');
+            if (addPollOptionBtn) {
+                addPollOptionBtn.addEventListener('click', () => {
+                    const optionsContainer = document.getElementById('pollOptionsContainer');
+                    if (optionsContainer) {
+                        const optionCount = optionsContainer.children.length;
+                        const newOption = document.createElement('div');
+                        newOption.className = 'poll-option';
+                        newOption.innerHTML = `
+                            <input type="text" class="poll-option-input" placeholder="Option ${optionCount + 1}">
+                            <button class="status-action-btn danger remove-option-btn">
+                                <i class="fas fa-times"></i>
+                            </button>
+                        `;
+                        
+                        newOption.querySelector('.remove-option-btn').addEventListener('click', () => {
+                            if (optionsContainer.children.length > 2) {
+                                optionsContainer.removeChild(newOption);
+                            }
+                        });
+                        
+                        optionsContainer.appendChild(newOption);
+                    }
+                });
+            }
+            
+            // Post status button
+            document.getElementById('postStatusBtn').addEventListener('click', () => {
+                postStatusFromModal();
+            });
+            
+            // Save draft button - ENHANCED FEATURE
+            document.getElementById('saveDraftBtn').addEventListener('click', () => {
+                saveCurrentAsDraft();
+            });
+            
+            // Close modals
+            document.getElementById('closeCreateStatusModal').addEventListener('click', () => {
+                createStatusModal.classList.remove('active');
+            });
+            
+            document.getElementById('closeHighlightsModal').addEventListener('click', () => {
+                highlightsModal.classList.remove('active');
+            });
+            
+            document.getElementById('closeStatsModal').addEventListener('click', () => {
+                statsModal.classList.remove('active');
+            });
+            
+            // NEW: Close memory timeline modal
+            document.getElementById('closeMemoryTimelineModal').addEventListener('click', () => {
+                memoryTimelineModal.classList.remove('active');
+            });
+            
+            // Back button in viewer
+            document.getElementById('backBtn').addEventListener('click', () => {
+                closeStatusViewer();
+            });
+            
+            // Add highlight button - ENHANCED FEATURE
+            const addHighlightBtn = document.getElementById('addHighlightBtn');
+            if (addHighlightBtn) {
+                addHighlightBtn.addEventListener('click', () => {
+                    const highlightName = prompt('Enter highlight name:');
+                    if (highlightName) {
+                        // Would need to select a status to add
+                        showNotification('Select a status to add to highlights', 'info');
+                    }
+                });
+            }
+            
+            // NEW: Discovery filter chips
+            document.querySelectorAll('.discovery-filter-chip').forEach(chip => {
+                chip.addEventListener('click', function() {
+                    const filter = this.dataset.filter;
+                    applyDiscoveryFilter(filter);
+                });
+            });
+            
+            // NEW: Timeline filter chips
+            document.querySelectorAll('.timeline-filter-chip').forEach(chip => {
+                chip.addEventListener('click', function() {
+                    const filter = this.dataset.filter;
+                    applyTimelineFilter(filter);
+                });
+            });
+            
+            // Swipe gestures for mobile - ENHANCED FEATURE
+            setupSwipeGestures();
+            
+            // Window resize
+            window.addEventListener('resize', () => {
+                // Handle responsive adjustments
+            });
+            
+            // Before unload
+            window.addEventListener('beforeunload', () => {
+                saveAllData();
+            });
+            
+            // Network status for offline support - ENHANCED FEATURE
+            window.addEventListener('online', () => {
+                showNotification('Back online - syncing data', 'info');
+                syncOfflineData();
+            });
+            
+            window.addEventListener('offline', () => {
+                showNotification('Working offline', 'info');
+            });
+        }
+        
+        // NEW: Toggle Discovery Filters
+        function toggleDiscoveryFilters() {
+            if (!discoveryFiltersElement) return;
+            
+            if (discoveryFiltersElement.style.display === 'none') {
+                discoveryFiltersElement.style.display = 'flex';
+                document.getElementById('viewDiscoveryBtn').style.backgroundColor = 'rgba(76, 175, 80, 0.3)';
+                showNotification('Browse statuses by intent or mood', 'info');
+            } else {
+                discoveryFiltersElement.style.display = 'none';
+                document.getElementById('viewDiscoveryBtn').style.backgroundColor = '';
+                renderStatusList(); // Reset to normal view
+            }
+        }
+        
+        // NEW: Apply Discovery Filter
+        function applyDiscoveryFilter(filter) {
+            const [type, value] = filter.split(':');
+            
+            let filteredStatuses = [];
+            
+            switch (type) {
+                case 'intent':
+                    filteredStatuses = allStatuses.filter(status => status.intent === value);
+                    break;
+                case 'mood':
+                    filteredStatuses = allStatuses.filter(status => status.mood === value);
+                    break;
+            }
+            
+            renderFilteredStatuses(filteredStatuses);
+            
+            // Update filter UI
+            document.querySelectorAll('.discovery-filter-chip').forEach(chip => {
+                chip.classList.remove('selected');
+            });
+            event.target.classList.add('selected');
+        }
+        
+        // NEW: Show Memory Timeline Modal
+        function showMemoryTimelineModal() {
+            const timelineGrid = document.getElementById('memoryTimelineGrid');
+            if (!timelineGrid) return;
+            
+            timelineGrid.innerHTML = '';
+            
+            // Get user's statuses
+            const userStatuses = allStatuses.filter(status => status.userId === (currentUser.id || currentUser._id));
+            
+            if (userStatuses.length === 0) {
+                timelineGrid.innerHTML = `
+                    <div style="text-align: center; padding: 40px; color: var(--text-secondary); grid-column: 1 / -1;">
+                        <i class="fas fa-history" style="font-size: 48px; margin-bottom: 15px;"></i>
+                        <p>No status history yet</p>
+                        <p style="font-size: 14px; margin-top: 10px;">Your status memory timeline will appear here</p>
+                    </div>
+                `;
+            } else {
+                // Sort by date (newest first)
+                userStatuses.sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
+                
+                // Display limited number of statuses
+                userStatuses.slice(0, 12).forEach(status => {
+                    const timelineItem = document.createElement('div');
+                    timelineItem.className = 'highlight-item';
+                    
+                    let coverUrl = getStatusCoverUrl(status);
+                    let title = getStatusPreviewText(status);
+                    
+                    timelineItem.innerHTML = `
+                        <div class="highlight-cover" style="background-image: url('${escapeHtml(coverUrl || '')}'); background-color: ${coverUrl ? '' : '#0084ff'};"></div>
+                        <div class="highlight-name">${escapeHtml(title)}</div>
+                        <div style="position: absolute; top: 5px; right: 5px; background: rgba(0,0,0,0.7); color: white; padding: 2px 5px; border-radius: 10px; font-size: 10px;">
+                            ${formatTimeAgo(new Date(status.createdAt))}
+                        </div>
+                    `;
+                    
+                    timelineItem.addEventListener('click', () => {
+                        viewUserStatuses(currentUser.id || currentUser._id, userData.displayName || 'My Status');
+                        memoryTimelineModal.classList.remove('active');
+                    });
+                    
+                    timelineGrid.appendChild(timelineItem);
+                });
+            }
+            
+            memoryTimelineModal.classList.add('active');
+        }
+        
+        // NEW: Apply Timeline Filter
+        function applyTimelineFilter(filter) {
+            const timelineGrid = document.getElementById('memoryTimelineGrid');
+            if (!timelineGrid) return;
+            
+            // Get user's statuses
+            let userStatuses = allStatuses.filter(status => status.userId === (currentUser.id || currentUser._id));
+            
+            // Apply filter
+            switch (filter) {
+                case 'motivational':
+                    userStatuses = userStatuses.filter(status => 
+                        status.category === 'motivation' || 
+                        status.intent === 'achievement' ||
+                        status.mood === 'motivated'
+                    );
+                    break;
+                case 'reflective':
+                    userStatuses = userStatuses.filter(status => 
+                        status.intent === 'reflection' || 
+                        status.intent === 'venting' ||
+                        status.mood === 'calm'
+                    );
+                    break;
+                case 'achievement':
+                    userStatuses = userStatuses.filter(status => 
+                        status.intent === 'achievement' || 
+                        status.intent === 'celebration'
+                    );
+                    break;
+                case 'mood:happy':
+                    userStatuses = userStatuses.filter(status => status.mood === 'happy');
+                    break;
+                case 'mood:motivated':
+                    userStatuses = userStatuses.filter(status => status.mood === 'motivated');
+                    break;
+                case 'lastweek':
+                    const oneWeekAgo = new Date();
+                    oneWeekAgo.setDate(oneWeekAgo.getDate() - 7);
+                    userStatuses = userStatuses.filter(status => new Date(status.createdAt) > oneWeekAgo);
+                    break;
+                case 'lastmonth':
+                    const oneMonthAgo = new Date();
+                    oneMonthAgo.setMonth(oneMonthAgo.getMonth() - 1);
+                    userStatuses = userStatuses.filter(status => new Date(status.createdAt) > oneMonthAgo);
+                    break;
+                // 'all' filter shows everything
+            }
+            
+            timelineGrid.innerHTML = '';
+            
+            if (userStatuses.length === 0) {
+                timelineGrid.innerHTML = `
+                    <div style="text-align: center; padding: 40px; color: var(--text-secondary); grid-column: 1 / -1;">
+                        <i class="fas fa-search" style="font-size: 48px; margin-bottom: 15px;"></i>
+                        <p>No statuses match this filter</p>
+                        <p style="font-size: 14px; margin-top: 10px;">Try a different filter</p>
+                    </div>
+                `;
+            } else {
+                // Sort by date (newest first)
+                userStatuses.sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
+                
+                // Display limited number of statuses
+                userStatuses.slice(0, 12).forEach(status => {
+                    const timelineItem = document.createElement('div');
+                    timelineItem.className = 'highlight-item';
+                    
+                    let coverUrl = getStatusCoverUrl(status);
+                    let title = getStatusPreviewText(status);
+                    
+                    timelineItem.innerHTML = `
+                        <div class="highlight-cover" style="background-image: url('${escapeHtml(coverUrl || '')}'); background-color: ${coverUrl ? '' : '#0084ff'};"></div>
+                        <div class="highlight-name">${escapeHtml(title)}</div>
+                        <div style="position: absolute; top: 5px; right: 5px; background: rgba(0,0,0,0.7); color: white; padding: 2px 5px; border-radius: 10px; font-size: 10px;">
+                            ${formatTimeAgo(new Date(status.createdAt))}
+                        </div>
+                    `;
+                    
+                    timelineItem.addEventListener('click', () => {
+                        viewUserStatuses(currentUser.id || currentUser._id, userData.displayName || 'My Status');
+                        memoryTimelineModal.classList.remove('active');
+                    });
+                    
+                    timelineGrid.appendChild(timelineItem);
+                });
+            }
+            
+            // Update filter UI
+            document.querySelectorAll('.timeline-filter-chip').forEach(chip => {
+                chip.classList.remove('selected');
+            });
+            event.target.classList.add('selected');
+        }
+        
+        // ENHANCED FEATURE: Swipe Gestures
+        function setupSwipeGestures() {
+            let touchStartX = 0;
+            let touchStartY = 0;
+            let touchEndX = 0;
+            let touchEndY = 0;
+            
+            const viewerContent = document.getElementById('statusViewerContent');
+            if (!viewerContent) return;
+            
+            viewerContent.addEventListener('touchstart', (e) => {
+                touchStartX = e.changedTouches[0].screenX;
+                touchStartY = e.changedTouches[0].screenY;
+            });
+            
+            viewerContent.addEventListener('touchend', (e) => {
+                touchEndX = e.changedTouches[0].screenX;
+                touchEndY = e.changedTouches[0].screenY;
+                handleSwipe();
+            });
+            
+            function handleSwipe() {
+                const diffX = touchEndX - touchStartX;
+                const diffY = touchEndY - touchStartY;
+                
+                // Horizontal swipe (left/right)
+                if (Math.abs(diffX) > Math.abs(diffY)) {
+                    if (diffX > 50) {
+                        // Swipe right - previous status
+                        prevStatus();
+                    } else if (diffX < -50) {
+                        // Swipe left - next status
+                        nextStatus();
+                    }
+                }
+                // Vertical swipe (up/down)
+                else {
+                    if (diffY > 50) {
+                        // Swipe down - show reactions
+                        if (currentViewerStatus) {
+                            const currentStatus = currentViewerStatus.statuses[currentViewerStatus.currentIndex];
+                            showEnhancedReactionPicker(currentStatus.id);
+                        }
+                    }
+                }
+            }
+        }
+        
+        function renderFriendsStatuses() {
+            // Filter to show only friends' statuses
+            const friendsIds = new Set(friendsStatuses.map(status => status.userId));
+            const filteredStatuses = allStatuses.filter(status => friendsIds.has(status.userId));
+            
+            renderFilteredStatuses(filteredStatuses);
+        }
+        
+        function renderCloseFriendsStatuses() {
+            // Filter to show only close friends' statuses
+            const closeFriendsIds = new Set(); // This should come from user's close friends list
+            const filteredStatuses = allStatuses.filter(status => closeFriendsIds.has(status.userId));
+            
+            renderFilteredStatuses(filteredStatuses);
+        }
+        
+        // NEW: Render Micro Circle Statuses
+        function renderMicroCircleStatuses() {
+            // Filter to show only micro circle statuses
+            const filteredStatuses = allStatuses.filter(status => status.privacy === PRIVACY_SETTINGS.CIRCLE);
+            
+            if (filteredStatuses.length === 0) {
+                statusListContent.innerHTML = `
+                    <div class="empty-state" style="text-align: center; padding: 40px 20px; color: var(--text-secondary);">
+                        <i class="fas fa-users" style="font-size: 48px; margin-bottom: 15px;"></i>
+                        <p>No micro circle statuses</p>
+                        <p class="subtext">Create statuses visible only to specific circles</p>
+                    </div>
+                `;
+                return;
+            }
+            
+            renderFilteredStatuses(filteredStatuses);
+        }
+        
+        // ENHANCED FEATURE: Render Pinned Statuses
+        function renderPinnedStatuses() {
+            // Show pinned statuses at the top
+            statusListContent.innerHTML = '';
+            
+            if (pinnedStatuses.length === 0) {
+                statusListContent.innerHTML = `
+                    <div class="empty-state" style="text-align: center; padding: 40px 20px; color: var(--text-secondary);">
+                        <i class="fas fa-thumbtack" style="font-size: 48px; margin-bottom: 15px;"></i>
+                        <p>No pinned statuses</p>
+                        <p class="subtext">Pin important statuses to keep them at the top</p>
+                    </div>
+                `;
+                return;
+            }
+            
+            pinnedStatuses.forEach(status => {
+                const statusItem = document.createElement('div');
+                statusItem.className = 'status-item pinned';
+                statusItem.dataset.userId = status.userId;
+                statusItem.dataset.statusId = status.id;
+                
+                const userAvatar = status.user?.photoURL || '';
+                const userName = status.user?.displayName || 'Unknown User';
+                const userInitials = userName.split(' ').map(word => word[0]).join('').toUpperCase().substring(0, 2);
+                
+                statusItem.innerHTML = `
+                    <div class="status-avatar has-status">
+                        ${userAvatar ? '' : `<span style="color: white; font-size: 18px;">${userInitials}</span>`}
+                        <div style="position: absolute; bottom: -2px; right: -2px; background: #ff9800; color: white; border-radius: 50%; width: 20px; height: 20px; display: flex; align-items: center; justify-content: center; font-size: 10px;">
+                            <i class="fas fa-thumbtack"></i>
+                        </div>
+                    </div>
+                    <div class="status-info">
+                        <div class="status-name">
+                            <span>${escapeHtml(userName)} <span style="color: #ff9800; font-size: 12px;"><i class="fas fa-thumbtack"></i> Pinned</span></span>
+                        </div>
+                        <div class="status-time">
+                            <span>${formatTimeAgo(new Date(status.createdAt))}</span>
+                        </div>
+                        <div class="status-preview">
+                            ${getStatusPreviewText(status)}
+                        </div>
+                    </div>
+                `;
+                
+                if (userAvatar) {
+                    statusItem.querySelector('.status-avatar').style.backgroundImage = `url('${escapeHtml(userAvatar)}')`;
+                }
+                
+                statusItem.addEventListener('click', () => {
+                    viewUserStatuses(status.userId, status.user?.displayName || 'User');
+                });
+                
+                statusListContent.appendChild(statusItem);
+            });
+        }
+        
+        function renderMutedStatuses() {
+            // Show muted users' statuses
+            const filteredStatuses = allStatuses.filter(status => mutedUsers.has(status.userId));
+            renderFilteredStatuses(filteredStatuses);
+        }
+        
+        function renderFilteredStatuses(statuses) {
+            if (!statusListContent) return;
+            
+            statusListContent.innerHTML = '';
+            
+            if (statuses.length === 0) {
+                statusListContent.innerHTML = `
+                    <div class="empty-state" style="text-align: center; padding: 40px 20px; color: var(--text-secondary);">
+                        <i class="fas fa-comment-dots" style="font-size: 48px; margin-bottom: 15px;"></i>
+                        <p>No status updates in this category</p>
+                    </div>
+                `;
+                return;
+            }
+            
+            // Group statuses by user
+            const statusesByUser = {};
+            statuses.forEach(status => {
+                const userId = status.userId;
+                if (!statusesByUser[userId]) {
+                    statusesByUser[userId] = [];
+                }
+                statusesByUser[userId].push(status);
+            });
+            
+            // Render each user's statuses
+            Object.entries(statusesByUser).forEach(([userId, userStatuses]) => {
+                const userStatus = userStatuses[0]; // Get latest status
+                addStatusItem(userStatus, userStatuses.length);
+            });
+        }
+        
+        function showCreateStatusModal() {
+            if (!createStatusModal) return;
+            createStatusModal.classList.add('active');
+            
+            // Reset form
+            document.getElementById('textStatusInput').value = '';
+            document.getElementById('mediaCaption').value = '';
+            document.getElementById('pollQuestion').value = '';
+            document.getElementById('scheduleInput').value = '';
+            
+            // Reset selections
+            document.querySelectorAll('.category-chip').forEach(chip => {
+                chip.classList.remove('selected');
+            });
+            
+            document.querySelectorAll('.music-track').forEach(track => {
+                track.classList.remove('selected');
+            });
+            
+            document.querySelectorAll('.template-item').forEach(item => {
+                item.classList.remove('selected');
+            });
+            
+            // NEW: Reset enhanced feature selections
+            document.querySelectorAll('.intent-chip').forEach(chip => {
+                chip.classList.remove('selected');
+            });
+            
+            document.querySelectorAll('.mood-chip').forEach(chip => {
+                chip.classList.remove('selected');
+            });
+            
+            document.querySelectorAll('.action-button-chip').forEach(chip => {
+                chip.classList.remove('selected');
+            });
+            
+            document.querySelectorAll('.circle-chip').forEach(chip => {
+                chip.classList.remove('selected');
+            });
+            
+            window.selectedMusicTrack = null;
+            window.selectedMediaFile = null;
+            window.selectedMediaUrl = null;
+            window.selectedMediaType = null;
+            
+            // Clear media preview
+            const mediaPreview = document.getElementById('mediaPreview');
+            if (mediaPreview) {
+                mediaPreview.innerHTML = '';
+            }
+            
+            // Update preview
+            updateTextStatusPreview();
+        }
+        
+        function handleMediaUpload(file) {
+            const preview = document.getElementById('mediaPreview');
+            if (!preview) return;
+            
+            // Check file type
+            const isImage = file.type.startsWith('image/');
+            const isVideo = file.type.startsWith('video/');
+            
+            if (!isImage && !isVideo) {
+                showNotification('Please upload an image or video', 'error');
+                return;
+            }
+            
+            // Check file size (max 50MB)
+            if (file.size > 50 * 1024 * 1024) {
+                showNotification('File size must be less than 50MB', 'error');
+                return;
+            }
+            
+            // Show upload progress - ENHANCED FEATURE
+            const progressBar = document.getElementById('uploadProgress');
+            progressBar.style.width = '0%';
+            
+            // Create preview
+            const reader = new FileReader();
+            reader.onloadstart = function() {
+                progressBar.style.width = '10%';
+            };
+            
+            reader.onprogress = function(e) {
+                if (e.lengthComputable) {
+                    const percentLoaded = Math.round((e.loaded / e.total) * 100);
+                    progressBar.style.width = percentLoaded + '%';
+                }
+            };
+            
+            reader.onload = function(e) {
+                progressBar.style.width = '100%';
+                setTimeout(() => {
+                    progressBar.style.width = '0%';
+                }, 500);
+                
+                preview.innerHTML = '';
+                
+                if (isImage) {
+                    const img = document.createElement('img');
+                    img.src = e.target.result;
+                    img.style.width = '100%';
+                    img.style.maxHeight = '300px';
+                    img.style.objectFit = 'contain';
+                    preview.appendChild(img);
+                } else if (isVideo) {
+                    const video = document.createElement('video');
+                    video.src = e.target.result;
+                    video.controls = true;
+                    video.style.width = '100%';
+                    video.style.maxHeight = '300px';
+                    preview.appendChild(video);
+                }
+                
+                // Add remove button
+                const removeBtn = document.createElement('button');
+                removeBtn.className = 'media-remove-btn';
+                removeBtn.innerHTML = '<i class="fas fa-times"></i>';
+                removeBtn.addEventListener('click', () => {
+                    preview.innerHTML = '';
+                    window.selectedMediaFile = null;
+                    window.selectedMediaUrl = null;
+                    window.selectedMediaType = null;
+                });
+                preview.appendChild(removeBtn);
+                
+                // Store file for upload
+                window.selectedMediaFile = file;
+                window.selectedMediaUrl = e.target.result;
+                window.selectedMediaType = isImage ? STATUS_TYPES.PHOTO : STATUS_TYPES.VIDEO;
+            };
+            
+            reader.readAsDataURL(file);
+        }
+        
+        function postStatusFromModal() {
+            const activeTab = document.querySelector('.create-status-tab.active');
+            if (!activeTab) return;
+            
+            const tabName = activeTab.dataset.tab;
+            
+            // Get common options
+            const privacy = document.getElementById('privacySelect').value;
+            const duration = document.getElementById('durationSelect').value;
+            const expiresAt = duration === 'permanent' ? null : new Date(Date.now() + DURATION_OPTIONS[duration]).toISOString();
+            
+            const selectedCategories = Array.from(document.querySelectorAll('.category-chip.selected')).map(chip => chip.dataset.category);
+            const category = selectedCategories.length > 0 ? selectedCategories[0] : null;
+            
+            const isSensitive = document.getElementById('sensitiveToggle')?.checked || false;
+            const silentMode = document.getElementById('silentModeToggle')?.checked || false;
+            const offlineMode = document.getElementById('offlineModeToggle')?.checked || false;
+            const autoTranslate = document.getElementById('translateToggle')?.checked || false;
+            
+            const scheduleInput = document.getElementById('scheduleInput').value;
+            const scheduleTime = scheduleInput ? new Date(scheduleInput).toISOString() : null;
+            
+            // NEW: Get enhanced features
+            const selectedIntent = document.querySelector('.intent-chip.selected')?.dataset.intent;
+            const selectedMood = document.querySelector('.mood-chip.selected')?.dataset.mood;
+            const selectedActions = Array.from(document.querySelectorAll('.action-button-chip.selected')).map(chip => chip.dataset.action);
+            const selectedCircle = document.querySelector('.circle-chip.selected')?.dataset.circle;
+            
+            switch (tabName) {
+                case 'text':
+                    const text = document.getElementById('textStatusInput').value.trim();
+                    if (!text) {
+                        showNotification('Please enter status text', 'error');
+                        return;
+                    }
+                    
+                    let backgroundColor = '#0084ff';
+                    if (colorPicker && colorPicker.spectrum) {
+                        backgroundColor = colorPicker.spectrum('get').toHexString();
+                    } else {
+                        backgroundColor = document.getElementById('textStatusColor').value;
+                    }
+                    
+                    const textColor = getContrastColor(backgroundColor);
+                    
+                    const statusData = {
+                        text,
+                        backgroundColor,
+                        textColor,
+                        fontSize: '24px', // Default, could be customizable
+                        category,
+                        intent: selectedIntent,
+                        mood: selectedMood,
+                        actionButtons: selectedActions,
+                        microCircle: selectedCircle,
+                        privacy: selectedCircle ? PRIVACY_SETTINGS.CIRCLE : privacy,
+                        expiresAt,
+                        isSensitive,
+                        silentMode,
+                        offlineCreated: offlineMode,
+                        autoTranslate,
+                        type: STATUS_TYPES.TEXT
+                    };
+                    
+                    if (scheduleTime) {
+                        scheduleStatus(statusData, scheduleTime);
+                    } else {
+                        createTextStatus(text, statusData);
+                    }
+                    break;
+                    
+                case 'media':
+                    if (!window.selectedMediaFile) {
+                        showNotification('Please select a photo or video', 'error');
+                        return;
+                    }
+                    
+                    const caption = document.getElementById('mediaCaption').value.trim();
+                    const musicTrack = window.selectedMusicTrack;
+                    
+                    const mediaData = {
+                        caption,
+                        musicTrack,
+                        category,
+                        intent: selectedIntent,
+                        mood: selectedMood,
+                        actionButtons: selectedActions,
+                        microCircle: selectedCircle,
+                        privacy: selectedCircle ? PRIVACY_SETTINGS.CIRCLE : privacy,
+                        expiresAt,
+                        isSensitive,
+                        silentMode,
+                        offlineCreated: offlineMode,
+                        type: window.selectedMediaType
+                    };
+                    
+                    if (scheduleTime) {
+                        scheduleStatus(mediaData, scheduleTime);
+                    } else {
+                        // In real implementation, you would upload the file first
+                        // For now, we'll use the data URL
+                        createMediaStatus(window.selectedMediaUrl, window.selectedMediaType, mediaData);
+                    }
+                    break;
+                    
+                case 'intent':
+                    // This tab doesn't create status directly
+                    showNotification('Please use Text or Media tab to create status', 'info');
+                    return;
+                    
+                case 'options':
+                    // This tab doesn't create status directly
+                    showNotification('Please use Text or Media tab to create status', 'info');
+                    return;
+                    
+                case 'templates':
+                    const selectedTemplate = document.querySelector('.template-item.selected');
+                    if (!selectedTemplate) {
+                        showNotification('Please select a template', 'error');
+                        return;
+                    }
+                    
+                    const templateText = document.getElementById('textStatusInput').value.trim() || 'Your status here';
+                    const template = TEMPLATES.find(t => t.id === selectedTemplate.dataset.templateId);
+                    
+                    const templateData = {
+                        text: templateText,
+                        backgroundImage: template.bg,
+                        textColor: template.textColor,
+                        fontSize: template.fontSize,
+                        emoji: template.emoji,
+                        category,
+                        intent: selectedIntent,
+                        mood: selectedMood,
+                        actionButtons: selectedActions,
+                        microCircle: selectedCircle,
+                        privacy: selectedCircle ? PRIVACY_SETTINGS.CIRCLE : privacy,
+                        expiresAt,
+                        isSensitive,
+                        silentMode,
+                        offlineCreated: offlineMode,
+                        autoTranslate,
+                        type: STATUS_TYPES.TEXT
+                    };
+                    
+                    if (scheduleTime) {
+                        scheduleStatus(templateData, scheduleTime);
+                    } else {
+                        createTextStatus(templateText, templateData);
+                    }
+                    break;
+                    
+                case 'drafts':
+                    // This tab doesn't create status directly
+                    showNotification('Select a draft to load', 'info');
+                    return;
+            }
+            
+            // Close modal
+            createStatusModal.classList.remove('active');
+        }
+        
+        // ENHANCED FEATURE: Save Current as Draft with new features
+        function saveCurrentAsDraft() {
+            const activeTab = document.querySelector('.create-status-tab.active');
+            if (!activeTab) return;
+            
+            const tabName = activeTab.dataset.tab;
+            let draftData = {};
+            
+            switch (tabName) {
+                case 'text':
+                    const text = document.getElementById('textStatusInput').value.trim();
+                    if (!text) {
+                        showNotification('No text to save as draft', 'warning');
+                        return;
+                    }
+                    
+                    let backgroundColor = '#0084ff';
+                    if (colorPicker && colorPicker.spectrum) {
+                        backgroundColor = colorPicker.spectrum('get').toHexString();
+                    } else {
+                        backgroundColor = document.getElementById('textStatusColor').value;
+                    }
+                    
+                    draftData = {
+                        type: STATUS_TYPES.TEXT,
+                        text,
+                        backgroundColor,
+                        textColor: getContrastColor(backgroundColor)
+                    };
+                    break;
+                    
+                case 'media':
+                    if (!window.selectedMediaFile) {
+                        showNotification('No media to save as draft', 'warning');
+                        return;
+                    }
+                    
+                    const caption = document.getElementById('mediaCaption').value.trim();
+                    
+                    draftData = {
+                        type: window.selectedMediaType,
+                        mediaUrl: window.selectedMediaUrl,
+                        caption
+                    };
+                    break;
+                    
+                case 'intent':
+                    // Get intent and mood selections
+                    const selectedIntent = document.querySelector('.intent-chip.selected')?.dataset.intent;
+                    const selectedMood = document.querySelector('.mood-chip.selected')?.dataset.mood;
+                    const selectedActions = Array.from(document.querySelectorAll('.action-button-chip.selected')).map(chip => chip.dataset.action);
+                    
+                    if (!selectedIntent && !selectedMood && selectedActions.length === 0) {
+                        showNotification('No enhanced features selected to save as draft', 'warning');
+                        return;
+                    }
+                    
+                    draftData = {
+                        type: 'enhanced_features',
+                        intent: selectedIntent,
+                        mood: selectedMood,
+                        actionButtons: selectedActions
+                    };
+                    break;
+                    
+                default:
+                    showNotification('Cannot save draft from this tab', 'warning');
+                    return;
+            }
+            
+            // Add other options
+            const privacy = document.getElementById('privacySelect').value;
+            const duration = document.getElementById('durationSelect').value;
+            const expiresAt = duration === 'permanent' ? null : new Date(Date.now() + DURATION_OPTIONS[duration]).toISOString();
+            
+            const selectedCategories = Array.from(document.querySelectorAll('.category-chip.selected')).map(chip => chip.dataset.category);
+            const category = selectedCategories.length > 0 ? selectedCategories[0] : null;
+            
+            const selectedCircle = document.querySelector('.circle-chip.selected')?.dataset.circle;
+            
+            draftData.privacy = selectedCircle ? PRIVACY_SETTINGS.CIRCLE : privacy;
+            draftData.expiresAt = expiresAt;
+            draftData.category = category;
+            draftData.microCircle = selectedCircle;
+            
+            saveStatusDraft(draftData);
+            
+            // Update drafts tab
+            loadDraftsIntoModal();
+        }
+        
+        function loadDraftsIntoModal() {
+            const draftsContainer = document.getElementById('draftsContainer');
+            if (!draftsContainer) return;
+            
+            draftsContainer.innerHTML = '';
+            
+            if (statusDrafts.length === 0) {
+                draftsContainer.innerHTML = `
+                    <div style="text-align: center; padding: 40px; color: var(--text-secondary);">
+                        <i class="fas fa-save" style="font-size: 32px; margin-bottom: 10px;"></i>
+                        <p>No drafts saved</p>
+                        <p style="font-size: 14px; margin-top: 10px;">Your drafts will appear here</p>
+                    </div>
+                `;
+                return;
+            }
+            
+            statusDrafts.forEach(draft => {
+                const draftItem = document.createElement('div');
+                draftItem.className = 'draft-item';
+                draftItem.dataset.draftId = draft.id;
+                
+                let previewContent = '';
+                let previewStyle = '';
+                
+                if (draft.type === STATUS_TYPES.TEXT) {
+                    previewContent = draft.text.length > 50 ? draft.text.substring(0, 50) + '...' : draft.text;
+                    previewStyle = `background-color: ${draft.backgroundColor}; color: ${draft.textColor};`;
+                } else if (draft.type === STATUS_TYPES.PHOTO) {
+                    previewContent = '📸 Photo';
+                    previewStyle = 'background-color: #f0f2f5;';
+                } else if (draft.type === STATUS_TYPES.VIDEO) {
+                    previewContent = '🎬 Video';
+                    previewStyle = 'background-color: #f0f2f5;';
+                } else if (draft.type === 'enhanced_features') {
+                    previewContent = '🎯 Enhanced Status';
+                    previewStyle = 'background-color: #4caf50; color: white;';
+                }
+                
+                draftItem.innerHTML = `
+                    <div class="draft-preview" style="${previewStyle}">
+                        ${previewContent}
+                    </div>
+                    <div class="draft-info">
+                        ${formatTimeAgo(new Date(draft.savedAt))}
+                        ${draft.category ? `<br><small><i class="${CATEGORIES.find(c => c.id === draft.category)?.icon || 'fas fa-tag'}"></i> ${CATEGORIES.find(c => c.id === draft.category)?.name || 'Uncategorized'}</small>` : ''}
+                        ${draft.intent ? `<br><small><i class="${STATUS_INTENTS.find(i => i.id === draft.intent)?.icon || 'fas fa-bullseye'}"></i> ${STATUS_INTENTS.find(i => i.id === draft.intent)?.name || 'Intent'}</small>` : ''}
+                    </div>
+                `;
+                
+                draftItem.addEventListener('click', () => {
+                    loadDraft(draft.id);
+                    createStatusModal.classList.remove('active');
+                    setTimeout(() => {
+                        showCreateStatusModal();
+                    }, 300);
+                });
+                
+                draftsContainer.appendChild(draftItem);
+            });
+        }
+        
+        // ENHANCED FEATURE: Show Highlights Modal
+        function showHighlightsModal() {
+            const highlightsGrid = document.getElementById('highlightsGrid');
+            if (!highlightsGrid) return;
+            
+            highlightsGrid.innerHTML = '';
+            
+            if (statusHighlights.length === 0) {
+                highlightsGrid.innerHTML = `
+                    <div style="text-align: center; padding: 40px; color: var(--text-secondary); grid-column: 1 / -1;">
+                        <i class="fas fa-star" style="font-size: 48px; margin-bottom: 15px;"></i>
+                        <p>No highlights yet</p>
+                        <p style="font-size: 14px; margin-top: 10px;">Save your favorite statuses to highlights</p>
+                        <button class="action-btn primary" style="margin-top: 20px;" onclick="showNotification('Create a status first, then save it to highlights', 'info')">
+                            <i class="fas fa-plus"></i> Create Your First Highlight
+                        </button>
+                    </div>
+                `;
+            } else {
+                statusHighlights.forEach(highlight => {
+                    const highlightItem = document.createElement('div');
+                    highlightItem.className = 'highlight-item';
+                    
+                    highlightItem.innerHTML = `
+                        <div class="highlight-cover" style="background-image: url('${escapeHtml(highlight.coverUrl || '')}'); background-color: ${highlight.coverUrl ? '' : '#0084ff'};"></div>
+                        <div class="highlight-name">${escapeHtml(highlight.name)}</div>
+                    `;
+                    
+                    highlightItem.addEventListener('click', () => {
+                        // View the highlighted status
+                        const status = myStatuses.find(s => s.id === highlight.statusId);
+                        if (status) {
+                            viewUserStatuses(currentUser.id, userData.displayName || 'My Status');
+                        }
+                        highlightsModal.classList.remove('active');
+                    });
+                    
+                    highlightsGrid.appendChild(highlightItem);
+                });
+            }
+            
+            highlightsModal.classList.add('active');
+        }
+        
+        // ENHANCED FEATURE: Show Stats Modal with silent mode stats
+        async function showStatsModal() {
+            // Load stats from backend
+            try {
+                if (window.api) {
+                    const response = await window.api('GET', '/api/status/stats');
+                    
+                    if (response && response.stats) {
+                        const stats = response.stats;
+                        
+                        // Update stats display
+                        document.getElementById('totalViews').textContent = stats.totalViews || 0;
+                        document.getElementById('avgViewTime').textContent = stats.avgViewTime ? Math.round(stats.avgViewTime) + 's' : '0s';
+                        document.getElementById('totalReplies').textContent = stats.totalReplies || 0;
+                        document.getElementById('totalReactions').textContent = stats.totalReactions || 0;
+                        document.getElementById('totalShares').textContent = stats.totalShares || 0;
+                        
+                        // Check for silent mode stats
+                        const silentModeStats = document.getElementById('silentModeStats');
+                        if (silentModeStats && stats.privateViews) {
+                            silentModeStats.style.display = 'block';
+                            document.getElementById('privateViews').textContent = stats.privateViews || 0;
+                            document.getElementById('reflectionTime').textContent = stats.reflectionTime || '0min';
+                        }
+                        
+                        // Load recent viewers
+                        const viewersList = document.getElementById('viewersList');
+                        if (viewersList && stats.recentViewers) {
+                            viewersList.innerHTML = '';
+                            
+                            stats.recentViewers.forEach(viewer => {
+                                const viewerItem = document.createElement('div');
+                                viewerItem.className = 'viewer-item';
+                                viewerItem.innerHTML = `
+                                    <div class="viewer-avatar" style="background-image: url('${escapeHtml(viewer.avatar || '')}'); background-color: ${viewer.avatar ? '' : '#ccc'};"></div>
+                                    <div class="viewer-info">
+                                        <div class="viewer-name">${escapeHtml(viewer.name)}</div>
+                                        <div style="display: flex; justify-content: space-between;">
+                                            <span class="viewer-time">${formatTimeAgo(new Date(viewer.viewedAt))}</span>
+                                            <span class="viewer-duration">${viewer.duration || '0s'}</span>
+                                        </div>
+                                    </div>
+                                `;
+                                viewersList.appendChild(viewerItem);
+                            });
+                        }
+                    }
+                }
+            } catch (error) {
+                console.error('Error loading stats:', error);
+                // Fallback to cached stats
+                loadCachedStats();
+            }
+            
+            statsModal.classList.add('active');
+        }
+        
+        function loadCachedStats() {
+            // Load stats from localStorage
+            const statsData = localStorage.getItem(LOCAL_STORAGE_KEYS.STATUS_STATS);
+            const stats = statsData ? JSON.parse(statsData) : {};
+            
+            // Calculate totals
+            let totalViews = 0;
+            let totalViewDuration = 0;
+            let viewCount = 0;
+            let totalReplies = 0;
+            let totalReactions = 0;
+            let totalShares = 0;
+            
+            Object.values(stats).forEach(stat => {
+                totalViews += stat.views || 0;
+                totalReplies += stat.replies || 0;
+                totalReactions += stat.reactions || 0;
+                totalShares += stat.shares || 0;
+                
+                if (stat.viewDuration && stat.viewDuration.length > 0) {
+                    viewCount += stat.viewDuration.length;
+                    // Calculate average view time (simplified)
+                    totalViewDuration += stat.viewDuration.length * 5; // Assume 5 seconds per view
+                }
+            });
+            
+            // Update stats display
+            document.getElementById('totalViews').textContent = totalViews;
+            document.getElementById('avgViewTime').textContent = viewCount > 0 ? Math.round(totalViewDuration / viewCount) + 's' : '0s';
+            document.getElementById('totalReplies').textContent = totalReplies;
+            document.getElementById('totalReactions').textContent = totalReactions;
+            document.getElementById('totalShares').textContent = totalShares;
+            
+            // Calculate silent mode stats
+            const silentModeCount = silentModeStatuses.length;
+            if (silentModeCount > 0) {
+                const silentModeStats = document.getElementById('silentModeStats');
+                if (silentModeStats) {
+                    silentModeStats.style.display = 'block';
+                    document.getElementById('privateViews').textContent = Math.round(totalViews * 0.3); // Estimate
+                    document.getElementById('reflectionTime').textContent = Math.round(silentModeCount * 2) + 'min'; // Estimate
+                }
+            }
+            
+            // Load cached viewers if any
+            const viewersList = document.getElementById('viewersList');
+            if (viewersList) {
+                viewersList.innerHTML = '<div style="text-align: center; padding: 20px; color: var(--text-secondary);">Viewer data will sync when online</div>';
+            }
+        }
+        
+        // ENHANCED FEATURE: Sync Offline Data
+        async function syncOfflineData() {
+            if (offlineQueue.length === 0) return;
+            
+            showNotification(`Syncing ${offlineQueue.length} items...`, 'info');
+            
+            for (let i = 0; i < offlineQueue.length; i++) {
+                const item = offlineQueue[i];
+                try {
+                    if (item.type === 'status') {
+                        if (window.api) {
+                            await window.api('POST', '/api/status', item.data);
+                        }
+                        // Remove from queue on success
+                        offlineQueue.splice(i, 1);
+                        i--;
+                    }
+                } catch (error) {
+                    console.log('Sync failed for item:', item);
+                    item.retryCount = (item.retryCount || 0) + 1;
+                    
+                    // Remove if too many retries
+                    if (item.retryCount > 3) {
+                        offlineQueue.splice(i, 1);
+                        i--;
+                    }
+                }
+            }
+            
+            saveToLocalStorage(LOCAL_STORAGE_KEYS.OFFLINE_QUEUE, offlineQueue);
+            
+            if (offlineQueue.length === 0) {
+                showNotification('All data synced successfully', 'success');
+            } else {
+                showNotification(`${offlineQueue.length} items failed to sync`, 'warning');
+            }
+        }
+        
+        function saveAllData() {
+            saveToLocalStorage(LOCAL_STORAGE_KEYS.MY_STATUSES, myStatuses);
+            saveToLocalStorage(LOCAL_STORAGE_KEYS.VIEWED_STATUSES, Array.from(viewedStatusIds));
+            saveToLocalStorage(LOCAL_STORAGE_KEYS.MUTED_USERS, Array.from(mutedUsers));
+            saveToLocalStorage(LOCAL_STORAGE_KEYS.PINNED_STATUSES, pinnedStatuses);
+            saveToLocalStorage(LOCAL_STORAGE_KEYS.STATUS_HIGHLIGHTS, statusHighlights);
+            saveToLocalStorage(LOCAL_STORAGE_KEYS.STATUS_DRAFTS, statusDrafts);
+            
+            // NEW: Save enhanced features
+            saveToLocalStorage(LOCAL_STORAGE_KEYS.STATUS_INTENTS, statusIntents);
+            saveToLocalStorage(LOCAL_STORAGE_KEYS.STATUS_MOODS, statusMoods);
+            saveToLocalStorage(LOCAL_STORAGE_KEYS.MICRO_CIRCLES, microCircles);
+            saveToLocalStorage(LOCAL_STORAGE_KEYS.ACTION_BUTTONS, actionButtons);
+            saveToLocalStorage(LOCAL_STORAGE_KEYS.DAILY_STREAK, dailyStreak);
+            saveToLocalStorage(LOCAL_STORAGE_KEYS.MOOD_TRENDS, moodTrends);
+            saveToLocalStorage(LOCAL_STORAGE_KEYS.SILENT_MODE_STATUSES, silentModeStatuses);
+            saveToLocalStorage(LOCAL_STORAGE_KEYS.OFFLINE_QUEUE, offlineQueue);
+            saveToLocalStorage(LOCAL_STORAGE_KEYS.DISCOVERY_FILTERS, discoveryFilters);
+            
+            console.log('All status data saved to localStorage');
+        }
+        
+        // Setup status viewer controls (called from showStatusViewer)
         function setupStatusViewerControls() {
+            // Defensive checks for DOM elements
+            if (!document.getElementById('prevStatusBtn') || !document.getElementById('reactStatusBtn')) {
+                console.error('Status viewer control elements not found');
+                return;
+            }
+            
             // Next/Previous buttons
             document.getElementById('prevStatusBtn').addEventListener('click', prevStatus);
             document.getElementById('nextStatusBtn').addEventListener('click', nextStatus);
@@ -3589,23 +5990,27 @@
             });
             
             // Reply functionality
-            document.getElementById('sendReplyBtn').addEventListener('click', () => {
-                const replyInput = document.getElementById('statusReplyInput');
-                const replyText = replyInput.value.trim();
-                
-                if (replyText && currentViewerStatus) {
-                    const currentStatus = currentViewerStatus.statuses[currentViewerStatus.currentIndex];
-                    sendStatusReply(currentStatus.id, replyText);
-                    replyInput.value = '';
-                }
-            });
+            const sendReplyBtn = document.getElementById('sendReplyBtn');
+            const replyInput = document.getElementById('statusReplyInput');
             
-            // Reply input enter key
-            document.getElementById('statusReplyInput').addEventListener('keypress', (e) => {
-                if (e.key === 'Enter') {
-                    document.getElementById('sendReplyBtn').click();
-                }
-            });
+            if (sendReplyBtn && replyInput) {
+                sendReplyBtn.addEventListener('click', () => {
+                    const replyText = replyInput.value.trim();
+                    
+                    if (replyText && currentViewerStatus) {
+                        const currentStatus = currentViewerStatus.statuses[currentViewerStatus.currentIndex];
+                        sendStatusReply(currentStatus.id, replyText);
+                        replyInput.value = '';
+                    }
+                });
+                
+                // Reply input enter key
+                replyInput.addEventListener('keypress', (e) => {
+                    if (e.key === 'Enter') {
+                        sendReplyBtn.click();
+                    }
+                });
+            }
         }
         
         // ENHANCED FEATURE: Enhanced Reaction Picker
@@ -3677,10 +6082,12 @@
         
         async function reactToStatus(statusId, reaction, label = '') {
             try {
-                const response = await api('POST', `/api/status/${statusId}/react`, { reaction, label });
-                
-                if (response && response.success) {
-                    showNotification(`Reacted with ${reaction} ${label ? '(' + label + ')' : ''}`, 'success');
+                if (window.api) {
+                    const response = await window.api('POST', `/api/status/${statusId}/react`, { reaction, label });
+                    
+                    if (response && response.success) {
+                        showNotification(`Reacted with ${reaction} ${label ? '(' + label + ')' : ''}`, 'success');
+                    }
                 }
                 
             } catch (error) {
@@ -3912,14 +6319,16 @@
         
         async function sendStatusReply(statusId, text) {
             try {
-                const response = await api('POST', `/api/status/${statusId}/reply`, { text });
-                
-                if (response && response.success) {
-                    showNotification('Reply sent', 'success');
+                if (window.api) {
+                    const response = await window.api('POST', `/api/status/${statusId}/reply`, { text });
                     
-                    // Open chat with the user
-                    if (currentViewerStatus) {
-                        openChat(currentViewerStatus.userId, currentViewerStatus.userName);
+                    if (response && response.success) {
+                        showNotification('Reply sent', 'success');
+                        
+                        // Open chat with the user
+                        if (currentViewerStatus) {
+                            openChat(currentViewerStatus.userId, currentViewerStatus.userName);
+                        }
                     }
                 }
                 
@@ -3934,983 +6343,8 @@
             window.location.href = `../message.html?user=${userId}&name=${encodedName}`;
         }
         
-        function setupEventListeners() {
-            // Category tabs
-            document.getElementById('allTab').addEventListener('click', function() {
-                document.querySelectorAll('.category-btn').forEach(btn => {
-                    btn.classList.remove('active');
-                });
-                this.classList.add('active');
-                renderStatusList();
-            });
-            
-            document.getElementById('friendsTab').addEventListener('click', function() {
-                document.querySelectorAll('.category-btn').forEach(btn => {
-                    btn.classList.remove('active');
-                });
-                this.classList.add('active');
-                // Filter to show only friends statuses
-                renderFriendsStatuses();
-            });
-            
-            document.getElementById('closeTab').addEventListener('click', function() {
-                document.querySelectorAll('.category-btn').forEach(btn => {
-                    btn.classList.remove('active');
-                });
-                this.classList.add('active');
-                // Filter to show only close friends
-                renderCloseFriendsStatuses();
-            });
-            
-            document.getElementById('pinnedTab').addEventListener('click', function() {
-                document.querySelectorAll('.category-btn').forEach(btn => {
-                    btn.classList.remove('active');
-                });
-                this.classList.add('active');
-                // Show pinned statuses - ENHANCED FEATURE
-                renderPinnedStatuses();
-            });
-            
-            document.getElementById('mutedTab').addEventListener('click', function() {
-                document.querySelectorAll('.category-btn').forEach(btn => {
-                    btn.classList.remove('active');
-                });
-                this.classList.add('active');
-                // Show muted users' statuses
-                renderMutedStatuses();
-            });
-            
-            // Create status buttons
-            document.getElementById('createStatusBtn').addEventListener('click', () => {
-                showCreateStatusModal();
-            });
-            
-            document.getElementById('createStatusQuickBtn').addEventListener('click', () => {
-                showCreateStatusModal();
-            });
-            
-            document.getElementById('textStatusBtn').addEventListener('click', () => {
-                showCreateStatusModal();
-                document.querySelector('.create-status-tab[data-tab="text"]').click();
-            });
-            
-            document.getElementById('photoStatusBtn').addEventListener('click', () => {
-                showCreateStatusModal();
-                document.querySelector('.create-status-tab[data-tab="media"]').click();
-            });
-            
-            // View highlights button - ENHANCED FEATURE
-            document.getElementById('viewHighlightsBtn').addEventListener('click', () => {
-                showHighlightsModal();
-            });
-            
-            // View stats button - ENHANCED FEATURE
-            document.getElementById('viewStatsBtn').addEventListener('click', () => {
-                showStatsModal();
-            });
-            
-            // Create status modal tabs
-            document.querySelectorAll('.create-status-tab').forEach(tab => {
-                tab.addEventListener('click', function() {
-                    const tabName = this.dataset.tab;
-                    
-                    document.querySelectorAll('.create-status-tab').forEach(t => {
-                        t.classList.remove('active');
-                    });
-                    this.classList.add('active');
-                    
-                    document.querySelectorAll('.create-status-tab-content').forEach(content => {
-                        content.classList.remove('active');
-                    });
-                    
-                    const tabContent = document.getElementById(`${tabName}Tab`);
-                    if (tabContent) {
-                        tabContent.classList.add('active');
-                    }
-                    
-                    // Load drafts when drafts tab is selected - ENHANCED FEATURE
-                    if (tabName === 'drafts') {
-                        loadDraftsIntoModal();
-                    }
-                });
-            });
-            
-            // Text status input
-            const textStatusInput = document.getElementById('textStatusInput');
-            if (textStatusInput) {
-                textStatusInput.addEventListener('input', updateTextStatusPreview);
-                
-                // Initialize background options
-                const textStatusOptions = document.getElementById('textStatusOptions');
-                if (textStatusOptions) {
-                    BACKGROUND_COLORS.forEach(color => {
-                        const bgOption = document.createElement('div');
-                        bgOption.className = 'text-status-bg';
-                        bgOption.style.backgroundColor = color;
-                        bgOption.dataset.color = color;
-                        
-                        bgOption.addEventListener('click', function() {
-                            document.querySelectorAll('.text-status-bg').forEach(opt => {
-                                opt.classList.remove('selected');
-                            });
-                            this.classList.add('selected');
-                            
-                            // Update color picker
-                            if (colorPicker && colorPicker.spectrum) {
-                                colorPicker.spectrum('set', color);
-                            } else {
-                                document.getElementById('textStatusColor').value = color;
-                            }
-                            
-                            updateTextStatusPreview();
-                        });
-                        
-                        textStatusOptions.appendChild(bgOption);
-                    });
-                }
-            }
-            
-            // Media upload
-            const mediaUploadArea = document.getElementById('mediaUploadArea');
-            const mediaUploadInput = document.getElementById('mediaUploadInput');
-            
-            if (mediaUploadArea && mediaUploadInput) {
-                mediaUploadArea.addEventListener('click', () => {
-                    mediaUploadInput.click();
-                });
-                
-                mediaUploadArea.addEventListener('dragover', (e) => {
-                    e.preventDefault();
-                    mediaUploadArea.style.borderColor = 'var(--primary-color)';
-                    mediaUploadArea.style.backgroundColor = 'rgba(0, 132, 255, 0.05)';
-                });
-                
-                mediaUploadArea.addEventListener('dragleave', () => {
-                    mediaUploadArea.style.borderColor = '';
-                    mediaUploadArea.style.backgroundColor = '';
-                });
-                
-                mediaUploadArea.addEventListener('drop', (e) => {
-                    e.preventDefault();
-                    mediaUploadArea.style.borderColor = '';
-                    mediaUploadArea.style.backgroundColor = '';
-                    
-                    if (e.dataTransfer.files.length > 0) {
-                        handleMediaUpload(e.dataTransfer.files[0]);
-                    }
-                });
-                
-                mediaUploadInput.addEventListener('change', (e) => {
-                    if (e.target.files.length > 0) {
-                        handleMediaUpload(e.target.files[0]);
-                    }
-                });
-            }
-            
-            // Add poll option - ENHANCED FEATURE
-            document.getElementById('addPollOptionBtn')?.addEventListener('click', () => {
-                const optionsContainer = document.getElementById('pollOptionsContainer');
-                if (optionsContainer) {
-                    const optionCount = optionsContainer.children.length;
-                    const newOption = document.createElement('div');
-                    newOption.className = 'poll-option';
-                    newOption.innerHTML = `
-                        <input type="text" class="poll-option-input" placeholder="Option ${optionCount + 1}">
-                        <button class="status-action-btn danger remove-option-btn">
-                            <i class="fas fa-times"></i>
-                        </button>
-                    `;
-                    
-                    newOption.querySelector('.remove-option-btn').addEventListener('click', () => {
-                        if (optionsContainer.children.length > 2) {
-                            optionsContainer.removeChild(newOption);
-                        }
-                    });
-                    
-                    optionsContainer.appendChild(newOption);
-                }
-            });
-            
-            // Post status button
-            document.getElementById('postStatusBtn').addEventListener('click', () => {
-                postStatusFromModal();
-            });
-            
-            // Save draft button - ENHANCED FEATURE
-            document.getElementById('saveDraftBtn').addEventListener('click', () => {
-                saveCurrentAsDraft();
-            });
-            
-            // Close modals
-            document.getElementById('closeCreateStatusModal').addEventListener('click', () => {
-                createStatusModal.classList.remove('active');
-            });
-            
-            document.getElementById('closeHighlightsModal').addEventListener('click', () => {
-                highlightsModal.classList.remove('active');
-            });
-            
-            document.getElementById('closeStatsModal').addEventListener('click', () => {
-                statsModal.classList.remove('active');
-            });
-            
-            // Back button in viewer
-            document.getElementById('backBtn').addEventListener('click', () => {
-                closeStatusViewer();
-            });
-            
-            // Add highlight button - ENHANCED FEATURE
-            document.getElementById('addHighlightBtn')?.addEventListener('click', () => {
-                const highlightName = prompt('Enter highlight name:');
-                if (highlightName) {
-                    // Would need to select a status to add
-                    showNotification('Select a status to add to highlights', 'info');
-                }
-            });
-            
-            // Swipe gestures for mobile - ENHANCED FEATURE
-            setupSwipeGestures();
-            
-            // Window resize
-            window.addEventListener('resize', () => {
-                // Handle responsive adjustments
-            });
-            
-            // Before unload
-            window.addEventListener('beforeunload', () => {
-                saveAllData();
-            });
-            
-            // Network status for offline support - ENHANCED FEATURE
-            window.addEventListener('online', () => {
-                showNotification('Back online - syncing data', 'info');
-                syncOfflineData();
-            });
-            
-            window.addEventListener('offline', () => {
-                showNotification('Working offline', 'info');
-            });
-        }
-        
-        // ENHANCED FEATURE: Swipe Gestures
-        function setupSwipeGestures() {
-            let touchStartX = 0;
-            let touchStartY = 0;
-            let touchEndX = 0;
-            let touchEndY = 0;
-            
-            const viewerContent = document.getElementById('statusViewerContent');
-            if (!viewerContent) return;
-            
-            viewerContent.addEventListener('touchstart', (e) => {
-                touchStartX = e.changedTouches[0].screenX;
-                touchStartY = e.changedTouches[0].screenY;
-            });
-            
-            viewerContent.addEventListener('touchend', (e) => {
-                touchEndX = e.changedTouches[0].screenX;
-                touchEndY = e.changedTouches[0].screenY;
-                handleSwipe();
-            });
-            
-            function handleSwipe() {
-                const diffX = touchEndX - touchStartX;
-                const diffY = touchEndY - touchStartY;
-                
-                // Horizontal swipe (left/right)
-                if (Math.abs(diffX) > Math.abs(diffY)) {
-                    if (diffX > 50) {
-                        // Swipe right - previous status
-                        prevStatus();
-                    } else if (diffX < -50) {
-                        // Swipe left - next status
-                        nextStatus();
-                    }
-                }
-                // Vertical swipe (up/down)
-                else {
-                    if (diffY > 50) {
-                        // Swipe down - show reactions
-                        if (currentViewerStatus) {
-                            const currentStatus = currentViewerStatus.statuses[currentViewerStatus.currentIndex];
-                            showEnhancedReactionPicker(currentStatus.id);
-                        }
-                    }
-                }
-            }
-        }
-        
-        function renderFriendsStatuses() {
-            // Filter to show only friends' statuses
-            const friendsIds = new Set(friendsStatuses.map(status => status.userId));
-            const filteredStatuses = allStatuses.filter(status => friendsIds.has(status.userId));
-            
-            renderFilteredStatuses(filteredStatuses);
-        }
-        
-        function renderCloseFriendsStatuses() {
-            // Filter to show only close friends' statuses
-            const closeFriendsIds = new Set(); // This should come from user's close friends list
-            const filteredStatuses = allStatuses.filter(status => closeFriendsIds.has(status.userId));
-            
-            renderFilteredStatuses(filteredStatuses);
-        }
-        
-        // ENHANCED FEATURE: Render Pinned Statuses
-        function renderPinnedStatuses() {
-            // Show pinned statuses at the top
-            statusListContent.innerHTML = '';
-            
-            if (pinnedStatuses.length === 0) {
-                statusListContent.innerHTML = `
-                    <div class="empty-state" style="text-align: center; padding: 40px 20px; color: var(--text-secondary);">
-                        <i class="fas fa-thumbtack" style="font-size: 48px; margin-bottom: 15px;"></i>
-                        <p>No pinned statuses</p>
-                        <p class="subtext">Pin important statuses to keep them at the top</p>
-                    </div>
-                `;
-                return;
-            }
-            
-            pinnedStatuses.forEach(status => {
-                const statusItem = document.createElement('div');
-                statusItem.className = 'status-item pinned';
-                statusItem.dataset.userId = status.userId;
-                statusItem.dataset.statusId = status.id;
-                
-                const userAvatar = status.user?.photoURL || '';
-                const userName = status.user?.displayName || 'Unknown User';
-                const userInitials = userName.split(' ').map(word => word[0]).join('').toUpperCase().substring(0, 2);
-                
-                statusItem.innerHTML = `
-                    <div class="status-avatar has-status">
-                        ${userAvatar ? '' : `<span style="color: white; font-size: 18px;">${userInitials}</span>`}
-                        <div style="position: absolute; bottom: -2px; right: -2px; background: #ff9800; color: white; border-radius: 50%; width: 20px; height: 20px; display: flex; align-items: center; justify-content: center; font-size: 10px;">
-                            <i class="fas fa-thumbtack"></i>
-                        </div>
-                    </div>
-                    <div class="status-info">
-                        <div class="status-name">
-                            <span>${escapeHtml(userName)} <span style="color: #ff9800; font-size: 12px;"><i class="fas fa-thumbtack"></i> Pinned</span></span>
-                        </div>
-                        <div class="status-time">
-                            <span>${formatTimeAgo(new Date(status.createdAt))}</span>
-                        </div>
-                        <div class="status-preview">
-                            ${getStatusPreviewText(status)}
-                        </div>
-                    </div>
-                `;
-                
-                if (userAvatar) {
-                    statusItem.querySelector('.status-avatar').style.backgroundImage = `url('${escapeHtml(userAvatar)}')`;
-                }
-                
-                statusItem.addEventListener('click', () => {
-                    viewUserStatuses(status.userId, status.user?.displayName || 'User');
-                });
-                
-                statusListContent.appendChild(statusItem);
-            });
-        }
-        
-        function renderMutedStatuses() {
-            // Show muted users' statuses
-            const filteredStatuses = allStatuses.filter(status => mutedUsers.has(status.userId));
-            renderFilteredStatuses(filteredStatuses);
-        }
-        
-        function renderFilteredStatuses(statuses) {
-            statusListContent.innerHTML = '';
-            
-            if (statuses.length === 0) {
-                statusListContent.innerHTML = `
-                    <div class="empty-state" style="text-align: center; padding: 40px 20px; color: var(--text-secondary);">
-                        <i class="fas fa-comment-dots" style="font-size: 48px; margin-bottom: 15px;"></i>
-                        <p>No status updates in this category</p>
-                    </div>
-                `;
-                return;
-            }
-            
-            // Group statuses by user
-            const statusesByUser = {};
-            statuses.forEach(status => {
-                const userId = status.userId;
-                if (!statusesByUser[userId]) {
-                    statusesByUser[userId] = [];
-                }
-                statusesByUser[userId].push(status);
-            });
-            
-            // Render each user's statuses
-            Object.entries(statusesByUser).forEach(([userId, userStatuses]) => {
-                const userStatus = userStatuses[0]; // Get latest status
-                addStatusItem(userStatus, userStatuses.length);
-            });
-        }
-        
-        function showCreateStatusModal() {
-            createStatusModal.classList.add('active');
-            
-            // Reset form
-            document.getElementById('textStatusInput').value = '';
-            document.getElementById('mediaCaption').value = '';
-            document.getElementById('pollQuestion').value = '';
-            document.getElementById('scheduleInput').value = '';
-            
-            // Reset selections
-            document.querySelectorAll('.category-chip').forEach(chip => {
-                chip.classList.remove('selected');
-            });
-            
-            document.querySelectorAll('.music-track').forEach(track => {
-                track.classList.remove('selected');
-            });
-            
-            document.querySelectorAll('.template-item').forEach(item => {
-                item.classList.remove('selected');
-            });
-            
-            window.selectedMusicTrack = null;
-            window.selectedMediaFile = null;
-            window.selectedMediaUrl = null;
-            window.selectedMediaType = null;
-            
-            // Clear media preview
-            const mediaPreview = document.getElementById('mediaPreview');
-            if (mediaPreview) {
-                mediaPreview.innerHTML = '';
-            }
-            
-            // Update preview
-            updateTextStatusPreview();
-        }
-        
-        function handleMediaUpload(file) {
-            const preview = document.getElementById('mediaPreview');
-            if (!preview) return;
-            
-            // Check file type
-            const isImage = file.type.startsWith('image/');
-            const isVideo = file.type.startsWith('video/');
-            
-            if (!isImage && !isVideo) {
-                showNotification('Please upload an image or video', 'error');
-                return;
-            }
-            
-            // Check file size (max 50MB)
-            if (file.size > 50 * 1024 * 1024) {
-                showNotification('File size must be less than 50MB', 'error');
-                return;
-            }
-            
-            // Show upload progress - ENHANCED FEATURE
-            const progressBar = document.getElementById('uploadProgress');
-            progressBar.style.width = '0%';
-            
-            // Create preview
-            const reader = new FileReader();
-            reader.onloadstart = function() {
-                progressBar.style.width = '10%';
-            };
-            
-            reader.onprogress = function(e) {
-                if (e.lengthComputable) {
-                    const percentLoaded = Math.round((e.loaded / e.total) * 100);
-                    progressBar.style.width = percentLoaded + '%';
-                }
-            };
-            
-            reader.onload = function(e) {
-                progressBar.style.width = '100%';
-                setTimeout(() => {
-                    progressBar.style.width = '0%';
-                }, 500);
-                
-                preview.innerHTML = '';
-                
-                if (isImage) {
-                    const img = document.createElement('img');
-                    img.src = e.target.result;
-                    img.style.width = '100%';
-                    img.style.maxHeight = '300px';
-                    img.style.objectFit = 'contain';
-                    preview.appendChild(img);
-                } else if (isVideo) {
-                    const video = document.createElement('video');
-                    video.src = e.target.result;
-                    video.controls = true;
-                    video.style.width = '100%';
-                    video.style.maxHeight = '300px';
-                    preview.appendChild(video);
-                }
-                
-                // Add remove button
-                const removeBtn = document.createElement('button');
-                removeBtn.className = 'media-remove-btn';
-                removeBtn.innerHTML = '<i class="fas fa-times"></i>';
-                removeBtn.addEventListener('click', () => {
-                    preview.innerHTML = '';
-                    window.selectedMediaFile = null;
-                    window.selectedMediaUrl = null;
-                    window.selectedMediaType = null;
-                });
-                preview.appendChild(removeBtn);
-                
-                // Store file for upload
-                window.selectedMediaFile = file;
-                window.selectedMediaUrl = e.target.result;
-                window.selectedMediaType = isImage ? STATUS_TYPES.PHOTO : STATUS_TYPES.VIDEO;
-            };
-            
-            reader.readAsDataURL(file);
-        }
-        
-        function postStatusFromModal() {
-            const activeTab = document.querySelector('.create-status-tab.active');
-            if (!activeTab) return;
-            
-            const tabName = activeTab.dataset.tab;
-            
-            // Get common options
-            const privacy = document.getElementById('privacySelect').value;
-            const duration = document.getElementById('durationSelect').value;
-            const expiresAt = duration === 'permanent' ? null : new Date(Date.now() + DURATION_OPTIONS[duration]).toISOString();
-            
-            const selectedCategories = Array.from(document.querySelectorAll('.category-chip.selected')).map(chip => chip.dataset.category);
-            const category = selectedCategories.length > 0 ? selectedCategories[0] : null;
-            
-            const isSensitive = document.getElementById('sensitiveToggle')?.checked || false;
-            const autoTranslate = document.getElementById('translateToggle')?.checked || false;
-            
-            const scheduleInput = document.getElementById('scheduleInput').value;
-            const scheduleTime = scheduleInput ? new Date(scheduleInput).toISOString() : null;
-            
-            switch (tabName) {
-                case 'text':
-                    const text = document.getElementById('textStatusInput').value.trim();
-                    if (!text) {
-                        showNotification('Please enter status text', 'error');
-                        return;
-                    }
-                    
-                    let backgroundColor = '#0084ff';
-                    if (colorPicker && colorPicker.spectrum) {
-                        backgroundColor = colorPicker.spectrum('get').toHexString();
-                    } else {
-                        backgroundColor = document.getElementById('textStatusColor').value;
-                    }
-                    
-                    const textColor = getContrastColor(backgroundColor);
-                    
-                    const statusData = {
-                        text,
-                        backgroundColor,
-                        textColor,
-                        fontSize: '24px', // Default, could be customizable
-                        category,
-                        privacy,
-                        expiresAt,
-                        isSensitive,
-                        autoTranslate,
-                        type: STATUS_TYPES.TEXT
-                    };
-                    
-                    if (scheduleTime) {
-                        scheduleStatus(statusData, scheduleTime);
-                    } else {
-                        createTextStatus(text, statusData);
-                    }
-                    break;
-                    
-                case 'media':
-                    if (!window.selectedMediaFile) {
-                        showNotification('Please select a photo or video', 'error');
-                        return;
-                    }
-                    
-                    const caption = document.getElementById('mediaCaption').value.trim();
-                    const musicTrack = window.selectedMusicTrack;
-                    
-                    const mediaData = {
-                        caption,
-                        musicTrack,
-                        category,
-                        privacy,
-                        expiresAt,
-                        isSensitive,
-                        type: window.selectedMediaType
-                    };
-                    
-                    if (scheduleTime) {
-                        scheduleStatus(mediaData, scheduleTime);
-                    } else {
-                        // In real implementation, you would upload the file first
-                        // For now, we'll use the data URL
-                        createMediaStatus(window.selectedMediaUrl, window.selectedMediaType, mediaData);
-                    }
-                    break;
-                    
-                case 'options':
-                    // This tab doesn't create status directly
-                    showNotification('Please use Text or Media tab to create status', 'info');
-                    return;
-                    
-                case 'templates':
-                    const selectedTemplate = document.querySelector('.template-item.selected');
-                    if (!selectedTemplate) {
-                        showNotification('Please select a template', 'error');
-                        return;
-                    }
-                    
-                    const templateText = document.getElementById('textStatusInput').value.trim() || 'Your status here';
-                    const template = TEMPLATES.find(t => t.id === selectedTemplate.dataset.templateId);
-                    
-                    const templateData = {
-                        text: templateText,
-                        backgroundImage: template.bg,
-                        textColor: template.textColor,
-                        fontSize: template.fontSize,
-                        emoji: template.emoji,
-                        category,
-                        privacy,
-                        expiresAt,
-                        isSensitive,
-                        autoTranslate,
-                        type: STATUS_TYPES.TEXT
-                    };
-                    
-                    if (scheduleTime) {
-                        scheduleStatus(templateData, scheduleTime);
-                    } else {
-                        createTextStatus(templateText, templateData);
-                    }
-                    break;
-                    
-                case 'drafts':
-                    // This tab doesn't create status directly
-                    showNotification('Select a draft to load', 'info');
-                    return;
-            }
-            
-            // Close modal
-            createStatusModal.classList.remove('active');
-        }
-        
-        // ENHANCED FEATURE: Save Current as Draft
-        function saveCurrentAsDraft() {
-            const activeTab = document.querySelector('.create-status-tab.active');
-            if (!activeTab) return;
-            
-            const tabName = activeTab.dataset.tab;
-            let draftData = {};
-            
-            switch (tabName) {
-                case 'text':
-                    const text = document.getElementById('textStatusInput').value.trim();
-                    if (!text) {
-                        showNotification('No text to save as draft', 'warning');
-                        return;
-                    }
-                    
-                    let backgroundColor = '#0084ff';
-                    if (colorPicker && colorPicker.spectrum) {
-                        backgroundColor = colorPicker.spectrum('get').toHexString();
-                    } else {
-                        backgroundColor = document.getElementById('textStatusColor').value;
-                    }
-                    
-                    draftData = {
-                        type: STATUS_TYPES.TEXT,
-                        text,
-                        backgroundColor,
-                        textColor: getContrastColor(backgroundColor)
-                    };
-                    break;
-                    
-                case 'media':
-                    if (!window.selectedMediaFile) {
-                        showNotification('No media to save as draft', 'warning');
-                        return;
-                    }
-                    
-                    const caption = document.getElementById('mediaCaption').value.trim();
-                    
-                    draftData = {
-                        type: window.selectedMediaType,
-                        mediaUrl: window.selectedMediaUrl,
-                        caption
-                    };
-                    break;
-                    
-                default:
-                    showNotification('Cannot save draft from this tab', 'warning');
-                    return;
-            }
-            
-            // Add other options
-            const privacy = document.getElementById('privacySelect').value;
-            const duration = document.getElementById('durationSelect').value;
-            const expiresAt = duration === 'permanent' ? null : new Date(Date.now() + DURATION_OPTIONS[duration]).toISOString();
-            
-            const selectedCategories = Array.from(document.querySelectorAll('.category-chip.selected')).map(chip => chip.dataset.category);
-            const category = selectedCategories.length > 0 ? selectedCategories[0] : null;
-            
-            draftData.privacy = privacy;
-            draftData.expiresAt = expiresAt;
-            draftData.category = category;
-            
-            saveStatusDraft(draftData);
-            
-            // Update drafts tab
-            loadDraftsIntoModal();
-        }
-        
-        function loadDraftsIntoModal() {
-            const draftsContainer = document.getElementById('draftsContainer');
-            if (!draftsContainer) return;
-            
-            draftsContainer.innerHTML = '';
-            
-            if (statusDrafts.length === 0) {
-                draftsContainer.innerHTML = `
-                    <div style="text-align: center; padding: 40px; color: var(--text-secondary);">
-                        <i class="fas fa-save" style="font-size: 32px; margin-bottom: 10px;"></i>
-                        <p>No drafts saved</p>
-                        <p style="font-size: 14px; margin-top: 10px;">Your drafts will appear here</p>
-                    </div>
-                `;
-                return;
-            }
-            
-            statusDrafts.forEach(draft => {
-                const draftItem = document.createElement('div');
-                draftItem.className = 'draft-item';
-                draftItem.dataset.draftId = draft.id;
-                
-                let previewContent = '';
-                let previewStyle = '';
-                
-                if (draft.type === STATUS_TYPES.TEXT) {
-                    previewContent = draft.text.length > 50 ? draft.text.substring(0, 50) + '...' : draft.text;
-                    previewStyle = `background-color: ${draft.backgroundColor}; color: ${draft.textColor};`;
-                } else if (draft.type === STATUS_TYPES.PHOTO) {
-                    previewContent = '📸 Photo';
-                    previewStyle = 'background-color: #f0f2f5;';
-                } else if (draft.type === STATUS_TYPES.VIDEO) {
-                    previewContent = '🎬 Video';
-                    previewStyle = 'background-color: #f0f2f5;';
-                }
-                
-                draftItem.innerHTML = `
-                    <div class="draft-preview" style="${previewStyle}">
-                        ${previewContent}
-                    </div>
-                    <div class="draft-info">
-                        ${formatTimeAgo(new Date(draft.savedAt))}
-                        ${draft.category ? `<br><small><i class="${CATEGORIES.find(c => c.id === draft.category)?.icon || 'fas fa-tag'}"></i> ${CATEGORIES.find(c => c.id === draft.category)?.name || 'Uncategorized'}</small>` : ''}
-                    </div>
-                `;
-                
-                draftItem.addEventListener('click', () => {
-                    loadDraft(draft.id);
-                    createStatusModal.classList.remove('active');
-                    setTimeout(() => {
-                        showCreateStatusModal();
-                    }, 300);
-                });
-                
-                draftsContainer.appendChild(draftItem);
-            });
-        }
-        
-        // ENHANCED FEATURE: Show Highlights Modal
-        function showHighlightsModal() {
-            const highlightsGrid = document.getElementById('highlightsGrid');
-            if (!highlightsGrid) return;
-            
-            highlightsGrid.innerHTML = '';
-            
-            if (statusHighlights.length === 0) {
-                highlightsGrid.innerHTML = `
-                    <div style="text-align: center; padding: 40px; color: var(--text-secondary); grid-column: 1 / -1;">
-                        <i class="fas fa-star" style="font-size: 48px; margin-bottom: 15px;"></i>
-                        <p>No highlights yet</p>
-                        <p style="font-size: 14px; margin-top: 10px;">Save your favorite statuses to highlights</p>
-                        <button class="action-btn primary" style="margin-top: 20px;" onclick="showNotification('Create a status first, then save it to highlights', 'info')">
-                            <i class="fas fa-plus"></i> Create Your First Highlight
-                        </button>
-                    </div>
-                `;
-            } else {
-                statusHighlights.forEach(highlight => {
-                    const highlightItem = document.createElement('div');
-                    highlightItem.className = 'highlight-item';
-                    
-                    highlightItem.innerHTML = `
-                        <div class="highlight-cover" style="background-image: url('${escapeHtml(highlight.coverUrl || '')}'); background-color: ${highlight.coverUrl ? '' : '#0084ff'};"></div>
-                        <div class="highlight-name">${escapeHtml(highlight.name)}</div>
-                    `;
-                    
-                    highlightItem.addEventListener('click', () => {
-                        // View the highlighted status
-                        const status = myStatuses.find(s => s.id === highlight.statusId);
-                        if (status) {
-                            viewUserStatuses(currentUser.id, userData.displayName || 'My Status');
-                        }
-                        highlightsModal.classList.remove('active');
-                    });
-                    
-                    highlightsGrid.appendChild(highlightItem);
-                });
-            }
-            
-            highlightsModal.classList.add('active');
-        }
-        
-        // ENHANCED FEATURE: Show Stats Modal
-        async function showStatsModal() {
-            // Load stats from backend
-            try {
-                const response = await api('GET', '/api/status/stats');
-                
-                if (response && response.stats) {
-                    const stats = response.stats;
-                    
-                    // Update stats display
-                    document.getElementById('totalViews').textContent = stats.totalViews || 0;
-                    document.getElementById('avgViewTime').textContent = stats.avgViewTime ? Math.round(stats.avgViewTime) + 's' : '0s';
-                    document.getElementById('totalReplies').textContent = stats.totalReplies || 0;
-                    document.getElementById('totalReactions').textContent = stats.totalReactions || 0;
-                    document.getElementById('totalShares').textContent = stats.totalShares || 0;
-                    
-                    // Load recent viewers
-                    const viewersList = document.getElementById('viewersList');
-                    if (viewersList && stats.recentViewers) {
-                        viewersList.innerHTML = '';
-                        
-                        stats.recentViewers.forEach(viewer => {
-                            const viewerItem = document.createElement('div');
-                            viewerItem.className = 'viewer-item';
-                            viewerItem.innerHTML = `
-                                <div class="viewer-avatar" style="background-image: url('${escapeHtml(viewer.avatar || '')}'); background-color: ${viewer.avatar ? '' : '#ccc'};"></div>
-                                <div class="viewer-info">
-                                    <div class="viewer-name">${escapeHtml(viewer.name)}</div>
-                                    <div style="display: flex; justify-content: space-between;">
-                                        <span class="viewer-time">${formatTimeAgo(new Date(viewer.viewedAt))}</span>
-                                        <span class="viewer-duration">${viewer.duration || '0s'}</span>
-                                    </div>
-                                </div>
-                            `;
-                            viewersList.appendChild(viewerItem);
-                        });
-                    }
-                }
-            } catch (error) {
-                console.error('Error loading stats:', error);
-                // Fallback to cached stats
-                loadCachedStats();
-            }
-            
-            statsModal.classList.add('active');
-        }
-        
-        function loadCachedStats() {
-            // Load stats from localStorage
-            const statsData = localStorage.getItem(LOCAL_STORAGE_KEYS.STATUS_STATS);
-            const stats = statsData ? JSON.parse(statsData) : {};
-            
-            // Calculate totals
-            let totalViews = 0;
-            let totalViewDuration = 0;
-            let viewCount = 0;
-            let totalReplies = 0;
-            let totalReactions = 0;
-            let totalShares = 0;
-            
-            Object.values(stats).forEach(stat => {
-                totalViews += stat.views || 0;
-                totalReplies += stat.replies || 0;
-                totalReactions += stat.reactions || 0;
-                totalShares += stat.shares || 0;
-                
-                if (stat.viewDuration && stat.viewDuration.length > 0) {
-                    viewCount += stat.viewDuration.length;
-                    // Calculate average view time (simplified)
-                    totalViewDuration += stat.viewDuration.length * 5; // Assume 5 seconds per view
-                }
-            });
-            
-            // Update stats display
-            document.getElementById('totalViews').textContent = totalViews;
-            document.getElementById('avgViewTime').textContent = viewCount > 0 ? Math.round(totalViewDuration / viewCount) + 's' : '0s';
-            document.getElementById('totalReplies').textContent = totalReplies;
-            document.getElementById('totalReactions').textContent = totalReactions;
-            document.getElementById('totalShares').textContent = totalShares;
-            
-            // Load cached viewers if any
-            const viewersList = document.getElementById('viewersList');
-            if (viewersList) {
-                viewersList.innerHTML = '<div style="text-align: center; padding: 20px; color: var(--text-secondary);">Viewer data will sync when online</div>';
-            }
-        }
-        
-        // ENHANCED FEATURE: Sync Offline Data
-        async function syncOfflineData() {
-            const syncQueue = JSON.parse(localStorage.getItem('knecta_sync_queue') || '[]');
-            if (syncQueue.length === 0) return;
-            
-            showNotification(`Syncing ${syncQueue.length} items...`, 'info');
-            
-            for (let i = 0; i < syncQueue.length; i++) {
-                const item = syncQueue[i];
-                try {
-                    if (item.type === 'status') {
-                        await api('POST', '/api/status', item.data);
-                        // Remove from queue on success
-                        syncQueue.splice(i, 1);
-                        i--;
-                    }
-                } catch (error) {
-                    console.log('Sync failed for item:', item);
-                    item.retryCount = (item.retryCount || 0) + 1;
-                    
-                    // Remove if too many retries
-                    if (item.retryCount > 3) {
-                        syncQueue.splice(i, 1);
-                        i--;
-                    }
-                }
-            }
-            
-            localStorage.setItem('knecta_sync_queue', JSON.stringify(syncQueue));
-            
-            if (syncQueue.length === 0) {
-                showNotification('All data synced successfully', 'success');
-            } else {
-                showNotification(`${syncQueue.length} items failed to sync`, 'warning');
-            }
-        }
-        
-        function saveAllData() {
-            saveToLocalStorage(LOCAL_STORAGE_KEYS.MY_STATUSES, myStatuses);
-            saveToLocalStorage(LOCAL_STORAGE_KEYS.VIEWED_STATUSES, Array.from(viewedStatusIds));
-            saveToLocalStorage(LOCAL_STORAGE_KEYS.MUTED_USERS, Array.from(mutedUsers));
-            saveToLocalStorage(LOCAL_STORAGE_KEYS.PINNED_STATUSES, pinnedStatuses);
-            saveToLocalStorage(LOCAL_STORAGE_KEYS.STATUS_HIGHLIGHTS, statusHighlights);
-            saveToLocalStorage(LOCAL_STORAGE_KEYS.STATUS_DRAFTS, statusDrafts);
-            
-            console.log('All status data saved to localStorage');
-        }
-        
         console.log('Complete status system initialized successfully with all enhanced features working');
-        console.log('Features enabled: Categories, Pinned Statuses, Polls, Drafts, Offline Support, Quick Reactions, View Duration Tracking');
+        console.log('Features enabled: Status Intents, Mood Layer, Action Buttons, Micro Circles, Memory Timeline, Silent Mode, User-Controlled Discovery, Offline Identity, Status as Tool, Daily Streaks, Mood Trends');
     </script>
-    <!-- BACKEND MIGRATION: Using updated api.js and app.js -->
-    <script src="js/api.js"></script>
-    <script src="js/settingsManager.js"></script>
-    <script src="js/app.js"></script>
 </body>
 </html>

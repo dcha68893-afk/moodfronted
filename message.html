@@ -10,7 +10,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
     <title>Chat | Knecta Chat</title>
     
-    <!-- API Helper -->
+    <!-- API Helper - Load FIRST -->
     <script src="../js/api.js"></script>
     
     <!-- Font Awesome -->
@@ -1427,6 +1427,15 @@
             opacity: 0.7;
         }
         
+        .chat-item.archived {
+            background-color: rgba(255, 149, 0, 0.05);
+        }
+        
+        .chat-item.blocked {
+            background-color: rgba(255, 59, 48, 0.05);
+            opacity: 0.7;
+        }
+        
         .chat-item-avatar {
             width: 50px;
             height: 50px;
@@ -2733,9 +2742,9 @@
             try {
                 // Try to get user from API using new app.js functions
                 try {
-                    // Use getCurrentUser from app.js
-                    if (typeof getCurrentUser === 'function') {
-                        const user = await getCurrentUser();
+                    // Use getCurrentUser from app.js - FIXED: Use window.getCurrentUser
+                    if (typeof window.getCurrentUser === 'function') {
+                        const user = await window.getCurrentUser();
                         if (user) {
                             currentUser = user;
                             console.log('User loaded from API:', currentUser.uid);
@@ -2884,7 +2893,7 @@
                     renderContactsList();
                 }
                 
-                // Load from API using new API functions
+                // Load from API using new API functions - FIXED: Use window.api
                 await loadContactsFromAPI();
                 
             } catch (error) {
@@ -2894,8 +2903,13 @@
         
         async function loadContactsFromAPI() {
             try {
-                // Use new API function
-                const response = await api('/api/contacts', 'GET');
+                // Use new API function - FIXED: Use window.api
+                if (typeof window.api !== 'function') {
+                    console.warn('API function not available, using local storage only');
+                    return;
+                }
+                
+                const response = await window.api('/api/contacts', 'GET');
                 if (response && response.contacts) {
                     contacts = response.contacts;
                     localStorage.setItem(LOCAL_STORAGE_KEYS.CONTACTS, JSON.stringify(contacts));
@@ -2983,7 +2997,7 @@
                     renderChatsList();
                 }
                 
-                // Load from API using new API functions
+                // Load from API using new API functions - FIXED: Use window.api
                 await loadChatsFromAPI();
                 
             } catch (error) {
@@ -2993,8 +3007,13 @@
         
         async function loadChatsFromAPI() {
             try {
-                // Use new API function
-                const response = await api('/api/chats', 'GET');
+                // Use new API function - FIXED: Use window.api
+                if (typeof window.api !== 'function') {
+                    console.warn('API function not available, using local storage only');
+                    return;
+                }
+                
+                const response = await window.api('/api/chats', 'GET');
                 if (response && response.chats) {
                     chats = response.chats;
                     localStorage.setItem(LOCAL_STORAGE_KEYS.CHATS, JSON.stringify(chats));
@@ -3014,7 +3033,7 @@
             
             switch (currentCategory) {
                 case 'unread':
-                    filteredChats = chats.filter(chat => chat.unreadCount > 0 && !chat.archived && !chat.blocked);
+                    filteredChats = chats.filter(chat => chat.unreadCount > 0 && !chat.archived && !chat.blocked && chat.type !== 'note');
                     break;
                 case 'archived':
                     filteredChats = chats.filter(chat => chat.archived);
@@ -3336,9 +3355,11 @@
                     renderMessages();
                 }
                 
-                // Call API to clear chat
+                // Call API to clear chat - FIXED: Use window.api
                 try {
-                    await api(`/api/chats/${chatId}/clear`, 'POST');
+                    if (typeof window.api === 'function') {
+                        await window.api(`/api/chats/${chatId}/clear`, 'POST');
+                    }
                 } catch (error) {
                     // Silent fail for offline mode
                 }
@@ -3422,14 +3443,18 @@
                     return;
                 }
                 
-                // Get friend info from API
+                // Get friend info from API - FIXED: Use window.api
                 try {
-                    const response = await api(`/api/users/${friendId}`, 'GET');
+                    if (typeof window.api !== 'function') {
+                        throw new Error('API not available');
+                    }
+                    
+                    const response = await window.api(`/api/users/${friendId}`, 'GET');
                     if (response && response.user) {
                         const friendData = response.user;
                         
-                        // Create chat via API
-                        const chatResponse = await api('/api/chats/create', 'POST', {
+                        // Create chat via API - FIXED: Use window.api
+                        const chatResponse = await window.api('/api/chats/create', 'POST', {
                             friendId: friendId
                         });
                         
@@ -3480,7 +3505,7 @@
                     renderMessages();
                 }
                 
-                // Load from API (silent background sync)
+                // Load from API (silent background sync) - FIXED: Use window.api
                 await loadMessagesFromAPI();
                 
                 // Scroll to bottom
@@ -3507,8 +3532,13 @@
             if (!currentChat) return;
             
             try {
-                // Use new API function
-                const response = await api(`/api/chats/${currentChat.id}/messages`, 'GET');
+                // Use new API function - FIXED: Use window.api
+                if (typeof window.api !== 'function') {
+                    console.warn('API function not available, using local storage only');
+                    return;
+                }
+                
+                const response = await window.api(`/api/chats/${currentChat.id}/messages`, 'GET');
                 if (response && response.messages) {
                     messages = response.messages;
                     
@@ -4064,7 +4094,7 @@
                 updateChatLastMessage(content, type);
                 
                 if (isOnline) {
-                    // Send to API
+                    // Send to API - FIXED: Use window.api
                     const savedMessage = await sendMessageToAPI(messageData);
                     
                     // Update message with real ID and status
@@ -4206,8 +4236,13 @@
             if (!currentChat) return null;
             
             try {
-                // Use new API function from api.js
-                const response = await api('/api/messages/send', 'POST', {
+                // Use new API function from api.js - FIXED: Use window.api
+                if (typeof window.api !== 'function') {
+                    console.warn('API function not available, storing locally only');
+                    return messageData;
+                }
+                
+                const response = await window.api('/api/messages/send', 'POST', {
                     chatId: currentChat.id,
                     content: messageData.content,
                     type: messageData.type,
@@ -4248,7 +4283,11 @@
             
             for (const chatId of chatIds) {
                 try {
-                    const response = await api('/api/messages/send', 'POST', {
+                    if (typeof window.api !== 'function') {
+                        throw new Error('API not available');
+                    }
+                    
+                    const response = await window.api('/api/messages/send', 'POST', {
                         chatId: chatId,
                         content: content,
                         type: 'text',
@@ -4283,10 +4322,12 @@
                 // Save to localStorage
                 localStorage.setItem(`${LOCAL_STORAGE_KEYS.MESSAGES}${currentChat.id}`, JSON.stringify(messages));
                 
-                // Update API
-                await api(`/api/messages/${messageId}`, 'PUT', {
-                    content: newContent
-                });
+                // Update API - FIXED: Use window.api
+                if (typeof window.api === 'function') {
+                    await window.api(`/api/messages/${messageId}`, 'PUT', {
+                        content: newContent
+                    });
+                }
                 
                 // Re-render messages
                 editingMessageId = null;
@@ -4321,8 +4362,10 @@
                     // Delete for everyone
                     messages[messageIndex].deleted = true;
                     
-                    // Call API to delete message
-                    await api(`/api/messages/${messageId}`, 'DELETE');
+                    // Call API to delete message - FIXED: Use window.api
+                    if (typeof window.api === 'function') {
+                        await window.api(`/api/messages/${messageId}`, 'DELETE');
+                    }
                     
                     showNotification('Message deleted for everyone', 'success');
                 } else {
@@ -4365,8 +4408,10 @@
                     renderChatsList();
                 }
                 
-                // Call API to mark as read
-                await api(`/api/chats/${chatId}/read`, 'POST');
+                // Call API to mark as read - FIXED: Use window.api
+                if (typeof window.api === 'function') {
+                    await window.api(`/api/chats/${chatId}/read`, 'POST');
+                }
                 
             } catch (error) {
                 console.error('Error marking chat as read:', error);
@@ -4595,8 +4640,10 @@ Message ID: ${message.id.substring(0, 8)}...
                 reports.push(reportData);
                 localStorage.setItem('knecta_reports', JSON.stringify(reports));
                 
-                // Send to API
-                api('/api/reports', 'POST', reportData);
+                // Send to API - FIXED: Use window.api
+                if (typeof window.api === 'function') {
+                    window.api('/api/reports', 'POST', reportData);
+                }
                 
                 reportModal.classList.remove('active');
                 showNotification('Report submitted. Thank you for helping keep our community safe.', 'success');
@@ -4642,9 +4689,9 @@ Message ID: ${message.id.substring(0, 8)}...
                 // Save locally
                 localStorage.setItem(`${LOCAL_STORAGE_KEYS.MESSAGES}${currentChat.id}`, JSON.stringify(messages));
                 
-                // Update API (silently if requested)
-                if (!silent) {
-                    await api(`/api/messages/${messageId}/reactions`, 'POST', {
+                // Update API (silently if requested) - FIXED: Use window.api
+                if (!silent && typeof window.api === 'function') {
+                    await window.api(`/api/messages/${messageId}/reactions`, 'POST', {
                         emoji: emoji,
                         action: userIndex > -1 ? 'remove' : 'add'
                     });
@@ -5188,10 +5235,12 @@ Message ID: ${message.id.substring(0, 8)}...
                 // Save locally
                 localStorage.setItem(`${LOCAL_STORAGE_KEYS.MESSAGES}${currentChat.id}`, JSON.stringify(messages));
                 
-                // Update API
-                await api(`/api/messages/${messageId}/vote`, 'POST', {
-                    optionIndex: optionIndex
-                });
+                // Update API - FIXED: Use window.api
+                if (typeof window.api === 'function') {
+                    await window.api(`/api/messages/${messageId}/vote`, 'POST', {
+                        optionIndex: optionIndex
+                    });
+                }
                 
                 // Re-render messages
                 renderMessages();
@@ -6105,9 +6154,10 @@ Message ID: ${message.id.substring(0, 8)}...
         
         console.log('Complete chat system with new API backend initialized successfully');
     </script>
-    <script src="js/config.js"></script>
-    <script src="js/api.js"></script>
-    <script src="js/settingsManager.js"></script>
-    <script src="js/app.js"></script>
+    
+    <!-- Additional scripts - Load AFTER the main script -->
+    <script src="../js/settingsManager.js"></script>
+    <script src="../js/config.js"></script>
+    
 </body>
 </html>

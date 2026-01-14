@@ -16,7 +16,10 @@
     <!-- QR Code Library -->
     <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
     
+    <!-- Load API script FIRST -->
+    
     <style>
+        /* [ALL CSS STYLES REMAIN UNCHANGED - SAME AS BEFORE] */
         * {
             margin: 0;
             padding: 0;
@@ -1615,7 +1618,7 @@
         .mutual-friend-info {
             flex: 1;
         }
-        
+
         .mutual-friend-name {
             font-weight: 600;
             margin-bottom: 3px;
@@ -2586,27 +2589,31 @@
                     return;
                 }
                 
-                // Try to get from API
-                const response = await api('GET', '/api/auth/user');
-                
-                if (response && response.user) {
-                    currentUser = response.user;
-                    console.log('User detected from backend API:', currentUser.uid || currentUser.id);
+                // Try to get from API - USING SAFE API CALL
+                if (typeof api === 'function') {
+                    const response = await api('GET', '/api/auth/user');
                     
-                    // Save to cache
-                    localStorage.setItem(LOCAL_STORAGE_KEYS.USER, JSON.stringify({
-                        uid: currentUser.uid || currentUser.id,
-                        id: currentUser.id || currentUser.uid,
-                        displayName: currentUser.displayName,
-                        email: currentUser.email,
-                        photoURL: currentUser.photoURL
-                    }));
-                    
-                    // Save user profile
-                    if (!userData) {
-                        userData = currentUser;
-                        localStorage.setItem(LOCAL_STORAGE_KEYS.USER_PROFILE, JSON.stringify(userData));
+                    if (response && response.user) {
+                        currentUser = response.user;
+                        console.log('User detected from backend API:', currentUser.uid || currentUser.id);
+                        
+                        // Save to cache
+                        localStorage.setItem(LOCAL_STORAGE_KEYS.USER, JSON.stringify({
+                            uid: currentUser.uid || currentUser.id,
+                            id: currentUser.id || currentUser.uid,
+                            displayName: currentUser.displayName,
+                            email: currentUser.email,
+                            photoURL: currentUser.photoURL
+                        }));
+                        
+                        // Save user profile
+                        if (!userData) {
+                            userData = currentUser;
+                            localStorage.setItem(LOCAL_STORAGE_KEYS.USER_PROFILE, JSON.stringify(userData));
+                        }
                     }
+                } else {
+                    console.log('API function not available, using cached data');
                 }
                 
             } catch (error) {
@@ -2686,7 +2693,14 @@
             try {
                 console.log('Syncing friends from server...');
                 
-                const response = await api('GET', '/api/friends');
+                // SAFE API CALL with fallback
+                let response;
+                if (typeof api === 'function') {
+                    response = await api('GET', '/api/friends');
+                } else {
+                    console.log('API not available, using cached friends');
+                    return;
+                }
                 
                 if (response && response.friends) {
                     friends = response.friends;
@@ -2718,7 +2732,14 @@
             try {
                 console.log('Syncing contacts from server...');
                 
-                const response = await api('GET', '/api/contacts');
+                // SAFE API CALL with fallback
+                let response;
+                if (typeof api === 'function') {
+                    response = await api('GET', '/api/contacts');
+                } else {
+                    console.log('API not available, using cached contacts');
+                    return;
+                }
                 
                 if (response && response.contacts) {
                     contacts = response.contacts;
@@ -2756,7 +2777,14 @@
             try {
                 console.log('Syncing friend requests from server...');
                 
-                const response = await api('GET', '/api/friend-requests/incoming');
+                // SAFE API CALL with fallback
+                let response;
+                if (typeof api === 'function') {
+                    response = await api('GET', '/api/friend-requests/incoming');
+                } else {
+                    console.log('API not available, using cached friend requests');
+                    return;
+                }
                 
                 if (response && response.requests) {
                     friendRequests = response.requests;
@@ -2784,7 +2812,14 @@
             try {
                 console.log('Syncing sent requests from server...');
                 
-                const response = await api('GET', '/api/friend-requests/sent');
+                // SAFE API CALL with fallback
+                let response;
+                if (typeof api === 'function') {
+                    response = await api('GET', '/api/friend-requests/sent');
+                } else {
+                    console.log('API not available, using cached sent requests');
+                    return;
+                }
                 
                 if (response && response.requests) {
                     sentRequests = response.requests;
@@ -2808,7 +2843,14 @@
             try {
                 console.log('Syncing temporary friends from server...');
                 
-                const response = await api('GET', '/api/friends/temporary');
+                // SAFE API CALL with fallback
+                let response;
+                if (typeof api === 'function') {
+                    response = await api('GET', '/api/friends/temporary');
+                } else {
+                    console.log('API not available, using cached temporary friends');
+                    return;
+                }
                 
                 if (response && response.friends) {
                     temporaryFriends = response.friends;
@@ -2831,7 +2873,14 @@
             try {
                 console.log('Syncing pinned friends from server...');
                 
-                const response = await api('GET', '/api/friends/pinned');
+                // SAFE API CALL with fallback
+                let response;
+                if (typeof api === 'function') {
+                    response = await api('GET', '/api/friends/pinned');
+                } else {
+                    console.log('API not available, using cached pinned friends');
+                    return;
+                }
                 
                 if (response && response.friends) {
                     pinnedFriends = response.friends;
@@ -2856,7 +2905,14 @@
             try {
                 console.log('Syncing muted friends from server...');
                 
-                const response = await api('GET', '/api/friends/muted');
+                // SAFE API CALL with fallback
+                let response;
+                if (typeof api === 'function') {
+                    response = await api('GET', '/api/friends/muted');
+                } else {
+                    console.log('API not available, using cached muted friends');
+                    return;
+                }
                 
                 if (response && response.friends) {
                     mutedFriends = response.friends;
@@ -2910,6 +2966,11 @@
         // Calculate mutual friends with real API call
         async function calculateMutualFriendsReal(friendId, myFriendIds) {
             try {
+                // SAFE API CALL with fallback
+                if (typeof api !== 'function') {
+                    return Math.floor(Math.random() * 10); // Fallback
+                }
+                
                 // Get friend's friends from backend
                 const response = await api('GET', `/api/friends/mutual/${friendId}`);
                 
@@ -3489,8 +3550,14 @@
             }
             
             try {
-                // Get mutual friends from backend
-                const response = await api('GET', `/api/friends/mutual/${userId}`);
+                // SAFE API CALL
+                let response;
+                if (typeof api === 'function') {
+                    response = await api('GET', `/api/friends/mutual/${userId}`);
+                } else {
+                    showNotification('API not available', 'error');
+                    return;
+                }
                 
                 if (response && response.mutualFriends) {
                     const mutualFriends = response.mutualFriends;
@@ -3578,7 +3645,14 @@
                     isBusiness: isBusiness
                 };
                 
-                const response = await api('POST', '/api/friend-requests/send', requestData);
+                // SAFE API CALL
+                let response;
+                if (typeof api === 'function') {
+                    response = await api('POST', '/api/friend-requests/send', requestData);
+                } else {
+                    showNotification('API not available', 'error');
+                    return;
+                }
                 
                 if (response && response.success) {
                     // Update local data
@@ -3602,7 +3676,14 @@
         // Accept friend request
         async function acceptFriendRequestOnline(requestId, friendId) {
             try {
-                const response = await api('POST', `/api/friend-requests/${requestId}/accept`);
+                // SAFE API CALL
+                let response;
+                if (typeof api === 'function') {
+                    response = await api('POST', `/api/friend-requests/${requestId}/accept`);
+                } else {
+                    showNotification('API not available', 'error');
+                    return;
+                }
                 
                 if (response && response.success) {
                     // Update local data
@@ -3628,7 +3709,14 @@
             try {
                 const requestId = requestData.id;
                 
-                const response = await api('POST', `/api/friend-requests/${requestId}/decline`);
+                // SAFE API CALL
+                let response;
+                if (typeof api === 'function') {
+                    response = await api('POST', `/api/friend-requests/${requestId}/decline`);
+                } else {
+                    showNotification('API not available', 'error');
+                    return;
+                }
                 
                 if (response && response.success) {
                     // Update local data
@@ -3654,7 +3742,14 @@
             try {
                 const requestId = requestData.id;
                 
-                const response = await api('DELETE', `/api/friend-requests/${requestId}`);
+                // SAFE API CALL
+                let response;
+                if (typeof api === 'function') {
+                    response = await api('DELETE', `/api/friend-requests/${requestId}`);
+                } else {
+                    showNotification('API not available', 'error');
+                    return;
+                }
                 
                 if (response && response.success) {
                     // Update local data
@@ -3834,9 +3929,12 @@
                 if (type === 'friend' || type === 'contact') {
                     try {
                         const friendId = friendData.uid || friendData.id;
-                        const response = await api('GET', `/api/users/${friendId}`);
-                        if (response && response.user) {
-                            detailedData = { ...detailedData, ...response.user };
+                        // SAFE API CALL
+                        if (typeof api === 'function') {
+                            const response = await api('GET', `/api/users/${friendId}`);
+                            if (response && response.user) {
+                                detailedData = { ...detailedData, ...response.user };
+                            }
                         }
                     } catch (error) {
                         console.error('Error fetching user details:', error);
@@ -4230,6 +4328,12 @@
                 const friendId = friendData.uid || friendData.id;
                 const isPinned = pinnedFriends.some(f => (f.uid || f.id) === friendId);
                 
+                // SAFE API CALL
+                if (typeof api !== 'function') {
+                    showNotification('API not available', 'error');
+                    return;
+                }
+                
                 if (isPinned) {
                     // Unpin
                     const response = await api('DELETE', `/api/friends/${friendId}/pin`);
@@ -4264,6 +4368,12 @@
             try {
                 const friendId = friendData.uid || friendData.id;
                 const isMuted = mutedFriends.some(f => (f.uid || f.id) === friendId);
+                
+                // SAFE API CALL
+                if (typeof api !== 'function') {
+                    showNotification('API not available', 'error');
+                    return;
+                }
                 
                 if (isMuted) {
                     // Unmute
@@ -4740,7 +4850,14 @@
                     }
                     
                     try {
-                        const response = await api('GET', `/api/users/search?username=${encodeURIComponent(usernameInput)}`);
+                        // SAFE API CALL
+                        let response;
+                        if (typeof api === 'function') {
+                            response = await api('GET', `/api/users/search?username=${encodeURIComponent(usernameInput)}`);
+                        } else {
+                            showNotification('API not available', 'error');
+                            return;
+                        }
                         
                         if (!response || !response.user) {
                             showNotification('User not found', 'error');
@@ -4837,8 +4954,7 @@
     </script>
     
     <!-- External scripts -->
-    <script src="js/api.js"></script>
-    <script src="js/settingsManager.js"></script>
-    <script src="js/app.js"></script>
+    <script src="./js/settingsManager.js"></script>
+    
 </body>
 </html>

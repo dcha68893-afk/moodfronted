@@ -20,18 +20,17 @@ const APP_SHELL_ASSETS = [
   '/settings.html',
   
   // CSS files (assuming these exist locally)
-  '/css/app.css',
+  '/layout.css',
   '/css/chat.css',
   '/css/components.css',
   '/css/theme.css',
+  '/css/group.css',
   
   // JavaScript files (assuming these exist locally)
   '/js/app.js',
   '/js/chat.js',
   '/js/api.js',
-  '/js/ui.js',
-  '/js/session.js',
-  '/js/notifications.js',
+  
   
   // Manifest and icons
   '/manifest.json',
@@ -434,14 +433,14 @@ async function handleApiRequest(request) {
       return response;
     }
     
-    // Return offline response
+    // Return offline response - don't break UI with HTTP errors
     return new Response(JSON.stringify({
       status: 'offline',
       message: 'You are offline and no cached data is available',
       data: [],
       cached: true
     }), {
-      status: 503,
+      status: 200, // Return 200 instead of 503 to prevent UI errors
       headers: {
         'Content-Type': 'application/json',
         'X-Cache': 'MISS',
@@ -451,7 +450,7 @@ async function handleApiRequest(request) {
   }
 }
 
-// Cache-First strategy for static assets
+// Cache-First strategy for static assets with versioning to prevent repeated requests
 async function handleStaticAsset(request) {
   // NEVER cache assets from never-cache paths
   if (shouldNeverCache(request.url)) {
@@ -469,22 +468,100 @@ async function handleStaticAsset(request) {
   const cachedResponse = await cache.match(request);
   
   if (cachedResponse) {
-    // Update cache in background
-    fetch(request)
-      .then(async networkResponse => {
-        if (networkResponse.ok && !shouldNeverCache(request.url) && !url.pathname.startsWith('/auth/')) {
-          await cache.put(request, networkResponse.clone());
-        }
-      })
-      .catch(() => {
-        // Silent fail - we have cached version
-      });
+    // Return cached response immediately for better performance
+    // Background update only for non-critical assets
+    if (shouldUpdateInBackground(request)) {
+      updateCacheInBackground(request, cache);
+    }
     
     return cachedResponse;
   }
   
   // If not in cache, fetch from network
-  return fetch(request);
+  try {
+    const networkResponse = await fetch(request);
+    
+    // Cache successful responses
+    if (networkResponse.ok && !shouldNeverCache(request.url) && !url.pathname.startsWith('/auth/')) {
+      await cache.put(request, networkResponse.clone());
+    }
+    
+    return networkResponse;
+  } catch (error) {
+    // If fetch fails and it's a critical asset, return a fallback
+    if (isCriticalAsset(request)) {
+      return getAssetFallback(request);
+    }
+    
+    throw error;
+  }
+}
+
+// Helper: Determine if asset should be updated in background
+function shouldUpdateInBackground(request) {
+  const url = new URL(request.url);
+  const path = url.pathname;
+  
+  // Don't background update very frequently
+  const infrequentUpdates = [
+    '.js',
+    '.css',
+    '.woff2',
+    '.woff',
+    '.ttf'
+  ];
+  
+  return infrequentUpdates.some(ext => path.endsWith(ext));
+}
+
+// Helper: Update cache in background
+async function updateCacheInBackground(request, cache) {
+  try {
+    const networkResponse = await fetch(request);
+    if (networkResponse.ok && !shouldNeverCache(request.url)) {
+      await cache.put(request, networkResponse.clone());
+      console.log('[Service Worker] Background cache updated:', request.url);
+    }
+  } catch (error) {
+    // Silent fail - we already have cached version
+  }
+}
+
+// Helper: Check if asset is critical for UI
+function isCriticalAsset(request) {
+  const url = new URL(request.url);
+  const criticalAssets = [
+    '/js/app.js',
+    '/css/app.css',
+    '/css/theme.css'
+  ];
+  
+  return criticalAssets.includes(url.pathname);
+}
+
+// Helper: Get fallback for critical assets
+function getAssetFallback(request) {
+  const url = new URL(request.url);
+  
+  if (url.pathname.endsWith('.js')) {
+    return new Response('console.log("Asset loaded from fallback");', {
+      status: 200,
+      headers: { 'Content-Type': 'application/javascript' }
+    });
+  }
+  
+  if (url.pathname.endsWith('.css')) {
+    return new Response('/* Fallback CSS */', {
+      status: 200,
+      headers: { 'Content-Type': 'text/css' }
+    });
+  }
+  
+  // Default fallback
+  return new Response('', {
+    status: 404,
+    headers: { 'Content-Type': 'text/plain' }
+  });
 }
 
 // Helper: Get offline HTML response
@@ -500,11 +577,22 @@ function getOfflineHtmlResponse(message) {
           body { font-family: Arial, sans-serif; text-align: center; padding: 50px; }
           h1 { color: #666; }
           p { color: #999; }
+          .retry-button { 
+            background: #4CAF50; 
+            color: white; 
+            border: none; 
+            padding: 10px 20px; 
+            margin: 10px; 
+            cursor: pointer;
+            border-radius: 5px;
+          }
         </style>
       </head>
       <body>
         <h1>Offline</h1>
         <p>${message}</p>
+        <button class="retry-button" onclick="window.location.reload()">Retry</button>
+        <button class="retry-button" onclick="window.history.back()">Go Back</button>
       </body>
     </html>`,
     { 
