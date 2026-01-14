@@ -16,7 +16,7 @@ const APP_SHELL_ASSETS = [
   '/friend.html',
   '/group.html',
   '/calls.html',
-  '/tools.html',
+  '/Tools.html',
   '/settings.html',
   
   // CSS files (assuming these exist locally)
