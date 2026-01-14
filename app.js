@@ -6,7 +6,6 @@
 // FIXED: getDeviceId infinite recursion, auto-login, UI visibility, API error handling
 // ENHANCED: Login/register/forget password forms work with window.api, show UI errors, auto-login fixed
 // ENHANCED: Proper api.js coordination with retry mechanism and real online detection
-// ENHANCED: Login/register/autologin fully integrated with api.js
 
 // ============================================================================
 // CONFIGURATION
@@ -2589,18 +2588,13 @@ function setupGlobalAuthAccess() {
       window.showLoginLoading(true);
       
       try {
-        // UPDATED: Use api.js login endpoint properly
         const response = await API_COORDINATION.safeApiCall('/auth/login', {
           method: 'POST',
-          headers: {
-            'Content-Type': 'application/json'
-          },
           body: JSON.stringify({ email, password })
         });
         
         window.showLoginLoading(false);
         
-        // UPDATED: Handle api.js response structure
         if (response && response.success && response.data && response.data.token) {
           // Store JWT token
           JWT_VALIDATION.storeToken(response.data.token);
@@ -2639,13 +2633,12 @@ function setupGlobalAuthAccess() {
             message: 'Login successful'
           });
         } else {
-          // Show error message from api.js response
-          const errorMsg = response?.message || response?.error || 'Login failed. Please check your credentials.';
-          window.showToast(errorMsg, 'error');
+          // Show error message
+          window.showToast(response?.message || 'Login failed. Please check your credentials.', 'error');
           
           resolve({
             success: false,
-            message: errorMsg
+            message: response?.message || 'Login failed'
           });
         }
       } catch (error) {
@@ -2771,12 +2764,8 @@ function setupGlobalAuthAccess() {
       window.showRegisterLoading(true);
       
       try {
-        // UPDATED: Use api.js register endpoint properly
         const response = await API_COORDINATION.safeApiCall('/auth/register', {
           method: 'POST',
-          headers: {
-            'Content-Type': 'application/json'
-          },
           body: JSON.stringify({ 
             email, 
             password, 
@@ -2786,7 +2775,6 @@ function setupGlobalAuthAccess() {
         
         window.showRegisterLoading(false);
         
-        // UPDATED: Handle api.js response structure
         if (response && response.success && response.data && response.data.token) {
           // Store JWT token
           JWT_VALIDATION.storeToken(response.data.token);
@@ -2825,13 +2813,12 @@ function setupGlobalAuthAccess() {
             message: 'Registration successful'
           });
         } else {
-          // Show error message from api.js response
-          const errorMsg = response?.message || response?.error || 'Registration failed. Please try again.';
-          window.showToast(errorMsg, 'error');
+          // Show error message
+          window.showToast(response?.message || 'Registration failed. Please try again.', 'error');
           
           resolve({
             success: false,
-            message: errorMsg
+            message: response?.message || 'Registration failed'
           });
         }
       } catch (error) {
@@ -5452,14 +5439,9 @@ window.handleLogin = async function(event) {
     return;
   }
   
-  // Check if we're online and api.js is available
+  // Check if we're online
   if (!isOnline) {
     window.showToast('Cannot login while offline. Please check your internet connection.', 'error');
-    return;
-  }
-  
-  if (!API_COORDINATION.isApiAvailable()) {
-    window.showToast('Login service not available. Please try again later.', 'error');
     return;
   }
   
@@ -5467,7 +5449,6 @@ window.handleLogin = async function(event) {
   window.showLoginLoading(true);
   
   try {
-    // UPDATED: Use the enhanced login function that calls api.js
     const result = await window.login(email, password);
     
     if (result.success) {
@@ -5487,8 +5468,7 @@ window.handleLogin = async function(event) {
         window.location.href = 'chat.html';
       }, 1000);
     } else {
-      // Error message already shown by login function
-      console.log('Login failed:', result.message);
+      window.showToast(result.message || 'Login failed. Please try again.', 'error');
     }
   } catch (error) {
     console.error('Login error:', error);
@@ -5528,14 +5508,9 @@ window.handleRegister = async function(event) {
     return;
   }
   
-  // Check if we're online and api.js is available
+  // Check if we're online
   if (!isOnline) {
     window.showToast('Cannot register while offline. Please check your internet connection.', 'error');
-    return;
-  }
-  
-  if (!API_COORDINATION.isApiAvailable()) {
-    window.showToast('Registration service not available. Please try again later.', 'error');
     return;
   }
   
@@ -5543,7 +5518,6 @@ window.handleRegister = async function(event) {
   window.showRegisterLoading(true);
   
   try {
-    // UPDATED: Use the enhanced register function that calls api.js
     const result = await window.register(email, password, displayName);
     
     if (result.success) {
@@ -5562,8 +5536,7 @@ window.handleRegister = async function(event) {
         setTimeout(() => window.showLoginForm(), 2000);
       }
     } else {
-      // Error message already shown by register function
-      console.log('Registration failed:', result.message);
+      window.showToast(result.message || 'Registration failed. Please try again.', 'error');
     }
   } catch (error) {
     console.error('Registration error:', error);
@@ -5603,19 +5576,14 @@ window.handleResetPassword = async function(event) {
     if (API_COORDINATION.isApiAvailable()) {
       const response = await API_COORDINATION.safeApiCall('/auth/reset-password', {
         method: 'POST',
-        headers: {
-          'Content-Type': 'application/json'
-        },
         body: JSON.stringify({ email })
       });
       
-      // UPDATED: Handle api.js response structure
       if (response && response.success) {
         window.showToast('Password reset link sent to your email', 'success');
         setTimeout(() => window.showLoginForm(), 3000);
       } else {
-        const errorMsg = response?.message || response?.error || 'Failed to send reset link';
-        window.showToast(errorMsg, 'error');
+        window.showToast(response?.message || 'Failed to send reset link', 'error');
       }
     } else {
       // Fallback to simulated success
@@ -5786,7 +5754,7 @@ function isValidEmail(email) {
 }
 
 // ============================================================================
-// AUTO-LOGIN FUNCTIONALITY - ENHANCED WITH API.JS INTEGRATION
+// AUTO-LOGIN FUNCTIONALITY - FIXED
 // ============================================================================
 
 window.checkAutoLogin = function() {
@@ -5794,24 +5762,13 @@ window.checkAutoLogin = function() {
   
   // Check if we have a valid JWT token
   if (JWT_VALIDATION.hasToken()) {
-    console.log('JWT token found, checking if backend is reachable...');
+    console.log('JWT token found, checking if valid...');
     
-    // Only attempt auto-login if backend is reachable
-    if (!isOnline) {
-      console.log('Auto-login: Skipping - offline');
-      return false;
-    }
-    
-    if (!API_COORDINATION.isApiAvailable()) {
-      console.log('Auto-login: Skipping - api.js not available');
-      return false;
-    }
-    
-    // Try to validate the token with backend
+    // Try to validate the token without blocking UI
     JWT_VALIDATION.validateToken()
       .then(validation => {
         if (validation.valid) {
-          console.log('Auto-login: Valid JWT token confirmed with backend');
+          console.log('Auto-login: Valid JWT token found');
           
           // Check if we're on the login page
           if (window.location.pathname.endsWith('index.html') || window.location.pathname.endsWith('/')) {
@@ -5820,42 +5777,23 @@ window.checkAutoLogin = function() {
             // Show a loading message
             window.showToast('Auto-logging in...', 'info');
             
-            // Create user from validated token
-            const validatedUser = {
-              uid: validation.user.id || validation.user._id || validation.user.sub,
-              email: validation.user.email || 'user@example.com',
-              displayName: validation.user.name || validation.user.username || 'User',
-              photoURL: validation.user.avatar || `https://ui-avatars.com/api/?name=User&background=8b5cf6&color=fff`,
-              emailVerified: validation.user.emailVerified || false,
-              isOffline: false,
-              providerId: 'api',
-              refreshToken: JWT_VALIDATION.getToken(),
-              getIdToken: () => Promise.resolve(JWT_VALIDATION.getToken()),
-              ...validation.user
-            };
-            
-            // Set user and redirect
-            window.currentUser = validatedUser;
-            authStateRestored = true;
-            updateGlobalAuthState(validatedUser);
-            
+            // Redirect to chat page after a short delay
             setTimeout(() => {
               window.location.href = 'chat.html';
             }, 1000);
           }
         } else {
-          console.log('Auto-login: Invalid token confirmed with backend, staying on login page');
-          // Token is invalid, clear it
-          JWT_VALIDATION.clearToken();
+          console.log('Auto-login: Invalid token, staying on login page');
+          // Token is invalid, stay on login page
         }
       })
       .catch(error => {
-        console.log('Auto-login: Token validation error, staying on login page:', error);
+        console.log('Auto-login: Token validation error, staying on login page');
       });
   } else {
     console.log('Auto-login: No JWT token found');
     
-    // Check for device session as fallback (but don't auto-login with device session)
+    // Check for device session as fallback
     const storedSession = localStorage.getItem('moodchat_device_session');
     if (storedSession) {
       try {
@@ -5863,8 +5801,36 @@ window.checkAutoLogin = function() {
         const currentDeviceId = getDeviceId();
         
         if (session.userId && session.deviceId === currentDeviceId && !session.loggedOut) {
-          console.log('Auto-login: Valid device session found, but requiring manual login');
-          // Device session exists but we don't auto-login with it for security
+          console.log('Auto-login: Valid device session found');
+          
+          if (window.location.pathname.endsWith('index.html') || window.location.pathname.endsWith('/')) {
+            console.log('Auto-login: Redirecting to chat page with device session...');
+            
+            // Show a loading message
+            window.showToast('Auto-logging in with device session...', 'info');
+            
+            // Create user from device session
+            const deviceUser = {
+              uid: session.userId,
+              email: session.email || null,
+              displayName: session.displayName || null,
+              photoURL: session.photoURL || null,
+              emailVerified: session.emailVerified || false,
+              isOffline: true,
+              providerId: 'device',
+              refreshToken: 'device-token',
+              getIdToken: () => Promise.resolve('device-token')
+            };
+            
+            // Set user and redirect
+            window.currentUser = deviceUser;
+            authStateRestored = true;
+            updateGlobalAuthState(deviceUser);
+            
+            setTimeout(() => {
+              window.location.href = 'chat.html';
+            }, 1000);
+          }
         }
       } catch (error) {
         console.log('Auto-login: Error parsing device session:', error);
@@ -6210,27 +6176,13 @@ console.log('  ✓ ENHANCED: Login/register/forget password work with api.js');
 console.log('  ✓ ENHANCED: UI error messages shown via toast system');
 console.log('  ✓ ENHANCED: Auto-login detection fixed to not hide forms');
 console.log('  ✓ HARDENED: Production-ready with all potential errors fixed');
-console.log('  ✓ ENHANCED: Login/registration/autologin fully integrated with api.js');
-console.log('  ✓ ENHANCED: Auto-login only runs if backend is reachable');
-console.log('  ✓ ENHANCED: UI initializes only after api.js confirms backend availability');
-console.log('  ✓ ENHANCED: Preserved offline UI experience with disabled login/register buttons');
 
 // Initial logging
 console.log('🚀 MoodChat ready - Waiting for api.js...');
 
 // Check for auto-login on page load (but don't interfere with form display)
 if (window.location.pathname.endsWith('index.html') || window.location.pathname.endsWith('/')) {
-  // Wait for api.js to be ready before checking auto-login
-  API_COORDINATION.waitForApi().then(() => {
-    // Also check if we're online
-    API_COORDINATION.getRealOnlineStatus().then(online => {
-      if (online && API_COORDINATION.isApiAvailable()) {
-        setTimeout(() => {
-          window.checkAutoLogin();
-        }, 1500); // Give UI time to initialize
-      } else {
-        console.log('Auto-login: Skipping - backend not reachable');
-      }
-    });
-  });
+  setTimeout(() => {
+    window.checkAutoLogin();
+  }, 1000);
 }

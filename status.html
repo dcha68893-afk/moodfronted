@@ -13,10 +13,6 @@
     <!-- Font Awesome -->
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
     
-    <!-- Color Picker Library -->
-    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/spectrum/1.8.1/spectrum.min.css">
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/spectrum/1.8.1/spectrum.min.js"></script>
-    
     <!-- Emoji Picker -->
     <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/emoji-picker-element@1.12.0/css/picker.css">
     <script type="module" src="https://cdn.jsdelivr.net/npm/emoji-picker-element@1.12.0/index.js"></script>
@@ -24,1698 +20,10 @@
     <!-- Video Player -->
     <script src="https://cdnjs.cloudflare.com/ajax/libs/video.js/7.21.5/video.min.js"></script>
     <link href="https://cdnjs.cloudflare.com/ajax/libs/video.js/7.21.5/video-js.min.css" rel="stylesheet">
-    
+    <link rel="stylesheet" href="status.css">
     <style>
         /* CSS remains exactly the same - no changes */
-        * {
-            margin: 0;
-            padding: 0;
-            box-sizing: border-box;
-            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
-        }
-        
-        :root {
-            --primary-color: #0084ff;
-            --secondary-color: #f0f2f5;
-            --danger-color: #ff3b30;
-            --success-color: #34c759;
-            --warning-color: #ff9500;
-            --info-color: #5ac8fa;
-            --text-primary: #050505;
-            --text-secondary: #65676b;
-            --bg-color: #ffffff;
-            --border-color: #dddfe2;
-            --status-gradient: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-            --shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
-            --shadow-lg: 0 10px 30px rgba(0, 0, 0, 0.2);
-            --story-ring: linear-gradient(45deg, #ff6b6b, #ffa726, #ffeb3b, #4caf50, #2196f3, #9c27b0);
-            --story-ring-seen: linear-gradient(45deg, #b0b0b0, #d0d0d0);
-            --dark-bg: #121212;
-            --dark-card: #1e1e1e;
-            --dark-text: #e4e6eb;
-        }
-        
-        [data-theme="dark"] {
-            --bg-color: var(--dark-bg);
-            --secondary-color: var(--dark-card);
-            --text-primary: var(--dark-text);
-            --text-secondary: #a0a0a0;
-            --border-color: #333;
-        }
-        
-        body {
-            background-color: var(--bg-color);
-            color: var(--text-primary);
-            height: 100vh;
-            overflow: hidden;
-            transition: background-color 0.3s ease;
-        }
-        
-        .app-container {
-            display: flex;
-            height: 100vh;
-            position: relative;
-        }
-        
-        /* Sidebar Styles */
-        .sidebar {
-            width: 380px;
-            background-color: var(--bg-color);
-            border-right: 1px solid var(--border-color);
-            display: flex;
-            flex-direction: column;
-            height: 100%;
-            overflow: hidden;
-            position: relative;
-            transition: all 0.3s ease;
-        }
-        
-        @media (min-width: 769px) {
-            .sidebar {
-                display: flex;
-            }
-        }
-        
-        @media (max-width: 768px) {
-            .sidebar {
-                display: flex !important;
-                position: relative !important;
-                width: 100% !important;
-                height: 100vh !important;
-                border-right: none !important;
-                z-index: auto !important;
-            }
-            
-            .status-viewer-panel {
-                position: relative !important;
-                width: 100% !important;
-                height: auto !important;
-                z-index: auto !important;
-            }
-            
-            .app-container {
-                flex-direction: column !important;
-                height: auto !important;
-                min-height: 100vh !important;
-            }
-            
-            .status-list-content {
-                padding-bottom: 20px !important;
-            }
-        }
-        
-        .sidebar-header {
-            padding: 20px;
-            background: var(--status-gradient);
-            color: white;
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-            flex-shrink: 0;
-        }
-        
-        .sidebar-header h2 {
-            font-size: 24px;
-            font-weight: 600;
-        }
-        
-        .add-status-btn {
-            background-color: rgba(255, 255, 255, 0.2);
-            color: white;
-            border: 1px solid rgba(255, 255, 255, 0.3);
-            border-radius: 50%;
-            width: 45px;
-            height: 45px;
-            cursor: pointer;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            font-size: 20px;
-            transition: all 0.2s;
-            backdrop-filter: blur(10px);
-        }
-        
-        .add-status-btn:hover {
-            background-color: rgba(255, 255, 255, 0.3);
-            transform: scale(1.05);
-        }
-        
-        /* Status Categories */
-        .status-categories {
-            display: flex;
-            border-bottom: 1px solid var(--border-color);
-            background-color: var(--bg-color);
-            flex-shrink: 0;
-            overflow-x: auto;
-            scrollbar-width: none;
-        }
-        
-        .status-categories::-webkit-scrollbar {
-            display: none;
-        }
-        
-        .category-btn {
-            padding: 15px 20px;
-            text-align: center;
-            font-weight: 500;
-            background: none;
-            border: none;
-            cursor: pointer;
-            color: var(--text-secondary);
-            transition: all 0.2s;
-            border-bottom: 3px solid transparent;
-            white-space: nowrap;
-            flex-shrink: 0;
-        }
-        
-        .category-btn.active {
-            color: var(--primary-color);
-            border-bottom-color: var(--primary-color);
-        }
-        
-        .category-btn:hover {
-            background-color: var(--secondary-color);
-        }
-        
-        /* My Status Section */
-        .my-status-section {
-            padding: 20px;
-            border-bottom: 1px solid var(--border-color);
-        }
-        
-        .my-status-header {
-            display: flex;
-            align-items: center;
-            margin-bottom: 15px;
-        }
-        
-        .my-status-avatar {
-            width: 60px;
-            height: 60px;
-            border-radius: 50%;
-            background-color: var(--secondary-color);
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            font-size: 20px;
-            color: white;
-            margin-right: 15px;
-            position: relative;
-            overflow: hidden;
-            background-size: cover;
-            background-position: center;
-        }
-        
-        .my-status-avatar.has-status {
-            padding: 3px;
-            background: var(--story-ring);
-            background-size: 400% 400%;
-            animation: gradient-ring 3s ease infinite;
-        }
-        
-        .my-status-avatar.has-status.seen {
-            background: var(--story-ring-seen);
-            animation: none;
-        }
-        
-        .my-status-info {
-            flex: 1;
-        }
-        
-        .my-status-name {
-            font-weight: 600;
-            font-size: 18px;
-            margin-bottom: 5px;
-        }
-        
-        .my-status-text {
-            color: var(--text-secondary);
-            font-size: 14px;
-        }
-        
-        .my-status-actions {
-            display: flex;
-            gap: 10px;
-            margin-top: 15px;
-        }
-        
-        .my-status-action-btn {
-            flex: 1;
-            padding: 12px;
-            background-color: var(--secondary-color);
-            border: none;
-            border-radius: 8px;
-            cursor: pointer;
-            font-weight: 500;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            gap: 8px;
-            transition: all 0.2s;
-        }
-        
-        .my-status-action-btn:hover {
-            background-color: #e4e6e9;
-        }
-        
-        .my-status-action-btn.primary {
-            background-color: var(--primary-color);
-            color: white;
-        }
-        
-        .my-status-action-btn.primary:hover {
-            background-color: #0073e6;
-        }
-        
-        /* Status List */
-        .status-list {
-            flex: 1;
-            display: flex;
-            flex-direction: column;
-            overflow: hidden;
-        }
-        
-        .status-list-content {
-            flex: 1;
-            overflow-y: auto;
-            padding: 10px 0;
-        }
-        
-        .section-title {
-            padding: 15px 20px;
-            font-size: 14px;
-            font-weight: 600;
-            color: var(--text-secondary);
-            text-transform: uppercase;
-            letter-spacing: 0.5px;
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-        }
-        
-        .status-item {
-            display: flex;
-            align-items: center;
-            padding: 15px;
-            background-color: var(--bg-color);
-            cursor: pointer;
-            transition: all 0.2s;
-            border-bottom: 1px solid var(--border-color);
-            position: relative;
-        }
-        
-        .status-item:hover {
-            background-color: var(--secondary-color);
-        }
-        
-        .status-avatar {
-            width: 56px;
-            height: 56px;
-            border-radius: 50%;
-            background-color: var(--secondary-color);
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            font-size: 18px;
-            color: white;
-            margin-right: 15px;
-            position: relative;
-            overflow: hidden;
-            background-size: cover;
-            background-position: center;
-        }
-        
-        .status-avatar.has-status {
-            padding: 3px;
-            background: var(--story-ring);
-            background-size: 400% 400%;
-            animation: gradient-ring 3s ease infinite;
-        }
-        
-        .status-avatar.has-status.seen {
-            background: var(--story-ring-seen);
-            animation: none;
-        }
-        
-        .status-info {
-            flex: 1;
-            min-width: 0;
-        }
-        
-        .status-name {
-            font-weight: 600;
-            font-size: 16px;
-            margin-bottom: 5px;
-            display: flex;
-            align-items: center;
-            justify-content: space-between;
-        }
-        
-        .status-time {
-            color: var(--text-secondary);
-            font-size: 13px;
-            display: flex;
-            align-items: center;
-            gap: 8px;
-        }
-        
-        .status-preview {
-            color: var(--text-secondary);
-            font-size: 14px;
-            overflow: hidden;
-            text-overflow: ellipsis;
-            white-space: nowrap;
-        }
-        
-        .status-count {
-            background-color: var(--primary-color);
-            color: white;
-            font-size: 12px;
-            padding: 2px 6px;
-            border-radius: 10px;
-            margin-left: 5px;
-        }
-        
-        /* Status Viewer Panel */
-        .status-viewer-panel {
-            flex: 1;
-            background-color: #000;
-            position: relative;
-            display: none;
-            overflow: hidden;
-        }
-        
-        .status-viewer-panel.active {
-            display: flex;
-            flex-direction: column;
-        }
-        
-        .status-viewer-header {
-            position: absolute;
-            top: 0;
-            left: 0;
-            right: 0;
-            padding: 20px;
-            display: flex;
-            align-items: center;
-            justify-content: space-between;
-            z-index: 100;
-            background: linear-gradient(to bottom, rgba(0,0,0,0.7) 0%, rgba(0,0,0,0) 100%);
-        }
-        
-        .back-btn {
-            background: none;
-            border: none;
-            color: white;
-            cursor: pointer;
-            font-size: 20px;
-            padding: 8px;
-            border-radius: 50%;
-            transition: all 0.2s;
-        }
-        
-        .back-btn:hover {
-            background-color: rgba(255, 255, 255, 0.1);
-        }
-        
-        .status-viewer-info {
-            display: flex;
-            align-items: center;
-            gap: 10px;
-            color: white;
-        }
-        
-        .status-viewer-avatar {
-            width: 40px;
-            height: 40px;
-            border-radius: 50%;
-            overflow: hidden;
-            background-size: cover;
-            background-position: center;
-        }
-        
-        .status-viewer-name {
-            font-weight: 600;
-            font-size: 16px;
-        }
-        
-        .status-viewer-time {
-            font-size: 12px;
-            opacity: 0.8;
-        }
-        
-        .status-viewer-content {
-            flex: 1;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            position: relative;
-        }
-        
-        .status-media {
-            max-width: 100%;
-            max-height: 100%;
-            object-fit: contain;
-        }
-        
-        .status-text-content {
-            padding: 40px;
-            color: white;
-            font-size: 24px;
-            text-align: center;
-            word-break: break-word;
-            max-width: 600px;
-        }
-        
-        .status-viewer-controls {
-            position: absolute;
-            bottom: 0;
-            left: 0;
-            right: 0;
-            padding: 20px;
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-            z-index: 100;
-            background: linear-gradient(to top, rgba(0,0,0,0.7) 0%, rgba(0,0,0,0) 100%);
-        }
-        
-        .status-viewer-actions {
-            display: flex;
-            gap: 15px;
-        }
-        
-        .status-action-btn {
-            background: none;
-            border: none;
-            color: white;
-            cursor: pointer;
-            font-size: 20px;
-            width: 44px;
-            height: 44px;
-            border-radius: 50%;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            transition: all 0.2s;
-            background-color: rgba(255, 255, 255, 0.1);
-        }
-        
-        .status-action-btn:hover {
-            background-color: rgba(255, 255, 255, 0.2);
-            transform: scale(1.1);
-        }
-        
-        .status-progress-container {
-            position: absolute;
-            top: 10px;
-            left: 20px;
-            right: 20px;
-            display: flex;
-            gap: 5px;
-            z-index: 101;
-        }
-        
-        .status-progress-bar {
-            flex: 1;
-            height: 3px;
-            background-color: rgba(255, 255, 255, 0.3);
-            border-radius: 3px;
-            overflow: hidden;
-        }
-        
-        .status-progress-fill {
-            height: 100%;
-            background-color: white;
-            width: 0%;
-            transition: width 0.1s linear;
-        }
-        
-        .status-reply-container {
-            position: absolute;
-            bottom: 80px;
-            left: 0;
-            right: 0;
-            padding: 0 20px;
-            display: flex;
-            gap: 10px;
-            z-index: 100;
-        }
-        
-        .status-reply-input {
-            flex: 1;
-            padding: 12px 20px;
-            background-color: rgba(255, 255, 255, 0.1);
-            border: 1px solid rgba(255, 255, 255, 0.3);
-            border-radius: 24px;
-            color: white;
-            font-size: 14px;
-            backdrop-filter: blur(10px);
-        }
-        
-        .status-reply-input:focus {
-            outline: none;
-            border-color: var(--primary-color);
-        }
-        
-        .status-reply-btn {
-            background-color: var(--primary-color);
-            color: white;
-            border: none;
-            border-radius: 50%;
-            width: 44px;
-            height: 44px;
-            cursor: pointer;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            font-size: 18px;
-            transition: all 0.2s;
-        }
-        
-        .status-reply-btn:hover {
-            background-color: #0073e6;
-            transform: scale(1.05);
-        }
-        
-        /* Create Status Modal */
-        .create-status-modal {
-            display: none;
-            position: fixed;
-            top: 0;
-            left: 0;
-            width: 100%;
-            height: 100%;
-            background-color: rgba(0, 0, 0, 0.9);
-            z-index: 2000;
-            align-items: center;
-            justify-content: center;
-        }
-        
-        .create-status-modal.active {
-            display: flex;
-        }
-        
-        .create-status-container {
-            width: 90%;
-            max-width: 500px;
-            background-color: var(--bg-color);
-            border-radius: 20px;
-            overflow: hidden;
-            display: flex;
-            flex-direction: column;
-            max-height: 90vh;
-            box-shadow: var(--shadow-lg);
-        }
-        
-        .create-status-header {
-            padding: 20px;
-            border-bottom: 1px solid var(--border-color);
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-            background: var(--status-gradient);
-            color: white;
-        }
-        
-        .create-status-header h3 {
-            font-size: 20px;
-            font-weight: 600;
-        }
-        
-        .create-status-tabs {
-            display: flex;
-            border-bottom: 1px solid var(--border-color);
-        }
-        
-        .create-status-tab {
-            flex: 1;
-            padding: 15px;
-            text-align: center;
-            background: none;
-            border: none;
-            cursor: pointer;
-            font-weight: 500;
-            color: var(--text-secondary);
-            transition: all 0.2s;
-            border-bottom: 3px solid transparent;
-        }
-        
-        .create-status-tab.active {
-            color: var(--primary-color);
-            border-bottom-color: var(--primary-color);
-        }
-        
-        .create-status-content {
-            flex: 1;
-            padding: 25px;
-            overflow-y: auto;
-        }
-        
-        .create-status-tab-content {
-            display: none;
-        }
-        
-        .create-status-tab-content.active {
-            display: block;
-            animation: fadeIn 0.3s ease;
-        }
-        
-        /* Text Status Tab */
-        .text-status-container {
-            display: flex;
-            flex-direction: column;
-            gap: 20px;
-        }
-        
-        .text-status-preview {
-            height: 300px;
-            border-radius: 12px;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            padding: 30px;
-            text-align: center;
-            font-size: 24px;
-            font-weight: 500;
-            word-break: break-word;
-            transition: all 0.3s ease;
-            position: relative;
-            overflow: hidden;
-        }
-        
-        .text-status-input {
-            width: 100%;
-            min-height: 100px;
-            padding: 15px;
-            border: 1px solid var(--border-color);
-            border-radius: 8px;
-            font-size: 16px;
-            resize: vertical;
-            margin-bottom: 10px;
-        }
-        
-        .text-status-input:focus {
-            outline: none;
-            border-color: var(--primary-color);
-        }
-        
-        .text-status-options {
-            display: grid;
-            grid-template-columns: repeat(5, 1fr);
-            gap: 10px;
-            margin-top: 20px;
-        }
-        
-        .text-status-bg {
-            width: 100%;
-            aspect-ratio: 1;
-            border-radius: 8px;
-            cursor: pointer;
-            border: 3px solid transparent;
-            transition: all 0.2s;
-        }
-        
-        .text-status-bg:hover {
-            transform: scale(1.05);
-        }
-        
-        .text-status-bg.selected {
-            border-color: var(--primary-color);
-        }
-        
-        .emoji-picker-container {
-            position: relative;
-            margin-bottom: 20px;
-        }
-        
-        .emoji-trigger-btn {
-            background-color: var(--secondary-color);
-            border: none;
-            padding: 10px 15px;
-            border-radius: 8px;
-            cursor: pointer;
-            display: flex;
-            align-items: center;
-            gap: 8px;
-        }
-        
-        .emoji-picker-wrapper {
-            position: absolute;
-            z-index: 1000;
-            display: none;
-        }
-        
-        .emoji-picker-wrapper.active {
-            display: block;
-        }
-        
-        /* Media Status Tab */
-        .media-status-container {
-            display: flex;
-            flex-direction: column;
-            gap: 20px;
-        }
-        
-        .media-upload-area {
-            border: 2px dashed var(--border-color);
-            border-radius: 12px;
-            padding: 40px 20px;
-            text-align: center;
-            cursor: pointer;
-            transition: all 0.3s;
-        }
-        
-        .media-upload-area:hover {
-            border-color: var(--primary-color);
-            background-color: rgba(0, 132, 255, 0.05);
-        }
-        
-        .media-upload-icon {
-            font-size: 48px;
-            color: var(--primary-color);
-            margin-bottom: 15px;
-        }
-        
-        .media-preview {
-            margin-top: 20px;
-            max-height: 300px;
-            overflow: hidden;
-            border-radius: 12px;
-            position: relative;
-        }
-        
-        .media-preview img,
-        .media-preview video {
-            width: 100%;
-            max-height: 300px;
-            object-fit: contain;
-            border-radius: 12px;
-        }
-        
-        .media-remove-btn {
-            position: absolute;
-            top: 10px;
-            right: 10px;
-            background-color: rgba(0, 0, 0, 0.5);
-            color: white;
-            border: none;
-            border-radius: 50%;
-            width: 36px;
-            height: 36px;
-            cursor: pointer;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-        }
-        
-        /* Status Options Tab */
-        .status-options-container {
-            display: flex;
-            flex-direction: column;
-            gap: 20px;
-        }
-        
-        .option-group {
-            background-color: var(--secondary-color);
-            border-radius: 12px;
-            padding: 20px;
-        }
-        
-        .option-title {
-            font-weight: 600;
-            margin-bottom: 15px;
-            display: flex;
-            align-items: center;
-            gap: 10px;
-        }
-        
-        .option-item {
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-            padding: 12px 0;
-            border-bottom: 1px solid var(--border-color);
-        }
-        
-        .option-item:last-child {
-            border-bottom: none;
-        }
-        
-        .option-label {
-            display: flex;
-            align-items: center;
-            gap: 10px;
-        }
-        
-        .option-icon {
-            color: var(--primary-color);
-            font-size: 18px;
-        }
-        
-        .privacy-select {
-            padding: 8px 12px;
-            border-radius: 8px;
-            border: 1px solid var(--border-color);
-            background-color: var(--bg-color);
-            color: var(--text-primary);
-        }
-        
-        .duration-select {
-            padding: 8px 12px;
-            border-radius: 8px;
-            border: 1px solid var(--border-color);
-            background-color: var(--bg-color);
-            color: var(--text-primary);
-        }
-        
-        /* NEW: Status Intent Styles */
-        .intent-options {
-            display: flex;
-            flex-wrap: wrap;
-            gap: 10px;
-            margin-top: 10px;
-        }
-        
-        .intent-chip {
-            padding: 8px 16px;
-            background-color: var(--secondary-color);
-            border: 1px solid var(--border-color);
-            border-radius: 20px;
-            cursor: pointer;
-            transition: all 0.2s;
-            font-size: 14px;
-            display: flex;
-            align-items: center;
-            gap: 8px;
-        }
-        
-        .intent-chip:hover {
-            background-color: #e4e6e9;
-        }
-        
-        .intent-chip.selected {
-            background-color: var(--primary-color);
-            color: white;
-            border-color: var(--primary-color);
-        }
-        
-        /* NEW: Mood Styles */
-        .mood-options {
-            display: flex;
-            flex-wrap: wrap;
-            gap: 10px;
-            margin-top: 10px;
-        }
-        
-        .mood-chip {
-            padding: 8px 16px;
-            background-color: var(--secondary-color);
-            border: 1px solid var(--border-color);
-            border-radius: 20px;
-            cursor: pointer;
-            transition: all 0.2s;
-            font-size: 14px;
-            display: flex;
-            align-items: center;
-            gap: 8px;
-        }
-        
-        .mood-chip:hover {
-            background-color: #e4e6e9;
-        }
-        
-        .mood-chip.selected {
-            color: white;
-            border-color: transparent;
-        }
-        
-        .mood-chip.happy.selected { background-color: #4caf50; }
-        .mood-chip.stressed.selected { background-color: #ff9800; }
-        .mood-chip.motivated.selected { background-color: #2196f3; }
-        .mood-chip.lonely.selected { background-color: #9c27b0; }
-        .mood-chip.excited.selected { background-color: #ffeb3b; color: #000; }
-        .mood-chip.calm.selected { background-color: #00bcd4; }
-        .mood-chip.sad.selected { background-color: #607d8b; }
-        .mood-chip.angry.selected { background-color: #f44336; }
-        
-        /* NEW: Action Buttons Styles */
-        .action-buttons-container {
-            display: flex;
-            flex-wrap: wrap;
-            gap: 10px;
-            margin-top: 10px;
-        }
-        
-        .action-button-chip {
-            padding: 8px 16px;
-            background-color: var(--secondary-color);
-            border: 1px solid var(--border-color);
-            border-radius: 20px;
-            cursor: pointer;
-            transition: all 0.2s;
-            font-size: 14px;
-            display: flex;
-            align-items: center;
-            gap: 8px;
-        }
-        
-        .action-button-chip:hover {
-            background-color: #e4e6e9;
-        }
-        
-        .action-button-chip.selected {
-            background-color: var(--primary-color);
-            color: white;
-            border-color: var(--primary-color);
-        }
-        
-        /* NEW: Micro Circle Styles */
-        .circle-options {
-            display: flex;
-            flex-wrap: wrap;
-            gap: 10px;
-            margin-top: 10px;
-        }
-        
-        .circle-chip {
-            padding: 8px 16px;
-            background-color: var(--secondary-color);
-            border: 1px solid var(--border-color);
-            border-radius: 20px;
-            cursor: pointer;
-            transition: all 0.2s;
-            font-size: 14px;
-            display: flex;
-            align-items: center;
-            gap: 8px;
-        }
-        
-        .circle-chip:hover {
-            background-color: #e4e6e9;
-        }
-        
-        .circle-chip.selected {
-            background-color: #9c27b0;
-            color: white;
-            border-color: #9c27b0;
-        }
-        
-        /* NEW: Offline Indicator */
-        .offline-indicator {
-            display: inline-flex;
-            align-items: center;
-            gap: 5px;
-            font-size: 12px;
-            color: #ff9800;
-            background-color: rgba(255, 152, 0, 0.1);
-            padding: 3px 8px;
-            border-radius: 10px;
-            margin-left: 5px;
-        }
-        
-        /* NEW: Silent Mode Indicator */
-        .silent-mode-indicator {
-            display: inline-flex;
-            align-items: center;
-            gap: 5px;
-            font-size: 12px;
-            color: #607d8b;
-            background-color: rgba(96, 125, 139, 0.1);
-            padding: 3px 8px;
-            border-radius: 10px;
-            margin-left: 5px;
-        }
-        
-        /* Category Select */
-        .category-select-container {
-            display: flex;
-            flex-wrap: wrap;
-            gap: 10px;
-            margin-top: 10px;
-        }
-        
-        .category-chip {
-            padding: 8px 16px;
-            background-color: var(--secondary-color);
-            border: 1px solid var(--border-color);
-            border-radius: 20px;
-            cursor: pointer;
-            transition: all 0.2s;
-        }
-        
-        .category-chip:hover {
-            background-color: #e4e6e9;
-        }
-        
-        .category-chip.selected {
-            background-color: var(--primary-color);
-            color: white;
-            border-color: var(--primary-color);
-        }
-        
-        /* Template Select */
-        .template-grid {
-            display: grid;
-            grid-template-columns: repeat(2, 1fr);
-            gap: 15px;
-            margin-top: 15px;
-        }
-        
-        .template-item {
-            border: 2px solid var(--border-color);
-            border-radius: 12px;
-            overflow: hidden;
-            cursor: pointer;
-            transition: all 0.2s;
-        }
-        
-        .template-item:hover {
-            border-color: var(--primary-color);
-            transform: translateY(-2px);
-        }
-        
-        .template-item.selected {
-            border-color: var(--primary-color);
-            box-shadow: 0 4px 12px rgba(0, 132, 255, 0.2);
-        }
-        
-        .template-preview {
-            height: 120px;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            font-size: 20px;
-            font-weight: 500;
-        }
-        
-        .template-name {
-            padding: 10px;
-            text-align: center;
-            font-size: 14px;
-            background-color: var(--secondary-color);
-        }
-        
-        /* Poll Creator */
-        .poll-creator {
-            background-color: var(--secondary-color);
-            border-radius: 12px;
-            padding: 20px;
-            margin-top: 20px;
-        }
-        
-        .poll-question-input {
-            width: 100%;
-            padding: 12px;
-            border: 1px solid var(--border-color);
-            border-radius: 8px;
-            margin-bottom: 15px;
-            font-size: 16px;
-        }
-        
-        .poll-option {
-            display: flex;
-            align-items: center;
-            gap: 10px;
-            margin-bottom: 10px;
-        }
-        
-        .poll-option-input {
-            flex: 1;
-            padding: 10px;
-            border: 1px solid var(--border-color);
-            border-radius: 8px;
-        }
-        
-        .add-option-btn {
-            background-color: var(--secondary-color);
-            border: 1px solid var(--border-color);
-            border-radius: 8px;
-            padding: 10px;
-            cursor: pointer;
-            display: flex;
-            align-items: center;
-            gap: 5px;
-            margin-top: 10px;
-        }
-        
-        /* Music Selector */
-        .music-selector {
-            background-color: var(--secondary-color);
-            border-radius: 12px;
-            padding: 20px;
-            margin-top: 20px;
-        }
-        
-        .music-search {
-            width: 100%;
-            padding: 12px;
-            border: 1px solid var(--border-color);
-            border-radius: 8px;
-            margin-bottom: 15px;
-        }
-        
-        .music-tracks {
-            max-height: 200px;
-            overflow-y: auto;
-        }
-        
-        .music-track {
-            display: flex;
-            align-items: center;
-            padding: 10px;
-            border-radius: 8px;
-            cursor: pointer;
-            transition: background-color 0.2s;
-        }
-        
-        .music-track:hover {
-            background-color: rgba(0, 0, 0, 0.05);
-        }
-        
-        .music-track.selected {
-            background-color: rgba(0, 132, 255, 0.1);
-        }
-        
-        .music-track-icon {
-            font-size: 20px;
-            margin-right: 10px;
-            color: var(--primary-color);
-        }
-        
-        /* Schedule Status */
-        .schedule-container {
-            background-color: var(--secondary-color);
-            border-radius: 12px;
-            padding: 20px;
-            margin-top: 20px;
-        }
-        
-        .schedule-input {
-            width: 100%;
-            padding: 12px;
-            border: 1px solid var(--border-color);
-            border-radius: 8px;
-            margin-bottom: 15px;
-            font-size: 16px;
-        }
-        
-        /* Status Drafts */
-        .drafts-container {
-            display: grid;
-            grid-template-columns: repeat(2, 1fr);
-            gap: 15px;
-            margin-top: 20px;
-        }
-        
-        .draft-item {
-            border: 1px solid var(--border-color);
-            border-radius: 12px;
-            overflow: hidden;
-            cursor: pointer;
-        }
-        
-        .draft-preview {
-            height: 100px;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            font-size: 16px;
-            padding: 15px;
-            text-align: center;
-        }
-        
-        .draft-info {
-            padding: 10px;
-            background-color: var(--secondary-color);
-            font-size: 12px;
-            color: var(--text-secondary);
-        }
-        
-        /* NEW: Memory Timeline Styles */
-        .timeline-filters {
-            display: flex;
-            flex-wrap: wrap;
-            gap: 10px;
-            margin-top: 15px;
-            margin-bottom: 15px;
-        }
-        
-        .timeline-filter-chip {
-            padding: 6px 12px;
-            background-color: var(--secondary-color);
-            border: 1px solid var(--border-color);
-            border-radius: 15px;
-            cursor: pointer;
-            transition: all 0.2s;
-            font-size: 13px;
-        }
-        
-        .timeline-filter-chip:hover {
-            background-color: #e4e6e9;
-        }
-        
-        .timeline-filter-chip.selected {
-            background-color: var(--primary-color);
-            color: white;
-            border-color: var(--primary-color);
-        }
-        
-        /* NEW: User Controlled Discovery Styles */
-        .discovery-filters {
-            display: flex;
-            flex-wrap: wrap;
-            gap: 10px;
-            margin: 15px 0;
-        }
-        
-        .discovery-filter-chip {
-            padding: 6px 12px;
-            background-color: var(--secondary-color);
-            border: 1px solid var(--border-color);
-            border-radius: 15px;
-            cursor: pointer;
-            transition: all 0.2s;
-            font-size: 13px;
-            display: flex;
-            align-items: center;
-            gap: 5px;
-        }
-        
-        .discovery-filter-chip:hover {
-            background-color: #e4e6e9;
-        }
-        
-        .discovery-filter-chip.selected {
-            background-color: #4caf50;
-            color: white;
-            border-color: #4caf50;
-        }
-        
-        /* Action Buttons */
-        .action-buttons {
-            display: flex;
-            gap: 10px;
-            padding: 20px;
-            border-top: 1px solid var(--border-color);
-        }
-        
-        .action-btn {
-            flex: 1;
-            padding: 12px;
-            border: none;
-            border-radius: 8px;
-            cursor: pointer;
-            font-weight: 500;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            gap: 8px;
-            transition: all 0.2s;
-        }
-        
-        .action-btn.primary {
-            background-color: var(--primary-color);
-            color: white;
-        }
-        
-        .action-btn.primary:hover {
-            background-color: #0073e6;
-        }
-        
-        .action-btn.secondary {
-            background-color: var(--secondary-color);
-            color: var(--text-primary);
-        }
-        
-        .action-btn.secondary:hover {
-            background-color: #e4e6e9;
-        }
-        
-        /* Status Highlights Modal */
-        .highlights-modal {
-            display: none;
-            position: fixed;
-            top: 0;
-            left: 0;
-            width: 100%;
-            height: 100%;
-            background-color: rgba(0, 0, 0, 0.9);
-            z-index: 2000;
-            align-items: center;
-            justify-content: center;
-        }
-        
-        .highlights-modal.active {
-            display: flex;
-        }
-        
-        .highlights-container {
-            width: 90%;
-            max-width: 600px;
-            background-color: var(--bg-color);
-            border-radius: 20px;
-            overflow: hidden;
-            display: flex;
-            flex-direction: column;
-            max-height: 90vh;
-        }
-        
-        .highlights-header {
-            padding: 20px;
-            border-bottom: 1px solid var(--border-color);
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-        }
-        
-        .highlights-grid {
-            display: grid;
-            grid-template-columns: repeat(3, 1fr);
-            gap: 15px;
-            padding: 20px;
-            overflow-y: auto;
-        }
-        
-        .highlight-item {
-            aspect-ratio: 1;
-            border-radius: 12px;
-            overflow: hidden;
-            position: relative;
-            cursor: pointer;
-        }
-        
-        .highlight-cover {
-            width: 100%;
-            height: 100%;
-            object-fit: cover;
-        }
-        
-        .highlight-name {
-            position: absolute;
-            bottom: 0;
-            left: 0;
-            right: 0;
-            padding: 10px;
-            background: linear-gradient(to top, rgba(0,0,0,0.8), transparent);
-            color: white;
-            font-size: 12px;
-            text-align: center;
-        }
-        
-        /* Stats Modal */
-        .stats-modal {
-            display: none;
-            position: fixed;
-            top: 0;
-            left: 0;
-            width: 100%;
-            height: 100%;
-            background-color: rgba(0, 0, 0, 0.9);
-            z-index: 2000;
-            align-items: center;
-            justify-content: center;
-        }
-        
-        .stats-modal.active {
-            display: flex;
-        }
-        
-        .stats-container {
-            width: 90%;
-            max-width: 500px;
-            background-color: var(--bg-color);
-            border-radius: 20px;
-            overflow: hidden;
-            display: flex;
-            flex-direction: column;
-            max-height: 90vh;
-        }
-        
-        .stats-header {
-            padding: 20px;
-            border-bottom: 1px solid var(--border-color);
-            text-align: center;
-        }
-        
-        .stats-content {
-            padding: 20px;
-            overflow-y: auto;
-        }
-        
-        .stat-item {
-            display: flex;
-            justify-content: space-between;
-            padding: 15px 0;
-            border-bottom: 1px solid var(--border-color);
-        }
-        
-        .stat-item:last-child {
-            border-bottom: none;
-        }
-        
-        .stat-label {
-            color: var(--text-secondary);
-        }
-        
-        .stat-value {
-            font-weight: 600;
-        }
-        
-        .viewers-list {
-            max-height: 300px;
-            overflow-y: auto;
-            margin-top: 20px;
-        }
-        
-        .viewer-item {
-            display: flex;
-            align-items: center;
-            padding: 12px;
-            border-radius: 8px;
-            margin-bottom: 8px;
-            background-color: var(--secondary-color);
-        }
-        
-        .viewer-avatar {
-            width: 40px;
-            height: 40px;
-            border-radius: 50%;
-            margin-right: 12px;
-            background-size: cover;
-            background-position: center;
-        }
-        
-        .viewer-info {
-            flex: 1;
-        }
-        
-        .viewer-name {
-            font-weight: 600;
-            margin-bottom: 3px;
-        }
-        
-        .viewer-time {
-            font-size: 12px;
-            color: var(--text-secondary);
-        }
-        
-        .viewer-duration {
-            font-size: 12px;
-            color: var(--primary-color);
-        }
-        
-        /* Notification */
-        .notification {
-            position: fixed;
-            bottom: 20px;
-            right: 20px;
-            background-color: var(--success-color);
-            color: white;
-            padding: 12px 20px;
-            border-radius: 8px;
-            box-shadow: var(--shadow);
-            z-index: 1000;
-            display: flex;
-            align-items: center;
-            gap: 10px;
-            transform: translateY(100px);
-            opacity: 0;
-            transition: all 0.3s;
-        }
-        
-        .notification.active {
-            transform: translateY(0);
-            opacity: 1;
-        }
-        
-        .notification.error {
-            background-color: var(--danger-color);
-        }
-        
-        .notification.warning {
-            background-color: var(--warning-color);
-        }
-        
-        .notification.info {
-            background-color: var(--info-color);
-        }
-        
-        /* Animations */
-        @keyframes fadeIn {
-            from { opacity: 0; transform: translateY(20px); }
-            to { opacity: 1; transform: translateY(0); }
-        }
-        
-        @keyframes gradient-ring {
-            0% { background-position: 0% 50%; }
-            50% { background-position: 100% 50%; }
-            100% { background-position: 0% 50%; }
-        }
-        
-        .fade-in {
-            animation: fadeIn 0.3s ease;
-        }
-        
-        /* Responsive */
-        @media (max-width: 768px) {
-            body {
-                overflow: auto;
-            }
-            
-            .app-container {
-                flex-direction: column;
-                height: auto;
-                min-height: 100vh;
-                overflow: hidden;
-            }
-            
-            .sidebar {
-                width: 100% !important;
-                height: 100vh !important;
-                max-height: 100vh !important;
-                border-right: none !important;
-                display: flex !important;
-                position: relative !important;
-                z-index: auto !important;
-            }
-            
-            .status-viewer-panel {
-                position: relative !important;
-                width: 100% !important;
-                height: auto !important;
-                z-index: auto !important;
-            }
-            
-            .status-categories {
-                padding: 0 10px;
-                overflow-x: auto;
-            }
-            
-            .category-btn {
-                padding: 12px 15px;
-                font-size: 14px;
-                min-width: 120px;
-            }
-            
-            .text-status-options {
-                grid-template-columns: repeat(3, 1fr);
-            }
-            
-            .template-grid {
-                grid-template-columns: 1fr;
-            }
-            
-            .drafts-container {
-                grid-template-columns: 1fr;
-            }
-            
-            .highlights-grid {
-                grid-template-columns: repeat(2, 1fr);
-            }
-            
-            .status-list-content {
-                padding-bottom: 20px !important;
-            }
-        }
-        
-        @media (max-width: 480px) {
-            .sidebar-header h2 {
-                font-size: 20px;
-            }
-            
-            .status-categories {
-                padding: 0 5px;
-            }
-            
-            .category-btn {
-                padding: 10px 12px;
-                font-size: 13px;
-                min-width: 100px;
-            }
-            
-            .text-status-options {
-                grid-template-columns: repeat(2, 1fr);
-            }
-            
-            .highlights-grid {
-                grid-template-columns: 1fr;
-            }
-        }
-        
-        /* Dark mode preview */
-        .dark-mode-preview {
-            position: absolute;
-            top: 10px;
-            right: 10px;
-            background: rgba(0, 0, 0, 0.5);
-            color: white;
-            padding: 5px 10px;
-            border-radius: 15px;
-            font-size: 12px;
-            display: none;
-        }
-        
-        [data-theme="dark"] .dark-mode-preview {
-            display: block;
-        }
-        
-        /* Upload Progress */
-        .upload-progress {
-            position: fixed;
-            top: 0;
-            left: 0;
-            right: 0;
-            height: 3px;
-            background-color: var(--primary-color);
-            width: 0%;
-            z-index: 3000;
-            transition: width 0.3s ease;
-        }
-        
-        /* Blur sensitive content */
-        .sensitive-content {
-            filter: blur(10px);
-            transition: filter 0.3s ease;
-        }
-        
-        .sensitive-content.revealed {
-            filter: blur(0);
-        }
-        
-        .sensitive-warning {
-            position: absolute;
-            top: 50%;
-            left: 50%;
-            transform: translate(-50%, -50%);
-            background: rgba(0, 0, 0, 0.8);
-            color: white;
-            padding: 20px;
-            border-radius: 12px;
-            text-align: center;
-            backdrop-filter: blur(10px);
-            cursor: pointer;
-        }
+       
     </style>
 </head>
 <body>
@@ -1922,7 +230,7 @@
                         
                         <div class="input-group">
                             <label style="display: block; margin-bottom: 10px; font-weight: 500;">Background Color</label>
-                            <input type="text" id="textStatusColor" value="#0084ff" style="width: 100%;">
+                            <input type="color" id="textStatusColor" value="#0084ff" style="width: 100%; height: 40px; padding: 0;">
                         </div>
                         
                         <div class="input-group">
@@ -2409,14 +717,22 @@
     <!-- Upload Progress Bar -->
     <div class="upload-progress" id="uploadProgress"></div>
 
-    <!-- Load scripts in correct order with defer -->
-    <script src="./js/api.js" defer></script>
-    <script src="./js/app.js" defer></script>
+    <!-- Error message container -->
+    <div id="apiErrorContainer" style="display: none; position: fixed; top: 0; left: 0; right: 0; bottom: 0; background: white; z-index: 9999; padding: 20px; display: flex; flex-direction: column; align-items: center; justify-content: center; text-align: center;">
+        <i class="fas fa-exclamation-triangle" style="font-size: 48px; color: #f44336; margin-bottom: 20px;"></i>
+        <h2 style="color: #333; margin-bottom: 10px;">Connection Error</h2>
+        <p style="color: #666; margin-bottom: 20px; max-width: 400px;">Unable to connect to the server. Please check your connection and try again.</p>
+        <button id="retryConnectionBtn" style="background: #4F46E5; color: white; border: none; padding: 10px 20px; border-radius: 5px; cursor: pointer;">
+            <i class="fas fa-redo"></i> Retry Connection
+        </button>
+        <p style="margin-top: 20px; font-size: 12px; color: #999;">Working offline with limited functionality</p>
+    </div>
 
-    <script defer>
+    <script>
         // =============================================
-        // COMPLETE STATUS SYSTEM - BACKEND MIGRATION
+        // COMPLETE STATUS SYSTEM - IFRAME COMPATIBLE
         // =============================================
+        console.log('=== STATUS SYSTEM INITIALIZATION START ===');
 
         // Global variables
         let currentUser = null;
@@ -2439,7 +755,6 @@
         let currentPoll = null;
         let currentSchedule = null;
         let emojiPicker = null;
-        let colorPicker = null;
         
         // NEW: Enhanced feature variables
         let statusIntents = [];
@@ -2575,6 +890,8 @@
         const notification = document.getElementById('notification');
         const memoryTimelineModal = document.getElementById('memoryTimelineModal');
         const discoveryFiltersElement = document.getElementById('discoveryFilters');
+        const apiErrorContainer = document.getElementById('apiErrorContainer');
+        const retryConnectionBtn = document.getElementById('retryConnectionBtn');
         
         // Status sections
         const statusListContent = document.getElementById('statusListContent');
@@ -2605,43 +922,94 @@
             OFFLINE_QUEUE: 'knecta_offline_queue',
             DISCOVERY_FILTERS: 'knecta_discovery_filters'
         };
-        
+
+        // Safe API access function
+        function getApi() {
+            try {
+                // Try to access parent window API
+                if (window.parent && window.parent.api) {
+                    console.log('API found in parent window');
+                    return window.parent.api;
+                }
+                // Try to access window.api directly
+                if (window.api) {
+                    console.log('API found in current window');
+                    return window.api;
+                }
+                // Try to access via appState
+                if (window.appState && window.appState.api) {
+                    console.log('API found in appState');
+                    return window.appState.api;
+                }
+                console.warn('API not found');
+                return null;
+            } catch (error) {
+                console.warn('Error accessing API:', error);
+                return null;
+            }
+        }
+
+        // Safe API call function
+        async function callApi(method, endpoint, data = null) {
+            const api = getApi();
+            if (!api) {
+                console.log('API not available, working offline');
+                throw new Error('API not available');
+            }
+            
+            try {
+                console.log(`Calling API: ${method} ${endpoint}`);
+                return await api(method, endpoint, data);
+            } catch (error) {
+                console.error(`API call failed: ${method} ${endpoint}`, error);
+                throw error;
+            }
+        }
+
+        // Show error message
+        function showApiError() {
+            if (apiErrorContainer) {
+                apiErrorContainer.style.display = 'flex';
+            }
+        }
+
+        // Hide error message
+        function hideApiError() {
+            if (apiErrorContainer) {
+                apiErrorContainer.style.display = 'none';
+            }
+        }
+
         // Initialize the application
         document.addEventListener('DOMContentLoaded', function() {
+            console.log('DOM Content Loaded - Starting initialization');
+            
             // Defensive check for required DOM elements
             if (!statusListContent || !createStatusModal || !statusViewerPanel) {
                 console.error('Required DOM elements not found. Status system may not work correctly.');
                 return;
             }
             
-            // Handle iframe token passing - BACKEND MIGRATION FIX
-            if (window.self !== window.top) {
-                // Running in iframe
-                console.log('Running in iframe mode');
-                // Check for token in parent window or URL
+            // Check if we're in an iframe
+            const isInIframe = window.self !== window.top;
+            console.log(`Running in iframe: ${isInIframe}`);
+            
+            // Handle iframe token passing
+            if (isInIframe) {
                 handleIframeAuth();
             }
             
-            // Load data from localStorage for instant display
+            // Load cached data immediately for instant display
             loadCachedDataInstantly();
             
-            // Initialize app after a short delay
-            setTimeout(() => {
-                initializeApp();
-            }, 100);
+            // Start initialization with API check
+            checkApiAndInitialize();
         });
-        
-        // Handle iframe authentication - BACKEND MIGRATION
+
+        // Handle iframe authentication
         function handleIframeAuth() {
             try {
-                // Check if we have a token from parent
-                if (window.parent && window.parent.getAuthToken) {
-                    const token = window.parent.getAuthToken();
-                    if (token) {
-                        localStorage.setItem('knecta_auth_token', token);
-                        console.log('Token received from parent window');
-                    }
-                }
+                console.log('Handling iframe authentication');
                 
                 // Check URL for token (for mobile apps)
                 const urlParams = new URLSearchParams(window.location.search);
@@ -2651,11 +1019,64 @@
                     console.log('Token received from URL');
                 }
                 
+                // Check for postMessage token
+                window.addEventListener('message', function(event) {
+                    if (event.data && event.data.type === 'auth_token') {
+                        localStorage.setItem('knecta_auth_token', event.data.token);
+                        console.log('Token received via postMessage');
+                    }
+                });
+                
             } catch (error) {
                 console.log('Iframe auth handling:', error);
             }
         }
-        
+
+        // Check API availability and initialize
+        async function checkApiAndInitialize() {
+            console.log('Checking API availability...');
+            
+            // Show loading state
+            if (statusListContent) {
+                statusListContent.innerHTML = `
+                    <div class="loading-placeholder" style="text-align: center; padding: 40px 20px; color: var(--text-secondary);">
+                        <i class="fas fa-spinner fa-spin" style="font-size: 24px; margin-bottom: 15px;"></i>
+                        <p>Connecting to server...</p>
+                    </div>
+                `;
+            }
+            
+            try {
+                // Test API connection
+                const api = getApi();
+                if (api) {
+                    console.log('API is available');
+                    hideApiError();
+                    
+                    // Initialize the app
+                    await initializeApp();
+                } else {
+                    console.log('API not available, running in offline mode');
+                    showApiError();
+                    
+                    // Still initialize with offline capabilities
+                    await initializeOfflineMode();
+                }
+            } catch (error) {
+                console.error('Error checking API:', error);
+                showApiError();
+                await initializeOfflineMode();
+            }
+        }
+
+        // Retry connection handler
+        if (retryConnectionBtn) {
+            retryConnectionBtn.addEventListener('click', function() {
+                console.log('Retrying connection...');
+                checkApiAndInitialize();
+            });
+        }
+
         function loadCachedDataInstantly() {
             console.log('=== INSTANT STATUS CACHE LOAD START ===');
             
@@ -2787,20 +1208,16 @@
         async function initializeApp() {
             console.log('=== STATUS SYSTEM INITIALIZATION START ===');
             
-            // Check for dark mode preference
+            // Check for dark mode
             checkDarkMode();
             
             // Load user from cache first
             await loadUserFromCache();
             
-            // Load initial data from backend in background
-            loadInitialStatusData();
-            
             // Setup event listeners
             setupEventListeners();
             
             // Initialize components
-            initializeColorPicker();
             initializeEmojiPicker();
             loadTemplates();
             loadMusicTracks();
@@ -2822,8 +1239,52 @@
             // Check for offline sync
             checkOfflineSync();
             
+            // Load status data from backend
+            await loadInitialStatusData();
+            
             console.log('=== STATUS SYSTEM INITIALIZATION COMPLETE ===');
             console.log('Enhanced features loaded: Intents, Moods, Micro Circles, Action Buttons, Daily Streak, Mood Trends');
+            
+            // Show success notification
+            showNotification('Status system ready', 'success');
+        }
+        
+        async function initializeOfflineMode() {
+            console.log('=== OFFLINE MODE INITIALIZATION ===');
+            
+            // Check for dark mode
+            checkDarkMode();
+            
+            // Load user from cache
+            await loadUserFromCache();
+            
+            // Setup event listeners
+            setupEventListeners();
+            
+            // Initialize components
+            initializeEmojiPicker();
+            loadTemplates();
+            loadMusicTracks();
+            loadCategories();
+            
+            // Load enhanced features
+            loadIntentsAndMoods();
+            loadMicroCircles();
+            loadActionButtons();
+            calculateDailyStreak();
+            loadMoodTrends();
+            
+            // Load drafts into modal
+            loadDraftsIntoModal();
+            
+            // Check for auto-schedule
+            checkScheduledStatuses();
+            
+            // Load cached statuses
+            loadCachedStatuses();
+            
+            console.log('=== OFFLINE MODE INITIALIZATION COMPLETE ===');
+            showNotification('Working offline with cached data', 'info');
         }
         
         async function loadUserFromCache() {
@@ -2832,13 +1293,13 @@
                 const cachedUser = localStorage.getItem(LOCAL_STORAGE_KEYS.USER);
                 if (cachedUser) {
                     currentUser = JSON.parse(cachedUser);
-                    console.log('Loaded user from cache:', currentUser.id || currentUser._id);
+                    console.log('Loaded user from cache:', currentUser.id || currentUser._id || 'Guest');
                 }
                 
                 // Try to get user data from app.js
                 if (window.appState && window.appState.currentUser) {
                     currentUser = window.appState.currentUser;
-                    console.log('User detected from app.js:', currentUser.id || currentUser._id);
+                    console.log('User detected from app.js:', currentUser.id || currentUser._id || 'Guest');
                 }
                 
                 // Load user profile from cache
@@ -2847,18 +1308,15 @@
                     userData = JSON.parse(cachedProfile);
                 }
                 
-                // If no user found, try to fetch from backend - BACKEND MIGRATION
+                // If no user found, try to fetch from backend
                 if (!currentUser || !currentUser.id) {
                     try {
-                        // Use window.api instead of just api
-                        if (window.api) {
-                            const response = await window.api('GET', '/api/auth/me');
-                            if (response && response.user) {
-                                currentUser = response.user;
-                                userData = response.user;
-                                localStorage.setItem(LOCAL_STORAGE_KEYS.USER, JSON.stringify(currentUser));
-                                localStorage.setItem(LOCAL_STORAGE_KEYS.USER_PROFILE, JSON.stringify(userData));
-                            }
+                        const response = await callApi('GET', '/api/auth/me');
+                        if (response && response.user) {
+                            currentUser = response.user;
+                            userData = response.user;
+                            localStorage.setItem(LOCAL_STORAGE_KEYS.USER, JSON.stringify(currentUser));
+                            localStorage.setItem(LOCAL_STORAGE_KEYS.USER_PROFILE, JSON.stringify(userData));
                         }
                     } catch (error) {
                         console.log('No authenticated user found, will use offline mode');
@@ -2887,48 +1345,58 @@
         }
         
         async function loadInitialStatusData() {
-            // Load statuses from backend in background
-            setTimeout(async () => {
-                try {
-                    await loadStatusesFromBackend();
-                    await loadFriendsStatuses();
-                    updateStatusCounts();
-                    showNotification('Status updates loaded', 'success');
-                } catch (error) {
-                    console.error('Error loading status data:', error);
-                    // Use cached data
-                    showNotification('Using cached status data', 'info');
-                }
-            }, 500);
+            console.log('Loading initial status data...');
+            
+            try {
+                await loadStatusesFromBackend();
+                await loadFriendsStatuses();
+                updateStatusCounts();
+                showNotification('Status updates loaded', 'success');
+            } catch (error) {
+                console.error('Error loading status data:', error);
+                // Use cached data
+                loadCachedStatuses();
+                showNotification('Using cached status data', 'info');
+            }
+        }
+        
+        function loadCachedStatuses() {
+            console.log('Loading cached statuses...');
+            
+            // Load all statuses from cache
+            const cachedStatuses = localStorage.getItem('knecta_all_statuses');
+            if (cachedStatuses) {
+                allStatuses = JSON.parse(cachedStatuses);
+                allStatuses = allStatuses.filter(status => !isStatusExpired(status));
+                renderStatusList();
+                updateRecentUpdatesCount();
+                console.log(`Loaded ${allStatuses.length} statuses from cache`);
+            }
+            
+            // Load friends statuses from cache
+            const cachedFriendsStatuses = localStorage.getItem('knecta_friends_statuses');
+            if (cachedFriendsStatuses) {
+                friendsStatuses = JSON.parse(cachedFriendsStatuses);
+                friendsStatuses = friendsStatuses.filter(status => !isStatusExpired(status));
+                document.getElementById('friendsStatusCount').textContent = friendsStatuses.length;
+            }
         }
         
         async function loadStatusesFromBackend() {
             try {
-                // Use window.api instead of just api
-                if (window.api) {
-                    const response = await window.api('GET', '/api/status');
+                const response = await callApi('GET', '/api/status');
+                
+                if (response && response.statuses) {
+                    allStatuses = response.statuses;
                     
-                    if (response && response.statuses) {
-                        allStatuses = response.statuses;
-                        
-                        // Filter out expired statuses
-                        allStatuses = allStatuses.filter(status => !isStatusExpired(status));
-                        
-                        // Update UI
-                        renderStatusList();
-                        updateRecentUpdatesCount();
-                        
-                        console.log(`Loaded ${allStatuses.length} statuses from backend`);
-                    } else {
-                        // If no statuses from backend, try to load from cache
-                        const cachedStatuses = localStorage.getItem('knecta_all_statuses');
-                        if (cachedStatuses) {
-                            allStatuses = JSON.parse(cachedStatuses);
-                            allStatuses = allStatuses.filter(status => !isStatusExpired(status));
-                            renderStatusList();
-                            updateRecentUpdatesCount();
-                        }
-                    }
+                    // Filter out expired statuses
+                    allStatuses = allStatuses.filter(status => !isStatusExpired(status));
+                    
+                    // Update UI
+                    renderStatusList();
+                    updateRecentUpdatesCount();
+                    
+                    console.log(`Loaded ${allStatuses.length} statuses from backend`);
                     
                     // Save to cache
                     localStorage.setItem('knecta_all_statuses', JSON.stringify(allStatuses));
@@ -2936,45 +1404,29 @@
                 
             } catch (error) {
                 console.error('Error loading statuses from backend:', error);
-                // Use cached data
-                const cachedStatuses = localStorage.getItem('knecta_all_statuses');
-                if (cachedStatuses) {
-                    allStatuses = JSON.parse(cachedStatuses);
-                    allStatuses = allStatuses.filter(status => !isStatusExpired(status));
-                    renderStatusList();
-                    updateRecentUpdatesCount();
-                }
+                throw error;
             }
         }
         
         async function loadFriendsStatuses() {
             try {
-                // Use window.api instead of just api
-                if (window.api) {
-                    const response = await window.api('GET', '/api/status/friends');
+                const response = await callApi('GET', '/api/status/friends');
+                
+                if (response && response.statuses) {
+                    friendsStatuses = response.statuses.filter(status => !isStatusExpired(status));
                     
-                    if (response && response.statuses) {
-                        friendsStatuses = response.statuses.filter(status => !isStatusExpired(status));
-                        
-                        // Update friends status count
-                        document.getElementById('friendsStatusCount').textContent = friendsStatuses.length;
-                        
-                        console.log(`Loaded ${friendsStatuses.length} friends statuses`);
-                        
-                        // Save to cache
-                        localStorage.setItem('knecta_friends_statuses', JSON.stringify(friendsStatuses));
-                    }
+                    // Update friends status count
+                    document.getElementById('friendsStatusCount').textContent = friendsStatuses.length;
+                    
+                    console.log(`Loaded ${friendsStatuses.length} friends statuses`);
+                    
+                    // Save to cache
+                    localStorage.setItem('knecta_friends_statuses', JSON.stringify(friendsStatuses));
                 }
                 
             } catch (error) {
                 console.error('Error loading friends statuses:', error);
-                // Use cached data
-                const cachedFriendsStatuses = localStorage.getItem('knecta_friends_statuses');
-                if (cachedFriendsStatuses) {
-                    friendsStatuses = JSON.parse(cachedFriendsStatuses);
-                    friendsStatuses = friendsStatuses.filter(status => !isStatusExpired(status));
-                    document.getElementById('friendsStatusCount').textContent = friendsStatuses.length;
-                }
+                throw error;
             }
         }
         
@@ -3625,9 +2077,7 @@
         async function trackStatusView(statusId) {
             // Send view tracking to backend
             try {
-                if (window.api) {
-                    await window.api('POST', `/api/status/${statusId}/view`);
-                }
+                await callApi('POST', `/api/status/${statusId}/view`);
             } catch (error) {
                 console.log('Offline: View tracking saved locally');
             }
@@ -3726,12 +2176,10 @@
             
             // Send to backend - OFFLINE SUPPORT
             try {
-                if (window.api) {
-                    const response = await window.api('POST', '/api/status', status);
-                    if (response && response.status) {
-                        status.id = response.status.id || statusId;
-                        console.log('Status posted to backend');
-                    }
+                const response = await callApi('POST', '/api/status', status);
+                if (response && response.status) {
+                    status.id = response.status.id || statusId;
+                    console.log('Status posted to backend');
                 }
             } catch (error) {
                 console.log('Offline: Status saved locally, will sync when online');
@@ -3817,11 +2265,9 @@
             
             // Send to backend - OFFLINE SUPPORT
             try {
-                if (window.api) {
-                    const response = await window.api('POST', '/api/status', status);
-                    if (response && response.status) {
-                        status.id = response.status.id || statusId;
-                    }
+                const response = await callApi('POST', '/api/status', status);
+                if (response && response.status) {
+                    status.id = response.status.id || statusId;
                 }
             } catch (error) {
                 console.log('Offline: Media status saved locally');
@@ -3881,11 +2327,9 @@
             
             // Send to backend - OFFLINE SUPPORT
             try {
-                if (window.api) {
-                    const response = await window.api('POST', '/api/status', status);
-                    if (response && response.status) {
-                        status.id = response.status.id || statusId;
-                    }
+                const response = await callApi('POST', '/api/status', status);
+                if (response && response.status) {
+                    status.id = response.status.id || statusId;
                 }
             } catch (error) {
                 console.log('Offline: Poll saved locally');
@@ -3909,19 +2353,17 @@
         
         async function voteOnPoll(statusId, optionIndex) {
             try {
-                if (window.api) {
-                    const response = await window.api('POST', `/api/status/${statusId}/vote`, { optionIndex });
-                    
-                    if (response && response.success) {
-                        // Update local data
-                        const status = allStatuses.find(s => s.id === statusId);
-                        if (status && status.pollOptions) {
-                            status.pollOptions[optionIndex].votes = (status.pollOptions[optionIndex].votes || 0) + 1;
-                            status.totalVotes = (status.totalVotes || 0) + 1;
-                        }
-                        
-                        showNotification('Vote recorded', 'success');
+                const response = await callApi('POST', `/api/status/${statusId}/vote`, { optionIndex });
+                
+                if (response && response.success) {
+                    // Update local data
+                    const status = allStatuses.find(s => s.id === statusId);
+                    if (status && status.pollOptions) {
+                        status.pollOptions[optionIndex].votes = (status.pollOptions[optionIndex].votes || 0) + 1;
+                        status.totalVotes = (status.totalVotes || 0) + 1;
                     }
+                    
+                    showNotification('Vote recorded', 'success');
                 }
                 
             } catch (error) {
@@ -4137,9 +2579,7 @@
         
         function reportStatus(statusId, reason) {
             // Send report to backend
-            if (window.api) {
-                window.api('POST', `/api/status/${statusId}/report`, { reason }).catch(console.error);
-            }
+            callApi('POST', `/api/status/${statusId}/report`, { reason }).catch(console.error);
             
             showNotification('Status reported', 'success');
         }
@@ -4253,27 +2693,6 @@
             }
         }
         
-        // Initialize Color Picker
-        function initializeColorPicker() {
-            const colorInput = document.getElementById('textStatusColor');
-            if (colorInput && typeof jQuery !== 'undefined' && jQuery.fn.spectrum) {
-                colorPicker = jQuery(colorInput).spectrum({
-                    color: '#0084ff',
-                    showInput: true,
-                    showInitial: true,
-                    allowEmpty: false,
-                    showAlpha: false,
-                    preferredFormat: 'hex',
-                    move: function(color) {
-                        updateTextStatusPreview();
-                    },
-                    change: function(color) {
-                        updateTextStatusPreview();
-                    }
-                });
-            }
-        }
-        
         function initializeEmojiPicker() {
             const emojiTrigger = document.getElementById('emojiTriggerBtn');
             const emojiWrapper = document.getElementById('emojiPickerWrapper');
@@ -4313,13 +2732,7 @@
                 preview.textContent = textInput.value || 'Type your status here...';
                 
                 // Get color from color picker
-                let color = '#0084ff';
-                if (colorPicker && colorPicker.spectrum) {
-                    color = colorPicker.spectrum('get').toHexString();
-                } else {
-                    color = colorInput.value;
-                }
-                
+                let color = colorInput.value;
                 preview.style.backgroundColor = color;
                 
                 // Adjust text color for contrast
@@ -4383,11 +2796,9 @@
                 preview.style.fontSize = template.fontSize;
                 
                 // Update color picker if available
-                if (colorPicker && colorPicker.spectrum) {
-                    // Extract first color from gradient for simplicity
-                    const firstColor = template.bg.match(/#[0-9a-fA-F]{6}/)?.[0] || '#0084ff';
-                    colorPicker.spectrum('set', firstColor);
-                }
+                // Extract first color from gradient for simplicity
+                const firstColor = template.bg.match(/#[0-9a-fA-F]{6}/)?.[0] || '#0084ff';
+                document.getElementById('textStatusColor').value = firstColor;
             }
         }
         
@@ -4548,6 +2959,8 @@
         }
         
         function setupEventListeners() {
+            console.log('Setting up event listeners...');
+            
             // Defensive checks for DOM elements
             if (!document.getElementById('allTab') || !document.getElementById('createStatusBtn')) {
                 console.error('Required DOM elements for event listeners not found');
@@ -4706,12 +3119,7 @@
                             this.classList.add('selected');
                             
                             // Update color picker
-                            if (colorPicker && colorPicker.spectrum) {
-                                colorPicker.spectrum('set', color);
-                            } else {
-                                document.getElementById('textStatusColor').value = color;
-                            }
-                            
+                            document.getElementById('textStatusColor').value = color;
                             updateTextStatusPreview();
                         });
                         
@@ -4901,6 +3309,8 @@
             window.addEventListener('offline', () => {
                 showNotification('Working offline', 'info');
             });
+            
+            console.log('Event listeners setup complete');
         }
         
         // NEW: Toggle Discovery Filters
@@ -5438,13 +3848,7 @@
                         return;
                     }
                     
-                    let backgroundColor = '#0084ff';
-                    if (colorPicker && colorPicker.spectrum) {
-                        backgroundColor = colorPicker.spectrum('get').toHexString();
-                    } else {
-                        backgroundColor = document.getElementById('textStatusColor').value;
-                    }
-                    
+                    let backgroundColor = document.getElementById('textStatusColor').value;
                     const textColor = getContrastColor(backgroundColor);
                     
                     const statusData = {
@@ -5580,12 +3984,7 @@
                         return;
                     }
                     
-                    let backgroundColor = '#0084ff';
-                    if (colorPicker && colorPicker.spectrum) {
-                        backgroundColor = colorPicker.spectrum('get').toHexString();
-                    } else {
-                        backgroundColor = document.getElementById('textStatusColor').value;
-                    }
+                    let backgroundColor = document.getElementById('textStatusColor').value;
                     
                     draftData = {
                         type: STATUS_TYPES.TEXT,
@@ -5765,48 +4164,46 @@
         async function showStatsModal() {
             // Load stats from backend
             try {
-                if (window.api) {
-                    const response = await window.api('GET', '/api/status/stats');
+                const response = await callApi('GET', '/api/status/stats');
+                
+                if (response && response.stats) {
+                    const stats = response.stats;
                     
-                    if (response && response.stats) {
-                        const stats = response.stats;
+                    // Update stats display
+                    document.getElementById('totalViews').textContent = stats.totalViews || 0;
+                    document.getElementById('avgViewTime').textContent = stats.avgViewTime ? Math.round(stats.avgViewTime) + 's' : '0s';
+                    document.getElementById('totalReplies').textContent = stats.totalReplies || 0;
+                    document.getElementById('totalReactions').textContent = stats.totalReactions || 0;
+                    document.getElementById('totalShares').textContent = stats.totalShares || 0;
+                    
+                    // Check for silent mode stats
+                    const silentModeStats = document.getElementById('silentModeStats');
+                    if (silentModeStats && stats.privateViews) {
+                        silentModeStats.style.display = 'block';
+                        document.getElementById('privateViews').textContent = stats.privateViews || 0;
+                        document.getElementById('reflectionTime').textContent = stats.reflectionTime || '0min';
+                    }
+                    
+                    // Load recent viewers
+                    const viewersList = document.getElementById('viewersList');
+                    if (viewersList && stats.recentViewers) {
+                        viewersList.innerHTML = '';
                         
-                        // Update stats display
-                        document.getElementById('totalViews').textContent = stats.totalViews || 0;
-                        document.getElementById('avgViewTime').textContent = stats.avgViewTime ? Math.round(stats.avgViewTime) + 's' : '0s';
-                        document.getElementById('totalReplies').textContent = stats.totalReplies || 0;
-                        document.getElementById('totalReactions').textContent = stats.totalReactions || 0;
-                        document.getElementById('totalShares').textContent = stats.totalShares || 0;
-                        
-                        // Check for silent mode stats
-                        const silentModeStats = document.getElementById('silentModeStats');
-                        if (silentModeStats && stats.privateViews) {
-                            silentModeStats.style.display = 'block';
-                            document.getElementById('privateViews').textContent = stats.privateViews || 0;
-                            document.getElementById('reflectionTime').textContent = stats.reflectionTime || '0min';
-                        }
-                        
-                        // Load recent viewers
-                        const viewersList = document.getElementById('viewersList');
-                        if (viewersList && stats.recentViewers) {
-                            viewersList.innerHTML = '';
-                            
-                            stats.recentViewers.forEach(viewer => {
-                                const viewerItem = document.createElement('div');
-                                viewerItem.className = 'viewer-item';
-                                viewerItem.innerHTML = `
-                                    <div class="viewer-avatar" style="background-image: url('${escapeHtml(viewer.avatar || '')}'); background-color: ${viewer.avatar ? '' : '#ccc'};"></div>
-                                    <div class="viewer-info">
-                                        <div class="viewer-name">${escapeHtml(viewer.name)}</div>
-                                        <div style="display: flex; justify-content: space-between;">
-                                            <span class="viewer-time">${formatTimeAgo(new Date(viewer.viewedAt))}</span>
-                                            <span class="viewer-duration">${viewer.duration || '0s'}</span>
-                                        </div>
+                        stats.recentViewers.forEach(viewer => {
+                            const viewerItem = document.createElement('div');
+                            viewerItem.className = 'viewer-item';
+                            viewerItem.innerHTML = `
+                                <div class="viewer-avatar" style="background-image: url('${escapeHtml(viewer.avatar || '')}'); background-color: ${viewer.avatar ? '' : '#ccc'};"></div>
+                                <div class="viewer-info">
+                                    <div class="viewer-name">${escapeHtml(viewer.name)}</div>
+                                    <div style="display: flex; justify-content: space-between;">
+                                        <span class="viewer-time">${formatTimeAgo(new Date(viewer.viewedAt))}</span>
+                                        <span class="viewer-duration">${viewer.duration || '0s'}</span>
                                     </div>
-                                `;
-                                viewersList.appendChild(viewerItem);
-                            });
-                        }
+                                </div>
+                            `;
+                            viewersList.appendChild(viewerItem);
+                        });
                     }
                 }
             } catch (error) {
@@ -5879,9 +4276,7 @@
                 const item = offlineQueue[i];
                 try {
                     if (item.type === 'status') {
-                        if (window.api) {
-                            await window.api('POST', '/api/status', item.data);
-                        }
+                        await callApi('POST', '/api/status', item.data);
                         // Remove from queue on success
                         offlineQueue.splice(i, 1);
                         i--;
@@ -6082,12 +4477,10 @@
         
         async function reactToStatus(statusId, reaction, label = '') {
             try {
-                if (window.api) {
-                    const response = await window.api('POST', `/api/status/${statusId}/react`, { reaction, label });
-                    
-                    if (response && response.success) {
-                        showNotification(`Reacted with ${reaction} ${label ? '(' + label + ')' : ''}`, 'success');
-                    }
+                const response = await callApi('POST', `/api/status/${statusId}/react`, { reaction, label });
+                
+                if (response && response.success) {
+                    showNotification(`Reacted with ${reaction} ${label ? '(' + label + ')' : ''}`, 'success');
                 }
                 
             } catch (error) {
@@ -6319,16 +4712,14 @@
         
         async function sendStatusReply(statusId, text) {
             try {
-                if (window.api) {
-                    const response = await window.api('POST', `/api/status/${statusId}/reply`, { text });
+                const response = await callApi('POST', `/api/status/${statusId}/reply`, { text });
+                
+                if (response && response.success) {
+                    showNotification('Reply sent', 'success');
                     
-                    if (response && response.success) {
-                        showNotification('Reply sent', 'success');
-                        
-                        // Open chat with the user
-                        if (currentViewerStatus) {
-                            openChat(currentViewerStatus.userId, currentViewerStatus.userName);
-                        }
+                    // Open chat with the user
+                    if (currentViewerStatus) {
+                        openChat(currentViewerStatus.userId, currentViewerStatus.userName);
                     }
                 }
                 
