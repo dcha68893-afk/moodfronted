@@ -3,13 +3,31 @@
 // STRICT RULE: window.api is a plain object, safe singleton, no throw on duplicate
 
 // ============================================================================
+// ENVIRONMENT DETECTION & BACKEND URL SELECTION
+// ============================================================================
+
+// Determine environment based on hostname
+const IS_LOCAL_DEVELOPMENT = window.location.hostname === 'localhost' || 
+                           window.location.hostname.startsWith('127.') ||
+                           window.location.hostname.startsWith('192.168') ||
+                           window.location.protocol === 'file:';
+
+// Select backend URL based on environment
+const BACKEND_BASE_URL = IS_LOCAL_DEVELOPMENT 
+    ? 'http://localhost:4000' 
+    : 'https://moodchat-backend-1.onrender.com';
+
+const BACKEND_API_URL = BACKEND_BASE_URL + '/api';
+
+// Log backend selection
+console.log(`🔧 [API] Environment: ${IS_LOCAL_DEVELOPMENT ? 'Local Development' : 'Production'}`);
+console.log(`🔧 [API] Backend URL: ${BACKEND_API_URL}`);
+
+// ============================================================================
 // DEVELOPMENT MODE CHECK
 // ============================================================================
 
-const IS_DEVELOPMENT = window.location.hostname === 'localhost' || 
-                       window.location.hostname.startsWith('127.') ||
-                       window.location.hostname.startsWith('192.') ||
-                       window.location.protocol === 'file:' ||
+const IS_DEVELOPMENT = IS_LOCAL_DEVELOPMENT ||
                        window.location.search.includes('debug=true');
 
 const DEV_LOG = IS_DEVELOPMENT ? console.log.bind(console, '🔧 [API]') : () => {};
@@ -38,14 +56,18 @@ if (window.api && window.api._singleton && window.api._version && window.api._sa
     // ============================================================================
     
     const CONFIG = {
-        BACKEND_URL: 'https://moodchat-backend-1.onrender.com/api',
+        BACKEND_URL: BACKEND_API_URL,
+        BACKEND_BASE_URL: BACKEND_BASE_URL,
+        IS_LOCAL_DEVELOPMENT: IS_LOCAL_DEVELOPMENT,
         API_TIMEOUT: 15000, // 15 seconds
         HEARTBEAT_INTERVAL: 30000, // 30 seconds
         STORAGE_PREFIX: 'moodchat_',
         MAX_RETRIES: 2,
         RETRY_DELAY: 1000,
         CONNECTION_RETRY_INTERVAL: 3000, // 3 seconds for backend connectivity retry
-        MAX_CONNECTION_RETRIES: 10 // Maximum number of connection retry attempts
+        MAX_CONNECTION_RETRIES: 10, // Maximum number of connection retry attempts
+        BACKEND_COLD_START_RETRIES: 2, // Extra retries for backend cold start
+        BACKEND_COLD_START_DELAY: 2000 // Delay for cold start retry
     };
     
     const ENDPOINTS = {
@@ -655,11 +677,15 @@ if (window.api && window.api._singleton && window.api._version && window.api._sa
         
         let lastError = null;
         let attempt = 0;
+        const maxAttempts = maxRetries + CONFIG.BACKEND_COLD_START_RETRIES;
         
-        while (attempt <= maxRetries) {
+        while (attempt <= maxAttempts) {
             if (attempt > 0) {
-                DEV_LOG(`Retry attempt ${attempt} for ${endpoint}`);
-                await new Promise(resolve => setTimeout(resolve, CONFIG.RETRY_DELAY * attempt));
+                const delay = attempt <= maxRetries 
+                    ? CONFIG.RETRY_DELAY * attempt 
+                    : CONFIG.BACKEND_COLD_START_DELAY;
+                DEV_LOG(`Retry attempt ${attempt} for ${endpoint} (delay: ${delay}ms)`);
+                await new Promise(resolve => setTimeout(resolve, delay));
             }
             
             try {
@@ -773,14 +799,14 @@ if (window.api && window.api._singleton && window.api._version && window.api._sa
                 
             } catch (error) {
                 lastError = error;
-                DEV_WARN(`Request failed (attempt ${attempt + 1}/${maxRetries + 1}):`, error.message);
+                DEV_WARN(`Request failed (attempt ${attempt + 1}/${maxAttempts + 1}):`, error.message);
                 
                 // Update connection status on network errors
                 if (error.name === 'AbortError' || error.message.includes('network') || error.message.includes('fetch')) {
                     _updateConnectionStatus(navigator.onLine, false);
                 }
                 
-                if (attempt === maxRetries) {
+                if (attempt === maxAttempts) {
                     break;
                 }
             }
@@ -2467,52 +2493,3 @@ setTimeout(() => {
         console.warn('🔄 Created minimal API fallback. Some features will be limited.');
     }
 }, 2000);
-
-// ============================================================================
-// FEATURE SUMMARY
-// ============================================================================
-/*
-✅ COMPLETE, ROBUST, PRODUCTION-READY API LAYER WITH CONNECTIVITY HANDLING
-
-KEY FEATURES ADDED/ENHANCED:
-1. ✅ BACKEND HEALTH CHECK FUNCTION - Enhanced checkBackendHealth() method
-2. ✅ CONNECTION RETRY MECHANISM - Retry every 3 seconds until successful
-3. ✅ BLOCK API CALLS WHEN BACKEND UNREACHABLE - Prevents requests when backend is down
-4. ✅ WORKING window.api OBJECT - With all required methods plus aliases
-5. ✅ USER-FRIENDLY ERROR MESSAGES - Never crashes the app
-6. ✅ STOPPED "FAKE AUTO-LOGIN" - JWT validation only when backend is reachable
-7. ✅ PRESERVED ALL EXISTING FUNCTIONS - All original functionality maintained
-
-CONNECTIVITY IMPROVEMENTS:
-- Exponential backoff retry mechanism for backend connection
-- Automatic retry every 3 seconds when backend is unreachable
-- Maximum retry limit to prevent infinite loops
-- Backend reachability flag blocks non-GET requests
-- GET requests return cached data when backend is unreachable
-- Connection status listeners for real-time updates
-- Automatic queue processing when connection is restored
-
-AUTHENTICATION IMPROVEMENTS:
-- JWT token validation only occurs when backend is reachable
-- No "fake auto-login" - returns offline status when backend is down
-- Clear distinction between offline mode and backend unreachable
-- Session validation respects backend connectivity state
-
-ERROR HANDLING:
-- User-friendly error messages for backend unreachable state
-- Graceful degradation when backend is unavailable
-- Cached data served for GET requests when offline
-- POST/PUT/DELETE requests queued for later processing
-
-PERFORMANCE & RELIABILITY:
-- Efficient connection monitoring with heartbeat
-- Connection retry with configurable interval and max attempts
-- Proper cleanup of timers and intervals
-- Memory leak prevention
-
-MAINTENANCE:
-- Clear comments explaining connectivity logic
-- Easy to configure retry parameters
-- Backward compatible with existing code
-- Comprehensive error categorization
-*/

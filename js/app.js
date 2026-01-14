@@ -115,6 +115,13 @@ const API_COORDINATION = {
     return this.apiReady && typeof window.api === 'function';
   },
   
+  // Check if backend is reachable (read from api.js state)
+  isBackendReachable: function() {
+    return this.apiReady && 
+           typeof window.api === 'function' && 
+           window.api.backendReachable !== false;
+  },
+  
   // Make safe API call that works with or without api.js
   safeApiCall: async function(endpoint, options = {}) {
     // Wait for API to be ready
@@ -151,8 +158,8 @@ const API_COORDINATION = {
       return false;
     }
     
-    // Then verify with API heartbeat (but don't block if api.js not ready)
-    if (this.apiReady) {
+    // Then verify with API heartbeat (only if api.js is ready)
+    if (this.apiReady && this.isBackendReachable()) {
       try {
         return await this.heartbeatCheck();
       } catch (error) {
@@ -160,7 +167,7 @@ const API_COORDINATION = {
       }
     }
     
-    // If api.js not ready, rely on browser status
+    // If api.js not ready or backend unreachable, rely on browser status
     return navigator.onLine;
   }
 };
@@ -242,7 +249,7 @@ const JWT_VALIDATION = {
       // Wait for api.js to be ready
       await API_COORDINATION.waitForApi();
       
-      if (API_COORDINATION.isApiAvailable()) {
+      if (API_COORDINATION.isApiAvailable() && API_COORDINATION.isBackendReachable()) {
         try {
           const response = await API_COORDINATION.safeApiCall('/auth/me', {
             method: 'GET',
@@ -261,8 +268,8 @@ const JWT_VALIDATION = {
           return { valid: false, reason: 'API validation failed: ' + apiError.message };
         }
       } else {
-        // api.js not available
-        return { valid: false, reason: 'API service not available' };
+        // api.js not available or backend unreachable
+        return { valid: false, reason: 'API service not available or backend unreachable' };
       }
     } catch (error) {
       console.error('Token validation error:', error);
@@ -777,22 +784,31 @@ async function initializeApp() {
   
   appStartupPerformed = true;
   
-  // STEP 1: Wait for api.js (with timeout)
+  // STEP 1: Wait for api.js (with timeout) - MUST complete before continuing
   console.log('Waiting for api.js...');
   const apiAvailable = await API_COORDINATION.waitForApi();
   
-  if (!apiAvailable) {
-    console.log('⚠️ api.js not available, some features will be limited');
+  // STEP 2: Check backend reachability status from api.js
+  const backendReachable = API_COORDINATION.isBackendReachable();
+  console.log(`Backend reachable: ${backendReachable}`);
+  
+  if (!apiAvailable || !backendReachable) {
+    console.log('⚠️ api.js not available or backend unreachable, some features will be limited');
     window.showToast('Running in limited mode - API service unavailable', 'warning');
+    
+    // Mark as offline since backend is not reachable
+    isOnline = false;
+    updateNetworkStatus(false);
+  } else {
+    // STEP 3: Check real online status (only if backend is reachable)
+    console.log('Checking real online status...');
+    const realOnlineStatus = await API_COORDINATION.getRealOnlineStatus();
+    isOnline = realOnlineStatus;
+    console.log(`Real online status: ${isOnline ? 'Online' : 'Offline'}`);
+    updateNetworkStatus(isOnline);
   }
   
-  // STEP 2: Check real online status
-  console.log('Checking real online status...');
-  const realOnlineStatus = await API_COORDINATION.getRealOnlineStatus();
-  isOnline = realOnlineStatus;
-  console.log(`Real online status: ${isOnline ? 'Online' : 'Offline'}`);
-  
-  // STEP 3: Hide loading screen IMMEDIATELY
+  // STEP 4: Hide loading screen IMMEDIATELY
   const loadingScreen = document.getElementById('loadingScreen');
   if (loadingScreen) {
     loadingScreen.classList.add('hidden');
@@ -803,10 +819,10 @@ async function initializeApp() {
     }, 300);
   }
   
-  // STEP 4: Restore auth state INSTANTLY from cache (NON-BLOCKING)
+  // STEP 5: Restore auth state INSTANTLY from cache (NON-BLOCKING)
   const authRestored = restoreAuthStateInstantly();
   
-  // STEP 5: Initialize core services (non-blocking)
+  // STEP 6: Initialize core services (non-blocking)
   setTimeout(() => {
     // Initialize settings
     SETTINGS_SERVICE.initialize();
@@ -829,17 +845,19 @@ async function initializeApp() {
     console.log('✓ Core services initialized');
   }, 50);
   
-  // STEP 6: Initialize UI IMMEDIATELY (NON-BLOCKING)
+  // STEP 7: Initialize UI IMMEDIATELY (NON-BLOCKING)
   setTimeout(() => {
     initializeAppUI();
   }, 100);
   
-  // STEP 7: Schedule background validation (NON-BLOCKING, DELAYED)
+  // STEP 8: Schedule background validation ONLY if backend is reachable
   setTimeout(() => {
-    // Only validate if we have a JWT token
-    if (JWT_VALIDATION.hasToken()) {
+    // Only validate if we have a JWT token AND backend is reachable
+    if (JWT_VALIDATION.hasToken() && backendReachable) {
       console.log('Scheduling background token validation...');
       scheduleBackgroundValidation();
+    } else if (JWT_VALIDATION.hasToken() && !backendReachable) {
+      console.log('Skipping background validation: backend unreachable');
     } else {
       console.log('No JWT token found, skipping background validation');
     }
@@ -922,9 +940,9 @@ function initializeAppUI() {
     }
   }, 300);
   
-  // Start background services after delay - ONLY if online
+  // Start background services after delay - ONLY if online AND backend reachable
   setTimeout(() => {
-    if (isOnline && window.currentUser && !window.currentUser.isOfflineMode) {
+    if (isOnline && API_COORDINATION.isBackendReachable() && window.currentUser && !window.currentUser.isOfflineMode) {
       NETWORK_SERVICE_MANAGER.startAllServices();
       NETWORK_SERVICE_MANAGER.startBackgroundSync();
     }
@@ -2554,7 +2572,7 @@ function setupGlobalAuthAccess() {
   // Enhanced login function using api.js - with proper online/offline handling
   window.login = function(email, password) {
     return new Promise(async (resolve, reject) => {
-      // Check if we're online
+      // Check if we're online and backend is reachable
       if (!isOnline) {
         window.showToast('Cannot login while offline. Please check your internet connection.', 'error');
         resolve({
@@ -2565,8 +2583,7 @@ function setupGlobalAuthAccess() {
         return;
       }
       
-      // Check if api.js is available
-      if (!API_COORDINATION.isApiAvailable()) {
+      if (!API_COORDINATION.isApiAvailable() || !API_COORDINATION.isBackendReachable()) {
         window.showToast('Login service not available. Please try again later.', 'error');
         resolve({
           success: false,
@@ -2693,8 +2710,10 @@ function setupGlobalAuthAccess() {
       // Clear JWT token on logout
       JWT_VALIDATION.clearToken();
       
-      // Try API logout if available and user is not offline
-      if (window.currentUser && !window.currentUser.isOffline && isOnline && API_COORDINATION.isApiAvailable() && JWT_VALIDATION.hasToken()) {
+      // Try API logout if available and user is not offline AND backend is reachable
+      if (window.currentUser && !window.currentUser.isOffline && isOnline && 
+          API_COORDINATION.isApiAvailable() && API_COORDINATION.isBackendReachable() && 
+          JWT_VALIDATION.hasToken()) {
         try {
           await API_COORDINATION.safeApiCall('/auth/logout', {
             method: 'POST',
@@ -2736,7 +2755,7 @@ function setupGlobalAuthAccess() {
   // Enhanced register function using api.js
   window.register = function(email, password, displayName) {
     return new Promise(async (resolve, reject) => {
-      // Check if we're online
+      // Check if we're online and backend is reachable
       if (!isOnline) {
         window.showToast('Cannot register while offline. Please check your internet connection.', 'error');
         resolve({
@@ -2747,8 +2766,7 @@ function setupGlobalAuthAccess() {
         return;
       }
       
-      // Check if api.js is available
-      if (!API_COORDINATION.isApiAvailable()) {
+      if (!API_COORDINATION.isApiAvailable() || !API_COORDINATION.isBackendReachable()) {
         window.showToast('Registration service not available. Please try again later.', 'error');
         resolve({
           success: false,
@@ -3116,8 +3134,14 @@ function initializeNetworkDetection() {
 async function handleOnline() {
   console.log('Network: Online detected, verifying with API...');
   
-  // Verify real online status with API heartbeat
-  const realOnline = await API_COORDINATION.getRealOnlineStatus();
+  // Verify real online status with API heartbeat (only if backend is reachable)
+  let realOnline = false;
+  if (API_COORDINATION.isApiAvailable() && API_COORDINATION.isBackendReachable()) {
+    realOnline = await API_COORDINATION.getRealOnlineStatus();
+  } else {
+    realOnline = navigator.onLine;
+  }
+  
   if (!realOnline) {
     console.log('Network: Browser says online but API is unreachable');
     // Don't update status if API is unreachable
@@ -3130,19 +3154,21 @@ async function handleOnline() {
   // Broadcast network change to other files
   broadcastNetworkChange(true);
   
-  // Start all network-dependent services
-  NETWORK_SERVICE_MANAGER.startAllServices();
-  
-  // Start background sync
-  setTimeout(() => {
-    NETWORK_SERVICE_MANAGER.startBackgroundSync();
-  }, 500);
+  // Start all network-dependent services only if backend is reachable
+  if (API_COORDINATION.isApiAvailable() && API_COORDINATION.isBackendReachable()) {
+    NETWORK_SERVICE_MANAGER.startAllServices();
+    
+    // Start background sync
+    setTimeout(() => {
+      NETWORK_SERVICE_MANAGER.startBackgroundSync();
+    }, 500);
+  }
   
   // Update UI to show online status
   showOnlineIndicator();
   
-  // Enable login/register buttons
-  enableAuthForms(true);
+  // Enable login/register buttons only if backend is reachable
+  enableAuthForms(API_COORDINATION.isBackendReachable());
 }
 
 // Handle offline event
@@ -3218,7 +3244,8 @@ function updateNetworkStatus(online) {
     isOffline: !isOnline,
     lastChange: new Date().toISOString(),
     syncQueueSize: syncQueue.length,
-    services: NETWORK_SERVICE_MANAGER.getServiceStates()
+    services: NETWORK_SERVICE_MANAGER.getServiceStates(),
+    backendReachable: API_COORDINATION.isBackendReachable()
   };
   
   // Dispatch custom event for other components
@@ -3226,15 +3253,16 @@ function updateNetworkStatus(online) {
     detail: { 
       isOnline: isOnline, 
       isOffline: !isOnline,
-      services: NETWORK_SERVICE_MANAGER.getServiceStates()
+      services: NETWORK_SERVICE_MANAGER.getServiceStates(),
+      backendReachable: API_COORDINATION.isBackendReachable()
     }
   });
   window.dispatchEvent(event);
   
-  console.log(`Network status: ${online ? 'Online' : 'Offline'}`);
+  console.log(`Network status: ${online ? 'Online' : 'Offline'}, Backend reachable: ${API_COORDINATION.isBackendReachable()}`);
   
   // Update auth forms
-  enableAuthForms(online);
+  enableAuthForms(online && API_COORDINATION.isBackendReachable());
 }
 
 // Show offline indicator
@@ -3286,7 +3314,8 @@ function broadcastNetworkChange(isOnline) {
     isOnline: isOnline,
     isOffline: !isOnline,
     timestamp: new Date().toISOString(),
-    services: NETWORK_SERVICE_MANAGER.getServiceStates()
+    services: NETWORK_SERVICE_MANAGER.getServiceStates(),
+    backendReachable: API_COORDINATION.isBackendReachable()
   };
   
   try {
@@ -3306,15 +3335,15 @@ function broadcastNetworkChange(isOnline) {
 function startSyncMonitor() {
   // Check for queued items every 30 seconds
   setInterval(() => {
-    if (isOnline && syncQueue.length > 0) {
+    if (isOnline && API_COORDINATION.isBackendReachable() && syncQueue.length > 0) {
       console.log('Periodic sync check - processing queue');
       processQueuedMessages();
     }
   }, 30000);
   
-  // Background data refresh every 5 minutes when online
+  // Background data refresh every 5 minutes when online and backend reachable
   setInterval(() => {
-    if (isOnline && window.currentUser) {
+    if (isOnline && API_COORDINATION.isBackendReachable() && window.currentUser) {
       refreshCachedDataInBackground();
     }
   }, 5 * 60 * 1000);
@@ -3563,7 +3592,7 @@ function queueForSync(data, type = 'message') {
 
 // Process queued messages when online for current user only
 function processQueuedMessages() {
-  if (!isOnline || !window.indexedDB || syncQueue.length === 0 || !window.currentUser) return;
+  if (!isOnline || !API_COORDINATION.isBackendReachable() || !window.indexedDB || syncQueue.length === 0 || !window.currentUser) return;
   
   console.log(`Processing ${syncQueue.length} queued items for user ${window.currentUser.uid}...`);
   
@@ -3619,9 +3648,9 @@ function processStoreQueue(db, storeName, userId) {
 
 // Send a queued item
 function sendQueuedItem(item, db, storeName, userId) {
-  // Check if we're still online
-  if (!isOnline) {
-    console.log(`Cannot send ${storeName} ${item.id}: offline`);
+  // Check if we're still online and backend is reachable
+  if (!isOnline || !API_COORDINATION.isBackendReachable()) {
+    console.log(`Cannot send ${storeName} ${item.id}: offline or backend unreachable`);
     return;
   }
   
@@ -3683,8 +3712,8 @@ function getSendFunctionForType(type) {
 // Default send functions (Updated to use api.js where possible)
 function defaultSendMessage(message) {
   console.log('Sending queued message:', message);
-  // Use api.js to send message if available
-  if (API_COORDINATION.isApiAvailable() && isOnline && window.currentUser && JWT_VALIDATION.hasToken()) {
+  // Use api.js to send message if available and backend is reachable
+  if (API_COORDINATION.isApiAvailable() && API_COORDINATION.isBackendReachable() && isOnline && window.currentUser && JWT_VALIDATION.hasToken()) {
     return API_COORDINATION.safeApiCall('/chat/send', {
       method: 'POST',
       headers: {
@@ -3702,8 +3731,8 @@ function defaultSendMessage(message) {
 
 function defaultSendStatus(status) {
   console.log('Sending queued status:', status);
-  // Use api.js to update status if available
-  if (API_COORDINATION.isApiAvailable() && isOnline && window.currentUser && JWT_VALIDATION.hasToken()) {
+  // Use api.js to update status if available and backend is reachable
+  if (API_COORDINATION.isApiAvailable() && API_COORDINATION.isBackendReachable() && isOnline && window.currentUser && JWT_VALIDATION.hasToken()) {
     return API_COORDINATION.safeApiCall('/user/status', {
       method: 'POST',
       headers: {
@@ -3720,8 +3749,8 @@ function defaultSendStatus(status) {
 
 function defaultSendFriendRequest(request) {
   console.log('Sending queued friend request:', request);
-  // Use api.js to send friend request if available
-  if (API_COORDINATION.isApiAvailable() && isOnline && window.currentUser && JWT_VALIDATION.hasToken()) {
+  // Use api.js to send friend request if available and backend is reachable
+  if (API_COORDINATION.isApiAvailable() && API_COORDINATION.isBackendReachable() && isOnline && window.currentUser && JWT_VALIDATION.hasToken()) {
     return API_COORDINATION.safeApiCall('/friends/request', {
       method: 'POST',
       headers: {
@@ -3738,8 +3767,8 @@ function defaultSendFriendRequest(request) {
 
 function defaultSendCallLog(callLog) {
   console.log('Sending queued call log:', callLog);
-  // Use api.js to log call if available
-  if (API_COORDINATION.isApiAvailable() && isOnline && window.currentUser && JWT_VALIDATION.hasToken()) {
+  // Use api.js to log call if available and backend is reachable
+  if (API_COORDINATION.isApiAvailable() && API_COORDINATION.isBackendReachable() && isOnline && window.currentUser && JWT_VALIDATION.hasToken()) {
     return API_COORDINATION.safeApiCall('/calls/log', {
       method: 'POST',
       headers: {
@@ -3850,8 +3879,8 @@ function safeApiCall(apiFunction, data, type = 'action', cacheKey = null) {
           instant: true
         });
         
-        // Also try to get fresh data in background if online
-        if (isOnline) {
+        // Also try to get fresh data in background if online and backend reachable
+        if (isOnline && API_COORDINATION.isBackendReachable()) {
           setTimeout(() => {
             fetchFreshDataInBackground(apiFunction, data, cacheKey);
           }, 1000);
@@ -3860,9 +3889,9 @@ function safeApiCall(apiFunction, data, type = 'action', cacheKey = null) {
       }
     }
     
-    // If no cache and we're offline, use offline data generator
-    if (!isOnline && cacheKey && window.currentUser) {
-      console.log(`Offline mode: Using offline data for: ${cacheKey}`);
+    // If no cache and we're offline or backend unreachable, use offline data generator
+    if ((!isOnline || !API_COORDINATION.isBackendReachable()) && cacheKey && window.currentUser) {
+      console.log(`Offline or backend unreachable mode: Using offline data for: ${cacheKey}`);
       
       // Determine which offline data to generate based on cache key
       let offlineData = null;
@@ -3894,8 +3923,8 @@ function safeApiCall(apiFunction, data, type = 'action', cacheKey = null) {
       }
     }
     
-    // For online operations
-    if (isOnline) {
+    // For online operations with backend reachable
+    if (isOnline && API_COORDINATION.isBackendReachable()) {
       // Make real API call using api.js
       try {
         const result = apiFunction(data);
@@ -3969,7 +3998,7 @@ function safeApiCall(apiFunction, data, type = 'action', cacheKey = null) {
         reject(error);
       }
     } else {
-      // Offline - queue the data
+      // Offline or backend unreachable - queue the data
       queueForSync({
         apiFunction: apiFunction.name || 'anonymous',
         data: data,
@@ -4000,7 +4029,7 @@ function safeApiCall(apiFunction, data, type = 'action', cacheKey = null) {
 
 // Fetch fresh data in background using api.js
 function fetchFreshDataInBackground(apiFunction, data, cacheKey) {
-  if (!isOnline) return;
+  if (!isOnline || !API_COORDINATION.isBackendReachable()) return;
   
   console.log(`Fetching fresh data in background for: ${cacheKey}`);
   
@@ -4067,6 +4096,7 @@ function exposeGlobalStateToIframes() {
     getSyncQueueSize: () => syncQueue.length,
     getServiceStates: () => NETWORK_SERVICE_MANAGER.getServiceStates(),
     isServiceRunning: (name) => NETWORK_SERVICE_MANAGER.isServiceRunning(name),
+    isBackendReachable: () => API_COORDINATION.isBackendReachable(),
     waitForOnline: () => {
       return new Promise((resolve) => {
         if (isOnline) {
@@ -4299,8 +4329,8 @@ function loadTabDataInstantly(tabName) {
   // Show data source indicator
   showTabDataIndicator(tabName, dataSource);
   
-  // Then trigger background data load if online using api.js
-  if (isOnline && API_COORDINATION.isApiAvailable()) {
+  // Then trigger background data load if online and backend reachable using api.js
+  if (isOnline && API_COORDINATION.isApiAvailable() && API_COORDINATION.isBackendReachable()) {
     setTimeout(() => {
       triggerTabDataLoad(tabName);
     }, 100);
@@ -4374,7 +4404,8 @@ function triggerTabDataLoad(tabName) {
       services: NETWORK_SERVICE_MANAGER.getServiceStates(),
       timestamp: new Date().toISOString(),
       background: true, // Indicate this is a background load
-      usingApiJs: API_COORDINATION.isApiAvailable() // Flag for api.js usage
+      usingApiJs: API_COORDINATION.isApiAvailable(), // Flag for api.js usage
+      backendReachable: API_COORDINATION.isBackendReachable() // Flag for backend reachability
     }
   });
   window.dispatchEvent(event);
@@ -4815,7 +4846,8 @@ function setupEventListeners() {
         timestamp: event.detail.timestamp,
         background: event.detail.background,
         silent: event.detail.background, // Silent updates for background loads
-        usingApiJs: event.detail.usingApiJs // Pass api.js flag
+        usingApiJs: event.detail.usingApiJs, // Pass api.js flag
+        backendReachable: event.detail.backendReachable // Pass backend reachability flag
       }
     });
     window.dispatchEvent(broadcastEvent);
@@ -5035,8 +5067,8 @@ window.loadTabData = function(tabName, forceRefresh = false) {
     const userId = window.currentUser ? window.currentUser.uid : null;
     console.log(`Loading real data for tab: ${tabName}, user: ${userId}, forceRefresh: ${forceRefresh}`);
     
-    // Use api.js to fetch data based on tab name
-    if (API_COORDINATION.isApiAvailable() && isOnline && window.currentUser && JWT_VALIDATION.hasToken()) {
+    // Use api.js to fetch data based on tab name (only if backend reachable)
+    if (API_COORDINATION.isApiAvailable() && API_COORDINATION.isBackendReachable() && isOnline && window.currentUser && JWT_VALIDATION.hasToken()) {
       let endpoint = '';
       switch(tabName) {
         case 'friends':
@@ -5097,7 +5129,7 @@ window.loadTabData = function(tabName, forceRefresh = false) {
         success: true,
         userId: userId,
         tab: tabName,
-        message: 'Offline mode or api.js not available',
+        message: 'Offline or backend unreachable',
         offline: true,
         requiresImplementation: 'Using cached or offline data'
       });
@@ -5127,8 +5159,8 @@ window.sendChatMessage = function(chatId, message, type = 'text') {
       return;
     }
     
-    // Try to send via api.js if online
-    if (isOnline && API_COORDINATION.isApiAvailable() && JWT_VALIDATION.hasToken()) {
+    // Try to send via api.js if online and backend reachable
+    if (isOnline && API_COORDINATION.isApiAvailable() && API_COORDINATION.isBackendReachable() && JWT_VALIDATION.hasToken()) {
       try {
         const response = await API_COORDINATION.safeApiCall('/chat/send', {
           method: 'POST',
@@ -5230,8 +5262,8 @@ window.getChatMessages = function(chatId, limit = 50) {
       });
     }
     
-    // Try to fetch via api.js if online
-    if (isOnline && API_COORDINATION.isApiAvailable() && JWT_VALIDATION.hasToken()) {
+    // Try to fetch via api.js if online and backend reachable
+    if (isOnline && API_COORDINATION.isApiAvailable() && API_COORDINATION.isBackendReachable() && JWT_VALIDATION.hasToken()) {
       try {
         const response = await API_COORDINATION.safeApiCall(`/chat/${chatId}/messages?limit=${limit}`, {
           method: 'GET',
@@ -5266,7 +5298,7 @@ window.getChatMessages = function(chatId, limit = 50) {
     } else {
       resolve({
         success: false,
-        message: 'Offline or api.js not available',
+        message: 'Offline or backend unreachable',
         offline: true
       });
     }
@@ -5452,13 +5484,13 @@ window.handleLogin = async function(event) {
     return;
   }
   
-  // Check if we're online and api.js is available
+  // Check if we're online and backend is reachable
   if (!isOnline) {
     window.showToast('Cannot login while offline. Please check your internet connection.', 'error');
     return;
   }
   
-  if (!API_COORDINATION.isApiAvailable()) {
+  if (!API_COORDINATION.isApiAvailable() || !API_COORDINATION.isBackendReachable()) {
     window.showToast('Login service not available. Please try again later.', 'error');
     return;
   }
@@ -5528,13 +5560,13 @@ window.handleRegister = async function(event) {
     return;
   }
   
-  // Check if we're online and api.js is available
+  // Check if we're online and backend is reachable
   if (!isOnline) {
     window.showToast('Cannot register while offline. Please check your internet connection.', 'error');
     return;
   }
   
-  if (!API_COORDINATION.isApiAvailable()) {
+  if (!API_COORDINATION.isApiAvailable() || !API_COORDINATION.isBackendReachable()) {
     window.showToast('Registration service not available. Please try again later.', 'error');
     return;
   }
@@ -5589,9 +5621,14 @@ window.handleResetPassword = async function(event) {
     return;
   }
   
-  // Check if we're online
+  // Check if we're online and backend is reachable
   if (!isOnline) {
     window.showToast('Cannot reset password while offline. Please check your internet connection.', 'error');
+    return;
+  }
+  
+  if (!API_COORDINATION.isApiAvailable() || !API_COORDINATION.isBackendReachable()) {
+    window.showToast('Password reset service not available. Please try again later.', 'error');
     return;
   }
   
@@ -5600,7 +5637,7 @@ window.handleResetPassword = async function(event) {
   
   try {
     // Try to use api.js for password reset
-    if (API_COORDINATION.isApiAvailable()) {
+    if (API_COORDINATION.isApiAvailable() && API_COORDINATION.isBackendReachable()) {
       const response = await API_COORDINATION.safeApiCall('/auth/reset-password', {
         method: 'POST',
         headers: {
@@ -5802,8 +5839,8 @@ window.checkAutoLogin = function() {
       return false;
     }
     
-    if (!API_COORDINATION.isApiAvailable()) {
-      console.log('Auto-login: Skipping - api.js not available');
+    if (!API_COORDINATION.isApiAvailable() || !API_COORDINATION.isBackendReachable()) {
+      console.log('Auto-login: Skipping - backend not reachable');
       return false;
     }
     
@@ -6187,7 +6224,7 @@ console.log('Key improvements:');
 console.log('  ✓ WAITS for api.js with 3-second timeout');
 console.log('  ✓ Proper API coordination with retry mechanism');
 console.log('  ✓ Real online detection (browser + API heartbeat)');
-console.log('  ✓ Login/register DISABLED when offline');
+console.log('  ✓ Login/register DISABLED when offline or backend unreachable');
 console.log('  ✓ No fake "assume logged in" logic');
 console.log('  ✓ Iframe pages load ONLY after authentication');
 console.log('  ✓ Prevent redirect loops back to login');
@@ -6214,6 +6251,9 @@ console.log('  ✓ ENHANCED: Login/registration/autologin fully integrated with 
 console.log('  ✓ ENHANCED: Auto-login only runs if backend is reachable');
 console.log('  ✓ ENHANCED: UI initializes only after api.js confirms backend availability');
 console.log('  ✓ ENHANCED: Preserved offline UI experience with disabled login/register buttons');
+console.log('  ✓ ENHANCED: Backend reachability checking from api.js state');
+console.log('  ✓ ENHANCED: Services only start when backend is reachable');
+console.log('  ✓ ENHANCED: Background validation only runs when backend reachable');
 
 // Initial logging
 console.log('🚀 MoodChat ready - Waiting for api.js...');
@@ -6222,15 +6262,13 @@ console.log('🚀 MoodChat ready - Waiting for api.js...');
 if (window.location.pathname.endsWith('index.html') || window.location.pathname.endsWith('/')) {
   // Wait for api.js to be ready before checking auto-login
   API_COORDINATION.waitForApi().then(() => {
-    // Also check if we're online
-    API_COORDINATION.getRealOnlineStatus().then(online => {
-      if (online && API_COORDINATION.isApiAvailable()) {
-        setTimeout(() => {
-          window.checkAutoLogin();
-        }, 1500); // Give UI time to initialize
-      } else {
-        console.log('Auto-login: Skipping - backend not reachable');
-      }
-    });
+    // Also check if we're online and backend is reachable
+    if (isOnline && API_COORDINATION.isApiAvailable() && API_COORDINATION.isBackendReachable()) {
+      setTimeout(() => {
+        window.checkAutoLogin();
+      }, 1500); // Give UI time to initialize
+    } else {
+      console.log('Auto-login: Skipping - backend not reachable or offline');
+    }
   });
 }
