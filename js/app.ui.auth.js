@@ -432,318 +432,6 @@ function updateAuthButtonStates(activeForm) {
 }
 
 // ============================================================================
-// AUTH FORM SUBMISSION HANDLERS (UPDATED TO USE CORRECTED API.JS)
-// ============================================================================
-
-/**
- * Handles login form submission using corrected api.js
- * Makes POST request to /auth/login endpoint
- */
-async function handleLoginSubmit(event) {
-  event.preventDefault();
-  console.log('Login form submitted');
-  
-  const form = event.target;
-  const email = form.querySelector('input[type="email"]').value;
-  const password = form.querySelector('input[type="password"]').value;
-  const submitBtn = form.querySelector('button[type="submit"]');
-  
-  // Show loading state
-  const originalText = submitBtn.textContent;
-  submitBtn.textContent = 'Logging in...';
-  submitBtn.disabled = true;
-  
-  try {
-    // Use corrected api.js for login request
-    const response = await window.api('/auth/login', {
-      method: 'POST',
-      body: { email, password }
-    });
-    
-    console.log('Login response:', response);
-    
-    if (response && response.token) {
-      // Save auth token for future API calls
-      localStorage.setItem('authUser', response.token);
-      
-      // Save minimal user info for auto-login
-      const userInfo = {
-        id: response.user.id,
-        displayName: response.user.displayName,
-        email: response.user.email,
-        expiresAt: Date.now() + (24 * 60 * 60 * 1000) // 24 hours from now
-      };
-      localStorage.setItem('userInfo', JSON.stringify(userInfo));
-      
-      // Show success message
-      showToast('Login successful! Redirecting...', 'success');
-      
-      // Redirect to main app after a short delay
-      setTimeout(() => {
-        window.location.href = '/app.html';
-      }, 1500);
-    } else {
-      throw new Error('Invalid login response');
-    }
-  } catch (error) {
-    console.error('Login error:', error);
-    showToast(error.message || 'Login failed. Please check your credentials.', 'error');
-    
-    // Restore button state
-    submitBtn.textContent = originalText;
-    submitBtn.disabled = false;
-  }
-}
-
-/**
- * Handles registration form submission using corrected api.js
- * Makes POST request to /auth/register endpoint
- */
-async function handleRegisterSubmit(event) {
-  event.preventDefault();
-  console.log('Register form submitted');
-  
-  const form = event.target;
-  const displayName = form.querySelector('input[type="text"]').value;
-  const email = form.querySelector('input[type="email"]').value;
-  const password = form.querySelectorAll('input[type="password"]')[0].value;
-  const confirmPassword = form.querySelectorAll('input[type="password"]')[1].value;
-  const submitBtn = form.querySelector('button[type="submit"]');
-  
-  // Basic validation
-  if (password !== confirmPassword) {
-    showToast('Passwords do not match', 'error');
-    return;
-  }
-  
-  // Show loading state
-  const originalText = submitBtn.textContent;
-  submitBtn.textContent = 'Creating account...';
-  submitBtn.disabled = true;
-  
-  try {
-    // Use corrected api.js for registration request
-    const response = await window.api('/auth/register', {
-      method: 'POST',
-      body: { displayName, email, password }
-    });
-    
-    console.log('Registration response:', response);
-    
-    if (response && response.token) {
-      // Save auth token for future API calls
-      localStorage.setItem('authUser', response.token);
-      
-      // Save minimal user info for auto-login
-      const userInfo = {
-        id: response.user.id,
-        displayName: response.user.displayName,
-        email: response.user.email,
-        expiresAt: Date.now() + (24 * 60 * 60 * 1000) // 24 hours from now
-      };
-      localStorage.setItem('userInfo', JSON.stringify(userInfo));
-      
-      // Show success message
-      showToast('Registration successful! Redirecting...', 'success');
-      
-      // Auto-login and redirect after a short delay
-      setTimeout(() => {
-        window.location.href = '/app.html';
-      }, 1500);
-    } else {
-      throw new Error('Invalid registration response');
-    }
-  } catch (error) {
-    console.error('Registration error:', error);
-    showToast(error.message || 'Registration failed. Please try again.', 'error');
-    
-    // Restore button state
-    submitBtn.textContent = originalText;
-    submitBtn.disabled = false;
-  }
-}
-
-/**
- * Handles forgot password form submission using corrected api.js
- * Makes POST request to /auth/forgot-password endpoint
- */
-async function handleForgotPasswordSubmit(event) {
-  event.preventDefault();
-  console.log('Forgot password form submitted');
-  
-  const form = event.target;
-  const email = form.querySelector('input[type="email"]').value;
-  const submitBtn = form.querySelector('button[type="submit"]');
-  
-  // Show loading state
-  const originalText = submitBtn.textContent;
-  submitBtn.textContent = 'Sending reset link...';
-  submitBtn.disabled = true;
-  
-  try {
-    // Use corrected api.js for forgot password request
-    const response = await window.api('/auth/forgot-password', {
-      method: 'POST',
-      body: { email }
-    });
-    
-    console.log('Forgot password response:', response);
-    
-    if (response && response.success) {
-      showToast('Password reset link sent! Check your email.', 'success');
-      
-      // Switch back to login form after a short delay
-      setTimeout(() => {
-        showLoginForm();
-      }, 2000);
-    } else {
-      throw new Error('Failed to send reset link');
-    }
-  } catch (error) {
-    console.error('Forgot password error:', error);
-    showToast(error.message || 'Failed to send reset link. Please try again.', 'error');
-  } finally {
-    // Restore button state
-    submitBtn.textContent = originalText;
-    submitBtn.disabled = false;
-  }
-}
-
-/**
- * Shows a toast notification
- */
-function showToast(message, type = 'info') {
-  // Check if toast container exists
-  let toastContainer = document.getElementById('toast-container');
-  if (!toastContainer) {
-    toastContainer = document.createElement('div');
-    toastContainer.id = 'toast-container';
-    toastContainer.style.cssText = `
-      position: fixed;
-      top: 20px;
-      right: 20px;
-      z-index: 1000;
-      max-width: 300px;
-    `;
-    document.body.appendChild(toastContainer);
-  }
-  
-  // Create toast
-  const toast = document.createElement('div');
-  toast.className = `toast toast-${type}`;
-  toast.style.cssText = `
-    background: ${type === 'success' ? '#10b981' : type === 'error' ? '#ef4444' : '#3b82f6'};
-    color: white;
-    padding: 12px 16px;
-    margin-bottom: 10px;
-    border-radius: 6px;
-    box-shadow: 0 4px 6px rgba(0,0,0,0.1);
-    animation: slideInRight 0.3s ease-out;
-    cursor: pointer;
-  `;
-  toast.textContent = message;
-  
-  // Add animation styles if needed
-  if (!document.getElementById('toast-animations')) {
-    const styleSheet = document.createElement('style');
-    styleSheet.id = 'toast-animations';
-    styleSheet.textContent = `
-      @keyframes slideInRight {
-        from {
-          transform: translateX(100%);
-          opacity: 0;
-        }
-        to {
-          transform: translateX(0);
-          opacity: 1;
-        }
-      }
-      @keyframes slideOutRight {
-        from {
-          transform: translateX(0);
-          opacity: 1;
-        }
-        to {
-          transform: translateX(100%);
-          opacity: 0;
-        }
-      }
-    `;
-    document.head.appendChild(styleSheet);
-  }
-  
-  // Add to container
-  toastContainer.appendChild(toast);
-  
-  // Auto-remove after 5 seconds
-  setTimeout(() => {
-    toast.style.animation = 'slideOutRight 0.3s ease-in';
-    setTimeout(() => {
-      if (toast.parentNode) {
-        toast.parentNode.removeChild(toast);
-      }
-    }, 300);
-  }, 5000);
-  
-  // Click to dismiss
-  toast.addEventListener('click', () => {
-    toast.style.animation = 'slideOutRight 0.3s ease-in';
-    setTimeout(() => {
-      if (toast.parentNode) {
-        toast.parentNode.removeChild(toast);
-      }
-    }, 300);
-  });
-}
-
-// ============================================================================
-// AUTO-LOGIN CHECK ON PAGE LOAD
-// ============================================================================
-
-/**
- * Checks if user is already logged in (auto-login feature)
- * Uses localStorage tokens saved during registration/login
- */
-function checkAutoLogin() {
-  console.log('Checking for auto-login...');
-  
-  const authToken = localStorage.getItem('authUser');
-  const userInfoStr = localStorage.getItem('userInfo');
-  
-  if (authToken && userInfoStr) {
-    try {
-      const userInfo = JSON.parse(userInfoStr);
-      
-      // Check if token is still valid (not expired)
-      if (userInfo.expiresAt && userInfo.expiresAt > Date.now()) {
-        console.log('Auto-login detected for:', userInfo.email);
-        
-        // Show auto-login notification
-        showToast(`Welcome back, ${userInfo.displayName}!`, 'success');
-        
-        // Redirect to main app after a short delay
-        setTimeout(() => {
-          window.location.href = '/app.html';
-        }, 1000);
-        
-        return true;
-      } else {
-        // Token expired, clear storage
-        console.log('Auto-login token expired');
-        localStorage.removeItem('authUser');
-        localStorage.removeItem('userInfo');
-      }
-    } catch (error) {
-      console.error('Auto-login error:', error);
-      localStorage.removeItem('authUser');
-      localStorage.removeItem('userInfo');
-    }
-  }
-  
-  return false;
-}
-
-// ============================================================================
 // MANUAL NETWORK CHECK (FOR DEBUGGING) - UPDATED TO USE API.JS
 // ============================================================================
 
@@ -795,11 +483,11 @@ function integrateWithAppState() {
 }
 
 // ============================================================================
-// SETUP AUTH FORM EVENT LISTENERS (UPDATED WITH FORM SUBMISSIONS)
+// SETUP AUTH FORM EVENT LISTENERS
 // ============================================================================
 
 /**
- * Sets up event listeners for auth form toggling and submissions
+ * Sets up event listeners for auth form toggling
  * Must be called after DOM is ready
  */
 function setupAuthFormListeners() {
@@ -850,24 +538,6 @@ function setupAuthFormListeners() {
     });
   }
   
-  // Login form submission
-  const loginForm = document.getElementById('login-form');
-  if (loginForm) {
-    loginForm.addEventListener('submit', handleLoginSubmit);
-  }
-  
-  // Register form submission
-  const registerForm = document.getElementById('register-form');
-  if (registerForm) {
-    registerForm.addEventListener('submit', handleRegisterSubmit);
-  }
-  
-  // Forgot password form submission
-  const forgotForm = document.getElementById('forgot-form');
-  if (forgotForm) {
-    forgotForm.addEventListener('submit', handleForgotPasswordSubmit);
-  }
-  
   console.log('Auth form event listeners set up');
 }
 
@@ -882,33 +552,23 @@ function setupAuthFormListeners() {
 function initializeAuthUI() {
   console.log('Initializing auth UI and network status monitoring...');
   
-  // 1. First check for auto-login (non-blocking)
-  setTimeout(() => {
-    if (!checkAutoLogin()) {
-      // Only show auth forms if not auto-logging in
-      
-      // 2. Set up auth form listeners (ensures forms work immediately)
-      setupAuthFormListeners();
-      
-      // 3. Set initial network UI state (non-blocking)
-      updateNetworkStatusUI('checking', 'Checking connection...');
-      
-      // 4. Show login form by default
-      showLoginForm();
-    }
-  }, 100);
+  // 1. Set up auth form listeners FIRST (ensures forms work immediately)
+  setupAuthFormListeners();
   
-  // 5. Set up api.js event listener for real-time status updates
+  // 2. Set initial network UI state (non-blocking)
+  updateNetworkStatusUI('checking', 'Checking connection...');
+  
+  // 3. Set up api.js event listener for real-time status updates
   setupApiStatusListener();
   
-  // 6. Integrate with existing AppState
+  // 4. Integrate with existing AppState
   integrateWithAppState();
   
-  // 7. Set up browser event listeners for network status
+  // 5. Set up browser event listeners for network status
   window.addEventListener('online', handleBrowserOnline);
   window.addEventListener('offline', handleBrowserOffline);
   
-  // 8. Start periodic network status updates from api.js (non-blocking)
+  // 6. Start periodic network status updates from api.js (non-blocking)
   setTimeout(() => {
     startPeriodicNetworkUpdates();
   }, 500); // Start after 500ms to ensure forms are responsive
