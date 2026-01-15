@@ -11,7 +11,8 @@ window.NetworkStatus = {
   status: 'checking', // 'checking', 'online', 'offline'
   backendReachable: false,
   lastChecked: null,
-  checkInterval: null
+  checkInterval: null,
+  syncInterval: null
 };
 
 // ============================================================================
@@ -144,51 +145,27 @@ function updateNetworkStatusUI(status, message) {
 }
 
 // ============================================================================
-// NETWORK STATUS READING FROM API.JS (NON-BLOCKING)
+// NETWORK STATUS READING FROM API.JS (UPDATED TO HANDLE /STATUS ENDPOINT)
 // ============================================================================
 
 /**
- * Reads network status from api.js using two methods:
- * 1. Event listener for api.js status updates (preferred)
- * 2. Direct API call to /status endpoint as fallback
+ * Reads network status from api.js using multiple methods
  * Returns the current network status for UI display only
  */
 async function readNetworkStatusFromApi() {
+  console.log('readNetworkStatusFromApi called - checking multiple sources...');
+  
   // Method 1: Check browser network status first (fastest)
   if (!navigator.onLine) {
+    console.log('Browser reports offline');
     return { status: 'offline', message: 'No internet connection', backendReachable: false };
   }
   
-  // Method 2: Listen for api.js status events if available
-  // api.js will dispatch 'api-network-status' events when status changes
-  // We handle these events in setupApiStatusListener()
-  
-  // Method 3: Direct status check using window.api() (safe fallback)
-  if (typeof window.api === 'function') {
-    try {
-      // Use a timeout to prevent blocking UI
-      const statusPromise = window.api('/status');
-      const timeoutPromise = new Promise((_, reject) => 
-        setTimeout(() => reject(new Error('Status check timeout')), 5000)
-      );
-      
-      const response = await Promise.race([statusPromise, timeoutPromise]);
-      const isReachable = response && response.status === 'ok';
-      
-      return {
-        status: isReachable ? 'online' : 'offline',
-        message: isReachable ? 'Connected to MoodChat' : 'Cannot reach MoodChat server',
-        backendReachable: isReachable
-      };
-    } catch (error) {
-      console.log('API status check failed (non-critical):', error.message);
-      // Don't throw, just return offline status
-    }
-  }
-  
-  // Method 4: Check if api.js has exposed status directly
+  // Method 2: Check if api.js has exposed status directly (most reliable)
+  console.log('Checking API_COORDINATION:', window.API_COORDINATION);
   if (window.API_COORDINATION && window.API_COORDINATION.backendReachable !== undefined) {
     const isReachable = window.API_COORDINATION.backendReachable;
+    console.log('API_COORDINATION says backendReachable:', isReachable);
     return {
       status: isReachable ? 'online' : 'offline',
       message: isReachable ? 'Connected to MoodChat' : 'Cannot reach MoodChat server',
@@ -196,7 +173,85 @@ async function readNetworkStatusFromApi() {
     };
   }
   
-  // If api.js not fully loaded yet, show checking status
+  // Method 3: Check other api.js exposed properties
+  console.log('Checking other API status properties...');
+  
+  // Check for MoodChatAPI global object
+  if (window.MoodChatAPI && window.MoodChatAPI.backendReachable !== undefined) {
+    const isReachable = window.MoodChatAPI.backendReachable;
+    console.log('MoodChatAPI says backendReachable:', isReachable);
+    return {
+      status: isReachable ? 'online' : 'offline',
+      message: isReachable ? 'Connected to MoodChat' : 'Cannot reach MoodChat server',
+      backendReachable: isReachable
+    };
+  }
+  
+  // Check for API_STATUS global object
+  if (window.API_STATUS && window.API_STATUS.backendReachable !== undefined) {
+    const isReachable = window.API_STATUS.backendReachable;
+    console.log('API_STATUS says backendReachable:', isReachable);
+    return {
+      status: isReachable ? 'online' : 'offline',
+      message: isReachable ? 'Connected to MoodChat' : 'Cannot reach MoodChat server',
+      backendReachable: isReachable
+    };
+  }
+  
+  // Method 4: Direct API call to /status endpoint (fallback)
+  if (typeof window.api === 'function') {
+    try {
+      console.log('Attempting direct /status API call...');
+      
+      // Use a timeout to prevent blocking UI
+      const statusPromise = window.api('/status');
+      const timeoutPromise = new Promise((_, reject) => 
+        setTimeout(() => reject(new Error('Status check timeout')), 3000)
+      );
+      
+      const response = await Promise.race([statusPromise, timeoutPromise]);
+      console.log('/status API response:', response);
+      
+      // Check if response indicates backend is reachable
+      // The backend might return different success indicators
+      const isReachable = response && (
+        response.status === 'ok' || 
+        response.success === true ||
+        response.healthy === true ||
+        (response.statusCode && response.statusCode === 200) ||
+        (response.code && response.code === 200)
+      );
+      
+      console.log('Direct API check says backendReachable:', isReachable);
+      
+      return {
+        status: isReachable ? 'online' : 'offline',
+        message: isReachable ? 'Connected to MoodChat' : 'Cannot reach MoodChat server',
+        backendReachable: isReachable
+      };
+    } catch (error) {
+      console.log('Direct API status check failed:', error.message);
+      // Don't throw, just continue to other methods
+    }
+  }
+  
+  // Method 5: Check if we've received any api-network-status events
+  console.log('Checking for cached network status...');
+  if (window.NetworkStatus.lastChecked && 
+      Date.now() - window.NetworkStatus.lastChecked.getTime() < 30000) {
+    // Use cached status if it's recent (less than 30 seconds old)
+    console.log('Using cached network status:', window.NetworkStatus.status);
+    return {
+      status: window.NetworkStatus.status,
+      message: window.NetworkStatus.status === 'online' ? 'Connected to MoodChat' : 
+               window.NetworkStatus.status === 'offline' ? 'Cannot reach MoodChat server' : 
+               'Checking connection...',
+      backendReachable: window.NetworkStatus.backendReachable
+    };
+  }
+  
+  // If we can't determine status, show checking
+  console.log('Unable to determine network status, showing checking...');
   return { status: 'checking', message: 'Checking connection...', backendReachable: false };
 }
 
@@ -206,7 +261,10 @@ async function readNetworkStatusFromApi() {
  */
 async function updateNetworkStatusFromApi() {
   try {
+    console.log('Updating network status from api.js...');
     const statusInfo = await readNetworkStatusFromApi();
+    console.log('Status info determined:', statusInfo);
+    
     window.NetworkStatus.status = statusInfo.status;
     window.NetworkStatus.backendReachable = statusInfo.backendReachable;
     window.NetworkStatus.lastChecked = new Date();
@@ -219,18 +277,18 @@ async function updateNetworkStatusFromApi() {
 }
 
 // ============================================================================
-// API.JS EVENT LISTENER (PREFERRED METHOD)
+// API.JS EVENT LISTENER (UPDATED TO HANDLE MORE EVENTS)
 // ============================================================================
 
 /**
  * Sets up listener for api.js network status events
- * api.js will dispatch 'api-network-status' events when backend reachability changes
  */
 function setupApiStatusListener() {
-  console.log('Setting up api.js network status event listener...');
+  console.log('Setting up api.js network status event listeners...');
   
+  // Listen for api-network-status events
   window.addEventListener('api-network-status', (event) => {
-    console.log('Received api.js network status event:', event.detail);
+    console.log('Received api-network-status event:', event.detail);
     
     const { isReachable, message } = event.detail || {};
     const browserOnline = navigator.onLine;
@@ -252,10 +310,22 @@ function setupApiStatusListener() {
     
     window.NetworkStatus.lastChecked = new Date();
   });
+  
+  // Listen for api-ready events (multiple variants)
+  const handleApiReady = () => {
+    console.log('API ready event received, checking network status...');
+    setTimeout(() => {
+      updateNetworkStatusFromApi().catch(console.error);
+    }, 500); // Small delay to ensure API is fully ready
+  };
+  
+  window.addEventListener('api-ready', handleApiReady);
+  window.addEventListener('apiready', handleApiReady);
+  window.addEventListener('apiReady', handleApiReady);
 }
 
 // ============================================================================
-// PERIODIC STATUS UPDATES (READS FROM API.JS)
+// PERIODIC STATUS UPDATES (IMPROVED LOGIC)
 // ============================================================================
 
 /**
@@ -266,10 +336,12 @@ function startPeriodicNetworkUpdates() {
   // Clear any existing interval
   if (window.NetworkStatus.checkInterval) {
     clearInterval(window.NetworkStatus.checkInterval);
+    window.NetworkStatus.checkInterval = null;
   }
   
   // Initial update after api.js has time to initialize
   setTimeout(() => {
+    console.log('Initial network status check...');
     updateNetworkStatusFromApi().catch(error => {
       console.log('Initial network status check failed:', error.message);
     });
@@ -278,18 +350,20 @@ function startPeriodicNetworkUpdates() {
   // Set up periodic updates (every 10 seconds - non-blocking)
   window.NetworkStatus.checkInterval = setInterval(() => {
     if (navigator.onLine) {
+      console.log('Periodic network status check...');
       updateNetworkStatusFromApi().catch(error => {
         console.log('Periodic network status check failed:', error.message);
       });
     } else {
       // Immediately update if browser goes offline
+      console.log('Browser offline detected in periodic check');
       updateNetworkStatusUI('offline', 'No internet connection');
       window.NetworkStatus.backendReachable = false;
       window.NetworkStatus.lastChecked = new Date();
     }
   }, 10000); // 10 seconds
   
-  console.log('Periodic network status updates started (reading from api.js)');
+  console.log('Periodic network status updates started');
 }
 
 // ============================================================================
@@ -298,7 +372,6 @@ function startPeriodicNetworkUpdates() {
 
 /**
  * Handles browser's online event
- * Triggers a network status update when browser comes online
  */
 function handleBrowserOnline() {
   console.log('Browser online event detected');
@@ -312,7 +385,6 @@ function handleBrowserOnline() {
 
 /**
  * Handles browser's offline event
- * Immediately updates status when browser goes offline
  */
 function handleBrowserOffline() {
   console.log('Browser offline event detected');
@@ -327,7 +399,6 @@ function handleBrowserOffline() {
 
 /**
  * Shows login form and hides other auth forms
- * Instantly toggles without network checks
  */
 function showLoginForm() {
   console.log('Showing login form');
@@ -347,13 +418,11 @@ function showLoginForm() {
     if (emailInput) emailInput.focus();
   }
   
-  // Update active button states if needed
   updateAuthButtonStates('login');
 }
 
 /**
  * Shows register form and hides other auth forms
- * Instantly toggles without network checks
  */
 function showRegisterForm() {
   console.log('Showing register form');
@@ -373,13 +442,11 @@ function showRegisterForm() {
     if (nameInput) nameInput.focus();
   }
   
-  // Update active button states if needed
   updateAuthButtonStates('register');
 }
 
 /**
  * Shows forgot password form and hides other auth forms
- * Instantly toggles without network checks
  */
 function showForgotPasswordForm() {
   console.log('Showing forgot password form');
@@ -399,15 +466,13 @@ function showForgotPasswordForm() {
     if (emailInput) emailInput.focus();
   }
   
-  // Update active button states if needed
   updateAuthButtonStates('forgot');
 }
 
 /**
- * Updates active state of auth buttons (optional visual feedback)
+ * Updates active state of auth buttons
  */
 function updateAuthButtonStates(activeForm) {
-  // This is for visual feedback only, not required for functionality
   const loginBtn = document.getElementById('login-button');
   const signupBtn = document.getElementById('signup-button');
   const forgotBtn = document.getElementById('forgot-password-button');
@@ -432,18 +497,31 @@ function updateAuthButtonStates(activeForm) {
 }
 
 // ============================================================================
-// MANUAL NETWORK CHECK (FOR DEBUGGING) - UPDATED TO USE API.JS
+// DEBUG AND UTILITY FUNCTIONS
 // ============================================================================
 
 /**
- * Manual network check function
- * Can be called from browser console for debugging: window.checkNetworkNow()
- * Now reads from api.js instead of performing its own checks
+ * Manual network check function for debugging
  */
 window.checkNetworkNow = async function() {
-  console.log('Manual network status read requested (from api.js)');
+  console.log('Manual network status check requested');
   await updateNetworkStatusFromApi();
   return window.NetworkStatus;
+};
+
+/**
+ * Debug function to check all available status sources
+ */
+window.debugNetworkStatus = function() {
+  console.log('=== NETWORK STATUS DEBUG ===');
+  console.log('Browser online:', navigator.onLine);
+  console.log('API_COORDINATION:', window.API_COORDINATION);
+  console.log('MoodChatAPI:', window.MoodChatAPI);
+  console.log('API_STATUS:', window.API_STATUS);
+  console.log('window.api function:', typeof window.api);
+  console.log('NetworkStatus:', window.NetworkStatus);
+  console.log('Current AppState.network:', window.AppState?.network);
+  console.log('===========================');
 };
 
 // ============================================================================
@@ -452,7 +530,6 @@ window.checkNetworkNow = async function() {
 
 /**
  * Integrates network status with existing AppState
- * Maintains compatibility with other components
  */
 function integrateWithAppState() {
   // Ensure AppState exists
@@ -469,17 +546,19 @@ function integrateWithAppState() {
     };
   }
   
-  // Sync NetworkStatus with AppState.network
-  const syncInterval = setInterval(() => {
+  // Clear any existing sync interval
+  if (window.NetworkStatus.syncInterval) {
+    clearInterval(window.NetworkStatus.syncInterval);
+  }
+  
+  // Sync NetworkStatus with AppState.network every 2 seconds
+  window.NetworkStatus.syncInterval = setInterval(() => {
     if (window.AppState && window.AppState.network) {
       window.AppState.network.status = window.NetworkStatus.status;
       window.AppState.network.backendReachable = window.NetworkStatus.backendReachable;
       window.AppState.network.lastChecked = window.NetworkStatus.lastChecked;
     }
-  }, 1000);
-  
-  // Store interval ID for cleanup
-  window.NetworkStatus.syncInterval = syncInterval;
+  }, 2000);
 }
 
 // ============================================================================
@@ -488,7 +567,6 @@ function integrateWithAppState() {
 
 /**
  * Sets up event listeners for auth form toggling
- * Must be called after DOM is ready
  */
 function setupAuthFormListeners() {
   console.log('Setting up auth form event listeners...');
@@ -547,7 +625,6 @@ function setupAuthFormListeners() {
 
 /**
  * Initializes network status monitoring and auth forms
- * Runs asynchronously without blocking UI
  */
 function initializeAuthUI() {
   console.log('Initializing auth UI and network status monitoring...');
@@ -571,7 +648,7 @@ function initializeAuthUI() {
   // 6. Start periodic network status updates from api.js (non-blocking)
   setTimeout(() => {
     startPeriodicNetworkUpdates();
-  }, 500); // Start after 500ms to ensure forms are responsive
+  }, 1000); // Start after 1 second to ensure API is loaded
   
   console.log('Auth UI and network monitoring initialized');
 }
@@ -600,7 +677,6 @@ window.cleanupNetworkMonitoring = function() {
   // Remove event listeners
   window.removeEventListener('online', handleBrowserOnline);
   window.removeEventListener('offline', handleBrowserOffline);
-  window.removeEventListener('api-network-status', setupApiStatusListener);
   
   // Remove network indicator
   const indicator = document.getElementById('network-status-indicator');
@@ -618,11 +694,9 @@ window.cleanupNetworkMonitoring = function() {
 // Start auth UI when DOM is ready
 if (document.readyState === 'loading') {
   document.addEventListener('DOMContentLoaded', () => {
-    // Initialize immediately - forms work instantly
     initializeAuthUI();
   });
 } else {
-  // DOM already loaded, initialize immediately
   initializeAuthUI();
 }
 
