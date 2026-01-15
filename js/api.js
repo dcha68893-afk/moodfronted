@@ -1,5 +1,5 @@
-// api.js - UPDATED VERSION WITH PROPER CORS HANDLING
-// This version will handle all errors properly
+// api.js - UPDATED VERSION WITH CORRECTED BASE URL
+// This version fixes the baseUrl to ensure all API calls succeed
 
 // ============================================================================
 // ENVIRONMENT DETECTION
@@ -10,12 +10,9 @@ const IS_LOCAL_DEVELOPMENT = window.location.hostname === 'localhost' ||
                            window.location.protocol === 'file:';
 
 // ============================================================================
-// BACKEND URL CONFIGURATION
+// BACKEND URL CONFIGURATION - CORRECTED
 // ============================================================================
-const BACKEND_BASE_URL = IS_LOCAL_DEVELOPMENT 
-    ? 'http://localhost:4000' 
-    : 'https://moodchat-backend-1.onrender.com';
-
+const BACKEND_BASE_URL = 'https://moodchat-backend-1.onrender.com';
 const BASE_URL = BACKEND_BASE_URL + '/api';
 
 console.log(`🔧 [API] Environment: ${IS_LOCAL_DEVELOPMENT ? 'Local Development' : 'Production'}`);
@@ -23,18 +20,106 @@ console.log(`🔧 [API] Backend Base URL: ${BACKEND_BASE_URL}`);
 console.log(`🔧 [API] API Base URL: ${BASE_URL}`);
 
 // ============================================================================
+// GLOBAL API FUNCTION - Simple fetch wrapper
+// ============================================================================
+
+window.api = function(endpoint, options = {}) {
+    if (!endpoint.startsWith('/')) {
+        endpoint = '/' + endpoint;
+    }
+    
+    const defaultOptions = {
+        method: 'GET',
+        headers: {
+            'Content-Type': 'application/json'
+        },
+        mode: 'cors',
+        credentials: 'omit'
+    };
+    
+    const fetchOptions = {
+        ...defaultOptions,
+        ...options,
+        headers: {
+            ...defaultOptions.headers,
+            ...options.headers
+        }
+    };
+    
+    const token = localStorage.getItem('moodchat_auth_token');
+    if (token && fetchOptions.auth !== false) {
+        fetchOptions.headers['Authorization'] = 'Bearer ' + token;
+    }
+    
+    const validMethods = ['GET', 'POST', 'PUT', 'DELETE', 'PATCH', 'HEAD', 'OPTIONS'];
+    if (!validMethods.includes(fetchOptions.method.toUpperCase())) {
+        console.error(`🔧 [API] Invalid HTTP method: ${fetchOptions.method}, defaulting to GET`);
+        fetchOptions.method = 'GET';
+    }
+    
+    if (fetchOptions.body && typeof fetchOptions.body !== 'string') {
+        if (fetchOptions.headers['Content-Type'] && 
+            fetchOptions.headers['Content-Type'].includes('application/json')) {
+            fetchOptions.body = JSON.stringify(fetchOptions.body);
+        }
+    }
+    
+    console.log(`🔧 [API] Calling ${fetchOptions.method} ${BASE_URL}${endpoint}`);
+    
+    return fetch(BASE_URL + endpoint, fetchOptions)
+        .then(async response => {
+            try {
+                const data = await response.json();
+                return {
+                    success: response.ok,
+                    status: response.status,
+                    data: data,
+                    message: data.message || (response.ok ? 'Success' : 'Request failed'),
+                    headers: Object.fromEntries(response.headers.entries())
+                };
+            } catch (jsonError) {
+                return {
+                    success: response.ok,
+                    status: response.status,
+                    data: null,
+                    message: response.statusText || 'Request completed',
+                    headers: Object.fromEntries(response.headers.entries()),
+                    rawResponse: response
+                };
+            }
+        })
+        .catch(error => {
+            console.error(`🔧 [API] Fetch error for ${endpoint}:`, error);
+            
+            const isNetworkError = error.message && (
+                error.message.includes('Failed to fetch') ||
+                error.message.includes('NetworkError') ||
+                error.message.includes('aborted')
+            );
+            
+            return {
+                success: false,
+                status: 0,
+                message: isNetworkError 
+                    ? 'Network error. Please check your connection.' 
+                    : 'Request failed: ' + error.message,
+                error: error.message,
+                isNetworkError: isNetworkError
+            };
+        });
+};
+
+// ============================================================================
 // MAIN API OBJECT - WITH PROPER ERROR HANDLING
 // ============================================================================
 
-// Create API object immediately
-window.api = {
+const apiObject = {
     _singleton: true,
-    _version: '8.0.0',
+    _version: '8.0.1',
     _safeInitialized: true,
-    _backendReachable: null, // Track backend status
-    _sessionChecked: false, // Track if session has been checked
+    _backendReachable: null,
+    _sessionChecked: false,
     
-    // Configuration
     _config: {
         BACKEND_URL: BASE_URL,
         BACKEND_BASE_URL: BACKEND_BASE_URL,
@@ -42,13 +127,9 @@ window.api = {
         STORAGE_PREFIX: 'moodchat_',
         MAX_RETRIES: 3,
         RETRY_DELAY: 1000,
-        SESSION_CHECK_INTERVAL: 300000, // 5 minutes
-        STATUS_FETCH_TIMEOUT: 8000 // 8 seconds for status fetches
+        SESSION_CHECK_INTERVAL: 300000,
+        STATUS_FETCH_TIMEOUT: 8000
     },
-    
-    // ============================================================================
-    // CORE METHODS WITH IMPROVED ERROR HANDLING
-    // ============================================================================
     
     login: async function(emailOrUsername, password) {
         try {
@@ -70,7 +151,6 @@ window.api = {
             const data = await response.json();
             
             if (response.ok) {
-                // Store token and user
                 if (data.token) {
                     localStorage.setItem('moodchat_auth_token', data.token);
                 }
@@ -78,7 +158,6 @@ window.api = {
                     localStorage.setItem('moodchat_auth_user', JSON.stringify(data.user));
                 }
                 
-                // Set session as checked
                 this._sessionChecked = true;
                 
                 return {
@@ -99,7 +178,6 @@ window.api = {
         } catch (error) {
             console.error('🔧 [API] Login error:', error);
             
-            // Determine error type
             const isNetworkError = error.message && (
                 error.message.includes('Failed to fetch') ||
                 error.message.includes('NetworkError') ||
@@ -129,7 +207,6 @@ window.api = {
             const data = await response.json();
             
             if (response.ok) {
-                // Store token and user
                 if (data.token) {
                     localStorage.setItem('moodchat_auth_token', data.token);
                 }
@@ -137,7 +214,6 @@ window.api = {
                     localStorage.setItem('moodchat_auth_user', JSON.stringify(data.user));
                 }
                 
-                // Set session as checked
                 this._sessionChecked = true;
                 
                 return {
@@ -174,19 +250,14 @@ window.api = {
         }
     },
     
-    // ============================================================================
-    // IMPROVED BACKEND HEALTH CHECK WITH MULTIPLE ENDPOINTS
-    // ============================================================================
-    
     checkBackendHealth: async function() {
         console.log('🔧 [API] Checking backend health with improved method...');
         
-        // List of endpoints to try (in order of preference)
         const testEndpoints = [
-            '/status',          // Primary health endpoint
-            '/auth/health',     // Alternative auth health
-            '/health',          // General health
-            '',                 // Root API endpoint
+            '/status',
+            '/auth/health',
+            '/health',
+            '',
         ];
         
         for (const endpoint of testEndpoints) {
@@ -200,7 +271,7 @@ window.api = {
                     headers: {
                         'Content-Type': 'application/json'
                     },
-                    signal: AbortSignal.timeout(5000) // 5 second timeout
+                    signal: AbortSignal.timeout(5000)
                 });
                 
                 if (response.ok || response.status < 500) {
@@ -217,11 +288,10 @@ window.api = {
                 }
             } catch (error) {
                 console.log(`⚠️ [API] Endpoint ${endpoint} failed:`, error.message);
-                continue; // Try next endpoint
+                continue;
             }
         }
         
-        // If all endpoints fail
         console.log('🔧 [API] All backend endpoints failed, marking as unreachable');
         this._backendReachable = false;
         
@@ -232,10 +302,6 @@ window.api = {
             offlineMode: true
         };
     },
-    
-    // ============================================================================
-    // ENHANCED SESSION CHECK WITH OFFLINE SUPPORT (Firebase-like behavior)
-    // ============================================================================
     
     checkSession: async function() {
         try {
@@ -251,7 +317,6 @@ window.api = {
                 };
             }
             
-            // Parse user data first
             let userData;
             try {
                 userData = JSON.parse(userStr);
@@ -266,8 +331,6 @@ window.api = {
                 };
             }
             
-            // If we've already checked session recently and backend is reachable, 
-            // return cached data immediately (Firebase-like behavior)
             if (this._sessionChecked && this._backendReachable !== false) {
                 return {
                     success: true,
@@ -277,16 +340,14 @@ window.api = {
                 };
             }
             
-            // Try to validate with backend if reachable
             try {
                 const response = await this._fetchWithRetry('/auth/me', {
                     method: 'GET',
                     auth: true
-                }, false); // Don't retry for session check
+                }, false);
                 
                 if (response.ok) {
                     const data = await response.json();
-                    // Update user data
                     const updatedUser = data.user || userData;
                     localStorage.setItem('moodchat_auth_user', JSON.stringify(updatedUser));
                     
@@ -300,7 +361,6 @@ window.api = {
                         message: 'Session valid (online)'
                     };
                 } else {
-                    // Token invalid on backend
                     if (response.status === 401 || response.status === 403) {
                         this._clearAuthData();
                         this._sessionChecked = true;
@@ -312,7 +372,6 @@ window.api = {
                         };
                     }
                     
-                    // Other errors - use cached data but mark backend as potentially unreachable
                     this._sessionChecked = true;
                     
                     return {
@@ -324,7 +383,6 @@ window.api = {
                     };
                 }
             } catch (backendError) {
-                // Backend unreachable - use cached data (Firebase offline behavior)
                 console.log('🔧 [API] Backend unreachable for session check, using cached data');
                 
                 this._sessionChecked = true;
@@ -350,13 +408,11 @@ window.api = {
         }
     },
     
-    // Auto-login on refresh (Firebase-like behavior)
     autoLogin: async function() {
         if (!this.isLoggedIn()) {
             return { success: false, authenticated: false, message: 'No stored credentials' };
         }
         
-        // If session already checked recently, return cached
         if (this._sessionChecked) {
             const user = this.getCurrentUser();
             return {
@@ -368,13 +424,8 @@ window.api = {
             };
         }
         
-        // Otherwise check session
         return await this.checkSession();
     },
-    
-    // ============================================================================
-    // ENHANCED FETCH METHODS WITH RETRY LOGIC
-    // ============================================================================
     
     _fetchWithRetry: async function(endpoint, options = {}, retry = true) {
         const maxRetries = retry ? this._config.MAX_RETRIES : 0;
@@ -394,17 +445,15 @@ window.api = {
                     headers['Authorization'] = 'Bearer ' + token;
                 }
                 
-                // Add CORS mode for cross-origin requests
                 const fetchOptions = {
                     method: options.method || 'GET',
                     headers: headers,
                     body: options.body,
-                    mode: 'cors',  // Always use CORS mode
-                    credentials: 'omit', // Don't send cookies
+                    mode: 'cors',
+                    credentials: 'omit',
                     ...options
                 };
                 
-                // Add timeout (use longer timeout for status endpoint)
                 const timeout = endpoint === '/statuses/all' 
                     ? this._config.STATUS_FETCH_TIMEOUT 
                     : 10000;
@@ -416,22 +465,18 @@ window.api = {
                 const response = await fetch(url, fetchOptions);
                 clearTimeout(timeoutId);
                 
-                // If we got a response, return it
                 return response;
                 
             } catch (error) {
                 lastError = error;
                 
-                // Don't retry on abort (timeout)
                 if (error.name === 'AbortError') {
                     break;
                 }
                 
-                // Log retry attempt
                 if (attempt < maxRetries) {
                     console.log(`🔧 [API] Retry ${attempt + 1}/${maxRetries} for ${endpoint}:`, error.message);
                     
-                    // Wait before retrying (exponential backoff)
                     await new Promise(resolve => 
                         setTimeout(resolve, this._config.RETRY_DELAY * Math.pow(2, attempt))
                     );
@@ -443,47 +488,12 @@ window.api = {
         throw lastError || new Error('Request failed after retries');
     },
     
-    // Enhanced request method
     request: async function(endpoint, options = {}) {
-        try {
-            const response = await this._fetchWithRetry(endpoint, options);
-            const data = await response.json().catch(() => ({}));
-            
-            return {
-                success: response.ok,
-                status: response.status,
-                data: data,
-                message: data.message || (response.ok ? 'Success' : 'Request failed'),
-                headers: Object.fromEntries(response.headers.entries())
-            };
-        } catch (error) {
-            console.error(`🔧 [API] Request error for ${endpoint}:`, error);
-            
-            const isNetworkError = error.message && (
-                error.message.includes('Failed to fetch') ||
-                error.message.includes('NetworkError') ||
-                error.message.includes('aborted')
-            );
-            
-            return {
-                success: false,
-                status: 0,
-                message: isNetworkError 
-                    ? 'Network error. Please check your connection.' 
-                    : 'Request failed: ' + error.message,
-                error: error.message,
-                isNetworkError: isNetworkError
-            };
-        }
+        return window.api(endpoint, options);
     },
-    
-    // ============================================================================
-    // STATUS AND FRIENDS METHODS WITH FALLBACK
-    // ============================================================================
     
     getStatuses: async function() {
         try {
-            // Always use direct network fetch with timeout for /statuses/all
             const token = localStorage.getItem('moodchat_auth_token');
             const url = BASE_URL + '/statuses/all';
             
@@ -511,7 +521,6 @@ window.api = {
             
             const data = await response.json();
             
-            // Cache the data for offline use
             try {
                 localStorage.setItem('moodchat_cache_statuses', JSON.stringify({
                     data: data,
@@ -530,7 +539,6 @@ window.api = {
         } catch (error) {
             console.error('🔧 [API] Get statuses error:', error);
             
-            // Check for cached data only on network errors (not auth errors)
             const isNetworkError = error.message && (
                 error.message.includes('Failed to fetch') ||
                 error.message.includes('NetworkError') ||
@@ -538,14 +546,13 @@ window.api = {
             );
             
             if (isNetworkError) {
-                // Return cached data if available and recent (less than 5 minutes old)
                 const cached = localStorage.getItem('moodchat_cache_statuses');
                 if (cached) {
                     try {
                         const cachedData = JSON.parse(cached);
                         const cacheAge = Date.now() - (cachedData.timestamp || 0);
                         
-                        if (cacheAge < 300000) { // 5 minutes
+                        if (cacheAge < 300000) {
                             return {
                                 success: true,
                                 data: cachedData.data,
@@ -555,7 +562,6 @@ window.api = {
                             };
                         }
                     } catch (e) {
-                        // Ignore parse error
                     }
                 }
             }
@@ -582,7 +588,6 @@ window.api = {
             
             const data = await response.json();
             
-            // Cache the data
             try {
                 localStorage.setItem('moodchat_cache_friends', JSON.stringify({
                     data: data,
@@ -600,14 +605,13 @@ window.api = {
         } catch (error) {
             console.error('🔧 [API] Get friends error:', error);
             
-            // Return cached data if available and recent
             const cached = localStorage.getItem('moodchat_cache_friends');
             if (cached) {
                 try {
                     const cachedData = JSON.parse(cached);
                     const cacheAge = Date.now() - (cachedData.timestamp || 0);
                     
-                    if (cacheAge < 300000) { // 5 minutes
+                    if (cacheAge < 300000) {
                         return {
                             success: true,
                             data: cachedData.data,
@@ -617,7 +621,6 @@ window.api = {
                         };
                     }
                 } catch (e) {
-                    // Ignore parse error
                 }
             }
             
@@ -629,10 +632,6 @@ window.api = {
             };
         }
     },
-    
-    // ============================================================================
-    // UTILITY METHODS WITH ENHANCED ERROR HANDLING
-    // ============================================================================
     
     isLoggedIn: function() {
         try {
@@ -683,7 +682,6 @@ window.api = {
             }
             return deviceId;
         } catch (error) {
-            // Fallback device ID if storage fails
             return 'moodchat_fallback_' + Date.now().toString(36);
         }
     },
@@ -693,12 +691,10 @@ window.api = {
     },
     
     isBackendReachable: function() {
-        // Check cached status first
         if (this._backendReachable !== null) {
             return this._backendReachable;
         }
         
-        // Default to true if not checked yet (optimistic)
         return true;
     },
     
@@ -708,20 +704,117 @@ window.api = {
             backendReachable: this.isBackendReachable(),
             timestamp: new Date().toISOString(),
             backendUrl: BACKEND_BASE_URL,
+            baseApiUrl: BASE_URL,
             sessionChecked: this._sessionChecked
         };
     },
     
-    // ============================================================================
-    // INITIALIZATION WITH BACKEND CHECK (Firebase-like auto initialization)
-    // ============================================================================
+    getUsers: async function() {
+        try {
+            const response = await this.request('/users', { method: 'GET' });
+            return response;
+        } catch (error) {
+            console.error('🔧 [API] Get users error:', error);
+            return {
+                success: false,
+                message: 'Failed to fetch users',
+                error: error.message
+            };
+        }
+    },
+    
+    getUserById: async function(userId) {
+        try {
+            const response = await this.request(`/users/${userId}`, { method: 'GET' });
+            return response;
+        } catch (error) {
+            console.error('🔧 [API] Get user by ID error:', error);
+            return {
+                success: false,
+                message: 'Failed to fetch user',
+                error: error.message
+            };
+        }
+    },
+    
+    getStatus: async function(statusId) {
+        try {
+            const response = await this.request(`/status/${statusId}`, { method: 'GET' });
+            return response;
+        } catch (error) {
+            console.error('🔧 [API] Get status error:', error);
+            return {
+                success: false,
+                message: 'Failed to fetch status',
+                error: error.message
+            };
+        }
+    },
+    
+    createStatus: async function(statusData) {
+        try {
+            const response = await this.request('/status', {
+                method: 'POST',
+                body: JSON.stringify(statusData)
+            });
+            return response;
+        } catch (error) {
+            console.error('🔧 [API] Create status error:', error);
+            return {
+                success: false,
+                message: 'Failed to create status',
+                error: error.message
+            };
+        }
+    },
+    
+    getChats: async function() {
+        try {
+            const response = await this.request('/chats', { method: 'GET' });
+            return response;
+        } catch (error) {
+            console.error('🔧 [API] Get chats error:', error);
+            return {
+                success: false,
+                message: 'Failed to fetch chats',
+                error: error.message
+            };
+        }
+    },
+    
+    getChatById: async function(chatId) {
+        try {
+            const response = await this.request(`/chats/${chatId}`, { method: 'GET' });
+            return response;
+        } catch (error) {
+            console.error('🔧 [API] Get chat by ID error:', error);
+            return {
+                success: false,
+                message: 'Failed to fetch chat',
+                error: error.message
+            };
+        }
+    },
+    
+    getContacts: async function() {
+        try {
+            const response = await this.request('/contacts', { method: 'GET' });
+            return response;
+        } catch (error) {
+            console.error('🔧 [API] Get contacts error:', error);
+            return {
+                success: false,
+                message: 'Failed to fetch contacts',
+                error: error.message
+            };
+        }
+    },
     
     initialize: async function() {
-        console.log('🔧 [API] ⚡ MoodChat API v8.0.0 initializing...');
+        console.log('🔧 [API] ⚡ MoodChat API v8.0.1 initializing...');
         console.log('🔧 [API] 🔗 Backend URL:', BASE_URL);
         console.log('🔧 [API] 🌐 Environment:', IS_LOCAL_DEVELOPMENT ? 'Local' : 'Production');
         
-        // Auto-login on initialization (Firebase-like behavior)
         if (this.isLoggedIn() && !this._sessionChecked) {
             console.log('🔧 [API] 🔄 Auto-login on initialization...');
             try {
@@ -732,7 +825,6 @@ window.api = {
             }
         }
         
-        // Check backend health in background
         setTimeout(async () => {
             try {
                 const health = await this.checkBackendHealth();
@@ -745,14 +837,12 @@ window.api = {
             }
         }, 500);
         
-        // Set up periodic session check (every 5 minutes)
         setInterval(() => {
             if (this.isLoggedIn() && this.isOnline()) {
                 this.checkSession().catch(() => {});
             }
         }, this._config.SESSION_CHECK_INTERVAL);
         
-        // Dispatch ready event
         try {
             window.dispatchEvent(new CustomEvent('api-ready', {
                 detail: {
@@ -763,15 +853,10 @@ window.api = {
                 }
             }));
         } catch (e) {
-            // Ignore event errors
         }
         
         return true;
     },
-    
-    // ============================================================================
-    // DIAGNOSTICS AND DEBUGGING
-    // ============================================================================
     
     testRequirements: function() {
         console.log('🔍 Testing API Requirements...');
@@ -823,7 +908,6 @@ window.api = {
         
         console.table(results);
         
-        // Test backend connection
         try {
             const health = await this.checkBackendHealth();
             results.backendTest = health;
@@ -835,17 +919,15 @@ window.api = {
     }
 };
 
-// ============================================================================
-// INITIALIZE AND SETUP
-// ============================================================================
+Object.assign(window.api, apiObject);
+Object.setPrototypeOf(window.api, Object.getPrototypeOf(apiObject));
+
 console.log('🔧 [API] Starting initialization...');
 
-// Start initialization
 setTimeout(() => {
     window.api.initialize();
 }, 100);
 
-// Global error handlers
 if (typeof window.handleApiError === 'undefined') {
     window.handleApiError = function(error, defaultMessage) {
         if (!error) return defaultMessage || 'An error occurred';
@@ -867,13 +949,20 @@ if (typeof window.isNetworkError === 'undefined') {
     };
 }
 
-// ============================================================================
-// FALLBACK - Ensure api exists no matter what
-// ============================================================================
 setTimeout(() => {
-    if (!window.api || typeof window.api !== 'object') {
+    if (!window.api || typeof window.api !== 'function') {
         console.warn('⚠️ API not properly initialized, creating enhanced fallback');
-        window.api = {
+        
+        const fallbackApi = function(endpoint, options = {}) {
+            console.warn(`⚠️ Using fallback API for ${endpoint}`);
+            return Promise.resolve({
+                success: false,
+                message: 'API not available',
+                isNetworkError: true
+            });
+        };
+        
+        Object.assign(fallbackApi, {
             _singleton: true,
             _version: 'fallback',
             initialize: () => true,
@@ -896,13 +985,13 @@ setTimeout(() => {
             isOnline: () => navigator.onLine,
             isBackendReachable: () => false,
             checkSession: async () => ({ 
-                authenticated: window.api.isLoggedIn(),
+                authenticated: fallbackApi.isLoggedIn(),
                 offline: true 
             }),
             autoLogin: async () => ({
-                success: window.api.isLoggedIn(),
-                authenticated: window.api.isLoggedIn(),
-                user: window.api.getCurrentUser()
+                success: fallbackApi.isLoggedIn(),
+                authenticated: fallbackApi.isLoggedIn(),
+                user: fallbackApi.getCurrentUser()
             }),
             login: async () => ({ 
                 success: false, 
@@ -919,47 +1008,44 @@ setTimeout(() => {
                 message: 'API not available',
                 isNetworkError: true
             })
-        };
+        });
+        
+        window.api = fallbackApi;
     }
 }, 3000);
 
 console.log('🔧 [API] Enhanced API loaded successfully');
 
-// ============================================================================
-// ENSURE PROPER EXPORT AND DETECTION
-// ============================================================================
-
-// Force window.api to be accessible
 if (!window.api) {
     console.error('⚠️ window.api not set! Creating emergency API');
-    window.api = {
+    const emergencyApi = function(endpoint, options) {
+        return Promise.resolve({
+            success: false,
+            status: 0,
+            message: 'Emergency API fallback',
+            isNetworkError: true
+        });
+    };
+    
+    Object.assign(emergencyApi, {
         _singleton: true,
         _version: 'emergency',
         isLoggedIn: () => false,
         isBackendReachable: () => true,
         initialize: () => true,
         autoLogin: async () => ({ success: false, authenticated: false })
-    };
+    });
+    
+    window.api = emergencyApi;
 }
 
-// ============================================================================
-// ADD YOUR REQUESTED FEATURES
-// ============================================================================
-
-// Store events array
 window.__MOODCHAT_API_EVENTS = [];
-
-// Store instance reference
 window.__MOODCHAT_API_INSTANCE = window.api;
-
-// Set ready flag
 window.__MOODCHAT_API_READY = true;
 
-// Dispatch ready event immediately
 setTimeout(() => {
     console.log('🔧 [API] Dispatching ready event...');
     
-    // Create event detail object
     const eventDetail = {
         version: window.api._version,
         timestamp: new Date().toISOString(),
@@ -967,14 +1053,12 @@ setTimeout(() => {
         user: window.api.getCurrentUser()
     };
     
-    // Store current event in the events array
     window.__MOODCHAT_API_EVENTS.push({
         name: 'api-ready',
         timestamp: new Date().toISOString(),
         detail: eventDetail
     });
     
-    // Multiple events for compatibility
     const events = ['api-ready', 'apiready', 'apiReady'];
     events.forEach(eventName => {
         try {
@@ -987,11 +1071,9 @@ setTimeout(() => {
         }
     });
     
-    // Also set a global flag
     window.MOODCHAT_API_READY = true;
     console.log('🔧 [API] API is READY and accessible');
     
-    // Add delayed events - Dispatch events again after 500ms timeout
     setTimeout(() => {
         console.log('🔧 [API] Delayed dispatch (500ms)...');
         events.forEach(eventName => {
@@ -1018,7 +1100,6 @@ setTimeout(() => {
         });
     }, 500);
     
-    // Add second delay - Dispatch events again after 1000ms timeout
     setTimeout(() => {
         console.log('🔧 [API] Second delayed dispatch (1000ms)...');
         events.forEach(eventName => {
@@ -1044,7 +1125,6 @@ setTimeout(() => {
             }
         });
         
-        // Add console log
         console.log('🔧 [API] API synchronization ready');
     }, 1000);
 }, 200);

@@ -1796,47 +1796,60 @@
     let isInFullscreenView = false; // Track if we're in any fullscreen view
     
     // API Helper function for backend calls
-    async function api(endpoint, method = 'GET', data = null) {
-        const baseUrl = 'https://your-backend-api.com'; // Replace with your actual backend URL
-        const url = `${baseUrl}${endpoint}`;
-        
-        const options = {
-            method,
-            headers: {
-                'Content-Type': 'application/json',
-                'Authorization': `Bearer ${localStorage.getItem('auth_token') || ''}`
-            }
-        };
-        
-        if (data) {
-            options.body = JSON.stringify(data);
+  // API Helper function for backend calls
+async function api(endpoint, method = 'GET', data = null) {
+    const baseUrl = 'https://moodchat-backend-1.onrender.com'; // Replace with your actual backend URL
+    
+    // FIX 1: Ensure URL is properly constructed
+    const url = `${baseUrl}${endpoint.startsWith('/') ? endpoint : '/' + endpoint}`;
+    
+    const options = {
+        method: method, // FIX 2: Explicitly set method property
+        headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${localStorage.getItem('auth_token') || ''}`
         }
-        
-        try {
-            const response = await fetch(url, options);
-            
-            if (!response.ok) {
-                throw new Error(`API error: ${response.status}`);
-            }
-            
-            return await response.json();
-        } catch (error) {
-            console.error('API call failed:', error);
-            // For offline mode, store in local storage queue
-            if (method === 'POST' && endpoint.includes('/messages/send')) {
-                const offlineQueueKey = 'kynecta_offline_queue_' + (currentUser?.id || 'guest');
-                const offlineQueue = JSON.parse(localStorage.getItem(offlineQueueKey) || '[]');
-                offlineQueue.push({
-                    endpoint,
-                    method,
-                    data,
-                    timestamp: Date.now()
-                });
-                localStorage.setItem(offlineQueueKey, JSON.stringify(offlineQueue));
-            }
-            throw error;
-        }
+    };
+    
+    if (data && (method === 'POST' || method === 'PUT' || method === 'PATCH')) {
+        options.body = JSON.stringify(data);
     }
+    
+    try {
+        // FIX 3: The fetch call - this is where line 1816 is
+        console.log('Fetching URL:', url, 'with options:', options);
+        const response = await fetch(url, options);
+        
+        if (!response.ok) {
+            const errorText = await response.text();
+            throw new Error(`API error ${response.status}: ${errorText || response.statusText}`);
+        }
+        
+        const contentType = response.headers.get('content-type');
+        if (contentType && contentType.includes('application/json')) {
+            return await response.json();
+        }
+        
+        return await response.text();
+        
+    } catch (error) {
+        console.error(`API call failed [${method} ${endpoint}]:`, error.message);
+        
+        // For offline mode, store in local storage queue
+        if (method === 'POST' && endpoint.includes('/messages/send')) {
+            const offlineQueueKey = 'kynecta_offline_queue_' + (currentUser?.id || 'guest');
+            const offlineQueue = JSON.parse(localStorage.getItem(offlineQueueKey) || '[]');
+            offlineQueue.push({
+                endpoint,
+                method,
+                data,
+                timestamp: Date.now()
+            });
+            localStorage.setItem(offlineQueueKey, JSON.stringify(offlineQueue));
+        }
+        throw error;
+    }
+}
     
     document.addEventListener('DOMContentLoaded', async function() {
         console.log('DOM loaded, initializing iframe controller...');

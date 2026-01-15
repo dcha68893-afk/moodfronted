@@ -148,30 +148,45 @@ function updateNetworkStatusUI(status, message) {
 // ============================================================================
 
 /**
- * Reads network status from api.js without performing health checks
+ * Reads network status from api.js using two methods:
+ * 1. Event listener for api.js status updates (preferred)
+ * 2. Direct API call to /status endpoint as fallback
  * Returns the current network status for UI display only
  */
 async function readNetworkStatusFromApi() {
-  // Default to browser status
+  // Method 1: Check browser network status first (fastest)
   if (!navigator.onLine) {
     return { status: 'offline', message: 'No internet connection', backendReachable: false };
   }
   
-  // Try to read from api.js if available
-  if (window.API_COORDINATION && typeof window.API_COORDINATION.getNetworkStatus === 'function') {
+  // Method 2: Listen for api.js status events if available
+  // api.js will dispatch 'api-network-status' events when status changes
+  // We handle these events in setupApiStatusListener()
+  
+  // Method 3: Direct status check using window.api() (safe fallback)
+  if (typeof window.api === 'function') {
     try {
-      const apiStatus = window.API_COORDINATION.getNetworkStatus();
+      // Use a timeout to prevent blocking UI
+      const statusPromise = window.api('/status');
+      const timeoutPromise = new Promise((_, reject) => 
+        setTimeout(() => reject(new Error('Status check timeout')), 5000)
+      );
+      
+      const response = await Promise.race([statusPromise, timeoutPromise]);
+      const isReachable = response && response.status === 'ok';
+      
       return {
-        status: apiStatus.backendReachable ? 'online' : 'offline',
-        message: apiStatus.backendReachable ? 'Connected to MoodChat' : 'Cannot reach MoodChat server',
-        backendReachable: apiStatus.backendReachable
+        status: isReachable ? 'online' : 'offline',
+        message: isReachable ? 'Connected to MoodChat' : 'Cannot reach MoodChat server',
+        backendReachable: isReachable
       };
     } catch (error) {
-      console.warn('Failed to read network status from api.js:', error);
+      console.log('API status check failed (non-critical):', error.message);
+      // Don't throw, just return offline status
     }
   }
   
-  // Fallback: Check if api.js has a reachable property
+  // Method 4: Check if api.js has exposed status directly
   if (window.API_COORDINATION && window.API_COORDINATION.backendReachable !== undefined) {
     const isReachable = window.API_COORDINATION.backendReachable;
     return {
@@ -204,12 +219,48 @@ async function updateNetworkStatusFromApi() {
 }
 
 // ============================================================================
+// API.JS EVENT LISTENER (PREFERRED METHOD)
+// ============================================================================
+
+/**
+ * Sets up listener for api.js network status events
+ * api.js will dispatch 'api-network-status' events when backend reachability changes
+ */
+function setupApiStatusListener() {
+  console.log('Setting up api.js network status event listener...');
+  
+  window.addEventListener('api-network-status', (event) => {
+    console.log('Received api.js network status event:', event.detail);
+    
+    const { isReachable, message } = event.detail || {};
+    const browserOnline = navigator.onLine;
+    
+    // Determine status based on api.js and browser status
+    if (!browserOnline) {
+      window.NetworkStatus.status = 'offline';
+      window.NetworkStatus.backendReachable = false;
+      updateNetworkStatusUI('offline', 'No internet connection');
+    } else if (isReachable) {
+      window.NetworkStatus.status = 'online';
+      window.NetworkStatus.backendReachable = true;
+      updateNetworkStatusUI('online', message || 'Connected to MoodChat');
+    } else {
+      window.NetworkStatus.status = 'offline';
+      window.NetworkStatus.backendReachable = false;
+      updateNetworkStatusUI('offline', message || 'Cannot reach MoodChat server');
+    }
+    
+    window.NetworkStatus.lastChecked = new Date();
+  });
+}
+
+// ============================================================================
 // PERIODIC STATUS UPDATES (READS FROM API.JS)
 // ============================================================================
 
 /**
  * Starts periodic network status updates from api.js
- * Reads status every 30 seconds without performing health checks
+ * Reads status every 10 seconds without blocking UI
  */
 function startPeriodicNetworkUpdates() {
   // Clear any existing interval
@@ -217,21 +268,26 @@ function startPeriodicNetworkUpdates() {
     clearInterval(window.NetworkStatus.checkInterval);
   }
   
-  // Initial update
+  // Initial update after api.js has time to initialize
   setTimeout(() => {
-    updateNetworkStatusFromApi().catch(console.error);
-  }, 1000); // Start after 1 second to allow api.js to initialize
+    updateNetworkStatusFromApi().catch(error => {
+      console.log('Initial network status check failed:', error.message);
+    });
+  }, 2000);
   
-  // Set up periodic updates (every 30 seconds)
+  // Set up periodic updates (every 10 seconds - non-blocking)
   window.NetworkStatus.checkInterval = setInterval(() => {
     if (navigator.onLine) {
-      updateNetworkStatusFromApi().catch(console.error);
+      updateNetworkStatusFromApi().catch(error => {
+        console.log('Periodic network status check failed:', error.message);
+      });
     } else {
       // Immediately update if browser goes offline
       updateNetworkStatusUI('offline', 'No internet connection');
       window.NetworkStatus.backendReachable = false;
+      window.NetworkStatus.lastChecked = new Date();
     }
-  }, 30000); // 30 seconds
+  }, 10000); // 10 seconds
   
   console.log('Periodic network status updates started (reading from api.js)');
 }
@@ -262,6 +318,7 @@ function handleBrowserOffline() {
   console.log('Browser offline event detected');
   updateNetworkStatusUI('offline', 'No internet connection');
   window.NetworkStatus.backendReachable = false;
+  window.NetworkStatus.lastChecked = new Date();
 }
 
 // ============================================================================
@@ -375,6 +432,318 @@ function updateAuthButtonStates(activeForm) {
 }
 
 // ============================================================================
+// AUTH FORM SUBMISSION HANDLERS (UPDATED TO USE CORRECTED API.JS)
+// ============================================================================
+
+/**
+ * Handles login form submission using corrected api.js
+ * Makes POST request to /auth/login endpoint
+ */
+async function handleLoginSubmit(event) {
+  event.preventDefault();
+  console.log('Login form submitted');
+  
+  const form = event.target;
+  const email = form.querySelector('input[type="email"]').value;
+  const password = form.querySelector('input[type="password"]').value;
+  const submitBtn = form.querySelector('button[type="submit"]');
+  
+  // Show loading state
+  const originalText = submitBtn.textContent;
+  submitBtn.textContent = 'Logging in...';
+  submitBtn.disabled = true;
+  
+  try {
+    // Use corrected api.js for login request
+    const response = await window.api('/auth/login', {
+      method: 'POST',
+      body: { email, password }
+    });
+    
+    console.log('Login response:', response);
+    
+    if (response && response.token) {
+      // Save auth token for future API calls
+      localStorage.setItem('authUser', response.token);
+      
+      // Save minimal user info for auto-login
+      const userInfo = {
+        id: response.user.id,
+        displayName: response.user.displayName,
+        email: response.user.email,
+        expiresAt: Date.now() + (24 * 60 * 60 * 1000) // 24 hours from now
+      };
+      localStorage.setItem('userInfo', JSON.stringify(userInfo));
+      
+      // Show success message
+      showToast('Login successful! Redirecting...', 'success');
+      
+      // Redirect to main app after a short delay
+      setTimeout(() => {
+        window.location.href = '/app.html';
+      }, 1500);
+    } else {
+      throw new Error('Invalid login response');
+    }
+  } catch (error) {
+    console.error('Login error:', error);
+    showToast(error.message || 'Login failed. Please check your credentials.', 'error');
+    
+    // Restore button state
+    submitBtn.textContent = originalText;
+    submitBtn.disabled = false;
+  }
+}
+
+/**
+ * Handles registration form submission using corrected api.js
+ * Makes POST request to /auth/register endpoint
+ */
+async function handleRegisterSubmit(event) {
+  event.preventDefault();
+  console.log('Register form submitted');
+  
+  const form = event.target;
+  const displayName = form.querySelector('input[type="text"]').value;
+  const email = form.querySelector('input[type="email"]').value;
+  const password = form.querySelectorAll('input[type="password"]')[0].value;
+  const confirmPassword = form.querySelectorAll('input[type="password"]')[1].value;
+  const submitBtn = form.querySelector('button[type="submit"]');
+  
+  // Basic validation
+  if (password !== confirmPassword) {
+    showToast('Passwords do not match', 'error');
+    return;
+  }
+  
+  // Show loading state
+  const originalText = submitBtn.textContent;
+  submitBtn.textContent = 'Creating account...';
+  submitBtn.disabled = true;
+  
+  try {
+    // Use corrected api.js for registration request
+    const response = await window.api('/auth/register', {
+      method: 'POST',
+      body: { displayName, email, password }
+    });
+    
+    console.log('Registration response:', response);
+    
+    if (response && response.token) {
+      // Save auth token for future API calls
+      localStorage.setItem('authUser', response.token);
+      
+      // Save minimal user info for auto-login
+      const userInfo = {
+        id: response.user.id,
+        displayName: response.user.displayName,
+        email: response.user.email,
+        expiresAt: Date.now() + (24 * 60 * 60 * 1000) // 24 hours from now
+      };
+      localStorage.setItem('userInfo', JSON.stringify(userInfo));
+      
+      // Show success message
+      showToast('Registration successful! Redirecting...', 'success');
+      
+      // Auto-login and redirect after a short delay
+      setTimeout(() => {
+        window.location.href = '/app.html';
+      }, 1500);
+    } else {
+      throw new Error('Invalid registration response');
+    }
+  } catch (error) {
+    console.error('Registration error:', error);
+    showToast(error.message || 'Registration failed. Please try again.', 'error');
+    
+    // Restore button state
+    submitBtn.textContent = originalText;
+    submitBtn.disabled = false;
+  }
+}
+
+/**
+ * Handles forgot password form submission using corrected api.js
+ * Makes POST request to /auth/forgot-password endpoint
+ */
+async function handleForgotPasswordSubmit(event) {
+  event.preventDefault();
+  console.log('Forgot password form submitted');
+  
+  const form = event.target;
+  const email = form.querySelector('input[type="email"]').value;
+  const submitBtn = form.querySelector('button[type="submit"]');
+  
+  // Show loading state
+  const originalText = submitBtn.textContent;
+  submitBtn.textContent = 'Sending reset link...';
+  submitBtn.disabled = true;
+  
+  try {
+    // Use corrected api.js for forgot password request
+    const response = await window.api('/auth/forgot-password', {
+      method: 'POST',
+      body: { email }
+    });
+    
+    console.log('Forgot password response:', response);
+    
+    if (response && response.success) {
+      showToast('Password reset link sent! Check your email.', 'success');
+      
+      // Switch back to login form after a short delay
+      setTimeout(() => {
+        showLoginForm();
+      }, 2000);
+    } else {
+      throw new Error('Failed to send reset link');
+    }
+  } catch (error) {
+    console.error('Forgot password error:', error);
+    showToast(error.message || 'Failed to send reset link. Please try again.', 'error');
+  } finally {
+    // Restore button state
+    submitBtn.textContent = originalText;
+    submitBtn.disabled = false;
+  }
+}
+
+/**
+ * Shows a toast notification
+ */
+function showToast(message, type = 'info') {
+  // Check if toast container exists
+  let toastContainer = document.getElementById('toast-container');
+  if (!toastContainer) {
+    toastContainer = document.createElement('div');
+    toastContainer.id = 'toast-container';
+    toastContainer.style.cssText = `
+      position: fixed;
+      top: 20px;
+      right: 20px;
+      z-index: 1000;
+      max-width: 300px;
+    `;
+    document.body.appendChild(toastContainer);
+  }
+  
+  // Create toast
+  const toast = document.createElement('div');
+  toast.className = `toast toast-${type}`;
+  toast.style.cssText = `
+    background: ${type === 'success' ? '#10b981' : type === 'error' ? '#ef4444' : '#3b82f6'};
+    color: white;
+    padding: 12px 16px;
+    margin-bottom: 10px;
+    border-radius: 6px;
+    box-shadow: 0 4px 6px rgba(0,0,0,0.1);
+    animation: slideInRight 0.3s ease-out;
+    cursor: pointer;
+  `;
+  toast.textContent = message;
+  
+  // Add animation styles if needed
+  if (!document.getElementById('toast-animations')) {
+    const styleSheet = document.createElement('style');
+    styleSheet.id = 'toast-animations';
+    styleSheet.textContent = `
+      @keyframes slideInRight {
+        from {
+          transform: translateX(100%);
+          opacity: 0;
+        }
+        to {
+          transform: translateX(0);
+          opacity: 1;
+        }
+      }
+      @keyframes slideOutRight {
+        from {
+          transform: translateX(0);
+          opacity: 1;
+        }
+        to {
+          transform: translateX(100%);
+          opacity: 0;
+        }
+      }
+    `;
+    document.head.appendChild(styleSheet);
+  }
+  
+  // Add to container
+  toastContainer.appendChild(toast);
+  
+  // Auto-remove after 5 seconds
+  setTimeout(() => {
+    toast.style.animation = 'slideOutRight 0.3s ease-in';
+    setTimeout(() => {
+      if (toast.parentNode) {
+        toast.parentNode.removeChild(toast);
+      }
+    }, 300);
+  }, 5000);
+  
+  // Click to dismiss
+  toast.addEventListener('click', () => {
+    toast.style.animation = 'slideOutRight 0.3s ease-in';
+    setTimeout(() => {
+      if (toast.parentNode) {
+        toast.parentNode.removeChild(toast);
+      }
+    }, 300);
+  });
+}
+
+// ============================================================================
+// AUTO-LOGIN CHECK ON PAGE LOAD
+// ============================================================================
+
+/**
+ * Checks if user is already logged in (auto-login feature)
+ * Uses localStorage tokens saved during registration/login
+ */
+function checkAutoLogin() {
+  console.log('Checking for auto-login...');
+  
+  const authToken = localStorage.getItem('authUser');
+  const userInfoStr = localStorage.getItem('userInfo');
+  
+  if (authToken && userInfoStr) {
+    try {
+      const userInfo = JSON.parse(userInfoStr);
+      
+      // Check if token is still valid (not expired)
+      if (userInfo.expiresAt && userInfo.expiresAt > Date.now()) {
+        console.log('Auto-login detected for:', userInfo.email);
+        
+        // Show auto-login notification
+        showToast(`Welcome back, ${userInfo.displayName}!`, 'success');
+        
+        // Redirect to main app after a short delay
+        setTimeout(() => {
+          window.location.href = '/app.html';
+        }, 1000);
+        
+        return true;
+      } else {
+        // Token expired, clear storage
+        console.log('Auto-login token expired');
+        localStorage.removeItem('authUser');
+        localStorage.removeItem('userInfo');
+      }
+    } catch (error) {
+      console.error('Auto-login error:', error);
+      localStorage.removeItem('authUser');
+      localStorage.removeItem('userInfo');
+    }
+  }
+  
+  return false;
+}
+
+// ============================================================================
 // MANUAL NETWORK CHECK (FOR DEBUGGING) - UPDATED TO USE API.JS
 // ============================================================================
 
@@ -426,11 +795,11 @@ function integrateWithAppState() {
 }
 
 // ============================================================================
-// SETUP AUTH FORM EVENT LISTENERS
+// SETUP AUTH FORM EVENT LISTENERS (UPDATED WITH FORM SUBMISSIONS)
 // ============================================================================
 
 /**
- * Sets up event listeners for auth form toggling
+ * Sets up event listeners for auth form toggling and submissions
  * Must be called after DOM is ready
  */
 function setupAuthFormListeners() {
@@ -481,6 +850,24 @@ function setupAuthFormListeners() {
     });
   }
   
+  // Login form submission
+  const loginForm = document.getElementById('login-form');
+  if (loginForm) {
+    loginForm.addEventListener('submit', handleLoginSubmit);
+  }
+  
+  // Register form submission
+  const registerForm = document.getElementById('register-form');
+  if (registerForm) {
+    registerForm.addEventListener('submit', handleRegisterSubmit);
+  }
+  
+  // Forgot password form submission
+  const forgotForm = document.getElementById('forgot-form');
+  if (forgotForm) {
+    forgotForm.addEventListener('submit', handleForgotPasswordSubmit);
+  }
+  
   console.log('Auth form event listeners set up');
 }
 
@@ -495,20 +882,33 @@ function setupAuthFormListeners() {
 function initializeAuthUI() {
   console.log('Initializing auth UI and network status monitoring...');
   
-  // 1. Set up auth form listeners FIRST (ensures forms work immediately)
-  setupAuthFormListeners();
+  // 1. First check for auto-login (non-blocking)
+  setTimeout(() => {
+    if (!checkAutoLogin()) {
+      // Only show auth forms if not auto-logging in
+      
+      // 2. Set up auth form listeners (ensures forms work immediately)
+      setupAuthFormListeners();
+      
+      // 3. Set initial network UI state (non-blocking)
+      updateNetworkStatusUI('checking', 'Checking connection...');
+      
+      // 4. Show login form by default
+      showLoginForm();
+    }
+  }, 100);
   
-  // 2. Set initial network UI state (non-blocking)
-  updateNetworkStatusUI('checking', 'Checking connection...');
+  // 5. Set up api.js event listener for real-time status updates
+  setupApiStatusListener();
   
-  // 3. Integrate with existing AppState
+  // 6. Integrate with existing AppState
   integrateWithAppState();
   
-  // 4. Set up browser event listeners for network status
+  // 7. Set up browser event listeners for network status
   window.addEventListener('online', handleBrowserOnline);
   window.addEventListener('offline', handleBrowserOffline);
   
-  // 5. Start periodic network status updates from api.js (non-blocking)
+  // 8. Start periodic network status updates from api.js (non-blocking)
   setTimeout(() => {
     startPeriodicNetworkUpdates();
   }, 500); // Start after 500ms to ensure forms are responsive
@@ -540,6 +940,7 @@ window.cleanupNetworkMonitoring = function() {
   // Remove event listeners
   window.removeEventListener('online', handleBrowserOnline);
   window.removeEventListener('offline', handleBrowserOffline);
+  window.removeEventListener('api-network-status', setupApiStatusListener);
   
   // Remove network indicator
   const indicator = document.getElementById('network-status-indicator');

@@ -13,7 +13,10 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
     <title>MoodChat - Global Chat Platform</title>
     
-    <!-- CSS Styles -->
+    <!-- CSS Frameworks and Styles -->
+    <!-- Font Awesome for icons -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <!-- Inline CSS for performance (already present) -->
     <style>
         /* ============================================= */
         /* ROOT VARIABLES & THEME SYSTEM */
@@ -1901,923 +1904,144 @@
     <!-- Notification Container -->
     <div class="notification-container" id="notificationContainer"></div>
 
-    <!-- Authentication UI JavaScript - Added directly to index.html -->
+    <!-- ============================================= -->
+    <!-- JAVASCRIPT LOADING - CRITICAL FOR UI TOGGLING -->
+    <!-- ============================================= -->
+    
+    <!-- 1. jQuery - Required for plugins and some UI components -->
+    <!-- Load from CDN with local fallback -->
+    <script src="https://code.jquery.com/jquery-3.6.0.min.js"></script>
+    <script>
+        // Fallback to local jQuery if CDN fails
+        window.jQuery || document.write('<script src="js/vendor/jquery.min.js"><\/script>');
+    </script>
+    
+    <!-- 2. Spectrum Color Picker - For color selection features (if needed) -->
+    <!-- Note: Only include if actually used in the app -->
+    <!-- <script src="js/vendor/spectrum.min.js"></script> -->
+    <!-- <link rel="stylesheet" href="css/spectrum.min.css"> -->
+    
+    <!-- 3. Auth UI JavaScript - Embedded for immediate form toggling -->
+    <!-- This handles the instant form switching without network dependency -->
     <script>
         // =============================================
-        // AUTHENTICATION UI CONTROLLER
+        // IMMEDIATE FORM TOGGLING SCRIPT
+        // This ensures forms toggle instantly without waiting for other scripts
         // =============================================
-        console.log('Auth UI: Initializing authentication UI controller...');
-        
-        // Main controller object for authentication UI
-        const AuthUIController = {
-            // Current active form state
-            currentForm: 'login',
+        document.addEventListener('DOMContentLoaded', function() {
+            console.log('Form Toggler: Initializing immediate form switching...');
             
-            // DOM Elements cache
-            elements: {},
+            // Get all form toggle buttons
+            const signupButton = document.getElementById('signup-button');
+            const forgotPasswordButton = document.getElementById('forgot-password-button');
+            const backToLoginFromRegister = document.getElementById('back-to-login-from-register');
+            const backToLoginFromForgot = document.getElementById('back-to-login-from-forgot');
             
-            // User data storage
-            userData: {
-                displayName: '',
-                email: '',
-                isAuthenticated: false
-            },
+            // Get all forms
+            const loginForm = document.getElementById('login-form');
+            const registerForm = document.getElementById('register-form');
+            const forgotForm = document.getElementById('forgot-form');
+            const dashboardPanel = document.getElementById('dashboardPanel');
             
-            // Initialize all UI components
-            init: function() {
-                console.log('Auth UI: Initializing UI components...');
-                this.cacheElements();
-                this.bindEvents();
-                this.setupPasswordToggles();
-                this.setupFeatureTags();
-                this.updateLoginMethodUI('email');
-                console.log('Auth UI: UI initialization complete.');
-            },
+            // Get panel title elements
+            const panelTitle = document.getElementById('panelTitle');
+            const panelSubtitle = document.getElementById('panelSubtitle');
             
-            // Cache all required DOM elements
-            cacheElements: function() {
-                console.log('Auth UI: Caching DOM elements...');
-                
-                // Form containers
-                this.elements = {
-                    // Forms
-                    loginForm: document.getElementById('login-form'),
-                    registerForm: document.getElementById('register-form'),
-                    forgotForm: document.getElementById('forgot-form'),
-                    dashboardPanel: document.getElementById('dashboardPanel'),
-                    
-                    // Form buttons and links
-                    signupButton: document.getElementById('signup-button'),
-                    forgotPasswordButton: document.getElementById('forgot-password-button'),
-                    backToLoginFromRegister: document.getElementById('back-to-login-from-register'),
-                    backToLoginFromForgot: document.getElementById('back-to-login-from-forgot'),
-                    
-                    // Form submission buttons
-                    loginButton: document.getElementById('login-button'),
-                    registerSubmitBtn: document.querySelector('#register-form button[type="submit"]'),
-                    forgotSubmitBtn: document.querySelector('#forgot-form button[type="submit"]'),
-                    
-                    // Auth tabs
-                    authTabs: document.querySelectorAll('.auth-tab'),
-                    
-                    // Login method UI
-                    loginMethodLabel: document.getElementById('loginMethodLabel'),
-                    loginMethodIcon: document.getElementById('loginMethodIcon'),
-                    loginIdentifier: document.getElementById('loginIdentifier'),
-                    
-                    // Spinners
-                    loginSpinner: document.getElementById('loginSpinner'),
-                    registerSpinner: document.getElementById('registerSpinner'),
-                    forgotPasswordSpinner: document.getElementById('forgotPasswordSpinner'),
-                    
-                    // Error/Success messages
-                    loginIdentifierError: document.getElementById('loginIdentifierError'),
-                    loginPasswordError: document.getElementById('loginPasswordError'),
-                    registerNameError: document.getElementById('registerNameError'),
-                    registerUsernameError: document.getElementById('registerUsernameError'),
-                    registerEmailError: document.getElementById('registerEmailError'),
-                    registerPasswordError: document.getElementById('registerPasswordError'),
-                    registerConfirmPasswordError: document.getElementById('registerConfirmPasswordError'),
-                    forgotPasswordError: document.getElementById('forgotPasswordError'),
-                    forgotPasswordSuccess: document.getElementById('forgotPasswordSuccess'),
-                    
-                    // Dashboard elements
-                    enterChatBtn: document.getElementById('enterChatBtn'),
-                    logoutBtn: document.getElementById('logoutBtn'),
-                    quickLoginBtn: document.getElementById('quickLoginBtn'),
-                    useDifferentAccountBtn: document.getElementById('useDifferentAccountBtn'),
-                    removeQuickLogin: document.getElementById('removeQuickLogin'),
-                    quickLoginCard: document.getElementById('quickLoginCard'),
-                    
-                    // Panel titles
-                    panelTitle: document.getElementById('panelTitle'),
-                    panelSubtitle: document.getElementById('panelSubtitle')
-                };
-                
-                console.log('Auth UI: DOM elements cached successfully.');
-            },
-            
-            // Bind all event listeners
-            bindEvents: function() {
-                console.log('Auth UI: Binding event listeners...');
-                
-                // Form toggling buttons
-                this.elements.signupButton.addEventListener('click', (e) => {
-                    e.preventDefault();
-                    this.showForm('register');
-                });
-                
-                this.elements.forgotPasswordButton.addEventListener('click', (e) => {
-                    e.preventDefault();
-                    this.showForm('forgot');
-                });
-                
-                this.elements.backToLoginFromRegister.addEventListener('click', (e) => {
-                    e.preventDefault();
-                    this.showForm('login');
-                });
-                
-                this.elements.backToLoginFromForgot.addEventListener('click', (e) => {
-                    e.preventDefault();
-                    this.showForm('login');
-                });
-                
-                // Auth tabs (email/mobile/username)
-                this.elements.authTabs.forEach(tab => {
-                    tab.addEventListener('click', (e) => {
-                        const method = e.currentTarget.dataset.method;
-                        this.updateLoginMethodUI(method);
-                        this.elements.authTabs.forEach(t => t.classList.remove('active'));
-                        e.currentTarget.classList.add('active');
-                    });
-                });
-                
-                // Form submissions
-                this.elements.loginForm.addEventListener('submit', (e) => this.handleLoginSubmit(e));
-                this.elements.registerForm.addEventListener('submit', (e) => this.handleRegisterSubmit(e));
-                this.elements.forgotForm.addEventListener('submit', (e) => this.handleForgotPasswordSubmit(e));
-                
-                // Dashboard buttons
-                if (this.elements.enterChatBtn) {
-                    this.elements.enterChatBtn.addEventListener('click', () => this.handleEnterChat());
-                }
-                
-                if (this.elements.logoutBtn) {
-                    this.elements.logoutBtn.addEventListener('click', () => this.handleLogout());
-                }
-                
-                // Quick login buttons
-                if (this.elements.quickLoginBtn) {
-                    this.elements.quickLoginBtn.addEventListener('click', () => this.handleQuickLogin());
-                }
-                
-                if (this.elements.useDifferentAccountBtn) {
-                    this.elements.useDifferentAccountBtn.addEventListener('click', () => this.handleUseDifferentAccount());
-                }
-                
-                if (this.elements.removeQuickLogin) {
-                    this.elements.removeQuickLogin.addEventListener('click', () => this.handleRemoveQuickLogin());
-                }
-                
-                console.log('Auth UI: Event listeners bound successfully.');
-            },
-            
-            // Setup password visibility toggles
-            setupPasswordToggles: function() {
-                console.log('Auth UI: Setting up password toggles...');
-                
-                const toggleLoginPassword = document.getElementById('toggleLoginPassword');
-                const toggleRegisterPassword = document.getElementById('toggleRegisterPassword');
-                const toggleRegisterConfirmPassword = document.getElementById('toggleRegisterConfirmPassword');
-                
-                if (toggleLoginPassword) {
-                    toggleLoginPassword.addEventListener('click', () => {
-                        const passwordInput = document.getElementById('loginPassword');
-                        const icon = toggleLoginPassword.querySelector('i');
-                        this.togglePasswordVisibility(passwordInput, icon);
-                    });
-                }
-                
-                if (toggleRegisterPassword) {
-                    toggleRegisterPassword.addEventListener('click', () => {
-                        const passwordInput = document.getElementById('registerPassword');
-                        const icon = toggleRegisterPassword.querySelector('i');
-                        this.togglePasswordVisibility(passwordInput, icon);
-                    });
-                }
-                
-                if (toggleRegisterConfirmPassword) {
-                    toggleRegisterConfirmPassword.addEventListener('click', () => {
-                        const passwordInput = document.getElementById('registerConfirmPassword');
-                        const icon = toggleRegisterConfirmPassword.querySelector('i');
-                        this.togglePasswordVisibility(passwordInput, icon);
-                    });
-                }
-            },
-            
-            // Setup interest feature tags
-            setupFeatureTags: function() {
-                console.log('Auth UI: Setting up feature tags...');
-                
-                const featureTags = document.querySelectorAll('.feature-tag');
-                featureTags.forEach(tag => {
-                    tag.addEventListener('click', function() {
-                        this.classList.toggle('selected');
-                        console.log('Auth UI: Interest selected:', this.dataset.interest, this.classList.contains('selected'));
-                    });
-                });
-            },
-            
-            // Toggle password visibility
-            togglePasswordVisibility: function(input, icon) {
-                if (input.type === 'password') {
-                    input.type = 'text';
-                    icon.classList.remove('fa-eye');
-                    icon.classList.add('fa-eye-slash');
-                } else {
-                    input.type = 'password';
-                    icon.classList.remove('fa-eye-slash');
-                    icon.classList.add('fa-eye');
-                }
-            },
-            
-            // Update login method UI (email/mobile/username)
-            updateLoginMethodUI: function(method) {
-                console.log('Auth UI: Updating login method to:', method);
-                
-                const placeholderMap = {
-                    email: 'Enter your email',
-                    mobile: 'Enter your phone number',
-                    username: 'Enter your username'
-                };
-                
-                const labelMap = {
-                    email: 'Email Address',
-                    mobile: 'Phone Number',
-                    username: 'Username'
-                };
-                
-                const iconMap = {
-                    email: 'fa-envelope',
-                    mobile: 'fa-mobile-alt',
-                    username: 'fa-user'
-                };
-                
-                // Update placeholder and label
-                this.elements.loginIdentifier.placeholder = placeholderMap[method] || placeholderMap.email;
-                this.elements.loginMethodLabel.textContent = labelMap[method] || labelMap.email;
-                
-                // Update icon
-                const currentIcon = this.elements.loginMethodIcon.classList;
-                currentIcon.remove('fa-envelope', 'fa-mobile-alt', 'fa-user');
-                currentIcon.add(iconMap[method] || 'fa-envelope');
-                
-                // Update input type for validation
-                if (method === 'email') {
-                    this.elements.loginIdentifier.type = 'email';
-                } else {
-                    this.elements.loginIdentifier.type = 'text';
-                }
-            },
-            
-            // Show specific form and hide others
-            showForm: function(formName) {
-                console.log('Auth UI: Showing form:', formName);
-                
-                // Update current form state
-                this.currentForm = formName;
+            // Function to show a specific form and hide others
+            function showForm(formName) {
+                console.log('Form Toggler: Showing form:', formName);
                 
                 // Hide all forms and panels
-                this.elements.loginForm.classList.remove('active');
-                this.elements.registerForm.classList.remove('active');
-                this.elements.forgotForm.classList.remove('active');
-                this.elements.dashboardPanel.classList.remove('active');
+                [loginForm, registerForm, forgotForm, dashboardPanel].forEach(form => {
+                    if (form) {
+                        form.classList.remove('active');
+                        form.classList.remove('fade-in');
+                    }
+                });
                 
-                // Clear all error messages
-                this.clearAllErrorMessages();
-                this.clearAllSuccessMessages();
-                
-                // Show the requested form/panel with animation
+                // Show the requested form with animation
                 setTimeout(() => {
+                    let activeForm = null;
+                    
                     switch(formName) {
                         case 'login':
-                            this.elements.loginForm.classList.add('active');
-                            this.elements.panelTitle.textContent = 'Welcome to MoodChat';
-                            this.elements.panelSubtitle.textContent = 'Login to continue';
+                            if (loginForm) {
+                                loginForm.classList.add('active');
+                                activeForm = loginForm;
+                            }
+                            if (panelTitle) panelTitle.textContent = 'Welcome to MoodChat';
+                            if (panelSubtitle) panelSubtitle.textContent = 'Login to continue';
                             break;
                         case 'register':
-                            this.elements.registerForm.classList.add('active');
-                            this.elements.panelTitle.textContent = 'Join MoodChat';
-                            this.elements.panelSubtitle.textContent = 'Create your free account';
+                            if (registerForm) {
+                                registerForm.classList.add('active');
+                                activeForm = registerForm;
+                            }
+                            if (panelTitle) panelTitle.textContent = 'Join MoodChat';
+                            if (panelSubtitle) panelSubtitle.textContent = 'Create your free account';
                             break;
                         case 'forgot':
-                            this.elements.forgotForm.classList.add('active');
-                            this.elements.panelTitle.textContent = 'Reset Password';
-                            this.elements.panelSubtitle.textContent = 'Enter your email to reset';
+                            if (forgotForm) {
+                                forgotForm.classList.add('active');
+                                activeForm = forgotForm;
+                            }
+                            if (panelTitle) panelTitle.textContent = 'Reset Password';
+                            if (panelSubtitle) panelSubtitle.textContent = 'Enter your email to reset';
                             break;
                         case 'dashboard':
-                            this.elements.dashboardPanel.classList.add('active');
-                            this.elements.panelTitle.textContent = 'MoodChat Dashboard';
-                            this.elements.panelSubtitle.textContent = 'Welcome back!';
+                            if (dashboardPanel) {
+                                dashboardPanel.classList.add('active');
+                                activeForm = dashboardPanel;
+                            }
+                            if (panelTitle) panelTitle.textContent = 'MoodChat Dashboard';
+                            if (panelSubtitle) panelSubtitle.textContent = 'Welcome back!';
                             break;
                     }
                     
-                    // Add animation class
-                    const activeElement = document.querySelector('.auth-form.active, .panel.active');
-                    if (activeElement) {
-                        activeElement.classList.add('fade-in');
+                    // Add fade-in animation
+                    if (activeForm) {
                         setTimeout(() => {
-                            activeElement.classList.remove('fade-in');
-                        }, 300);
+                            activeForm.classList.add('fade-in');
+                            setTimeout(() => {
+                                activeForm.classList.remove('fade-in');
+                            }, 300);
+                        }, 10);
                     }
                 }, 10);
-                
-                console.log('Auth UI: Form shown successfully:', formName);
-            },
-            
-            // Handle login form submission
-            handleLoginSubmit: function(e) {
-                e.preventDefault();
-                console.log('Auth UI: Login form submitted');
-                
-                // Validate inputs
-                const isValid = this.validateLoginForm();
-                
-                if (isValid) {
-                    // Show loading spinner
-                    this.showSpinner('login');
-                    
-                    // Simulate API call delay
-                    setTimeout(() => {
-                        // Hide spinner
-                        this.hideSpinner('login');
-                        
-                        // Get user data
-                        const email = this.elements.loginIdentifier.value.trim();
-                        const displayName = email.split('@')[0]; // Use part of email as display name
-                        
-                        // Store user data
-                        this.userData = {
-                            displayName: displayName.charAt(0).toUpperCase() + displayName.slice(1),
-                            email: email,
-                            isAuthenticated: true
-                        };
-                        
-                        // Save to localStorage for persistence
-                        this.saveUserData();
-                        
-                        // Show success notification
-                        this.showNotification('success', 'Login Successful', 'Welcome back to MoodChat! Redirecting to chat...');
-                        
-                        // Redirect to chat.html after short delay
-                        setTimeout(() => {
-                            window.location.href = 'chat.html';
-                        }, 1000);
-                        
-                        console.log('Auth UI: Login successful, redirecting to chat.html');
-                    }, 1500);
-                } else {
-                    // Show error animation
-                    this.elements.loginForm.classList.add('shake');
-                    setTimeout(() => {
-                        this.elements.loginForm.classList.remove('shake');
-                    }, 500);
-                    
-                    console.log('Auth UI: Login validation failed');
-                }
-            },
-            
-            // Handle register form submission
-            handleRegisterSubmit: function(e) {
-                e.preventDefault();
-                console.log('Auth UI: Register form submitted');
-                
-                // Validate inputs
-                const isValid = this.validateRegisterForm();
-                
-                if (isValid) {
-                    // Show loading spinner
-                    this.showSpinner('register');
-                    
-                    // Simulate API call delay
-                    setTimeout(() => {
-                        // Hide spinner
-                        this.hideSpinner('register');
-                        
-                        // Get user data from form
-                        const displayName = document.getElementById('registerDisplayName').value.trim();
-                        const email = document.getElementById('registerEmail').value.trim();
-                        
-                        // Store user data
-                        this.userData = {
-                            displayName: displayName,
-                            email: email,
-                            isAuthenticated: true
-                        };
-                        
-                        // Save to localStorage for persistence
-                        this.saveUserData();
-                        
-                        // Show success notification
-                        this.showNotification('success', 'Registration Successful', 'Welcome to MoodChat! 30-day premium trial activated. Redirecting to chat...');
-                        
-                        // Redirect to chat.html after short delay
-                        setTimeout(() => {
-                            window.location.href = 'chat.html';
-                        }, 1000);
-                        
-                        console.log('Auth UI: Registration successful, redirecting to chat.html');
-                    }, 1500);
-                } else {
-                    // Show error animation
-                    this.elements.registerForm.classList.add('shake');
-                    setTimeout(() => {
-                        this.elements.registerForm.classList.remove('shake');
-                    }, 500);
-                    
-                    console.log('Auth UI: Registration validation failed');
-                }
-            },
-            
-            // Handle forgot password form submission
-            handleForgotPasswordSubmit: function(e) {
-                e.preventDefault();
-                console.log('Auth UI: Forgot password form submitted');
-                
-                // Validate email
-                const isValid = this.validateForgotPasswordForm();
-                
-                if (isValid) {
-                    // Show loading spinner
-                    this.showSpinner('forgot');
-                    
-                    // Simulate API call delay
-                    setTimeout(() => {
-                        // Hide spinner
-                        this.hideSpinner('forgot');
-                        
-                        // Show success message
-                        this.showSuccessMessage('forgot');
-                        this.clearErrorMessages('forgot');
-                        
-                        // Clear form
-                        document.getElementById('forgotPasswordEmail').value = '';
-                        
-                        console.log('Auth UI: Password reset email sent');
-                    }, 1500);
-                } else {
-                    // Show error animation
-                    this.elements.forgotForm.classList.add('shake');
-                    setTimeout(() => {
-                        this.elements.forgotForm.classList.remove('shake');
-                    }, 500);
-                    
-                    console.log('Auth UI: Forgot password validation failed');
-                }
-            },
-            
-            // Handle quick login
-            handleQuickLogin: function() {
-                console.log('Auth UI: Quick login clicked');
-                
-                // Show loading on quick login button
-                const originalText = this.elements.quickLoginBtn.innerHTML;
-                this.elements.quickLoginBtn.innerHTML = '<div class="spinner"></div>';
-                this.elements.quickLoginBtn.disabled = true;
-                
-                // Load user data from localStorage
-                this.loadUserData();
-                
-                // Simulate quick login
-                setTimeout(() => {
-                    // Restore button
-                    this.elements.quickLoginBtn.innerHTML = originalText;
-                    this.elements.quickLoginBtn.disabled = false;
-                    
-                    // Mark as authenticated
-                    this.userData.isAuthenticated = true;
-                    
-                    // Show notification and redirect
-                    this.showNotification('success', 'Quick Login', 'Welcome back! Redirecting to chat...');
-                    
-                    // Redirect to chat.html
-                    setTimeout(() => {
-                        window.location.href = 'chat.html';
-                    }, 1000);
-                    
-                    console.log('Auth UI: Quick login successful, redirecting to chat.html');
-                }, 1000);
-            },
-            
-            // Handle use different account
-            handleUseDifferentAccount: function() {
-                console.log('Auth UI: Use different account clicked');
-                this.elements.quickLoginCard.classList.add('hidden');
-                this.showForm('login');
-            },
-            
-            // Handle remove quick login
-            handleRemoveQuickLogin: function() {
-                console.log('Auth UI: Remove quick login clicked');
-                this.elements.quickLoginCard.classList.add('hidden');
-                this.showNotification('info', 'Quick Login Removed', 'You can add it again from settings.');
-                localStorage.removeItem('moodchat_user');
-            },
-            
-            // Handle enter chat
-            handleEnterChat: function() {
-                console.log('Auth UI: Enter chat clicked');
-                this.showNotification('info', 'Entering Chat', 'Redirecting to chat interface...');
-                
-                // Redirect to chat.html
-                setTimeout(() => {
-                    window.location.href = 'chat.html';
-                }, 1000);
-            },
-            
-            // Handle logout
-            handleLogout: function() {
-                console.log('Auth UI: Logout clicked');
-                this.userData.isAuthenticated = false;
-                localStorage.removeItem('moodchat_user');
-                this.showForm('login');
-                this.showNotification('info', 'Logged Out', 'You have been successfully logged out.');
-                this.clearAllForms();
-            },
-            
-            // Update dashboard user data
-            updateDashboardUserData: function(name, email) {
-                console.log('Auth UI: Updating dashboard with user data:', name, email);
-                
-                // Update dashboard display
-                const avatar = document.getElementById('dashboardAvatar');
-                const greeting = document.getElementById('dashboardGreeting');
-                const emailDisplay = document.getElementById('dashboardEmail');
-                
-                // Get first letter for avatar
-                const firstLetter = name.charAt(0).toUpperCase();
-                avatar.textContent = firstLetter;
-                
-                // Update text
-                greeting.textContent = `Welcome, ${name}!`;
-                emailDisplay.textContent = email;
-                
-                // Update quick login card if visible
-                if (this.elements.quickLoginCard) {
-                    const quickAvatar = document.getElementById('quickLoginAvatar');
-                    const quickName = document.getElementById('quickLoginName');
-                    const quickEmail = document.getElementById('quickLoginEmail');
-                    
-                    quickAvatar.textContent = firstLetter;
-                    quickName.textContent = `Welcome back, ${name}!`;
-                    quickEmail.textContent = email;
-                    
-                    // Show quick login card
-                    this.elements.quickLoginCard.classList.remove('hidden');
-                }
-            },
-            
-            // Save user data to localStorage
-            saveUserData: function() {
-                try {
-                    localStorage.setItem('moodchat_user', JSON.stringify(this.userData));
-                    console.log('Auth UI: User data saved to localStorage');
-                } catch (e) {
-                    console.error('Auth UI: Failed to save user data:', e);
-                }
-            },
-            
-            // Load user data from localStorage
-            loadUserData: function() {
-                try {
-                    const savedData = localStorage.getItem('moodchat_user');
-                    if (savedData) {
-                        this.userData = JSON.parse(savedData);
-                        console.log('Auth UI: User data loaded from localStorage');
-                        return true;
-                    }
-                } catch (e) {
-                    console.error('Auth UI: Failed to load user data:', e);
-                }
-                return false;
-            },
-            
-            // Validate login form
-            validateLoginForm: function() {
-                console.log('Auth UI: Validating login form...');
-                let isValid = true;
-                
-                const identifier = this.elements.loginIdentifier.value.trim();
-                const password = document.getElementById('loginPassword').value.trim();
-                
-                // Clear previous errors
-                this.clearErrorMessages('login');
-                
-                // Validate identifier based on current method
-                const activeTab = document.querySelector('.auth-tab.active');
-                const method = activeTab ? activeTab.dataset.method : 'email';
-                
-                if (!identifier) {
-                    this.showError('loginIdentifierError', 'This field is required');
-                    isValid = false;
-                } else if (method === 'email' && !this.isValidEmail(identifier)) {
-                    this.showError('loginIdentifierError', 'Please enter a valid email address');
-                    isValid = false;
-                } else if (method === 'mobile' && !this.isValidPhone(identifier)) {
-                    this.showError('loginIdentifierError', 'Please enter a valid phone number');
-                    isValid = false;
-                }
-                
-                // Validate password
-                if (!password) {
-                    this.showError('loginPasswordError', 'Password is required');
-                    isValid = false;
-                }
-                
-                return isValid;
-            },
-            
-            // Validate register form
-            validateRegisterForm: function() {
-                console.log('Auth UI: Validating register form...');
-                let isValid = true;
-                
-                const displayName = document.getElementById('registerDisplayName').value.trim();
-                const username = document.getElementById('registerUsername').value.trim();
-                const email = document.getElementById('registerEmail').value.trim();
-                const password = document.getElementById('registerPassword').value;
-                const confirmPassword = document.getElementById('registerConfirmPassword').value;
-                const acceptTerms = document.getElementById('acceptTerms').checked;
-                
-                // Clear previous errors
-                this.clearErrorMessages('register');
-                
-                // Validate display name
-                if (!displayName) {
-                    this.showError('registerNameError', 'Display name is required');
-                    isValid = false;
-                }
-                
-                // Validate username
-                if (!username) {
-                    this.showError('registerUsernameError', 'Username is required');
-                    isValid = false;
-                } else if (username.length < 3 || username.length > 20) {
-                    this.showError('registerUsernameError', 'Username must be 3-20 characters');
-                    isValid = false;
-                }
-                
-                // Validate email
-                if (!email) {
-                    this.showError('registerEmailError', 'Email is required');
-                    isValid = false;
-                } else if (!this.isValidEmail(email)) {
-                    this.showError('registerEmailError', 'Please enter a valid email address');
-                    isValid = false;
-                }
-                
-                // Validate password
-                if (!password) {
-                    this.showError('registerPasswordError', 'Password is required');
-                    isValid = false;
-                } else if (password.length < 8) {
-                    this.showError('registerPasswordError', 'Password must be at least 8 characters');
-                    isValid = false;
-                }
-                
-                // Validate confirm password
-                if (!confirmPassword) {
-                    this.showError('registerConfirmPasswordError', 'Please confirm your password');
-                    isValid = false;
-                } else if (password !== confirmPassword) {
-                    this.showError('registerConfirmPasswordError', 'Passwords do not match');
-                    isValid = false;
-                }
-                
-                // Validate terms acceptance
-                if (!acceptTerms) {
-                    this.showNotification('error', 'Terms Required', 'You must accept the terms and conditions');
-                    isValid = false;
-                }
-                
-                return isValid;
-            },
-            
-            // Validate forgot password form
-            validateForgotPasswordForm: function() {
-                console.log('Auth UI: Validating forgot password form...');
-                let isValid = true;
-                
-                const email = document.getElementById('forgotPasswordEmail').value.trim();
-                
-                // Clear previous errors and success
-                this.clearErrorMessages('forgot');
-                this.clearSuccessMessages('forgot');
-                
-                // Validate email
-                if (!email) {
-                    this.showError('forgotPasswordError', 'Email is required');
-                    isValid = false;
-                } else if (!this.isValidEmail(email)) {
-                    this.showError('forgotPasswordError', 'Please enter a valid email address');
-                    isValid = false;
-                }
-                
-                return isValid;
-            },
-            
-            // Utility validation functions
-            isValidEmail: function(email) {
-                const re = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
-                return re.test(email);
-            },
-            
-            isValidPhone: function(phone) {
-                // Simple phone validation - at least 10 digits
-                const digits = phone.replace(/\D/g, '');
-                return digits.length >= 10;
-            },
-            
-            // Show error message
-            showError: function(errorElementId, message) {
-                const errorElement = document.getElementById(errorElementId);
-                if (errorElement) {
-                    errorElement.querySelector('span').textContent = message;
-                    errorElement.classList.remove('hidden');
-                    errorElement.classList.add('visible');
-                }
-            },
-            
-            // Show success message
-            showSuccessMessage: function(formType) {
-                if (formType === 'forgot') {
-                    this.elements.forgotPasswordSuccess.classList.remove('hidden');
-                    this.elements.forgotPasswordSuccess.classList.add('visible');
-                }
-            },
-            
-            // Clear error messages for a specific form
-            clearErrorMessages: function(formType) {
-                const errorSelectors = {
-                    login: ['loginIdentifierError', 'loginPasswordError'],
-                    register: ['registerNameError', 'registerUsernameError', 'registerEmailError', 'registerPasswordError', 'registerConfirmPasswordError'],
-                    forgot: ['forgotPasswordError']
-                };
-                
-                if (errorSelectors[formType]) {
-                    errorSelectors[formType].forEach(id => {
-                        const element = document.getElementById(id);
-                        if (element) {
-                            element.classList.add('hidden');
-                            element.classList.remove('visible');
-                        }
-                    });
-                }
-            },
-            
-            // Clear success messages for a specific form
-            clearSuccessMessages: function(formType) {
-                if (formType === 'forgot') {
-                    this.elements.forgotPasswordSuccess.classList.add('hidden');
-                    this.elements.forgotPasswordSuccess.classList.remove('visible');
-                }
-            },
-            
-            // Clear all error messages
-            clearAllErrorMessages: function() {
-                const allErrorElements = document.querySelectorAll('.error-message');
-                allErrorElements.forEach(element => {
-                    element.classList.add('hidden');
-                    element.classList.remove('visible');
-                });
-            },
-            
-            // Clear all success messages
-            clearAllSuccessMessages: function() {
-                const allSuccessElements = document.querySelectorAll('.success-message');
-                allSuccessElements.forEach(element => {
-                    element.classList.add('hidden');
-                    element.classList.remove('visible');
-                });
-            },
-            
-            // Clear all form inputs
-            clearAllForms: function() {
-                // Login form
-                this.elements.loginIdentifier.value = '';
-                document.getElementById('loginPassword').value = '';
-                
-                // Register form
-                document.getElementById('registerDisplayName').value = '';
-                document.getElementById('registerUsername').value = '';
-                document.getElementById('registerEmail').value = '';
-                document.getElementById('registerPassword').value = '';
-                document.getElementById('registerConfirmPassword').value = '';
-                document.getElementById('acceptTerms').checked = false;
-                
-                // Reset feature tags
-                document.querySelectorAll('.feature-tag').forEach(tag => {
-                    tag.classList.remove('selected');
-                });
-                
-                // Forgot password form
-                document.getElementById('forgotPasswordEmail').value = '';
-                
-                console.log('Auth UI: All forms cleared');
-            },
-            
-            // Show loading spinner
-            showSpinner: function(formType) {
-                const spinnerMap = {
-                    login: this.elements.loginSpinner,
-                    register: this.elements.registerSpinner,
-                    forgot: this.elements.forgotPasswordSpinner
-                };
-                
-                const buttonMap = {
-                    login: this.elements.loginButton,
-                    register: this.elements.registerSubmitBtn,
-                    forgot: this.elements.forgotSubmitBtn
-                };
-                
-                if (spinnerMap[formType]) {
-                    spinnerMap[formType].classList.remove('hidden');
-                    if (buttonMap[formType]) {
-                        buttonMap[formType].disabled = true;
-                    }
-                }
-            },
-            
-            // Hide loading spinner
-            hideSpinner: function(formType) {
-                const spinnerMap = {
-                    login: this.elements.loginSpinner,
-                    register: this.elements.registerSpinner,
-                    forgot: this.elements.forgotPasswordSpinner
-                };
-                
-                const buttonMap = {
-                    login: this.elements.loginButton,
-                    register: this.elements.registerSubmitBtn,
-                    forgot: this.elements.forgotSubmitBtn
-                };
-                
-                if (spinnerMap[formType]) {
-                    spinnerMap[formType].classList.add('hidden');
-                    if (buttonMap[formType]) {
-                        buttonMap[formType].disabled = false;
-                    }
-                }
-            },
-            
-            // Show notification
-            showNotification: function(type, title, message) {
-                console.log(`Auth UI: Showing ${type} notification:`, title, message);
-                
-                const container = document.getElementById('notificationContainer');
-                if (!container) return;
-                
-                const notification = document.createElement('div');
-                notification.className = `notification ${type}`;
-                notification.innerHTML = `
-                    <div class="notification-icon">
-                        <i class="fas fa-${this.getNotificationIcon(type)}"></i>
-                    </div>
-                    <div class="notification-content">
-                        <div class="notification-title">${title}</div>
-                        <div class="notification-message">${message}</div>
-                    </div>
-                    <button class="notification-close">
-                        <i class="fas fa-times"></i>
-                    </button>
-                `;
-                
-                container.appendChild(notification);
-                
-                // Add show class with delay for animation
-                setTimeout(() => {
-                    notification.classList.add('show');
-                }, 10);
-                
-                // Auto remove after 5 seconds
-                setTimeout(() => {
-                    notification.classList.remove('show');
-                    setTimeout(() => {
-                        if (notification.parentNode) {
-                            notification.parentNode.removeChild(notification);
-                        }
-                    }, 300);
-                }, 5000);
-                
-                // Close button
-                const closeBtn = notification.querySelector('.notification-close');
-                closeBtn.addEventListener('click', () => {
-                    notification.classList.remove('show');
-                    setTimeout(() => {
-                        if (notification.parentNode) {
-                            notification.parentNode.removeChild(notification);
-                        }
-                    }, 300);
-                });
-            },
-            
-            // Get icon for notification type
-            getNotificationIcon: function(type) {
-                const iconMap = {
-                    success: 'check-circle',
-                    error: 'exclamation-circle',
-                    warning: 'exclamation-triangle',
-                    info: 'info-circle'
-                };
-                return iconMap[type] || 'info-circle';
             }
-        };
-        
-        // Initialize auth UI when DOM is ready
-        document.addEventListener('DOMContentLoaded', function() {
-            console.log('Auth UI: DOM fully loaded, initializing auth UI...');
             
-            // Initialize mobile menu (existing code)
+            // Set up event listeners for immediate form toggling
+            if (signupButton) {
+                signupButton.addEventListener('click', function(e) {
+                    e.preventDefault();
+                    showForm('register');
+                });
+            }
+            
+            if (forgotPasswordButton) {
+                forgotPasswordButton.addEventListener('click', function(e) {
+                    e.preventDefault();
+                    showForm('forgot');
+                });
+            }
+            
+            if (backToLoginFromRegister) {
+                backToLoginFromRegister.addEventListener('click', function(e) {
+                    e.preventDefault();
+                    showForm('login');
+                });
+            }
+            
+            if (backToLoginFromForgot) {
+                backToLoginFromForgot.addEventListener('click', function(e) {
+                    e.preventDefault();
+                    showForm('login');
+                });
+            }
+            
+            console.log('Form Toggler: Immediate form switching initialized.');
+            
+            // Initialize mobile menu toggle (existing functionality)
             const menuToggle = document.getElementById('mobileMenuToggle');
             const mobileSidebar = document.getElementById('mobileSidebar');
             const overlay = document.getElementById('mobileSidebarOverlay');
@@ -2834,89 +2058,101 @@
                 });
             }
             
-            // Initialize auth UI controller
-            AuthUIController.init();
-            
-            // Check if user is already logged in (quick login)
-            if (AuthUIController.loadUserData() && AuthUIController.userData.isAuthenticated) {
-                // Show quick login card
-                const quickLoginCard = document.getElementById('quickLoginCard');
-                if (quickLoginCard) {
-                    quickLoginCard.classList.remove('hidden');
-                    
-                    // Update quick login card with user data
-                    const quickAvatar = document.getElementById('quickLoginAvatar');
-                    const quickName = document.getElementById('quickLoginName');
-                    const quickEmail = document.getElementById('quickLoginEmail');
-                    
-                    if (quickAvatar && quickName && quickEmail) {
-                        const firstLetter = AuthUIController.userData.displayName.charAt(0).toUpperCase();
-                        quickAvatar.textContent = firstLetter;
-                        quickName.textContent = `Welcome back, ${AuthUIController.userData.displayName}!`;
-                        quickEmail.textContent = AuthUIController.userData.email;
+            // Setup password toggles
+            const passwordToggles = document.querySelectorAll('.password-toggle');
+            passwordToggles.forEach(toggle => {
+                toggle.addEventListener('click', function() {
+                    const input = this.parentElement.querySelector('.form-input');
+                    const icon = this.querySelector('i');
+                    if (input.type === 'password') {
+                        input.type = 'text';
+                        icon.classList.remove('fa-eye');
+                        icon.classList.add('fa-eye-slash');
+                    } else {
+                        input.type = 'password';
+                        icon.classList.remove('fa-eye-slash');
+                        icon.classList.add('fa-eye');
                     }
-                }
-            }
-            
-            // Mark that auth UI is ready
-            window.authUIReady = true;
-            const event = new Event('authUIReady');
-            document.dispatchEvent(event);
-            
-            console.log('Auth UI: Auth UI fully initialized and ready.');
-        });
-        
-        // Fallback initialization in case DOMContentLoaded doesn't fire
-        if (document.readyState === 'loading') {
-            document.addEventListener('DOMContentLoaded', function() {
-                AuthUIController.init();
+                });
             });
-        } else {
-            // DOM already loaded
-            AuthUIController.init();
-        }
+            
+            // Setup feature tags
+            const featureTags = document.querySelectorAll('.feature-tag');
+            featureTags.forEach(tag => {
+                tag.addEventListener('click', function() {
+                    this.classList.toggle('selected');
+                });
+            });
+            
+            // Setup auth tabs
+            const authTabs = document.querySelectorAll('.auth-tab');
+            authTabs.forEach(tab => {
+                tab.addEventListener('click', function() {
+                    const method = this.dataset.method;
+                    
+                    // Update active tab
+                    authTabs.forEach(t => t.classList.remove('active'));
+                    this.classList.add('active');
+                    
+                    // Update input placeholder and icon
+                    const placeholderMap = {
+                        email: 'Enter your email',
+                        mobile: 'Enter your phone number',
+                        username: 'Enter your username'
+                    };
+                    
+                    const labelMap = {
+                        email: 'Email Address',
+                        mobile: 'Phone Number',
+                        username: 'Username'
+                    };
+                    
+                    const iconMap = {
+                        email: 'fa-envelope',
+                        mobile: 'fa-mobile-alt',
+                        username: 'fa-user'
+                    };
+                    
+                    const loginIdentifier = document.getElementById('loginIdentifier');
+                    const loginMethodLabel = document.getElementById('loginMethodLabel');
+                    const loginMethodIcon = document.getElementById('loginMethodIcon');
+                    
+                    if (loginIdentifier && loginMethodLabel && loginMethodIcon) {
+                        loginIdentifier.placeholder = placeholderMap[method] || placeholderMap.email;
+                        loginMethodLabel.textContent = labelMap[method] || labelMap.email;
+                        
+                        // Update icon
+                        loginMethodIcon.className = `fas ${iconMap[method] || 'fa-envelope'} input-icon`;
+                    }
+                });
+            });
+        });
     </script>
     
-    <!-- Load JavaScript modules in correct order -->
+    <!-- 4. Main Application Scripts (Loaded as modules) -->
+    <!-- Note: Load in correct order of dependency -->
     <script src="js/api.js" type="module"></script>
     <script src="js/app.core.js" type="module"></script>
     <script src="js/app.ui.auth.js" type="module"></script>
     
-    <!-- Service Worker Registration - Only after auth is fully initialized -->
+    <!-- 5. Service Worker Registration -->
+    <!-- Load after auth UI is ready to prevent conflicts -->
     <script>
-        // Wait for auth to be fully initialized before registering service worker
-        document.addEventListener('authUIReady', function() {
+        // Wait for DOM to be fully ready
+        document.addEventListener('DOMContentLoaded', function() {
             if ('serviceWorker' in navigator) {
-                // Small delay to ensure auth state is completely settled
+                // Small delay to ensure all UI is initialized
                 setTimeout(() => {
                     navigator.serviceWorker.register('/service-worker.js')
                         .then(function(registration) {
                             console.log('Service Worker registered with scope:', registration.scope);
-                            
-                            // Dispatch event that service worker is ready
-                            const event = new Event('serviceWorkerRegistered');
-                            document.dispatchEvent(event);
                         })
                         .catch(function(error) {
                             console.log('Service Worker registration failed:', error);
                         });
-                }, 500);
+                }, 1000);
             }
         });
-        
-        // Fallback: If auth initialization doesn't fire within 3 seconds, register service worker anyway
-        setTimeout(() => {
-            if ('serviceWorker' in navigator && !window.serviceWorkerRegistered) {
-                navigator.serviceWorker.register('/service-worker.js')
-                    .then(function(registration) {
-                        console.log('Service Worker registered (fallback):', registration.scope);
-                        window.serviceWorkerRegistered = true;
-                    })
-                    .catch(function(error) {
-                        console.log('Service Worker registration failed (fallback):', error);
-                    });
-            }
-        }, 3000);
     </script>
 
 </body>
