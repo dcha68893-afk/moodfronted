@@ -1,15 +1,7 @@
-// app.js - MoodChat Application Shell & Tab Controller
-// UPDATED: WhatsApp-style instant loading with background validation
-// ENHANCED: UI loads instantly from cache, token validates in background
-// REQUIREMENT: Never wait for server during initial render
-// HARDENED: Production-ready with all errors fixed
-// FIXED: getDeviceId infinite recursion, auto-login, UI visibility, API error handling
-// ENHANCED: Login/register/forget password forms work with window.api, show UI errors, auto-login fixed
-// ENHANCED: Proper api.js coordination with retry mechanism and real online detection
-// ENHANCED: Login/register/autologin fully integrated with api.js
-// FIXED: Auto-login logic inconsistencies and redirect loops
-// ADDED: Signup functionality with API integration
-// FIXED: Network detection logic - THREE-STATE model with proper api.js coordination
+// app.core.js - MoodChat Core Services & Bootstrapping
+// UPDATED: Network status waits for api.js health check completion
+// FIXED: Never show "Offline" before api.js completes health check
+// ENHANCED: Background validation with proper network coordination
 
 // ============================================================================
 // CONFIGURATION
@@ -81,12 +73,13 @@ window.MoodChatAPIReady = window.MoodChatAPIReady || new Promise((resolve, rejec
   }, 60000);
 });
 
-// Initialize global config
+// Initialize global config - ADDED: networkStatus to track UI state
 window.MoodChatConfig = window.MoodChatConfig || {
-  backendReachable: null, // CHANGED: null means "not checked yet" instead of false
+  backendReachable: null, // Changed: null means "not checked yet"
   api: null,
   healthChecked: false,
-  initialized: false
+  initialized: false,
+  networkStatus: 'checking' // NEW: 'checking', 'online', 'offline'
 };
 
 const API_COORDINATION = {
@@ -96,6 +89,7 @@ const API_COORDINATION = {
   apiCheckComplete: false,
   waitPromise: null,
   pollAttempts: 0,
+  healthCheckInProgress: false, // NEW: Track health check status
   
   // Wait for window.api to be available using multiple detection methods
   waitForApi: function() {
@@ -211,21 +205,39 @@ const API_COORDINATION = {
       window.__MOODCHAT_API_RESOLVE = null;
     }
     
-    // Trigger health check in background
-    this.checkBackendHealth();
+    // Start health check in background (NON-BLOCKING)
+    setTimeout(() => {
+      this.checkBackendHealth();
+    }, 100);
   },
   
-  // Check backend health using api.js
+  // Check backend health using api.js - UPDATED: Never blocks UI, updates status asynchronously
   checkBackendHealth: async function() {
     if (!this.apiReady || !window.MoodChatConfig.api) {
       console.log('Skipping health check: api.js not ready');
+      window.MoodChatConfig.backendReachable = false;
+      window.MoodChatConfig.networkStatus = 'offline';
       return false;
     }
     
+    // Prevent duplicate health checks
+    if (this.healthCheckInProgress) {
+      console.log('Health check already in progress');
+      return false;
+    }
+    
+    this.healthCheckInProgress = true;
+    
     try {
-      console.log('🩺 Checking backend health...');
+      console.log('🩺 Starting backend health check...');
       
-      // Try to call health endpoint
+      // Set initial network status to "checking"
+      window.MoodChatConfig.networkStatus = 'checking';
+      
+      // Notify UI that we're checking connection
+      this.notifyNetworkStatus('checking', 'Checking backend connection...');
+      
+      // Try to call health endpoint with timeout
       const healthResponse = await window.MoodChatConfig.api('/health', { 
         method: 'GET',
         timeout: 5000 // 5 second timeout
@@ -234,25 +246,61 @@ const API_COORDINATION = {
       if (healthResponse && healthResponse.success !== false) {
         window.MoodChatConfig.backendReachable = true;
         window.MoodChatConfig.healthChecked = true;
+        window.MoodChatConfig.networkStatus = 'online';
+        
         console.log('✅ Backend reachable: true');
+        
+        // Notify UI
+        this.notifyNetworkStatus('online', 'Connected to backend');
         
         // Dispatch event for other components
         const event = new CustomEvent('moodchat-backend-ready', {
-          detail: { reachable: true, timestamp: new Date().toISOString() }
+          detail: { 
+            reachable: true, 
+            timestamp: new Date().toISOString(),
+            networkStatus: 'online'
+          }
         });
         window.dispatchEvent(event);
         
         return true;
       } else {
         window.MoodChatConfig.backendReachable = false;
+        window.MoodChatConfig.networkStatus = 'offline';
         console.log('⚠️ Backend health check failed:', healthResponse);
+        
+        // Notify UI
+        this.notifyNetworkStatus('offline', 'Backend unreachable');
+        
         return false;
       }
     } catch (error) {
       window.MoodChatConfig.backendReachable = false;
+      window.MoodChatConfig.networkStatus = 'offline';
       console.log('⚠️ Backend health check error:', error.message);
+      
+      // Notify UI
+      this.notifyNetworkStatus('offline', 'Backend connection failed: ' + error.message);
+      
       return false;
+    } finally {
+      this.healthCheckInProgress = false;
     }
+  },
+  
+  // Notify UI about network status changes
+  notifyNetworkStatus: function(status, message) {
+    console.log(`Network status: ${status} - ${message}`);
+    
+    const event = new CustomEvent('moodchat-network-status', {
+      detail: {
+        status: status,
+        message: message,
+        backendReachable: window.MoodChatConfig.backendReachable,
+        timestamp: new Date().toISOString()
+      }
+    });
+    window.dispatchEvent(event);
   },
   
   // Check if api.js is available
@@ -261,14 +309,14 @@ const API_COORDINATION = {
   },
   
   // Check if backend is reachable (read from api.js state or health check)
+  // UPDATED: Returns null if not checked yet
   isBackendReachable: function() {
-    // Return the actual state (null = not checked yet, true/false = known state)
     return window.MoodChatConfig.backendReachable;
   },
   
-  // Check if backend reachability has been determined
-  isBackendStatusKnown: function() {
-    return window.MoodChatConfig.backendReachable !== null;
+  // Get current network status for UI
+  getNetworkStatus: function() {
+    return window.MoodChatConfig.networkStatus || 'checking';
   },
   
   // Make safe API call that works with or without api.js
@@ -306,24 +354,35 @@ const API_COORDINATION = {
     }
   },
   
-  // Get real online status (browser + API heartbeat)
+  // Get real online status (browser + API heartbeat) - UPDATED: Returns "checking" if not determined
   getRealOnlineStatus: async function() {
     // First check browser online status
     if (!navigator.onLine) {
-      return false;
+      return 'offline';
+    }
+    
+    // If health check hasn't completed yet, return "checking"
+    if (window.MoodChatConfig.networkStatus === 'checking') {
+      return 'checking';
     }
     
     // Then verify with API heartbeat (only if api.js is ready and backend reachable)
-    if (this.apiReady && this.isBackendReachable()) {
+    if (this.apiReady && window.MoodChatConfig.backendReachable === true) {
       try {
-        return await this.heartbeatCheck();
+        const reachable = await this.heartbeatCheck();
+        return reachable ? 'online' : 'offline';
       } catch (error) {
-        return false;
+        return 'offline';
       }
     }
     
-    // If api.js not ready or backend unreachable, rely on browser status
-    return navigator.onLine;
+    // If backend not reachable, return offline
+    if (window.MoodChatConfig.backendReachable === false) {
+      return 'offline';
+    }
+    
+    // If api.js not ready or backend status unknown, rely on browser status
+    return navigator.onLine ? 'online' : 'offline';
   }
 };
 
@@ -404,7 +463,7 @@ const JWT_VALIDATION = {
       // Wait for api.js to be ready
       await API_COORDINATION.waitForApi();
       
-      if (API_COORDINATION.isApiAvailable() && API_COORDINATION.isBackendReachable()) {
+      if (API_COORDINATION.isApiAvailable() && window.MoodChatConfig.backendReachable) {
         try {
           const response = await API_COORDINATION.safeApiCall('/auth/me', {
             method: 'GET',
@@ -545,9 +604,8 @@ let currentTab = 'groups';
 let isLoading = false;
 let isSidebarOpen = true;
 let authStateRestored = false;
-
-// THREE-STATE NETWORK MODEL: checking, online, offline
-let networkState = 'checking'; // CHANGED: Default to checking instead of navigator.onLine
+// CHANGED: Initial network status is "checking" not false
+let isOnline = null;
 let syncQueue = [];
 let instantUILoaded = false;
 let backgroundSyncInProgress = false;
@@ -951,7 +1009,7 @@ function showReauthNotification() {
 }
 
 // ============================================================================
-// MAIN STARTUP SEQUENCE - WAITS FOR API.JS
+// MAIN STARTUP SEQUENCE - WAITS FOR API.JS - UPDATED FOR NETWORK STATUS
 // ============================================================================
 
 async function initializeApp() {
@@ -965,41 +1023,37 @@ async function initializeApp() {
   
   appStartupPerformed = true;
   
-  // STEP 1: Set initial network state to "checking"
-  console.log('Setting initial network state to "checking"...');
-  updateNetworkStatus('checking');
+  // STEP 1: Set initial network status to "checking" - FIXED: Not "offline"
+  isOnline = null; // null means "checking"
+  window.MoodChatConfig.networkStatus = 'checking';
+  console.log('Initial network status: checking...');
+  
+  // Notify UI about initial checking state
+  API_COORDINATION.notifyNetworkStatus('checking', 'Checking connection...');
   
   // STEP 2: Wait for api.js using enhanced detection
   console.log('Waiting for api.js using multiple detection methods...');
   const apiAvailable = await API_COORDINATION.waitForApi();
   
-  // STEP 3: Check backend reachability status (but don't block UI)
-  console.log('Starting background backend health check...');
+  // STEP 3: Check backend reachability in background - NON-BLOCKING
+  // This will update network status when it completes
+  console.log('Starting backend health check in background...');
   
-  // Health check runs in background - don't wait for it
-  API_COORDINATION.checkBackendHealth()
-    .then(backendReachable => {
-      console.log(`Backend health check completed: ${backendReachable ? 'reachable' : 'unreachable'}`);
-      
-      // Update network state based on health check result
-      if (backendReachable) {
-        updateNetworkStatus('online');
-      } else {
-        updateNetworkStatus('offline');
-      }
-      
-      // Only start network services if backend is reachable
-      if (backendReachable && window.currentUser && !window.currentUser.isOfflineMode) {
-        NETWORK_SERVICE_MANAGER.startAllServices();
-        NETWORK_SERVICE_MANAGER.startBackgroundSync();
-      }
-    })
-    .catch(error => {
-      console.log('Backend health check error, marking as offline:', error);
-      updateNetworkStatus('offline');
-    });
+  // The health check runs async and will update window.MoodChatConfig.networkStatus
+  // when it completes. UI should show "checking" until then.
   
-  // STEP 4: Hide loading screen IMMEDIATELY
+  if (!apiAvailable) {
+    console.log('⚠️ api.js not available, some features will be limited');
+    window.MoodChatConfig.networkStatus = 'offline';
+    isOnline = false;
+    API_COORDINATION.notifyNetworkStatus('offline', 'API service unavailable');
+  } else {
+    // Health check is already running in background from handleApiDetected()
+    // Show "checking" status until it completes
+    console.log('api.js available, health check running in background');
+  }
+  
+  // STEP 4: Hide loading screen IMMEDIATELY (don't wait for health check)
   const loadingScreen = document.getElementById('loadingScreen');
   if (loadingScreen) {
     loadingScreen.classList.add('hidden');
@@ -1021,7 +1075,7 @@ async function initializeApp() {
     // Setup global auth access
     setupGlobalAuthAccess();
     
-    // Initialize network detection
+    // Initialize network detection - UPDATED: Won't set offline prematurely
     initializeNetworkDetection();
     
     // Expose global state to iframes
@@ -1041,18 +1095,14 @@ async function initializeApp() {
     initializeAppUI();
   }, 100);
   
-  // STEP 8: Schedule background validation ONLY if backend might be reachable
-  setTimeout(() => {
-    // Only validate if we have a JWT token AND api is available
-    if (JWT_VALIDATION.hasToken() && apiAvailable) {
-      console.log('Scheduling background token validation...');
+  // STEP 8: Schedule background validation ONLY if backend becomes reachable
+  // This will be triggered by the health check completion event
+  window.addEventListener('moodchat-backend-ready', (event) => {
+    if (event.detail.reachable && JWT_VALIDATION.hasToken()) {
+      console.log('Backend ready, scheduling background token validation...');
       scheduleBackgroundValidation();
-    } else if (JWT_VALIDATION.hasToken() && !apiAvailable) {
-      console.log('Skipping background validation: api.js not available');
-    } else {
-      console.log('No JWT token found, skipping background validation');
     }
-  }, 2000);
+  });
   
   console.log('✓ App initialization completed');
 }
@@ -1131,14 +1181,18 @@ function initializeAppUI() {
     }
   }, 300);
   
-  // Start background services after delay - wait for network state to be determined
-  setTimeout(() => {
-    // Only start services if we're confirmed online and user is authenticated
-    if (networkState === 'online' && window.currentUser && !window.currentUser.isOfflineMode) {
-      NETWORK_SERVICE_MANAGER.startAllServices();
-      NETWORK_SERVICE_MANAGER.startBackgroundSync();
+  // Start background services after delay - ONLY if online AND backend reachable
+  // This will be triggered when network status becomes "online"
+  window.addEventListener('moodchat-network-status', (event) => {
+    if (event.detail.status === 'online' && 
+        window.currentUser && 
+        !window.currentUser.isOfflineMode) {
+      setTimeout(() => {
+        NETWORK_SERVICE_MANAGER.startAllServices();
+        NETWORK_SERVICE_MANAGER.startBackgroundSync();
+      }, 1000);
     }
-  }, 1000);
+  });
   
   console.log('✓ App UI initialized instantly');
 }
@@ -1235,7 +1289,7 @@ const OFFLINE_DATA_GENERATOR = {
         isOfflineMode: true
       });
     }
-  
+    
     // Sort by most recent message
     return chats.sort((a, b) => new Date(b.lastMessageTime) - new Date(a.lastMessageTime));
   },
@@ -2566,8 +2620,8 @@ const NETWORK_SERVICE_MANAGER = {
       return;
     }
     
-    if (networkState !== 'online') {
-      console.log('Background sync skipped: not online');
+    if (!isOnline) {
+      console.log('Background sync skipped: offline');
       return;
     }
     
@@ -2583,7 +2637,7 @@ const NETWORK_SERVICE_MANAGER = {
   },
   
   performBackgroundSync: function() {
-    if (networkState !== 'online' || !window.currentUser) {
+    if (!isOnline || !window.currentUser) {
       backgroundSyncInProgress = false;
       this.states.backgroundSync.running = false;
       return;
@@ -2765,7 +2819,8 @@ function setupGlobalAuthAccess() {
   window.login = function(email, password) {
     return new Promise(async (resolve, reject) => {
       // Check if we're online and backend is reachable
-      if (networkState === 'offline') {
+      const networkStatus = API_COORDINATION.getNetworkStatus();
+      if (networkStatus === 'offline') {
         window.showToast('Cannot login while offline. Please check your internet connection.', 'error');
         resolve({
           success: false,
@@ -2775,8 +2830,7 @@ function setupGlobalAuthAccess() {
         return;
       }
       
-      // If network state is still checking, we can still try (optimistic)
-      if (!API_COORDINATION.isApiAvailable()) {
+      if (!API_COORDINATION.isApiAvailable() || window.MoodChatConfig.backendReachable === false) {
         window.showToast('Login service not available. Please try again later.', 'error');
         resolve({
           success: false,
@@ -2904,8 +2958,9 @@ function setupGlobalAuthAccess() {
       JWT_VALIDATION.clearToken();
       
       // Try API logout if available and user is not offline AND backend is reachable
-      if (window.currentUser && !window.currentUser.isOffline && networkState === 'online' && 
-          API_COORDINATION.isApiAvailable() && JWT_VALIDATION.hasToken()) {
+      if (window.currentUser && !window.currentUser.isOffline && 
+          API_COORDINATION.isApiAvailable() && window.MoodChatConfig.backendReachable === true && 
+          JWT_VALIDATION.hasToken()) {
         try {
           await API_COORDINATION.safeApiCall('/auth/logout', {
             method: 'POST',
@@ -2948,7 +3003,8 @@ function setupGlobalAuthAccess() {
   window.register = function(email, password, displayName) {
     return new Promise(async (resolve, reject) => {
       // Check if we're online and backend is reachable
-      if (networkState === 'offline') {
+      const networkStatus = API_COORDINATION.getNetworkStatus();
+      if (networkStatus === 'offline') {
         window.showToast('Cannot register while offline. Please check your internet connection.', 'error');
         resolve({
           success: false,
@@ -2958,7 +3014,7 @@ function setupGlobalAuthAccess() {
         return;
       }
       
-      if (!API_COORDINATION.isApiAvailable()) {
+      if (!API_COORDINATION.isApiAvailable() || window.MoodChatConfig.backendReachable === false) {
         window.showToast('Registration service not available. Please try again later.', 'error');
         resolve({
           success: false,
@@ -3182,7 +3238,8 @@ function showOfflinePlaceholderUI() {
 }
 
 function refreshCachedDataInBackground() {
-  if (networkState !== 'online' || !window.currentUser || !window.currentUser.uid) {
+  const networkStatus = API_COORDINATION.getNetworkStatus();
+  if (networkStatus !== 'online' || !window.currentUser || !window.currentUser.uid) {
     console.log('Cannot refresh cached data: offline or no user');
     return;
   }
@@ -3275,21 +3332,20 @@ function showCachedDataIndicator(isOfflineData = false) {
 }
 
 // ============================================================================
-// NETWORK DETECTION WITH THREE-STATE MODEL
+// NETWORK DETECTION WITH INSTANT UI SUPPORT - UPDATED: No premature offline
 // ============================================================================
 
 function initializeNetworkDetection() {
-  console.log('Initializing THREE-STATE network detection...');
+  console.log('Initializing network detection with proper status handling...');
   
-  // Set initial state to "checking" (already done in initializeApp)
-  updateNetworkStatus(networkState);
+  // Set initial state - FIXED: Start with "checking" not false
+  isOnline = null;
+  window.MoodChatConfig.networkStatus = 'checking';
+  updateNetworkStatus('checking');
   
   // Listen for online/offline events
   window.addEventListener('online', handleOnline);
   window.addEventListener('offline', handleOffline);
-  
-  // Listen for backend health check completion
-  window.addEventListener('moodchat-backend-ready', handleBackendReady);
   
   // Initialize data cache
   DATA_CACHE.initialize();
@@ -3325,55 +3381,68 @@ function initializeNetworkDetection() {
   );
 }
 
-// Handle online event
+// Handle online event - UPDATED: Won't mark as offline if backend check is pending
 async function handleOnline() {
-  console.log('Network: Browser online event detected');
+  console.log('Network: Online detected, verifying with API...');
   
-  // If we were offline, change to checking
-  if (networkState === 'offline') {
-    updateNetworkStatus('checking');
-    
-    // Try to verify with API if api.js is available
-    if (API_COORDINATION.isApiAvailable()) {
-      console.log('Network: Verifying backend reachability after coming online...');
+  // Update browser status but keep overall status as "checking" until API confirms
+  const browserOnline = true;
+  
+  // Notify UI that we're checking connection
+  API_COORDINATION.notifyNetworkStatus('checking', 'Checking backend connection...');
+  
+  // Verify real online status with API heartbeat (only if backend reachable)
+  if (API_COORDINATION.isApiAvailable() && window.MoodChatConfig.backendReachable !== false) {
+    try {
+      const realOnline = await API_COORDINATION.getRealOnlineStatus();
       
-      // Check backend health in background
-      API_COORDINATION.checkBackendHealth()
-        .then(backendReachable => {
-          if (backendReachable) {
-            console.log('Network: Backend reachable after coming online');
-            updateNetworkStatus('online');
-            NETWORK_SERVICE_MANAGER.startAllServices();
+      if (realOnline === 'online') {
+        console.log('Network: Confirmed online with API');
+        updateNetworkStatus('online');
+        
+        // Broadcast network change to other files
+        broadcastNetworkChange('online');
+        
+        // Start all network-dependent services only if backend is reachable
+        if (window.MoodChatConfig.backendReachable === true) {
+          NETWORK_SERVICE_MANAGER.startAllServices();
+          
+          // Start background sync
+          setTimeout(() => {
             NETWORK_SERVICE_MANAGER.startBackgroundSync();
-          } else {
-            console.log('Network: Backend still unreachable after coming online');
-            updateNetworkStatus('offline');
-          }
-        })
-        .catch(error => {
-          console.log('Network: Error checking backend after coming online:', error);
-          updateNetworkStatus('offline');
-        });
-    } else {
-      // api.js not available, assume online based on browser
-      console.log('Network: api.js not available, assuming online based on browser');
-      updateNetworkStatus('online');
+          }, 500);
+        }
+        
+        // Update UI to show online status
+        showOnlineIndicator();
+      } else if (realOnline === 'offline') {
+        console.log('Network: Browser says online but API is unreachable');
+        updateNetworkStatus('offline');
+        showOfflineIndicator();
+      }
+      // If realOnline is 'checking', we stay in checking state
+      
+    } catch (error) {
+      console.log('Network: API check failed:', error);
+      updateNetworkStatus('offline');
+      showOfflineIndicator();
     }
-  } else if (networkState === 'checking') {
-    // We were already checking, browser event confirms we have connectivity
-    console.log('Network: Browser confirms online while checking');
-    // Keep state as checking until backend health check completes
+  } else {
+    // No API available, rely on browser status
+    console.log('Network: API not available, using browser status');
+    updateNetworkStatus(browserOnline ? 'online' : 'offline');
+    
+    if (browserOnline) {
+      showOnlineIndicator();
+    } else {
+      showOfflineIndicator();
+    }
   }
-  
-  // Update UI to show checking/online status
-  showNetworkStatusIndicator();
 }
 
 // Handle offline event
 function handleOffline() {
-  console.log('Network: Browser offline event detected');
-  
-  // Browser says offline - immediately set to offline regardless of backend state
+  console.log('Network: Offline detected');
   updateNetworkStatus('offline');
   
   // Stop all network-dependent services
@@ -3383,98 +3452,35 @@ function handleOffline() {
   broadcastNetworkChange('offline');
   
   // Show offline indicator
-  showNetworkStatusIndicator();
+  showOfflineIndicator();
   
-  // Disable login/register buttons for submission (but forms are still visible)
-  enableAuthFormsForSubmission(false);
+  // Disable login/register buttons
+  enableAuthForms(false);
 }
 
-// Handle backend ready event
-function handleBackendReady(event) {
-  console.log('Network: Backend health check completed:', event.detail.reachable ? 'reachable' : 'unreachable');
-  
-  if (event.detail.reachable) {
-    // Backend is reachable
-    if (networkState === 'checking' || networkState === 'online') {
-      updateNetworkStatus('online');
-      
-      // Start network services if we have a user
-      if (window.currentUser && !window.currentUser.isOfflineMode) {
-        NETWORK_SERVICE_MANAGER.startAllServices();
-        NETWORK_SERVICE_MANAGER.startBackgroundSync();
-      }
-    }
-  } else {
-    // Backend is unreachable
-    if (networkState === 'checking') {
-      // Only set to offline if browser is also offline
-      if (!navigator.onLine) {
-        updateNetworkStatus('offline');
-      } else {
-        // Browser says online but backend is unreachable - special state
-        updateNetworkStatus('offline'); // Still offline from app's perspective
-      }
-    }
-  }
-  
-  // Update UI
-  showNetworkStatusIndicator();
-  enableAuthFormsForSubmission(event.detail.reachable);
-}
-
-// Enable/disable auth forms for SUBMISSION only (forms always visible)
-function enableAuthFormsForSubmission(enabled) {
+// Enable/disable auth forms based on online status - UPDATED: Only disable when confirmed offline
+function enableAuthForms(enabled) {
   const loginButton = document.querySelector('#loginBox button[type="submit"]');
   const registerButton = document.querySelector('#registerBox button[type="submit"]');
-  const resetButton = document.querySelector('#resetPasswordBox button[type="submit"]');
   
-  [loginButton, registerButton, resetButton].forEach(button => {
-    if (button) {
-      button.disabled = !enabled;
-      if (!enabled) {
-        button.title = networkState === 'checking' ? 'Checking connection...' : 'Service unavailable while offline';
-      } else {
-        button.title = '';
-      }
-    }
-  });
+  if (loginButton) {
+    loginButton.disabled = !enabled;
+    loginButton.title = enabled ? '' : 'Login disabled while offline';
+  }
   
-  // Show/hide network status message
-  updateNetworkStatusMessage();
-}
-
-// Update network status message in auth UI
-function updateNetworkStatusMessage() {
-  const existingMessage = document.getElementById('network-status-message');
+  if (registerButton) {
+    registerButton.disabled = !enabled;
+    registerButton.title = enabled ? '' : 'Registration disabled while offline';
+  }
   
-  if (networkState === 'checking') {
-    if (!existingMessage) {
-      const messageDiv = document.createElement('div');
-      messageDiv.id = 'network-status-message';
-      messageDiv.style.cssText = `
-        background: #3b82f6;
-        color: white;
-        padding: 8px 12px;
-        border-radius: 4px;
-        margin-bottom: 16px;
-        font-size: 14px;
-        text-align: center;
-      `;
-      messageDiv.textContent = 'Checking connection...';
-      
-      const authContainer = document.querySelector('.auth-container') || document.querySelector('main');
-      if (authContainer) {
-        authContainer.insertBefore(messageDiv, authContainer.firstChild);
-      }
-    } else {
-      existingMessage.textContent = 'Checking connection...';
-      existingMessage.style.background = '#3b82f6';
-    }
-  } else if (networkState === 'offline') {
-    if (!existingMessage) {
-      const messageDiv = document.createElement('div');
-      messageDiv.id = 'network-status-message';
-      messageDiv.style.cssText = `
+  // Show warning if disabled
+  const networkStatus = API_COORDINATION.getNetworkStatus();
+  if (networkStatus === 'offline' && (window.location.pathname.endsWith('index.html') || window.location.pathname.endsWith('/'))) {
+    const warning = document.getElementById('offline-auth-warning');
+    if (!warning) {
+      const warningDiv = document.createElement('div');
+      warningDiv.id = 'offline-auth-warning';
+      warningDiv.style.cssText = `
         background: #f59e0b;
         color: white;
         padding: 8px 12px;
@@ -3483,114 +3489,78 @@ function updateNetworkStatusMessage() {
         font-size: 14px;
         text-align: center;
       `;
-      messageDiv.textContent = 'Offline - Some features limited';
+      warningDiv.textContent = '⚠️ Login and registration are disabled while offline';
       
       const authContainer = document.querySelector('.auth-container') || document.querySelector('main');
       if (authContainer) {
-        authContainer.insertBefore(messageDiv, authContainer.firstChild);
+        authContainer.insertBefore(warningDiv, authContainer.firstChild);
       }
-    } else {
-      existingMessage.textContent = 'Offline - Some features limited';
-      existingMessage.style.background = '#f59e0b';
     }
-  } else if (networkState === 'online') {
-    if (existingMessage && existingMessage.parentNode) {
-      existingMessage.parentNode.removeChild(existingMessage);
+  } else {
+    const warning = document.getElementById('offline-auth-warning');
+    if (warning && warning.parentNode) {
+      warning.parentNode.removeChild(warning);
     }
   }
 }
 
-// Update network status globally
-function updateNetworkStatus(newState) {
-  // Validate state
-  if (!['checking', 'online', 'offline'].includes(newState)) {
-    console.error('Invalid network state:', newState);
-    return;
+// Update network status globally - UPDATED: Accepts status string
+function updateNetworkStatus(status) {
+  // Convert status string to boolean for legacy compatibility
+  if (status === 'online') {
+    isOnline = true;
+  } else if (status === 'offline') {
+    isOnline = false;
+  } else {
+    isOnline = null; // checking
   }
   
-  const oldState = networkState;
-  networkState = newState;
-  
-  console.log(`Network state: ${oldState} -> ${newState}`);
+  window.MoodChatConfig.networkStatus = status;
   
   // Expose globally for other modules
   window.MOODCHAT_NETWORK = {
-    isOnline: networkState === 'online',
-    isOffline: networkState === 'offline',
-    isChecking: networkState === 'checking',
-    state: networkState,
+    isOnline: status === 'online',
+    isOffline: status === 'offline',
+    isChecking: status === 'checking',
+    status: status,
     lastChange: new Date().toISOString(),
     syncQueueSize: syncQueue.length,
     services: NETWORK_SERVICE_MANAGER.getServiceStates(),
-    backendReachable: API_COORDINATION.isBackendReachable(),
-    backendStatusKnown: API_COORDINATION.isBackendStatusKnown()
+    backendReachable: window.MoodChatConfig.backendReachable
   };
   
   // Dispatch custom event for other components
   const event = new CustomEvent('moodchat-network-change', {
     detail: { 
-      state: networkState,
-      isOnline: networkState === 'online',
-      isOffline: networkState === 'offline',
-      isChecking: networkState === 'checking',
+      status: status,
+      isOnline: status === 'online',
+      isOffline: status === 'offline',
+      isChecking: status === 'checking',
       services: NETWORK_SERVICE_MANAGER.getServiceStates(),
-      backendReachable: API_COORDINATION.isBackendReachable(),
-      backendStatusKnown: API_COORDINATION.isBackendStatusKnown()
+      backendReachable: window.MoodChatConfig.backendReachable
     }
   });
   window.dispatchEvent(event);
   
-  // Update auth forms for submission
-  enableAuthFormsForSubmission(networkState === 'online');
+  console.log(`Network status: ${status}, Backend reachable: ${window.MoodChatConfig.backendReachable}`);
   
-  // Update network status message
-  updateNetworkStatusMessage();
+  // Update auth forms - FIXED: Only disable when confirmed offline
+  enableAuthForms(status !== 'offline');
 }
 
-// Show network status indicator
-function showNetworkStatusIndicator() {
+// Show offline indicator
+function showOfflineIndicator() {
   // Remove existing indicator if any
-  const existing = document.getElementById('network-status-indicator');
+  const existing = document.getElementById('offline-indicator');
   if (existing) existing.remove();
   
-  // Don't show indicator if we're online with no issues
-  if (networkState === 'online' && API_COORDINATION.isBackendReachable()) {
-    return;
-  }
-  
   const indicator = document.createElement('div');
-  indicator.id = 'network-status-indicator';
-  
-  let bgColor, text, icon;
-  
-  switch(networkState) {
-    case 'checking':
-      bgColor = '#3b82f6';
-      text = 'Checking connection...';
-      icon = '⏳';
-      break;
-    case 'offline':
-      bgColor = '#f87171';
-      text = 'Offline - Using cached data';
-      icon = '⚠️';
-      break;
-    case 'online':
-      if (!API_COORDINATION.isBackendReachable()) {
-        bgColor = '#f59e0b';
-        text = 'Online (backend unreachable)';
-        icon = '⚠️';
-      } else {
-        // Don't show indicator for normal online state
-        return;
-      }
-      break;
-  }
-  
+  indicator.id = 'offline-indicator';
   indicator.style.cssText = `
     position: fixed;
     bottom: 10px;
     left: 10px;
-    background: ${bgColor};
+    background: #f87171;
     color: white;
     padding: 6px 12px;
     border-radius: 4px;
@@ -3599,48 +3569,47 @@ function showNetworkStatusIndicator() {
     opacity: 0.9;
     box-shadow: 0 2px 4px rgba(0,0,0,0.2);
     animation: slideIn 0.3s ease-out;
-    display: flex;
-    align-items: center;
-    gap: 6px;
   `;
-  indicator.innerHTML = `
-    <span>${icon}</span>
-    <span>${text}</span>
-  `;
+  indicator.textContent = 'Offline - Using cached data';
   document.body.appendChild(indicator);
-  
-  // Auto-remove online indicator after 3 seconds
-  if (networkState === 'online') {
+}
+
+// Show online indicator
+function showOnlineIndicator() {
+  const existing = document.getElementById('offline-indicator');
+  if (existing) {
+    existing.style.background = '#10b981';
+    existing.textContent = 'Back online';
+    
     setTimeout(() => {
-      if (indicator.parentNode) {
-        indicator.style.animation = 'slideOut 0.3s ease-in';
-        setTimeout(() => indicator.remove(), 300);
+      if (existing.parentNode) {
+        existing.style.animation = 'slideOut 0.3s ease-in';
+        setTimeout(() => existing.remove(), 300);
       }
-    }, 3000);
+    }, 2000);
   }
 }
 
 // Broadcast network changes
-function broadcastNetworkChange(state) {
-  const status = {
+function broadcastNetworkChange(status) {
+  const networkStatus = {
     type: 'network-status',
-    state: state,
-    isOnline: state === 'online',
-    isOffline: state === 'offline',
-    isChecking: state === 'checking',
+    status: status,
+    isOnline: status === 'online',
+    isOffline: status === 'offline',
+    isChecking: status === 'checking',
     timestamp: new Date().toISOString(),
     services: NETWORK_SERVICE_MANAGER.getServiceStates(),
-    backendReachable: API_COORDINATION.isBackendReachable(),
-    backendStatusKnown: API_COORDINATION.isBackendStatusKnown()
+    backendReachable: window.MoodChatConfig.backendReachable
   };
   
   try {
-    localStorage.setItem(CACHE_CONFIG.KEYS.NETWORK_STATUS, JSON.stringify(status));
+    localStorage.setItem(CACHE_CONFIG.KEYS.NETWORK_STATUS, JSON.stringify(networkStatus));
     
     // Dispatch storage event for other tabs/windows
     window.dispatchEvent(new StorageEvent('storage', {
       key: CACHE_CONFIG.KEYS.NETWORK_STATUS,
-      newValue: JSON.stringify(status)
+      newValue: JSON.stringify(networkStatus)
     }));
   } catch (e) {
     console.log('Could not broadcast network status to localStorage:', e);
@@ -3649,17 +3618,19 @@ function broadcastNetworkChange(state) {
 
 // Start periodic sync monitor
 function startSyncMonitor() {
-  // Check for queued items every 30 seconds when online
+  // Check for queued items every 30 seconds
   setInterval(() => {
-    if (networkState === 'online' && syncQueue.length > 0) {
+    const networkStatus = API_COORDINATION.getNetworkStatus();
+    if (networkStatus === 'online' && syncQueue.length > 0) {
       console.log('Periodic sync check - processing queue');
       processQueuedMessages();
     }
   }, 30000);
   
-  // Background data refresh every 5 minutes when online
+  // Background data refresh every 5 minutes when online and backend reachable
   setInterval(() => {
-    if (networkState === 'online' && window.currentUser) {
+    const networkStatus = API_COORDINATION.getNetworkStatus();
+    if (networkStatus === 'online' && window.currentUser) {
       refreshCachedDataInBackground();
     }
   }, 5 * 60 * 1000);
@@ -3908,7 +3879,8 @@ function queueForSync(data, type = 'message') {
 
 // Process queued messages when online for current user only
 function processQueuedMessages() {
-  if (networkState !== 'online' || !window.indexedDB || syncQueue.length === 0 || !window.currentUser) return;
+  const networkStatus = API_COORDINATION.getNetworkStatus();
+  if (networkStatus !== 'online' || !window.indexedDB || syncQueue.length === 0 || !window.currentUser) return;
   
   console.log(`Processing ${syncQueue.length} queued items for user ${window.currentUser.uid}...`);
   
@@ -3964,9 +3936,10 @@ function processStoreQueue(db, storeName, userId) {
 
 // Send a queued item
 function sendQueuedItem(item, db, storeName, userId) {
-  // Check if we're still online
-  if (networkState !== 'online') {
-    console.log(`Cannot send ${storeName} ${item.id}: offline`);
+  // Check if we're still online and backend is reachable
+  const networkStatus = API_COORDINATION.getNetworkStatus();
+  if (networkStatus !== 'online' || window.MoodChatConfig.backendReachable !== true) {
+    console.log(`Cannot send ${storeName} ${item.id}: offline or backend unreachable`);
     return;
   }
   
@@ -4029,7 +4002,9 @@ function getSendFunctionForType(type) {
 function defaultSendMessage(message) {
   console.log('Sending queued message:', message);
   // Use api.js to send message if available and backend is reachable
-  if (API_COORDINATION.isApiAvailable() && networkState === 'online' && window.currentUser && JWT_VALIDATION.hasToken()) {
+  const networkStatus = API_COORDINATION.getNetworkStatus();
+  if (API_COORDINATION.isApiAvailable() && window.MoodChatConfig.backendReachable === true && 
+      networkStatus === 'online' && window.currentUser && JWT_VALIDATION.hasToken()) {
     return API_COORDINATION.safeApiCall('/chat/send', {
       method: 'POST',
       headers: {
@@ -4048,7 +4023,9 @@ function defaultSendMessage(message) {
 function defaultSendStatus(status) {
   console.log('Sending queued status:', status);
   // Use api.js to update status if available and backend is reachable
-  if (API_COORDINATION.isApiAvailable() && networkState === 'online' && window.currentUser && JWT_VALIDATION.hasToken()) {
+  const networkStatus = API_COORDINATION.getNetworkStatus();
+  if (API_COORDINATION.isApiAvailable() && window.MoodChatConfig.backendReachable === true && 
+      networkStatus === 'online' && window.currentUser && JWT_VALIDATION.hasToken()) {
     return API_COORDINATION.safeApiCall('/user/status', {
       method: 'POST',
       headers: {
@@ -4066,7 +4043,9 @@ function defaultSendStatus(status) {
 function defaultSendFriendRequest(request) {
   console.log('Sending queued friend request:', request);
   // Use api.js to send friend request if available and backend is reachable
-  if (API_COORDINATION.isApiAvailable() && networkState === 'online' && window.currentUser && JWT_VALIDATION.hasToken()) {
+  const networkStatus = API_COORDINATION.getNetworkStatus();
+  if (API_COORDINATION.isApiAvailable() && window.MoodChatConfig.backendReachable === true && 
+      networkStatus === 'online' && window.currentUser && JWT_VALIDATION.hasToken()) {
     return API_COORDINATION.safeApiCall('/friends/request', {
       method: 'POST',
       headers: {
@@ -4084,7 +4063,9 @@ function defaultSendFriendRequest(request) {
 function defaultSendCallLog(callLog) {
   console.log('Sending queued call log:', callLog);
   // Use api.js to log call if available and backend is reachable
-  if (API_COORDINATION.isApiAvailable() && networkState === 'online' && window.currentUser && JWT_VALIDATION.hasToken()) {
+  const networkStatus = API_COORDINATION.getNetworkStatus();
+  if (API_COORDINATION.isApiAvailable() && window.MoodChatConfig.backendReachable === true && 
+      networkStatus === 'online' && window.currentUser && JWT_VALIDATION.hasToken()) {
     return API_COORDINATION.safeApiCall('/calls/log', {
       method: 'POST',
       headers: {
@@ -4188,15 +4169,16 @@ function safeApiCall(apiFunction, data, type = 'action', cacheKey = null) {
         console.log(`Using cached data instantly for: ${cacheKey}`);
         resolve({
           success: true,
-          offline: networkState !== 'online',
+          offline: !isOnline,
           cached: true,
           data: cachedData,
           message: 'Data loaded instantly from cache',
           instant: true
         });
         
-        // Also try to get fresh data in background if online
-        if (networkState === 'online') {
+        // Also try to get fresh data in background if online and backend reachable
+        const networkStatus = API_COORDINATION.getNetworkStatus();
+        if (networkStatus === 'online') {
           setTimeout(() => {
             fetchFreshDataInBackground(apiFunction, data, cacheKey);
           }, 1000);
@@ -4205,8 +4187,9 @@ function safeApiCall(apiFunction, data, type = 'action', cacheKey = null) {
       }
     }
     
-    // If no cache and we're offline, use offline data generator
-    if (networkState !== 'online' && cacheKey && window.currentUser) {
+    // If no cache and we're offline or backend unreachable, use offline data generator
+    const networkStatus = API_COORDINATION.getNetworkStatus();
+    if (networkStatus === 'offline' && cacheKey && window.currentUser) {
       console.log(`Offline mode: Using offline data for: ${cacheKey}`);
       
       // Determine which offline data to generate based on cache key
@@ -4239,8 +4222,8 @@ function safeApiCall(apiFunction, data, type = 'action', cacheKey = null) {
       }
     }
     
-    // For online operations
-    if (networkState === 'online') {
+    // For online operations with backend reachable
+    if (networkStatus === 'online' && window.MoodChatConfig.backendReachable === true) {
       // Make real API call using api.js
       try {
         const result = apiFunction(data);
@@ -4314,7 +4297,7 @@ function safeApiCall(apiFunction, data, type = 'action', cacheKey = null) {
         reject(error);
       }
     } else {
-      // Offline - queue the data
+      // Offline or backend unreachable - queue the data
       queueForSync({
         apiFunction: apiFunction.name || 'anonymous',
         data: data,
@@ -4345,7 +4328,8 @@ function safeApiCall(apiFunction, data, type = 'action', cacheKey = null) {
 
 // Fetch fresh data in background using api.js
 function fetchFreshDataInBackground(apiFunction, data, cacheKey) {
-  if (networkState !== 'online') return;
+  const networkStatus = API_COORDINATION.getNetworkStatus();
+  if (networkStatus !== 'online' || window.MoodChatConfig.backendReachable !== true) return;
   
   console.log(`Fetching fresh data in background for: ${cacheKey}`);
   
@@ -4405,39 +4389,31 @@ function exposeGlobalStateToIframes() {
     getDeviceId: () => getDeviceId()
   };
   
-  // Expose network state with THREE-STATE model
+  // Expose network state - UPDATED with status
   window.MOODCHAT_GLOBAL.network = {
-    isOnline: () => networkState === 'online',
-    isOffline: () => networkState === 'offline',
-    isChecking: () => networkState === 'checking',
-    getState: () => networkState,
+    isOnline: () => API_COORDINATION.getNetworkStatus() === 'online',
+    isOffline: () => API_COORDINATION.getNetworkStatus() === 'offline',
+    isChecking: () => API_COORDINATION.getNetworkStatus() === 'checking',
+    getStatus: () => API_COORDINATION.getNetworkStatus(),
     getSyncQueueSize: () => syncQueue.length,
     getServiceStates: () => NETWORK_SERVICE_MANAGER.getServiceStates(),
     isServiceRunning: (name) => NETWORK_SERVICE_MANAGER.isServiceRunning(name),
-    isBackendReachable: () => API_COORDINATION.isBackendReachable(),
-    isBackendStatusKnown: () => API_COORDINATION.isBackendStatusKnown(),
+    isBackendReachable: () => window.MoodChatConfig.backendReachable,
     waitForOnline: () => {
       return new Promise((resolve) => {
-        if (networkState === 'online') {
+        const status = API_COORDINATION.getNetworkStatus();
+        if (status === 'online') {
           resolve();
-        } else if (networkState === 'offline') {
-          // Can't resolve if we're offline
-          const listener = () => {
-            window.removeEventListener('moodchat-network-change', listener);
-            if (networkState === 'online') {
-              resolve();
-            }
-          };
-          window.addEventListener('moodchat-network-change', listener);
         } else {
-          // checking state - wait for resolution
           const listener = () => {
             window.removeEventListener('moodchat-network-change', listener);
-            if (networkState === 'online') {
-              resolve();
-            }
+            resolve();
           };
-          window.addEventListener('moodchat-network-change', listener);
+          window.addEventListener('moodchat-network-change', (e) => {
+            if (e.detail.status === 'online') {
+              listener();
+            }
+          });
         }
       });
     }
@@ -4501,6 +4477,26 @@ function exposeGlobalStateToIframes() {
   
   // Expose API coordination
   window.MOODCHAT_GLOBAL.api = API_COORDINATION;
+  
+  // Expose global AppState for UI components
+  window.AppState = {
+    network: {
+      status: API_COORDINATION.getNetworkStatus(),
+      backendReachable: window.MoodChatConfig.backendReachable,
+      isOnline: API_COORDINATION.getNetworkStatus() === 'online',
+      isOffline: API_COORDINATION.getNetworkStatus() === 'offline',
+      isChecking: API_COORDINATION.getNetworkStatus() === 'checking'
+    },
+    auth: {
+      currentUser: window.currentUser,
+      isAuthenticated: !!window.currentUser,
+      isReady: authStateRestored
+    },
+    api: {
+      isReady: API_COORDINATION.apiReady,
+      isAvailable: API_COORDINATION.isApiAvailable()
+    }
+  };
 }
 
 // ============================================================================
@@ -4656,8 +4652,9 @@ function loadTabDataInstantly(tabName) {
   // Show data source indicator
   showTabDataIndicator(tabName, dataSource);
   
-  // Then trigger background data load if online using api.js
-  if (networkState === 'online') {
+  // Then trigger background data load if online and backend reachable using api.js
+  const networkStatus = API_COORDINATION.getNetworkStatus();
+  if (networkStatus === 'online' && window.MoodChatConfig.backendReachable === true) {
     setTimeout(() => {
       triggerTabDataLoad(tabName);
     }, 100);
@@ -4727,12 +4724,12 @@ function triggerTabDataLoad(tabName) {
     detail: {
       tab: tabName,
       userId: window.currentUser ? window.currentUser.uid : null,
-      networkState: networkState,
+      networkStatus: API_COORDINATION.getNetworkStatus(),
       services: NETWORK_SERVICE_MANAGER.getServiceStates(),
       timestamp: new Date().toISOString(),
       background: true, // Indicate this is a background load
       usingApiJs: API_COORDINATION.isApiAvailable(), // Flag for api.js usage
-      backendReachable: API_COORDINATION.isBackendReachable() // Flag for backend reachability
+      backendReachable: window.MoodChatConfig.backendReachable // Flag for backend reachability
     }
   });
   window.dispatchEvent(event);
@@ -5168,7 +5165,7 @@ function setupEventListeners() {
       detail: {
         tab: event.detail.tab,
         userId: event.detail.userId,
-        networkState: event.detail.networkState,
+        networkStatus: event.detail.networkStatus,
         services: event.detail.services,
         timestamp: event.detail.timestamp,
         background: event.detail.background,
@@ -5182,7 +5179,7 @@ function setupEventListeners() {
   
   // Listen for network service state changes
   window.addEventListener('moodchat-network-change', (event) => {
-    console.log('Network state changed:', event.detail.state);
+    console.log('Network state changed, status:', event.detail.status);
   });
   
   // Listen for cached data loaded event
@@ -5283,7 +5280,7 @@ function setupCrossPageCommunication() {
 }
 
 // ============================================================================
-// ENHANCED PUBLIC API WITH THREE-STATE NETWORK MODEL
+// ENHANCED PUBLIC API WITH INSTANT LOADING AND OFFLINE SUPPORT
 // ============================================================================
 
 // Expose application functions
@@ -5301,17 +5298,16 @@ window.MOODCHAT_AUTH = {
   isAuthReady: false
 };
 
-// THREE-STATE NETWORK MODEL
+// NETWORK CONNECTIVITY - UPDATED with status
 window.MOODCHAT_NETWORK = {
-  isOnline: networkState === 'online',
-  isOffline: networkState === 'offline',
-  isChecking: networkState === 'checking',
-  state: networkState,
+  isOnline: () => API_COORDINATION.getNetworkStatus() === 'online',
+  isOffline: () => API_COORDINATION.getNetworkStatus() === 'offline',
+  isChecking: () => API_COORDINATION.getNetworkStatus() === 'checking',
+  status: API_COORDINATION.getNetworkStatus(),
   lastChange: null,
   syncQueueSize: 0,
   services: NETWORK_SERVICE_MANAGER.getServiceStates(),
-  backendReachable: API_COORDINATION.isBackendReachable(),
-  backendStatusKnown: API_COORDINATION.isBackendStatusKnown()
+  backendReachable: window.MoodChatConfig.backendReachable
 };
 
 // NETWORK SERVICE MANAGER
@@ -5399,7 +5395,9 @@ window.loadTabData = function(tabName, forceRefresh = false) {
     console.log(`Loading real data for tab: ${tabName}, user: ${userId}, forceRefresh: ${forceRefresh}`);
     
     // Use api.js to fetch data based on tab name (only if backend reachable)
-    if (API_COORDINATION.isApiAvailable() && networkState === 'online' && window.currentUser && JWT_VALIDATION.hasToken()) {
+    const networkStatus = API_COORDINATION.getNetworkStatus();
+    if (API_COORDINATION.isApiAvailable() && window.MoodChatConfig.backendReachable === true && 
+        networkStatus === 'online' && window.currentUser && JWT_VALIDATION.hasToken()) {
       let endpoint = '';
       switch(tabName) {
         case 'friends':
@@ -5490,8 +5488,10 @@ window.sendChatMessage = function(chatId, message, type = 'text') {
       return;
     }
     
-    // Try to send via api.js if online
-    if (networkState === 'online' && API_COORDINATION.isApiAvailable() && JWT_VALIDATION.hasToken()) {
+    // Try to send via api.js if online and backend reachable
+    const networkStatus = API_COORDINATION.getNetworkStatus();
+    if (networkStatus === 'online' && API_COORDINATION.isApiAvailable() && 
+        window.MoodChatConfig.backendReachable === true && JWT_VALIDATION.hasToken()) {
       try {
         const response = await API_COORDINATION.safeApiCall('/chat/send', {
           method: 'POST',
@@ -5593,8 +5593,10 @@ window.getChatMessages = function(chatId, limit = 50) {
       });
     }
     
-    // Try to fetch via api.js if online
-    if (networkState === 'online' && API_COORDINATION.isApiAvailable() && JWT_VALIDATION.hasToken()) {
+    // Try to fetch via api.js if online and backend reachable
+    const networkStatus = API_COORDINATION.getNetworkStatus();
+    if (networkStatus === 'online' && API_COORDINATION.isApiAvailable() && 
+        window.MoodChatConfig.backendReachable === true && JWT_VALIDATION.hasToken()) {
       try {
         const response = await API_COORDINATION.safeApiCall(`/chat/${chatId}/messages?limit=${limit}`, {
           method: 'GET',
@@ -5671,21 +5673,17 @@ window.showChatList = function() {
   }
 };
 
-// THREE-STATE NETWORK FUNCTIONS
+// NETWORK FUNCTIONS - UPDATED
 window.isOnline = function() {
-  return networkState === 'online';
+  return API_COORDINATION.getNetworkStatus() === 'online';
 };
 
 window.isOffline = function() {
-  return networkState === 'offline';
+  return API_COORDINATION.getNetworkStatus() === 'offline';
 };
 
-window.isCheckingConnection = function() {
-  return networkState === 'checking';
-};
-
-window.getNetworkState = function() {
-  return networkState;
+window.isNetworkChecking = function() {
+  return API_COORDINATION.getNetworkStatus() === 'checking';
 };
 
 // NETWORK SERVICE FUNCTIONS
@@ -5748,635 +5746,6 @@ window.isInstantUILoaded = function() {
 };
 
 // ============================================================================
-// ENHANCED UI VISIBILITY MANAGEMENT FOR LOGIN/REGISTER/RESET PASSWORD
-// ============================================================================
-
-window.showLoginForm = function() {
-  console.log('Showing login form');
-  const loginBox = document.getElementById('loginBox');
-  const registerBox = document.getElementById('registerBox');
-  const resetPasswordBox = document.getElementById('resetPasswordBox');
-  
-  if (loginBox) loginBox.classList.remove('hidden');
-  if (registerBox) registerBox.classList.add('hidden');
-  if (resetPasswordBox) resetPasswordBox.classList.add('hidden');
-  
-  // Focus on first input
-  setTimeout(() => {
-    const emailInput = document.getElementById('loginEmail');
-    if (emailInput) emailInput.focus();
-  }, 100);
-};
-
-window.showRegisterForm = function() {
-  console.log('Showing register form');
-  const loginBox = document.getElementById('loginBox');
-  const registerBox = document.getElementById('registerBox');
-  const resetPasswordBox = document.getElementById('resetPasswordBox');
-  
-  if (loginBox) loginBox.classList.add('hidden');
-  if (registerBox) registerBox.classList.remove('hidden');
-  if (resetPasswordBox) resetPasswordBox.classList.add('hidden');
-  
-  // Focus on first input
-  setTimeout(() => {
-    const emailInput = document.getElementById('registerEmail');
-    if (emailInput) emailInput.focus();
-  }, 100);
-};
-
-window.showResetPasswordForm = function() {
-  console.log('Showing reset password form');
-  const loginBox = document.getElementById('loginBox');
-  const registerBox = document.getElementById('registerBox');
-  const resetPasswordBox = document.getElementById('resetPasswordBox');
-  
-  if (loginBox) loginBox.classList.add('hidden');
-  if (registerBox) registerBox.classList.add('hidden');
-  if (resetPasswordBox) resetPasswordBox.classList.remove('hidden');
-  
-  // Focus on first input
-  setTimeout(() => {
-    const emailInput = document.getElementById('resetEmail');
-    if (emailInput) emailInput.focus();
-  }, 100);
-};
-
-// ============================================================================
-// ENHANCED FORM HANDLING WITH ERROR DISPLAY AND UI TOASTS
-// ============================================================================
-
-window.handleLogin = async function(event) {
-  event.preventDefault();
-  
-  const email = document.getElementById('loginEmail')?.value;
-  const password = document.getElementById('loginPassword')?.value;
-  const rememberMe = document.getElementById('rememberMe')?.checked || false;
-  
-  if (!email || !password) {
-    window.showToast('Please enter both email and password', 'error');
-    return;
-  }
-  
-  if (!isValidEmail(email)) {
-    window.showToast('Please enter a valid email address', 'error');
-    return;
-  }
-  
-  // Check if we're offline
-  if (networkState === 'offline') {
-    window.showToast('Cannot login while offline. Please check your internet connection.', 'error');
-    return;
-  }
-  
-  // If checking, we can still try (optimistic)
-  if (networkState === 'checking') {
-    window.showToast('Checking connection, attempting login...', 'info');
-  }
-  
-  if (!API_COORDINATION.isApiAvailable()) {
-    window.showToast('Login service not available. Please try again later.', 'error');
-    return;
-  }
-  
-  // Show loading state
-  window.showLoginLoading(true);
-  
-  try {
-    // UPDATED: Use the enhanced login function that calls api.js
-    const result = await window.login(email, password);
-    
-    if (result.success) {
-      console.log('Login successful:', result.message);
-      
-      // Store remember me preference
-      if (rememberMe) {
-        localStorage.setItem('moodchat_remember_me', 'true');
-        localStorage.setItem('moodchat_remember_email', email);
-      } else {
-        localStorage.removeItem('moodchat_remember_me');
-        localStorage.removeItem('moodchat_remember_email');
-      }
-      
-      // Redirect to chat page after a short delay to show success message
-      setTimeout(() => {
-        window.location.href = 'chat.html';
-      }, 1000);
-    } else {
-      // Error message already shown by login function
-      console.log('Login failed:', result.message);
-    }
-  } catch (error) {
-    console.error('Login error:', error);
-    window.showToast('An error occurred during login. Please try again.', 'error');
-  } finally {
-    // Restore button state
-    window.showLoginLoading(false);
-  }
-};
-
-window.handleRegister = async function(event) {
-  event.preventDefault();
-  
-  const email = document.getElementById('registerEmail')?.value;
-  const password = document.getElementById('registerPassword')?.value;
-  const confirmPassword = document.getElementById('registerConfirmPassword')?.value;
-  const displayName = document.getElementById('registerDisplayName')?.value || email?.split('@')[0];
-  
-  // Validation
-  if (!email || !password || !confirmPassword) {
-    window.showToast('Please fill in all required fields', 'error');
-    return;
-  }
-  
-  if (!isValidEmail(email)) {
-    window.showToast('Please enter a valid email address', 'error');
-    return;
-  }
-  
-  if (password.length < 6) {
-    window.showToast('Password must be at least 6 characters long', 'error');
-    return;
-  }
-  
-  if (password !== confirmPassword) {
-    window.showToast('Passwords do not match', 'error');
-    return;
-  }
-  
-  // Check if we're offline
-  if (networkState === 'offline') {
-    window.showToast('Cannot register while offline. Please check your internet connection.', 'error');
-    return;
-  }
-  
-  // If checking, we can still try (optimistic)
-  if (networkState === 'checking') {
-    window.showToast('Checking connection, attempting registration...', 'info');
-  }
-  
-  if (!API_COORDINATION.isApiAvailable()) {
-    window.showToast('Registration service not available. Please try again later.', 'error');
-    return;
-  }
-  
-  // Show loading state
-  window.showRegisterLoading(true);
-  
-  try {
-    // UPDATED: Use the enhanced register function that calls api.js
-    const result = await window.register(email, password, displayName);
-    
-    if (result.success) {
-      console.log('Registration successful:', result.message);
-      
-      // Auto-login after registration
-      const loginResult = await window.login(email, password);
-      if (loginResult.success) {
-        window.showToast('Account created successfully!', 'success');
-        setTimeout(() => {
-          window.location.href = 'chat.html';
-        }, 1500);
-      } else {
-        // Still show success but prompt for login
-        window.showToast('Account created! Please log in.', 'info');
-        setTimeout(() => window.showLoginForm(), 2000);
-      }
-    } else {
-      // Error message already shown by register function
-      console.log('Registration failed:', result.message);
-    }
-  } catch (error) {
-    console.error('Registration error:', error);
-    window.showToast('An error occurred during registration. Please try again.', 'error');
-  } finally {
-    // Restore button state
-    window.showRegisterLoading(false);
-  }
-};
-
-window.handleResetPassword = async function(event) {
-  event.preventDefault();
-  
-  const email = document.getElementById('resetEmail')?.value;
-  
-  if (!email) {
-    window.showToast('Please enter your email address', 'error');
-    return;
-  }
-  
-  if (!isValidEmail(email)) {
-    window.showToast('Please enter a valid email address', 'error');
-    return;
-  }
-  
-  // Check if we're offline
-  if (networkState === 'offline') {
-    window.showToast('Cannot reset password while offline. Please check your internet connection.', 'error');
-    return;
-  }
-  
-  // If checking, we can still try (optimistic)
-  if (networkState === 'checking') {
-    window.showToast('Checking connection, attempting password reset...', 'info');
-  }
-  
-  if (!API_COORDINATION.isApiAvailable()) {
-    window.showToast('Password reset service not available. Please try again later.', 'error');
-    return;
-  }
-  
-  // Show loading state
-  window.showResetPasswordLoading(true);
-  
-  try {
-    // Try to use api.js for password reset
-    if (API_COORDINATION.isApiAvailable()) {
-      const response = await API_COORDINATION.safeApiCall('/auth/reset-password', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json'
-        },
-        body: JSON.stringify({ email })
-      });
-      
-      // UPDATED: Handle api.js response structure
-      if (response && response.success) {
-        window.showToast('Password reset link sent to your email', 'success');
-        setTimeout(() => window.showLoginForm(), 3000);
-      } else {
-        const errorMsg = response?.message || response?.error || 'Failed to send reset link';
-        window.showToast(errorMsg, 'error');
-      }
-    } else {
-      // Fallback to simulated success
-      window.showToast('Password reset link would be sent to your email (simulated)', 'info');
-      setTimeout(() => window.showLoginForm(), 3000);
-    }
-  } catch (error) {
-    console.error('Reset password error:', error);
-    window.showToast('An error occurred. Please try again.', 'error');
-  } finally {
-    // Restore button state
-    window.showResetPasswordLoading(false);
-  }
-};
-
-// ============================================================================
-// ADDED: SIGNUP FUNCTIONALITY WITH API INTEGRATION
-// ============================================================================
-
-window.handleSignup = async function(event) {
-  if (event) {
-    event.preventDefault();
-  }
-  
-  console.log('Signup process initiated');
-  
-  // Get form values
-  const username = document.getElementById('signup-username')?.value;
-  const email = document.getElementById('signup-email')?.value;
-  const password = document.getElementById('signup-password')?.value;
-  const confirmPassword = document.getElementById('signup-confirm-password')?.value;
-  
-  // Validation
-  if (!username || !email || !password || !confirmPassword) {
-    window.showToast('Please fill in all required fields', 'error');
-    return;
-  }
-  
-  if (!isValidEmail(email)) {
-    window.showToast('Please enter a valid email address', 'error');
-    return;
-  }
-  
-  if (password.length < 6) {
-    window.showToast('Password must be at least 6 characters long', 'error');
-    return;
-  }
-  
-  if (password !== confirmPassword) {
-    window.showToast('Passwords do not match', 'error');
-    return;
-  }
-  
-  // Check if we're offline
-  if (networkState === 'offline') {
-    window.showToast('Cannot sign up while offline. Please check your internet connection.', 'error');
-    return;
-  }
-  
-  // If checking, we can still try (optimistic)
-  if (networkState === 'checking') {
-    window.showToast('Checking connection, attempting signup...', 'info');
-  }
-  
-  if (!API_COORDINATION.isApiAvailable()) {
-    window.showToast('Signup service not available. Please try again later.', 'error');
-    return;
-  }
-  
-  // Show loading state
-  window.showSignupLoading(true);
-  
-  try {
-    // Use direct fetch call to API endpoint (compatible with existing api.js)
-    console.log('Sending signup request to API...');
-    
-    // Determine if we should use window.api or direct fetch
-    let response;
-    if (API_COORDINATION.isApiAvailable()) {
-      // Use api.js if available
-      response = await API_COORDINATION.safeApiCall('/api/register', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json'
-        },
-        body: JSON.stringify({
-          username: username,
-          email: email,
-          password: password
-        })
-      });
-    } else {
-      // Fallback to direct fetch
-      response = await fetch('/api/register', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json'
-        },
-        body: JSON.stringify({
-          username: username,
-          email: email,
-          password: password
-        })
-      });
-      
-      if (!response.ok) {
-        throw new Error(`HTTP error! status: ${response.status}`);
-      }
-      
-      response = await response.json();
-    }
-    
-    // Handle response
-    if (response.success || (response.token && response.user)) {
-      console.log('Signup successful:', response);
-      
-      // Store JWT token if provided
-      if (response.token) {
-        JWT_VALIDATION.storeToken(response.token);
-      }
-      
-      // Create user object from response
-      const userData = response.user || response;
-      const user = {
-        uid: userData.id || userData._id || 'user_' + Date.now(),
-        email: userData.email || email,
-        displayName: userData.username || userData.name || username,
-        photoURL: userData.avatar || `https://ui-avatars.com/api/?name=${encodeURIComponent(username)}&background=8b5cf6&color=fff`,
-        emailVerified: userData.emailVerified || false,
-        isOffline: false,
-        providerId: 'api',
-        refreshToken: response.token || response.refreshToken,
-        getIdToken: () => Promise.resolve(response.token || ''),
-        ...userData
-      };
-      
-      // Store device session for offline use
-      storeDeviceBasedSession(user);
-      
-      // Generate offline data for this user
-      setTimeout(() => {
-        DATA_CACHE.ensureOfflineDataAvailable();
-      }, 100);
-      
-      handleAuthStateChange(user);
-      
-      // Show success message
-      window.showToast('Account created successfully!', 'success');
-      
-      // Redirect to dashboard after a short delay
-      setTimeout(() => {
-        window.location.href = 'dashboard.html';
-      }, 1500);
-      
-      return { success: true, user: user, message: 'Signup successful' };
-    } else {
-      // Show error message from API response
-      const errorMsg = response?.message || response?.error || 'Signup failed. Please try again.';
-      window.showToast(errorMsg, 'error');
-      return { success: false, message: errorMsg };
-    }
-  } catch (error) {
-    console.error('Signup error:', error);
-    
-    // Show appropriate error message
-    let errorMessage = 'An error occurred during signup. Please try again.';
-    if (error.message.includes('Network')) {
-      errorMessage = 'Network error. Please check your connection and try again.';
-    } else if (error.message.includes('409')) {
-      errorMessage = 'Email or username already exists. Please use different credentials.';
-    } else if (error.message.includes('400')) {
-      errorMessage = 'Invalid signup data. Please check your inputs.';
-    }
-    
-    window.showToast(errorMessage, 'error');
-    return { success: false, message: errorMessage, error: error.message };
-  } finally {
-    // Restore button state
-    window.showSignupLoading(false);
-  }
-};
-
-// Helper functions for UI loading states
-window.showLoginLoading = function(show) {
-  const loginButton = document.querySelector('#loginBox button[type="submit"]');
-  const loginSpinner = document.getElementById('loginSpinner');
-  const loginButtonText = document.getElementById('loginButtonText');
-  
-  if (loginButton) {
-    loginButton.disabled = show;
-  }
-  
-  if (loginSpinner) {
-    loginSpinner.classList.toggle('hidden', !show);
-  }
-  
-  if (loginButtonText) {
-    loginButtonText.textContent = show ? 'Logging in...' : 'Login';
-  }
-};
-
-window.showRegisterLoading = function(show) {
-  const registerButton = document.querySelector('#registerBox button[type="submit"]');
-  const registerSpinner = document.getElementById('registerSpinner');
-  const registerButtonText = document.getElementById('registerButtonText');
-  
-  if (registerButton) {
-    registerButton.disabled = show;
-  }
-  
-  if (registerSpinner) {
-    registerSpinner.classList.toggle('hidden', !show);
-  }
-  
-  if (registerButtonText) {
-    registerButtonText.textContent = show ? 'Creating account...' : 'Register';
-  }
-};
-
-window.showResetPasswordLoading = function(show) {
-  const resetButton = document.querySelector('#resetPasswordBox button[type="submit"]');
-  const resetSpinner = document.getElementById('resetSpinner');
-  const resetButtonText = document.getElementById('resetButtonText');
-  
-  if (resetButton) {
-    resetButton.disabled = show;
-  }
-  
-  if (resetSpinner) {
-    resetSpinner.classList.toggle('hidden', !show);
-  }
-  
-  if (resetButtonText) {
-    resetButtonText.textContent = show ? 'Sending reset link...' : 'Reset Password';
-  }
-};
-
-// ADDED: Signup loading state
-window.showSignupLoading = function(show) {
-  const signupButton = document.getElementById('signup-button');
-  const signupSpinner = document.getElementById('signup-spinner');
-  const signupButtonText = document.getElementById('signup-button-text');
-  
-  if (signupButton) {
-    signupButton.disabled = show;
-  }
-  
-  if (signupSpinner) {
-    signupSpinner.classList.toggle('hidden', !show);
-  }
-  
-  if (signupButtonText) {
-    signupButtonText.textContent = show ? 'Creating account...' : 'Sign Up';
-  }
-  
-  // Create spinner if it doesn't exist
-  if (show && !signupSpinner && signupButton) {
-    const spinner = document.createElement('span');
-    spinner.id = 'signup-spinner';
-    spinner.className = 'hidden ml-2';
-    spinner.innerHTML = `
-      <svg class="animate-spin h-5 w-5 text-white" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
-        <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
-        <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
-      </svg>
-    `;
-    signupButton.appendChild(spinner);
-  }
-};
-
-// Toast notification system
-window.showToast = function(message, type = 'info') {
-  // Remove existing toasts
-  document.querySelectorAll('.moodchat-toast').forEach(toast => {
-    if (toast.parentNode) {
-      toast.parentNode.removeChild(toast);
-    }
-  });
-  
-  const toast = document.createElement('div');
-  toast.className = `moodchat-toast moodchat-toast-${type}`;
-  toast.style.cssText = `
-    position: fixed;
-    top: 20px;
-    right: 20px;
-    background: ${type === 'success' ? '#10b981' : type === 'error' ? '#ef4444' : type === 'warning' ? '#f59e0b' : '#3b82f6'};
-    color: white;
-    padding: 12px 20px;
-    border-radius: 8px;
-    z-index: 10000;
-    max-width: 300px;
-    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
-    animation: toastSlideIn 0.3s ease-out;
-    display: flex;
-    align-items: center;
-    gap: 10px;
-  `;
-  
-  // Add icon based on type
-  let icon = '';
-  switch(type) {
-    case 'success':
-      icon = '✓';
-      break;
-    case 'error':
-      icon = '✗';
-      break;
-    case 'warning':
-      icon = '⚠';
-      break;
-    default:
-      icon = 'ℹ';
-  }
-  
-  toast.innerHTML = `
-    <span style="font-weight: bold; font-size: 16px;">${icon}</span>
-    <span>${message}</span>
-  `;
-  
-  document.body.appendChild(toast);
-  
-  // Auto-remove after 5 seconds
-  setTimeout(() => {
-    if (toast.parentNode) {
-      toast.style.animation = 'toastSlideOut 0.3s ease-in';
-      setTimeout(() => {
-        if (toast.parentNode) {
-          toast.parentNode.removeChild(toast);
-        }
-      }, 300);
-    }
-  }, 5000);
-  
-  // Add CSS for toast animations if not already present
-  if (!document.getElementById('toast-styles')) {
-    const styleSheet = document.createElement('style');
-    styleSheet.id = 'toast-styles';
-    styleSheet.textContent = `
-      @keyframes toastSlideIn {
-        from {
-          transform: translateX(100%);
-          opacity: 0;
-        }
-        to {
-          transform: translateX(0);
-          opacity: 1;
-        }
-      }
-      
-      @keyframes toastSlideOut {
-        from {
-          transform: translateX(0);
-          opacity: 1;
-        }
-        to {
-          transform: translateX(100%);
-          opacity: 0;
-        }
-      }
-    `;
-    document.head.appendChild(styleSheet);
-  }
-};
-
-function isValidEmail(email) {
-  const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
-  return emailRegex.test(email);
-}
-
-// ============================================================================
 // AUTO-LOGIN FUNCTIONALITY - ENHANCED WITH API.JS INTEGRATION - FIXED
 // ============================================================================
 
@@ -6393,19 +5762,15 @@ window.checkAutoLogin = function() {
       return false;
     }
     
-    // Don't auto-login if offline
-    if (networkState === 'offline') {
+    // Don't auto-login if offline or backend unreachable
+    const networkStatus = API_COORDINATION.getNetworkStatus();
+    if (networkStatus === 'offline') {
       console.log('Auto-login: Skipping - offline');
       return false;
     }
     
-    // If checking, we can still try (optimistic)
-    if (networkState === 'checking') {
-      console.log('Auto-login: Network checking, attempting optimistic auto-login');
-    }
-    
-    if (!API_COORDINATION.isApiAvailable()) {
-      console.log('Auto-login: Skipping - api.js not available');
+    if (!API_COORDINATION.isApiAvailable() || window.MoodChatConfig.backendReachable === false) {
+      console.log('Auto-login: Skipping - backend not reachable');
       return false;
     }
     
@@ -6478,56 +5843,6 @@ window.checkAutoLogin = function() {
   
   return false;
 };
-
-// ============================================================================
-// ADDED: SIGNUP EVENT LISTENER SETUP (WAITS FOR DOMContentLoaded)
-// ============================================================================
-
-function setupSignupEventListener() {
-  console.log('Setting up signup event listener...');
-  
-  // Wait for DOM to be fully loaded before attaching event listeners
-  if (document.readyState === 'loading') {
-    document.addEventListener('DOMContentLoaded', attachSignupListener);
-  } else {
-    // DOM already loaded, attach immediately
-    attachSignupListener();
-  }
-}
-
-function attachSignupListener() {
-  const signupButton = document.getElementById('signup-button');
-  const signupForm = document.getElementById('signup-form');
-  
-  if (signupButton) {
-    console.log('Found signup button, attaching event listener');
-    
-    // Remove any existing event listeners by cloning the button
-    const newButton = signupButton.cloneNode(true);
-    signupButton.parentNode.replaceChild(newButton, signupButton);
-    
-    // Attach click event listener
-    newButton.addEventListener('click', function(event) {
-      console.log('Signup button clicked');
-      window.handleSignup(event);
-    });
-    
-    // Also handle form submission if there's a form
-    if (signupForm) {
-      signupForm.addEventListener('submit', function(event) {
-        console.log('Signup form submitted');
-        event.preventDefault();
-        window.handleSignup(event);
-      });
-    }
-    
-    console.log('Signup event listener attached successfully');
-  } else {
-    console.log('Signup button not found, will check again later');
-    // Try again after a short delay in case the button is added dynamically
-    setTimeout(attachSignupListener, 500);
-  }
-}
 
 // ============================================================================
 // STYLES INJECTION
@@ -6603,7 +5918,119 @@ function injectStyles() {
     @keyframes slideIn {
       from {
         transform: translateX(100%);
-        opacity:
+        opacity: 0;
+      }
+      to {
+        transform: translateX(0);
+        opacity: 1;
+      }
+    }
+    
+    @keyframes slideOut {
+      from {
+        transform: translateX(0);
+        opacity: 1;
+      }
+      to {
+        transform: translateX(100%);
+        opacity: 0;
+      }
+    }
+    
+    @keyframes slideInUp {
+      from {
+        transform: translateY(100%);
+        opacity: 0;
+      }
+      to {
+        transform: translateY(0);
+        opacity: 1;
+      }
+    }
+    
+    @keyframes slideOutDown {
+      from {
+        transform: translateY(0);
+        opacity: 1;
+      }
+      to {
+        transform: translateY(100%);
+        opacity: 0;
+      }
+    }
+    
+    .moodchat-toast {
+      position: fixed;
+      top: 20px;
+      right: 20px;
+      padding: 12px 20px;
+      border-radius: 8px;
+      z-index: 10000;
+      max-width: 300px;
+      box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+      animation: toastSlideIn 0.3s ease-out;
+      display: flex;
+      align-items: center;
+      gap: 10px;
+    }
+    
+    .moodchat-toast-success {
+      background: #10b981;
+      color: white;
+    }
+    
+    .moodchat-toast-error {
+      background: #ef4444;
+      color: white;
+    }
+    
+    .moodchat-toast-warning {
+      background: #f59e0b;
+      color: white;
+    }
+    
+    .moodchat-toast-info {
+      background: #3b82f6;
+      color: white;
+    }
+    
+    @keyframes toastSlideIn {
+      from {
+        transform: translateX(100%);
+        opacity: 0;
+      }
+      to {
+        transform: translateX(0);
+        opacity: 1;
+      }
+    }
+    
+    @keyframes toastSlideOut {
+      from {
+        transform: translateX(0);
+        opacity: 1;
+      }
+      to {
+        transform: translateX(100%);
+        opacity: 0;
+      }
+    }
+    
+    /* Network status indicator */
+    .network-status-checking {
+      background: #f59e0b;
+      color: white;
+    }
+    
+    .network-status-online {
+      background: #10b981;
+      color: white;
+    }
+    
+    .network-status-offline {
+      background: #ef4444;
+      color: white;
+    }
   `;
   
   const styleSheet = document.createElement('style');
@@ -6613,24 +6040,29 @@ function injectStyles() {
 }
 
 // ============================================================================
-// STARTUP EXECUTION - MUST BE LAST
+// START THE APPLICATION
 // ============================================================================
 
-// Setup signup event listener on page load
-setupSignupEventListener();
-
-// Start the app when DOM is ready
+// Initialize the app when DOM is ready
 if (document.readyState === 'loading') {
   document.addEventListener('DOMContentLoaded', () => {
-    setTimeout(initializeApp, 50);
+    console.log('DOMContentLoaded - Starting app initialization');
+    setTimeout(() => {
+      initializeApp();
+    }, 50);
   });
 } else {
-  setTimeout(initializeApp, 50);
+  console.log('DOM already loaded - Starting app initialization');
+  setTimeout(() => {
+    initializeApp();
+  }, 50);
 }
 
-// Auto-login check on login page
+// Start auto-login check if on login page
 if (window.location.pathname.endsWith('index.html') || window.location.pathname.endsWith('/')) {
   setTimeout(() => {
     window.checkAutoLogin();
   }, 500);
 }
+
+console.log('app.core.js loaded and ready');
