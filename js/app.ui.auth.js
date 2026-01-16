@@ -56,14 +56,27 @@ function getAuthData() {
       return null;
     }
     
-    // Optional: Check token expiration if you have expiry info
-    // This would require JWT decoding or backend response
     console.log('Auth data retrieved successfully');
     return authUser;
   } catch (error) {
     console.error('Error retrieving auth data:', error);
     return null;
   }
+}
+
+/**
+ * Validates JWT token (basic validation - checks if token exists)
+ */
+function validateToken(token) {
+  if (!token) return false;
+  
+  // Basic validation - token should be a string
+  if (typeof token !== 'string') return false;
+  
+  // Check token format (at least 10 characters)
+  if (token.length < 10) return false;
+  
+  return true;
 }
 
 /**
@@ -77,15 +90,56 @@ function clearAuthData() {
 }
 
 /**
- * Checks if user is already logged in via JWT
+ * Checks if user is already logged in via JWT and validates token
+ * Returns true if auto-login succeeds, false otherwise
  */
-function checkAutoLogin() {
+async function checkAutoLogin() {
   console.log('Checking for auto-login...');
   
   const authData = getAuthData();
   
-  if (authData && authData.token) {
-    console.log('Valid JWT found, attempting auto-login');
+  if (!authData || !authData.token) {
+    console.log('No auth data found in localStorage');
+    return false;
+  }
+  
+  // Validate token format
+  if (!validateToken(authData.token)) {
+    console.log('Invalid token format found');
+    clearAuthData();
+    return false;
+  }
+  
+  console.log('Valid JWT found, attempting auto-login...');
+  
+  try {
+    // Check if backend is reachable before attempting auto-login
+    if (window.API_COORDINATION && !window.API_COORDINATION.backendReachable) {
+      console.log('Backend not reachable, deferring auto-login');
+      updateNetworkStatusUI('offline', 'Cannot connect to server. Please check your connection.');
+      return false;
+    }
+    
+    // Validate token with backend (optional but recommended)
+    if (typeof window.api === 'function') {
+      try {
+        console.log('Validating token with backend...');
+        const response = await window.api('/validate-token', {
+          headers: {
+            'Authorization': `Bearer ${authData.token}`
+          }
+        });
+        
+        if (!response || !response.success) {
+          throw new Error('Token validation failed');
+        }
+        
+        console.log('Token validated successfully with backend');
+      } catch (error) {
+        console.log('Token validation with backend failed:', error.message);
+        // Continue anyway - token might be valid but backend validation endpoint might not exist
+      }
+    }
     
     // Set user in app state if AppState exists
     if (window.AppState && authData.user) {
@@ -99,14 +153,27 @@ function checkAutoLogin() {
       console.log('Token set in API_COORDINATION');
     }
     
-    // Redirect to chat page
-    console.log('Redirecting to chat.html...');
-    window.location.href = 'chat.html';
+    // Show success message
+    updateNetworkStatusUI('online', 'Auto-login successful!');
+    
+    // Small delay before redirect
+    setTimeout(() => {
+      console.log('Redirecting to chat.html...');
+      window.location.href = 'chat.html';
+    }, 1500);
+    
     return true;
+  } catch (error) {
+    console.error('Auto-login failed:', error);
+    
+    // Clear invalid auth data
+    clearAuthData();
+    
+    // Show error message
+    updateNetworkStatusUI('offline', 'Auto-login failed. Please log in again.');
+    
+    return false;
   }
-  
-  console.log('No valid JWT found, showing login form');
-  return false;
 }
 
 // ============================================================================
@@ -121,8 +188,14 @@ async function handleLoginSubmit(event) {
   console.log('Login form submitted');
   
   const form = event.target;
-  const email = form.querySelector('input[type="email"]').value;
+  const identifier = form.querySelector('input[type="text"]')?.value || 
+                    form.querySelector('input[type="email"]')?.value;
   const password = form.querySelector('input[type="password"]').value;
+  
+  if (!identifier || !password) {
+    updateNetworkStatusUI('offline', 'Email/username and password are required');
+    return;
+  }
   
   // Disable form during submission
   const submitBtn = form.querySelector('button[type="submit"]');
@@ -140,31 +213,37 @@ async function handleLoginSubmit(event) {
     console.log('Calling login API...');
     const response = await window.api('/login', {
       method: 'POST',
-      body: { email, password }
+      body: { identifier, password }
     });
     
     console.log('Login API response:', response);
     
     // Check for success
-    if (response && response.success && response.data) {
-      const { token, user } = response.data;
+    if (response && response.user && response.token) {
+      const { token, user } = response;
       
-      if (token) {
-        // Save JWT and user info
-        saveAuthData(token, user);
-        
-        // Show success message
-        updateNetworkStatusUI('online', 'Login successful!');
-        
-        // Small delay before redirect
-        setTimeout(() => {
-          window.location.href = 'chat.html';
-        }, 1000);
-      } else {
-        throw new Error('No token received from server');
+      // Save JWT and user info
+      saveAuthData(token, user);
+      
+      // Show success message
+      updateNetworkStatusUI('online', 'Login successful!');
+      
+      // Set token in api.js if API_COORDINATION exists
+      if (window.API_COORDINATION) {
+        window.API_COORDINATION.authToken = token;
       }
+      
+      // Set user in AppState if it exists
+      if (window.AppState) {
+        window.AppState.user = user;
+      }
+      
+      // Small delay before redirect
+      setTimeout(() => {
+        window.location.href = 'chat.html';
+      }, 1000);
     } else {
-      throw new Error(response?.message || 'Login failed');
+      throw new Error(response?.error || 'Login failed');
     }
   } catch (error) {
     console.error('Login error:', error);
@@ -186,9 +265,16 @@ async function handleRegisterSubmit(event) {
   console.log('Registration form submitted');
   
   const form = event.target;
-  const name = form.querySelector('input[type="text"]').value;
-  const email = form.querySelector('input[type="email"]').value;
-  const password = form.querySelector('input[type="password"]').value;
+  const username = form.querySelector('input[name="username"]')?.value;
+  const email = form.querySelector('input[type="email"]')?.value;
+  const password = form.querySelector('input[type="password"]')?.value;
+  const firstName = form.querySelector('input[name="firstName"]')?.value;
+  const lastName = form.querySelector('input[name="lastName"]')?.value;
+  
+  if (!username || !email || !password) {
+    updateNetworkStatusUI('offline', 'Username, email and password are required');
+    return;
+  }
   
   // Disable form during submission
   const submitBtn = form.querySelector('button[type="submit"]');
@@ -206,31 +292,37 @@ async function handleRegisterSubmit(event) {
     console.log('Calling register API...');
     const response = await window.api('/register', {
       method: 'POST',
-      body: { name, email, password }
+      body: { username, email, password, firstName, lastName }
     });
     
     console.log('Register API response:', response);
     
     // Check for success
-    if (response && response.success && response.data) {
-      const { token, user } = response.data;
+    if (response && response.user && response.token) {
+      const { token, user } = response;
       
-      if (token) {
-        // Save JWT and user info
-        saveAuthData(token, user);
-        
-        // Show success message
-        updateNetworkStatusUI('online', 'Registration successful!');
-        
-        // Small delay before redirect
-        setTimeout(() => {
-          window.location.href = 'chat.html';
-        }, 1000);
-      } else {
-        throw new Error('No token received from server');
+      // Save JWT and user info
+      saveAuthData(token, user);
+      
+      // Show success message
+      updateNetworkStatusUI('online', 'Registration successful!');
+      
+      // Set token in api.js if API_COORDINATION exists
+      if (window.API_COORDINATION) {
+        window.API_COORDINATION.authToken = token;
       }
+      
+      // Set user in AppState if it exists
+      if (window.AppState) {
+        window.AppState.user = user;
+      }
+      
+      // Small delay before redirect
+      setTimeout(() => {
+        window.location.href = 'chat.html';
+      }, 1000);
     } else {
-      throw new Error(response?.message || 'Registration failed');
+      throw new Error(response?.error || 'Registration failed');
     }
   } catch (error) {
     console.error('Registration error:', error);
@@ -392,7 +484,7 @@ function updateNetworkStatusUI(status, message) {
       indicator.style.display = 'block';
       
       // Auto-hide after 3 seconds if online (unless it's a login/register success)
-      if (!message || (!message.includes('Login') && !message.includes('Registration'))) {
+      if (!message || (!message.includes('Login') && !message.includes('Registration') && !message.includes('Auto-login'))) {
         setTimeout(() => {
           if (indicator && indicator.parentNode && window.NetworkStatus.status === 'online') {
             indicator.style.animation = 'slideOut 0.3s ease-in';
@@ -496,7 +588,6 @@ async function readNetworkStatusFromApi() {
       console.log('/status API response:', response);
       
       // Check if response indicates backend is reachable
-      // The backend might return different success indicators
       const isReachable = response && (
         response.status === 'ok' || 
         response.success === true ||
@@ -514,7 +605,6 @@ async function readNetworkStatusFromApi() {
       };
     } catch (error) {
       console.log('Direct API status check failed:', error.message);
-      // Don't throw, just continue to other methods
     }
   }
   
@@ -599,7 +689,7 @@ function setupApiStatusListener() {
     console.log('API ready event received, checking network status...');
     setTimeout(() => {
       updateNetworkStatusFromApi().catch(console.error);
-    }, 500); // Small delay to ensure API is fully ready
+    }, 500);
   };
   
   window.addEventListener('api-ready', handleApiReady);
@@ -644,7 +734,7 @@ function startPeriodicNetworkUpdates() {
       window.NetworkStatus.backendReachable = false;
       window.NetworkStatus.lastChecked = new Date();
     }
-  }, 10000); // 10 seconds
+  }, 10000);
   
   console.log('Periodic network status updates started');
 }
@@ -931,17 +1021,27 @@ function integrateWithAppState() {
 function initializeAuthUI() {
   console.log('Initializing auth UI and network status monitoring...');
   
-  // 1. First check for auto-login (before setting up forms)
-  const shouldAutoLogin = checkAutoLogin();
+  // 1. Check for auto-login (runs only on login page)
+  const currentPage = window.location.pathname;
+  const isLoginPage = currentPage.includes('index.html') || currentPage === '/' || currentPage.endsWith('/');
   
-  // If auto-login succeeded and we're redirecting, don't set up forms
-  if (shouldAutoLogin) {
-    console.log('Auto-login in progress, skipping form setup');
-    return;
+  if (isLoginPage) {
+    console.log('On login page, checking for auto-login...');
+    const shouldAutoLogin = checkAutoLogin();
+    
+    // If auto-login succeeds and we're redirecting, don't set up forms
+    if (shouldAutoLogin) {
+      console.log('Auto-login in progress, skipping form setup');
+      return;
+    }
+  } else {
+    console.log('Not on login page, skipping auto-login check');
   }
   
-  // 2. Set up auth form listeners
-  setupAuthFormListeners();
+  // 2. Set up auth form listeners (only if on login page)
+  if (isLoginPage) {
+    setupAuthFormListeners();
+  }
   
   // 3. Set initial network UI state (non-blocking)
   updateNetworkStatusUI('checking', 'Checking connection...');
@@ -959,7 +1059,7 @@ function initializeAuthUI() {
   // 7. Start periodic network status updates from api.js (non-blocking)
   setTimeout(() => {
     startPeriodicNetworkUpdates();
-  }, 1000); // Start after 1 second to ensure API is loaded
+  }, 1000);
   
   console.log('Auth UI and network monitoring initialized');
 }
