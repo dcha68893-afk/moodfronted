@@ -1,5 +1,5 @@
-// api.js - UPDATED VERSION WITH CORRECTED BASE URL
-// This version fixes the baseUrl to ensure all API calls succeed
+// api.js - FULL BACKEND API INTEGRATION WITH CORRECT FETCH USAGE
+// This version fixes all fetch method calls and ensures proper backend integration
 
 // ============================================================================
 // ENVIRONMENT DETECTION
@@ -111,12 +111,12 @@ window.api = function(endpoint, options = {}) {
 };
 
 // ============================================================================
-// MAIN API OBJECT - WITH PROPER ERROR HANDLING
+// MAIN API OBJECT - WITH PROPER BACKEND INTEGRATION
 // ============================================================================
 
 const apiObject = {
     _singleton: true,
-    _version: '8.0.1',
+    _version: '9.0.0',
     _safeInitialized: true,
     _backendReachable: null,
     _sessionChecked: false,
@@ -132,6 +132,10 @@ const apiObject = {
         STATUS_FETCH_TIMEOUT: 8000
     },
     
+    // ============================================================================
+    // AUTHENTICATION METHODS
+    // ============================================================================
+    
     login: async function(emailOrUsername, password) {
         try {
             console.log(`🔧 [API] Login attempt for: ${emailOrUsername}`);
@@ -144,19 +148,22 @@ const apiObject = {
                 requestData.username = String(emailOrUsername).trim();
             }
             
-            const response = await this._fetchWithRetry('/auth/login', {
+            const response = await fetch(`${BASE_URL}/auth/login`, {
                 method: 'POST',
-                body: JSON.stringify(requestData)
+                headers: {
+                    'Content-Type': 'application/json'
+                },
+                body: JSON.stringify(requestData),
+                mode: 'cors',
+                credentials: 'omit'
             });
             
             const data = await response.json();
             
             if (response.ok) {
-                // FIX: Ensure token is properly stored and propagated
                 if (data.token) {
                     console.log(`🔧 [API] Login successful, storing token: ${data.token.substring(0, 20)}...`);
                     localStorage.setItem('moodchat_auth_token', data.token);
-                    // Also store in authToken for compatibility with app.core.js
                     localStorage.setItem('authToken', data.token);
                 }
                 if (data.user) {
@@ -164,6 +171,7 @@ const apiObject = {
                 }
                 
                 this._sessionChecked = true;
+                this._backendReachable = true;
                 
                 return {
                     success: true,
@@ -173,12 +181,7 @@ const apiObject = {
                     data: data
                 };
             } else {
-                return {
-                    success: false,
-                    message: data.message || 'Login failed',
-                    status: response.status,
-                    data: data
-                };
+                throw new Error(data.message || 'Login failed');
             }
         } catch (error) {
             console.error('🔧 [API] Login error:', error);
@@ -204,19 +207,22 @@ const apiObject = {
         try {
             console.log('🔧 [API] Register attempt');
             
-            const response = await this._fetchWithRetry('/auth/register', {
+            const response = await fetch(`${BASE_URL}/auth/register`, {
                 method: 'POST',
-                body: JSON.stringify(userData)
+                headers: {
+                    'Content-Type': 'application/json'
+                },
+                body: JSON.stringify(userData),
+                mode: 'cors',
+                credentials: 'omit'
             });
             
             const data = await response.json();
             
             if (response.ok) {
-                // FIX: Perform EXACT SAME token handling as login
                 if (data.token) {
                     console.log(`🔧 [API] Registration successful, storing token: ${data.token.substring(0, 20)}...`);
                     localStorage.setItem('moodchat_auth_token', data.token);
-                    // Also store in authToken for compatibility with app.core.js
                     localStorage.setItem('authToken', data.token);
                 }
                 if (data.user) {
@@ -224,6 +230,7 @@ const apiObject = {
                 }
                 
                 this._sessionChecked = true;
+                this._backendReachable = true;
                 
                 return {
                     success: true,
@@ -233,12 +240,7 @@ const apiObject = {
                     data: data
                 };
             } else {
-                return {
-                    success: false,
-                    message: data.message || 'Registration failed',
-                    status: response.status,
-                    data: data
-                };
+                throw new Error(data.message || 'Registration failed');
             }
         } catch (error) {
             console.error('🔧 [API] Register error:', error);
@@ -259,14 +261,18 @@ const apiObject = {
         }
     },
     
+    // ============================================================================
+    // BACKEND HEALTH CHECK
+    // ============================================================================
+    
     checkBackendHealth: async function() {
-        console.log('🔧 [API] Checking backend health with improved method...');
+        console.log('🔧 [API] Checking backend health...');
         
         const testEndpoints = [
             '/status',
             '/auth/health',
             '/health',
-            '',
+            ''
         ];
         
         for (const endpoint of testEndpoints) {
@@ -312,6 +318,10 @@ const apiObject = {
         };
     },
     
+    // ============================================================================
+    // SESSION MANAGEMENT
+    // ============================================================================
+    
     checkSession: async function() {
         try {
             const token = localStorage.getItem('moodchat_auth_token');
@@ -350,10 +360,15 @@ const apiObject = {
             }
             
             try {
-                const response = await this._fetchWithRetry('/auth/me', {
+                const response = await fetch(`${BASE_URL}/auth/me`, {
                     method: 'GET',
-                    auth: true
-                }, false);
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'Authorization': 'Bearer ' + token
+                    },
+                    mode: 'cors',
+                    credentials: 'omit'
+                });
                 
                 if (response.ok) {
                     const data = await response.json();
@@ -436,87 +451,31 @@ const apiObject = {
         return await this.checkSession();
     },
     
-    _fetchWithRetry: async function(endpoint, options = {}, retry = true) {
-        const maxRetries = retry ? this._config.MAX_RETRIES : 0;
-        let lastError;
-        
-        for (let attempt = 0; attempt <= maxRetries; attempt++) {
-            try {
-                const token = localStorage.getItem('moodchat_auth_token');
-                const url = BASE_URL + endpoint;
-                
-                const headers = {
-                    'Content-Type': 'application/json',
-                    ...options.headers
-                };
-                
-                if (token && options.auth !== false) {
-                    headers['Authorization'] = 'Bearer ' + token;
-                }
-                
-                const fetchOptions = {
-                    method: options.method || 'GET',
-                    headers: headers,
-                    body: options.body,
-                    mode: 'cors',
-                    credentials: 'omit',
-                    ...options
-                };
-                
-                const timeout = endpoint === '/statuses/all' 
-                    ? this._config.STATUS_FETCH_TIMEOUT 
-                    : 10000;
-                
-                const controller = new AbortController();
-                const timeoutId = setTimeout(() => controller.abort(), timeout);
-                fetchOptions.signal = controller.signal;
-                
-                const response = await fetch(url, fetchOptions);
-                clearTimeout(timeoutId);
-                
-                return response;
-                
-            } catch (error) {
-                lastError = error;
-                
-                if (error.name === 'AbortError') {
-                    break;
-                }
-                
-                if (attempt < maxRetries) {
-                    console.log(`🔧 [API] Retry ${attempt + 1}/${maxRetries} for ${endpoint}:`, error.message);
-                    
-                    await new Promise(resolve => 
-                        setTimeout(resolve, this._config.RETRY_DELAY * Math.pow(2, attempt))
-                    );
-                    continue;
-                }
-            }
-        }
-        
-        throw lastError || new Error('Request failed after retries');
-    },
-    
-    request: async function(endpoint, options = {}) {
-        return window.api(endpoint, options);
-    },
+    // ============================================================================
+    // DATA FETCHING METHODS - ALL WITH CORRECT FETCH USAGE
+    // ============================================================================
     
     getStatuses: async function() {
         try {
             const token = localStorage.getItem('moodchat_auth_token');
-            const url = BASE_URL + '/statuses/all';
+            const url = `${BASE_URL}/statuses/all`;
             
-            console.log('🔧 [API] Fetching statuses with direct network request...');
+            console.log('🔧 [API] Fetching statuses...');
             
             const controller = new AbortController();
             const timeoutId = setTimeout(() => controller.abort(), this._config.STATUS_FETCH_TIMEOUT);
             
+            const headers = {
+                'Content-Type': 'application/json'
+            };
+            
+            if (token) {
+                headers['Authorization'] = 'Bearer ' + token;
+            }
+            
             const response = await fetch(url, {
                 method: 'GET',
-                headers: {
-                    'Content-Type': 'application/json',
-                    ...(token ? { 'Authorization': 'Bearer ' + token } : {})
-                },
+                headers: headers,
                 mode: 'cors',
                 credentials: 'omit',
                 signal: controller.signal
@@ -571,6 +530,7 @@ const apiObject = {
                             };
                         }
                     } catch (e) {
+                        // Ignore cache parsing errors
                     }
                 }
             }
@@ -586,9 +546,22 @@ const apiObject = {
     
     getFriends: async function() {
         try {
-            const response = await this._fetchWithRetry('/friends/list', {
+            const token = localStorage.getItem('moodchat_auth_token');
+            const url = `${BASE_URL}/friends/list`;
+            
+            const headers = {
+                'Content-Type': 'application/json'
+            };
+            
+            if (token) {
+                headers['Authorization'] = 'Bearer ' + token;
+            }
+            
+            const response = await fetch(url, {
                 method: 'GET',
-                auth: true
+                headers: headers,
+                mode: 'cors',
+                credentials: 'omit'
             });
             
             if (!response.ok) {
@@ -630,6 +603,7 @@ const apiObject = {
                         };
                     }
                 } catch (e) {
+                    // Ignore cache parsing errors
                 }
             }
             
@@ -641,6 +615,284 @@ const apiObject = {
             };
         }
     },
+    
+    getUsers: async function() {
+        try {
+            const token = localStorage.getItem('moodchat_auth_token');
+            const url = `${BASE_URL}/users`;
+            
+            const headers = {
+                'Content-Type': 'application/json'
+            };
+            
+            if (token) {
+                headers['Authorization'] = 'Bearer ' + token;
+            }
+            
+            const response = await fetch(url, {
+                method: 'GET',
+                headers: headers,
+                mode: 'cors',
+                credentials: 'omit'
+            });
+            
+            const data = await response.json();
+            
+            return {
+                success: response.ok,
+                status: response.status,
+                data: data,
+                message: response.ok ? 'Success' : 'Failed to fetch users'
+            };
+        } catch (error) {
+            console.error('🔧 [API] Get users error:', error);
+            return {
+                success: false,
+                message: 'Failed to fetch users',
+                error: error.message,
+                isNetworkError: error.message && error.message.includes('Failed to fetch')
+            };
+        }
+    },
+    
+    getUserById: async function(userId) {
+        try {
+            const token = localStorage.getItem('moodchat_auth_token');
+            const url = `${BASE_URL}/users/${userId}`;
+            
+            const headers = {
+                'Content-Type': 'application/json'
+            };
+            
+            if (token) {
+                headers['Authorization'] = 'Bearer ' + token;
+            }
+            
+            const response = await fetch(url, {
+                method: 'GET',
+                headers: headers,
+                mode: 'cors',
+                credentials: 'omit'
+            });
+            
+            const data = await response.json();
+            
+            return {
+                success: response.ok,
+                status: response.status,
+                data: data,
+                message: response.ok ? 'Success' : 'Failed to fetch user'
+            };
+        } catch (error) {
+            console.error('🔧 [API] Get user by ID error:', error);
+            return {
+                success: false,
+                message: 'Failed to fetch user',
+                error: error.message,
+                isNetworkError: error.message && error.message.includes('Failed to fetch')
+            };
+        }
+    },
+    
+    getStatus: async function(statusId) {
+        try {
+            const token = localStorage.getItem('moodchat_auth_token');
+            const url = `${BASE_URL}/status/${statusId}`;
+            
+            const headers = {
+                'Content-Type': 'application/json'
+            };
+            
+            if (token) {
+                headers['Authorization'] = 'Bearer ' + token;
+            }
+            
+            const response = await fetch(url, {
+                method: 'GET',
+                headers: headers,
+                mode: 'cors',
+                credentials: 'omit'
+            });
+            
+            const data = await response.json();
+            
+            return {
+                success: response.ok,
+                status: response.status,
+                data: data,
+                message: response.ok ? 'Success' : 'Failed to fetch status'
+            };
+        } catch (error) {
+            console.error('🔧 [API] Get status error:', error);
+            return {
+                success: false,
+                message: 'Failed to fetch status',
+                error: error.message,
+                isNetworkError: error.message && error.message.includes('Failed to fetch')
+            };
+        }
+    },
+    
+    createStatus: async function(statusData) {
+        try {
+            const token = localStorage.getItem('moodchat_auth_token');
+            const url = `${BASE_URL}/status`;
+            
+            const headers = {
+                'Content-Type': 'application/json'
+            };
+            
+            if (token) {
+                headers['Authorization'] = 'Bearer ' + token;
+            }
+            
+            const response = await fetch(url, {
+                method: 'POST',
+                headers: headers,
+                body: JSON.stringify(statusData),
+                mode: 'cors',
+                credentials: 'omit'
+            });
+            
+            const data = await response.json();
+            
+            return {
+                success: response.ok,
+                status: response.status,
+                data: data,
+                message: response.ok ? 'Status created successfully' : 'Failed to create status'
+            };
+        } catch (error) {
+            console.error('🔧 [API] Create status error:', error);
+            return {
+                success: false,
+                message: 'Failed to create status',
+                error: error.message,
+                isNetworkError: error.message && error.message.includes('Failed to fetch')
+            };
+        }
+    },
+    
+    getChats: async function() {
+        try {
+            const token = localStorage.getItem('moodchat_auth_token');
+            const url = `${BASE_URL}/chats`;
+            
+            const headers = {
+                'Content-Type': 'application/json'
+            };
+            
+            if (token) {
+                headers['Authorization'] = 'Bearer ' + token;
+            }
+            
+            const response = await fetch(url, {
+                method: 'GET',
+                headers: headers,
+                mode: 'cors',
+                credentials: 'omit'
+            });
+            
+            const data = await response.json();
+            
+            return {
+                success: response.ok,
+                status: response.status,
+                data: data,
+                message: response.ok ? 'Success' : 'Failed to fetch chats'
+            };
+        } catch (error) {
+            console.error('🔧 [API] Get chats error:', error);
+            return {
+                success: false,
+                message: 'Failed to fetch chats',
+                error: error.message,
+                isNetworkError: error.message && error.message.includes('Failed to fetch')
+            };
+        }
+    },
+    
+    getChatById: async function(chatId) {
+        try {
+            const token = localStorage.getItem('moodchat_auth_token');
+            const url = `${BASE_URL}/chats/${chatId}`;
+            
+            const headers = {
+                'Content-Type': 'application/json'
+            };
+            
+            if (token) {
+                headers['Authorization'] = 'Bearer ' + token;
+            }
+            
+            const response = await fetch(url, {
+                method: 'GET',
+                headers: headers,
+                mode: 'cors',
+                credentials: 'omit'
+            });
+            
+            const data = await response.json();
+            
+            return {
+                success: response.ok,
+                status: response.status,
+                data: data,
+                message: response.ok ? 'Success' : 'Failed to fetch chat'
+            };
+        } catch (error) {
+            console.error('🔧 [API] Get chat by ID error:', error);
+            return {
+                success: false,
+                message: 'Failed to fetch chat',
+                error: error.message,
+                isNetworkError: error.message && error.message.includes('Failed to fetch')
+            };
+        }
+    },
+    
+    getContacts: async function() {
+        try {
+            const token = localStorage.getItem('moodchat_auth_token');
+            const url = `${BASE_URL}/contacts`;
+            
+            const headers = {
+                'Content-Type': 'application/json'
+            };
+            
+            if (token) {
+                headers['Authorization'] = 'Bearer ' + token;
+            }
+            
+            const response = await fetch(url, {
+                method: 'GET',
+                headers: headers,
+                mode: 'cors',
+                credentials: 'omit'
+            });
+            
+            const data = await response.json();
+            
+            return {
+                success: response.ok,
+                status: response.status,
+                data: data,
+                message: response.ok ? 'Success' : 'Failed to fetch contacts'
+            };
+        } catch (error) {
+            console.error('🔧 [API] Get contacts error:', error);
+            return {
+                success: false,
+                message: 'Failed to fetch contacts',
+                error: error.message,
+                isNetworkError: error.message && error.message.includes('Failed to fetch')
+            };
+        }
+    },
+    
+    // ============================================================================
+    // UTILITY METHODS
+    // ============================================================================
     
     isLoggedIn: function() {
         try {
@@ -679,7 +931,7 @@ const apiObject = {
     _clearAuthData: function() {
         localStorage.removeItem('moodchat_auth_token');
         localStorage.removeItem('moodchat_auth_user');
-        localStorage.removeItem('authToken'); // Also clear compatibility token
+        localStorage.removeItem('authToken');
         this._sessionChecked = false;
     },
     
@@ -720,117 +972,19 @@ const apiObject = {
         };
     },
     
-    getUsers: async function() {
-        try {
-            const response = await this.request('/users', { method: 'GET' });
-            return response;
-        } catch (error) {
-            console.error('🔧 [API] Get users error:', error);
-            return {
-                success: false,
-                message: 'Failed to fetch users',
-                error: error.message
-            };
-        }
-    },
-    
-    getUserById: async function(userId) {
-        try {
-            const response = await this.request(`/users/${userId}`, { method: 'GET' });
-            return response;
-        } catch (error) {
-            console.error('🔧 [API] Get user by ID error:', error);
-            return {
-                success: false,
-                message: 'Failed to fetch user',
-                error: error.message
-            };
-        }
-    },
-    
-    getStatus: async function(statusId) {
-        try {
-            const response = await this.request(`/status/${statusId}`, { method: 'GET' });
-            return response;
-        } catch (error) {
-            console.error('🔧 [API] Get status error:', error);
-            return {
-                success: false,
-                message: 'Failed to fetch status',
-                error: error.message
-            };
-        }
-    },
-    
-    createStatus: async function(statusData) {
-        try {
-            const response = await this.request('/status', {
-                method: 'POST',
-                body: JSON.stringify(statusData)
-            });
-            return response;
-        } catch (error) {
-            console.error('🔧 [API] Create status error:', error);
-            return {
-                success: false,
-                message: 'Failed to create status',
-                error: error.message
-            };
-        }
-    },
-    
-    getChats: async function() {
-        try {
-            const response = await this.request('/chats', { method: 'GET' });
-            return response;
-        } catch (error) {
-            console.error('🔧 [API] Get chats error:', error);
-            return {
-                success: false,
-                message: 'Failed to fetch chats',
-                error: error.message
-            };
-        }
-    },
-    
-    getChatById: async function(chatId) {
-        try {
-            const response = await this.request(`/chats/${chatId}`, { method: 'GET' });
-            return response;
-        } catch (error) {
-            console.error('🔧 [API] Get chat by ID error:', error);
-            return {
-                success: false,
-                message: 'Failed to fetch chat',
-                error: error.message
-            };
-        }
-    },
-    
-    getContacts: async function() {
-        try {
-            const response = await this.request('/contacts', { method: 'GET' });
-            return response;
-        } catch (error) {
-            console.error('🔧 [API] Get contacts error:', error);
-            return {
-                success: false,
-                message: 'Failed to fetch contacts',
-                error: error.message
-            };
-        }
-    },
+    // ============================================================================
+    // INITIALIZATION
+    // ============================================================================
     
     initialize: async function() {
-        console.log('🔧 [API] ⚡ MoodChat API v8.0.1 initializing...');
+        console.log('🔧 [API] ⚡ MoodChat API v9.0.0 initializing...');
         console.log('🔧 [API] 🔗 Backend URL:', BASE_URL);
         console.log('🔧 [API] 🌐 Environment:', IS_LOCAL_DEVELOPMENT ? 'Local' : 'Production');
         
-        // On initialization: Read authToken from localStorage if present
+        // Restore token from localStorage if present
         const storedToken = localStorage.getItem('moodchat_auth_token');
         if (storedToken) {
             console.log(`🔧 [API] Restoring token from localStorage: ${storedToken.substring(0, 20)}...`);
-            // Ensure compatibility with app.core.js by also setting authToken
             if (!localStorage.getItem('authToken')) {
                 localStorage.setItem('authToken', storedToken);
             }
@@ -865,46 +1019,79 @@ const apiObject = {
             }
         }, this._config.SESSION_CHECK_INTERVAL);
         
-        try {
-            window.dispatchEvent(new CustomEvent('api-ready', {
-                detail: {
-                    version: this._version,
-                    timestamp: new Date().toISOString(),
-                    backendUrl: BASE_URL,
-                    user: this.getCurrentUser(),
-                    hasToken: !!localStorage.getItem('moodchat_auth_token')
-                }
-            }));
-        } catch (e) {
-        }
+        // Dispatch ready events
+        this._dispatchReadyEvents();
         
         return true;
     },
     
-    testRequirements: function() {
-        console.log('🔍 Testing API Requirements...');
+    _dispatchReadyEvents: function() {
+        const eventDetail = {
+            version: this._version,
+            timestamp: new Date().toISOString(),
+            backendUrl: BASE_URL,
+            user: this.getCurrentUser(),
+            hasToken: !!localStorage.getItem('moodchat_auth_token')
+        };
         
-        const tests = [
-            { name: 'Dynamic BASE_URL', passed: !!BASE_URL },
-            { name: 'CORS mode support', passed: true },
-            { name: 'Retry logic', passed: !!this._fetchWithRetry },
-            { name: 'Offline mode', passed: !!this.isLoggedIn },
-            { name: 'Error handling', passed: !!this.request },
-            { name: 'Backend detection', passed: !!this.checkBackendHealth },
-            { name: 'Token persistence', passed: true },
-            { name: 'Auto-login', passed: !!this.autoLogin }
-        ];
+        const events = ['api-ready', 'apiready', 'apiReady'];
         
-        tests.forEach(test => {
-            console.log(`${test.passed ? '✅' : '❌'} ${test.name}`);
+        // Immediate dispatch
+        events.forEach(eventName => {
+            try {
+                window.dispatchEvent(new CustomEvent(eventName, { detail: eventDetail }));
+                console.log(`🔧 [API] Dispatched ${eventName} event`);
+            } catch (e) {
+                console.log(`🔧 [API] Could not dispatch ${eventName}:`, e.message);
+            }
         });
         
-        return {
-            success: tests.every(t => t.passed),
-            tests: tests,
-            timestamp: new Date().toISOString()
-        };
+        // Delayed dispatch (500ms)
+        setTimeout(() => {
+            events.forEach(eventName => {
+                try {
+                    const delayedEventDetail = {
+                        ...eventDetail,
+                        delayed: true,
+                        delayMs: 500
+                    };
+                    
+                    window.dispatchEvent(new CustomEvent(eventName, {
+                        detail: delayedEventDetail
+                    }));
+                    console.log(`🔧 [API] Dispatched delayed ${eventName} event (500ms)`);
+                } catch (e) {
+                    console.log(`🔧 [API] Could not dispatch delayed ${eventName}:`, e.message);
+                }
+            });
+        }, 500);
+        
+        // Second delayed dispatch (1000ms)
+        setTimeout(() => {
+            events.forEach(eventName => {
+                try {
+                    const secondDelayedEventDetail = {
+                        ...eventDetail,
+                        delayed: true,
+                        delayMs: 1000
+                    };
+                    
+                    window.dispatchEvent(new CustomEvent(eventName, {
+                        detail: secondDelayedEventDetail
+                    }));
+                    console.log(`🔧 [API] Dispatched second delayed ${eventName} event (1000ms)`);
+                } catch (e) {
+                    console.log(`🔧 [API] Could not dispatch second delayed ${eventName}:`, e.message);
+                }
+            });
+            
+            console.log('🔧 [API] API synchronization ready');
+        }, 1000);
     },
+    
+    // ============================================================================
+    // DIAGNOSTICS
+    // ============================================================================
     
     diagnose: async function() {
         console.log('🔧 [API] Running diagnostics...');
@@ -912,7 +1099,7 @@ const apiObject = {
         const results = {
             localStorage: {
                 token: !!localStorage.getItem('moodchat_auth_token'),
-                authToken: !!localStorage.getItem('authToken'), // Compatibility check
+                authToken: !!localStorage.getItem('authToken'),
                 user: !!localStorage.getItem('moodchat_auth_user'),
                 deviceId: !!localStorage.getItem('moodchat_device_id')
             },
@@ -940,8 +1127,16 @@ const apiObject = {
         }
         
         return results;
+    },
+    
+    request: async function(endpoint, options = {}) {
+        return window.api(endpoint, options);
     }
 };
+
+// ============================================================================
+// API SETUP AND FALLBACKS
+// ============================================================================
 
 Object.assign(window.api, apiObject);
 Object.setPrototypeOf(window.api, Object.getPrototypeOf(apiObject));
@@ -952,6 +1147,7 @@ setTimeout(() => {
     window.api.initialize();
 }, 100);
 
+// Global error handlers
 if (typeof window.handleApiError === 'undefined') {
     window.handleApiError = function(error, defaultMessage) {
         if (!error) return defaultMessage || 'An error occurred';
@@ -973,6 +1169,7 @@ if (typeof window.isNetworkError === 'undefined') {
     };
 }
 
+// Fallback API for iframe compatibility
 setTimeout(() => {
     if (!window.api || typeof window.api !== 'function') {
         console.warn('⚠️ API not properly initialized, creating enhanced fallback');
@@ -1040,6 +1237,7 @@ setTimeout(() => {
 
 console.log('🔧 [API] Enhanced API loaded successfully');
 
+// Emergency fallback
 if (!window.api) {
     console.error('⚠️ window.api not set! Creating emergency API');
     const emergencyApi = function(endpoint, options) {
@@ -1063,93 +1261,10 @@ if (!window.api) {
     window.api = emergencyApi;
 }
 
+// Global API state
 window.__MOODCHAT_API_EVENTS = [];
 window.__MOODCHAT_API_INSTANCE = window.api;
 window.__MOODCHAT_API_READY = true;
+window.MOODCHAT_API_READY = true;
 
-setTimeout(() => {
-    console.log('🔧 [API] Dispatching ready event...');
-    
-    const eventDetail = {
-        version: window.api._version,
-        timestamp: new Date().toISOString(),
-        backendUrl: BASE_URL,
-        user: window.api.getCurrentUser(),
-        hasToken: !!localStorage.getItem('moodchat_auth_token')
-    };
-    
-    window.__MOODCHAT_API_EVENTS.push({
-        name: 'api-ready',
-        timestamp: new Date().toISOString(),
-        detail: eventDetail
-    });
-    
-    const events = ['api-ready', 'apiready', 'apiReady'];
-    events.forEach(eventName => {
-        try {
-            window.dispatchEvent(new CustomEvent(eventName, {
-                detail: eventDetail
-            }));
-            console.log(`🔧 [API] Dispatched ${eventName} event`);
-        } catch (e) {
-            console.log(`🔧 [API] Could not dispatch ${eventName}:`, e.message);
-        }
-    });
-    
-    window.MOODCHAT_API_READY = true;
-    console.log('🔧 [API] API is READY and accessible');
-    
-    setTimeout(() => {
-        console.log('🔧 [API] Delayed dispatch (500ms)...');
-        events.forEach(eventName => {
-            try {
-                const delayedEventDetail = {
-                    ...eventDetail,
-                    delayed: true,
-                    delayMs: 500
-                };
-                
-                window.__MOODCHAT_API_EVENTS.push({
-                    name: eventName + '-delayed-500ms',
-                    timestamp: new Date().toISOString(),
-                    detail: delayedEventDetail
-                });
-                
-                window.dispatchEvent(new CustomEvent(eventName, {
-                    detail: delayedEventDetail
-                }));
-                console.log(`🔧 [API] Dispatched delayed ${eventName} event (500ms)`);
-            } catch (e) {
-                console.log(`🔧 [API] Could not dispatch delayed ${eventName}:`, e.message);
-            }
-        });
-    }, 500);
-    
-    setTimeout(() => {
-        console.log('🔧 [API] Second delayed dispatch (1000ms)...');
-        events.forEach(eventName => {
-            try {
-                const secondDelayedEventDetail = {
-                    ...eventDetail,
-                    delayed: true,
-                    delayMs: 1000
-                };
-                
-                window.__MOODCHAT_API_EVENTS.push({
-                    name: eventName + '-delayed-1000ms',
-                    timestamp: new Date().toISOString(),
-                    detail: secondDelayedEventDetail
-                });
-                
-                window.dispatchEvent(new CustomEvent(eventName, {
-                    detail: secondDelayedEventDetail
-                }));
-                console.log(`🔧 [API] Dispatched second delayed ${eventName} event (1000ms)`);
-            } catch (e) {
-                console.log(`🔧 [API] Could not dispatch second delayed ${eventName}:`, e.message);
-            }
-        });
-        
-        console.log('🔧 [API] API synchronization ready');
-    }, 1000);
-}, 200);
+console.log('🔧 [API] Backend API integration complete');

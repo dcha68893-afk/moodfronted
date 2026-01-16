@@ -1597,7 +1597,7 @@
                             </div>
                             <div class="error-message hidden" id="loginIdentifierError">
                                 <i class="fas fa-exclamation-circle"></i>
-                                <span>Please enter a valid email</span>
+                                <span id="loginIdentifierErrorText">Please enter a valid email</span>
                             </div>
                         </div>
                         
@@ -1618,7 +1618,7 @@
                             </div>
                             <div class="error-message hidden" id="loginPasswordError">
                                 <i class="fas fa-exclamation-circle"></i>
-                                <span>Password is required</span>
+                                <span id="loginPasswordErrorText">Password is required</span>
                             </div>
                         </div>
                         
@@ -1695,7 +1695,7 @@
                             </div>
                             <div class="error-message hidden" id="registerNameError">
                                 <i class="fas fa-exclamation-circle"></i>
-                                <span>Display name is required</span>
+                                <span id="registerNameErrorText">Display name is required</span>
                             </div>
                         </div>
                         
@@ -1713,7 +1713,7 @@
                             </div>
                             <div class="error-message hidden" id="registerUsernameError">
                                 <i class="fas fa-exclamation-circle"></i>
-                                <span>Username required (3-20 chars)</span>
+                                <span id="registerUsernameErrorText">Username required (3-20 chars)</span>
                             </div>
                         </div>
                         
@@ -1731,7 +1731,7 @@
                             </div>
                             <div class="error-message hidden" id="registerEmailError">
                                 <i class="fas fa-exclamation-circle"></i>
-                                <span>Please enter a valid email</span>
+                                <span id="registerEmailErrorText">Please enter a valid email</span>
                             </div>
                         </div>
                         
@@ -1752,7 +1752,7 @@
                             </div>
                             <div class="error-message hidden" id="registerPasswordError">
                                 <i class="fas fa-exclamation-circle"></i>
-                                <span>Minimum 8 characters</span>
+                                <span id="registerPasswordErrorText">Minimum 8 characters</span>
                             </div>
                         </div>
                         
@@ -1773,7 +1773,7 @@
                             </div>
                             <div class="error-message hidden" id="registerConfirmPasswordError">
                                 <i class="fas fa-exclamation-circle"></i>
-                                <span>Passwords must match</span>
+                                <span id="registerConfirmPasswordErrorText">Passwords must match</span>
                             </div>
                         </div>
                         
@@ -1785,7 +1785,7 @@
                         </div>
                         
                         <div class="form-group mb-30">
-                            <button type="submit" class="btn btn-success">
+                            <button type="submit" class="btn btn-success" id="register-button">
                                 <i class="fas fa-user-plus"></i>
                                 <span>Create Free Account</span>
                                 <div class="spinner hidden" id="registerSpinner"></div>
@@ -1815,7 +1815,7 @@
                             </div>
                             <div class="error-message hidden" id="forgotPasswordError">
                                 <i class="fas fa-exclamation-circle"></i>
-                                <span>Please enter a valid email</span>
+                                <span id="forgotPasswordErrorText">Please enter a valid email</span>
                             </div>
                             <div class="success-message hidden" id="forgotPasswordSuccess">
                                 <i class="fas fa-check-circle"></i>
@@ -1925,6 +1925,243 @@
     <!-- This handles the instant form switching without network dependency -->
     <script>
         // =============================================
+        // CONFIGURATION
+        // =============================================
+        const API_BASE_URL = 'https://moodchat-backend-1.onrender.com/api';
+        const LOGIN_ENDPOINT = `${API_BASE_URL}/auth/login`;
+        const REGISTER_ENDPOINT = `${API_BASE_URL}/auth/register`;
+        const AUTH_TOKEN_KEY = 'moodchat_auth_token';
+        const USER_DATA_KEY = 'moodchat_user_data';
+        
+        // =============================================
+        // UTILITY FUNCTIONS
+        // =============================================
+        function showNotification(type, title, message) {
+            console.log(`${type}: ${title} - ${message}`);
+            
+            // Simple inline notification - you can enhance this with your existing notification system
+            const notificationContainer = document.getElementById('notificationContainer');
+            if (!notificationContainer) return;
+            
+            const notification = document.createElement('div');
+            notification.className = `notification ${type}`;
+            notification.innerHTML = `
+                <div class="notification-icon">
+                    <i class="fas fa-${type === 'success' ? 'check-circle' : type === 'error' ? 'exclamation-circle' : 'info-circle'}"></i>
+                </div>
+                <div class="notification-content">
+                    <div class="notification-title">${title}</div>
+                    <div class="notification-message">${message}</div>
+                </div>
+                <button class="notification-close">
+                    <i class="fas fa-times"></i>
+                </button>
+            `;
+            
+            notificationContainer.appendChild(notification);
+            
+            // Show with animation
+            setTimeout(() => notification.classList.add('show'), 10);
+            
+            // Auto remove after 5 seconds
+            setTimeout(() => {
+                notification.classList.remove('show');
+                setTimeout(() => notification.remove(), 300);
+            }, 5000);
+            
+            // Close button
+            notification.querySelector('.notification-close').addEventListener('click', () => {
+                notification.classList.remove('show');
+                setTimeout(() => notification.remove(), 300);
+            });
+        }
+        
+        function showFormError(elementId, message) {
+            const element = document.getElementById(elementId);
+            if (!element) return;
+            
+            const errorText = element.querySelector('span') || element;
+            if (errorText.tagName === 'SPAN') {
+                errorText.textContent = message;
+            } else {
+                // Find the span inside
+                const span = element.querySelector('span');
+                if (span) span.textContent = message;
+            }
+            
+            element.classList.remove('hidden');
+            element.classList.add('shake');
+            
+            setTimeout(() => element.classList.remove('shake'), 500);
+        }
+        
+        function hideFormError(elementId) {
+            const element = document.getElementById(elementId);
+            if (element) {
+                element.classList.add('hidden');
+            }
+        }
+        
+        function clearAllFormErrors() {
+            document.querySelectorAll('.error-message').forEach(el => el.classList.add('hidden'));
+        }
+        
+        function setLoading(buttonId, isLoading) {
+            const button = document.getElementById(buttonId);
+            if (!button) return;
+            
+            const spinner = button.querySelector('.spinner');
+            if (spinner) {
+                spinner.classList.toggle('hidden', !isLoading);
+            }
+            
+            button.disabled = isLoading;
+            
+            // Also disable/enable all buttons within the same form
+            const form = button.closest('form');
+            if (form) {
+                form.querySelectorAll('button[type="submit"]').forEach(btn => {
+                    if (btn !== button) {
+                        btn.disabled = isLoading;
+                    }
+                });
+            }
+        }
+        
+        function saveAuthData(token, userData) {
+            try {
+                if (token) {
+                    localStorage.setItem(AUTH_TOKEN_KEY, token);
+                    sessionStorage.setItem(AUTH_TOKEN_KEY, token);
+                }
+                if (userData) {
+                    localStorage.setItem(USER_DATA_KEY, JSON.stringify(userData));
+                    sessionStorage.setItem(USER_DATA_KEY, JSON.stringify(userData));
+                }
+                return true;
+            } catch (error) {
+                console.error('Failed to save auth data:', error);
+                return false;
+            }
+        }
+        
+        function getAuthToken() {
+            return localStorage.getItem(AUTH_TOKEN_KEY) || sessionStorage.getItem(AUTH_TOKEN_KEY);
+        }
+        
+        function getUserData() {
+            const data = localStorage.getItem(USER_DATA_KEY) || sessionStorage.getItem(USER_DATA_KEY);
+            return data ? JSON.parse(data) : null;
+        }
+        
+        function clearAuthData() {
+            localStorage.removeItem(AUTH_TOKEN_KEY);
+            localStorage.removeItem(USER_DATA_KEY);
+            sessionStorage.removeItem(AUTH_TOKEN_KEY);
+            sessionStorage.removeItem(USER_DATA_KEY);
+        }
+        
+        function isOnline() {
+            return navigator.onLine;
+        }
+        
+        // =============================================
+        // BACKEND API FUNCTIONS
+        // =============================================
+        async function loginWithBackend(identifier, password) {
+            if (!isOnline()) {
+                throw new Error('No internet connection. Please check your network and try again.');
+            }
+            
+            try {
+                const response = await fetch(LOGIN_ENDPOINT, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify({ identifier, password })
+                });
+                
+                const data = await response.json();
+                
+                if (!response.ok) {
+                    throw new Error(data.message || 'Login failed. Please check your credentials.');
+                }
+                
+                return {
+                    success: true,
+                    token: data.token || data.accessToken,
+                    user: data.user || { username: identifier.split('@')[0], email: identifier.includes('@') ? identifier : null }
+                };
+            } catch (error) {
+                console.error('Login error:', error);
+                throw error;
+            }
+        }
+        
+        async function registerWithBackend(username, email, password, displayName) {
+            if (!isOnline()) {
+                throw new Error('No internet connection. Registration requires an internet connection.');
+            }
+            
+            try {
+                const response = await fetch(REGISTER_ENDPOINT, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify({ 
+                        username, 
+                        email, 
+                        password,
+                        displayName: displayName || username
+                    })
+                });
+                
+                const data = await response.json();
+                
+                if (!response.ok) {
+                    const errorMsg = data.message || 
+                                   (data.errors ? data.errors.map(e => e.msg).join(', ') : 'Registration failed');
+                    throw new Error(errorMsg);
+                }
+                
+                return {
+                    success: true,
+                    token: data.token || data.accessToken,
+                    user: data.user || { username, email, displayName: displayName || username }
+                };
+            } catch (error) {
+                console.error('Registration error:', error);
+                throw error;
+            }
+        }
+        
+        // =============================================
+        // OFFLINE MODE FUNCTIONS
+        // =============================================
+        function attemptOfflineLogin(identifier, password) {
+            // Check if we have cached user data
+            const cachedUser = getUserData();
+            
+            if (cachedUser) {
+                // Very basic offline validation - in production this would be more secure
+                const cachedIdentifier = cachedUser.email || cachedUser.username;
+                if (cachedIdentifier === identifier) {
+                    // Note: In a real app, you'd use a hashed comparison or other secure method
+                    // This is just for demo purposes
+                    return {
+                        success: true,
+                        token: getAuthToken(),
+                        user: cachedUser
+                    };
+                }
+            }
+            
+            throw new Error('Cannot login offline. No cached credentials found.');
+        }
+        
+        // =============================================
         // IMMEDIATE FORM TOGGLING SCRIPT
         // This ensures forms toggle instantly without waiting for other scripts
         // =============================================
@@ -1995,6 +2232,24 @@
                             }
                             if (panelTitle) panelTitle.textContent = 'MoodChat Dashboard';
                             if (panelSubtitle) panelSubtitle.textContent = 'Welcome back!';
+                            
+                            // Update dashboard with user data
+                            const userData = getUserData();
+                            if (userData) {
+                                const dashboardGreeting = document.getElementById('dashboardGreeting');
+                                const dashboardEmail = document.getElementById('dashboardEmail');
+                                const dashboardAvatar = document.getElementById('dashboardAvatar');
+                                
+                                if (dashboardGreeting) {
+                                    dashboardGreeting.textContent = `Welcome, ${userData.displayName || userData.username}!`;
+                                }
+                                if (dashboardEmail && userData.email) {
+                                    dashboardEmail.textContent = userData.email;
+                                }
+                                if (dashboardAvatar && (userData.displayName || userData.username)) {
+                                    dashboardAvatar.textContent = (userData.displayName || userData.username).charAt(0).toUpperCase();
+                                }
+                            }
                             break;
                     }
                     
@@ -2025,9 +2280,8 @@
                 if (registerSpinner) registerSpinner.classList.remove('hidden');
                 if (loginButton) loginButton.disabled = true;
                 
-                // Simulate API call delay
+                // Redirect to chat.html after a short delay
                 setTimeout(() => {
-                    // Redirect to chat.html
                     window.location.href = 'chat.html';
                 }, 1500);
             }
@@ -2037,35 +2291,67 @@
             // =============================================
             const loginFormElement = document.getElementById('login-form');
             if (loginFormElement) {
-                loginFormElement.addEventListener('submit', function(e) {
+                loginFormElement.addEventListener('submit', async function(e) {
                     e.preventDefault();
                     
-                    // Get form values
-                    const identifier = document.getElementById('loginIdentifier').value;
-                    const password = document.getElementById('loginPassword').value;
+                    // Clear previous errors
+                    clearAllFormErrors();
                     
-                    // Simple validation
-                    if (!identifier || !password) {
-                        // Show error messages
-                        const identifierError = document.getElementById('loginIdentifierError');
-                        const passwordError = document.getElementById('loginPasswordError');
-                        
-                        if (!identifier && identifierError) identifierError.classList.remove('hidden');
-                        if (!password && passwordError) passwordError.classList.remove('hidden');
+                    // Get form values
+                    const identifier = document.getElementById('loginIdentifier').value.trim();
+                    const password = document.getElementById('loginPassword').value;
+                    const rememberMe = document.getElementById('rememberMe').checked;
+                    
+                    // Basic validation
+                    if (!identifier) {
+                        showFormError('loginIdentifierError', 'Please enter your email or username');
                         return;
                     }
                     
-                    // Hide error messages
-                    document.querySelectorAll('.error-message').forEach(el => el.classList.add('hidden'));
+                    if (!password) {
+                        showFormError('loginPasswordError', 'Please enter your password');
+                        return;
+                    }
                     
-                    // Simulate successful login
-                    console.log('Login successful for:', identifier);
+                    // Set loading state
+                    setLoading('login-button', true);
                     
-                    // Show dashboard temporarily
-                    showForm('dashboard');
-                    
-                    // Redirect to chat.html after 2 seconds
-                    setTimeout(redirectToChat, 2000);
+                    try {
+                        let result;
+                        
+                        if (isOnline()) {
+                            // Try backend login first
+                            result = await loginWithBackend(identifier, password);
+                            showNotification('success', 'Login Successful', 'Welcome back!');
+                        } else {
+                            // Offline mode - use cached data
+                            result = attemptOfflineLogin(identifier, password);
+                            showNotification('info', 'Offline Login', 'Logged in using cached credentials');
+                        }
+                        
+                        if (result.success) {
+                            // Save auth data
+                            const storage = rememberMe ? localStorage : sessionStorage;
+                            saveAuthData(result.token, result.user);
+                            
+                            // Show dashboard temporarily
+                            showForm('dashboard');
+                            
+                            // Redirect to chat.html after 2 seconds
+                            setTimeout(redirectToChat, 2000);
+                        }
+                    } catch (error) {
+                        console.error('Login failed:', error);
+                        
+                        // Show error to user
+                        showFormError('loginIdentifierError', error.message || 'Login failed. Please check your credentials.');
+                        showNotification('error', 'Login Failed', error.message || 'Please check your credentials and try again.');
+                        
+                        // Do NOT redirect on error
+                    } finally {
+                        // Reset loading state
+                        setLoading('login-button', false);
+                    }
                 });
             }
             
@@ -2074,42 +2360,45 @@
             // =============================================
             const registerFormElement = document.getElementById('register-form');
             if (registerFormElement) {
-                registerFormElement.addEventListener('submit', function(e) {
+                registerFormElement.addEventListener('submit', async function(e) {
                     e.preventDefault();
                     
+                    // Clear previous errors
+                    clearAllFormErrors();
+                    
                     // Get form values
-                    const displayName = document.getElementById('registerDisplayName').value;
-                    const username = document.getElementById('registerUsername').value;
-                    const email = document.getElementById('registerEmail').value;
+                    const displayName = document.getElementById('registerDisplayName').value.trim();
+                    const username = document.getElementById('registerUsername').value.trim();
+                    const email = document.getElementById('registerEmail').value.trim();
                     const password = document.getElementById('registerPassword').value;
                     const confirmPassword = document.getElementById('registerConfirmPassword').value;
                     const acceptTerms = document.getElementById('acceptTerms').checked;
                     
-                    // Simple validation
+                    // Validation
                     let isValid = true;
                     
                     if (!displayName) {
-                        document.getElementById('registerNameError')?.classList.remove('hidden');
+                        showFormError('registerNameError', 'Please enter a display name');
                         isValid = false;
                     }
                     
                     if (!username || username.length < 3) {
-                        document.getElementById('registerUsernameError')?.classList.remove('hidden');
+                        showFormError('registerUsernameError', 'Username must be at least 3 characters');
                         isValid = false;
                     }
                     
-                    if (!email || !email.includes('@')) {
-                        document.getElementById('registerEmailError')?.classList.remove('hidden');
+                    if (!email || !email.includes('@') || !email.includes('.')) {
+                        showFormError('registerEmailError', 'Please enter a valid email address');
                         isValid = false;
                     }
                     
                     if (!password || password.length < 8) {
-                        document.getElementById('registerPasswordError')?.classList.remove('hidden');
+                        showFormError('registerPasswordError', 'Password must be at least 8 characters');
                         isValid = false;
                     }
                     
                     if (password !== confirmPassword) {
-                        document.getElementById('registerConfirmPasswordError')?.classList.remove('hidden');
+                        showFormError('registerConfirmPasswordError', 'Passwords do not match');
                         isValid = false;
                     }
                     
@@ -2120,17 +2409,46 @@
                     
                     if (!isValid) return;
                     
-                    // Hide error messages
-                    document.querySelectorAll('.error-message').forEach(el => el.classList.add('hidden'));
+                    // Set loading state
+                    setLoading('register-button', true);
                     
-                    // Simulate successful registration
-                    console.log('Registration successful for:', email);
-                    
-                    // Show dashboard temporarily
-                    showForm('dashboard');
-                    
-                    // Redirect to chat.html after 2 seconds
-                    setTimeout(redirectToChat, 2000);
+                    try {
+                        // Attempt registration with backend
+                        const result = await registerWithBackend(username, email, password, displayName);
+                        
+                        if (result.success) {
+                            // Save auth data to localStorage (registration implies remember me)
+                            saveAuthData(result.token, result.user);
+                            
+                            showNotification('success', 'Registration Successful', 'Welcome to MoodChat!');
+                            
+                            // Show dashboard temporarily
+                            showForm('dashboard');
+                            
+                            // Redirect to chat.html after 2 seconds
+                            setTimeout(redirectToChat, 2000);
+                        }
+                    } catch (error) {
+                        console.error('Registration failed:', error);
+                        
+                        // Handle specific error cases
+                        let errorMessage = error.message || 'Registration failed. Please try again.';
+                        
+                        if (errorMessage.includes('duplicate') || errorMessage.includes('already exists')) {
+                            if (errorMessage.includes('email')) {
+                                showFormError('registerEmailError', 'This email is already registered');
+                            } else if (errorMessage.includes('username')) {
+                                showFormError('registerUsernameError', 'This username is already taken');
+                            }
+                        } else if (errorMessage.includes('validation') || errorMessage.includes('invalid')) {
+                            showFormError('registerEmailError', 'Please check your information and try again');
+                        }
+                        
+                        showNotification('error', 'Registration Failed', errorMessage);
+                    } finally {
+                        // Reset loading state
+                        setLoading('register-button', false);
+                    }
                 });
             }
             
@@ -2142,11 +2460,18 @@
                 quickLoginBtn.addEventListener('click', function() {
                     console.log('Quick login initiated');
                     
-                    // Show dashboard temporarily
-                    showForm('dashboard');
+                    // Check for cached credentials
+                    const cachedToken = getAuthToken();
+                    const cachedUser = getUserData();
                     
-                    // Redirect to chat.html after 1 second
-                    setTimeout(redirectToChat, 1000);
+                    if (cachedToken && cachedUser) {
+                        showNotification('info', 'Quick Login', 'Logging in with cached credentials...');
+                        showForm('dashboard');
+                        setTimeout(redirectToChat, 1000);
+                    } else {
+                        showNotification('warning', 'Quick Login Unavailable', 'No cached credentials found');
+                        showForm('login');
+                    }
                 });
             }
             
@@ -2306,7 +2631,10 @@
                     const forgotPasswordSpinner = document.getElementById('forgotPasswordSpinner');
                     
                     if (!email || !email.includes('@')) {
-                        if (forgotPasswordError) forgotPasswordError.classList.remove('hidden');
+                        if (forgotPasswordError) {
+                            forgotPasswordError.classList.remove('hidden');
+                            showFormError('forgotPasswordError', 'Please enter a valid email');
+                        }
                         if (forgotPasswordSuccess) forgotPasswordSuccess.classList.add('hidden');
                         return;
                     }
@@ -2319,6 +2647,7 @@
                         if (forgotPasswordSpinner) forgotPasswordSpinner.classList.add('hidden');
                         if (forgotPasswordError) forgotPasswordError.classList.add('hidden');
                         if (forgotPasswordSuccess) forgotPasswordSuccess.classList.remove('hidden');
+                        showNotification('info', 'Reset Email Sent', 'Check your email for password reset instructions');
                     }, 1500);
                 });
             }
@@ -2331,6 +2660,8 @@
                 removeQuickLogin.addEventListener('click', function() {
                     const quickLoginCard = document.getElementById('quickLoginCard');
                     if (quickLoginCard) quickLoginCard.classList.add('hidden');
+                    clearAuthData();
+                    showNotification('info', 'Quick Login Removed', 'Your cached login has been removed');
                 });
             }
             
@@ -2350,20 +2681,58 @@
             if (logoutBtn) {
                 logoutBtn.addEventListener('click', function() {
                     console.log('User logged out');
+                    clearAuthData();
+                    showNotification('info', 'Logged Out', 'You have been successfully logged out');
                     showForm('login');
                 });
             }
             
             // =============================================
-            // INITIALIZE QUICK LOGIN CARD (for demo)
+            // CHECK FOR EXISTING AUTH ON PAGE LOAD
             // =============================================
-            // Uncomment to show quick login card on page load for demo
-            // const quickLoginCard = document.getElementById('quickLoginCard');
-            // if (quickLoginCard) {
-            //     setTimeout(() => {
-            //         quickLoginCard.classList.remove('hidden');
-            //     }, 1000);
-            // }
+            // Check if user is already logged in
+            const authToken = getAuthToken();
+            const userData = getUserData();
+            
+            if (authToken && userData) {
+                // Show quick login card
+                const quickLoginCard = document.getElementById('quickLoginCard');
+                const quickLoginName = document.getElementById('quickLoginName');
+                const quickLoginEmail = document.getElementById('quickLoginEmail');
+                const quickLoginAvatar = document.getElementById('quickLoginAvatar');
+                
+                if (quickLoginCard && quickLoginName && quickLoginEmail && quickLoginAvatar) {
+                    quickLoginName.textContent = `Welcome back, ${userData.displayName || userData.username}!`;
+                    quickLoginEmail.textContent = userData.email || 'Ready to chat?';
+                    quickLoginAvatar.textContent = (userData.displayName || userData.username).charAt(0).toUpperCase();
+                    quickLoginCard.classList.remove('hidden');
+                }
+            }
+            
+            // =============================================
+            // NETWORK STATUS MONITORING
+            // =============================================
+            function updateNetworkStatus() {
+                const connectionStatus = document.querySelector('.connection-status');
+                if (connectionStatus) {
+                    if (isOnline()) {
+                        connectionStatus.innerHTML = '<i class="fas fa-wifi"></i><span>Connected to Network</span>';
+                        connectionStatus.style.background = 'rgba(46, 204, 113, 0.1)';
+                        connectionStatus.style.color = 'var(--success-color)';
+                    } else {
+                        connectionStatus.innerHTML = '<i class="fas fa-wifi-slash"></i><span>Offline Mode</span>';
+                        connectionStatus.style.background = 'rgba(241, 196, 15, 0.1)';
+                        connectionStatus.style.color = 'var(--warning-color)';
+                    }
+                }
+            }
+            
+            // Initial status
+            updateNetworkStatus();
+            
+            // Listen for network changes
+            window.addEventListener('online', updateNetworkStatus);
+            window.addEventListener('offline', updateNetworkStatus);
         });
     </script>
     
