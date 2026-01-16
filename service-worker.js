@@ -1,10 +1,10 @@
 // Service Worker for PWA Chat Application
-// Version: 3.1.5 - Fixed critical caching rules for auth and API endpoints
-// Cache Strategy: Cache-First for static assets, Network-First for API/HTML
+// Version: 4.0.0 - Critical API bypass for production
+// Cache Strategy: Cache-First for static assets, Network-Only for API
 
-const CACHE_NAME = 'moodchat-v9';
-const API_CACHE_NAME = 'moodchat-api-v9';
-const OFFLINE_CACHE_NAME = 'moodchat-offline-v9';
+const CACHE_NAME = 'moodchat-v10';
+const API_CACHE_NAME = 'moodchat-api-v10';
+const OFFLINE_CACHE_NAME = 'moodchat-offline-v10';
 
 // App shell - all static assets that make up the UI
 const APP_SHELL_ASSETS = [
@@ -50,19 +50,13 @@ const OPTIONAL_ASSETS = [
   '/icons/settings.svg'
 ];
 
-// API endpoints that should use network-first strategy
-const API_ENDPOINTS = [
-  '/api/messages',
-  '/api/conversations',
-  '/api/users',
-  '/api/profile',
-  '/api/friends',
-  '/api/groups',
-  '/api/status',
-  '/api/calls'
+// CRITICAL: API BYPASS LIST - ALL /api/* requests MUST bypass cache
+const API_BYPASS_PATHS = [
+  // ANYTHING under /api/ - MUST bypass cache completely
+  '/api/'
 ];
 
-// CRITICAL: Authentication and sensitive endpoints - NEVER cache these
+// Authentication and sensitive endpoints - NEVER cache these
 const NEVER_CACHE_ENDPOINTS = [
   // Auth API endpoints
   '/api/auth',
@@ -73,9 +67,7 @@ const NEVER_CACHE_ENDPOINTS = [
   '/api/verify',
   '/api/token',
   '/api/session',
-  '/api/auth/',
-  // CRITICAL FIX: Add /api/status to NEVER cache
-  '/api/status'
+  '/api/auth/'
 ];
 
 // Authentication HTML pages - NEVER cache these (to prevent auth loops)
@@ -96,7 +88,7 @@ const NEVER_CACHE_JS = [
 
 // Install event - cache app shell with error handling
 self.addEventListener('install', event => {
-  console.log('[Service Worker] Installing v3.1.5...');
+  console.log('[Service Worker] Installing v4.0.0 - API BYPASS ENABLED...');
   
   event.waitUntil(
     (async () => {
@@ -190,7 +182,7 @@ self.addEventListener('install', event => {
 
 // Activate event - clean up old caches
 self.addEventListener('activate', event => {
-  console.log('[Service Worker] Activating v3.1.5...');
+  console.log('[Service Worker] Activating v4.0.0 - API BYPASS ENABLED...');
   
   event.waitUntil(
     Promise.all([
@@ -218,8 +210,9 @@ self.addEventListener('activate', event => {
         clients.forEach(client => {
           client.postMessage({
             type: 'SW_ACTIVATED',
-            version: '3.1.5',
-            timestamp: Date.now()
+            version: '4.0.0',
+            timestamp: Date.now(),
+            apiBypass: true
           });
         });
       });
@@ -227,11 +220,18 @@ self.addEventListener('activate', event => {
   );
 });
 
-// Helper: Check if request should NEVER be cached
-function shouldNeverCache(requestUrl) {
+// CRITICAL API BYPASS FUNCTION: Check if request should bypass cache completely
+function shouldBypassCache(requestUrl) {
   const url = new URL(requestUrl, self.location.origin);
   
-  // NEVER cache POST, PUT, DELETE requests
+  // CRITICAL: ANY /api/* request MUST bypass cache completely
+  // This is the most important fix for the production issues
+  if (url.pathname.startsWith('/api/')) {
+    console.log('[Service Worker] API BYPASS: /api/* request detected:', url.pathname);
+    return true;
+  }
+  
+  // Never cache POST, PUT, DELETE requests
   if (typeof requestUrl === 'object' && ['POST', 'PUT', 'DELETE'].includes(requestUrl.method)) {
     return true;
   }
@@ -322,12 +322,6 @@ function isNeverCacheJs(path) {
   });
 }
 
-// Helper: Check if request is for API
-function isApiRequest(request) {
-  const url = new URL(request.url);
-  return API_ENDPOINTS.some(endpoint => url.pathname.startsWith(endpoint));
-}
-
 // Helper: Check if request is for static asset
 function isStaticAssetRequest(request) {
   const url = new URL(request.url);
@@ -344,31 +338,6 @@ function isHtmlRequest(request) {
   return extension === 'html' || request.headers.get('Accept')?.includes('text/html');
 }
 
-// Helper: Check if response should not be cached
-function shouldNotCacheResponse(response) {
-  // Never cache redirect responses
-  if (response.status >= 300 && response.status < 400) {
-    return true;
-  }
-  
-  // Never cache authentication errors (401, 403)
-  if (response.status === 401 || response.status === 403) {
-    return true;
-  }
-  
-  // Never cache server errors (500+)
-  if (response.status >= 500) {
-    return true;
-  }
-  
-  // Never cache opaque responses
-  if (response.type === 'opaqueredirect' || response.type === 'opaque') {
-    return true;
-  }
-  
-  return false;
-}
-
 // Helper: Check if URL is valid for caching
 function isValidUrl(url) {
   try {
@@ -377,27 +346,6 @@ function isValidUrl(url) {
   } catch (e) {
     return false;
   }
-}
-
-// CRITICAL FIX: Enhanced helper to check if request is for authentication-sensitive endpoint
-function isAuthSensitiveRequest(request) {
-  const url = new URL(request.url);
-  
-  // Check for auth endpoints
-  if (shouldNeverCache(request.url)) {
-    return true;
-  }
-  
-  // Check for authentication headers or cookies
-  const hasAuthHeader = request.headers.get('Authorization') || 
-                       request.headers.get('X-Auth-Token') ||
-                       request.headers.get('Cookie');
-  
-  if (hasAuthHeader && url.pathname.includes('/api/')) {
-    return true;
-  }
-  
-  return false;
 }
 
 // CRITICAL: Handle HTML page requests with network-first strategy
@@ -419,14 +367,18 @@ async function handleHtmlRequest(request) {
     // Network first for HTML to get fresh authentication state
     const networkResponse = await fetch(request);
     
-    // CRITICAL: Don't cache error responses or redirects
-    if (shouldNotCacheResponse(networkResponse)) {
-      console.log('[Service Worker] Not caching HTML response:', url.pathname, networkResponse.status);
+    // Don't cache redirect responses
+    if (networkResponse.status >= 300 && networkResponse.status < 400) {
+      return networkResponse;
+    }
+    
+    // Don't cache authentication errors
+    if (networkResponse.status === 401 || networkResponse.status === 403) {
       return networkResponse;
     }
     
     // Only cache successful responses that aren't auth-related
-    if (networkResponse.ok && !shouldNeverCache(request.url) && !url.pathname.startsWith('/auth/')) {
+    if (networkResponse.ok && !url.pathname.startsWith('/auth/') && !isNeverCacheHtml(url.pathname)) {
       const cache = await caches.open(CACHE_NAME);
       await cache.put(request, networkResponse.clone());
     }
@@ -448,145 +400,51 @@ async function handleHtmlRequest(request) {
   }
 }
 
-// CRITICAL: Handle API requests with network-first, cache-fallback only for GET
+// CRITICAL API BYPASS: Handle API requests - NO CACHING, NO FALLBACK
 async function handleApiRequest(request) {
   const url = new URL(request.url);
   
-  // CRITICAL FIX: NEVER cache POST, PUT, DELETE requests or auth endpoints
-  if (['POST', 'PUT', 'DELETE'].includes(request.method) || shouldNeverCache(request.url) || url.pathname.startsWith('/auth/')) {
-    console.log('[Service Worker] Never-cache API (' + request.method + '):', url.pathname);
-    return fetch(request);
-  }
+  console.log('[Service Worker] API BYPASS: Direct fetch for', url.pathname);
   
-  // CRITICAL FIX: Special handling for /api/status - always fetch from network, no fallback
-  if (url.pathname.startsWith('/api/status')) {
-    console.log('[Service Worker] /api/status - network only, no cache');
-    try {
-      const response = await fetch(request);
-      // Don't cache status endpoint even if successful
-      return response;
-    } catch (error) {
-      // For /api/status, return proper error instead of cached data
-      console.log('[Service Worker] /api/status network failed');
-      return new Response(JSON.stringify({
-        status: 'error',
-        online: false,
-        message: 'Network error checking status',
-        timestamp: Date.now()
-      }), {
-        status: 503, // Service Unavailable
-        headers: {
-          'Content-Type': 'application/json',
-          'X-Status': 'offline',
-          'X-SW-Fallback': 'network-error'
-        }
-      });
-    }
-  }
-  
+  // CRITICAL: ALL /api/* requests go directly to network with no caching
+  // This solves the "app shows offline while online" problem
   try {
-    // Network first for API
-    const networkResponse = await fetch(request);
+    // Direct fetch - no caching, no interception
+    const response = await fetch(request);
     
-    // CRITICAL: Don't cache error responses
-    if (shouldNotCacheResponse(networkResponse)) {
-      console.log('[Service Worker] Not caching API error:', url.pathname, networkResponse.status);
-      return networkResponse;
-    }
-    
-    // Only cache successful GET responses
-    if (networkResponse.ok && !shouldNeverCache(request.url) && !url.pathname.startsWith('/auth/')) {
-      const cache = await caches.open(API_CACHE_NAME);
-      await cache.put(request, networkResponse.clone());
-    }
-    
-    return networkResponse;
+    // CRITICAL: Never cache any API response
+    // This solves "API calls return cached responses" problem
+    console.log(`[Service Worker] API BYPASS: ${url.pathname} -> ${response.status}`);
+    return response;
   } catch (error) {
-    console.log('[Service Worker] API network failed, trying cache:', error);
+    console.log('[Service Worker] API BYPASS: Network failed for', url.pathname);
     
-    // CRITICAL FIX: Don't return fake 200 OK for auth-sensitive requests
-    if (isAuthSensitiveRequest(request)) {
-      console.log('[Service Worker] Auth-sensitive API offline - returning proper error');
-      return new Response(JSON.stringify({
-        status: 'auth_error',
-        message: 'Authentication required - offline',
-        requiresOnline: true,
-        cached: false
-      }), {
-        status: 401, // Unauthorized
-        headers: {
-          'Content-Type': 'application/json',
-          'X-Cache': 'MISS',
-          'X-SW-Auth-Required': 'true'
-        }
-      });
-    }
-    
-    // Fall back to cache ONLY for GET non-auth requests
-    const cache = await caches.open(API_CACHE_NAME);
-    const cachedResponse = await cache.match(request);
-    
-    if (cachedResponse) {
-      // Check if cached response is still valid for non-sensitive data
-      const dateHeader = cachedResponse.headers.get('date');
-      const cachedTime = dateHeader ? new Date(dateHeader).getTime() : 0;
-      const now = Date.now();
-      const maxAge = 5 * 60 * 1000; // 5 minutes max cache age
-      
-      if (now - cachedTime > maxAge) {
-        console.log('[Service Worker] Cached API data expired');
-        // Return offline response instead of stale cached data
-        return new Response(JSON.stringify({
-          status: 'offline',
-          message: 'You are offline and cached data is expired',
-          data: [],
-          cached: false,
-          expired: true
-        }), {
-          status: 200,
-          headers: {
-            'Content-Type': 'application/json',
-            'X-Cache': 'EXPIRED',
-            'X-SW-Offline': 'true'
-          }
-        });
-      }
-      
-      // Add cache indicator header
-      const response = new Response(cachedResponse.body, {
-        status: cachedResponse.status,
-        statusText: cachedResponse.statusText,
-        headers: new Headers(cachedResponse.headers)
-      });
-      
-      response.headers.set('X-Cache', 'HIT');
-      response.headers.set('X-SW-Cached', 'true');
-      response.headers.set('X-Cache-Age', (now - cachedTime).toString());
-      
-      return response;
-    }
-    
-    // Return offline response - don't break UI with HTTP errors
+    // CRITICAL: When offline, API requests MUST fail naturally
+    // This respects browser's offline state and doesn't fake online status
+    // Return a proper network error - don't return cached data
     return new Response(JSON.stringify({
-      status: 'offline',
-      message: 'You are offline and no cached data is available',
-      data: [],
-      cached: false
+      error: 'network_failed',
+      message: 'Network request failed',
+      online: navigator.onLine,
+      requiresNetwork: true,
+      path: url.pathname,
+      timestamp: Date.now()
     }), {
-      status: 200,
+      status: 503, // Service Unavailable
       headers: {
         'Content-Type': 'application/json',
-        'X-Cache': 'MISS',
-        'X-SW-Offline': 'true'
+        'X-Service-Worker': 'api-bypass',
+        'X-Offline': 'true',
+        'X-API-Bypass': 'true'
       }
     });
   }
 }
 
-// Cache-First strategy for static assets with versioning to prevent repeated requests
+// Cache-First strategy for static assets
 async function handleStaticAsset(request) {
   // NEVER cache assets from never-cache paths
-  if (shouldNeverCache(request.url)) {
+  if (shouldBypassCache(request.url)) {
     console.log('[Service Worker] Never-cache static asset:', request.url);
     return fetch(request);
   }
@@ -621,7 +479,7 @@ async function handleStaticAsset(request) {
     const networkResponse = await fetch(request);
     
     // Cache successful responses
-    if (networkResponse.ok && !shouldNeverCache(request.url) && !url.pathname.startsWith('/auth/') && !isNeverCacheJs(url.pathname)) {
+    if (networkResponse.ok && !shouldBypassCache(request.url) && !url.pathname.startsWith('/auth/') && !isNeverCacheJs(url.pathname)) {
       await cache.put(request, networkResponse.clone());
     }
     
@@ -657,7 +515,7 @@ function shouldUpdateInBackground(request) {
 async function updateCacheInBackground(request, cache) {
   try {
     const networkResponse = await fetch(request);
-    if (networkResponse.ok && !shouldNeverCache(request.url)) {
+    if (networkResponse.ok && !shouldBypassCache(request.url)) {
       await cache.put(request, networkResponse.clone());
       console.log('[Service Worker] Background cache updated:', request.url);
     }
@@ -741,30 +599,38 @@ function getOfflineHtmlResponse(message) {
   );
 }
 
-// Fetch event - main request handler
+// CRITICAL: MAIN FETCH HANDLER - API BYPASS LOGIC
 self.addEventListener('fetch', event => {
   const request = event.request;
   const url = new URL(request.url);
-  
-  // CRITICAL FIX: Skip non-GET requests completely (POST, PUT, DELETE)
-  if (['POST', 'PUT', 'DELETE'].includes(request.method)) {
-    console.log('[Service Worker] Skipping non-GET request:', request.method, url.pathname);
-    return;
-  }
   
   // Skip cross-origin requests
   if (url.origin !== self.location.origin) {
     return;
   }
   
-  // CRITICAL FIX: Handle never-cache requests immediately (including api.js)
-  if (shouldNeverCache(request.url) || isNeverCacheJs(url.pathname)) {
+  // CRITICAL API BYPASS: Skip ALL /api/* requests from Service Worker interception
+  // This solves "DevTools shows initiator: service-worker.js for API calls"
+  if (url.pathname.startsWith('/api/')) {
+    console.log('[Service Worker] API BYPASS: Letting request pass through for', url.pathname);
+    // DO NOT call event.respondWith() - let the request go directly to network
+    return;
+  }
+  
+  // CRITICAL: Skip non-GET requests completely (POST, PUT, DELETE)
+  if (['POST', 'PUT', 'DELETE'].includes(request.method)) {
+    console.log('[Service Worker] Skipping non-GET request:', request.method, url.pathname);
+    return;
+  }
+  
+  // Handle never-cache requests immediately (excluding /api/* which are already bypassed)
+  if (shouldBypassCache(request.url) || isNeverCacheJs(url.pathname)) {
     console.log('[Service Worker] Never-cache request:', request.method, url.pathname);
     event.respondWith(fetch(request));
     return;
   }
   
-  // CRITICAL FIX: Never intercept /auth/ paths
+  // Never intercept /auth/ paths
   if (url.pathname.startsWith('/auth/')) {
     console.log('[Service Worker] Auth path - fetch only:', url.pathname);
     event.respondWith(fetch(request));
@@ -778,13 +644,6 @@ self.addEventListener('fetch', event => {
     return;
   }
   
-  // Handle API requests
-  if (isApiRequest(request)) {
-    console.log('[Service Worker] API request:', url.pathname);
-    event.respondWith(handleApiRequest(request));
-    return;
-  }
-  
   // Handle static assets
   if (isStaticAssetRequest(request)) {
     console.log('[Service Worker] Static asset:', url.pathname);
@@ -792,7 +651,7 @@ self.addEventListener('fetch', event => {
     return;
   }
   
-  // Default: try network, fall back to cache
+  // Default: try network, fall back to cache (for non-API, non-auth requests)
   event.respondWith(
     fetch(request).catch(async () => {
       const cache = await caches.open(CACHE_NAME);
@@ -855,7 +714,7 @@ async function syncPendingApiRequests() {
       try {
         const response = await fetch(request);
         if (response.ok) {
-          if (isApiRequest(request) && !shouldNeverCache(request.url)) {
+          if (!shouldBypassCache(request.url)) {
             const apiCache = await caches.open(API_CACHE_NAME);
             await apiCache.put(request, response.clone());
           }
@@ -1027,7 +886,8 @@ self.addEventListener('message', event => {
       event.ports[0].postMessage({
         type: 'HEALTH_RESPONSE',
         status: 'healthy',
-        version: '3.1.5',
+        version: '4.0.0',
+        apiBypass: true,
         timestamp: Date.now()
       });
       break;
@@ -1051,10 +911,9 @@ async function storeAuthState(isAuthenticated, token) {
 // Cache API data from main thread
 async function cacheApiData(url, data) {
   try {
-    // CRITICAL: Don't cache auth-related data
-    const request = new Request(url);
-    if (shouldNeverCache(url) || url.startsWith('/auth/')) {
-      console.log('[Service Worker] Skipping cache for never-cache data:', url);
+    // CRITICAL: Don't cache auth-related data or /api/* data
+    if (shouldBypassCache(url) || url.startsWith('/auth/') || url.startsWith('/api/')) {
+      console.log('[Service Worker] Skipping cache for bypassed data:', url);
       return;
     }
     
@@ -1070,7 +929,7 @@ async function cacheApiData(url, data) {
       }
     });
     
-    await cache.put(request, response);
+    await cache.put(new Request(url), response);
     console.log('[Service Worker] Cached API data for:', url);
   } catch (error) {
     console.error('[Service Worker] Failed to cache API data:', error);
@@ -1112,7 +971,8 @@ async function getCacheInfo(event) {
     event.ports[0].postMessage({
       type: 'CACHE_INFO',
       caches: cacheInfo,
-      timestamp: Date.now()
+      timestamp: Date.now(),
+      apiBypassEnabled: true
     });
   } catch (error) {
     event.ports[0].postMessage({
@@ -1140,8 +1000,8 @@ async function cleanupOldCacheEntries() {
     let cleanedCount = 0;
     
     for (const request of keys) {
-      // Skip never-cache endpoints
-      if (shouldNeverCache(request.url) || request.url.includes('/auth/')) {
+      // Skip /api/* and never-cache endpoints
+      if (shouldBypassCache(request.url) || request.url.includes('/auth/') || request.url.includes('/api/')) {
         await cache.delete(request);
         cleanedCount++;
         continue;
