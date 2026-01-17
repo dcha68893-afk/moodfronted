@@ -1,6 +1,6 @@
 // app.ui.auth.js - MoodChat Network Status Detection with JWT Auth
-// FOCUS: Network status detection, backend health checks, and JWT auth handling
-// UI forms, buttons, toggling logic, and auth handling remain in index.html
+// UPDATED: Added progressive login attempts, password guidance, and better error handling
+// FOCUS: Network status detection, backend health checks, JWT auth handling, and progressive login limits
 
 // ============================================================================
 // NETWORK STATUS MANAGEMENT
@@ -14,6 +14,92 @@ window.NetworkStatus = {
   checkInterval: null,
   syncInterval: null
 };
+
+// ============================================================================
+// LOGIN ATTEMPTS TRACKING & PROGRESSIVE DELAY
+// ============================================================================
+
+const LoginAttempts = {
+  attempts: {},
+  maxAttempts: 3,
+  delays: [20000, 40000, 60000], // 20s, 40s, 60s
+  storageKey: 'moodchat_login_attempts',
+  
+  init() {
+    try {
+      const stored = localStorage.getItem(this.storageKey);
+      if (stored) {
+        this.attempts = JSON.parse(stored);
+      }
+    } catch (e) {
+      console.error('Failed to load login attempts:', e);
+      this.attempts = {};
+    }
+  },
+  
+  recordAttempt(identifier) {
+    if (!this.attempts[identifier]) {
+      this.attempts[identifier] = {
+        count: 1,
+        lastAttempt: Date.now(),
+        blockedUntil: null
+      };
+    } else {
+      this.attempts[identifier].count++;
+      this.attempts[identifier].lastAttempt = Date.now();
+      
+      // Apply progressive blocking
+      if (this.attempts[identifier].count <= this.maxAttempts) {
+        const delayIndex = Math.min(this.attempts[identifier].count - 1, this.delays.length - 1);
+        this.attempts[identifier].blockedUntil = Date.now() + this.delays[delayIndex];
+      } else {
+        // After max attempts, block for 1 minute and suggest password recovery
+        this.attempts[identifier].blockedUntil = Date.now() + 60000;
+      }
+    }
+    
+    this.save();
+    return this.attempts[identifier];
+  },
+  
+  resetAttempts(identifier) {
+    if (this.attempts[identifier]) {
+      delete this.attempts[identifier];
+      this.save();
+    }
+  },
+  
+  isBlocked(identifier) {
+    const attempt = this.attempts[identifier];
+    if (!attempt) return false;
+    
+    if (attempt.blockedUntil && Date.now() < attempt.blockedUntil) {
+      return {
+        blocked: true,
+        remaining: attempt.blockedUntil - Date.now(),
+        attemptCount: attempt.count,
+        maxAttempts: this.maxAttempts
+      };
+    }
+    
+    return false;
+  },
+  
+  getAttemptCount(identifier) {
+    return this.attempts[identifier]?.count || 0;
+  },
+  
+  save() {
+    try {
+      localStorage.setItem(this.storageKey, JSON.stringify(this.attempts));
+    } catch (e) {
+      console.error('Failed to save login attempts:', e);
+    }
+  }
+};
+
+// Initialize login attempts tracking
+LoginAttempts.init();
 
 // ============================================================================
 // JWT AUTHENTICATION MANAGEMENT
@@ -115,6 +201,55 @@ async function safeParseResponse(response) {
 }
 
 /**
+ * Shows login attempt countdown in the UI
+ */
+function showLoginAttemptCountdown(blockInfo) {
+  const countdownEl = document.getElementById('loginAttemptCountdown');
+  const timerEl = document.getElementById('countdownTimer');
+  const messageEl = document.getElementById('countdownMessage');
+  
+  if (!countdownEl || !timerEl || !messageEl) return;
+  
+  // Update message based on attempt count
+  let message = 'Too many login attempts. Please wait:';
+  if (blockInfo.attemptCount === 1) {
+    message = 'First failed attempt. Please wait:';
+  } else if (blockInfo.attemptCount === 2) {
+    message = 'Second failed attempt. Please wait:';
+  } else if (blockInfo.attemptCount >= 3) {
+    message = 'Multiple failed attempts. Consider using password recovery. Wait:';
+  }
+  
+  messageEl.textContent = message;
+  countdownEl.classList.remove('hidden');
+  
+  // Start countdown
+  let remaining = Math.ceil(blockInfo.remaining / 1000);
+  
+  function updateTimer() {
+    if (remaining <= 0) {
+      countdownEl.classList.add('hidden');
+      clearInterval(timerInterval);
+      return;
+    }
+    
+    const minutes = Math.floor(remaining / 60);
+    const seconds = remaining % 60;
+    timerEl.textContent = `${minutes.toString().padStart(2, '0')}:${seconds.toString().padStart(2, '0')}`;
+    remaining--;
+  }
+  
+  updateTimer();
+  const timerInterval = setInterval(updateTimer, 1000);
+  
+  // Return function to stop timer
+  return () => {
+    clearInterval(timerInterval);
+    countdownEl.classList.add('hidden');
+  };
+}
+
+/**
  * Checks if user is already logged in via JWT and validates token
  * Returns true if auto-login succeeds, false otherwise
  */
@@ -212,11 +347,11 @@ async function checkAutoLogin() {
 }
 
 // ============================================================================
-// AUTH FORM HANDLERS WITH JWT SUPPORT
+// AUTH FORM HANDLERS WITH JWT SUPPORT AND PROGRESSIVE LOGIN LIMITS
 // ============================================================================
 
 /**
- * Handles login form submission
+ * Handles login form submission with progressive attempt limiting
  */
 async function handleLoginSubmit(event) {
   event.preventDefault();
@@ -232,11 +367,31 @@ async function handleLoginSubmit(event) {
     return;
   }
   
+  // Check if this identifier is currently blocked
+  const blockInfo = LoginAttempts.isBlocked(identifier);
+  if (blockInfo) {
+    // Show countdown timer
+    showLoginAttemptCountdown(blockInfo);
+    
+    // Update UI message based on attempt count
+    let message = 'Account temporarily locked. Please wait ';
+    if (blockInfo.attemptCount >= LoginAttempts.maxAttempts) {
+      message += 'and consider using password recovery.';
+    }
+    
+    updateNetworkStatusUI('offline', message);
+    return;
+  }
+  
   // Disable form during submission
   const submitBtn = form.querySelector('button[type="submit"]');
   const originalText = submitBtn.textContent;
   submitBtn.textContent = 'Logging in...';
   submitBtn.disabled = true;
+  
+  // Hide any existing countdown
+  const countdownEl = document.getElementById('loginAttemptCountdown');
+  if (countdownEl) countdownEl.classList.add('hidden');
   
   try {
     // Check if API is available
@@ -270,6 +425,9 @@ async function handleLoginSubmit(event) {
       // Save JWT and user info
       saveAuthData(token, user);
       
+      // Reset login attempts for this identifier
+      LoginAttempts.resetAttempts(identifier);
+      
       // Show success message
       updateNetworkStatusUI('online', 'Login successful!');
       
@@ -293,8 +451,33 @@ async function handleLoginSubmit(event) {
   } catch (error) {
     console.error('Login error:', error);
     
+    // Record failed attempt
+    const attempt = LoginAttempts.recordAttempt(identifier);
+    
+    // Check if we should show countdown
+    const newBlockInfo = LoginAttempts.isBlocked(identifier);
+    if (newBlockInfo) {
+      showLoginAttemptCountdown(newBlockInfo);
+    }
+    
+    // Show appropriate error message
+    let errorMessage = error.message;
+    
+    // Handle specific error cases
+    if (errorMessage.includes('429') || errorMessage.includes('Too Many Requests')) {
+      errorMessage = 'Too many login attempts. Please wait and try again.';
+    } else if (errorMessage.includes('Invalid credentials') || errorMessage.includes('401')) {
+      errorMessage = `Invalid credentials. Attempt ${attempt.count} of ${LoginAttempts.maxAttempts}.`;
+      
+      if (attempt.count >= LoginAttempts.maxAttempts) {
+        errorMessage += ' Consider using password recovery.';
+      }
+    } else if (errorMessage.includes('500') || errorMessage.includes('Internal Server Error')) {
+      errorMessage = 'Server error. Please try again later.';
+    }
+    
     // Show error in network status indicator
-    updateNetworkStatusUI('offline', `Login failed: ${error.message}`);
+    updateNetworkStatusUI('offline', errorMessage);
     
     // Re-enable form
     submitBtn.textContent = originalText;
@@ -303,7 +486,7 @@ async function handleLoginSubmit(event) {
 }
 
 /**
- * Handles registration form submission
+ * Handles registration form submission with password guidance only
  */
 async function handleRegisterSubmit(event) {
   event.preventDefault();
@@ -313,11 +496,22 @@ async function handleRegisterSubmit(event) {
   const username = form.querySelector('input[name="username"]')?.value;
   const email = form.querySelector('input[type="email"]')?.value;
   const password = form.querySelector('input[type="password"]')?.value;
-  const firstName = form.querySelector('input[name="firstName"]')?.value;
-  const lastName = form.querySelector('input[name="lastName"]')?.value;
+  const confirmPassword = form.querySelectorAll('input[type="password"]')[1]?.value;
+  const displayName = form.querySelector('input[name="displayName"]')?.value;
   
-  if (!username || !email || !password) {
-    updateNetworkStatusUI('offline', 'Username, email and password are required');
+  // Basic frontend validation
+  if (!username || !email || !password || !confirmPassword) {
+    updateNetworkStatusUI('offline', 'All fields are required');
+    return;
+  }
+  
+  if (password !== confirmPassword) {
+    updateNetworkStatusUI('offline', 'Passwords do not match');
+    return;
+  }
+  
+  if (password.length < 8) {
+    updateNetworkStatusUI('offline', 'Password must be at least 8 characters');
     return;
   }
   
@@ -337,7 +531,14 @@ async function handleRegisterSubmit(event) {
     console.log('Calling register API...');
     const response = await window.api('/register', {
       method: 'POST',
-      body: { username, email, password, firstName, lastName }
+      body: { 
+        username, 
+        email, 
+        password, 
+        confirmPassword,
+        firstName: displayName || username,
+        lastName: '' 
+      }
     });
     
     // Safely parse the response
@@ -383,7 +584,22 @@ async function handleRegisterSubmit(event) {
     console.error('Registration error:', error);
     
     // Show error in network status indicator
-    updateNetworkStatusUI('offline', `Registration failed: ${error.message}`);
+    let errorMessage = error.message;
+    
+    // Handle specific error cases
+    if (errorMessage.includes('already exists') || errorMessage.includes('duplicate')) {
+      if (errorMessage.toLowerCase().includes('email')) {
+        errorMessage = 'This email is already registered';
+      } else if (errorMessage.toLowerCase().includes('username')) {
+        errorMessage = 'This username is already taken';
+      }
+    } else if (errorMessage.includes('validation') || errorMessage.includes('invalid')) {
+      errorMessage = 'Please check your information and try again';
+    } else if (errorMessage.includes('500') || errorMessage.includes('Internal Server Error')) {
+      errorMessage = 'Server error. Please try again later.';
+    }
+    
+    updateNetworkStatusUI('offline', `Registration failed: ${errorMessage}`);
     
     // Re-enable form
     submitBtn.textContent = originalText;
@@ -566,7 +782,7 @@ function updateNetworkStatusUI(status, message) {
     case 'offline':
       indicator.style.background = '#ef4444'; // Red
       indicator.style.color = '#ffffff';
-      indicator.innerHTML = '⚠️ Offline' + (message ? ` - ${message}` : '');
+      indicator.innerHTML = '⚠️ ' + (message || 'Offline');
       indicator.classList.remove('pulse-animation');
       indicator.style.display = 'block';
       break;
@@ -1047,7 +1263,22 @@ window.debugNetworkStatus = function() {
   console.log('NetworkStatus:', window.NetworkStatus);
   console.log('Current AppState.network:', window.AppState?.network);
   console.log('Auth data exists:', !!localStorage.getItem('authUser'));
+  console.log('Login attempts:', LoginAttempts.attempts);
   console.log('===========================');
+};
+
+/**
+ * Reset login attempts for debugging
+ */
+window.resetLoginAttempts = function(identifier) {
+  if (identifier) {
+    LoginAttempts.resetAttempts(identifier);
+    console.log(`Reset login attempts for: ${identifier}`);
+  } else {
+    LoginAttempts.attempts = {};
+    LoginAttempts.save();
+    console.log('Reset all login attempts');
+  }
 };
 
 // ============================================================================

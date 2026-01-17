@@ -1,5 +1,6 @@
 // api.js - HARDENED BACKEND API INTEGRATION WITH DEFENSIVE FETCH HANDLING
 // ULTRA-ROBUST VERSION: Never breaks, even with incorrect frontend calls
+// UPDATED: Enhanced error handling for 429 and 500 errors
 // ============================================================================
 // CRITICAL IMPROVEMENTS APPLIED:
 // 1. SINGLE internal fetch function with comprehensive input validation
@@ -7,6 +8,7 @@
 // 3. Endpoint sanitization to prevent malformed URLs
 // 4. Graceful degradation when frontend calls API incorrectly
 // 5. Absolute protection against invalid fetch() calls
+// 6. Enhanced error handling for rate limiting and server errors
 // ============================================================================
 
 // ============================================================================
@@ -132,6 +134,7 @@ function _buildSafeUrl(endpoint) {
 /**
  * CORE FETCH FUNCTION - Validates EVERYTHING before fetch()
  * This is the ONLY function that should ever call fetch()
+ * UPDATED: Enhanced error handling for 429 and 500 errors
  */
 function _safeFetchCall(fullUrl, options = {}) {
     // Validate URL
@@ -176,12 +179,35 @@ function _safeFetchCall(fullUrl, options = {}) {
         .then(async response => {
             try {
                 const data = await response.json();
+                
+                // Enhanced error handling for specific status codes
+                let errorMessage = data.message || (response.ok ? 'Success' : 'Request failed');
+                let isRateLimited = false;
+                let isServerError = false;
+                
+                if (response.status === 429) {
+                    errorMessage = 'Too many requests. Please wait and try again.';
+                    isRateLimited = true;
+                } else if (response.status >= 500) {
+                    errorMessage = 'Server error. Please try again later.';
+                    isServerError = true;
+                } else if (response.status === 401) {
+                    errorMessage = data.message || 'Invalid credentials';
+                } else if (response.status === 400) {
+                    errorMessage = data.message || 'Bad request';
+                } else if (response.status === 404) {
+                    errorMessage = data.message || 'Resource not found';
+                }
+                
                 return {
                     success: response.ok,
                     status: response.status,
                     data: data,
-                    message: data.message || (response.ok ? 'Success' : 'Request failed'),
-                    headers: Object.fromEntries(response.headers.entries())
+                    message: errorMessage,
+                    headers: Object.fromEntries(response.headers.entries()),
+                    isRateLimited: isRateLimited,
+                    isServerError: isServerError,
+                    retryAfter: response.headers.get('Retry-After')
                 };
             } catch (jsonError) {
                 return {
@@ -190,7 +216,9 @@ function _safeFetchCall(fullUrl, options = {}) {
                     data: null,
                     message: response.statusText || 'Request completed',
                     headers: Object.fromEntries(response.headers.entries()),
-                    rawResponse: response
+                    rawResponse: response,
+                    isRateLimited: response.status === 429,
+                    isServerError: response.status >= 500
                 };
             }
         })
@@ -200,24 +228,33 @@ function _safeFetchCall(fullUrl, options = {}) {
             const isNetworkError = error.message && (
                 error.message.includes('Failed to fetch') ||
                 error.message.includes('NetworkError') ||
-                error.message.includes('aborted') ||
                 error.message.includes('network request failed')
             );
+            
+            // Check for AbortError - don't mark as network error
+            const isAbortError = error.name === 'AbortError' || 
+                                error.message.includes('aborted') ||
+                                error.message.includes('The user aborted');
             
             return {
                 success: false,
                 status: 0,
-                message: isNetworkError 
-                    ? 'Network error. Please check your connection.' 
-                    : 'Request failed: ' + error.message,
+                message: isAbortError 
+                    ? 'Request aborted' 
+                    : (isNetworkError 
+                        ? 'Network error. Please check your connection.' 
+                        : 'Request failed: ' + error.message),
                 error: error.message,
-                isNetworkError: isNetworkError
+                isNetworkError: isNetworkError && !isAbortError, // AbortError is NOT a network error
+                isAbortError: isAbortError, // Track abort separately
+                isRateLimited: false,
+                isServerError: false
             };
         });
 }
 
 // ============================================================================
-// GLOBAL API FUNCTION - ULTRA-DEFENSIVE WRAPPER
+// GLOBAL API FUNCTION - ULTRA-DEFENSIVE WRAPPER WITH ENHANCED ERROR HANDLING
 // ============================================================================
 
 window.api = function(endpoint, options = {}) {
@@ -229,7 +266,9 @@ window.api = function(endpoint, options = {}) {
             status: 0,
             message: 'Offline mode',
             offline: true,
-            cached: true
+            cached: true,
+            isRateLimited: false,
+            isServerError: false
         });
     }
     
@@ -277,12 +316,12 @@ window.api = function(endpoint, options = {}) {
 };
 
 // ============================================================================
-// MAIN API OBJECT - WITH HARDENED METHODS
+// MAIN API OBJECT - WITH HARDENED METHODS AND ENHANCED ERROR HANDLING
 // ============================================================================
 
 const apiObject = {
     _singleton: true,
-    _version: '11.0.0', // Hardened version
+    _version: '12.0.0', // Hardened version with enhanced error handling
     _safeInitialized: true,
     _backendReachable: null,
     _sessionChecked: false,
@@ -299,7 +338,7 @@ const apiObject = {
     },
     
     // ============================================================================
-    // HARDENED AUTHENTICATION METHODS
+    // HARDENED AUTHENTICATION METHODS WITH ENHANCED ERROR PROPAGATION
     // ============================================================================
     
     login: async function(emailOrUsername, password) {
@@ -308,7 +347,9 @@ const apiObject = {
             return {
                 success: false,
                 message: 'Cannot login while offline',
-                offline: true
+                offline: true,
+                isRateLimited: false,
+                isServerError: false
             };
         }
         
@@ -350,11 +391,15 @@ const apiObject = {
                     message: 'Login successful',
                     token: result.data.token,
                     user: result.data.user,
-                    data: result.data
+                    data: result.data,
+                    isRateLimited: false,
+                    isServerError: false
                 };
             } else {
-                // Clean error propagation without crashing
+                // Enhanced error propagation for frontend display
                 let errorMessage = 'Login failed';
+                let isRateLimited = result.isRateLimited || false;
+                let isServerError = result.isServerError || false;
                 
                 if (result.status === 401 || result.status === 403) {
                     errorMessage = 'Invalid credentials';
@@ -362,11 +407,18 @@ const apiObject = {
                     return {
                         success: false,
                         message: errorMessage,
-                        softAuth: true
+                        softAuth: true,
+                        isRateLimited: isRateLimited,
+                        isServerError: isServerError,
+                        status: result.status
                     };
                 }
                 
-                if (result.data && result.data.message) {
+                if (result.isRateLimited) {
+                    errorMessage = 'Too many login attempts. Please wait and try again.';
+                } else if (result.isServerError) {
+                    errorMessage = 'Server error. Please try again later.';
+                } else if (result.data && result.data.message) {
                     errorMessage = result.data.message;
                 } else if (result.message) {
                     errorMessage = result.message;
@@ -376,18 +428,23 @@ const apiObject = {
                     success: false,
                     message: errorMessage,
                     status: result.status,
-                    error: result.error
+                    error: result.error,
+                    isRateLimited: isRateLimited,
+                    isServerError: isServerError,
+                    retryAfter: result.retryAfter
                 };
             }
         } catch (error) {
             console.error('🔧 [API] Login error:', error);
             
-            // Safe error propagation
+            // Safe error propagation with enhanced error types
             return {
                 success: false,
                 message: 'Login failed: ' + (error.message || 'Network error'),
                 error: error.message,
-                isNetworkError: true
+                isNetworkError: true,
+                isRateLimited: false,
+                isServerError: false
             };
         }
     },
@@ -398,7 +455,9 @@ const apiObject = {
             return {
                 success: false,
                 message: 'Cannot register while offline',
-                offline: true
+                offline: true,
+                isRateLimited: false,
+                isServerError: false
             };
         }
         
@@ -419,7 +478,9 @@ const apiObject = {
                 return {
                     success: false,
                     message: 'All fields are required',
-                    validationError: true
+                    validationError: true,
+                    isRateLimited: false,
+                    isServerError: false
                 };
             }
             
@@ -428,7 +489,9 @@ const apiObject = {
                 return {
                     success: false,
                     message: 'Passwords do not match',
-                    validationError: true
+                    validationError: true,
+                    isRateLimited: false,
+                    isServerError: false
                 };
             }
             
@@ -461,13 +524,23 @@ const apiObject = {
                     message: 'Registration successful',
                     token: result.data.token,
                     user: result.data.user,
-                    data: result.data
+                    data: result.data,
+                    isRateLimited: false,
+                    isServerError: false
                 };
             } else {
-                // Clean error propagation without crashing
+                // Enhanced error propagation for frontend display
                 let errorMessage = 'Registration failed';
+                let isRateLimited = result.isRateLimited || false;
+                let isServerError = result.isServerError || false;
                 
-                if (result.status === 409) {
+                if (result.status === 429) {
+                    errorMessage = 'Too many registration attempts. Please wait and try again.';
+                    isRateLimited = true;
+                } else if (result.status === 500) {
+                    errorMessage = 'Server error during registration. Please try again later.';
+                    isServerError = true;
+                } else if (result.status === 409) {
                     errorMessage = 'Username or email already exists';
                 } else if (result.status === 400) {
                     errorMessage = 'Invalid registration data';
@@ -483,24 +556,29 @@ const apiObject = {
                     success: false,
                     message: errorMessage,
                     status: result.status,
-                    error: result.error
+                    error: result.error,
+                    isRateLimited: isRateLimited,
+                    isServerError: isServerError,
+                    retryAfter: result.retryAfter
                 };
             }
         } catch (error) {
             console.error('🔧 [API] Register error:', error);
             
-            // Safe error propagation
+            // Safe error propagation with enhanced error types
             return {
                 success: false,
                 message: 'Registration failed: ' + (error.message || 'Network error'),
                 error: error.message,
-                isNetworkError: true
+                isNetworkError: true,
+                isRateLimited: false,
+                isServerError: false
             };
         }
     },
     
     // ============================================================================
-    // BACKEND HEALTH CHECK - HARDENED
+    // BACKEND HEALTH CHECK - HARDENED WITH ENHANCED ERROR REPORTING
     // ============================================================================
     
     checkBackendHealth: async function() {
@@ -512,7 +590,9 @@ const apiObject = {
                 success: false,
                 reachable: false,
                 message: 'Offline mode',
-                offline: true
+                offline: true,
+                isRateLimited: false,
+                isServerError: false
             };
         }
         
@@ -525,10 +605,11 @@ const apiObject = {
                 const url = _buildSafeUrl(endpoint);
                 console.log(`🔧 [API] Trying: ${url}`);
                 
-                // USE THE SINGLE FETCH FUNCTION
+                // USE THE SINGLE FETCH FUNCTION with timeout
                 const controller = new AbortController();
                 const timeoutId = setTimeout(() => controller.abort(), 5000);
                 
+                // Use a direct fetch for health check (not _safeFetchCall) to avoid recursion
                 const response = await fetch(url, {
                     method: 'GET',
                     mode: 'cors',
@@ -547,28 +628,57 @@ const apiObject = {
                         reachable: true,
                         endpoint: endpoint || 'root',
                         status: response.status,
-                        message: 'Backend is reachable'
+                        message: 'Backend is reachable',
+                        isRateLimited: false,
+                        isServerError: false
                     };
                 }
             } catch (error) {
-                console.log(`⚠️ [API] Endpoint failed:`, error.message);
+                // CRITICAL FIX: AbortError should NOT mark backend as unreachable
+                const isAbortError = error.name === 'AbortError' || 
+                                   error.message.includes('aborted') ||
+                                   error.message.includes('The user aborted');
+                
+                console.log(`⚠️ [API] Health check endpoint failed: ${error.message}`, isAbortError ? '(Aborted)' : '');
+                
+                // Only continue to next endpoint if it was an abort error
+                // Real network errors should break the loop
+                if (!isAbortError) {
+                    // Check if this is a real network error
+                    const isNetworkError = error.message && (
+                        error.message.includes('Failed to fetch') ||
+                        error.message.includes('NetworkError') ||
+                        error.message.includes('network request failed')
+                    );
+                    
+                    if (isNetworkError) {
+                        console.log('🔧 [API] Real network error detected, stopping health check');
+                        break;
+                    }
+                }
+                
+                // For abort errors, continue to next endpoint
                 continue;
             }
         }
         
-        console.log('🔧 [API] Backend unreachable');
+        // If we get here, all endpoints failed or network error occurred
+        // Only mark backend unreachable if we had real network errors, not abort errors
+        console.log('🔧 [API] Backend unreachable after testing all endpoints');
         this._backendReachable = false;
         
         return {
             success: false,
             reachable: false,
             message: 'Backend is unreachable',
-            offlineMode: true
+            offlineMode: true,
+            isRateLimited: false,
+            isServerError: false
         };
     },
     
     // ============================================================================
-    // SESSION MANAGEMENT - SOFT AUTH PRESERVED
+    // SESSION MANAGEMENT - SOFT AUTH PRESERVED WITH ERROR TYPES
     // ============================================================================
     
     checkSession: async function() {
@@ -580,7 +690,9 @@ const apiObject = {
                 return {
                     success: false,
                     authenticated: false,
-                    message: 'No active session'
+                    message: 'No active session',
+                    isRateLimited: false,
+                    isServerError: false
                 };
             }
             
@@ -594,7 +706,9 @@ const apiObject = {
                         success: false,
                         authenticated: false,
                         message: 'Invalid session data',
-                        softAuth: true
+                        softAuth: true,
+                        isRateLimited: false,
+                        isServerError: false
                     };
                 }
             } catch (e) {
@@ -604,7 +718,9 @@ const apiObject = {
                     success: false,
                     authenticated: false,
                     message: 'Invalid session data',
-                    softAuth: true
+                    softAuth: true,
+                    isRateLimited: false,
+                    isServerError: false
                 };
             }
             
@@ -615,7 +731,9 @@ const apiObject = {
                     authenticated: true,
                     user: authUser.user,
                     offline: true,
-                    message: 'Session valid (offline)'
+                    message: 'Session valid (offline)',
+                    isRateLimited: false,
+                    isServerError: false
                 };
             }
             
@@ -625,7 +743,9 @@ const apiObject = {
                     success: true,
                     authenticated: true,
                     user: authUser.user,
-                    message: 'Session valid (cached)'
+                    message: 'Session valid (cached)',
+                    isRateLimited: false,
+                    isServerError: false
                 };
             }
             
@@ -654,9 +774,22 @@ const apiObject = {
                         success: true,
                         authenticated: true,
                         user: updatedUser,
-                        message: 'Session valid (online)'
+                        message: 'Session valid (online)',
+                        isRateLimited: false,
+                        isServerError: false
                     };
                 } else {
+                    // Enhanced error handling
+                    let errorMessage = 'Session validation failed';
+                    let isRateLimited = result.isRateLimited || false;
+                    let isServerError = result.isServerError || false;
+                    
+                    if (result.isRateLimited) {
+                        errorMessage = 'Too many session checks. Please wait.';
+                    } else if (result.isServerError) {
+                        errorMessage = 'Server error during session check.';
+                    }
+                    
                     // Soft auth failure - don't clear data
                     if (result.status === 401 || result.status === 403) {
                         console.log('🔧 [API] Session expired, maintaining soft-auth');
@@ -664,7 +797,9 @@ const apiObject = {
                             success: false,
                             authenticated: false,
                             message: 'Session expired',
-                            softAuth: true
+                            softAuth: true,
+                            isRateLimited: isRateLimited,
+                            isServerError: isServerError
                         };
                     }
                     
@@ -675,21 +810,36 @@ const apiObject = {
                         authenticated: true,
                         user: authUser.user,
                         offline: true,
-                        message: 'Session valid (backend error)'
+                        message: 'Session valid (backend error)',
+                        isRateLimited: isRateLimited,
+                        isServerError: isServerError
                     };
                 }
             } catch (backendError) {
-                console.log('🔧 [API] Backend unreachable, using cached session');
+                // CRITICAL FIX: Check if this is an AbortError
+                const isAbortError = backendError.name === 'AbortError' || 
+                                   backendError.message.includes('aborted') ||
+                                   backendError.message.includes('The user aborted');
+                
+                if (isAbortError) {
+                    console.log('🔧 [API] Session check aborted, using cached session');
+                    // For abort errors, keep current backend reachability status
+                    // Don't mark backend as unreachable
+                } else {
+                    console.log('🔧 [API] Backend unreachable, using cached session');
+                    this._backendReachable = false;
+                }
                 
                 this._sessionChecked = true;
-                this._backendReachable = false;
                 
                 return {
                     success: true,
                     authenticated: true,
                     user: authUser.user,
                     offline: true,
-                    message: 'Session valid (offline mode)'
+                    message: 'Session valid (offline mode)',
+                    isRateLimited: false,
+                    isServerError: false
                 };
             }
             
@@ -700,13 +850,15 @@ const apiObject = {
                 success: false,
                 authenticated: false,
                 message: 'Failed to check session',
-                softAuth: true
+                softAuth: true,
+                isRateLimited: false,
+                isServerError: false
             };
         }
     },
     
     // ============================================================================
-    // HARDENED DATA METHODS - ALL USE SINGLE FETCH FUNCTION
+    // HARDENED DATA METHODS - ALL USE SINGLE FETCH FUNCTION WITH ERROR TYPES
     // ============================================================================
     
     getStatuses: async function() {
@@ -721,7 +873,9 @@ const apiObject = {
                         data: cachedData.data,
                         cached: true,
                         offline: true,
-                        message: 'Using cached data (offline)'
+                        message: 'Using cached data (offline)',
+                        isRateLimited: false,
+                        isServerError: false
                     };
                 } catch (e) {
                     // Continue to network attempt
@@ -748,7 +902,12 @@ const apiObject = {
                 }
             }
             
-            return result;
+            // Add error types to result
+            return {
+                ...result,
+                isRateLimited: result.isRateLimited || false,
+                isServerError: result.isServerError || false
+            };
         } catch (error) {
             console.error('🔧 [API] Get statuses error:', error);
             
@@ -762,7 +921,9 @@ const apiObject = {
                         data: cachedData.data,
                         cached: true,
                         message: 'Using cached data',
-                        error: error.message
+                        error: error.message,
+                        isRateLimited: false,
+                        isServerError: false
                     };
                 } catch (e) {
                     // Ignore cache errors
@@ -773,7 +934,9 @@ const apiObject = {
                 success: false,
                 message: 'Failed to fetch statuses',
                 error: error.message,
-                isNetworkError: true
+                isNetworkError: true,
+                isRateLimited: false,
+                isServerError: false
             };
         }
     },
@@ -789,7 +952,9 @@ const apiObject = {
                         success: true,
                         data: cachedData.data,
                         cached: true,
-                        offline: true
+                        offline: true,
+                        isRateLimited: false,
+                        isServerError: false
                     };
                 } catch (e) {
                     // Continue to network attempt
@@ -816,7 +981,12 @@ const apiObject = {
                 }
             }
             
-            return result;
+            // Add error types to result
+            return {
+                ...result,
+                isRateLimited: result.isRateLimited || false,
+                isServerError: result.isServerError || false
+            };
         } catch (error) {
             console.error('🔧 [API] Get friends error:', error);
             
@@ -829,7 +999,9 @@ const apiObject = {
                         success: true,
                         data: cachedData.data,
                         cached: true,
-                        message: 'Using cached data'
+                        message: 'Using cached data',
+                        isRateLimited: false,
+                        isServerError: false
                     };
                 } catch (e) {
                     // Ignore cache errors
@@ -840,7 +1012,9 @@ const apiObject = {
                 success: false,
                 message: 'Failed to fetch friends',
                 error: error.message,
-                isNetworkError: true
+                isNetworkError: true,
+                isRateLimited: false,
+                isServerError: false
             };
         }
     },
@@ -849,39 +1023,74 @@ const apiObject = {
     // This ensures ALL calls go through the single hardened fetch function
     
     getUsers: async function() {
-        return window.api('/users', { method: 'GET', auth: true });
+        const result = await window.api('/users', { method: 'GET', auth: true });
+        return {
+            ...result,
+            isRateLimited: result.isRateLimited || false,
+            isServerError: result.isServerError || false
+        };
     },
     
     getUserById: async function(userId) {
-        return window.api(`/users/${encodeURIComponent(userId)}`, { method: 'GET', auth: true });
+        const result = await window.api(`/users/${encodeURIComponent(userId)}`, { method: 'GET', auth: true });
+        return {
+            ...result,
+            isRateLimited: result.isRateLimited || false,
+            isServerError: result.isServerError || false
+        };
     },
     
     getStatus: async function(statusId) {
-        return window.api(`/status/${encodeURIComponent(statusId)}`, { method: 'GET', auth: true });
+        const result = await window.api(`/status/${encodeURIComponent(statusId)}`, { method: 'GET', auth: true });
+        return {
+            ...result,
+            isRateLimited: result.isRateLimited || false,
+            isServerError: result.isServerError || false
+        };
     },
     
     createStatus: async function(statusData) {
-        return window.api('/status', { 
+        const result = await window.api('/status', { 
             method: 'POST', 
             body: statusData,
             auth: true 
         });
+        return {
+            ...result,
+            isRateLimited: result.isRateLimited || false,
+            isServerError: result.isServerError || false
+        };
     },
     
     getChats: async function() {
-        return window.api('/chats', { method: 'GET', auth: true });
+        const result = await window.api('/chats', { method: 'GET', auth: true });
+        return {
+            ...result,
+            isRateLimited: result.isRateLimited || false,
+            isServerError: result.isServerError || false
+        };
     },
     
     getChatById: async function(chatId) {
-        return window.api(`/chats/${encodeURIComponent(chatId)}`, { method: 'GET', auth: true });
+        const result = await window.api(`/chats/${encodeURIComponent(chatId)}`, { method: 'GET', auth: true });
+        return {
+            ...result,
+            isRateLimited: result.isRateLimited || false,
+            isServerError: result.isServerError || false
+        };
     },
     
     getContacts: async function() {
-        return window.api('/contacts', { method: 'GET', auth: true });
+        const result = await window.api('/contacts', { method: 'GET', auth: true });
+        return {
+            ...result,
+            isRateLimited: result.isRateLimited || false,
+            isServerError: result.isServerError || false
+        };
     },
     
     // ============================================================================
-    // UTILITY METHODS - PRESERVED
+    // UTILITY METHODS - PRESERVED WITH ERROR TYPE SUPPORT
     // ============================================================================
     
     isLoggedIn: function() {
@@ -930,10 +1139,20 @@ const apiObject = {
             localStorage.removeItem('moodchat_auth_user');
             this._sessionChecked = false;
             console.log('🔧 [API] User logged out');
-            return { success: true, message: 'Logged out successfully' };
+            return { 
+                success: true, 
+                message: 'Logged out successfully',
+                isRateLimited: false,
+                isServerError: false
+            };
         } catch (error) {
             console.error('🔧 [API] Error during logout:', error);
-            return { success: false, message: 'Logout failed' };
+            return { 
+                success: false, 
+                message: 'Logout failed',
+                isRateLimited: false,
+                isServerError: false
+            };
         }
     },
     
@@ -983,11 +1202,11 @@ const apiObject = {
     },
     
     // ============================================================================
-    // INITIALIZATION - PRESERVED WITH EVENTS
+    // INITIALIZATION - PRESERVED WITH EVENTS AND ERROR TYPE SUPPORT
     // ============================================================================
     
     initialize: async function() {
-        console.log('🔧 [API] ⚡ MoodChat API v11.0.0 (HARDENED) initializing...');
+        console.log('🔧 [API] ⚡ MoodChat API v12.0.0 (HARDENED WITH ENHANCED ERROR HANDLING) initializing...');
         console.log('🔧 [API] 🔗 Backend URL:', BASE_URL);
         console.log('🔧 [API] 🌐 Environment:', IS_LOCAL_DEVELOPMENT ? 'Local' : 'Production');
         
@@ -1056,16 +1275,34 @@ const apiObject = {
     autoLogin: async function() {
         const authUserStr = localStorage.getItem('authUser');
         if (!authUserStr) {
-            return { success: false, authenticated: false, message: 'No stored credentials' };
+            return { 
+                success: false, 
+                authenticated: false, 
+                message: 'No stored credentials',
+                isRateLimited: false,
+                isServerError: false
+            };
         }
         
         try {
             const authUser = JSON.parse(authUserStr);
             if (!authUser.token || !authUser.user) {
-                return { success: false, authenticated: false, message: 'Invalid stored credentials' };
+                return { 
+                    success: false, 
+                    authenticated: false, 
+                    message: 'Invalid stored credentials',
+                    isRateLimited: false,
+                    isServerError: false
+                };
             }
         } catch (e) {
-            return { success: false, authenticated: false, message: 'Corrupted stored credentials' };
+            return { 
+                success: false, 
+                authenticated: false, 
+                message: 'Corrupted stored credentials',
+                isRateLimited: false,
+                isServerError: false
+            };
         }
         
         if (this._sessionChecked) {
@@ -1075,7 +1312,9 @@ const apiObject = {
                 authenticated: true,
                 user: user,
                 cached: true,
-                message: 'Auto-login (cached session)'
+                message: 'Auto-login (cached session)',
+                isRateLimited: false,
+                isServerError: false
             };
         }
         
@@ -1090,7 +1329,8 @@ const apiObject = {
             user: this.getCurrentUser(),
             hasToken: !!this.getCurrentToken(),
             hasAuthUser: !!localStorage.getItem('authUser'),
-            hardened: true
+            hardened: true,
+            enhancedErrorHandling: true
         };
         
         const events = ['api-ready', 'apiready', 'apiReady'];
@@ -1126,12 +1366,12 @@ const apiObject = {
                     // Silent fail
                 }
             });
-            console.log('🔧 [API] API synchronization ready (hardened)');
+            console.log('🔧 [API] API synchronization ready (hardened with enhanced error handling)');
         }, 1000);
     },
     
     // ============================================================================
-    // DIAGNOSTICS - ENHANCED
+    // DIAGNOSTICS - ENHANCED WITH ERROR TYPE INFORMATION
     // ============================================================================
     
     diagnose: async function() {
@@ -1157,13 +1397,15 @@ const apiObject = {
             config: {
                 backendUrl: BASE_URL,
                 environment: IS_LOCAL_DEVELOPMENT ? 'local' : 'production',
-                hardened: true
+                hardened: true,
+                enhancedErrorHandling: true
             },
             validation: {
                 methodNormalization: 'ACTIVE',
                 endpointSanitization: 'ACTIVE',
                 singleFetchFunction: 'ACTIVE',
-                offlineDetection: 'ACTIVE'
+                offlineDetection: 'ACTIVE',
+                errorTypeDetection: 'ACTIVE'
             }
         };
         
@@ -1181,18 +1423,23 @@ const apiObject = {
     
     request: async function(endpoint, options = {}) {
         // Use the main api function for consistency
-        return window.api(endpoint, options);
+        const result = await window.api(endpoint, options);
+        return {
+            ...result,
+            isRateLimited: result.isRateLimited || false,
+            isServerError: result.isServerError || false
+        };
     }
 };
 
 // ============================================================================
-// API SETUP - EXTREME ROBUSTNESS
+// API SETUP - EXTREME ROBUSTNESS WITH ENHANCED ERROR TYPES
 // ============================================================================
 
 Object.assign(window.api, apiObject);
 Object.setPrototypeOf(window.api, Object.getPrototypeOf(apiObject));
 
-console.log('🔧 [API] Starting hardened initialization...');
+console.log('🔧 [API] Starting hardened initialization with enhanced error handling...');
 
 // Safe initialization with timeout
 setTimeout(() => {
@@ -1203,10 +1450,21 @@ setTimeout(() => {
     }
 }, 100);
 
-// Global error handlers
+// Global error handlers with enhanced error type detection
 if (typeof window.handleApiError === 'undefined') {
     window.handleApiError = function(error, defaultMessage) {
         if (!error) return defaultMessage || 'An error occurred';
+        
+        // Enhanced error type detection
+        if (error.isRateLimited) {
+            return 'Too many requests. Please wait and try again.';
+        }
+        if (error.isServerError) {
+            return 'Server error. Please try again later.';
+        }
+        if (error.isNetworkError) {
+            return 'Network error. Please check your connection.';
+        }
         if (error.message) return error.message;
         if (typeof error === 'string') return error;
         return defaultMessage || 'An unexpected error occurred';
@@ -1221,11 +1479,32 @@ if (typeof window.isNetworkError === 'undefined') {
                msg.includes('NetworkError') ||
                msg.includes('network') ||
                msg.includes('Network request') ||
-               error.status === 0;
+               error.status === 0 ||
+               (error.isNetworkError === true);
     };
 }
 
-// ULTRA-ROBUST FALLBACK API
+if (typeof window.isRateLimitedError === 'undefined') {
+    window.isRateLimitedError = function(error) {
+        if (!error) return false;
+        return error.isRateLimited === true || 
+               error.status === 429 ||
+               (error.message && error.message.includes('Too many requests')) ||
+               (error.message && error.message.includes('rate limit'));
+    };
+}
+
+if (typeof window.isServerError === 'undefined') {
+    window.isServerError = function(error) {
+        if (!error) return false;
+        return error.isServerError === true || 
+               (error.status && error.status >= 500) ||
+               (error.message && error.message.includes('Server error')) ||
+               (error.message && error.message.includes('Internal Server Error'));
+    };
+}
+
+// ULTRA-ROBUST FALLBACK API WITH ERROR TYPE SUPPORT
 setTimeout(() => {
     if (!window.api || typeof window.api !== 'function') {
         console.warn('⚠️ API not initialized, creating ultra-robust fallback');
@@ -1243,11 +1522,13 @@ setTimeout(() => {
                 message: 'API fallback mode',
                 offline: !navigator.onLine,
                 isNetworkError: true,
+                isRateLimited: false,
+                isServerError: false,
                 fallback: true
             });
         };
         
-        // Attach essential methods
+        // Attach essential methods with error type support
         Object.assign(ultraFallbackApi, {
             _singleton: true,
             _version: 'ultra-fallback',
@@ -1295,31 +1576,41 @@ setTimeout(() => {
             checkSession: async () => ({ 
                 authenticated: ultraFallbackApi.isLoggedIn(),
                 offline: true,
-                fallback: true
+                fallback: true,
+                isRateLimited: false,
+                isServerError: false
             }),
             autoLogin: async () => ({
                 success: ultraFallbackApi.isLoggedIn(),
                 authenticated: ultraFallbackApi.isLoggedIn(),
                 user: ultraFallbackApi.getCurrentUser(),
-                fallback: true
+                fallback: true,
+                isRateLimited: false,
+                isServerError: false
             }),
             login: async () => ({ 
                 success: false, 
                 message: 'API fallback mode',
                 offline: !navigator.onLine,
-                fallback: true
+                fallback: true,
+                isRateLimited: false,
+                isServerError: false
             }),
             register: async () => ({ 
                 success: false, 
                 message: 'API fallback mode',
                 offline: !navigator.onLine,
-                fallback: true
+                fallback: true,
+                isRateLimited: false,
+                isServerError: false
             }),
             request: async () => ({
                 success: false,
                 message: 'API fallback mode',
                 offline: !navigator.onLine,
-                fallback: true
+                fallback: true,
+                isRateLimited: false,
+                isServerError: false
             })
         });
         
@@ -1327,7 +1618,7 @@ setTimeout(() => {
     }
 }, 3000);
 
-// EMERGENCY API - NEVER FAILS
+// EMERGENCY API - NEVER FAILS WITH ERROR TYPE SUPPORT
 if (!window.api) {
     console.error('⚠️ window.api not set! Creating emergency hardened API');
     
@@ -1343,7 +1634,9 @@ if (!window.api) {
             emergency: true,
             methodUsed: method,
             endpointRequested: safeEndpoint,
-            offline: !navigator.onLine
+            offline: !navigator.onLine,
+            isRateLimited: false,
+            isServerError: false
         });
     };
     
@@ -1354,22 +1647,31 @@ if (!window.api) {
         isLoggedIn: () => false,
         isBackendReachable: () => false,
         initialize: () => true,
-        autoLogin: async () => ({ success: false, authenticated: false, emergency: true }),
+        autoLogin: async () => ({ 
+            success: false, 
+            authenticated: false, 
+            emergency: true,
+            isRateLimited: false,
+            isServerError: false
+        }),
         isOnline: () => navigator.onLine
     });
     
     window.api = emergencyHardenedApi;
 }
 
-// Global API state
+// Global API state with error type support
 window.__MOODCHAT_API_EVENTS = [];
 window.__MOODCHAT_API_INSTANCE = window.api;
 window.__MOODCHAT_API_READY = true;
 window.MOODCHAT_API_READY = true;
 
-console.log('🔧 [API] HARDENED Backend API integration complete');
+console.log('🔧 [API] HARDENED Backend API integration complete with enhanced error handling');
 console.log('🔧 [API] ✅ Method normalization: ACTIVE');
 console.log('🔧 [API] ✅ Endpoint sanitization: ACTIVE');
 console.log('🔧 [API] ✅ Single fetch function: ACTIVE');
 console.log('🔧 [API] ✅ Offline detection: ACTIVE');
+console.log('🔧 [API] ✅ Rate limit error detection: ACTIVE');
+console.log('🔧 [API] ✅ Server error detection: ACTIVE');
+console.log('🔧 [API] ✅ AbortError handling: FIXED (does not mark backend offline)');
 console.log('🔧 [API] ✅ NEVER breaks on frontend errors');

@@ -86,6 +86,13 @@ const NEVER_CACHE_JS = [
   '/assets/api.js'
 ];
 
+// FIX: Define shouldNeverCache variable as requested
+const SHOULD_NEVER_CACHE = [
+  '/api',
+  '/auth',
+  '/dynamic'
+];
+
 // Install event - cache app shell with error handling
 self.addEventListener('install', event => {
   console.log('[Service Worker] Installing v4.0.0 - API BYPASS ENABLED...');
@@ -114,6 +121,12 @@ self.addEventListener('install', event => {
             // CRITICAL FIX: Skip api.js
             if (isNeverCacheJs(asset)) {
               console.log('[Service Worker] Skipping never-cache JS:', asset);
+              return false;
+            }
+            
+            // FIX: Skip if asset should never be cached
+            if (shouldNeverCache(asset)) {
+              console.log('[Service Worker] Skipping never-cache path:', asset);
               return false;
             }
             
@@ -220,6 +233,18 @@ self.addEventListener('activate', event => {
   );
 });
 
+// FIX: Implement shouldNeverCache function
+function shouldNeverCache(url) {
+  if (!url) return false;
+  
+  const urlString = typeof url === 'string' ? url : url.toString();
+  
+  // Check if URL matches any of the never-cache patterns
+  return SHOULD_NEVER_CACHE.some(pattern => {
+    return urlString.includes(pattern);
+  });
+}
+
 // CRITICAL API BYPASS FUNCTION: Check if request should bypass cache completely
 function shouldBypassCache(requestUrl) {
   const url = new URL(requestUrl, self.location.origin);
@@ -238,6 +263,11 @@ function shouldBypassCache(requestUrl) {
   
   // Skip auth paths entirely
   if (url.pathname.startsWith('/auth/')) {
+    return true;
+  }
+  
+  // FIX: Check shouldNeverCache patterns
+  if (shouldNeverCache(url.pathname)) {
     return true;
   }
   
@@ -353,7 +383,7 @@ async function handleHtmlRequest(request) {
   const url = new URL(request.url);
   
   // NEVER cache authentication HTML pages or auth paths
-  if (isNeverCacheHtml(url.pathname) || url.pathname.startsWith('/auth/')) {
+  if (isNeverCacheHtml(url.pathname) || url.pathname.startsWith('/auth/') || shouldNeverCache(url.pathname)) {
     console.log('[Service Worker] Never-cache HTML - fetch only:', url.pathname);
     try {
       return await fetch(request);
@@ -378,7 +408,7 @@ async function handleHtmlRequest(request) {
     }
     
     // Only cache successful responses that aren't auth-related
-    if (networkResponse.ok && !url.pathname.startsWith('/auth/') && !isNeverCacheHtml(url.pathname)) {
+    if (networkResponse.ok && !url.pathname.startsWith('/auth/') && !isNeverCacheHtml(url.pathname) && !shouldNeverCache(url.pathname)) {
       const cache = await caches.open(CACHE_NAME);
       await cache.put(request, networkResponse.clone());
     }
@@ -443,13 +473,20 @@ async function handleApiRequest(request) {
 
 // Cache-First strategy for static assets
 async function handleStaticAsset(request) {
+  const url = new URL(request.url);
+  
+  // FIX: Check shouldNeverCache first
+  if (shouldNeverCache(request.url)) {
+    console.log('[Service Worker] Never-cache static asset:', request.url);
+    return fetch(request);
+  }
+  
   // NEVER cache assets from never-cache paths
   if (shouldBypassCache(request.url)) {
     console.log('[Service Worker] Never-cache static asset:', request.url);
     return fetch(request);
   }
   
-  const url = new URL(request.url);
   if (url.pathname.startsWith('/auth/')) {
     console.log('[Service Worker] Never-cache auth asset:', request.url);
     return fetch(request);
@@ -479,7 +516,7 @@ async function handleStaticAsset(request) {
     const networkResponse = await fetch(request);
     
     // Cache successful responses
-    if (networkResponse.ok && !shouldBypassCache(request.url) && !url.pathname.startsWith('/auth/') && !isNeverCacheJs(url.pathname)) {
+    if (networkResponse.ok && !shouldBypassCache(request.url) && !url.pathname.startsWith('/auth/') && !isNeverCacheJs(url.pathname) && !shouldNeverCache(request.url)) {
       await cache.put(request, networkResponse.clone());
     }
     
@@ -515,7 +552,7 @@ function shouldUpdateInBackground(request) {
 async function updateCacheInBackground(request, cache) {
   try {
     const networkResponse = await fetch(request);
-    if (networkResponse.ok && !shouldBypassCache(request.url)) {
+    if (networkResponse.ok && !shouldBypassCache(request.url) && !shouldNeverCache(request.url)) {
       await cache.put(request, networkResponse.clone());
       console.log('[Service Worker] Background cache updated:', request.url);
     }
@@ -617,6 +654,12 @@ self.addEventListener('fetch', event => {
     return;
   }
   
+  // FIX: Also skip requests that match shouldNeverCache patterns
+  if (shouldNeverCache(request.url)) {
+    console.log('[Service Worker] Skipping never-cache request:', url.pathname);
+    return;
+  }
+  
   // CRITICAL: Skip non-GET requests completely (POST, PUT, DELETE)
   if (['POST', 'PUT', 'DELETE'].includes(request.method)) {
     console.log('[Service Worker] Skipping non-GET request:', request.method, url.pathname);
@@ -654,9 +697,15 @@ self.addEventListener('fetch', event => {
   // Default: try network, fall back to cache (for non-API, non-auth requests)
   event.respondWith(
     fetch(request).catch(async () => {
-      const cache = await caches.open(CACHE_NAME);
-      const cachedResponse = await cache.match(request);
-      return cachedResponse || new Response('Resource not found', { status: 404 });
+      // FIX: Only fall back to cache if not a never-cache asset
+      if (!shouldNeverCache(request.url)) {
+        const cache = await caches.open(CACHE_NAME);
+        const cachedResponse = await cache.match(request);
+        if (cachedResponse) {
+          return cachedResponse;
+        }
+      }
+      return new Response('Resource not found', { status: 404 });
     })
   );
 });
@@ -714,7 +763,7 @@ async function syncPendingApiRequests() {
       try {
         const response = await fetch(request);
         if (response.ok) {
-          if (!shouldBypassCache(request.url)) {
+          if (!shouldBypassCache(request.url) && !shouldNeverCache(request.url)) {
             const apiCache = await caches.open(API_CACHE_NAME);
             await apiCache.put(request, response.clone());
           }
@@ -912,7 +961,7 @@ async function storeAuthState(isAuthenticated, token) {
 async function cacheApiData(url, data) {
   try {
     // CRITICAL: Don't cache auth-related data or /api/* data
-    if (shouldBypassCache(url) || url.startsWith('/auth/') || url.startsWith('/api/')) {
+    if (shouldBypassCache(url) || url.startsWith('/auth/') || url.startsWith('/api/') || shouldNeverCache(url)) {
       console.log('[Service Worker] Skipping cache for bypassed data:', url);
       return;
     }
@@ -1001,7 +1050,7 @@ async function cleanupOldCacheEntries() {
     
     for (const request of keys) {
       // Skip /api/* and never-cache endpoints
-      if (shouldBypassCache(request.url) || request.url.includes('/auth/') || request.url.includes('/api/')) {
+      if (shouldBypassCache(request.url) || request.url.includes('/auth/') || request.url.includes('/api/') || shouldNeverCache(request.url)) {
         await cache.delete(request);
         cleanedCount++;
         continue;

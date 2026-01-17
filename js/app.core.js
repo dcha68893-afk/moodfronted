@@ -2,6 +2,7 @@
 // UPDATED: Network status waits for api.js health check completion
 // FIXED: Never show "Offline" before api.js completes health check
 // ENHANCED: Background validation with proper network coordination
+// UPDATED: AbortError does not trigger offline mode - keep backend status as "checking"
 
 // ============================================================================
 // CONFIGURATION
@@ -211,7 +212,7 @@ const API_COORDINATION = {
     }, 100);
   },
   
-  // Check backend health using api.js - UPDATED: Never blocks UI, updates status asynchronously
+  // Check backend health using api.js - UPDATED: AbortError does not mark backend as unreachable
   checkBackendHealth: async function() {
     if (!this.apiReady || !window.MoodChatConfig.api) {
       console.log('Skipping health check: api.js not ready');
@@ -275,14 +276,29 @@ const API_COORDINATION = {
         return false;
       }
     } catch (error) {
-      window.MoodChatConfig.backendReachable = false;
-      window.MoodChatConfig.networkStatus = 'offline';
-      console.log('⚠️ Backend health check error:', error.message);
-      
-      // Notify UI
-      this.notifyNetworkStatus('offline', 'Backend connection failed: ' + error.message);
-      
-      return false;
+      // UPDATED: AbortError does not mark backend as unreachable
+      if (error.name === 'AbortError' || error.message?.includes('aborted') || error.message?.includes('timeout')) {
+        console.log('🔄 Backend health check aborted (timeout), keeping status as "checking"');
+        // Keep backend status as "checking" or unknown - don't mark as offline
+        window.MoodChatConfig.backendReachable = null; // null means "unknown/checking"
+        window.MoodChatConfig.networkStatus = 'checking';
+        
+        // Notify UI
+        this.notifyNetworkStatus('checking', 'Backend check timed out - retrying');
+        
+        // Don't dispatch backend-ready event with false, keep checking
+        return false;
+      } else {
+        // Real network failure (DNS, connection refused, etc.)
+        window.MoodChatConfig.backendReachable = false;
+        window.MoodChatConfig.networkStatus = 'offline';
+        console.log('⚠️ Backend health check error (real network failure):', error.message);
+        
+        // Notify UI
+        this.notifyNetworkStatus('offline', 'Backend connection failed: ' + error.message);
+        
+        return false;
+      }
     } finally {
       this.healthCheckInProgress = false;
     }
@@ -372,6 +388,11 @@ const API_COORDINATION = {
         const reachable = await this.heartbeatCheck();
         return reachable ? 'online' : 'offline';
       } catch (error) {
+        // UPDATED: AbortError doesn't count as offline
+        if (error.name === 'AbortError' || error.message?.includes('aborted')) {
+          console.log('🔄 Heartbeat check aborted, status remains checking');
+          return 'checking';
+        }
         return 'offline';
       }
     }
@@ -2818,26 +2839,33 @@ function setupGlobalAuthAccess() {
   // Enhanced login function using api.js - with proper online/offline handling
   window.login = function(email, password) {
     return new Promise(async (resolve, reject) => {
-      // Check if we're online and backend is reachable
+      // UPDATED: Check network status more accurately
       const networkStatus = API_COORDINATION.getNetworkStatus();
-      if (networkStatus === 'offline') {
+      const isBrowserOffline = !navigator.onLine;
+      
+      // Block login ONLY if browser is offline OR backend is confirmed unreachable
+      if (isBrowserOffline) {
         window.showToast('Cannot login while offline. Please check your internet connection.', 'error');
         resolve({
           success: false,
           offline: true,
-          message: 'Cannot login while offline'
+          message: 'Cannot login while offline (browser offline)'
         });
         return;
       }
       
-      if (!API_COORDINATION.isApiAvailable() || window.MoodChatConfig.backendReachable === false) {
+      // Check if backend is confirmed unreachable (not just checking/unknown)
+      if (window.MoodChatConfig.backendReachable === false) {
         window.showToast('Login service not available. Please try again later.', 'error');
         resolve({
           success: false,
-          message: 'API service not available'
+          message: 'Backend confirmed unreachable'
         });
         return;
       }
+      
+      // UPDATED: Allow login even if backend status is "checking" or "unknown" (null)
+      // This handles AbortError/timeout scenarios where we don't know the real status
       
       // Clear any existing user data before login
       const existingUsers = USER_DATA_ISOLATION.getCachedUsers();
@@ -2915,14 +2943,25 @@ function setupGlobalAuthAccess() {
       } catch (error) {
         window.showLoginLoading(false);
         
-        // Show error message
-        window.showToast(error.message || 'Network error. Please check your connection.', 'error');
-        
-        console.log('API login failed:', error);
-        resolve({
-          success: false,
-          message: 'Login failed: ' + error.message
-        });
+        // UPDATED: Handle AbortError specially
+        if (error.name === 'AbortError' || error.message?.includes('aborted') || error.message?.includes('timeout')) {
+          console.log('🔄 Login request aborted (timeout), backend status remains checking');
+          window.showToast('Login request timed out. Please try again.', 'warning');
+          resolve({
+            success: false,
+            timeout: true,
+            message: 'Login request timed out'
+          });
+        } else {
+          // Real network error
+          window.showToast(error.message || 'Network error. Please check your connection.', 'error');
+          
+          console.log('API login failed:', error);
+          resolve({
+            success: false,
+            message: 'Login failed: ' + error.message
+          });
+        }
       }
     });
   };
@@ -3002,26 +3041,33 @@ function setupGlobalAuthAccess() {
   // Enhanced register function using api.js
   window.register = function(email, password, displayName) {
     return new Promise(async (resolve, reject) => {
-      // Check if we're online and backend is reachable
+      // UPDATED: Check network status more accurately
       const networkStatus = API_COORDINATION.getNetworkStatus();
-      if (networkStatus === 'offline') {
+      const isBrowserOffline = !navigator.onLine;
+      
+      // Block registration ONLY if browser is offline OR backend is confirmed unreachable
+      if (isBrowserOffline) {
         window.showToast('Cannot register while offline. Please check your internet connection.', 'error');
         resolve({
           success: false,
           offline: true,
-          message: 'Cannot register while offline'
+          message: 'Cannot register while offline (browser offline)'
         });
         return;
       }
       
-      if (!API_COORDINATION.isApiAvailable() || window.MoodChatConfig.backendReachable === false) {
+      // Check if backend is confirmed unreachable (not just checking/unknown)
+      if (window.MoodChatConfig.backendReachable === false) {
         window.showToast('Registration service not available. Please try again later.', 'error');
         resolve({
           success: false,
-          message: 'API service not available'
+          message: 'Backend confirmed unreachable'
         });
         return;
       }
+      
+      // UPDATED: Allow registration even if backend status is "checking" or "unknown" (null)
+      // This handles AbortError/timeout scenarios where we don't know the real status
       
       // Clear any existing user data before registration
       const existingUsers = USER_DATA_ISOLATION.getCachedUsers();
@@ -3103,14 +3149,25 @@ function setupGlobalAuthAccess() {
       } catch (error) {
         window.showRegisterLoading(false);
         
-        // Show error message
-        window.showToast(error.message || 'Network error. Please check your connection.', 'error');
-        
-        console.log('API registration failed:', error);
-        resolve({
-          success: false,
-          message: 'Registration failed: ' + error.message
-        });
+        // UPDATED: Handle AbortError specially
+        if (error.name === 'AbortError' || error.message?.includes('aborted') || error.message?.includes('timeout')) {
+          console.log('🔄 Registration request aborted (timeout), backend status remains checking');
+          window.showToast('Registration request timed out. Please try again.', 'warning');
+          resolve({
+            success: false,
+            timeout: true,
+            message: 'Registration request timed out'
+          });
+        } else {
+          // Real network error
+          window.showToast(error.message || 'Network error. Please check your connection.', 'error');
+          
+          console.log('API registration failed:', error);
+          resolve({
+            success: false,
+            message: 'Registration failed: ' + error.message
+          });
+        }
       }
     });
   };

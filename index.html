@@ -14,7 +14,7 @@
     <title>MoodChat - Global Chat Platform</title>
     
     <!-- CSS Frameworks and Styles -->
-    <!-- Font Awesome for icons -->
+    <!-- Font Awesome for icons - Local fallback note -->
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
     <!-- Inline CSS for performance (already present) -->
     <style>
@@ -674,6 +674,30 @@
             color: var(--primary-color);
         }
         
+        /* Password guidance text */
+        .password-guidance {
+            font-size: 12px;
+            color: var(--text-light);
+            margin-top: 5px;
+            line-height: 1.4;
+        }
+        
+        .password-guidance ul {
+            padding-left: 18px;
+            margin-top: 5px;
+        }
+        
+        .password-guidance li {
+            margin-bottom: 3px;
+        }
+        
+        .guidance-note {
+            font-style: italic;
+            font-size: 11px;
+            color: var(--text-light);
+            margin-top: 8px;
+        }
+        
         .error-message {
             color: var(--danger-color);
             font-size: 13px;
@@ -690,6 +714,29 @@
             display: flex;
             align-items: center;
             gap: 5px;
+        }
+        
+        /* Login attempt countdown */
+        .login-attempt-countdown {
+            background: var(--warning-color);
+            color: white;
+            padding: 10px 15px;
+            border-radius: var(--card-radius);
+            margin-bottom: 20px;
+            text-align: center;
+            font-size: 14px;
+            animation: pulseWarning 1s ease-in-out infinite alternate;
+        }
+        
+        .countdown-timer {
+            font-weight: bold;
+            font-size: 16px;
+            margin: 0 5px;
+        }
+        
+        @keyframes pulseWarning {
+            0% { opacity: 0.8; }
+            100% { opacity: 1; }
         }
         
         /* Checkbox Group */
@@ -1314,6 +1361,10 @@
             .feature-card {
                 padding: 12px;
             }
+            
+            .password-guidance {
+                font-size: 11px;
+            }
         }
         
         /* Small Mobile (360px and below) */
@@ -1347,6 +1398,10 @@
             
             .stats-grid {
                 grid-template-columns: 1fr;
+            }
+            
+            .password-guidance {
+                font-size: 10px;
             }
         }
         
@@ -1744,6 +1799,13 @@
                 <div class="auth-body">
                     <!-- Login Form -->
                     <form class="auth-form active" id="login-form">
+                        <!-- Login attempt countdown placeholder -->
+                        <div class="login-attempt-countdown hidden" id="loginAttemptCountdown">
+                            <i class="fas fa-clock"></i>
+                            <span id="countdownMessage">Too many login attempts. Please wait:</span>
+                            <span class="countdown-timer" id="countdownTimer">00:20</span>
+                        </div>
+                        
                         <div class="form-group">
                             <label class="form-label" id="loginMethodLabel">Email Address</label>
                             <div class="form-input-group">
@@ -1903,7 +1965,7 @@
                                        class="form-input" 
                                        id="registerPassword"
                                        name="password"
-                                       placeholder="Create a strong password"
+                                       placeholder="Create a password (min 6 characters)"
                                        autocomplete="new-password"
                                        required>
                                 <button type="button" class="password-toggle" id="toggleRegisterPassword">
@@ -1913,7 +1975,7 @@
                             </div>
                             <div class="error-message hidden" id="registerPasswordError">
                                 <i class="fas fa-exclamation-circle"></i>
-                                <span id="registerPasswordErrorText">Minimum 8 characters</span>
+                                <span id="registerPasswordErrorText">Minimum 6 characters</span>
                             </div>
                         </div>
                         
@@ -2084,6 +2146,119 @@
         const REGISTER_ENDPOINT = `${API_BASE_URL}/auth/register`;
         const AUTH_TOKEN_KEY = 'moodchat_auth_token';
         const USER_DATA_KEY = 'moodchat_user_data';
+        const LOGIN_ATTEMPTS_KEY = 'moodchat_login_attempts';
+        const LOGIN_LOCKOUT_KEY = 'moodchat_login_lockout';
+        
+        // =============================================
+        // LOGIN ATTEMPT TRACKING
+        // =============================================
+        function getLoginAttempts() {
+            try {
+                const attempts = localStorage.getItem(LOGIN_ATTEMPTS_KEY);
+                return attempts ? parseInt(attempts) : 0;
+            } catch (e) {
+                return 0;
+            }
+        }
+        
+        function incrementLoginAttempts() {
+            const attempts = getLoginAttempts() + 1;
+            localStorage.setItem(LOGIN_ATTEMPTS_KEY, attempts.toString());
+            return attempts;
+        }
+        
+        function resetLoginAttempts() {
+            localStorage.removeItem(LOGIN_ATTEMPTS_KEY);
+            localStorage.removeItem(LOGIN_LOCKOUT_KEY);
+        }
+        
+        function getLockoutTime() {
+            try {
+                const lockout = localStorage.getItem(LOGIN_LOCKOUT_KEY);
+                return lockout ? parseInt(lockout) : null;
+            } catch (e) {
+                return null;
+            }
+        }
+        
+        function setLockoutTime(seconds) {
+            const lockoutUntil = Date.now() + (seconds * 1000);
+            localStorage.setItem(LOGIN_LOCKOUT_KEY, lockoutUntil.toString());
+        }
+        
+        function isLoginLocked() {
+            const lockoutUntil = getLockoutTime();
+            if (!lockoutUntil) return false;
+            
+            if (Date.now() > lockoutUntil) {
+                localStorage.removeItem(LOGIN_LOCKOUT_KEY);
+                return false;
+            }
+            
+            return true;
+        }
+        
+        function getRemainingLockoutTime() {
+            const lockoutUntil = getLockoutTime();
+            if (!lockoutUntil) return 0;
+            
+            const remaining = Math.max(0, Math.ceil((lockoutUntil - Date.now()) / 1000));
+            return remaining;
+        }
+        
+        function updateLoginButtonState() {
+            const loginButton = document.getElementById('login-button');
+            const loginAttemptCountdown = document.getElementById('loginAttemptCountdown');
+            const countdownTimer = document.getElementById('countdownTimer');
+            const countdownMessage = document.getElementById('countdownMessage');
+            
+            if (!loginButton || !loginAttemptCountdown) return;
+            
+            if (isLoginLocked()) {
+                const remainingSeconds = getRemainingLockoutTime();
+                const attempts = getLoginAttempts();
+                
+                // Update countdown display
+                const minutes = Math.floor(remainingSeconds / 60);
+                const seconds = remainingSeconds % 60;
+                countdownTimer.textContent = `${minutes.toString().padStart(2, '0')}:${seconds.toString().padStart(2, '0')}`;
+                
+                // Update message based on attempt count
+                if (attempts >= 3) {
+                    countdownMessage.textContent = 'Too many failed attempts. Please try again in:';
+                    // Show password recovery suggestion
+                    const forgotPasswordButton = document.getElementById('forgot-password-button');
+                    if (forgotPasswordButton) {
+                        forgotPasswordButton.style.color = 'var(--warning-color)';
+                        forgotPasswordButton.style.fontWeight = 'bold';
+                        forgotPasswordButton.textContent = 'Forgot password? Reset it now';
+                    }
+                } else {
+                    countdownMessage.textContent = 'Login temporarily locked. Please wait:';
+                }
+                
+                // Show countdown and disable button
+                loginAttemptCountdown.classList.remove('hidden');
+                loginButton.disabled = true;
+                loginButton.textContent = `Login Locked (${minutes}:${seconds.toString().padStart(2, '0')})`;
+                
+                // Update countdown every second
+                setTimeout(updateLoginButtonState, 1000);
+            } else {
+                // Hide countdown and enable button
+                loginAttemptCountdown.classList.add('hidden');
+                loginButton.disabled = false;
+                loginButton.innerHTML = '<span>Login to MoodChat</span><div class="spinner hidden" id="loginSpinner"></div>';
+                
+                // Reset password recovery button style
+                const forgotPasswordButton = document.getElementById('forgot-password-button');
+                if (forgotPasswordButton) {
+                    forgotPasswordButton.style.color = '';
+                    forgotPasswordButton.style.fontWeight = '';
+                    forgotPasswordButton.textContent = 'Forgot password?';
+                }
+            }
+        }
         
         // =============================================
         // UTILITY FUNCTIONS
@@ -2091,7 +2266,6 @@
         function showNotification(type, title, message) {
             console.log(`${type}: ${title} - ${message}`);
             
-            // Simple inline notification - you can enhance this with your existing notification system
             const notificationContainer = document.getElementById('notificationContainer');
             if (!notificationContainer) return;
             
@@ -2112,22 +2286,18 @@
             
             notificationContainer.appendChild(notification);
             
-            // Show with animation
             setTimeout(() => notification.classList.add('show'), 10);
             
-            // Auto remove after 5 seconds
             setTimeout(() => {
                 notification.classList.remove('show');
                 setTimeout(() => notification.remove(), 300);
             }, 5000);
             
-            // Close button
             notification.querySelector('.notification-close').addEventListener('click', () => {
                 notification.classList.remove('show');
                 setTimeout(() => notification.remove(), 300);
             });
             
-            // Return the notification element for potential programmatic control
             return notification;
         }
         
@@ -2139,7 +2309,6 @@
             if (errorText.tagName === 'SPAN') {
                 errorText.textContent = message;
             } else {
-                // Find the span inside
                 const span = element.querySelector('span');
                 if (span) span.textContent = message;
             }
@@ -2172,7 +2341,6 @@
             
             button.disabled = isLoading;
             
-            // Also disable/enable all buttons within the same form
             const form = button.closest('form');
             if (form) {
                 form.querySelectorAll('button[type="submit"]').forEach(btn => {
@@ -2229,7 +2397,6 @@
             }
             
             try {
-                // CORRECT PAYLOAD: { identifier, password }
                 const requestBody = {
                     identifier: identifier.trim(),
                     password: password
@@ -2245,7 +2412,6 @@
                     body: JSON.stringify(requestBody)
                 });
                 
-                // Handle non-JSON responses gracefully
                 const contentType = response.headers.get('content-type');
                 if (!contentType || !contentType.includes('application/json')) {
                     const text = await response.text();
@@ -2279,7 +2445,6 @@
             }
             
             try {
-                // CORRECT PAYLOAD: { username, email, password, confirmPassword }
                 const requestBody = {
                     username: username.trim(),
                     email: email.trim(),
@@ -2297,7 +2462,6 @@
                     body: JSON.stringify(requestBody)
                 });
                 
-                // Handle non-JSON responses gracefully
                 const contentType = response.headers.get('content-type');
                 if (!contentType || !contentType.includes('application/json')) {
                     const text = await response.text();
@@ -2308,7 +2472,6 @@
                 const data = await response.json();
                 
                 if (!response.ok) {
-                    // Handle validation errors from backend
                     let errorMsg = data.message || 'Registration failed';
                     
                     if (data.errors && Array.isArray(data.errors)) {
@@ -2335,15 +2498,11 @@
         // OFFLINE MODE FUNCTIONS
         // =============================================
         function attemptOfflineLogin(identifier, password) {
-            // Check if we have cached user data
             const cachedUser = getUserData();
             
             if (cachedUser) {
-                // Very basic offline validation - in production this would be more secure
                 const cachedIdentifier = cachedUser.email || cachedUser.username;
                 if (cachedIdentifier === identifier) {
-                    // Note: In a real app, you'd use a hashed comparison or other secure method
-                    // This is just for demo purposes
                     return {
                         success: true,
                         token: getAuthToken(),
@@ -2357,32 +2516,29 @@
         
         // =============================================
         // IMMEDIATE FORM TOGGLING SCRIPT
-        // This ensures forms toggle instantly without waiting for other scripts
         // =============================================
         document.addEventListener('DOMContentLoaded', function() {
             console.log('Form Toggler: Initializing immediate form switching...');
             
-            // Get all form toggle buttons
+            // Initialize login attempt tracking
+            updateLoginButtonState();
+            
             const signupButton = document.getElementById('signup-button');
             const forgotPasswordButton = document.getElementById('forgot-password-button');
             const backToLoginFromRegister = document.getElementById('back-to-login-from-register');
             const backToLoginFromForgot = document.getElementById('back-to-login-from-forgot');
             
-            // Get all forms
             const loginForm = document.getElementById('login-form');
             const registerForm = document.getElementById('register-form');
             const forgotForm = document.getElementById('forgot-form');
             const dashboardPanel = document.getElementById('dashboardPanel');
             
-            // Get panel title elements
             const panelTitle = document.getElementById('panelTitle');
             const panelSubtitle = document.getElementById('panelSubtitle');
             
-            // Function to show a specific form and hide others
             function showForm(formName) {
                 console.log('Form Toggler: Showing form:', formName);
                 
-                // Hide all forms and panels
                 [loginForm, registerForm, forgotForm, dashboardPanel].forEach(form => {
                     if (form) {
                         form.classList.remove('active');
@@ -2390,7 +2546,6 @@
                     }
                 });
                 
-                // Show the requested form with animation
                 setTimeout(() => {
                     let activeForm = null;
                     
@@ -2427,7 +2582,6 @@
                             if (panelTitle) panelTitle.textContent = 'MoodChat Dashboard';
                             if (panelSubtitle) panelSubtitle.textContent = 'Welcome back!';
                             
-                            // Update dashboard with user data
                             const userData = getUserData();
                             if (userData) {
                                 const dashboardGreeting = document.getElementById('dashboardGreeting');
@@ -2447,7 +2601,6 @@
                             break;
                     }
                     
-                    // Add fade-in animation
                     if (activeForm) {
                         setTimeout(() => {
                             activeForm.classList.add('fade-in');
@@ -2465,7 +2618,6 @@
             function redirectToChat() {
                 console.log('Redirecting to chat.html...');
                 
-                // Show loading state
                 const loginButton = document.getElementById('login-button');
                 const loginSpinner = document.getElementById('loginSpinner');
                 const registerSpinner = document.getElementById('registerSpinner');
@@ -2474,32 +2626,34 @@
                 if (registerSpinner) registerSpinner.classList.remove('hidden');
                 if (loginButton) loginButton.disabled = true;
                 
-                // Show redirect notification
                 showNotification('info', 'Redirecting', 'Taking you to the chat...');
                 
-                // Redirect to chat.html after a short delay
                 setTimeout(() => {
                     window.location.href = 'chat.html';
                 }, 1500);
             }
             
             // =============================================
-            // LOGIN FORM SUBMISSION HANDLER - UPDATED
+            // LOGIN FORM SUBMISSION HANDLER - UPDATED WITH ATTEMPT TRACKING
             // =============================================
             const loginFormElement = document.getElementById('login-form');
             if (loginFormElement) {
                 loginFormElement.addEventListener('submit', async function(e) {
                     e.preventDefault();
                     
-                    // Clear previous errors
+                    // Check if login is locked
+                    if (isLoginLocked()) {
+                        showNotification('warning', 'Login Locked', 'Please wait before trying again.');
+                        updateLoginButtonState();
+                        return;
+                    }
+                    
                     clearAllFormErrors();
                     
-                    // Get form values
                     const identifier = document.getElementById('loginIdentifier').value.trim();
                     const password = document.getElementById('loginPassword').value;
                     const rememberMe = document.getElementById('rememberMe').checked;
                     
-                    // Basic validation
                     if (!identifier) {
                         showFormError('loginIdentifierError', 'Please enter your email or username');
                         return;
@@ -2510,60 +2664,77 @@
                         return;
                     }
                     
-                    // Set loading state
                     setLoading('login-button', true);
                     
                     try {
                         let result;
                         
                         if (isOnline()) {
-                            // Try backend login first
                             result = await loginWithBackend(identifier, password);
+                            
+                            // Reset login attempts on successful login
+                            resetLoginAttempts();
                             showNotification('success', 'Login Successful', 'Welcome back!');
                         } else {
-                            // Offline mode - use cached data
                             result = attemptOfflineLogin(identifier, password);
                             showNotification('info', 'Offline Login', 'Logged in using cached credentials');
                         }
                         
                         if (result.success) {
-                            // Save auth data
                             const storage = rememberMe ? localStorage : sessionStorage;
                             saveAuthData(result.token, result.user);
                             
-                            // Show dashboard temporarily
                             showForm('dashboard');
                             
-                            // Redirect to chat.html after 2 seconds
                             setTimeout(redirectToChat, 2000);
                         }
                     } catch (error) {
                         console.error('Login failed:', error);
                         
-                        // Show error to user
-                        showFormError('loginIdentifierError', error.message || 'Login failed. Please check your credentials.');
-                        showNotification('error', 'Login Failed', error.message || 'Please check your credentials and try again.');
+                        // Increment failed login attempts
+                        const attempts = incrementLoginAttempts();
                         
-                        // Do NOT redirect on error
+                        // Determine lockout time based on attempts
+                        let lockoutSeconds = 0;
+                        if (attempts === 1) {
+                            lockoutSeconds = 20;
+                        } else if (attempts === 2) {
+                            lockoutSeconds = 40;
+                        } else if (attempts >= 3) {
+                            lockoutSeconds = 60;
+                        }
+                        
+                        // Set lockout if needed
+                        if (lockoutSeconds > 0) {
+                            setLockoutTime(lockoutSeconds);
+                            showNotification('warning', 'Login Attempt Failed', 
+                                attempts >= 3 
+                                    ? 'Too many failed attempts. Please wait 60 seconds or reset your password.'
+                                    : `Login temporarily locked for ${lockoutSeconds} seconds.`
+                            );
+                        } else {
+                            showFormError('loginIdentifierError', error.message || 'Login failed. Please check your credentials.');
+                            showNotification('error', 'Login Failed', error.message || 'Please check your credentials and try again.');
+                        }
+                        
+                        // Update button state
+                        updateLoginButtonState();
                     } finally {
-                        // Reset loading state
                         setLoading('login-button', false);
                     }
                 });
             }
             
             // =============================================
-            // REGISTER FORM SUBMISSION HANDLER - UPDATED
+            // REGISTER FORM SUBMISSION HANDLER - SIMPLIFIED PASSWORD VALIDATION
             // =============================================
             const registerFormElement = document.getElementById('register-form');
             if (registerFormElement) {
                 registerFormElement.addEventListener('submit', async function(e) {
                     e.preventDefault();
                     
-                    // Clear previous errors
                     clearAllFormErrors();
                     
-                    // Get form values
                     const displayName = document.getElementById('registerDisplayName').value.trim();
                     const username = document.getElementById('registerUsername').value.trim();
                     const email = document.getElementById('registerEmail').value.trim();
@@ -2571,7 +2742,6 @@
                     const confirmPassword = document.getElementById('registerConfirmPassword').value;
                     const acceptTerms = document.getElementById('acceptTerms').checked;
                     
-                    // Validation
                     let isValid = true;
                     
                     if (!displayName) {
@@ -2589,8 +2759,9 @@
                         isValid = false;
                     }
                     
-                    if (!password || password.length < 8) {
-                        showFormError('registerPasswordError', 'Password must be at least 8 characters');
+                    // SIMPLIFIED PASSWORD VALIDATION: Only check length >= 6
+                    if (!password || password.length < 6) {
+                        showFormError('registerPasswordError', 'Password must be at least 6 characters');
                         isValid = false;
                     }
                     
@@ -2606,29 +2777,23 @@
                     
                     if (!isValid) return;
                     
-                    // Set loading state
                     setLoading('register-button', true);
                     
                     try {
-                        // Attempt registration with backend
                         const result = await registerWithBackend(username, email, password, confirmPassword);
                         
                         if (result.success) {
-                            // Save auth data to localStorage (registration implies remember me)
                             saveAuthData(result.token, { ...result.user, displayName: displayName });
                             
                             showNotification('success', 'Registration Successful', 'Welcome to MoodChat!');
                             
-                            // Show dashboard temporarily
                             showForm('dashboard');
                             
-                            // Redirect to chat.html after 2 seconds
                             setTimeout(redirectToChat, 2000);
                         }
                     } catch (error) {
                         console.error('Registration failed:', error);
                         
-                        // Handle specific error cases
                         let errorMessage = error.message || 'Registration failed. Please try again.';
                         
                         if (errorMessage.includes('duplicate') || errorMessage.includes('already exists')) {
@@ -2643,7 +2808,6 @@
                         
                         showNotification('error', 'Registration Failed', errorMessage);
                     } finally {
-                        // Reset loading state
                         setLoading('register-button', false);
                     }
                 });
@@ -2657,7 +2821,10 @@
                 quickLoginBtn.addEventListener('click', function() {
                     console.log('Quick login initiated');
                     
-                    // Check for cached credentials
+                    // Reset login attempts for quick login
+                    resetLoginAttempts();
+                    updateLoginButtonState();
+                    
                     const cachedToken = getAuthToken();
                     const cachedUser = getUserData();
                     
@@ -2673,7 +2840,7 @@
             }
             
             // =============================================
-            // ENTER CHAT BUTTON HANDLER (from dashboard)
+            // ENTER CHAT BUTTON HANDLER
             // =============================================
             const enterChatBtn = document.getElementById('enterChatBtn');
             if (enterChatBtn) {
@@ -2685,7 +2852,6 @@
             // =============================================
             // EXISTING FORM TOGGLING LOGIC
             // =============================================
-            // Set up event listeners for immediate form toggling
             if (signupButton) {
                 signupButton.addEventListener('click', function(e) {
                     e.preventDefault();
@@ -2719,7 +2885,6 @@
             // =============================================
             // EXISTING MOBILE MENU FUNCTIONALITY
             // =============================================
-            // Initialize mobile menu toggle
             const menuToggle = document.getElementById('mobileMenuToggle');
             const mobileSidebar = document.getElementById('mobileSidebar');
             const overlay = document.getElementById('mobileSidebarOverlay');
@@ -2742,7 +2907,6 @@
             // =============================================
             // EXISTING PASSWORD TOGGLE FUNCTIONALITY
             // =============================================
-            // Setup password toggles
             const passwordToggles = document.querySelectorAll('.password-toggle');
             passwordToggles.forEach(toggle => {
                 toggle.addEventListener('click', function() {
@@ -2763,7 +2927,6 @@
             // =============================================
             // EXISTING FEATURE TAGS FUNCTIONALITY
             // =============================================
-            // Setup feature tags
             const featureTags = document.querySelectorAll('.feature-tag');
             const selectedInterests = [];
             
@@ -2790,17 +2953,14 @@
             // =============================================
             // EXISTING AUTH TABS FUNCTIONALITY
             // =============================================
-            // Setup auth tabs
             const authTabs = document.querySelectorAll('.auth-tab');
             authTabs.forEach(tab => {
                 tab.addEventListener('click', function() {
                     const method = this.dataset.method;
                     
-                    // Update active tab
                     authTabs.forEach(t => t.classList.remove('active'));
                     this.classList.add('active');
                     
-                    // Update input placeholder and icon
                     const placeholderMap = {
                         email: 'Enter your email',
                         mobile: 'Enter your phone number',
@@ -2827,10 +2987,8 @@
                         loginIdentifier.placeholder = placeholderMap[method] || placeholderMap.email;
                         loginMethodLabel.textContent = labelMap[method] || labelMap.email;
                         
-                        // Update icon
                         loginMethodIcon.className = `fas ${iconMap[method] || 'fa-envelope'} input-icon`;
                         
-                        // Clear any existing error
                         hideFormError('loginIdentifierError');
                     }
                 });
@@ -2859,11 +3017,9 @@
                         return;
                     }
                     
-                    // Show loading
                     if (forgotPasswordSpinner) forgotPasswordSpinner.classList.remove('hidden');
                     if (forgotPasswordBtn) forgotPasswordBtn.disabled = true;
                     
-                    // Simulate API call
                     setTimeout(() => {
                         if (forgotPasswordSpinner) forgotPasswordSpinner.classList.add('hidden');
                         if (forgotPasswordError) forgotPasswordError.classList.add('hidden');
@@ -2883,6 +3039,8 @@
                     const quickLoginCard = document.getElementById('quickLoginCard');
                     if (quickLoginCard) quickLoginCard.classList.add('hidden');
                     clearAuthData();
+                    resetLoginAttempts(); // Also reset attempts when removing quick login
+                    updateLoginButtonState();
                     showNotification('info', 'Quick Login Removed', 'Your cached login has been removed');
                 });
             }
@@ -2904,6 +3062,8 @@
                 logoutBtn.addEventListener('click', function() {
                     console.log('User logged out');
                     clearAuthData();
+                    resetLoginAttempts(); // Reset attempts on logout
+                    updateLoginButtonState();
                     showNotification('info', 'Logged Out', 'You have been successfully logged out');
                     showForm('login');
                 });
@@ -2912,12 +3072,10 @@
             // =============================================
             // CHECK FOR EXISTING AUTH ON PAGE LOAD
             // =============================================
-            // Check if user is already logged in
             const authToken = getAuthToken();
             const userData = getUserData();
             
             if (authToken && userData) {
-                // Show quick login card
                 const quickLoginCard = document.getElementById('quickLoginCard');
                 const quickLoginName = document.getElementById('quickLoginName');
                 const quickLoginEmail = document.getElementById('quickLoginEmail');
@@ -2934,7 +3092,6 @@
             // =============================================
             // AUTO-FOCUS ON FIRST INPUT
             // =============================================
-            // Auto-focus on the first input when form is shown
             const observer = new MutationObserver(function(mutations) {
                 mutations.forEach(function(mutation) {
                     if (mutation.type === 'attributes' && mutation.attributeName === 'class') {
@@ -2949,12 +3106,10 @@
                 });
             });
             
-            // Observe all auth forms for class changes
             document.querySelectorAll('.auth-form').forEach(form => {
                 observer.observe(form, { attributes: true });
             });
             
-            // Initial focus
             const activeForm = document.querySelector('.auth-form.active');
             if (activeForm) {
                 const firstInput = activeForm.querySelector('input:not([type="hidden"]):not([type="checkbox"])');
@@ -2966,7 +3121,6 @@
             // =============================================
             // ENTER KEY SUBMISSION
             // =============================================
-            // Allow form submission with Enter key
             document.addEventListener('keydown', function(e) {
                 if (e.key === 'Enter') {
                     const activeForm = document.querySelector('.auth-form.active');
@@ -2982,7 +3136,6 @@
             // =============================================
             // INPUT VALIDATION ON BLUR
             // =============================================
-            // Add blur validation for inputs
             document.querySelectorAll('.form-input').forEach(input => {
                 input.addEventListener('blur', function() {
                     if (this.value.trim() === '') {
@@ -2993,40 +3146,22 @@
             });
             
             // =============================================
-            // NETWORK STATUS INDICATOR
+            // REMOVE NETWORK STATUS INDICATOR (as requested)
             // =============================================
-            // Update UI based on network status
-            function updateNetworkStatus() {
-                const isOnline = navigator.onLine;
-                if (!isOnline) {
-                    showNotification('warning', 'Offline Mode', 'You are currently offline. Some features may be limited.');
-                }
-            }
-            
-            // Initial check
-            updateNetworkStatus();
-            
-            // Listen for network changes
-            window.addEventListener('online', updateNetworkStatus);
-            window.addEventListener('offline', updateNetworkStatus);
             
             console.log('All initialization complete.');
         });
     </script>
     
     <!-- 4. Main Application Scripts (Loaded as modules) -->
-    <!-- Note: Load in correct order of dependency -->
     <script src="js/api.js" type="module"></script>
     <script src="js/app.core.js" type="module"></script>
     <script src="js/app.ui.auth.js" type="module"></script>
     
     <!-- 5. Service Worker Registration -->
-    <!-- Load after auth UI is ready to prevent conflicts -->
     <script>
-        // Wait for DOM to be fully ready
         document.addEventListener('DOMContentLoaded', function() {
             if ('serviceWorker' in navigator) {
-                // Small delay to ensure all UI is initialized
                 setTimeout(() => {
                     navigator.serviceWorker.register('/service-worker.js')
                         .then(function(registration) {
