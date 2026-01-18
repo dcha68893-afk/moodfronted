@@ -698,6 +698,26 @@
             margin-top: 8px;
         }
         
+        /* Warning Container */
+        .password-warning {
+            font-size: 12px;
+            color: var(--warning-color);
+            margin-top: 6px;
+            display: flex;
+            align-items: flex-start;
+            gap: 6px;
+            line-height: 1.4;
+            background: rgba(243, 156, 18, 0.05);
+            padding: 8px 10px;
+            border-radius: 6px;
+            border-left: 3px solid var(--warning-color);
+        }
+        
+        .password-warning i {
+            margin-top: 1px;
+            flex-shrink: 0;
+        }
+        
         .error-message {
             color: var(--danger-color);
             font-size: 13px;
@@ -1365,6 +1385,11 @@
             .password-guidance {
                 font-size: 11px;
             }
+            
+            .password-warning {
+                font-size: 11px;
+                padding: 6px 8px;
+            }
         }
         
         /* Small Mobile (360px and below) */
@@ -1402,6 +1427,11 @@
             
             .password-guidance {
                 font-size: 10px;
+            }
+            
+            .password-warning {
+                font-size: 10px;
+                padding: 5px 6px;
             }
         }
         
@@ -1839,6 +1869,11 @@
                                 </button>
                                 <i class="fas fa-lock input-icon"></i>
                             </div>
+                            <!-- WARNING CONTAINER ADDED HERE -->
+                            <div class="password-warning">
+                                <i class="fas fa-exclamation-triangle"></i>
+                                <small>Warning: Passwords are case-sensitive. Make sure Caps Lock is off.</small>
+                            </div>
                             <div class="error-message hidden" id="loginPasswordError">
                                 <i class="fas fa-exclamation-circle"></i>
                                 <span id="loginPasswordErrorText">Password is required</span>
@@ -1972,6 +2007,11 @@
                                     <i class="fas fa-eye"></i>
                                 </button>
                                 <i class="fas fa-lock input-icon"></i>
+                            </div>
+                            <!-- WARNING CONTAINER ADDED HERE -->
+                            <div class="password-warning">
+                                <i class="fas fa-exclamation-triangle"></i>
+                                <small>Warning: Use a strong password with at least 6 characters. Avoid common passwords.</small>
                             </div>
                             <div class="error-message hidden" id="registerPasswordError">
                                 <i class="fas fa-exclamation-circle"></i>
