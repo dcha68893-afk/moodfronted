@@ -26,7 +26,7 @@ const IS_LOCAL_DEVELOPMENT = window.location.hostname === 'localhost' ||
 // ============================================================================
 const BACKEND_BASE_URL = IS_LOCAL_DEVELOPMENT
     ? 'http://localhost:4000'
-    : 'https://moodchat-backend-1.onrender.com';
+    : 'https://moodchat-fy56.onrender.com';
 const BASE_URL = BACKEND_BASE_URL + '/api';
 
 console.log(`🔧 [API] Environment: ${IS_LOCAL_DEVELOPMENT ? 'Local Development' : 'Production'}`);

@@ -7,7 +7,7 @@ console.log('🔧 Loading configuration...');
 // Helper function
 window.apiCall = async function(endpoint, options = {}) {
     // Use BACKEND_URL from api.js or fallback to Render URL if not set
-    const baseUrl = window.BACKEND_URL || 'https://moodchat-backend-1.onrender.com/api';
+    const baseUrl = window.BACKEND_URL || 'https://moodchat-fy56.onrender.com/api';
     const url = `${baseUrl}${endpoint}`;
     console.log('📡 Calling:', url);
     
