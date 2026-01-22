@@ -1,6 +1,7 @@
 // app.ui.auth.js - MoodChat Network Status Detection with JWT Auth
 // UPDATED: Added progressive login attempts, password guidance, and better error handling
 // FOCUS: Network status detection, backend health checks, JWT auth handling, and progressive login limits
+// CRITICAL FIX: All auth calls use centralized api.js with correct endpoints
 
 // ============================================================================
 // NETWORK STATUS MANAGEMENT
@@ -284,7 +285,7 @@ async function checkAutoLogin() {
     if (typeof window.api === 'function') {
       try {
         console.log('Validating token with backend...');
-        const response = await window.api('/validate-token', {
+        const response = await window.api('/auth/me', {
           headers: {
             'Authorization': `Bearer ${authData.token}`
           }
@@ -399,28 +400,17 @@ async function handleLoginSubmit(event) {
       throw new Error('API not available. Please check your connection.');
     }
     
-    // Call login API
-    console.log('Calling login API...');
-    const response = await window.api('/login', {
-      method: 'POST',
-      body: { identifier, password }
-    });
+    // Call login API using centralized api.js - CRITICAL FIX: Use correct endpoint
+    console.log('Calling login API via centralized api.js...');
     
-    // Safely parse the response
-    let parsedResponse;
-    if (response && typeof response === 'object' && 'ok' in response) {
-      // This is a raw Response object
-      parsedResponse = await safeParseResponse(response);
-    } else {
-      // Already parsed or different format
-      parsedResponse = response;
-    }
+    // Use window.api.login() method which handles the correct endpoint
+    const loginResult = await window.api.login(identifier, password);
     
-    console.log('Login API response:', parsedResponse);
+    console.log('Login API response:', loginResult);
     
     // Check for success
-    if (parsedResponse && parsedResponse.user && parsedResponse.token) {
-      const { token, user } = parsedResponse;
+    if (loginResult && loginResult.success && loginResult.user && loginResult.token) {
+      const { token, user } = loginResult;
       
       // Save JWT and user info
       saveAuthData(token, user);
@@ -446,7 +436,7 @@ async function handleLoginSubmit(event) {
         window.location.href = 'chat.html';
       }, 1000);
     } else {
-      throw new Error(parsedResponse?.error || 'Login failed');
+      throw new Error(loginResult?.message || 'Login failed');
     }
   } catch (error) {
     console.error('Login error:', error);
@@ -527,35 +517,26 @@ async function handleRegisterSubmit(event) {
       throw new Error('API not available. Please check your connection.');
     }
     
-    // Call register API
-    console.log('Calling register API...');
-    const response = await window.api('/register', {
-      method: 'POST',
-      body: { 
-        username, 
-        email, 
-        password, 
-        confirmPassword,
-        firstName: displayName || username,
-        lastName: '' 
-      }
-    });
+    // Call register API using centralized api.js - CRITICAL FIX: Use correct endpoint
+    console.log('Calling register API via centralized api.js...');
     
-    // Safely parse the response
-    let parsedResponse;
-    if (response && typeof response === 'object' && 'ok' in response) {
-      // This is a raw Response object
-      parsedResponse = await safeParseResponse(response);
-    } else {
-      // Already parsed or different format
-      parsedResponse = response;
-    }
+    // Prepare registration data
+    const registerData = {
+      username: username,
+      email: email,
+      password: password,
+      confirmPassword: confirmPassword,
+      displayName: displayName || username
+    };
     
-    console.log('Register API response:', parsedResponse);
+    // Use window.api.register() method which handles the correct endpoint
+    const registerResult = await window.api.register(registerData);
+    
+    console.log('Register API response:', registerResult);
     
     // Check for success
-    if (parsedResponse && parsedResponse.user && parsedResponse.token) {
-      const { token, user } = parsedResponse;
+    if (registerResult && registerResult.success && registerResult.user && registerResult.token) {
+      const { token, user } = registerResult;
       
       // Save JWT and user info
       saveAuthData(token, user);
@@ -578,7 +559,7 @@ async function handleRegisterSubmit(event) {
         window.location.href = 'chat.html';
       }, 1000);
     } else {
-      throw new Error(parsedResponse?.error || 'Registration failed');
+      throw new Error(registerResult?.message || 'Registration failed');
     }
   } catch (error) {
     console.error('Registration error:', error);
@@ -629,9 +610,11 @@ async function handleForgotPasswordSubmit(event) {
       throw new Error('API not available. Please check your connection.');
     }
     
-    // Call forgot password API
-    console.log('Calling forgot password API...');
-    const response = await window.api('/forgot-password', {
+    // Call forgot password API using centralized api.js
+    console.log('Calling forgot password API via centralized api.js...');
+    
+    // Use window.api for consistency
+    const response = await window.api('/auth/forgot-password', {
       method: 'POST',
       body: { email }
     });

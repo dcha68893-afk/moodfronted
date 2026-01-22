@@ -2,6 +2,7 @@
 // ULTRA-ROBUST VERSION: Never breaks, even with incorrect frontend calls
 // UPDATED: Enhanced error handling for 429 and 500 errors
 // UPDATED: Support for new token structure from backend
+// CRITICAL FIX: Single source of truth for backend URL - ALL calls use same base
 // ============================================================================
 // CRITICAL IMPROVEMENTS APPLIED:
 // 1. SINGLE internal fetch function with comprehensive input validation
@@ -11,10 +12,11 @@
 // 5. Absolute protection against invalid fetch() calls
 // 6. Enhanced error handling for rate limiting and server errors
 // 7. Updated to handle new token structure from backend
+// 8. CRITICAL FIX: Single source of truth for backend URL
 // ============================================================================
 
 // ============================================================================
-// ENVIRONMENT DETECTION
+// ENVIRONMENT DETECTION - SINGLE SOURCE OF TRUTH
 // ============================================================================
 const IS_LOCAL_DEVELOPMENT = window.location.hostname === 'localhost' || 
                            window.location.hostname.startsWith('127.') ||
@@ -22,16 +24,20 @@ const IS_LOCAL_DEVELOPMENT = window.location.hostname === 'localhost' ||
                            window.location.protocol === 'file:';
 
 // ============================================================================
-// BACKEND URL CONFIGURATION - FIXED AND IMMUTABLE
+// BACKEND URL CONFIGURATION - FIXED AND IMMUTABLE - SINGLE SOURCE
 // ============================================================================
+// CRITICAL FIX: ONE source for ALL API calls
 const BACKEND_BASE_URL = IS_LOCAL_DEVELOPMENT
     ? 'http://localhost:4000'
     : 'https://moodchat-fy56.onrender.com';
+
+// CRITICAL FIX: ALL API calls use the same base URL
 const BASE_URL = BACKEND_BASE_URL + '/api';
 
 console.log(`🔧 [API] Environment: ${IS_LOCAL_DEVELOPMENT ? 'Local Development' : 'Production'}`);
 console.log(`🔧 [API] Backend Base URL: ${BACKEND_BASE_URL}`);
 console.log(`🔧 [API] API Base URL: ${BASE_URL}`);
+console.log(`🔧 [API] CRITICAL: ALL API calls will use: ${BASE_URL}`);
 
 // ============================================================================
 // CORE VALIDATION FUNCTIONS - NEVER BREAK
@@ -330,7 +336,7 @@ window.api = function(endpoint, options = {}) {
 
 const apiObject = {
     _singleton: true,
-    _version: '13.0.0', // Updated version for new token structure
+    _version: '13.0.1', // Updated version for single URL source fix
     _safeInitialized: true,
     _backendReachable: null,
     _sessionChecked: false,
@@ -364,6 +370,7 @@ const apiObject = {
         
         try {
             console.log(`🔧 [API] Login attempt for: ${emailOrUsername}`);
+            console.log(`🔧 [API] Using backend URL: ${BASE_URL}`);
             
             // CORRECTED: Use { identifier, password } payload structure
             const requestData = { 
@@ -371,7 +378,7 @@ const apiObject = {
                 password: String(password) 
             };
             
-            // USE THE SINGLE FETCH FUNCTION
+            // USE THE SINGLE FETCH FUNCTION - CRITICAL: Uses same BASE_URL as all other calls
             const result = await _safeFetchCall(`${BASE_URL}/auth/login`, {
                 method: 'POST',
                 body: requestData
@@ -500,6 +507,7 @@ const apiObject = {
         
         try {
             console.log('🔧 [API] Register attempt');
+            console.log(`🔧 [API] Using backend URL: ${BASE_URL}`);
             
             // CORRECTED: Ensure correct payload structure { username, email, password, confirmPassword }
             const registerPayload = {
@@ -532,7 +540,7 @@ const apiObject = {
                 };
             }
             
-            // USE THE SINGLE FETCH FUNCTION
+            // USE THE SINGLE FETCH FUNCTION - CRITICAL: Uses same BASE_URL as all other calls
             const result = await _safeFetchCall(`${BASE_URL}/auth/register`, {
                 method: 'POST',
                 body: registerPayload
@@ -662,6 +670,7 @@ const apiObject = {
         }
         
         console.log('🔧 [API] Checking backend health...');
+        console.log(`🔧 [API] Using backend URL: ${BASE_URL}`);
         
         const testEndpoints = ['/status', '/auth/health', '/health', ''];
         
@@ -1299,9 +1308,10 @@ const apiObject = {
     // ============================================================================
     
     initialize: async function() {
-        console.log('🔧 [API] ⚡ MoodChat API v13.0.0 (UPDATED FOR NEW TOKEN STRUCTURE) initializing...');
+        console.log('🔧 [API] ⚡ MoodChat API v13.0.1 (SINGLE URL SOURCE FIX) initializing...');
         console.log('🔧 [API] 🔗 Backend URL:', BASE_URL);
         console.log('🔧 [API] 🌐 Environment:', IS_LOCAL_DEVELOPMENT ? 'Local' : 'Production');
+        console.log('🔧 [API] ✅ CRITICAL: ALL API calls will use single source:', BASE_URL);
         
         // Migrate old auth data if needed
         const oldToken = localStorage.getItem('moodchat_auth_token');
@@ -1427,7 +1437,9 @@ const apiObject = {
             hasAuthUser: !!localStorage.getItem('authUser'),
             hardened: true,
             enhancedErrorHandling: true,
-            supportsNewTokenStructure: true
+            supportsNewTokenStructure: true,
+            singleUrlSource: true,
+            baseUrl: BASE_URL
         };
         
         const events = ['api-ready', 'apiready', 'apiReady'];
@@ -1463,7 +1475,7 @@ const apiObject = {
                     // Silent fail
                 }
             });
-            console.log('🔧 [API] API synchronization ready (updated for new token structure)');
+            console.log('🔧 [API] API synchronization ready (single URL source)');
         }, 1000);
     },
     
@@ -1496,10 +1508,12 @@ const apiObject = {
             },
             config: {
                 backendUrl: BASE_URL,
+                backendBaseUrl: BACKEND_BASE_URL,
                 environment: IS_LOCAL_DEVELOPMENT ? 'local' : 'production',
                 hardened: true,
                 enhancedErrorHandling: true,
-                supportsNewTokenStructure: true
+                supportsNewTokenStructure: true,
+                singleUrlSource: true
             },
             validation: {
                 methodNormalization: 'ACTIVE',
@@ -1507,7 +1521,8 @@ const apiObject = {
                 singleFetchFunction: 'ACTIVE',
                 offlineDetection: 'ACTIVE',
                 errorTypeDetection: 'ACTIVE',
-                tokenStructureSupport: 'ACTIVE'
+                tokenStructureSupport: 'ACTIVE',
+                singleUrlSource: 'ACTIVE'
             }
         };
         
@@ -1541,7 +1556,7 @@ const apiObject = {
 Object.assign(window.api, apiObject);
 Object.setPrototypeOf(window.api, Object.getPrototypeOf(apiObject));
 
-console.log('🔧 [API] Starting hardened initialization with new token structure support...');
+console.log('🔧 [API] Starting hardened initialization with single URL source...');
 
 // Safe initialization with timeout
 setTimeout(() => {
@@ -1770,7 +1785,7 @@ window.__MOODCHAT_API_INSTANCE = window.api;
 window.__MOODCHAT_API_READY = true;
 window.MOODCHAT_API_READY = true;
 
-console.log('🔧 [API] UPDATED Backend API integration complete with new token structure support');
+console.log('🔧 [API] UPDATED Backend API integration complete with SINGLE URL SOURCE');
 console.log('🔧 [API] ✅ Method normalization: ACTIVE');
 console.log('🔧 [API] ✅ Endpoint sanitization: ACTIVE');
 console.log('🔧 [API] ✅ Single fetch function: ACTIVE');
@@ -1779,4 +1794,5 @@ console.log('🔧 [API] ✅ Rate limit error detection: ACTIVE');
 console.log('🔧 [API] ✅ Server error detection: ACTIVE');
 console.log('🔧 [API] ✅ AbortError handling: FIXED (does not mark backend offline)');
 console.log('🔧 [API] ✅ New token structure support: ACTIVE');
+console.log('🔧 [API] ✅ SINGLE URL SOURCE: ACTIVE (ALL calls use: ' + BASE_URL + ')');
 console.log('🔧 [API] ✅ NEVER breaks on frontend errors');

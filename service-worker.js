@@ -1,6 +1,7 @@
 // Service Worker for PWA Chat Application
 // Version: 4.0.0 - Critical API bypass for production
 // Cache Strategy: Cache-First for static assets, Network-Only for API
+// CRITICAL FIX: Auth endpoints NEVER cached, always bypass to network
 
 const CACHE_NAME = 'moodchat-v10';
 const API_CACHE_NAME = 'moodchat-api-v10';
@@ -58,8 +59,15 @@ const API_BYPASS_PATHS = [
 
 // Authentication and sensitive endpoints - NEVER cache these
 const NEVER_CACHE_ENDPOINTS = [
-  // Auth API endpoints
+  // Auth API endpoints - CRITICAL: Never cache auth
   '/api/auth',
+  '/api/auth/login',
+  '/api/auth/register',
+  '/api/auth/logout',
+  '/api/auth/validate',
+  '/api/auth/refresh',
+  '/api/auth/me',
+  '/api/auth/health',
   '/api/login',
   '/api/register',
   '/api/validate',
@@ -225,7 +233,8 @@ self.addEventListener('activate', event => {
             type: 'SW_ACTIVATED',
             version: '4.0.0',
             timestamp: Date.now(),
-            apiBypass: true
+            apiBypass: true,
+            authNeverCached: true
           });
         });
       });
@@ -297,6 +306,7 @@ function shouldBypassCache(requestUrl) {
   });
   
   if (isNeverCacheEndpoint) {
+    console.log('[Service Worker] Auth endpoint detected, bypassing cache:', url.pathname);
     return true;
   }
   
@@ -436,21 +446,52 @@ async function handleApiRequest(request) {
   
   console.log('[Service Worker] API BYPASS: Direct fetch for', url.pathname);
   
-  // CRITICAL: ALL /api/* requests go directly to network with no caching
-  // This solves the "app shows offline while online" problem
+  // CRITICAL FIX: Check if this is an auth endpoint - NEVER CACHE
+  const isAuthEndpoint = NEVER_CACHE_ENDPOINTS.some(endpoint => 
+    url.pathname.includes(endpoint) || 
+    url.pathname.startsWith('/api/auth/') ||
+    url.pathname.includes('/auth/')
+  );
+  
+  if (isAuthEndpoint) {
+    console.log('[Service Worker] CRITICAL: Auth endpoint detected, bypassing ALL caching:', url.pathname);
+    try {
+      // Direct fetch - no caching, no interception
+      const response = await fetch(request);
+      console.log(`[Service Worker] Auth endpoint ${url.pathname} -> ${response.status}`);
+      return response;
+    } catch (error) {
+      console.log('[Service Worker] Auth endpoint network failed:', url.pathname);
+      // Return proper error - auth requires network
+      return new Response(JSON.stringify({
+        error: 'network_failed',
+        message: 'Authentication requires network connection',
+        requiresNetwork: true,
+        path: url.pathname,
+        timestamp: Date.now()
+      }), {
+        status: 503,
+        headers: {
+          'Content-Type': 'application/json',
+          'X-Service-Worker': 'auth-bypass',
+          'X-Offline': 'true',
+          'X-Auth-Requires-Network': 'true'
+        }
+      });
+    }
+  }
+  
+  // Regular API bypass for non-auth endpoints
   try {
     // Direct fetch - no caching, no interception
     const response = await fetch(request);
     
     // CRITICAL: Never cache any API response
-    // This solves "API calls return cached responses" problem
     console.log(`[Service Worker] API BYPASS: ${url.pathname} -> ${response.status}`);
     return response;
   } catch (error) {
     console.log('[Service Worker] API BYPASS: Network failed for', url.pathname);
     
-    // CRITICAL: When offline, API requests MUST fail naturally
-    // This respects browser's offline state and doesn't fake online status
     // Return a proper network error - don't return cached data
     return new Response(JSON.stringify({
       error: 'network_failed',
@@ -651,6 +692,15 @@ self.addEventListener('fetch', event => {
   if (url.pathname.startsWith('/api/')) {
     console.log('[Service Worker] API BYPASS: Letting request pass through for', url.pathname);
     // DO NOT call event.respondWith() - let the request go directly to network
+    return;
+  }
+  
+  // CRITICAL: Skip auth-related requests completely
+  if (url.pathname.startsWith('/auth/') || 
+      url.pathname.includes('/login') || 
+      url.pathname.includes('/register') ||
+      url.pathname.includes('/logout')) {
+    console.log('[Service Worker] Auth request bypass:', url.pathname);
     return;
   }
   
@@ -937,6 +987,7 @@ self.addEventListener('message', event => {
         status: 'healthy',
         version: '4.0.0',
         apiBypass: true,
+        authNeverCached: true,
         timestamp: Date.now()
       });
       break;
@@ -1021,7 +1072,8 @@ async function getCacheInfo(event) {
       type: 'CACHE_INFO',
       caches: cacheInfo,
       timestamp: Date.now(),
-      apiBypassEnabled: true
+      apiBypassEnabled: true,
+      authNeverCached: true
     });
   } catch (error) {
     event.ports[0].postMessage({
