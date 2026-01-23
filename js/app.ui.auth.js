@@ -285,27 +285,15 @@ async function checkAutoLogin() {
     if (typeof window.api === 'function') {
       try {
         console.log('Validating token with backend...');
-        const response = await window.api('/auth/me', {
-          headers: {
-            'Authorization': `Bearer ${authData.token}`
-          }
-        });
+        const response = await window.api.checkSession();
         
-        // Use safe parsing instead of direct response access
-        let parsedResponse;
-        if (response && typeof response === 'object' && 'ok' in response) {
-          // This appears to be a raw Response object
-          parsedResponse = await safeParseResponse(response);
+        // Check if session is valid
+        if (response && response.authenticated && response.user) {
+          console.log('Token validated successfully with backend');
+          return true;
         } else {
-          // This might already be parsed, but ensure it has expected structure
-          parsedResponse = response;
+          throw new Error('Token validation failed');
         }
-        
-        if (!parsedResponse || !parsedResponse.success) {
-          throw new Error(parsedResponse?.error || 'Token validation failed');
-        }
-        
-        console.log('Token validated successfully with backend');
       } catch (error) {
         console.log('Token validation with backend failed:', error.message);
         // Continue anyway - token might be valid but backend validation endpoint might not exist
@@ -1153,51 +1141,6 @@ function updateAuthButtonStates(activeForm) {
  */
 function setupAuthFormListeners() {
   console.log('Setting up auth form event listeners...');
-  
-  // Login button
-  const loginButton = document.getElementById('login-button');
-  if (loginButton) {
-    loginButton.addEventListener('click', (e) => {
-      e.preventDefault();
-      showLoginForm();
-    });
-  }
-  
-  // Signup/Register button
-  const signupButton = document.getElementById('signup-button');
-  if (signupButton) {
-    signupButton.addEventListener('click', (e) => {
-      e.preventDefault();
-      showRegisterForm();
-    });
-  }
-  
-  // Forgot password button
-  const forgotButton = document.getElementById('forgot-password-button');
-  if (forgotButton) {
-    forgotButton.addEventListener('click', (e) => {
-      e.preventDefault();
-      showForgotPasswordForm();
-    });
-  }
-  
-  // Back to login from register
-  const backFromRegister = document.getElementById('back-to-login-from-register');
-  if (backFromRegister) {
-    backFromRegister.addEventListener('click', (e) => {
-      e.preventDefault();
-      showLoginForm();
-    });
-  }
-  
-  // Back to login from forgot password
-  const backFromForgot = document.getElementById('back-to-login-from-forgot');
-  if (backFromForgot) {
-    backFromForgot.addEventListener('click', (e) => {
-      e.preventDefault();
-      showLoginForm();
-    });
-  }
   
   // Login form submit handler
   const loginForm = document.getElementById('login-form');

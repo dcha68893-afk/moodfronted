@@ -1,15 +1,15 @@
 // Service Worker for PWA Chat Application
-// Version: 4.0.0 - Critical API bypass for production
-// Cache Strategy: Cache-First for static assets, Network-Only for API
-// CRITICAL FIX: Auth endpoints NEVER cached, always bypass to network
+// Version: 5.0.0 - Enhanced API bypass with strict no-caching for backend files
+// Cache Strategy: Cache-First for static assets, NETWORK-ONLY for all API/backend requests
+// CRITICAL: NO API endpoints cached, NO backend URLs persisted
 
-const CACHE_NAME = 'moodchat-v10';
-const API_CACHE_NAME = 'moodchat-api-v10';
-const OFFLINE_CACHE_NAME = 'moodchat-offline-v10';
+const CACHE_NAME = 'moodchat-v11'; // Incremented version
+const API_CACHE_NAME = 'moodchat-api-v11';
+const OFFLINE_CACHE_NAME = 'moodchat-offline-v11';
 
 // App shell - all static assets that make up the UI
 const APP_SHELL_ASSETS = [
-  // Core files (INCLUDING index.html for offline use)
+  // Core HTML files (INCLUDING index.html for offline use)
   '/',
   '/index.html',
   '/chat.html',
@@ -29,12 +29,8 @@ const APP_SHELL_ASSETS = [
   '/js/app.js',
   '/chat.js',
   
-  
   // Manifest and icons
   '/manifest.json',
-  
-  // Fonts (assuming these exist locally)
-  
 ];
 
 // Optional assets - try to cache if they exist, but don't fail if they don't
@@ -87,29 +83,58 @@ const NEVER_CACHE_HTML = [
   '/auth/'
 ];
 
-// CRITICAL FIX: Add api.js to never cache/intercept list
+// CRITICAL: Add ALL backend-related JS files to never cache/intercept list
 const NEVER_CACHE_JS = [
   '/api.js',
   '/js/api.js',
-  '/assets/api.js'
+  '/assets/api.js',
+  // Add any other backend-related JS files here
+  '/backend.js',
+  '/config.js',
+  '/auth.js',
+  '/services/api.js',
+  '/services/auth.js',
+  '/utils/api.js'
 ];
 
-// FIX: Define shouldNeverCache variable as requested
+// CRITICAL: Backend URL patterns that should NEVER be cached or referenced
+const BACKEND_URL_PATTERNS = [
+  'https://api.',
+  'http://api.',
+  'localhost:3000',
+  'localhost:5000',
+  '127.0.0.1',
+  ':3000',
+  ':5000',
+  ':8000',
+  '/api/v1/',
+  '/api/v2/',
+  'backend',
+  'server',
+  'api/'
+];
+
+// CRITICAL: NEVER cache any of these patterns
 const SHOULD_NEVER_CACHE = [
   '/api',
   '/auth',
-  '/dynamic'
+  '/dynamic',
+  '/backend',
+  '/server',
+  '/login',
+  '/register',
+  '/logout'
 ];
 
 // Install event - cache app shell with error handling
 self.addEventListener('install', event => {
-  console.log('[Service Worker] Installing v4.0.0 - API BYPASS ENABLED...');
+  console.log('[Service Worker] Installing v5.0.0 - STRICT API BYPASS ENABLED...');
   
   event.waitUntil(
     (async () => {
       try {
         const cache = await caches.open(CACHE_NAME);
-        console.log('[Service Worker] Caching app shell');
+        console.log('[Service Worker] Caching app shell - NO BACKEND FILES');
         
         // Cache core assets with error handling for each
         const cachePromises = APP_SHELL_ASSETS.map(async (asset) => {
@@ -126,15 +151,21 @@ self.addEventListener('install', event => {
               return false;
             }
             
-            // CRITICAL FIX: Skip api.js
+            // CRITICAL: Skip backend-related JS files
             if (isNeverCacheJs(asset)) {
               console.log('[Service Worker] Skipping never-cache JS:', asset);
               return false;
             }
             
-            // FIX: Skip if asset should never be cached
+            // CRITICAL: Skip if asset should never be cached
             if (shouldNeverCache(asset)) {
               console.log('[Service Worker] Skipping never-cache path:', asset);
+              return false;
+            }
+            
+            // CRITICAL: Skip if asset contains backend URL patterns
+            if (containsBackendUrlPattern(asset)) {
+              console.log('[Service Worker] Skipping asset with backend URL pattern:', asset);
               return false;
             }
             
@@ -148,7 +179,17 @@ self.addEventListener('install', event => {
             
             const response = await fetch(assetUrl);
             
-            if (response.ok && !shouldNeverCache(response.url)) {
+            // CRITICAL: Check response content for backend URLs before caching
+            if (response.ok && !shouldNeverCache(response.url) && !containsBackendUrlPattern(response.url)) {
+              // Additional check: Read response text to ensure it doesn't contain backend URLs
+              const responseClone = response.clone();
+              const text = await responseClone.text();
+              
+              if (containsBackendUrlPattern(text)) {
+                console.log('[Service Worker] Skipping asset containing backend URL in content:', assetUrl);
+                return false;
+              }
+              
               await cache.put(assetUrl === '/index.html' ? '/' : assetUrl, response);
               console.log(`[Service Worker] Cached: ${assetUrl}`);
               return true;
@@ -168,8 +209,13 @@ self.addEventListener('install', event => {
             return; // Skip never-cache assets
           }
           
-          // CRITICAL FIX: Skip api.js
+          // CRITICAL: Skip backend-related JS files
           if (isNeverCacheJs(asset)) {
+            return;
+          }
+          
+          // CRITICAL: Skip if contains backend URL patterns
+          if (containsBackendUrlPattern(asset)) {
             return;
           }
           
@@ -180,7 +226,7 @@ self.addEventListener('install', event => {
           
           try {
             const response = await fetch(asset);
-            if (response.ok && !shouldNeverCache(response.url)) {
+            if (response.ok && !shouldNeverCache(response.url) && !containsBackendUrlPattern(response.url)) {
               await cache.put(asset, response);
               console.log(`[Service Worker] Cached optional: ${asset}`);
             }
@@ -203,7 +249,7 @@ self.addEventListener('install', event => {
 
 // Activate event - clean up old caches
 self.addEventListener('activate', event => {
-  console.log('[Service Worker] Activating v4.0.0 - API BYPASS ENABLED...');
+  console.log('[Service Worker] Activating v5.0.0 - STRICT API BYPASS ENABLED...');
   
   event.waitUntil(
     Promise.all([
@@ -221,6 +267,9 @@ self.addEventListener('activate', event => {
         );
       }),
       
+      // CRITICAL: Clear IndexedDB data that might contain old backend URLs
+      clearIndexedDBData(),
+      
       // Claim clients immediately
       self.clients.claim().then(() => {
         console.log('[Service Worker] Clients claimed');
@@ -231,10 +280,11 @@ self.addEventListener('activate', event => {
         clients.forEach(client => {
           client.postMessage({
             type: 'SW_ACTIVATED',
-            version: '4.0.0',
+            version: '5.0.0',
             timestamp: Date.now(),
             apiBypass: true,
-            authNeverCached: true
+            authNeverCached: true,
+            strictNoBackendCaching: true
           });
         });
       });
@@ -242,7 +292,31 @@ self.addEventListener('activate', event => {
   );
 });
 
-// FIX: Implement shouldNeverCache function
+// CRITICAL: Clear IndexedDB data that might contain old backend URLs
+async function clearIndexedDBData() {
+  try {
+    const dbNames = await indexedDB.databases();
+    for (const dbInfo of dbNames) {
+      if (dbInfo.name && dbInfo.name.includes('chat') || dbInfo.name.includes('moodchat')) {
+        indexedDB.deleteDatabase(dbInfo.name);
+        console.log('[Service Worker] Cleared IndexedDB:', dbInfo.name);
+      }
+    }
+  } catch (error) {
+    console.log('[Service Worker] Error clearing IndexedDB:', error);
+  }
+}
+
+// CRITICAL: Check if text contains backend URL patterns
+function containsBackendUrlPattern(text) {
+  if (!text || typeof text !== 'string') return false;
+  
+  return BACKEND_URL_PATTERNS.some(pattern => {
+    return text.includes(pattern);
+  });
+}
+
+// Check if asset should never be cached
 function shouldNeverCache(url) {
   if (!url) return false;
   
@@ -259,7 +333,6 @@ function shouldBypassCache(requestUrl) {
   const url = new URL(requestUrl, self.location.origin);
   
   // CRITICAL: ANY /api/* request MUST bypass cache completely
-  // This is the most important fix for the production issues
   if (url.pathname.startsWith('/api/')) {
     console.log('[Service Worker] API BYPASS: /api/* request detected:', url.pathname);
     return true;
@@ -275,12 +348,12 @@ function shouldBypassCache(requestUrl) {
     return true;
   }
   
-  // FIX: Check shouldNeverCache patterns
+  // Check shouldNeverCache patterns
   if (shouldNeverCache(url.pathname)) {
     return true;
   }
   
-  // CRITICAL FIX: Check for never-cache JS files (api.js)
+  // CRITICAL: Check for never-cache JS files (api.js and backend-related)
   if (isNeverCacheJs(url.pathname)) {
     return true;
   }
@@ -315,6 +388,12 @@ function shouldBypassCache(requestUrl) {
     return true;
   }
   
+  // CRITICAL: Check if URL contains backend patterns
+  if (containsBackendUrlPattern(url.toString())) {
+    console.log('[Service Worker] Backend URL pattern detected, bypassing cache:', url.pathname);
+    return true;
+  }
+  
   return false;
 }
 
@@ -340,7 +419,7 @@ function isNeverCacheHtml(path) {
   });
 }
 
-// CRITICAL FIX: Helper to check if JS file should never be cached
+// CRITICAL: Helper to check if JS file should never be cached
 function isNeverCacheJs(path) {
   return NEVER_CACHE_JS.some(jsFile => {
     // Exact match
@@ -417,8 +496,21 @@ async function handleHtmlRequest(request) {
       return networkResponse;
     }
     
-    // Only cache successful responses that aren't auth-related
-    if (networkResponse.ok && !url.pathname.startsWith('/auth/') && !isNeverCacheHtml(url.pathname) && !shouldNeverCache(url.pathname)) {
+    // CRITICAL: Check if response contains backend URLs before caching
+    const responseClone = networkResponse.clone();
+    const text = await responseClone.text();
+    
+    if (containsBackendUrlPattern(text)) {
+      console.log('[Service Worker] Skipping cache for HTML containing backend URLs:', url.pathname);
+      return networkResponse;
+    }
+    
+    // Only cache successful responses that aren't auth-related and don't contain backend URLs
+    if (networkResponse.ok && 
+        !url.pathname.startsWith('/auth/') && 
+        !isNeverCacheHtml(url.pathname) && 
+        !shouldNeverCache(url.pathname) &&
+        !containsBackendUrlPattern(text)) {
       const cache = await caches.open(CACHE_NAME);
       await cache.put(request, networkResponse.clone());
     }
@@ -446,7 +538,7 @@ async function handleApiRequest(request) {
   
   console.log('[Service Worker] API BYPASS: Direct fetch for', url.pathname);
   
-  // CRITICAL FIX: Check if this is an auth endpoint - NEVER CACHE
+  // CRITICAL: Check if this is an auth endpoint - NEVER CACHE
   const isAuthEndpoint = NEVER_CACHE_ENDPOINTS.some(endpoint => 
     url.pathname.includes(endpoint) || 
     url.pathname.startsWith('/api/auth/') ||
@@ -516,7 +608,13 @@ async function handleApiRequest(request) {
 async function handleStaticAsset(request) {
   const url = new URL(request.url);
   
-  // FIX: Check shouldNeverCache first
+  // CRITICAL: Check if contains backend URL patterns
+  if (containsBackendUrlPattern(request.url)) {
+    console.log('[Service Worker] Backend URL pattern detected, bypassing:', request.url);
+    return fetch(request);
+  }
+  
+  // Check shouldNeverCache first
   if (shouldNeverCache(request.url)) {
     console.log('[Service Worker] Never-cache static asset:', request.url);
     return fetch(request);
@@ -533,9 +631,9 @@ async function handleStaticAsset(request) {
     return fetch(request);
   }
   
-  // CRITICAL FIX: Never cache or intercept api.js
+  // CRITICAL: Never cache or intercept api.js and backend-related JS
   if (isNeverCacheJs(url.pathname)) {
-    console.log('[Service Worker] Never-cache JS (api.js):', request.url);
+    console.log('[Service Worker] Never-cache JS (backend-related):', request.url);
     return fetch(request);
   }
   
@@ -556,8 +654,22 @@ async function handleStaticAsset(request) {
   try {
     const networkResponse = await fetch(request);
     
-    // Cache successful responses
-    if (networkResponse.ok && !shouldBypassCache(request.url) && !url.pathname.startsWith('/auth/') && !isNeverCacheJs(url.pathname) && !shouldNeverCache(request.url)) {
+    // CRITICAL: Check if response contains backend URLs before caching
+    const responseClone = networkResponse.clone();
+    const text = await responseClone.text();
+    
+    if (containsBackendUrlPattern(text)) {
+      console.log('[Service Worker] Skipping cache for static asset containing backend URLs:', request.url);
+      return networkResponse;
+    }
+    
+    // Cache successful responses that don't contain backend URLs
+    if (networkResponse.ok && 
+        !shouldBypassCache(request.url) && 
+        !url.pathname.startsWith('/auth/') && 
+        !isNeverCacheJs(url.pathname) && 
+        !shouldNeverCache(request.url) &&
+        !containsBackendUrlPattern(text)) {
       await cache.put(request, networkResponse.clone());
     }
     
@@ -593,7 +705,15 @@ function shouldUpdateInBackground(request) {
 async function updateCacheInBackground(request, cache) {
   try {
     const networkResponse = await fetch(request);
-    if (networkResponse.ok && !shouldBypassCache(request.url) && !shouldNeverCache(request.url)) {
+    
+    // CRITICAL: Check for backend URLs before caching
+    const responseClone = networkResponse.clone();
+    const text = await responseClone.text();
+    
+    if (networkResponse.ok && 
+        !shouldBypassCache(request.url) && 
+        !shouldNeverCache(request.url) &&
+        !containsBackendUrlPattern(text)) {
       await cache.put(request, networkResponse.clone());
       console.log('[Service Worker] Background cache updated:', request.url);
     }
@@ -687,8 +807,13 @@ self.addEventListener('fetch', event => {
     return;
   }
   
+  // CRITICAL: Check if URL contains backend patterns
+  if (containsBackendUrlPattern(request.url)) {
+    console.log('[Service Worker] Backend URL pattern detected, letting request pass:', url.pathname);
+    return;
+  }
+  
   // CRITICAL API BYPASS: Skip ALL /api/* requests from Service Worker interception
-  // This solves "DevTools shows initiator: service-worker.js for API calls"
   if (url.pathname.startsWith('/api/')) {
     console.log('[Service Worker] API BYPASS: Letting request pass through for', url.pathname);
     // DO NOT call event.respondWith() - let the request go directly to network
@@ -704,7 +829,13 @@ self.addEventListener('fetch', event => {
     return;
   }
   
-  // FIX: Also skip requests that match shouldNeverCache patterns
+  // CRITICAL: Skip backend-related JS files completely
+  if (isNeverCacheJs(url.pathname)) {
+    console.log('[Service Worker] Backend JS request bypass:', url.pathname);
+    return;
+  }
+  
+  // Skip requests that match shouldNeverCache patterns
   if (shouldNeverCache(request.url)) {
     console.log('[Service Worker] Skipping never-cache request:', url.pathname);
     return;
@@ -716,7 +847,7 @@ self.addEventListener('fetch', event => {
     return;
   }
   
-  // Handle never-cache requests immediately (excluding /api/* which are already bypassed)
+  // Handle never-cache requests immediately
   if (shouldBypassCache(request.url) || isNeverCacheJs(url.pathname)) {
     console.log('[Service Worker] Never-cache request:', request.method, url.pathname);
     event.respondWith(fetch(request));
@@ -744,11 +875,11 @@ self.addEventListener('fetch', event => {
     return;
   }
   
-  // Default: try network, fall back to cache (for non-API, non-auth requests)
+  // Default: try network, fall back to cache (for non-API, non-auth, non-backend requests)
   event.respondWith(
     fetch(request).catch(async () => {
-      // FIX: Only fall back to cache if not a never-cache asset
-      if (!shouldNeverCache(request.url)) {
+      // Only fall back to cache if not a never-cache asset and doesn't contain backend patterns
+      if (!shouldNeverCache(request.url) && !containsBackendUrlPattern(request.url)) {
         const cache = await caches.open(CACHE_NAME);
         const cachedResponse = await cache.match(request);
         if (cachedResponse) {
@@ -760,7 +891,7 @@ self.addEventListener('fetch', event => {
   );
 });
 
-// Background Sync for failed API requests (unchanged)
+// Background Sync for failed API requests
 self.addEventListener('sync', event => {
   if (event.tag === 'sync-messages') {
     console.log('[Service Worker] Background sync: sync-messages');
@@ -773,7 +904,7 @@ self.addEventListener('sync', event => {
   }
 });
 
-// Sync pending messages when back online (unchanged)
+// Sync pending messages when back online
 async function syncPendingMessages() {
   try {
     const db = await openMessageDatabase();
@@ -781,6 +912,7 @@ async function syncPendingMessages() {
     
     for (const message of pendingMessages) {
       try {
+        // CRITICAL: Do NOT cache API calls - direct fetch only
         const response = await fetch('/api/messages/send', {
           method: 'POST',
           headers: { 
@@ -803,13 +935,19 @@ async function syncPendingMessages() {
   }
 }
 
-// Sync pending API requests (unchanged)
+// Sync pending API requests
 async function syncPendingApiRequests() {
   try {
     const cache = await caches.open(OFFLINE_CACHE_NAME);
     const keys = await cache.keys();
     
     for (const request of keys) {
+      // CRITICAL: Skip any requests that contain backend URLs
+      if (containsBackendUrlPattern(request.url)) {
+        await cache.delete(request);
+        continue;
+      }
+      
       try {
         const response = await fetch(request);
         if (response.ok) {
@@ -829,7 +967,7 @@ async function syncPendingApiRequests() {
   }
 }
 
-// Handle push notifications (unchanged)
+// Handle push notifications
 self.addEventListener('push', event => {
   if (!event.data) return;
   
@@ -856,7 +994,7 @@ self.addEventListener('push', event => {
   }
 });
 
-// Handle notification clicks (unchanged)
+// Handle notification clicks
 self.addEventListener('notificationclick', event => {
   event.notification.close();
   
@@ -881,10 +1019,10 @@ self.addEventListener('notificationclick', event => {
   );
 });
 
-// IndexedDB helper functions (unchanged)
+// IndexedDB helper functions
 function openMessageDatabase() {
   return new Promise((resolve, reject) => {
-    const request = indexedDB.open('chat-messages', 2);
+    const request = indexedDB.open('chat-messages', 3); // Incremented version
     
     request.onupgradeneeded = function(event) {
       const db = event.target.result;
@@ -901,6 +1039,24 @@ function openMessageDatabase() {
       
       if (oldVersion < 2) {
         // Version 2: Add offline_queue store
+        const offlineQueue = db.createObjectStore('offline_queue', { keyPath: 'id', autoIncrement: true });
+        offlineQueue.createIndex('type', 'type');
+        offlineQueue.createIndex('timestamp', 'timestamp');
+      }
+      
+      if (oldVersion < 3) {
+        // Version 3: Clear all data to remove old backend URLs
+        db.deleteObjectStore('pending_messages');
+        db.deleteObjectStore('offline_queue');
+        db.deleteObjectStore('user_session');
+        
+        // Recreate with fresh structure
+        const pendingStore = db.createObjectStore('pending_messages', { keyPath: 'id' });
+        pendingStore.createIndex('timestamp', 'timestamp');
+        pendingStore.createIndex('status', 'status');
+        
+        db.createObjectStore('user_session', { keyPath: 'key' });
+        
         const offlineQueue = db.createObjectStore('offline_queue', { keyPath: 'id', autoIncrement: true });
         offlineQueue.createIndex('type', 'type');
         offlineQueue.createIndex('timestamp', 'timestamp');
@@ -950,7 +1106,7 @@ function markMessageAsSent(db, messageId) {
   });
 }
 
-// Message event handler for communication with main app (unchanged)
+// Message event handler for communication with main app
 self.addEventListener('message', event => {
   const data = event.data;
   
@@ -985,16 +1141,52 @@ self.addEventListener('message', event => {
       event.ports[0].postMessage({
         type: 'HEALTH_RESPONSE',
         status: 'healthy',
-        version: '4.0.0',
+        version: '5.0.0',
         apiBypass: true,
         authNeverCached: true,
+        strictNoBackendCaching: true,
         timestamp: Date.now()
       });
+      break;
+      
+    case 'FORCE_REFRESH_BACKEND_FILES':
+      console.log('[Service Worker] Force refreshing backend files');
+      event.waitUntil(forceRefreshBackendFiles());
       break;
   }
 });
 
-// Store authentication state (unchanged)
+// Force refresh backend-related files
+async function forceRefreshBackendFiles() {
+  try {
+    const cache = await caches.open(CACHE_NAME);
+    const keys = await cache.keys();
+    
+    let clearedCount = 0;
+    for (const request of keys) {
+      if (isNeverCacheJs(request.url) || containsBackendUrlPattern(request.url)) {
+        await cache.delete(request);
+        clearedCount++;
+      }
+    }
+    
+    console.log(`[Service Worker] Force refreshed ${clearedCount} backend files`);
+    
+    // Notify clients
+    const clients = await self.clients.matchAll();
+    clients.forEach(client => {
+      client.postMessage({
+        type: 'BACKEND_FILES_REFRESHED',
+        timestamp: Date.now(),
+        clearedCount
+      });
+    });
+  } catch (error) {
+    console.error('[Service Worker] Error force refreshing:', error);
+  }
+}
+
+// Store authentication state
 async function storeAuthState(isAuthenticated, token) {
   try {
     const db = await openMessageDatabase();
@@ -1011,8 +1203,12 @@ async function storeAuthState(isAuthenticated, token) {
 // Cache API data from main thread
 async function cacheApiData(url, data) {
   try {
-    // CRITICAL: Don't cache auth-related data or /api/* data
-    if (shouldBypassCache(url) || url.startsWith('/auth/') || url.startsWith('/api/') || shouldNeverCache(url)) {
+    // CRITICAL: Don't cache auth-related data or /api/* data or backend URLs
+    if (shouldBypassCache(url) || 
+        url.startsWith('/auth/') || 
+        url.startsWith('/api/') || 
+        shouldNeverCache(url) ||
+        containsBackendUrlPattern(url)) {
       console.log('[Service Worker] Skipping cache for bypassed data:', url);
       return;
     }
@@ -1036,7 +1232,7 @@ async function cacheApiData(url, data) {
   }
 }
 
-// Clear all caches (unchanged)
+// Clear all caches
 async function clearAllCaches() {
   try {
     const cacheNames = await caches.keys();
@@ -1056,7 +1252,7 @@ async function clearAllCaches() {
   }
 }
 
-// Get cache information (unchanged)
+// Get cache information
 async function getCacheInfo(event) {
   try {
     const cacheNames = await caches.keys();
@@ -1073,7 +1269,9 @@ async function getCacheInfo(event) {
       caches: cacheInfo,
       timestamp: Date.now(),
       apiBypassEnabled: true,
-      authNeverCached: true
+      authNeverCached: true,
+      strictNoBackendCaching: true,
+      version: '5.0.0'
     });
   } catch (error) {
     event.ports[0].postMessage({
@@ -1101,8 +1299,12 @@ async function cleanupOldCacheEntries() {
     let cleanedCount = 0;
     
     for (const request of keys) {
-      // Skip /api/* and never-cache endpoints
-      if (shouldBypassCache(request.url) || request.url.includes('/auth/') || request.url.includes('/api/') || shouldNeverCache(request.url)) {
+      // CRITICAL: Skip /api/*, never-cache endpoints, and backend URL patterns
+      if (shouldBypassCache(request.url) || 
+          request.url.includes('/auth/') || 
+          request.url.includes('/api/') || 
+          shouldNeverCache(request.url) ||
+          containsBackendUrlPattern(request.url)) {
         await cache.delete(request);
         cleanedCount++;
         continue;
@@ -1130,7 +1332,7 @@ async function cleanupOldCacheEntries() {
   }
 }
 
-// Error handling (unchanged)
+// Error handling
 self.addEventListener('error', event => {
   console.error('[Service Worker] Error:', event.error);
 });
@@ -1138,3 +1340,9 @@ self.addEventListener('error', event => {
 self.addEventListener('unhandledrejection', event => {
   console.error('[Service Worker] Unhandled rejection:', event.reason);
 });
+
+// CRITICAL NOTE FOR DEVELOPERS:
+// DO NOT add backend URLs to any cache lists or assets arrays.
+// All API calls and backend-related files are automatically bypassed.
+// The service worker will NOT cache any files containing backend URL patterns.
+// This ensures login/register always use the current backend URL dynamically.

@@ -18,22 +18,40 @@
 // ============================================================================
 // ENVIRONMENT DETECTION - SINGLE SOURCE OF TRUTH
 // ============================================================================
+/**
+ * Detects if the app is running in local development environment
+ * CRITICAL: This is the ONLY place environment detection happens
+ * Safe for: localhost, 127.x.x.x, 192.168.x.x (local networks), and file:// protocol
+ */
 const IS_LOCAL_DEVELOPMENT = window.location.hostname === 'localhost' || 
                            window.location.hostname.startsWith('127.') ||
                            window.location.hostname.startsWith('192.168') ||
                            window.location.protocol === 'file:';
 
 // ============================================================================
-// BACKEND URL CONFIGURATION - FIXED AND IMMUTABLE - SINGLE SOURCE
+// BACKEND URL CONFIGURATION - DYNAMIC & IMMUTABLE - SINGLE SOURCE
 // ============================================================================
-// CRITICAL FIX: ONE source for ALL API calls
+/**
+ * CRITICAL FIX: ONE source for ALL API calls
+ * Uses environment detection to choose the correct backend URL
+ * Local development: http://localhost:4000
+ * Production: https://moodchat-fy56.onrender.com
+ * 
+ * IMPORTANT: This is the ONLY place backend URLs are defined
+ * All other API calls reference these constants
+ */
 const BACKEND_BASE_URL = IS_LOCAL_DEVELOPMENT
-    ? 'http://localhost:4000'
-    : 'https://moodchat-fy56.onrender.com';
+    ? 'http://localhost:4000'            // Local development backend
+    : 'https://moodchat-fy56.onrender.com'; // Production backend on Render
 
-// CRITICAL FIX: ALL API calls use the same base URL
+/**
+ * CRITICAL FIX: ALL API calls use the same base URL
+ * Combines backend base URL with API path prefix
+ * This ensures consistency across all fetch calls
+ */
 const BASE_URL = BACKEND_BASE_URL + '/api';
 
+// Environment logging for debugging
 console.log(`🔧 [API] Environment: ${IS_LOCAL_DEVELOPMENT ? 'Local Development' : 'Production'}`);
 console.log(`🔧 [API] Backend Base URL: ${BACKEND_BASE_URL}`);
 console.log(`🔧 [API] API Base URL: ${BASE_URL}`);
@@ -121,6 +139,7 @@ function _sanitizeEndpoint(endpoint) {
 
 /**
  * Builds ABSOLUTELY SAFE URL that never breaks fetch()
+ * CRITICAL: Uses the dynamically determined BASE_URL
  */
 function _buildSafeUrl(endpoint) {
     const sanitizedEndpoint = _sanitizeEndpoint(endpoint);
@@ -145,6 +164,7 @@ function _buildSafeUrl(endpoint) {
  * CORE FETCH FUNCTION - Validates EVERYTHING before fetch()
  * This is the ONLY function that should ever call fetch()
  * UPDATED: Enhanced error handling for 429 and 500 errors
+ * CRITICAL: Uses dynamically determined BASE_URL via _buildSafeUrl()
  */
 function _safeFetchCall(fullUrl, options = {}) {
     // Validate URL
@@ -290,7 +310,7 @@ window.api = function(endpoint, options = {}) {
     
     // SANITIZE endpoint to prevent ANY malformed URLs
     const safeEndpoint = _sanitizeEndpoint(endpoint);
-    const fullUrl = _buildSafeUrl(safeEndpoint);
+    const fullUrl = _buildSafeUrl(safeEndpoint); // Uses dynamic BASE_URL
     
     // VALIDATE options
     const safeOptions = { ...options };
@@ -336,15 +356,19 @@ window.api = function(endpoint, options = {}) {
 
 const apiObject = {
     _singleton: true,
-    _version: '13.0.1', // Updated version for single URL source fix
+    _version: '13.0.2', // Updated version for dynamic environment detection
     _safeInitialized: true,
     _backendReachable: null,
     _sessionChecked: false,
     
+    /**
+     * Configuration object with dynamically determined URLs
+     * CRITICAL: All URLs come from the single source above
+     */
     _config: {
-        BACKEND_URL: BASE_URL,
-        BACKEND_BASE_URL: BACKEND_BASE_URL,
-        IS_LOCAL_DEVELOPMENT: IS_LOCAL_DEVELOPMENT,
+        BACKEND_URL: BASE_URL,               // Dynamic API base URL
+        BACKEND_BASE_URL: BACKEND_BASE_URL,  // Dynamic backend base URL
+        IS_LOCAL_DEVELOPMENT: IS_LOCAL_DEVELOPMENT, // Environment flag
         STORAGE_PREFIX: 'moodchat_',
         MAX_RETRIES: 3,
         RETRY_DELAY: 1000,
@@ -370,7 +394,7 @@ const apiObject = {
         
         try {
             console.log(`🔧 [API] Login attempt for: ${emailOrUsername}`);
-            console.log(`🔧 [API] Using backend URL: ${BASE_URL}`);
+            console.log(`🔧 [API] Using dynamic backend URL: ${BASE_URL}`);
             
             // CORRECTED: Use { identifier, password } payload structure
             const requestData = { 
@@ -378,7 +402,7 @@ const apiObject = {
                 password: String(password) 
             };
             
-            // USE THE SINGLE FETCH FUNCTION - CRITICAL: Uses same BASE_URL as all other calls
+            // USE THE SINGLE FETCH FUNCTION - CRITICAL: Uses dynamic BASE_URL
             const result = await _safeFetchCall(`${BASE_URL}/auth/login`, {
                 method: 'POST',
                 body: requestData
@@ -507,7 +531,7 @@ const apiObject = {
         
         try {
             console.log('🔧 [API] Register attempt');
-            console.log(`🔧 [API] Using backend URL: ${BASE_URL}`);
+            console.log(`🔧 [API] Using dynamic backend URL: ${BASE_URL}`);
             
             // CORRECTED: Ensure correct payload structure { username, email, password, confirmPassword }
             const registerPayload = {
@@ -540,7 +564,7 @@ const apiObject = {
                 };
             }
             
-            // USE THE SINGLE FETCH FUNCTION - CRITICAL: Uses same BASE_URL as all other calls
+            // USE THE SINGLE FETCH FUNCTION - CRITICAL: Uses dynamic BASE_URL
             const result = await _safeFetchCall(`${BASE_URL}/auth/register`, {
                 method: 'POST',
                 body: registerPayload
@@ -670,13 +694,13 @@ const apiObject = {
         }
         
         console.log('🔧 [API] Checking backend health...');
-        console.log(`🔧 [API] Using backend URL: ${BASE_URL}`);
+        console.log(`🔧 [API] Using dynamic backend URL: ${BASE_URL}`);
         
         const testEndpoints = ['/status', '/auth/health', '/health', ''];
         
         for (const endpoint of testEndpoints) {
             try {
-                const url = _buildSafeUrl(endpoint);
+                const url = _buildSafeUrl(endpoint); // Uses dynamic BASE_URL
                 console.log(`🔧 [API] Trying: ${url}`);
                 
                 // USE THE SINGLE FETCH FUNCTION with timeout
@@ -1294,8 +1318,8 @@ const apiObject = {
             online: navigator.onLine,
             backendReachable: this.isBackendReachable(),
             timestamp: new Date().toISOString(),
-            backendUrl: BACKEND_BASE_URL,
-            baseApiUrl: BASE_URL,
+            backendUrl: BACKEND_BASE_URL,        // Dynamic backend URL
+            baseApiUrl: BASE_URL,                // Dynamic API URL
             sessionChecked: this._sessionChecked,
             hasAuthToken: !!this.getCurrentToken(),
             hasAuthUser: !!localStorage.getItem('authUser'),
@@ -1308,10 +1332,10 @@ const apiObject = {
     // ============================================================================
     
     initialize: async function() {
-        console.log('🔧 [API] ⚡ MoodChat API v13.0.1 (SINGLE URL SOURCE FIX) initializing...');
+        console.log('🔧 [API] ⚡ MoodChat API v13.0.2 (DYNAMIC ENVIRONMENT DETECTION) initializing...');
         console.log('🔧 [API] 🔗 Backend URL:', BASE_URL);
         console.log('🔧 [API] 🌐 Environment:', IS_LOCAL_DEVELOPMENT ? 'Local' : 'Production');
-        console.log('🔧 [API] ✅ CRITICAL: ALL API calls will use single source:', BASE_URL);
+        console.log('🔧 [API] ✅ CRITICAL: ALL API calls will use single dynamic source:', BASE_URL);
         
         // Migrate old auth data if needed
         const oldToken = localStorage.getItem('moodchat_auth_token');
@@ -1431,7 +1455,7 @@ const apiObject = {
         const eventDetail = {
             version: this._version,
             timestamp: new Date().toISOString(),
-            backendUrl: BASE_URL,
+            backendUrl: BASE_URL,                    // Dynamic URL
             user: this.getCurrentUser(),
             hasToken: !!this.getCurrentToken(),
             hasAuthUser: !!localStorage.getItem('authUser'),
@@ -1439,7 +1463,8 @@ const apiObject = {
             enhancedErrorHandling: true,
             supportsNewTokenStructure: true,
             singleUrlSource: true,
-            baseUrl: BASE_URL
+            baseUrl: BASE_URL,                       // Dynamic URL
+            environment: IS_LOCAL_DEVELOPMENT ? 'local' : 'production' // Environment info
         };
         
         const events = ['api-ready', 'apiready', 'apiReady'];
@@ -1475,7 +1500,7 @@ const apiObject = {
                     // Silent fail
                 }
             });
-            console.log('🔧 [API] API synchronization ready (single URL source)');
+            console.log('🔧 [API] API synchronization ready (dynamic URL source)');
         }, 1000);
     },
     
@@ -1507,13 +1532,14 @@ const apiObject = {
                 tokenStructure: this.getConnectionStatus().tokenStructure
             },
             config: {
-                backendUrl: BASE_URL,
-                backendBaseUrl: BACKEND_BASE_URL,
+                backendUrl: BASE_URL,                    // Dynamic
+                backendBaseUrl: BACKEND_BASE_URL,        // Dynamic
                 environment: IS_LOCAL_DEVELOPMENT ? 'local' : 'production',
                 hardened: true,
                 enhancedErrorHandling: true,
                 supportsNewTokenStructure: true,
-                singleUrlSource: true
+                singleUrlSource: true,
+                dynamicEnvironmentDetection: true
             },
             validation: {
                 methodNormalization: 'ACTIVE',
@@ -1522,7 +1548,8 @@ const apiObject = {
                 offlineDetection: 'ACTIVE',
                 errorTypeDetection: 'ACTIVE',
                 tokenStructureSupport: 'ACTIVE',
-                singleUrlSource: 'ACTIVE'
+                singleUrlSource: 'ACTIVE',
+                dynamicEnvironmentDetection: 'ACTIVE'
             }
         };
         
@@ -1556,7 +1583,7 @@ const apiObject = {
 Object.assign(window.api, apiObject);
 Object.setPrototypeOf(window.api, Object.getPrototypeOf(apiObject));
 
-console.log('🔧 [API] Starting hardened initialization with single URL source...');
+console.log('🔧 [API] Starting hardened initialization with dynamic URL detection...');
 
 // Safe initialization with timeout
 setTimeout(() => {
@@ -1785,7 +1812,7 @@ window.__MOODCHAT_API_INSTANCE = window.api;
 window.__MOODCHAT_API_READY = true;
 window.MOODCHAT_API_READY = true;
 
-console.log('🔧 [API] UPDATED Backend API integration complete with SINGLE URL SOURCE');
+console.log('🔧 [API] UPDATED Backend API integration complete with DYNAMIC ENVIRONMENT DETECTION');
 console.log('🔧 [API] ✅ Method normalization: ACTIVE');
 console.log('🔧 [API] ✅ Endpoint sanitization: ACTIVE');
 console.log('🔧 [API] ✅ Single fetch function: ACTIVE');
@@ -1795,4 +1822,5 @@ console.log('🔧 [API] ✅ Server error detection: ACTIVE');
 console.log('🔧 [API] ✅ AbortError handling: FIXED (does not mark backend offline)');
 console.log('🔧 [API] ✅ New token structure support: ACTIVE');
 console.log('🔧 [API] ✅ SINGLE URL SOURCE: ACTIVE (ALL calls use: ' + BASE_URL + ')');
+console.log('🔧 [API] ✅ DYNAMIC ENVIRONMENT DETECTION: ACTIVE (Environment: ' + (IS_LOCAL_DEVELOPMENT ? 'Local' : 'Production') + ')');
 console.log('🔧 [API] ✅ NEVER breaks on frontend errors');
