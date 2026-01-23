@@ -3196,22 +3196,38 @@
     <script src="js/app.core.js" type="module"></script>
     <script src="js/app.ui.auth.js" type="module"></script>
     
-    <!-- 5. Service Worker Registration -->
+    <!-- 5. Service Worker Registration - UPDATED WITH ENVIRONMENT CHECK -->
     <script>
         document.addEventListener('DOMContentLoaded', function() {
             if ('serviceWorker' in navigator) {
                 setTimeout(() => {
-                    navigator.serviceWorker.register('/service-worker.js')
-                        .then(function(registration) {
-                            console.log('Service Worker registered with scope:', registration.scope);
-                            showNotification('success', 'App Ready', 'MoodChat is ready to use!');
-                        })
-                        .catch(function(error) {
-                            console.log('Service Worker registration failed:', error);
-                            showNotification('info', 'App Loaded', 'MoodChat is ready to use!');
-                        });
+                    const hostname = window.location.hostname;
+                    
+                    // Register Service Worker ONLY if hostname ends with onrender.com
+                    if (hostname.endsWith('onrender.com')) {
+                        navigator.serviceWorker.register('/service-worker.js')
+                            .then(function(registration) {
+                                console.log('✅ Service Worker registered for production (onrender.com). Scope:', registration.scope);
+                                showNotification('success', 'App Ready', 'MoodChat is ready to use with offline capabilities!');
+                            })
+                            .catch(function(error) {
+                                console.log('⚠️ Service Worker registration failed:', error);
+                                showNotification('info', 'App Loaded', 'MoodChat is ready to use!');
+                            });
+                    } 
+                    // DO NOT register Service Worker for localhost or 127.0.0.1
+                    else if (hostname === 'localhost' || hostname === '127.0.0.1') {
+                        console.log('⏭️ Service Worker registration SKIPPED for local development:', hostname);
+                        showNotification('info', 'Development Mode', 'MoodChat running in development mode');
+                    }
+                    // For other environments (testing, staging, custom domains)
+                    else {
+                        console.log('ℹ️ Service Worker not registered for hostname:', hostname);
+                        showNotification('info', 'App Loaded', 'MoodChat is ready to use!');
+                    }
                 }, 1000);
             } else {
+                console.log('ℹ️ Service Workers not supported by this browser');
                 showNotification('info', 'Welcome', 'MoodChat is ready to use!');
             }
         });

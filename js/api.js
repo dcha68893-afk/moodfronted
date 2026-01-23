@@ -21,29 +21,31 @@
 /**
  * Detects the environment and sets the correct backend URL
  * FIX 1: Dynamic environment detection based on current hostname
+ * ABSOLUTE RULE: If environment cannot be determined, DEFAULT TO LOCAL — NEVER production.
  */
 const getBackendBaseUrl = () => {
   const hostname = window.location.hostname;
   const protocol = window.location.protocol;
   
-  // Development environments
+  // LOCAL DEVELOPMENT ENVIRONMENTS - EXPLICITLY TREATED AS LOCAL
   if (hostname === 'localhost' || 
       hostname.startsWith('127.') ||
-      hostname.startsWith('192.168') ||
       hostname === '0.0.0.0' ||
+      hostname.startsWith('192.168.') ||
       protocol === 'file:') {
+    console.log(`🔧 [API] Detected LOCAL environment (${hostname}), using http://localhost:4000`);
     return 'http://localhost:4000';
   }
   
-  // Production environment on Render
-  if (hostname === 'moodfronted.onrender.com' ||
-      hostname.includes('moodfronted.onrender.com') ||
-      hostname.includes('onrender.com')) {
+  // PRODUCTION ENVIRONMENT on Render - ONLY when hostname ends with onrender.com
+  if (hostname.endsWith('onrender.com')) {
+    console.log(`🔧 [API] Detected PRODUCTION environment (${hostname}), using https://moodchat-fy56.onrender.com`);
     return 'https://moodchat-fy56.onrender.com';
   }
   
-  // Default to localhost for development
-  console.warn('⚠️ Unknown hostname, defaulting to local development backend');
+  // DEFAULT TO LOCAL - NEVER PRODUCTION
+  console.warn(`⚠️ [API] Unknown hostname "${hostname}", DEFAULTING TO LOCAL development backend`);
+  console.warn(`⚠️ [API] ABSOLUTE RULE: Unknown environment = LOCAL, NEVER production`);
   return 'http://localhost:4000';
 };
 

@@ -807,25 +807,26 @@ self.addEventListener('fetch', event => {
     return;
   }
   
-  // CRITICAL: Check if URL contains backend patterns
-  if (containsBackendUrlPattern(request.url)) {
-    console.log('[Service Worker] Backend URL pattern detected, letting request pass:', url.pathname);
-    return;
-  }
-  
-  // CRITICAL API BYPASS: Skip ALL /api/* requests from Service Worker interception
-  if (url.pathname.startsWith('/api/')) {
+  // CRITICAL HARD BYPASS AT TOP: Skip ALL /api/* requests from Service Worker interception
+  if (url.pathname.includes('/api')) {
     console.log('[Service Worker] API BYPASS: Letting request pass through for', url.pathname);
     // DO NOT call event.respondWith() - let the request go directly to network
     return;
   }
   
   // CRITICAL: Skip auth-related requests completely
-  if (url.pathname.startsWith('/auth/') || 
+  if (url.pathname.includes('/auth') || 
       url.pathname.includes('/login') || 
       url.pathname.includes('/register') ||
-      url.pathname.includes('/logout')) {
-    console.log('[Service Worker] Auth request bypass:', url.pathname);
+      url.pathname.includes('/logout') ||
+      url.pathname.includes('/health')) {
+    console.log('[Service Worker] Auth/health request bypass:', url.pathname);
+    return;
+  }
+  
+  // CRITICAL: Check if URL contains backend patterns
+  if (containsBackendUrlPattern(request.url)) {
+    console.log('[Service Worker] Backend URL pattern detected, letting request pass:', url.pathname);
     return;
   }
   
@@ -861,34 +862,29 @@ self.addEventListener('fetch', event => {
     return;
   }
   
-  // Handle HTML page requests (navigation)
-  if (request.mode === 'navigate' || isHtmlRequest(request)) {
-    console.log('[Service Worker] HTML request:', url.pathname);
-    event.respondWith(handleHtmlRequest(request));
+  // CRITICAL: Disable caching of HTML documents (mode === 'navigate')
+  if (request.mode === 'navigate') {
+    console.log('[Service Worker] Navigation request - fetch only:', url.pathname);
+    event.respondWith(fetch(request));
     return;
   }
   
-  // Handle static assets
+  // Handle HTML page requests - DISABLE CACHING
+  if (isHtmlRequest(request)) {
+    console.log('[Service Worker] HTML request - fetch only:', url.pathname);
+    event.respondWith(fetch(request));
+    return;
+  }
+  
+  // Handle static assets only - CSS, JS, icons, images
   if (isStaticAssetRequest(request)) {
     console.log('[Service Worker] Static asset:', url.pathname);
     event.respondWith(handleStaticAsset(request));
     return;
   }
   
-  // Default: try network, fall back to cache (for non-API, non-auth, non-backend requests)
-  event.respondWith(
-    fetch(request).catch(async () => {
-      // Only fall back to cache if not a never-cache asset and doesn't contain backend patterns
-      if (!shouldNeverCache(request.url) && !containsBackendUrlPattern(request.url)) {
-        const cache = await caches.open(CACHE_NAME);
-        const cachedResponse = await cache.match(request);
-        if (cachedResponse) {
-          return cachedResponse;
-        }
-      }
-      return new Response('Resource not found', { status: 404 });
-    })
-  );
+  // Default: try network for everything else
+  event.respondWith(fetch(request));
 });
 
 // Background Sync for failed API requests
