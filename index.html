@@ -988,6 +988,11 @@
             flex-shrink: 0;
         }
         
+        .quick-login-info {
+            display: flex;
+            flex-direction: column;
+        }
+        
         .quick-login-info h3 {
             font-size: 18px;
             margin-bottom: 4px;
@@ -2173,15 +2178,14 @@
         window.jQuery || document.write('<script src="js/vendor/jquery.min.js"><\/script>');
     </script>
     
-    <!-- 3. Auth UI JavaScript - Embedded for immediate form toggling -->
-    <!-- This handles the instant form switching without network dependency -->
+    <!-- 2. Load api.js FIRST so window.api is available -->
+    <script src="js/api.js"></script>
+    
+    <!-- 3. Auth UI JavaScript - Updated to use window.api -->
     <script>
         // =============================================
         // CONFIGURATION
         // =============================================
-        const API_BASE_URL = 'https://moodchat-fy56.onrender.com/api';
-        const LOGIN_ENDPOINT = `${API_BASE_URL}/auth/login`;
-        const REGISTER_ENDPOINT = `${API_BASE_URL}/auth/register`;
         const AUTH_TOKEN_KEY = 'moodchat_auth_token';
         const USER_DATA_KEY = 'moodchat_user_data';
         const LOGIN_ATTEMPTS_KEY = 'moodchat_login_attempts';
@@ -2427,112 +2431,6 @@
         }
         
         // =============================================
-        // BACKEND API FUNCTIONS - UPDATED WITH CORRECT PAYLOAD
-        // =============================================
-        async function loginWithBackend(identifier, password) {
-            if (!isOnline()) {
-                throw new Error('No internet connection. Please check your network and try again.');
-            }
-            
-            try {
-                const requestBody = {
-                    identifier: identifier.trim(),
-                    password: password
-                };
-                
-                console.log('Login payload:', requestBody);
-                
-                const response = await fetch(LOGIN_ENDPOINT, {
-                    method: 'POST',
-                    headers: {
-                        'Content-Type': 'application/json',
-                    },
-                    body: JSON.stringify(requestBody)
-                });
-                
-                const contentType = response.headers.get('content-type');
-                if (!contentType || !contentType.includes('application/json')) {
-                    const text = await response.text();
-                    console.error('Non-JSON response:', text.substring(0, 200));
-                    throw new Error('Server returned an invalid response. Please try again.');
-                }
-                
-                const data = await response.json();
-                
-                if (!response.ok) {
-                    throw new Error(data.message || data.error || 'Login failed. Please check your credentials.');
-                }
-                
-                return {
-                    success: true,
-                    token: data.token || data.accessToken || data.data?.token,
-                    user: data.user || data.data?.user || { 
-                        username: identifier.includes('@') ? identifier.split('@')[0] : identifier,
-                        email: identifier.includes('@') ? identifier : null 
-                    }
-                };
-            } catch (error) {
-                console.error('Login error:', error);
-                throw error;
-            }
-        }
-        
-        async function registerWithBackend(username, email, password, confirmPassword) {
-            if (!isOnline()) {
-                throw new Error('No internet connection. Registration requires an internet connection.');
-            }
-            
-            try {
-                const requestBody = {
-                    username: username.trim(),
-                    email: email.trim(),
-                    password: password,
-                    confirmPassword: confirmPassword
-                };
-                
-                console.log('Register payload:', { ...requestBody, password: '[REDACTED]', confirmPassword: '[REDACTED]' });
-                
-                const response = await fetch(REGISTER_ENDPOINT, {
-                    method: 'POST',
-                    headers: {
-                        'Content-Type': 'application/json',
-                    },
-                    body: JSON.stringify(requestBody)
-                });
-                
-                const contentType = response.headers.get('content-type');
-                if (!contentType || !contentType.includes('application/json')) {
-                    const text = await response.text();
-                    console.error('Non-JSON response:', text.substring(0, 200));
-                    throw new Error('Server returned an invalid response. Please try again.');
-                }
-                
-                const data = await response.json();
-                
-                if (!response.ok) {
-                    let errorMsg = data.message || 'Registration failed';
-                    
-                    if (data.errors && Array.isArray(data.errors)) {
-                        errorMsg = data.errors.map(e => e.message || e.msg).join(', ');
-                    } else if (data.error) {
-                        errorMsg = data.error;
-                    }
-                    
-                    throw new Error(errorMsg);
-                }
-                
-                return {
-                    success: true,
-                    token: data.token || data.accessToken || data.data?.token,
-                    user: data.user || data.data?.user || { username, email }
-                };
-            } catch (error) {
-                console.error('Registration error:', error);
-                throw error;
-            }
-        }
-        
-        // =============================================
         // OFFLINE MODE FUNCTIONS
         // =============================================
         function attemptOfflineLogin(identifier, password) {
@@ -2557,6 +2455,10 @@
         // =============================================
         document.addEventListener('DOMContentLoaded', function() {
             console.log('Form Toggler: Initializing immediate form switching...');
+            console.log('API available?', typeof window.api);
+            if (window.api) {
+                console.log('API methods:', Object.keys(window.api).filter(k => typeof window.api[k] === 'function'));
+            }
             
             // Initialize login attempt tracking
             updateLoginButtonState();
@@ -2672,7 +2574,7 @@
             }
             
             // =============================================
-            // LOGIN FORM SUBMISSION HANDLER - UPDATED WITH ATTEMPT TRACKING
+            // LOGIN FORM SUBMISSION HANDLER - UPDATED TO USE WINDOW.API
             // =============================================
             const loginFormElement = document.getElementById('login-form');
             if (loginFormElement) {
@@ -2708,7 +2610,12 @@
                         let result;
                         
                         if (isOnline()) {
-                            result = await loginWithBackend(identifier, password);
+                            // Use window.api.login instead of direct fetch
+                            if (window.api && window.api.login) {
+                                result = await window.api.login(identifier, password);
+                            } else {
+                                throw new Error('API not available. Please refresh the page.');
+                            }
                             
                             // Reset login attempts on successful login
                             resetLoginAttempts();
@@ -2764,7 +2671,7 @@
             }
             
             // =============================================
-            // REGISTER FORM SUBMISSION HANDLER - SIMPLIFIED PASSWORD VALIDATION
+            // REGISTER FORM SUBMISSION HANDLER - UPDATED TO USE WINDOW.API
             // =============================================
             const registerFormElement = document.getElementById('register-form');
             if (registerFormElement) {
@@ -2818,16 +2725,29 @@
                     setLoading('register-button', true);
                     
                     try {
-                        const result = await registerWithBackend(username, email, password, confirmPassword);
-                        
-                        if (result.success) {
-                            saveAuthData(result.token, { ...result.user, displayName: displayName });
+                        // Use window.api.register instead of direct fetch
+                        if (window.api && window.api.register) {
+                            const userData = {
+                                username: username,
+                                email: email,
+                                password: password,
+                                confirmPassword: confirmPassword,
+                                displayName: displayName
+                            };
                             
-                            showNotification('success', 'Registration Successful', 'Welcome to MoodChat!');
+                            const result = await window.api.register(userData);
                             
-                            showForm('dashboard');
-                            
-                            setTimeout(redirectToChat, 2000);
+                            if (result.success) {
+                                saveAuthData(result.token, { ...result.user, displayName: displayName });
+                                
+                                showNotification('success', 'Registration Successful', 'Welcome to MoodChat!');
+                                
+                                showForm('dashboard');
+                                
+                                setTimeout(redirectToChat, 2000);
+                            }
+                        } else {
+                            throw new Error('API not available. Please refresh the page.');
                         }
                     } catch (error) {
                         console.error('Registration failed:', error);
@@ -3183,18 +3103,13 @@
                 });
             });
             
-            // =============================================
-            // REMOVE NETWORK STATUS INDICATOR (as requested)
-            // =============================================
-            
             console.log('All initialization complete.');
         });
     </script>
     
     <!-- 4. Main Application Scripts (Loaded as modules) -->
-    <script src="js/api.js" type="module"></script>
-    <script src="js/app.core.js" type="module"></script>
-    <script src="js/app.ui.auth.js" type="module"></script>
+    <script src="js/app.core.js"></script>
+    <script src="js/app.ui.auth.js"></script>
     
     <!-- 5. Service Worker Registration - UPDATED WITH ENVIRONMENT CHECK -->
     <script>
