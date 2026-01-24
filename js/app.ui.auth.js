@@ -2,6 +2,7 @@
 // UPDATED: Added progressive login attempts, password guidance, and better error handling
 // FOCUS: Network status detection, backend health checks, JWT auth handling, and progressive login limits
 // CRITICAL FIX: All auth calls use centralized api.js with correct endpoints
+// FIXED: Removed duplicate isOnline declaration that conflicts with app.core.js
 
 // ============================================================================
 // NETWORK STATUS MANAGEMENT
