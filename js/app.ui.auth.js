@@ -3,6 +3,9 @@
 // FOCUS: Network status detection, backend health checks, JWT auth handling, and progressive login limits
 // CRITICAL FIX: All auth calls use centralized api.js with correct endpoints
 // FIXED: Removed duplicate isOnline declaration that conflicts with app.core.js
+// FIXED: STRICT API-driven authentication - no fake login success
+// FIXED: Auto-login no longer blocks form setup - forms work concurrently
+// FIXED: Form setup happens immediately, auto-login runs independently in background
 
 // ============================================================================
 // NETWORK STATUS MANAGEMENT
@@ -254,6 +257,7 @@ function showLoginAttemptCountdown(blockInfo) {
 /**
  * Checks if user is already logged in via JWT and validates token
  * Returns true if auto-login succeeds, false otherwise
+ * This function runs independently and does NOT interfere with form setup
  */
 async function checkAutoLogin() {
   console.log('Checking for auto-login...');
@@ -275,58 +279,57 @@ async function checkAutoLogin() {
   console.log('Valid JWT found, attempting auto-login...');
   
   try {
-    // Check if backend is reachable before attempting auto-login
-    if (window.API_COORDINATION && !window.API_COORDINATION.backendReachable) {
-      console.log('Backend not reachable, deferring auto-login');
-      updateNetworkStatusUI('offline', 'Cannot connect to server. Please check your connection.');
+    // Check browser network connectivity first - only block if EXPLICITLY false
+    const browserOnline = navigator.onLine;
+    
+    // STRICT REQUIREMENT: Validate token with backend API ONLY
+    if (typeof window.api === 'function') {
+      console.log('STRICT API VALIDATION: Validating token with backend...');
+      const response = await window.api.checkSession();
+      
+      // STRICT REQUIREMENT: Only proceed if API returns success
+      if (response && response.authenticated && response.user) {
+        console.log('STRICT API VALIDATION: Token validated successfully with backend');
+        
+        // Set user in app state if AppState exists
+        if (window.AppState && authData.user) {
+          window.AppState.user = authData.user;
+          console.log('User set in AppState:', authData.user);
+        }
+        
+        // Set token in api.js if API_COORDINATION exists
+        if (window.API_COORDINATION) {
+          window.API_COORDINATION.authToken = authData.token;
+          console.log('Token set in API_COORDINATION');
+        }
+        
+        // Show success message
+        updateNetworkStatusUI('online', 'Auto-login successful!');
+        
+        // Small delay before redirect
+        setTimeout(() => {
+          console.log('Redirecting to chat.html...');
+          window.location.href = 'chat.html';
+        }, 1500);
+        
+        return true;
+      } else {
+        // STRICT REQUIREMENT: Clear invalid auth data when API validation fails
+        console.log('STRICT API VALIDATION: Token validation failed');
+        clearAuthData();
+        updateNetworkStatusUI('offline', 'Session expired. Please log in again.');
+        return false;
+      }
+    } else {
+      // STRICT REQUIREMENT: No API available, cannot auto-login
+      console.log('STRICT REQUIREMENT: API not available, cannot auto-login');
+      clearAuthData();
       return false;
     }
-    
-    // Validate token with backend (optional but recommended)
-    if (typeof window.api === 'function') {
-      try {
-        console.log('Validating token with backend...');
-        const response = await window.api.checkSession();
-        
-        // Check if session is valid
-        if (response && response.authenticated && response.user) {
-          console.log('Token validated successfully with backend');
-          return true;
-        } else {
-          throw new Error('Token validation failed');
-        }
-      } catch (error) {
-        console.log('Token validation with backend failed:', error.message);
-        // Continue anyway - token might be valid but backend validation endpoint might not exist
-      }
-    }
-    
-    // Set user in app state if AppState exists
-    if (window.AppState && authData.user) {
-      window.AppState.user = authData.user;
-      console.log('User set in AppState:', authData.user);
-    }
-    
-    // Set token in api.js if API_COORDINATION exists
-    if (window.API_COORDINATION) {
-      window.API_COORDINATION.authToken = authData.token;
-      console.log('Token set in API_COORDINATION');
-    }
-    
-    // Show success message
-    updateNetworkStatusUI('online', 'Auto-login successful!');
-    
-    // Small delay before redirect
-    setTimeout(() => {
-      console.log('Redirecting to chat.html...');
-      window.location.href = 'chat.html';
-    }, 1500);
-    
-    return true;
   } catch (error) {
-    console.error('Auto-login failed:', error);
+    console.error('STRICT API VALIDATION: Auto-login failed:', error);
     
-    // Clear invalid auth data
+    // STRICT REQUIREMENT: Clear invalid auth data on any error
     clearAuthData();
     
     // Show error message
@@ -341,11 +344,12 @@ async function checkAutoLogin() {
 // ============================================================================
 
 /**
- * Handles login form submission with progressive attempt limiting
+ * STRICT API-DRIVEN LOGIN HANDLER
+ * NEVER shows "Login Successful" unless API returns HTTP 200
  */
 async function handleLoginSubmit(event) {
   event.preventDefault();
-  console.log('Login form submitted');
+  console.log('STRICT API-DRIVEN: Login form submitted');
   
   const form = event.target;
   const identifier = form.querySelector('input[type="text"]')?.value || 
@@ -384,51 +388,58 @@ async function handleLoginSubmit(event) {
   if (countdownEl) countdownEl.classList.add('hidden');
   
   try {
-    // Check if API is available
+    // STRICT REQUIREMENT: Check if API is available - don't block on network check
     if (!window.api || typeof window.api !== 'function') {
-      throw new Error('API not available. Please check your connection.');
+      // Only throw if API is completely unavailable
+      throw new Error('Authentication service not available');
     }
     
-    // Call login API using centralized api.js - CRITICAL FIX: Use correct endpoint
-    console.log('Calling login API via centralized api.js...');
+    console.log('STRICT API-DRIVEN: Calling login API via centralized api.js...');
     
-    // Use window.api.login() method which handles the correct endpoint
-    const loginResult = await window.api.login(identifier, password);
-    
-    console.log('Login API response:', loginResult);
-    
-    // Check for success
-    if (loginResult && loginResult.success && loginResult.user && loginResult.token) {
-      const { token, user } = loginResult;
+    try {
+      // STRICT REQUIREMENT: API call with proper error handling
+      const loginResult = await window.api.login(identifier, password);
       
-      // Save JWT and user info
-      saveAuthData(token, user);
+      console.log('STRICT API-DRIVEN: Login API response:', loginResult);
       
-      // Reset login attempts for this identifier
-      LoginAttempts.resetAttempts(identifier);
-      
-      // Show success message
-      updateNetworkStatusUI('online', 'Login successful!');
-      
-      // Set token in api.js if API_COORDINATION exists
-      if (window.API_COORDINATION) {
-        window.API_COORDINATION.authToken = token;
+      // STRICT REQUIREMENT: ONLY proceed if API returns success AND has valid token
+      if (loginResult && loginResult.success && loginResult.user && loginResult.token) {
+        const { token, user } = loginResult;
+        
+        // Save JWT and user info
+        saveAuthData(token, user);
+        
+        // Reset login attempts for this identifier
+        LoginAttempts.resetAttempts(identifier);
+        
+        // STRICT REQUIREMENT: Only show success AFTER API confirms
+        updateNetworkStatusUI('online', 'Login successful!');
+        
+        // Set token in api.js if API_COORDINATION exists
+        if (window.API_COORDINATION) {
+          window.API_COORDINATION.authToken = token;
+        }
+        
+        // Set user in AppState if it exists
+        if (window.AppState) {
+          window.AppState.user = user;
+        }
+        
+        // Small delay before redirect
+        setTimeout(() => {
+          window.location.href = 'chat.html';
+        }, 1000);
+      } else {
+        // STRICT REQUIREMENT: API returned but without success flag
+        throw new Error(loginResult?.message || 'Login failed - invalid response from server');
       }
-      
-      // Set user in AppState if it exists
-      if (window.AppState) {
-        window.AppState.user = user;
-      }
-      
-      // Small delay before redirect
-      setTimeout(() => {
-        window.location.href = 'chat.html';
-      }, 1000);
-    } else {
-      throw new Error(loginResult?.message || 'Login failed');
+    } catch (apiError) {
+      // STRICT REQUIREMENT: Catch and display API errors clearly
+      console.error('STRICT API-DRIVEN: API error:', apiError);
+      throw new Error(apiError.message || 'Login failed - server error');
     }
   } catch (error) {
-    console.error('Login error:', error);
+    console.error('STRICT API-DRIVEN: Login error:', error);
     
     // Record failed attempt
     const attempt = LoginAttempts.recordAttempt(identifier);
@@ -439,7 +450,7 @@ async function handleLoginSubmit(event) {
       showLoginAttemptCountdown(newBlockInfo);
     }
     
-    // Show appropriate error message
+    // STRICT REQUIREMENT: Display clear error messages
     let errorMessage = error.message;
     
     // Handle specific error cases
@@ -453,9 +464,11 @@ async function handleLoginSubmit(event) {
       }
     } else if (errorMessage.includes('500') || errorMessage.includes('Internal Server Error')) {
       errorMessage = 'Server error. Please try again later.';
+    } else if (errorMessage.includes('Network') || errorMessage.includes('network')) {
+      errorMessage = 'Network error. Please check your connection.';
     }
     
-    // Show error in network status indicator
+    // STRICT REQUIREMENT: Show error in network status indicator
     updateNetworkStatusUI('offline', errorMessage);
     
     // Re-enable form
@@ -465,11 +478,11 @@ async function handleLoginSubmit(event) {
 }
 
 /**
- * Handles registration form submission with password guidance only
+ * STRICT API-DRIVEN REGISTRATION HANDLER
  */
 async function handleRegisterSubmit(event) {
   event.preventDefault();
-  console.log('Registration form submitted');
+  console.log('STRICT API-DRIVEN: Registration form submitted');
   
   const form = event.target;
   const username = form.querySelector('input[name="username"]')?.value;
@@ -501,13 +514,13 @@ async function handleRegisterSubmit(event) {
   submitBtn.disabled = true;
   
   try {
-    // Check if API is available
+    // STRICT REQUIREMENT: Check if API is available - don't block on network check
     if (!window.api || typeof window.api !== 'function') {
-      throw new Error('API not available. Please check your connection.');
+      // Only throw if API is completely unavailable
+      throw new Error('Registration service not available');
     }
     
-    // Call register API using centralized api.js - CRITICAL FIX: Use correct endpoint
-    console.log('Calling register API via centralized api.js...');
+    console.log('STRICT API-DRIVEN: Calling register API via centralized api.js...');
     
     // Prepare registration data
     const registerData = {
@@ -518,42 +531,49 @@ async function handleRegisterSubmit(event) {
       displayName: displayName || username
     };
     
-    // Use window.api.register() method which handles the correct endpoint
-    const registerResult = await window.api.register(registerData);
-    
-    console.log('Register API response:', registerResult);
-    
-    // Check for success
-    if (registerResult && registerResult.success && registerResult.user && registerResult.token) {
-      const { token, user } = registerResult;
+    try {
+      // STRICT REQUIREMENT: API call with proper error handling
+      const registerResult = await window.api.register(registerData);
       
-      // Save JWT and user info
-      saveAuthData(token, user);
+      console.log('STRICT API-DRIVEN: Register API response:', registerResult);
       
-      // Show success message
-      updateNetworkStatusUI('online', 'Registration successful!');
-      
-      // Set token in api.js if API_COORDINATION exists
-      if (window.API_COORDINATION) {
-        window.API_COORDINATION.authToken = token;
+      // STRICT REQUIREMENT: ONLY proceed if API returns success AND has valid token
+      if (registerResult && registerResult.success && registerResult.user && registerResult.token) {
+        const { token, user } = registerResult;
+        
+        // Save JWT and user info
+        saveAuthData(token, user);
+        
+        // STRICT REQUIREMENT: Only show success AFTER API confirms
+        updateNetworkStatusUI('online', 'Registration successful!');
+        
+        // Set token in api.js if API_COORDINATION exists
+        if (window.API_COORDINATION) {
+          window.API_COORDINATION.authToken = token;
+        }
+        
+        // Set user in AppState if it exists
+        if (window.AppState) {
+          window.AppState.user = user;
+        }
+        
+        // Small delay before redirect
+        setTimeout(() => {
+          window.location.href = 'chat.html';
+        }, 1000);
+      } else {
+        // STRICT REQUIREMENT: API returned but without success flag
+        throw new Error(registerResult?.message || 'Registration failed - invalid response from server');
       }
-      
-      // Set user in AppState if it exists
-      if (window.AppState) {
-        window.AppState.user = user;
-      }
-      
-      // Small delay before redirect
-      setTimeout(() => {
-        window.location.href = 'chat.html';
-      }, 1000);
-    } else {
-      throw new Error(registerResult?.message || 'Registration failed');
+    } catch (apiError) {
+      // STRICT REQUIREMENT: Catch and display API errors clearly
+      console.error('STRICT API-DRIVEN: API error:', apiError);
+      throw new Error(apiError.message || 'Registration failed - server error');
     }
   } catch (error) {
-    console.error('Registration error:', error);
+    console.error('STRICT API-DRIVEN: Registration error:', error);
     
-    // Show error in network status indicator
+    // STRICT REQUIREMENT: Display clear error messages
     let errorMessage = error.message;
     
     // Handle specific error cases
@@ -567,6 +587,8 @@ async function handleRegisterSubmit(event) {
       errorMessage = 'Please check your information and try again';
     } else if (errorMessage.includes('500') || errorMessage.includes('Internal Server Error')) {
       errorMessage = 'Server error. Please try again later.';
+    } else if (errorMessage.includes('Network') || errorMessage.includes('network')) {
+      errorMessage = 'Network error. Please check your connection.';
     }
     
     updateNetworkStatusUI('offline', `Registration failed: ${errorMessage}`);
@@ -594,9 +616,10 @@ async function handleForgotPasswordSubmit(event) {
   submitBtn.disabled = true;
   
   try {
-    // Check if API is available
+    // Check if API is available - don't block on network check
     if (!window.api || typeof window.api !== 'function') {
-      throw new Error('API not available. Please check your connection.');
+      // Only throw if API is completely unavailable
+      throw new Error('Password reset service not available');
     }
     
     // Call forgot password API using centralized api.js
@@ -651,7 +674,7 @@ async function handleForgotPasswordSubmit(event) {
  * This ONLY updates the indicator, doesn't block any UI actions
  */
 function updateNetworkStatusUI(status, message) {
-  console.log(`Network status update: ${status} - ${message}`);
+  console.log(`STRICT UI: Network status update: ${status} - ${message}`);
   
   // Update global state
   window.NetworkStatus.status = status;
@@ -732,7 +755,7 @@ function updateNetworkStatusUI(status, message) {
     case 'online':
       indicator.style.background = '#10b981'; // Green
       indicator.style.color = '#ffffff';
-      indicator.innerHTML = '✅ Online' + (message ? ` - ${message}` : '');
+      indicator.innerHTML = '✅ ' + (message || 'Online');
       indicator.classList.remove('pulse-animation');
       indicator.style.display = 'block';
       
@@ -789,7 +812,17 @@ async function readNetworkStatusFromApi() {
     return { status: 'offline', message: 'No internet connection', backendReachable: false };
   }
   
-  // Method 2: Check if api.js has exposed status directly (most reliable)
+  // Method 2: Check AppNetwork if available (most reliable)
+  if (window.AppNetwork && typeof window.AppNetwork.isOnline === 'function') {
+    const isOnline = window.AppNetwork.isOnline();
+    console.log('AppNetwork says isOnline:', isOnline);
+    
+    if (!isOnline) {
+      return { status: 'offline', message: 'No internet connection', backendReachable: false };
+    }
+  }
+  
+  // Method 3: Check if api.js has exposed status directly
   console.log('Checking API_COORDINATION:', window.API_COORDINATION);
   if (window.API_COORDINATION && window.API_COORDINATION.backendReachable !== undefined) {
     const isReachable = window.API_COORDINATION.backendReachable;
@@ -801,7 +834,7 @@ async function readNetworkStatusFromApi() {
     };
   }
   
-  // Method 3: Check other api.js exposed properties
+  // Method 4: Check other api.js exposed properties
   console.log('Checking other API status properties...');
   
   // Check for MoodChatAPI global object
@@ -826,7 +859,7 @@ async function readNetworkStatusFromApi() {
     };
   }
   
-  // Method 4: Direct API call to /status endpoint (fallback)
+  // Method 5: Direct API call to /status endpoint (fallback)
   if (typeof window.api === 'function') {
     try {
       console.log('Attempting direct /status API call...');
@@ -839,14 +872,20 @@ async function readNetworkStatusFromApi() {
       
       const response = await Promise.race([statusPromise, timeoutPromise]);
       
-      // Safely parse the response
+      // Handle both raw Response objects and parsed responses
       let parsedResponse;
-      if (response && typeof response === 'object' && 'ok' in response) {
-        // This is a raw Response object
-        parsedResponse = await safeParseResponse(response);
-      } else {
-        // Already parsed or different format
-        parsedResponse = response;
+      if (response && typeof response === 'object') {
+        // Check if it's a Response object
+        if ('ok' in response && typeof response.text === 'function') {
+          // This is a raw Response object
+          parsedResponse = await safeParseResponse(response);
+        } else if (response.status || response.healthy || response.success) {
+          // Already parsed response
+          parsedResponse = response;
+        } else if (response.ok !== undefined) {
+          // It might already be the parsed response with ok property
+          parsedResponse = response;
+        }
       }
       
       console.log('/status API response:', parsedResponse);
@@ -857,7 +896,9 @@ async function readNetworkStatusFromApi() {
         parsedResponse.success === true ||
         parsedResponse.healthy === true ||
         (parsedResponse.statusCode && parsedResponse.statusCode === 200) ||
-        (parsedResponse.code && parsedResponse.code === 200)
+        (parsedResponse.code && parsedResponse.code === 200) ||
+        parsedResponse.ok === true ||
+        parsedResponse.ok === 200
       );
       
       console.log('Direct API check says backendReachable:', isReachable);
@@ -872,7 +913,7 @@ async function readNetworkStatusFromApi() {
     }
   }
   
-  // Method 5: Check if we've received any api-network-status events
+  // Method 6: Check if we've received any api-network-status events
   console.log('Checking for cached network status...');
   if (window.NetworkStatus.lastChecked && 
       Date.now() - window.NetworkStatus.lastChecked.getTime() < 30000) {
@@ -1134,32 +1175,78 @@ function updateAuthButtonStates(activeForm) {
 }
 
 // ============================================================================
-// SETUP AUTH FORM EVENT LISTENERS WITH SUBMIT HANDLERS
+// SETUP AUTH FORM EVENT LISTENERS WITH SUBMIT HANDLERS (IMMEDIATE SETUP)
 // ============================================================================
 
 /**
  * Sets up event listeners for auth form toggling and submission
+ * This runs IMMEDIATELY and sets up forms before anything else
  */
 function setupAuthFormListeners() {
   console.log('Setting up auth form event listeners...');
   
+  // First, set up form toggle buttons if they exist
+  const loginBtn = document.getElementById('login-button');
+  const signupBtn = document.getElementById('signup-button');
+  const forgotBtn = document.getElementById('forgot-password-button');
+  
+  if (loginBtn) {
+    loginBtn.addEventListener('click', (e) => {
+      e.preventDefault();
+      showLoginForm();
+    });
+  }
+  
+  if (signupBtn) {
+    signupBtn.addEventListener('click', (e) => {
+      e.preventDefault();
+      showRegisterForm();
+    });
+  }
+  
+  if (forgotBtn) {
+    forgotBtn.addEventListener('click', (e) => {
+      e.preventDefault();
+      showForgotPasswordForm();
+    });
+  }
+  
   // Login form submit handler
   const loginForm = document.getElementById('login-form');
   if (loginForm) {
+    console.log('Setting up login form submit listener');
     loginForm.addEventListener('submit', handleLoginSubmit);
   }
   
   // Register form submit handler
   const registerForm = document.getElementById('register-form');
   if (registerForm) {
+    console.log('Setting up register form submit listener');
     registerForm.addEventListener('submit', handleRegisterSubmit);
   }
   
   // Forgot password form submit handler
   const forgotForm = document.getElementById('forgot-form');
   if (forgotForm) {
+    console.log('Setting up forgot password form submit listener');
     forgotForm.addEventListener('submit', handleForgotPasswordSubmit);
   }
+  
+  // Also set up any direct form toggle links
+  const toggleLinks = document.querySelectorAll('.toggle-form');
+  toggleLinks.forEach(link => {
+    link.addEventListener('click', (e) => {
+      e.preventDefault();
+      const targetForm = e.target.getAttribute('data-target');
+      if (targetForm === 'register') {
+        showRegisterForm();
+      } else if (targetForm === 'forgot') {
+        showForgotPasswordForm();
+      } else {
+        showLoginForm();
+      }
+    });
+  });
   
   console.log('Auth form event listeners set up');
 }
@@ -1183,6 +1270,7 @@ window.checkNetworkNow = async function() {
 window.debugNetworkStatus = function() {
   console.log('=== NETWORK STATUS DEBUG ===');
   console.log('Browser online:', navigator.onLine);
+  console.log('AppNetwork.isOnline:', window.AppNetwork ? window.AppNetwork.isOnline() : 'N/A');
   console.log('API_COORDINATION:', window.API_COORDINATION);
   console.log('MoodChatAPI:', window.MoodChatAPI);
   console.log('API_STATUS:', window.API_STATUS);
@@ -1246,39 +1334,123 @@ function integrateWithAppState() {
 }
 
 // ============================================================================
-// INITIALIZATION (WITH AUTO-LOGIN CHECK)
+// FORM SETUP FUNCTION (RUNS IMMEDIATELY)
+// ============================================================================
+
+/**
+ * Sets up all auth forms immediately
+ * This function should run as soon as the DOM is ready
+ */
+function setupAuthFormsImmediately() {
+  console.log('Setting up auth forms immediately...');
+  
+  // Setup form toggle listeners
+  setupAuthFormListeners();
+  
+  // Show default form (login)
+  const loginForm = document.getElementById('login-form');
+  const registerForm = document.getElementById('register-form');
+  const forgotForm = document.getElementById('forgot-form');
+  
+  // Determine which form to show by default
+  let defaultForm = 'login';
+  
+  // Check URL hash for form type
+  const hash = window.location.hash;
+  if (hash === '#register') {
+    defaultForm = 'register';
+  } else if (hash === '#forgot') {
+    defaultForm = 'forgot';
+  }
+  
+  // Show the appropriate form
+  switch(defaultForm) {
+    case 'register':
+      if (registerForm) {
+        showRegisterForm();
+      } else if (loginForm) {
+        showLoginForm();
+      }
+      break;
+    case 'forgot':
+      if (forgotForm) {
+        showForgotPasswordForm();
+      } else if (loginForm) {
+        showLoginForm();
+      }
+      break;
+    default:
+      if (loginForm) {
+        showLoginForm();
+      }
+  }
+  
+  console.log('Auth forms set up immediately');
+}
+
+// ============================================================================
+// INITIALIZATION (WITH IMMEDIATE FORM SETUP)
 // ============================================================================
 
 /**
  * Initializes network status monitoring and auth forms
+ * Forms are set up immediately, auto-login runs independently
  */
-function initializeAuthUI() {
-  console.log('Initializing auth UI and network status monitoring...');
+async function initializeAuthUI() {
+  console.log('STRICT API-DRIVEN: Initializing auth UI and network status monitoring...');
   
-  // 1. Check for auto-login (runs only on login page)
+  // 1. IMMEDIATELY set up auth forms (this runs first, before anything else)
   const currentPage = window.location.pathname;
   const isLoginPage = currentPage.includes('index.html') || currentPage === '/' || currentPage.endsWith('/');
   
   if (isLoginPage) {
-    console.log('On login page, checking for auto-login...');
-    const shouldAutoLogin = checkAutoLogin();
+    console.log('STRICT API-DRIVEN: On login page, setting up forms IMMEDIATELY...');
+    setupAuthFormsImmediately();
+  }
+  
+  // 2. Check for auto-login (runs independently in the background)
+  if (isLoginPage) {
+    console.log('STRICT API-DRIVEN: Starting auto-login check in background...');
     
-    // If auto-login succeeds and we're redirecting, don't set up forms
-    if (shouldAutoLogin) {
-      console.log('Auto-login in progress, skipping form setup');
-      return;
-    }
+    // Start auto-login check in the background (async, non-blocking)
+    // Don't wait for it to complete - forms are already set up
+    setTimeout(async () => {
+      try {
+        console.log('STRICT API-DRIVEN: Background auto-login check starting...');
+        const autoLoginSucceeded = await checkAutoLogin();
+        if (autoLoginSucceeded) {
+          console.log('STRICT API-DRIVEN: Auto-login succeeded, user will be redirected');
+          // Auto-login succeeded, forms were already set up but will be redirected anyway
+        } else {
+          console.log('STRICT API-DRIVEN: Auto-login failed or not attempted, forms remain active');
+          // Auto-login failed, forms are already active for manual login
+        }
+      } catch (error) {
+        console.error('STRICT API-DRIVEN: Auto-login check error:', error);
+        // Error during auto-login, forms remain active
+      }
+    }, 1000); // Delay auto-login check slightly to let forms set up first
   } else {
     console.log('Not on login page, skipping auto-login check');
   }
   
-  // 2. Set up auth form listeners (only if on login page)
-  if (isLoginPage) {
-    setupAuthFormListeners();
-  }
-  
   // 3. Set initial network UI state (non-blocking)
-  updateNetworkStatusUI('checking', 'Checking connection...');
+  // Check if backend is reachable via api.js
+  if (typeof window.api === 'function') {
+    try {
+      // Simple check to see if API is responding
+      const healthCheck = await window.api('/status');
+      if (healthCheck && (healthCheck.ok || healthCheck.status === 'ok' || healthCheck.success)) {
+        updateNetworkStatusUI('online', 'Connected to MoodChat');
+      } else {
+        updateNetworkStatusUI('checking', 'Checking connection...');
+      }
+    } catch (error) {
+      updateNetworkStatusUI('checking', 'Checking connection...');
+    }
+  } else {
+    updateNetworkStatusUI('checking', 'Checking connection...');
+  }
   
   // 4. Set up api.js event listener for real-time status updates
   setupApiStatusListener();
@@ -1295,7 +1467,7 @@ function initializeAuthUI() {
     startPeriodicNetworkUpdates();
   }, 1000);
   
-  console.log('Auth UI and network monitoring initialized');
+  console.log('STRICT API-DRIVEN: Auth UI and network monitoring initialized');
 }
 
 // ============================================================================
@@ -1344,16 +1516,50 @@ window.logoutUser = function() {
 };
 
 // ============================================================================
-// START AUTH UI WHEN DOCUMENT IS READY
+// START AUTH UI WHEN DOCUMENT IS READY (WITH IMMEDIATE FORM SETUP)
 // ============================================================================
 
-// Start auth UI when DOM is ready
-if (document.readyState === 'loading') {
-  document.addEventListener('DOMContentLoaded', () => {
+/**
+ * Main initialization function that runs when DOM is ready
+ */
+function initialize() {
+  console.log('Initializing auth system...');
+  
+  // Setup forms immediately when DOM is ready
+  if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', () => {
+      console.log('DOMContentLoaded - Starting auth initialization');
+      
+      // First, set up forms immediately
+      const currentPage = window.location.pathname;
+      const isLoginPage = currentPage.includes('index.html') || currentPage === '/' || currentPage.endsWith('/');
+      
+      if (isLoginPage) {
+        console.log('Setting up forms immediately on DOMContentLoaded');
+        setupAuthFormsImmediately();
+      }
+      
+      // Then initialize the rest of the auth UI
+      initializeAuthUI();
+    });
+  } else {
+    // DOM already loaded, set up forms immediately
+    console.log('DOM already loaded, setting up forms immediately');
+    
+    const currentPage = window.location.pathname;
+    const isLoginPage = currentPage.includes('index.html') || currentPage === '/' || currentPage.endsWith('/');
+    
+    if (isLoginPage) {
+      console.log('Setting up forms immediately (DOM already ready)');
+      setupAuthFormsImmediately();
+    }
+    
+    // Then initialize the rest of the auth UI
     initializeAuthUI();
-  });
-} else {
-  initializeAuthUI();
+  }
 }
 
-console.log('app.ui.auth.js - Auth UI and network status module loaded');
+// Start initialization
+initialize();
+
+console.log('app.ui.auth.js - STRICT API-DRIVEN Auth UI and network status module loaded');

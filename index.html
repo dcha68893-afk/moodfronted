@@ -2426,10 +2426,6 @@
             sessionStorage.removeItem(USER_DATA_KEY);
         }
         
-        function isOnline() {
-            return navigator.onLine;
-        }
-        
         // =============================================
         // OFFLINE MODE FUNCTIONS
         // =============================================
@@ -2609,7 +2605,10 @@
                     try {
                         let result;
                         
-                        if (isOnline()) {
+                        // Check network status using window.AppNetwork
+                        const isOnline = window.AppNetwork?.isOnline?.();
+                        
+                        if (isOnline === true) {
                             // Use window.api.login instead of direct fetch
                             if (window.api && window.api.login) {
                                 result = await window.api.login(identifier, password);

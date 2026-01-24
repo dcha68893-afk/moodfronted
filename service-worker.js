@@ -1,11 +1,11 @@
 // Service Worker for PWA Chat Application
-// Version: 6.0.0 - Simplified API bypass with robust caching for static assets only
-// Cache Strategy: Cache-First for static assets only, NETWORK-ONLY for all API/backend requests
+// Version: 7.0.1 - Static Assets Only, No API Interference
+// Cache Strategy: Cache-First for static assets ONLY, Network-Only for all API/backend
 
-const CACHE_NAME = 'moodchat-v12';
-const OFFLINE_CACHE_NAME = 'moodchat-offline-v12';
+const CACHE_NAME = 'moodchat-static-v7';
+const OFFLINE_CACHE_NAME = 'moodchat-offline-v7';
 
-// Static assets only - these are local files that should be cached
+// Static assets only - local files that should be cached
 const STATIC_ASSETS = [
   // Core HTML files
   '/',
@@ -32,7 +32,7 @@ const STATIC_ASSETS = [
   '/moodchat-192x192.png',
   '/moodchat-512x512.png',
   
-  // Optional static assets (will try to cache if exist)
+  // Optional static assets
   '/apple-touch-icon.png',
   '/images/logo.svg',
   '/images/avatar-placeholder.png',
@@ -43,7 +43,7 @@ const STATIC_ASSETS = [
   '/icons/settings.svg'
 ];
 
-// NEVER cache these - they go directly to network
+// NEVER cache these - ALWAYS go directly to network
 const NEVER_CACHE_PATTERNS = [
   '/api/',
   '/auth/',
@@ -52,18 +52,23 @@ const NEVER_CACHE_PATTERNS = [
   '/logout',
   '/backend/',
   '/server/',
+  '/socket.io/',
+  '/ws/',
+  '/wss/',
   'https://api.',
   'http://api.',
   ':3000',
   ':5000',
   ':8000',
+  ':8080',
   'localhost',
-  '127.0.0.1'
+  '127.0.0.1',
+  '0.0.0.0'
 ];
 
 // Install event - cache static assets only
 self.addEventListener('install', event => {
-  console.log('[Service Worker] Installing v6.0.0 - Simple and reliable...');
+  console.log('[Service Worker] Installing v7.0.1 - Static Assets Only');
   
   event.waitUntil(
     (async () => {
@@ -71,13 +76,12 @@ self.addEventListener('install', event => {
         const cache = await caches.open(CACHE_NAME);
         console.log('[Service Worker] Caching static assets only...');
         
-        // Cache each static asset with error handling
         const cachePromises = STATIC_ASSETS.map(async (asset) => {
           try {
             // Skip if asset contains never-cache patterns
             if (containsNeverCachePattern(asset)) {
               console.log('[Service Worker] Skipping never-cache asset:', asset);
-              return false;
+              return { asset, success: false, reason: 'never-cache-pattern' };
             }
             
             // Handle root path
@@ -86,34 +90,51 @@ self.addEventListener('install', event => {
             // Skip invalid URLs
             if (!isValidLocalUrl(assetUrl)) {
               console.log('[Service Worker] Skipping invalid URL:', assetUrl);
-              return false;
+              return { asset: assetUrl, success: false, reason: 'invalid-url' };
             }
             
             // Fetch the asset
-            const response = await fetch(assetUrl);
+            const response = await fetch(assetUrl, {
+              credentials: 'same-origin',
+              // Non-blocking: don't fail entire installation if one asset fails
+              mode: 'no-cors'
+            }).catch(error => {
+              console.warn(`[Service Worker] Fetch failed for ${assetUrl}:`, error.message);
+              return null;
+            });
             
-            // Only cache if response is OK and not an error page
-            if (response.ok && response.status === 200 && !response.url.includes('/api/')) {
+            // Only cache if response is OK and not an API endpoint
+            if (response && response.ok && response.status === 200) {
               await cache.put(asset === '/' ? '/' : assetUrl, response);
               console.log(`[Service Worker] Cached: ${assetUrl}`);
-              return true;
+              return { asset: assetUrl, success: true };
             } else {
-              console.warn(`[Service Worker] Failed to cache ${assetUrl}: ${response.status}`);
-              return false;
+              const status = response ? response.status : 'no-response';
+              console.warn(`[Service Worker] Failed to cache ${assetUrl}: Status ${status}`);
+              return { asset: assetUrl, success: false, reason: `status-${status}` };
             }
           } catch (error) {
+            // NON-BLOCKING: Log error but don't throw
             console.warn(`[Service Worker] Failed to cache ${asset}:`, error.message);
-            return false;
+            return { asset, success: false, reason: error.message };
           }
         });
         
-        // Wait for all caching attempts to complete
         const results = await Promise.allSettled(cachePromises);
-        const successCount = results.filter(r => r.status === 'fulfilled' && r.value === true).length;
+        const successCount = results.filter(r => r.status === 'fulfilled' && r.value.success === true).length;
+        const failedAssets = results
+          .filter(r => r.status === 'fulfilled' && r.value.success === false)
+          .map(r => r.value);
         
-        console.log(`[Service Worker] Installation complete. Successfully cached ${successCount}/${STATIC_ASSETS.length} assets`);
+        console.log(`[Service Worker] Installation complete. Cached ${successCount}/${STATIC_ASSETS.length} assets`);
+        
+        if (failedAssets.length > 0) {
+          console.log('[Service Worker] Failed assets:', failedAssets.map(f => `${f.asset} (${f.reason})`).join(', '));
+        }
+        
         return self.skipWaiting();
       } catch (error) {
+        // NON-BLOCKING: Log error but don't fail installation
         console.error('[Service Worker] Install failed:', error);
         return self.skipWaiting();
       }
@@ -123,7 +144,7 @@ self.addEventListener('install', event => {
 
 // Activate event - clean up old caches
 self.addEventListener('activate', event => {
-  console.log('[Service Worker] Activating v6.0.0...');
+  console.log('[Service Worker] Activating v7.0.1...');
   
   event.waitUntil(
     (async () => {
@@ -148,7 +169,7 @@ self.addEventListener('activate', event => {
         clients.forEach(client => {
           client.postMessage({
             type: 'SW_ACTIVATED',
-            version: '6.0.0',
+            version: '7.0.1',
             timestamp: Date.now()
           });
         });
@@ -207,46 +228,77 @@ async function handleStaticAsset(request) {
     const cachedResponse = await cache.match(request);
     
     if (cachedResponse) {
-      // Return cached response immediately
       console.log('[Service Worker] Serving from cache:', request.url);
       return cachedResponse;
     }
     
     // If not in cache, fetch from network
-    const networkResponse = await fetch(request);
+    const networkResponse = await fetch(request).catch(error => {
+      console.warn('[Service Worker] Network fetch failed for:', request.url, error.message);
+      return null;
+    });
     
-    // Only cache if successful and not an API/backend response
-    if (networkResponse.ok && 
+    // If network fetch succeeded and should be cached
+    if (networkResponse && 
+        networkResponse.ok && 
         networkResponse.status === 200 && 
-        !containsNeverCachePattern(request.url) &&
-        !networkResponse.url.includes('/api/') &&
-        !networkResponse.url.includes('/auth/')) {
+        !containsNeverCachePattern(request.url)) {
       
       // Clone the response before caching
       const responseToCache = networkResponse.clone();
       await cache.put(request, responseToCache);
       console.log('[Service Worker] Cached new asset:', request.url);
+      return networkResponse;
     }
     
-    return networkResponse;
+    // If network fetch failed or shouldn't be cached, return network response if available
+    if (networkResponse) {
+      console.log('[Service Worker] Returning network response (not cached):', request.url);
+      return networkResponse;
+    }
     
-  } catch (error) {
-    console.error('[Service Worker] Failed to handle static asset:', request.url, error);
+    // If network failed and no cache, handle gracefully
+    console.warn('[Service Worker] Cache miss and network failed for:', request.url);
     
     // For HTML requests, return offline page
     if (request.headers.get('Accept')?.includes('text/html')) {
       return getOfflinePage();
     }
     
-    // For other assets, re-throw the error
-    throw error;
+    // For other assets, return a minimal error response without throwing
+    return new Response('Resource not available', {
+      status: 404,
+      statusText: 'Not Found',
+      headers: { 
+        'Content-Type': 'text/plain',
+        'X-Cache-Status': 'miss'
+      }
+    });
+    
+  } catch (error) {
+    // NON-BLOCKING: Log error but don't throw
+    console.warn('[Service Worker] Failed to handle static asset:', request.url, error.message);
+    
+    // For HTML requests, return offline page
+    if (request.headers.get('Accept')?.includes('text/html')) {
+      return getOfflinePage();
+    }
+    
+    // For other assets, return a minimal error response
+    return new Response('', {
+      status: 500,
+      headers: { 
+        'Content-Type': 'text/plain',
+        'X-Error': 'Service worker error'
+      }
+    });
   }
 }
 
 // Get offline page for HTML requests
 function getOfflinePage() {
-  return new Response(
-    `<!DOCTYPE html>
+  const offlineHtml = `
+    <!DOCTYPE html>
     <html>
       <head>
         <meta charset="UTF-8">
@@ -326,46 +378,113 @@ function getOfflinePage() {
           </div>
         </div>
       </body>
-    </html>`,
-    {
-      status: 200,
-      headers: {
-        'Content-Type': 'text/html',
-        'X-Service-Worker': 'offline'
-      }
+    </html>`;
+  
+  return new Response(offlineHtml, {
+    status: 200,
+    statusText: 'OK',
+    headers: {
+      'Content-Type': 'text/html; charset=utf-8',
+      'X-Service-Worker': 'offline'
     }
-  );
+  });
 }
 
-// Main fetch event handler - SIMPLE and RELIABLE
+// CRITICAL: Main fetch event handler - API requests bypass cache completely
 self.addEventListener('fetch', event => {
   const request = event.request;
-  const url = new URL(request.url);
+  const url = request.url;
   
-  // CRITICAL: Skip all API and backend requests completely
-  if (containsNeverCachePattern(request.url) || 
-      url.pathname.startsWith('/api/') || 
-      url.pathname.includes('/auth/') ||
-      url.pathname.includes('/backend/') ||
-      url.pathname.includes('/login') ||
-      url.pathname.includes('/register') ||
-      url.pathname.includes('/logout') ||
-      request.method !== 'GET') {
-    
-    console.log('[Service Worker] Bypassing cache for:', request.url);
-    // Let the request go directly to network
+  // CRITICAL REQUIREMENT: NEVER cache API requests - always fetch from network
+  // This ensures auth and API requests are NEVER interfered with
+  if (url.includes('/api/') || containsNeverCachePattern(url)) {
+    console.log('[Service Worker] Bypassing cache for API/Auth:', url);
+    event.respondWith(fetch(request));
+    return;
+  }
+  
+  // CRITICAL: Skip all non-GET requests (POST, PUT, DELETE, etc.)
+  if (request.method !== 'GET') {
+    console.log('[Service Worker] Bypassing cache for non-GET:', request.method, url);
+    event.respondWith(fetch(request));
+    return;
+  }
+  
+  // CRITICAL: Skip all auth-related requests
+  if (url.includes('/auth/') || 
+      url.includes('/login') || 
+      url.includes('/register') || 
+      url.includes('/logout')) {
+    console.log('[Service Worker] Bypassing cache for auth:', url);
+    event.respondWith(fetch(request));
+    return;
+  }
+  
+  // CRITICAL: Skip backend, server, and socket requests
+  if (url.includes('/backend/') || 
+      url.includes('/server/') || 
+      url.includes('/socket.io/') || 
+      url.includes('/ws/') || 
+      url.includes('/wss/')) {
+    console.log('[Service Worker] Bypassing cache for backend:', url);
+    event.respondWith(fetch(request));
     return;
   }
   
   // Handle static asset requests (CSS, JS, images, icons, HTML)
-  if (isStaticAssetRequest(request) && url.origin === self.location.origin) {
-    console.log('[Service Worker] Handling static asset:', request.url);
+  if (isStaticAssetRequest(request)) {
+    console.log('[Service Worker] Handling static asset:', url);
     event.respondWith(handleStaticAsset(request));
     return;
   }
   
-  // For all other requests, let them go to network
-  // (This includes navigation requests that we want fresh)
+  // For navigation requests (HTML), try cache then network
+  if (request.headers.get('Accept')?.includes('text/html') && 
+      new URL(request.url).origin === self.location.origin &&
+      !containsNeverCachePattern(request.url)) {
+    
+    console.log('[Service Worker] Handling navigation:', url);
+    event.respondWith(
+      (async () => {
+        try {
+          // Try cache first for HTML
+          const cache = await caches.open(CACHE_NAME);
+          const cachedResponse = await cache.match(request);
+          
+          if (cachedResponse) {
+            console.log('[Service Worker] Serving HTML from cache:', url);
+            return cachedResponse;
+          }
+          
+          // Try network
+          const networkResponse = await fetch(request).catch(error => {
+            console.warn('[Service Worker] Network failed for HTML:', url, error.message);
+            return null;
+          });
+          
+          if (networkResponse && networkResponse.ok) {
+            // Cache the HTML for next time
+            const responseToCache = networkResponse.clone();
+            await cache.put(request, responseToCache);
+            return networkResponse;
+          }
+          
+          // Network failed or invalid response, return offline page
+          console.log('[Service Worker] Network failed for HTML, returning offline page:', url);
+          return getOfflinePage();
+          
+        } catch (error) {
+          // NON-BLOCKING: Log error and return offline page
+          console.warn('[Service Worker] Error handling navigation:', url, error.message);
+          return getOfflinePage();
+        }
+      })()
+    );
+    return;
+  }
+  
+  // For all other requests, let them go to network (no caching)
+  console.log('[Service Worker] Passing through to network:', url);
 });
 
 // Handle push notifications
@@ -467,7 +586,7 @@ self.addEventListener('message', event => {
               type: 'CACHE_INFO',
               caches: cacheInfo,
               timestamp: Date.now(),
-              version: '6.0.0'
+              version: '7.0.1'
             });
           } catch (error) {
             event.ports[0].postMessage({
@@ -484,7 +603,15 @@ self.addEventListener('message', event => {
       event.ports[0].postMessage({
         type: 'HEALTH_RESPONSE',
         status: 'healthy',
-        version: '6.0.0',
+        version: '7.0.1',
+        timestamp: Date.now()
+      });
+      break;
+      
+    case 'CHECK_ONLINE_STATUS':
+      event.ports[0].postMessage({
+        type: 'ONLINE_STATUS',
+        online: navigator.onLine,
         timestamp: Date.now()
       });
       break;
@@ -502,8 +629,7 @@ self.addEventListener('sync', event => {
 async function syncPendingData() {
   try {
     console.log('[Service Worker] Syncing pending data...');
-    // This would sync any pending messages or data
-    // For now, just log it
+    // Implementation for syncing pending messages
   } catch (error) {
     console.log('[Service Worker] Sync failed:', error);
   }
@@ -542,11 +668,17 @@ async function cleanupOldCacheEntries() {
 // Run cleanup once a day
 setInterval(cleanupOldCacheEntries, 24 * 60 * 60 * 1000);
 
-// Error handling
+// Error handling - log but don't throw
 self.addEventListener('error', event => {
-  console.error('[Service Worker] Error:', event.error);
+  console.warn('[Service Worker] Error:', event.error);
+  // NON-BLOCKING: Don't re-throw
 });
 
 self.addEventListener('unhandledrejection', event => {
-  console.error('[Service Worker] Unhandled rejection:', event.reason);
+  console.warn('[Service Worker] Unhandled rejection:', event.reason);
+  // NON-BLOCKING: Don't re-throw
+  event.preventDefault();
 });
+
+// Initial cleanup
+cleanupOldCacheEntries();

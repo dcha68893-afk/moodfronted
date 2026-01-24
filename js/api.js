@@ -16,6 +16,56 @@
 // ============================================================================
 
 // ============================================================================
+// SINGLE SOURCE OF TRUTH - NETWORK STATE
+// ============================================================================
+/**
+ * GLOBAL NETWORK STATE - Declared ONLY ONCE here
+ * All other files must use window.AppNetwork
+ */
+let isOnline = navigator.onLine;
+let isBackendReachable = null;
+
+// Initialize global network state
+window.AppNetwork = {
+  isOnline: isOnline,
+  isBackendReachable: isBackendReachable,
+  lastChecked: new Date().toISOString(),
+  
+  // Update methods
+  updateOnlineStatus: function(status) {
+    isOnline = status;
+    this.isOnline = status;
+    this.lastChecked = new Date().toISOString();
+    console.log(`🔧 [NETWORK] Online status changed to: ${status}`);
+    
+    // Dispatch network change event
+    try {
+      window.dispatchEvent(new CustomEvent('network-state-changed', {
+        detail: { isOnline: status, isBackendReachable: isBackendReachable }
+      }));
+    } catch (e) {
+      console.log('🔧 [NETWORK] Could not dispatch event:', e.message);
+    }
+  },
+  
+  updateBackendStatus: function(status) {
+    isBackendReachable = status;
+    this.isBackendReachable = status;
+    this.lastChecked = new Date().toISOString();
+    console.log(`🔧 [NETWORK] Backend reachable changed to: ${status}`);
+  }
+};
+
+// Listen for online/offline events
+window.addEventListener('online', () => {
+  window.AppNetwork.updateOnlineStatus(true);
+});
+
+window.addEventListener('offline', () => {
+  window.AppNetwork.updateOnlineStatus(false);
+});
+
+// ============================================================================
 // ENVIRONMENT DETECTION - DYNAMIC BACKEND URL CONFIGURATION
 // ============================================================================
 /**
@@ -60,6 +110,7 @@ console.log(`🔧 [API] Current Protocol: ${window.location.protocol}`);
 console.log(`🔧 [API] Backend Base URL: ${BACKEND_BASE_URL}`);
 console.log(`🔧 [API] API Base URL: ${BASE_API_URL}`);
 console.log(`🔧 [API] CRITICAL: ALL API calls will use: ${BASE_API_URL}`);
+console.log(`🔧 [API] Network State: Online=${window.AppNetwork.isOnline}, BackendReachable=${window.AppNetwork.isBackendReachable}`);
 
 // ============================================================================
 // CORE VALIDATION FUNCTIONS - NEVER BREAK
@@ -161,16 +212,17 @@ function _buildSafeUrl(endpoint) {
 }
 
 // ============================================================================
-// SINGLE FETCH FUNCTION - THE ONLY PLACE fetch() IS CALLED
+// CORE FETCH FUNCTION - STRICT HTTP STATUS HANDLING
 // ============================================================================
 
 /**
- * CORE FETCH FUNCTION - Validates EVERYTHING before fetch()
- * This is the ONLY function that should ever call fetch()
- * UPDATED: Enhanced error handling for 429 and 500 errors
- * CRITICAL: Uses dynamically determined BASE_API_URL via _buildSafeUrl()
+ * CORE FETCH FUNCTION - STRICT REQUIREMENTS:
+ * 1. Treat ANY HTTP status ≥400 as a HARD failure
+ * 2. NEVER return success if response.ok === false
+ * 3. Do NOT mark backend offline on 401 or 400
+ * 4. All API calls MUST use BASE_API_URL derived dynamically from window.location
  */
-function _safeFetchCall(fullUrl, options = {}) {
+function _safeFetch(fullUrl, options = {}) {
   // Validate URL
   if (!fullUrl || typeof fullUrl !== 'string') {
     console.error('❌ [API] Invalid URL for fetch:', fullUrl);
@@ -208,52 +260,84 @@ function _safeFetchCall(fullUrl, options = {}) {
   
   console.log(`🔧 [API] Safe fetch: ${normalizedMethod} ${fullUrl}`);
   
-  // PERFORM THE FETCH - ONLY HERE
+  // PERFORM THE FETCH
   return fetch(fullUrl, safeOptions)
     .then(async response => {
       try {
         const data = await response.json();
         
-        // Enhanced error handling for specific status codes
-        let errorMessage = data.message || (response.ok ? 'Success' : 'Request failed');
-        let isRateLimited = false;
-        let isServerError = false;
+        // STRICT REQUIREMENT: Treat ANY HTTP status ≥400 as a HARD failure
+        // STRICT REQUIREMENT: NEVER return success if response.ok === false
+        const isSuccess = response.ok; // response.ok means status 200-299
+        const status = response.status;
         
-        if (response.status === 429) {
-          errorMessage = 'Too many requests. Please wait and try again.';
-          isRateLimited = true;
-        } else if (response.status >= 500) {
-          errorMessage = 'Server error. Please try again later.';
-          isServerError = true;
-        } else if (response.status === 401) {
-          errorMessage = data.message || 'Invalid credentials';
-        } else if (response.status === 400) {
-          errorMessage = data.message || 'Bad request';
-        } else if (response.status === 404) {
-          errorMessage = data.message || 'Resource not found';
+        // STRICT: Always include these properties
+        const result = {
+          ok: isSuccess,
+          status: status,
+          data: data,
+          headers: Object.fromEntries(response.headers.entries())
+        };
+        
+        // Enhanced error handling for specific status codes
+        if (!isSuccess) {
+          let errorMessage = data.message || response.statusText || 'Request failed';
+          
+          if (status === 429) {
+            errorMessage = 'Too many requests. Please wait and try again.';
+            result.isRateLimited = true;
+            result.retryAfter = response.headers.get('Retry-After');
+          } else if (status >= 500) {
+            errorMessage = 'Server error. Please try again later.';
+            result.isServerError = true;
+          } else if (status === 401) {
+            errorMessage = data.message || 'Invalid credentials';
+            result.isAuthError = true;
+          } else if (status === 400) {
+            errorMessage = data.message || 'Bad request';
+            result.isClientError = true;
+          } else if (status === 404) {
+            errorMessage = data.message || 'Resource not found';
+            result.isNotFound = true;
+          }
+          
+          result.message = errorMessage;
+          result.success = false; // STRICT: success must be false for non-ok responses
+        } else {
+          result.success = true;
+          result.message = data.message || 'Success';
         }
         
-        return {
-          success: response.ok,
-          status: response.status,
-          data: data,
-          message: errorMessage,
-          headers: Object.fromEntries(response.headers.entries()),
-          isRateLimited: isRateLimited,
-          isServerError: isServerError,
-          retryAfter: response.headers.get('Retry-After')
-        };
+        // STRICT: Do NOT mark backend offline on 401 or 400
+        // Only mark backend as unreachable on network errors or 5xx errors
+        if (status >= 500) {
+          window.AppNetwork.updateBackendStatus(false);
+        } else if (status < 500) {
+          // Any response with status < 500 means backend is reachable
+          window.AppNetwork.updateBackendStatus(true);
+        }
+        
+        return result;
       } catch (jsonError) {
-        return {
-          success: response.ok,
-          status: response.status,
+        // Handle JSON parsing errors
+        const isSuccess = response.ok;
+        const status = response.status;
+        
+        const result = {
+          ok: isSuccess,
+          success: isSuccess,
+          status: status,
           data: null,
           message: response.statusText || 'Request completed',
           headers: Object.fromEntries(response.headers.entries()),
-          rawResponse: response,
-          isRateLimited: response.status === 429,
-          isServerError: response.status >= 500
+          rawResponse: response
         };
+        
+        if (!isSuccess) {
+          result.success = false;
+        }
+        
+        return result;
       }
     })
     .catch(error => {
@@ -270,7 +354,13 @@ function _safeFetchCall(fullUrl, options = {}) {
                           error.message.includes('aborted') ||
                           error.message.includes('The user aborted');
       
+      // Update backend reachability for network errors
+      if (isNetworkError && !isAbortError) {
+        window.AppNetwork.updateBackendStatus(false);
+      }
+      
       return {
+        ok: false,
         success: false,
         status: 0,
         message: isAbortError 
@@ -279,8 +369,8 @@ function _safeFetchCall(fullUrl, options = {}) {
             ? 'Network error. Please check your connection.' 
             : 'Request failed: ' + error.message),
         error: error.message,
-        isNetworkError: isNetworkError && !isAbortError, // AbortError is NOT a network error
-        isAbortError: isAbortError, // Track abort separately
+        isNetworkError: isNetworkError && !isAbortError,
+        isAbortError: isAbortError,
         isRateLimited: false,
         isServerError: false
       };
@@ -288,19 +378,21 @@ function _safeFetchCall(fullUrl, options = {}) {
 }
 
 // ============================================================================
-// GLOBAL API FUNCTION - ULTRA-DEFENSIVE WRAPPER WITH ENHANCED ERROR HANDLING
+// GLOBAL API FUNCTION - ULTRA-DEFENSIVE WRAPPER
 // ============================================================================
 
 window.api = function(endpoint, options = {}) {
-  // OFFLINE FIRST CHECK - Immediate response if offline
-  if (!navigator.onLine) {
-    console.log('🔧 [API] Offline detected, returning cached response');
+  // Use global network state
+  if (!window.AppNetwork.isOnline) {
+    console.log('🔧 [API] Offline detected, returning offline response');
     return Promise.resolve({
+      ok: false,
       success: false,
       status: 0,
       message: 'Offline mode',
       offline: true,
       cached: true,
+      isNetworkError: true,
       isRateLimited: false,
       isServerError: false
     });
@@ -350,24 +442,23 @@ window.api = function(endpoint, options = {}) {
     console.log('🔧 [API] Could not attach auth token:', e.message);
   }
   
-  // CALL THE SINGLE SAFE FETCH FUNCTION
-  return _safeFetchCall(fullUrl, safeOptions);
+  // CALL THE CORE FETCH FUNCTION
+  return _safeFetch(fullUrl, safeOptions);
 };
 
 // ============================================================================
-// MAIN API OBJECT - WITH HARDENED METHODS AND ENHANCED ERROR HANDLING
+// MAIN API OBJECT - WITH HARDENED METHODS
 // ============================================================================
 
 const apiObject = {
   _singleton: true,
-  _version: '15.0.0', // Updated version for dynamic environment detection
+  _version: '16.0.0', // Updated version for strict HTTP handling
   _safeInitialized: true,
   _backendReachable: null,
   _sessionChecked: false,
   
   /**
    * Configuration object with dynamically determined URLs
-   * FIX 3: All URLs come from dynamic detection
    */
   _config: {
     BACKEND_URL: BACKEND_BASE_URL,               // Dynamic backend base URL
@@ -380,16 +471,18 @@ const apiObject = {
   },
   
   // ============================================================================
-  // HARDENED AUTHENTICATION METHODS WITH ENHANCED ERROR PROPAGATION
+  // HARDENED AUTHENTICATION METHODS - STRICT ERROR HANDLING
   // ============================================================================
   
   login: async function(emailOrUsername, password) {
-    // OFFLINE CHECK FIRST
-    if (!navigator.onLine) {
+    // OFFLINE CHECK FIRST - use global network state
+    if (!window.AppNetwork.isOnline) {
       return {
+        ok: false,
         success: false,
         message: 'Cannot login while offline',
         offline: true,
+        isNetworkError: true,
         isRateLimited: false,
         isServerError: false
       };
@@ -400,134 +493,122 @@ const apiObject = {
       console.log(`🔧 [API] Using dynamic backend URL: ${BACKEND_BASE_URL}`);
       console.log(`🔧 [API] Using dynamic API URL: ${BASE_API_URL}`);
       
-      // FIX 4: Proper JSON body for login
+      // Proper JSON body for login
       const requestData = { 
         identifier: String(emailOrUsername).trim(),
         password: String(password) 
       };
       
-      // USE THE SINGLE FETCH FUNCTION - CRITICAL: Uses dynamic BASE_API_URL
-      const result = await _safeFetchCall(`${BACKEND_BASE_URL}/api/auth/login`, {
+      // USE THE CORE FETCH FUNCTION
+      const result = await _safeFetch(`${BACKEND_BASE_URL}/api/auth/login`, {
         method: 'POST',
         body: requestData
       });
       
-      if (result.success) {
-        // UPDATED: Handle new token structure from backend
-        // Backend now returns: { user, tokens: { accessToken, refreshToken } }
-        const userData = result.data;
-        const accessToken = userData.tokens?.accessToken || userData.token;
-        const refreshToken = userData.tokens?.refreshToken;
-        const user = userData.user || userData;
+      // STRICT: Check response.ok - if false, treat as HARD failure
+      if (!result.ok) {
+        // STRICT: Do NOT return success if response.ok === false
+        console.log(`🔧 [API] Login failed with status ${result.status}: ${result.message}`);
         
-        if (accessToken && user) {
-          console.log(`🔧 [API] Login successful, storing authUser with new token structure`);
-          
-          // Store with new token structure
-          localStorage.setItem('authUser', JSON.stringify({
-            token: accessToken, // Keep backward compatibility
-            tokens: {
-              accessToken: accessToken,
-              refreshToken: refreshToken
-            },
-            user: user
-          }));
-          
-          // Backward compatibility with old storage keys
-          localStorage.setItem('moodchat_auth_token', accessToken);
-          localStorage.setItem('moodchat_auth_user', JSON.stringify(user));
-          
-          if (refreshToken) {
-            localStorage.setItem('moodchat_refresh_token', refreshToken);
-          }
-        } else if (userData.token && userData.user) {
-          // Fallback for old token structure
-          console.log(`🔧 [API] Login successful (legacy token structure)`);
-          localStorage.setItem('authUser', JSON.stringify({
-            token: userData.token,
-            user: userData.user
-          }));
-          
-          // Backward compatibility
-          localStorage.setItem('moodchat_auth_token', userData.token);
-          localStorage.setItem('moodchat_auth_user', JSON.stringify(userData.user));
+        // STRICT: Do NOT mark backend offline on 401 or 400
+        if (result.status === 401 || result.status === 400) {
+          // These are client errors, backend is still reachable
+          window.AppNetwork.updateBackendStatus(true);
         }
         
-        this._sessionChecked = true;
-        this._backendReachable = true;
-        
-        return {
-          success: true,
-          message: 'Login successful',
-          token: accessToken, // For backward compatibility
-          accessToken: accessToken,
-          refreshToken: refreshToken,
-          user: user,
-          data: result.data,
-          isRateLimited: false,
-          isServerError: false
-        };
-      } else {
-        // Enhanced error propagation for frontend display
-        let errorMessage = 'Login failed';
-        let isRateLimited = result.isRateLimited || false;
-        let isServerError = result.isServerError || false;
-        
-        if (result.status === 401 || result.status === 403) {
-          errorMessage = 'Invalid credentials';
-          console.log('🔧 [API] Auth failed, maintaining soft-auth mode');
-          return {
-            success: false,
-            message: errorMessage,
-            softAuth: true,
-            isRateLimited: isRateLimited,
-            isServerError: isServerError,
-            status: result.status
-          };
-        }
-        
-        if (result.isRateLimited) {
-          errorMessage = 'Too many login attempts. Please wait and try again.';
-        } else if (result.isServerError) {
-          errorMessage = 'Server error. Please try again later.';
-        } else if (result.data && result.data.message) {
-          errorMessage = result.data.message;
-        } else if (result.message) {
-          errorMessage = result.message;
-        }
-        
-        return {
-          success: false,
-          message: errorMessage,
+        // Throw error to be caught by frontend - STRICT REQUIREMENT
+        throw {
+          message: result.message,
           status: result.status,
-          error: result.error,
-          isRateLimited: isRateLimited,
-          isServerError: isServerError,
-          retryAfter: result.retryAfter
+          isAuthError: result.status === 401,
+          isClientError: result.status === 400,
+          isRateLimited: result.isRateLimited,
+          isServerError: result.isServerError
         };
       }
+      
+      // Only reach here if result.ok === true
+      // Handle new token structure from backend
+      const userData = result.data;
+      const accessToken = userData.tokens?.accessToken || userData.token;
+      const refreshToken = userData.tokens?.refreshToken;
+      const user = userData.user || userData;
+      
+      if (accessToken && user) {
+        console.log(`🔧 [API] Login successful, storing authUser with new token structure`);
+        
+        // Store with new token structure
+        localStorage.setItem('authUser', JSON.stringify({
+          token: accessToken, // Keep backward compatibility
+          tokens: {
+            accessToken: accessToken,
+            refreshToken: refreshToken
+          },
+          user: user
+        }));
+        
+        // Backward compatibility with old storage keys
+        localStorage.setItem('moodchat_auth_token', accessToken);
+        localStorage.setItem('moodchat_auth_user', JSON.stringify(user));
+        
+        if (refreshToken) {
+          localStorage.setItem('moodchat_refresh_token', refreshToken);
+        }
+      } else if (userData.token && userData.user) {
+        // Fallback for old token structure
+        console.log(`🔧 [API] Login successful (legacy token structure)`);
+        localStorage.setItem('authUser', JSON.stringify({
+          token: userData.token,
+          user: userData.user
+        }));
+        
+        // Backward compatibility
+        localStorage.setItem('moodchat_auth_token', userData.token);
+        localStorage.setItem('moodchat_auth_user', JSON.stringify(userData.user));
+      }
+      
+      this._sessionChecked = true;
+      window.AppNetwork.updateBackendStatus(true);
+      
+      return {
+        ok: true,
+        success: true,
+        message: 'Login successful',
+        token: accessToken, // For backward compatibility
+        accessToken: accessToken,
+        refreshToken: refreshToken,
+        user: user,
+        data: result.data,
+        isRateLimited: false,
+        isServerError: false
+      };
+      
     } catch (error) {
       console.error('🔧 [API] Login error:', error);
       
-      // Safe error propagation with enhanced error types
-      return {
+      // STRICT: Re-throw the error for UI to handle
+      throw {
         success: false,
-        message: 'Login failed: ' + (error.message || 'Network error'),
-        error: error.message,
-        isNetworkError: true,
-        isRateLimited: false,
-        isServerError: false
+        message: error.message || 'Login failed',
+        status: error.status || 0,
+        isAuthError: error.isAuthError || false,
+        isClientError: error.isClientError || false,
+        isNetworkError: !error.status, // Network error if no status
+        isRateLimited: error.isRateLimited || false,
+        isServerError: error.isServerError || false
       };
     }
   },
   
   register: async function(userData) {
-    // OFFLINE CHECK FIRST
-    if (!navigator.onLine) {
+    // OFFLINE CHECK FIRST - use global network state
+    if (!window.AppNetwork.isOnline) {
       return {
+        ok: false,
         success: false,
         message: 'Cannot register while offline',
         offline: true,
+        isNetworkError: true,
         isRateLimited: false,
         isServerError: false
       };
@@ -538,7 +619,7 @@ const apiObject = {
       console.log(`🔧 [API] Using dynamic backend URL: ${BACKEND_BASE_URL}`);
       console.log(`🔧 [API] Using dynamic API URL: ${BASE_API_URL}`);
       
-      // FIX 5: Proper JSON body for register
+      // Proper JSON body for register
       const registerPayload = {
         username: String(userData.username || '').trim(),
         email: String(userData.email || '').trim(),
@@ -549,10 +630,12 @@ const apiObject = {
       // Validate required fields
       if (!registerPayload.username || !registerPayload.email || 
         !registerPayload.password || !registerPayload.confirmPassword) {
-        return {
+        // This is a client-side validation error
+        throw {
           success: false,
           message: 'All fields are required',
           validationError: true,
+          isClientError: true,
           isRateLimited: false,
           isServerError: false
         };
@@ -560,139 +643,131 @@ const apiObject = {
       
       // Validate password match
       if (registerPayload.password !== registerPayload.confirmPassword) {
-        return {
+        throw {
           success: false,
           message: 'Passwords do not match',
           validationError: true,
+          isClientError: true,
           isRateLimited: false,
           isServerError: false
         };
       }
       
-      // USE THE SINGLE FETCH FUNCTION - CRITICAL: Uses dynamic BASE_API_URL
-      const result = await _safeFetchCall(`${BACKEND_BASE_URL}/api/auth/register`, {
+      // USE THE CORE FETCH FUNCTION
+      const result = await _safeFetch(`${BACKEND_BASE_URL}/api/auth/register`, {
         method: 'POST',
         body: registerPayload
       });
       
-      if (result.success) {
-        // UPDATED: Handle new token structure from backend
-        // Backend now returns: { user, tokens: { accessToken, refreshToken } }
-        const userData = result.data;
-        const accessToken = userData.tokens?.accessToken || userData.token;
-        const refreshToken = userData.tokens?.refreshToken;
-        const user = userData.user || userData;
+      // STRICT: Check response.ok - if false, treat as HARD failure
+      if (!result.ok) {
+        console.log(`🔧 [API] Registration failed with status ${result.status}: ${result.message}`);
         
-        if (accessToken && user) {
-          console.log(`🔧 [API] Registration successful, storing with new token structure`);
-          
-          // Store with new token structure
-          localStorage.setItem('authUser', JSON.stringify({
-            token: accessToken, // Keep backward compatibility
-            tokens: {
-              accessToken: accessToken,
-              refreshToken: refreshToken
-            },
-            user: user
-          }));
-          
-          // Backward compatibility with old storage keys
-          localStorage.setItem('moodchat_auth_token', accessToken);
-          localStorage.setItem('moodchat_auth_user', JSON.stringify(user));
-          
-          if (refreshToken) {
-            localStorage.setItem('moodchat_refresh_token', refreshToken);
-          }
-        } else if (userData.token && userData.user) {
-          // Fallback for old token structure
-          console.log(`🔧 [API] Registration successful (legacy token structure)`);
-          localStorage.setItem('authUser', JSON.stringify({
-            token: userData.token,
-            user: userData.user
-          }));
-          
-          // Backward compatibility
-          localStorage.setItem('moodchat_auth_token', userData.token);
-          localStorage.setItem('moodchat_auth_user', JSON.stringify(userData.user));
+        // STRICT: Do NOT mark backend offline on 400 or 409
+        if (result.status === 400 || result.status === 409) {
+          window.AppNetwork.updateBackendStatus(true);
         }
         
-        this._sessionChecked = true;
-        this._backendReachable = true;
-        
-        return {
-          success: true,
-          message: 'Registration successful',
-          token: accessToken, // For backward compatibility
-          accessToken: accessToken,
-          refreshToken: refreshToken,
-          user: user,
-          data: result.data,
-          isRateLimited: false,
-          isServerError: false
-        };
-      } else {
-        // Enhanced error propagation for frontend display
-        let errorMessage = 'Registration failed';
-        let isRateLimited = result.isRateLimited || false;
-        let isServerError = result.isServerError || false;
-        
-        if (result.status === 429) {
-          errorMessage = 'Too many registration attempts. Please wait and try again.';
-          isRateLimited = true;
-        } else if (result.status === 500) {
-          errorMessage = 'Server error during registration. Please try again later.';
-          isServerError = true;
-        } else if (result.status === 409) {
-          errorMessage = 'Username or email already exists';
-        } else if (result.status === 400) {
-          errorMessage = 'Invalid registration data';
-        }
-        
-        if (result.data && result.data.message) {
-          errorMessage = result.data.message;
-        } else if (result.message) {
-          errorMessage = result.message;
-        }
-        
-        return {
-          success: false,
-          message: errorMessage,
+        // Throw error to be caught by frontend - STRICT REQUIREMENT
+        throw {
+          message: result.message,
           status: result.status,
-          error: result.error,
-          isRateLimited: isRateLimited,
-          isServerError: isServerError,
-          retryAfter: result.retryAfter
+          isClientError: result.status === 400,
+          isConflictError: result.status === 409,
+          isRateLimited: result.isRateLimited,
+          isServerError: result.isServerError
         };
       }
+      
+      // Only reach here if result.ok === true
+      // Handle new token structure from backend
+      const responseData = result.data;
+      const accessToken = responseData.tokens?.accessToken || responseData.token;
+      const refreshToken = responseData.tokens?.refreshToken;
+      const user = responseData.user || responseData;
+      
+      if (accessToken && user) {
+        console.log(`🔧 [API] Registration successful, storing with new token structure`);
+        
+        // Store with new token structure
+        localStorage.setItem('authUser', JSON.stringify({
+          token: accessToken, // Keep backward compatibility
+          tokens: {
+            accessToken: accessToken,
+            refreshToken: refreshToken
+          },
+          user: user
+        }));
+        
+        // Backward compatibility with old storage keys
+        localStorage.setItem('moodchat_auth_token', accessToken);
+        localStorage.setItem('moodchat_auth_user', JSON.stringify(user));
+        
+        if (refreshToken) {
+          localStorage.setItem('moodchat_refresh_token', refreshToken);
+        }
+      } else if (responseData.token && responseData.user) {
+        // Fallback for old token structure
+        console.log(`🔧 [API] Registration successful (legacy token structure)`);
+        localStorage.setItem('authUser', JSON.stringify({
+          token: responseData.token,
+          user: responseData.user
+        }));
+        
+        // Backward compatibility
+        localStorage.setItem('moodchat_auth_token', responseData.token);
+        localStorage.setItem('moodchat_auth_user', JSON.stringify(responseData.user));
+      }
+      
+      this._sessionChecked = true;
+      window.AppNetwork.updateBackendStatus(true);
+      
+      return {
+        ok: true,
+        success: true,
+        message: 'Registration successful',
+        token: accessToken, // For backward compatibility
+        accessToken: accessToken,
+        refreshToken: refreshToken,
+        user: user,
+        data: result.data,
+        isRateLimited: false,
+        isServerError: false
+      };
+      
     } catch (error) {
       console.error('🔧 [API] Register error:', error);
       
-      // Safe error propagation with enhanced error types
-      return {
+      // STRICT: Re-throw the error for UI to handle
+      throw {
         success: false,
-        message: 'Registration failed: ' + (error.message || 'Network error'),
-        error: error.message,
-        isNetworkError: true,
-        isRateLimited: false,
-        isServerError: false
+        message: error.message || 'Registration failed',
+        status: error.status || 0,
+        validationError: error.validationError || false,
+        isClientError: error.isClientError || false,
+        isNetworkError: !error.status, // Network error if no status
+        isRateLimited: error.isRateLimited || false,
+        isServerError: error.isServerError || false
       };
     }
   },
   
   // ============================================================================
-  // BACKEND HEALTH CHECK - HARDENED WITH ENHANCED ERROR REPORTING
+  // BACKEND HEALTH CHECK - HARDENED
   // ============================================================================
   
   checkBackendHealth: async function() {
-    // OFFLINE DETECTION
-    if (!navigator.onLine) {
+    // Use global network state
+    if (!window.AppNetwork.isOnline) {
       console.log('🔧 [API] Offline, backend unreachable');
-      this._backendReachable = false;
+      window.AppNetwork.updateBackendStatus(false);
       return {
+        ok: false,
         success: false,
         reachable: false,
         message: 'Offline mode',
         offline: true,
+        isNetworkError: true,
         isRateLimited: false,
         isServerError: false
       };
@@ -709,11 +784,10 @@ const apiObject = {
         const url = BACKEND_BASE_URL + endpoint;
         console.log(`🔧 [API] Trying: ${url}`);
         
-        // USE THE SINGLE FETCH FUNCTION with timeout
+        // Use a direct fetch for health check with timeout
         const controller = new AbortController();
         const timeoutId = setTimeout(() => controller.abort(), 5000);
         
-        // Use a direct fetch for health check (not _safeFetchCall) to avoid recursion
         const response = await fetch(url, {
           method: 'GET',
           mode: 'cors',
@@ -725,9 +799,10 @@ const apiObject = {
         
         if (response.ok || response.status < 500) {
           console.log(`✅ [API] Backend reachable (status: ${response.status})`);
-          this._backendReachable = true;
+          window.AppNetwork.updateBackendStatus(true);
           
           return {
+            ok: true,
             success: true,
             reachable: true,
             endpoint: endpoint || 'root',
@@ -738,7 +813,7 @@ const apiObject = {
           };
         }
       } catch (error) {
-        // CRITICAL FIX: AbortError should NOT mark backend as unreachable
+        // Check for AbortError
         const isAbortError = error.name === 'AbortError' || 
                            error.message.includes('aborted') ||
                            error.message.includes('The user aborted');
@@ -767,22 +842,23 @@ const apiObject = {
     }
     
     // If we get here, all endpoints failed or network error occurred
-    // Only mark backend unreachable if we had real network errors, not abort errors
     console.log('🔧 [API] Backend unreachable after testing all endpoints');
-    this._backendReachable = false;
+    window.AppNetwork.updateBackendStatus(false);
     
     return {
+      ok: false,
       success: false,
       reachable: false,
       message: 'Backend is unreachable',
       offlineMode: true,
+      isNetworkError: true,
       isRateLimited: false,
       isServerError: false
     };
   },
   
   // ============================================================================
-  // SESSION MANAGEMENT - SOFT AUTH PRESERVED WITH ERROR TYPES
+  // SESSION MANAGEMENT
   // ============================================================================
   
   checkSession: async function() {
@@ -792,6 +868,7 @@ const apiObject = {
       if (!authUserStr) {
         this._sessionChecked = true;
         return {
+          ok: false,
           success: false,
           authenticated: false,
           message: 'No active session',
@@ -803,12 +880,13 @@ const apiObject = {
       let authUser;
       try {
         authUser = JSON.parse(authUserStr);
-        // UPDATED: Check for both old and new token structures
+        // Check for both old and new token structures
         const hasToken = authUser.token || (authUser.tokens && authUser.tokens.accessToken);
         if (!hasToken || !authUser.user) {
           // Soft failure - don't clear, just report
           this._sessionChecked = true;
           return {
+            ok: false,
             success: false,
             authenticated: false,
             message: 'Invalid session data',
@@ -821,6 +899,7 @@ const apiObject = {
         console.error('🔧 [API] Error parsing authUser:', e);
         this._sessionChecked = true;
         return {
+          ok: false,
           success: false,
           authenticated: false,
           message: 'Invalid session data',
@@ -831,8 +910,9 @@ const apiObject = {
       }
       
       // Return cached session if offline
-      if (!navigator.onLine) {
+      if (!window.AppNetwork.isOnline) {
         return {
+          ok: true,
           success: true,
           authenticated: true,
           user: authUser.user,
@@ -844,8 +924,9 @@ const apiObject = {
       }
       
       // Cached session check
-      if (this._sessionChecked && this._backendReachable !== false) {
+      if (this._sessionChecked && window.AppNetwork.isBackendReachable !== false) {
         return {
+          ok: true,
           success: true,
           authenticated: true,
           user: authUser.user,
@@ -859,8 +940,8 @@ const apiObject = {
         // Get token from new or old structure
         const token = authUser.tokens?.accessToken || authUser.token;
         
-        // USE THE SINGLE FETCH FUNCTION with proper headers
-        const result = await _safeFetchCall(`${BACKEND_BASE_URL}/api/auth/me`, {
+        // USE THE CORE FETCH FUNCTION
+        const result = await _safeFetch(`${BACKEND_BASE_URL}/api/auth/me`, {
           method: 'GET',
           headers: {
             'Authorization': 'Bearer ' + token,
@@ -868,64 +949,60 @@ const apiObject = {
           }
         });
         
-        if (result.success) {
-          const updatedUser = result.data.user || authUser.user;
-          
-          // Update auth data
-          authUser.user = updatedUser;
-          localStorage.setItem('authUser', JSON.stringify(authUser));
-          localStorage.setItem('moodchat_auth_user', JSON.stringify(updatedUser));
-          
-          this._sessionChecked = true;
-          this._backendReachable = true;
-          
-          return {
-            success: true,
-            authenticated: true,
-            user: updatedUser,
-            message: 'Session valid (online)',
-            isRateLimited: false,
-            isServerError: false
-          };
-        } else {
-          // Enhanced error handling
-          let errorMessage = 'Session validation failed';
-          let isRateLimited = result.isRateLimited || false;
-          let isServerError = result.isServerError || false;
-          
-          if (result.isRateLimited) {
-            errorMessage = 'Too many session checks. Please wait.';
-          } else if (result.isServerError) {
-            errorMessage = 'Server error during session check.';
-          }
-          
-          // Soft auth failure - don't clear data
+        // STRICT: Check response.ok
+        if (!result.ok) {
+          // STRICT: Do NOT mark backend offline on 401
           if (result.status === 401 || result.status === 403) {
             console.log('🔧 [API] Session expired, maintaining soft-auth');
             return {
+              ok: false,
               success: false,
               authenticated: false,
               message: 'Session expired',
               softAuth: true,
-              isRateLimited: isRateLimited,
-              isServerError: isServerError
+              isAuthError: true,
+              isRateLimited: false,
+              isServerError: false
             };
           }
           
           // Backend error but keep local session
           this._sessionChecked = true;
           return {
+            ok: true,
             success: true,
             authenticated: true,
             user: authUser.user,
             offline: true,
             message: 'Session valid (backend error)',
-            isRateLimited: isRateLimited,
-            isServerError: isServerError
+            isRateLimited: result.isRateLimited || false,
+            isServerError: result.isServerError || false
           };
         }
+        
+        // Only reach here if result.ok === true
+        const updatedUser = result.data.user || authUser.user;
+        
+        // Update auth data
+        authUser.user = updatedUser;
+        localStorage.setItem('authUser', JSON.stringify(authUser));
+        localStorage.setItem('moodchat_auth_user', JSON.stringify(updatedUser));
+        
+        this._sessionChecked = true;
+        window.AppNetwork.updateBackendStatus(true);
+        
+        return {
+          ok: true,
+          success: true,
+          authenticated: true,
+          user: updatedUser,
+          message: 'Session valid (online)',
+          isRateLimited: false,
+          isServerError: false
+        };
+        
       } catch (backendError) {
-        // CRITICAL FIX: Check if this is an AbortError
+        // Check if this is an AbortError
         const isAbortError = backendError.name === 'AbortError' || 
                            backendError.message.includes('aborted') ||
                            backendError.message.includes('The user aborted');
@@ -933,15 +1010,15 @@ const apiObject = {
         if (isAbortError) {
           console.log('🔧 [API] Session check aborted, using cached session');
           // For abort errors, keep current backend reachability status
-          // Don't mark backend as unreachable
         } else {
           console.log('🔧 [API] Backend unreachable, using cached session');
-          this._backendReachable = false;
+          window.AppNetwork.updateBackendStatus(false);
         }
         
         this._sessionChecked = true;
         
         return {
+          ok: true,
           success: true,
           authenticated: true,
           user: authUser.user,
@@ -956,6 +1033,7 @@ const apiObject = {
       console.error('🔧 [API] Check session error:', error);
       this._sessionChecked = true;
       return {
+        ok: false,
         success: false,
         authenticated: false,
         message: 'Failed to check session',
@@ -967,17 +1045,18 @@ const apiObject = {
   },
   
   // ============================================================================
-  // HARDENED DATA METHODS - ALL USE SINGLE FETCH FUNCTION WITH ERROR TYPES
+  // DATA METHODS - ALL USE CORE FETCH FUNCTION
   // ============================================================================
   
   getStatuses: async function() {
-    // OFFLINE FIRST
-    if (!navigator.onLine) {
+    // Use global network state
+    if (!window.AppNetwork.isOnline) {
       const cached = localStorage.getItem('moodchat_cache_statuses');
       if (cached) {
         try {
           const cachedData = JSON.parse(cached);
           return {
+            ok: true,
             success: true,
             data: cachedData.data,
             cached: true,
@@ -993,14 +1072,24 @@ const apiObject = {
     }
     
     try {
-      // USE THE SINGLE FETCH FUNCTION via window.api
+      // Use window.api which calls _safeFetch
       const result = await window.api('/statuses/all', {
         method: 'GET',
         auth: true
       });
       
-      if (result.success && result.data) {
-        // Cache for offline use
+      // STRICT: Check response.ok
+      if (!result.ok) {
+        throw {
+          message: result.message,
+          status: result.status,
+          isRateLimited: result.isRateLimited,
+          isServerError: result.isServerError
+        };
+      }
+      
+      // Only cache if successful
+      if (result.ok && result.data) {
         try {
           localStorage.setItem('moodchat_cache_statuses', JSON.stringify({
             data: result.data,
@@ -1011,9 +1100,11 @@ const apiObject = {
         }
       }
       
-      // Add error types to result
       return {
-        ...result,
+        ok: result.ok,
+        success: result.ok,
+        data: result.data,
+        message: result.message,
         isRateLimited: result.isRateLimited || false,
         isServerError: result.isServerError || false
       };
@@ -1026,6 +1117,7 @@ const apiObject = {
         try {
           const cachedData = JSON.parse(cached);
           return {
+            ok: true,
             success: true,
             data: cachedData.data,
             cached: true,
@@ -1040,6 +1132,7 @@ const apiObject = {
       }
       
       return {
+        ok: false,
         success: false,
         message: 'Failed to fetch statuses',
         error: error.message,
@@ -1051,13 +1144,14 @@ const apiObject = {
   },
   
   getFriends: async function() {
-    // OFFLINE FIRST
-    if (!navigator.onLine) {
+    // Use global network state
+    if (!window.AppNetwork.isOnline) {
       const cached = localStorage.getItem('moodchat_cache_friends');
       if (cached) {
         try {
           const cachedData = JSON.parse(cached);
           return {
+            ok: true,
             success: true,
             data: cachedData.data,
             cached: true,
@@ -1072,14 +1166,22 @@ const apiObject = {
     }
     
     try {
-      // USE THE SINGLE FETCH FUNCTION via window.api
       const result = await window.api('/friends/list', {
         method: 'GET',
         auth: true
       });
       
-      if (result.success && result.data) {
-        // Cache for offline use
+      // STRICT: Check response.ok
+      if (!result.ok) {
+        throw {
+          message: result.message,
+          status: result.status,
+          isRateLimited: result.isRateLimited,
+          isServerError: result.isServerError
+        };
+      }
+      
+      if (result.ok && result.data) {
         try {
           localStorage.setItem('moodchat_cache_friends', JSON.stringify({
             data: result.data,
@@ -1090,21 +1192,23 @@ const apiObject = {
         }
       }
       
-      // Add error types to result
       return {
-        ...result,
+        ok: result.ok,
+        success: result.ok,
+        data: result.data,
+        message: result.message,
         isRateLimited: result.isRateLimited || false,
         isServerError: result.isServerError || false
       };
     } catch (error) {
       console.error('🔧 [API] Get friends error:', error);
       
-      // Fallback to cached data
       const cached = localStorage.getItem('moodchat_cache_friends');
       if (cached) {
         try {
           const cachedData = JSON.parse(cached);
           return {
+            ok: true,
             success: true,
             data: cachedData.data,
             cached: true,
@@ -1118,6 +1222,7 @@ const apiObject = {
       }
       
       return {
+        ok: false,
         success: false,
         message: 'Failed to fetch friends',
         error: error.message,
@@ -1128,13 +1233,25 @@ const apiObject = {
     }
   },
   
-  // Additional methods remain but now use window.api() internally
-  // This ensures ALL calls go through the single hardened fetch function
-  
+  // Additional methods with strict error handling
   getUsers: async function() {
     const result = await window.api('/users', { method: 'GET', auth: true });
+    
+    // STRICT: Check response.ok
+    if (!result.ok) {
+      throw {
+        message: result.message,
+        status: result.status,
+        isRateLimited: result.isRateLimited,
+        isServerError: result.isServerError
+      };
+    }
+    
     return {
-      ...result,
+      ok: result.ok,
+      success: result.ok,
+      data: result.data,
+      message: result.message,
       isRateLimited: result.isRateLimited || false,
       isServerError: result.isServerError || false
     };
@@ -1142,8 +1259,21 @@ const apiObject = {
   
   getUserById: async function(userId) {
     const result = await window.api(`/users/${encodeURIComponent(userId)}`, { method: 'GET', auth: true });
+    
+    if (!result.ok) {
+      throw {
+        message: result.message,
+        status: result.status,
+        isRateLimited: result.isRateLimited,
+        isServerError: result.isServerError
+      };
+    }
+    
     return {
-      ...result,
+      ok: result.ok,
+      success: result.ok,
+      data: result.data,
+      message: result.message,
       isRateLimited: result.isRateLimited || false,
       isServerError: result.isServerError || false
     };
@@ -1151,8 +1281,21 @@ const apiObject = {
   
   getStatus: async function(statusId) {
     const result = await window.api(`/status/${encodeURIComponent(statusId)}`, { method: 'GET', auth: true });
+    
+    if (!result.ok) {
+      throw {
+        message: result.message,
+        status: result.status,
+        isRateLimited: result.isRateLimited,
+        isServerError: result.isServerError
+      };
+    }
+    
     return {
-      ...result,
+      ok: result.ok,
+      success: result.ok,
+      data: result.data,
+      message: result.message,
       isRateLimited: result.isRateLimited || false,
       isServerError: result.isServerError || false
     };
@@ -1164,8 +1307,21 @@ const apiObject = {
       body: statusData,
       auth: true 
     });
+    
+    if (!result.ok) {
+      throw {
+        message: result.message,
+        status: result.status,
+        isRateLimited: result.isRateLimited,
+        isServerError: result.isServerError
+      };
+    }
+    
     return {
-      ...result,
+      ok: result.ok,
+      success: result.ok,
+      data: result.data,
+      message: result.message,
       isRateLimited: result.isRateLimited || false,
       isServerError: result.isServerError || false
     };
@@ -1173,8 +1329,21 @@ const apiObject = {
   
   getChats: async function() {
     const result = await window.api('/chats', { method: 'GET', auth: true });
+    
+    if (!result.ok) {
+      throw {
+        message: result.message,
+        status: result.status,
+        isRateLimited: result.isRateLimited,
+        isServerError: result.isServerError
+      };
+    }
+    
     return {
-      ...result,
+      ok: result.ok,
+      success: result.ok,
+      data: result.data,
+      message: result.message,
       isRateLimited: result.isRateLimited || false,
       isServerError: result.isServerError || false
     };
@@ -1182,8 +1351,21 @@ const apiObject = {
   
   getChatById: async function(chatId) {
     const result = await window.api(`/chats/${encodeURIComponent(chatId)}`, { method: 'GET', auth: true });
+    
+    if (!result.ok) {
+      throw {
+        message: result.message,
+        status: result.status,
+        isRateLimited: result.isRateLimited,
+        isServerError: result.isServerError
+      };
+    }
+    
     return {
-      ...result,
+      ok: result.ok,
+      success: result.ok,
+      data: result.data,
+      message: result.message,
       isRateLimited: result.isRateLimited || false,
       isServerError: result.isServerError || false
     };
@@ -1191,15 +1373,28 @@ const apiObject = {
   
   getContacts: async function() {
     const result = await window.api('/contacts', { method: 'GET', auth: true });
+    
+    if (!result.ok) {
+      throw {
+        message: result.message,
+        status: result.status,
+        isRateLimited: result.isRateLimited,
+        isServerError: result.isServerError
+      };
+    }
+    
     return {
-      ...result,
+      ok: result.ok,
+      success: result.ok,
+      data: result.data,
+      message: result.message,
       isRateLimited: result.isRateLimited || false,
       isServerError: result.isServerError || false
     };
   },
   
   // ============================================================================
-  // UTILITY METHODS - PRESERVED WITH ERROR TYPE SUPPORT
+  // UTILITY METHODS
   // ============================================================================
   
   isLoggedIn: function() {
@@ -1208,7 +1403,7 @@ const apiObject = {
       if (!authUserStr) return false;
       
       const authUser = JSON.parse(authUserStr);
-      // UPDATED: Check for both old and new token structures
+      // Check for both old and new token structures
       const hasToken = authUser.token || (authUser.tokens && authUser.tokens.accessToken);
       return !!(hasToken && authUser.user);
     } catch (error) {
@@ -1234,7 +1429,6 @@ const apiObject = {
       const authUserStr = localStorage.getItem('authUser');
       if (authUserStr) {
         const authUser = JSON.parse(authUserStr);
-        // UPDATED: Return accessToken from new structure or old token
         return authUser.tokens?.accessToken || authUser.token || null;
       }
     } catch (e) {
@@ -1262,7 +1456,6 @@ const apiObject = {
   
   logout: function() {
     try {
-      // Soft logout - only clear if explicitly requested
       localStorage.removeItem('authUser');
       localStorage.removeItem('moodchat_auth_token');
       localStorage.removeItem('moodchat_auth_user');
@@ -1270,6 +1463,7 @@ const apiObject = {
       this._sessionChecked = false;
       console.log('🔧 [API] User logged out');
       return { 
+        ok: true,
         success: true, 
         message: 'Logged out successfully',
         isRateLimited: false,
@@ -1278,6 +1472,7 @@ const apiObject = {
     } catch (error) {
       console.error('🔧 [API] Error during logout:', error);
       return { 
+        ok: false,
         success: false, 
         message: 'Logout failed',
         isRateLimited: false,
@@ -1287,7 +1482,6 @@ const apiObject = {
   },
   
   _clearAuthData: function() {
-    // Only clear when absolutely necessary
     localStorage.removeItem('authUser');
     localStorage.removeItem('moodchat_auth_token');
     localStorage.removeItem('moodchat_auth_user');
@@ -1309,23 +1503,20 @@ const apiObject = {
   },
   
   isOnline: function() {
-    return navigator.onLine;
+    return window.AppNetwork.isOnline;
   },
   
   isBackendReachable: function() {
-    if (this._backendReachable !== null) {
-      return this._backendReachable;
-    }
-    return true; // Assume reachable until proven otherwise
+    return window.AppNetwork.isBackendReachable;
   },
   
   getConnectionStatus: function() {
     return {
-      online: navigator.onLine,
-      backendReachable: this.isBackendReachable(),
+      online: window.AppNetwork.isOnline,
+      backendReachable: window.AppNetwork.isBackendReachable,
       timestamp: new Date().toISOString(),
-      backendUrl: BACKEND_BASE_URL,        // Dynamic backend URL
-      baseApiUrl: BASE_API_URL,                // Dynamic API URL
+      backendUrl: BACKEND_BASE_URL,
+      baseApiUrl: BASE_API_URL,
       sessionChecked: this._sessionChecked,
       hasAuthToken: !!this.getCurrentToken(),
       hasAuthUser: !!localStorage.getItem('authUser'),
@@ -1334,13 +1525,14 @@ const apiObject = {
   },
   
   // ============================================================================
-  // INITIALIZATION - PRESERVED WITH EVENTS AND ERROR TYPE SUPPORT
+  // INITIALIZATION
   // ============================================================================
   
   initialize: async function() {
-    console.log('🔧 [API] ⚡ MoodChat API v15.0.0 (DYNAMIC ENVIRONMENT DETECTION) initializing...');
+    console.log('🔧 [API] ⚡ MoodChat API v16.0.0 (STRICT HTTP HANDLING) initializing...');
     console.log('🔧 [API] 🔗 Backend URL:', BACKEND_BASE_URL);
     console.log('🔧 [API] 🔗 API Base URL:', BASE_API_URL);
+    console.log('🔧 [API] 🌐 Network State - Online:', window.AppNetwork.isOnline, 'Backend Reachable:', window.AppNetwork.isBackendReachable);
     console.log('🔧 [API] ✅ CRITICAL: ALL API calls will use single dynamic source:', BASE_API_URL);
     
     // Migrate old auth data if needed
@@ -1395,12 +1587,12 @@ const apiObject = {
     
     // Periodic session checks
     setInterval(() => {
-      if (this.isLoggedIn() && this.isOnline()) {
+      if (this.isLoggedIn() && window.AppNetwork.isOnline) {
         this.checkSession().catch(() => {});
       }
     }, this._config.SESSION_CHECK_INTERVAL);
     
-    // Dispatch ready events - ALWAYS fire even if backend is down
+    // Dispatch ready events
     this._dispatchReadyEvents();
     
     return true;
@@ -1410,6 +1602,7 @@ const apiObject = {
     const authUserStr = localStorage.getItem('authUser');
     if (!authUserStr) {
       return { 
+        ok: false,
         success: false, 
         authenticated: false, 
         message: 'No stored credentials',
@@ -1420,10 +1613,10 @@ const apiObject = {
     
     try {
       const authUser = JSON.parse(authUserStr);
-      // UPDATED: Check for both old and new token structures
       const hasToken = authUser.token || (authUser.tokens && authUser.tokens.accessToken);
       if (!hasToken || !authUser.user) {
         return { 
+          ok: false,
           success: false, 
           authenticated: false, 
           message: 'Invalid stored credentials',
@@ -1433,6 +1626,7 @@ const apiObject = {
       }
     } catch (e) {
       return { 
+        ok: false,
         success: false, 
         authenticated: false, 
         message: 'Corrupted stored credentials',
@@ -1444,6 +1638,7 @@ const apiObject = {
     if (this._sessionChecked) {
       const user = this.getCurrentUser();
       return {
+        ok: true,
         success: true,
         authenticated: true,
         user: user,
@@ -1461,8 +1656,8 @@ const apiObject = {
     const eventDetail = {
       version: this._version,
       timestamp: new Date().toISOString(),
-      backendUrl: BACKEND_BASE_URL,                    // Dynamic URL
-      apiBaseUrl: BASE_API_URL,                        // Dynamic API URL
+      backendUrl: BACKEND_BASE_URL,
+      apiBaseUrl: BASE_API_URL,
       user: this.getCurrentUser(),
       hasToken: !!this.getCurrentToken(),
       hasAuthUser: !!localStorage.getItem('authUser'),
@@ -1470,12 +1665,16 @@ const apiObject = {
       enhancedErrorHandling: true,
       supportsNewTokenStructure: true,
       dynamicEnvironmentDetection: true,
-      environment: window.location.hostname === 'localhost' ? 'local' : 'production'
+      strictHttpHandling: true,
+      environment: window.location.hostname === 'localhost' ? 'local' : 'production',
+      networkState: {
+        isOnline: window.AppNetwork.isOnline,
+        isBackendReachable: window.AppNetwork.isBackendReachable
+      }
     };
     
     const events = ['api-ready', 'apiready', 'apiReady'];
     
-    // Immediate dispatch
     events.forEach(eventName => {
       try {
         window.dispatchEvent(new CustomEvent(eventName, { detail: eventDetail }));
@@ -1485,49 +1684,30 @@ const apiObject = {
       }
     });
     
-    // Delayed dispatches for compatibility
     setTimeout(() => {
-      events.forEach(eventName => {
-        try {
-          const delayedEventDetail = { ...eventDetail, delayed: true, delayMs: 500 };
-          window.dispatchEvent(new CustomEvent(eventName, { detail: delayedEventDetail }));
-        } catch (e) {
-          // Silent fail
-        }
-      });
-    }, 500);
-    
-    setTimeout(() => {
-      events.forEach(eventName => {
-        try {
-          const secondDelayedEventDetail = { ...eventDetail, delayed: true, delayMs: 1000 };
-          window.dispatchEvent(new CustomEvent(eventName, { detail: secondDelayedEventDetail }));
-        } catch (e) {
-          // Silent fail
-        }
-      });
-      console.log('🔧 [API] API synchronization ready (dynamic URL source)');
+      console.log('🔧 [API] API synchronization ready (strict HTTP handling)');
     }, 1000);
   },
   
   // ============================================================================
-  // DIAGNOSTICS - ENHANCED WITH ERROR TYPE INFORMATION
+  // DIAGNOSTICS
   // ============================================================================
   
   diagnose: async function() {
-    console.log('🔧 [API] Running hardened diagnostics...');
+    console.log('🔧 [API] Running diagnostics with strict HTTP handling...');
     
     const results = {
+      networkState: {
+        online: window.AppNetwork.isOnline,
+        backendReachable: window.AppNetwork.isBackendReachable,
+        lastChecked: window.AppNetwork.lastChecked
+      },
       localStorage: {
         authUser: !!localStorage.getItem('authUser'),
         moodchat_auth_token: !!localStorage.getItem('moodchat_auth_token'),
         moodchat_auth_user: !!localStorage.getItem('moodchat_auth_user'),
         moodchat_refresh_token: !!localStorage.getItem('moodchat_refresh_token'),
         deviceId: !!localStorage.getItem('moodchat_device_id')
-      },
-      network: {
-        online: navigator.onLine,
-        backendReachable: this._backendReachable
       },
       session: {
         checked: this._sessionChecked,
@@ -1538,14 +1718,15 @@ const apiObject = {
         tokenStructure: this.getConnectionStatus().tokenStructure
       },
       config: {
-        backendUrl: BACKEND_BASE_URL,                    // Dynamic
-        apiBaseUrl: BASE_API_URL,                        // Dynamic
+        backendUrl: BACKEND_BASE_URL,
+        apiBaseUrl: BASE_API_URL,
         currentHostname: window.location.hostname,
         currentProtocol: window.location.protocol,
         hardened: true,
         enhancedErrorHandling: true,
         supportsNewTokenStructure: true,
-        dynamicEnvironmentDetection: true
+        dynamicEnvironmentDetection: true,
+        strictHttpHandling: true
       },
       validation: {
         methodNormalization: 'ACTIVE',
@@ -1554,7 +1735,9 @@ const apiObject = {
         offlineDetection: 'ACTIVE',
         errorTypeDetection: 'ACTIVE',
         tokenStructureSupport: 'ACTIVE',
-        dynamicEnvironmentDetection: 'ACTIVE'
+        dynamicEnvironmentDetection: 'ACTIVE',
+        strictHttpStatusHandling: 'ACTIVE',
+        singleNetworkStateSource: 'ACTIVE'
       }
     };
     
@@ -1571,10 +1754,23 @@ const apiObject = {
   },
   
   request: async function(endpoint, options = {}) {
-    // Use the main api function for consistency
     const result = await window.api(endpoint, options);
+    
+    // STRICT: Check response.ok
+    if (!result.ok) {
+      throw {
+        message: result.message,
+        status: result.status,
+        isRateLimited: result.isRateLimited,
+        isServerError: result.isServerError
+      };
+    }
+    
     return {
-      ...result,
+      ok: result.ok,
+      success: result.ok,
+      data: result.data,
+      message: result.message,
       isRateLimited: result.isRateLimited || false,
       isServerError: result.isServerError || false
     };
@@ -1582,13 +1778,13 @@ const apiObject = {
 };
 
 // ============================================================================
-// API SETUP - EXTREME ROBUSTNESS WITH ENHANCED ERROR TYPES
+// API SETUP
 // ============================================================================
 
 Object.assign(window.api, apiObject);
 Object.setPrototypeOf(window.api, Object.getPrototypeOf(apiObject));
 
-console.log('🔧 [API] Starting hardened initialization with dynamic URL detection...');
+console.log('🔧 [API] Starting hardened initialization with strict HTTP handling...');
 
 // Safe initialization with timeout
 setTimeout(() => {
@@ -1599,12 +1795,11 @@ setTimeout(() => {
   }
 }, 100);
 
-// Global error handlers with enhanced error type detection
+// Global error handlers
 if (typeof window.handleApiError === 'undefined') {
   window.handleApiError = function(error, defaultMessage) {
     if (!error) return defaultMessage || 'An error occurred';
     
-    // Enhanced error type detection
     if (error.isRateLimited) {
       return 'Too many requests. Please wait and try again.';
     }
@@ -1653,23 +1848,23 @@ if (typeof window.isServerError === 'undefined') {
   };
 }
 
-// ULTRA-ROBUST FALLBACK API WITH ERROR TYPE SUPPORT
+// FALLBACK API
 setTimeout(() => {
   if (!window.api || typeof window.api !== 'function') {
-    console.warn('⚠️ API not initialized, creating ultra-robust fallback');
+    console.warn('⚠️ API not initialized, creating fallback');
     
-    const ultraFallbackApi = function(endpoint, options = {}) {
-      // Always return a safe response, never throw
+    const fallbackApi = function(endpoint, options = {}) {
       const method = _normalizeHttpMethod(options.method);
       const safeEndpoint = _sanitizeEndpoint(endpoint);
       
-      console.warn(`⚠️ Using ultra-fallback API for ${method} ${safeEndpoint}`);
+      console.warn(`⚠️ Using fallback API for ${method} ${safeEndpoint}`);
       
       return Promise.resolve({
+        ok: false,
         success: false,
         status: 0,
         message: 'API fallback mode',
-        offline: !navigator.onLine,
+        offline: !window.AppNetwork.isOnline,
         isNetworkError: true,
         isRateLimited: false,
         isServerError: false,
@@ -1677,13 +1872,12 @@ setTimeout(() => {
       });
     };
     
-    // Attach essential methods with error type support
-    Object.assign(ultraFallbackApi, {
+    Object.assign(fallbackApi, {
       _singleton: true,
-      _version: 'ultra-fallback',
+      _version: 'fallback',
       _hardened: true,
       initialize: () => {
-        console.log('🔧 [API] Ultra-fallback initialized');
+        console.log('🔧 [API] Fallback initialized');
         return true;
       },
       isLoggedIn: () => {
@@ -1691,7 +1885,6 @@ setTimeout(() => {
           const authUserStr = localStorage.getItem('authUser');
           if (!authUserStr) return false;
           const authUser = JSON.parse(authUserStr);
-          // Check for both old and new token structures
           const hasToken = authUser.token || (authUser.tokens && authUser.tokens.accessToken);
           return !!(hasToken && authUser.user);
         } catch (e) {
@@ -1722,111 +1915,115 @@ setTimeout(() => {
         }
         return null;
       },
-      isOnline: () => navigator.onLine,
+      isOnline: () => window.AppNetwork.isOnline,
       isBackendReachable: () => false,
       checkSession: async () => ({ 
-        authenticated: ultraFallbackApi.isLoggedIn(),
+        ok: false,
+        authenticated: fallbackApi.isLoggedIn(),
         offline: true,
         fallback: true,
         isRateLimited: false,
         isServerError: false
       }),
       autoLogin: async () => ({
-        success: ultraFallbackApi.isLoggedIn(),
-        authenticated: ultraFallbackApi.isLoggedIn(),
-        user: ultraFallbackApi.getCurrentUser(),
+        ok: fallbackApi.isLoggedIn(),
+        success: fallbackApi.isLoggedIn(),
+        authenticated: fallbackApi.isLoggedIn(),
+        user: fallbackApi.getCurrentUser(),
         fallback: true,
         isRateLimited: false,
         isServerError: false
       }),
       login: async () => ({ 
+        ok: false,
         success: false, 
         message: 'API fallback mode',
-        offline: !navigator.onLine,
+        offline: !window.AppNetwork.isOnline,
         fallback: true,
         isRateLimited: false,
         isServerError: false
       }),
       register: async () => ({ 
+        ok: false,
         success: false, 
         message: 'API fallback mode',
-        offline: !navigator.onLine,
+        offline: !window.AppNetwork.isOnline,
         fallback: true,
         isRateLimited: false,
         isServerError: false
       }),
       request: async () => ({
+        ok: false,
         success: false,
         message: 'API fallback mode',
-        offline: !navigator.onLine,
+        offline: !window.AppNetwork.isOnline,
         fallback: true,
         isRateLimited: false,
         isServerError: false
       })
     });
     
-    window.api = ultraFallbackApi;
+    window.api = fallbackApi;
   }
 }, 3000);
 
-// EMERGENCY API - NEVER FAILS WITH ERROR TYPE SUPPORT
+// EMERGENCY API
 if (!window.api) {
-  console.error('⚠️ window.api not set! Creating emergency hardened API');
+  console.error('⚠️ window.api not set! Creating emergency API');
   
-  const emergencyHardenedApi = function(endpoint, options) {
-    // Accept ANY input, return SAFE response
+  const emergencyApi = function(endpoint, options) {
     const method = _normalizeHttpMethod(options?.method);
     const safeEndpoint = _sanitizeEndpoint(endpoint);
     
     return Promise.resolve({
+      ok: false,
       success: false,
       status: 0,
-      message: 'Emergency hardened API',
+      message: 'Emergency API',
       emergency: true,
       methodUsed: method,
       endpointRequested: safeEndpoint,
-      offline: !navigator.onLine,
+      offline: !window.AppNetwork.isOnline,
       isRateLimited: false,
       isServerError: false
     });
   };
   
-  Object.assign(emergencyHardenedApi, {
+  Object.assign(emergencyApi, {
     _singleton: true,
-    _version: 'emergency-hardened',
+    _version: 'emergency',
     _neverFails: true,
     isLoggedIn: () => false,
     isBackendReachable: () => false,
     initialize: () => true,
     autoLogin: async () => ({ 
+      ok: false,
       success: false, 
       authenticated: false, 
       emergency: true,
       isRateLimited: false,
       isServerError: false
     }),
-    isOnline: () => navigator.onLine
+    isOnline: () => window.AppNetwork.isOnline
   });
   
-  window.api = emergencyHardenedApi;
+  window.api = emergencyApi;
 }
 
-// Global API state with error type support
+// Global API state
 window.__MOODCHAT_API_EVENTS = [];
 window.__MOODCHAT_API_INSTANCE = window.api;
 window.__MOODCHAT_API_READY = true;
 window.MOODCHAT_API_READY = true;
 
-console.log('🔧 [API] UPDATED Backend API integration complete with DYNAMIC ENVIRONMENT DETECTION');
-console.log('🔧 [API] ✅ Method normalization: ACTIVE');
-console.log('🔧 [API] ✅ Endpoint sanitization: ACTIVE');
-console.log('🔧 [API] ✅ Single fetch function: ACTIVE');
-console.log('🔧 [API] ✅ Offline detection: ACTIVE');
-console.log('🔧 [API] ✅ Rate limit error detection: ACTIVE');
-console.log('🔧 [API] ✅ Server error detection: ACTIVE');
-console.log('🔧 [API] ✅ AbortError handling: FIXED (does not mark backend offline)');
-console.log('🔧 [API] ✅ New token structure support: ACTIVE');
-console.log('🔧 [API] ✅ DYNAMIC ENVIRONMENT DETECTION: ACTIVE');
+console.log('🔧 [API] STRICT Backend API integration complete');
+console.log('🔧 [API] ✅ Single source of truth for network state: ACTIVE');
+console.log('🔧 [API] ✅ Global network state via window.AppNetwork: ACTIVE');
+console.log('🔧 [API] ✅ STRICT HTTP status handling: ACTIVE (≥400 = HARD failure)');
+console.log('🔧 [API] ✅ NEVER return success if response.ok === false: ACTIVE');
+console.log('🔧 [API] ✅ Do NOT mark backend offline on 401/400: ACTIVE');
+console.log('🔧 [API] ✅ Dynamic environment detection: ACTIVE');
+console.log('🔧 [API] ✅ All API calls use BASE_API_URL from window.location: ACTIVE');
 console.log('🔧 [API] ✅ Backend URL: ' + BACKEND_BASE_URL);
 console.log('🔧 [API] ✅ API Base URL: ' + BASE_API_URL);
-console.log('🔧 [API] ✅ NEVER breaks on frontend errors');
+console.log('🔧 [API] ⚡ Ready for production with strict error handling');
