@@ -16,1851 +16,13 @@
     <!-- QR Code Library -->
     <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
     
-    <!-- Load API script FIRST -->
+    <link rel="stylesheet" href="friend.css">
     
     <style>
-        /* [ALL CSS STYLES REMAIN UNCHANGED - SAME AS BEFORE] */
-        * {
-            margin: 0;
-            padding: 0;
-            box-sizing: border-box;
-            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
-        }
         
-        :root {
-            --primary-color: #0084ff;
-            --secondary-color: #f0f2f5;
-            --danger-color: #ff3b30;
-            --success-color: #34c759;
-            --warning-color: #ff9500;
-            --info-color: #5ac8fa;
-            --text-primary: #050505;
-            --text-secondary: #65676b;
-            --bg-color: #ffffff;
-            --border-color: #dddfe2;
-            --friends-gradient: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-            --shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
-            --shadow-lg: 0 10px 30px rgba(0, 0, 0, 0.2);
-            --category-acquaintance: #8e8e93;
-            --category-friend: #34c759;
-            --category-close-friend: #007aff;
-            --category-family: #ff2d55;
-            --category-business: #ff9500;
-            --offline-overlay: rgba(255, 255, 255, 0.95);
-        }
-        
-        body {
-            background-color: var(--bg-color);
-            color: var(--text-primary);
-            height: 100vh;
-            overflow: hidden;
-        }
-        
-        .app-container {
-            display: flex;
-            height: 100vh;
-            position: relative;
-        }
-        
-        /* Offline Overlay - Removed since we show instantly */
-        .offline-overlay {
-            display: none !important;
-        }
-        
-        /* Offline Indicator - Removed */
-        .offline-indicator {
-            display: none !important;
-        }
-        
-        /* Sidebar Styles - Always visible on both desktop and mobile */
-        .sidebar {
-            width: 380px;
-            background-color: var(--bg-color);
-            border-right: 1px solid var(--border-color);
-            display: flex;
-            flex-direction: column;
-            height: 100%;
-            overflow: hidden;
-            position: relative;
-        }
-        
-        /* Desktop: Sidebar always active by default */
-        @media (min-width: 769px) {
-            .sidebar {
-                display: flex;
-            }
-        }
-        
-        /* Mobile: Sidebar always visible */
-        @media (max-width: 768px) {
-            .sidebar {
-                display: flex !important;
-                position: relative !important;
-                width: 100% !important;
-                height: 100vh !important;
-                border-right: none !important;
-                z-index: auto !important;
-            }
-            
-            .friend-details-panel {
-                position: relative !important;
-                width: 100% !important;
-                height: auto !important;
-                z-index: auto !important;
-            }
-            
-            .app-container {
-                flex-direction: column !important;
-                height: auto !important;
-                min-height: 100vh !important;
-            }
-            
-            .friend-list-content {
-                padding-bottom: 20px !important;
-            }
-        }
-        
-        .sidebar-header {
-            padding: 20px;
-            background: var(--friends-gradient);
-            color: white;
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-            flex-shrink: 0;
-        }
-        
-        .sidebar-header h2 {
-            font-size: 24px;
-            font-weight: 600;
-        }
-        
-        .add-friend-btn {
-            background-color: rgba(255, 255, 255, 0.2);
-            color: white;
-            border: 1px solid rgba(255, 255, 255, 0.3);
-            border-radius: 50%;
-            width: 45px;
-            height: 45px;
-            cursor: pointer;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            font-size: 20px;
-            transition: all 0.2s;
-            backdrop-filter: blur(10px);
-        }
-        
-        .add-friend-btn:disabled {
-            opacity: 0.5;
-            cursor: not-allowed;
-            background-color: rgba(255, 255, 255, 0.1);
-        }
-        
-        .add-friend-btn:hover:not(:disabled) {
-            background-color: rgba(255, 255, 255, 0.3);
-            transform: scale(1.05);
-        }
-        
-        /* Friend Categories */
-        .friend-categories {
-            display: flex;
-            border-bottom: 1px solid var(--border-color);
-            background-color: var(--bg-color);
-            flex-shrink: 0;
-            overflow-x: auto;
-            scrollbar-width: none;
-        }
-        
-        .friend-categories::-webkit-scrollbar {
-            display: none;
-        }
-        
-        .category-btn {
-            padding: 15px 20px;
-            text-align: center;
-            font-weight: 500;
-            background: none;
-            border: none;
-            cursor: pointer;
-            color: var(--text-secondary);
-            transition: all 0.2s;
-            border-bottom: 3px solid transparent;
-            white-space: nowrap;
-            flex-shrink: 0;
-        }
-        
-        .category-btn.active {
-            color: var(--primary-color);
-            border-bottom-color: var(--primary-color);
-        }
-        
-        .category-btn:hover {
-            background-color: var(--secondary-color);
-        }
-        
-        .category-btn .badge {
-            background-color: var(--primary-color);
-            color: white;
-            font-size: 11px;
-            padding: 2px 6px;
-            border-radius: 10px;
-            margin-left: 6px;
-        }
-        
-        /* Search Container */
-        .search-container {
-            padding: 15px 20px;
-            border-bottom: 1px solid var(--border-color);
-            flex-shrink: 0;
-        }
-        
-        .search-box {
-            position: relative;
-        }
-        
-        .search-input {
-            width: 100%;
-            padding: 12px 45px 12px 15px;
-            border: 1px solid var(--border-color);
-            border-radius: 20px;
-            font-size: 14px;
-            background-color: var(--secondary-color);
-            transition: all 0.2s;
-        }
-        
-        .search-input:focus {
-            outline: none;
-            border-color: var(--primary-color);
-            background-color: var(--bg-color);
-        }
-        
-        .search-icon {
-            position: absolute;
-            right: 15px;
-            top: 50%;
-            transform: translateY(-50%);
-            color: var(--text-secondary);
-        }
-        
-        /* Friend List Container */
-        .friend-list {
-            flex: 1;
-            display: flex;
-            flex-direction: column;
-            overflow: hidden;
-        }
-        
-        .friend-list-content {
-            flex: 1;
-            overflow-y: auto;
-            padding: 10px 0;
-        }
-        
-        .section-title {
-            padding: 15px 20px;
-            font-size: 14px;
-            font-weight: 600;
-            color: var(--text-secondary);
-            text-transform: uppercase;
-            letter-spacing: 0.5px;
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-        }
-        
-        .section-count {
-            background-color: var(--secondary-color);
-            padding: 2px 8px;
-            border-radius: 10px;
-            font-size: 12px;
-        }
-        
-        /* Quick Actions */
-        .quick-actions {
-            padding: 0 20px;
-            margin-bottom: 20px;
-            display: flex;
-            gap: 15px;
-            flex-shrink: 0;
-        }
-        
-        .quick-action-btn {
-            flex: 1;
-            padding: 20px 15px;
-            background-color: var(--secondary-color);
-            border: none;
-            border-radius: 12px;
-            cursor: pointer;
-            display: flex;
-            flex-direction: column;
-            align-items: center;
-            gap: 10px;
-            transition: all 0.2s;
-        }
-        
-        .quick-action-btn:disabled {
-            opacity: 0.5;
-            cursor: not-allowed;
-        }
-        
-        .quick-action-btn:hover:not(:disabled) {
-            background-color: #e4e6e9;
-            transform: translateY(-2px);
-        }
-        
-        .quick-action-icon {
-            font-size: 24px;
-            color: var(--primary-color);
-        }
-        
-        .quick-action-text {
-            font-size: 14px;
-            font-weight: 500;
-            text-align: center;
-        }
-        
-        /* Friend Stats */
-        .friend-stats {
-            padding: 0 20px;
-            margin-bottom: 20px;
-            flex-shrink: 0;
-        }
-        
-        .stats-container {
-            display: grid;
-            grid-template-columns: repeat(3, 1fr);
-            gap: 10px;
-        }
-        
-        .stat-item {
-            background-color: var(--secondary-color);
-            border-radius: 12px;
-            padding: 15px;
-            text-align: center;
-            transition: all 0.2s;
-        }
-        
-        .stat-item:hover {
-            background-color: #e4e6e9;
-        }
-        
-        .stat-number {
-            font-size: 24px;
-            font-weight: 700;
-            margin-bottom: 5px;
-        }
-        
-        .stat-label {
-            font-size: 12px;
-            color: var(--text-secondary);
-        }
-        
-        /* Friend Categories Quick Filter */
-        .category-filters {
-            padding: 0 20px;
-            margin-bottom: 20px;
-            flex-shrink: 0;
-        }
-        
-        .category-filters-container {
-            display: flex;
-            gap: 10px;
-            overflow-x: auto;
-            padding-bottom: 5px;
-            scrollbar-width: none;
-        }
-        
-        .category-filters-container::-webkit-scrollbar {
-            display: none;
-        }
-        
-        .category-filter-btn {
-            padding: 8px 16px;
-            background-color: var(--secondary-color);
-            border: none;
-            border-radius: 20px;
-            cursor: pointer;
-            font-size: 13px;
-            font-weight: 500;
-            white-space: nowrap;
-            flex-shrink: 0;
-            transition: all 0.2s;
-        }
-        
-        .category-filter-btn.active {
-            background-color: var(--primary-color);
-            color: white;
-        }
-        
-        .category-filter-btn:hover {
-            background-color: #e4e6e9;
-        }
-        
-        .category-filter-btn.acquaintance.active {
-            background-color: var(--category-acquaintance);
-        }
-        
-        .category-filter-btn.friend.active {
-            background-color: var(--category-friend);
-        }
-        
-        .category-filter-btn.close-friend.active {
-            background-color: var(--category-close-friend);
-        }
-        
-        .category-filter-btn.family.active {
-            background-color: var(--category-family);
-        }
-        
-        .category-filter-btn.business.active {
-            background-color: var(--category-business);
-        }
-        
-        /* Friend List Items */
-        .friends-section {
-            display: none;
-            flex: 1;
-            flex-direction: column;
-        }
-        
-        .friends-section.active {
-            display: flex;
-        }
-        
-        .friends-list {
-            flex: 1;
-            overflow-y: auto;
-            min-height: 200px;
-        }
-        
-        .empty-state {
-            flex: 1;
-            display: flex;
-            flex-direction: column;
-            align-items: center;
-            justify-content: center;
-            padding: 40px 20px;
-            color: var(--text-secondary);
-            text-align: center;
-        }
-        
-        .empty-state i {
-            font-size: 48px;
-            margin-bottom: 15px;
-            opacity: 0.5;
-        }
-        
-        .empty-state p {
-            margin-bottom: 10px;
-        }
-        
-        .empty-state .subtext {
-            font-size: 14px;
-            margin-top: 10px;
-        }
-        
-        .friend-item {
-            display: flex;
-            align-items: center;
-            padding: 15px;
-            background-color: var(--bg-color);
-            border-radius: 12px;
-            margin-bottom: 10px;
-            cursor: pointer;
-            transition: all 0.2s;
-            border: 2px solid transparent;
-            position: relative;
-        }
-        
-        .friend-item:hover {
-            background-color: var(--secondary-color);
-            border-color: var(--primary-color);
-        }
-        
-        .friend-item.selected {
-            background-color: rgba(0, 132, 255, 0.1);
-            border-color: var(--primary-color);
-        }
-        
-        .friend-avatar {
-            width: 50px;
-            height: 50px;
-            border-radius: 50%;
-            background-color: var(--secondary-color);
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            font-size: 18px;
-            color: white;
-            margin-right: 15px;
-            position: relative;
-            overflow: hidden;
-            background-size: cover;
-            background-position: center;
-            flex-shrink: 0;
-        }
-        
-        .friend-status {
-            position: absolute;
-            bottom: 0;
-            right: 0;
-            width: 14px;
-            height: 14px;
-            border-radius: 50%;
-            border: 2px solid var(--bg-color);
-        }
-        
-        .friend-status.online {
-            background-color: var(--success-color);
-        }
-        
-        .friend-status.offline {
-            background-color: var(--text-secondary);
-        }
-        
-        .friend-status.away {
-            background-color: var(--warning-color);
-        }
-        
-        .friend-category-badge {
-            position: absolute;
-            top: 0;
-            right: 0;
-            width: 20px;
-            height: 20px;
-            border-radius: 50%;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            font-size: 10px;
-            color: white;
-            border: 2px solid var(--bg-color);
-        }
-        
-        .friend-category-badge.acquaintance {
-            background-color: var(--category-acquaintance);
-        }
-        
-        .friend-category-badge.friend {
-            background-color: var(--category-friend);
-        }
-        
-        .friend-category-badge.close-friend {
-            background-color: var(--category-close-friend);
-        }
-        
-        .friend-category-badge.family {
-            background-color: var(--category-family);
-        }
-        
-        .friend-category-badge.business {
-            background-color: var(--category-business);
-        }
-        
-        .friend-info {
-            flex: 1;
-            min-width: 0;
-        }
-        
-        .friend-name {
-            font-weight: 600;
-            font-size: 16px;
-            margin-bottom: 5px;
-            display: flex;
-            align-items: center;
-            justify-content: space-between;
-        }
-        
-        .friend-name-text {
-            overflow: hidden;
-            text-overflow: ellipsis;
-            white-space: nowrap;
-        }
-        
-        .friend-details {
-            color: var(--text-secondary);
-            font-size: 14px;
-            display: flex;
-            align-items: center;
-            gap: 8px;
-            flex-wrap: wrap;
-        }
-        
-        .friend-username {
-            font-family: 'Monaco', 'Menlo', monospace;
-            background-color: var(--secondary-color);
-            padding: 2px 6px;
-            border-radius: 4px;
-            font-size: 12px;
-        }
-        
-        .mutual-friends {
-            display: flex;
-            align-items: center;
-            gap: 5px;
-            font-size: 13px;
-            color: var(--primary-color);
-            background-color: rgba(0, 132, 255, 0.1);
-            padding: 2px 8px;
-            border-radius: 10px;
-            cursor: pointer;
-        }
-        
-        .mutual-friends:hover {
-            background-color: rgba(0, 132, 255, 0.2);
-        }
-        
-        .friend-actions {
-            display: flex;
-            gap: 8px;
-            flex-shrink: 0;
-        }
-        
-        .friend-action-btn {
-            background: none;
-            border: none;
-            color: var(--primary-color);
-            cursor: pointer;
-            font-size: 16px;
-            width: 36px;
-            height: 36px;
-            border-radius: 50%;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            transition: all 0.2s;
-        }
-        
-        .friend-action-btn:disabled {
-            opacity: 0.5;
-            cursor: not-allowed;
-        }
-        
-        .friend-action-btn:hover:not(:disabled) {
-            background-color: var(--secondary-color);
-        }
-        
-        .friend-action-btn.danger {
-            color: var(--danger-color);
-        }
-        
-        .friend-action-btn.success {
-            color: var(--success-color);
-        }
-        
-        .friend-action-btn.chat {
-            color: var(--success-color);
-        }
-        
-        .friend-action-btn.chat:hover:not(:disabled) {
-            background-color: rgba(52, 199, 89, 0.1);
-        }
-        
-        .friend-action-btn.call {
-            color: var(--primary-color);
-        }
-        
-        .friend-action-btn.call:hover:not(:disabled) {
-            background-color: rgba(0, 132, 255, 0.1);
-        }
-        
-        /* Friend Details Panel */
-        .friend-details-panel {
-            flex: 1;
-            background-color: var(--bg-color);
-            position: relative;
-            display: none;
-            overflow: hidden;
-        }
-        
-        .friend-details-panel.active {
-            display: flex;
-            flex-direction: column;
-        }
-        
-        .friend-details-header {
-            position: absolute;
-            top: 0;
-            left: 0;
-            right: 0;
-            padding: 20px;
-            display: flex;
-            align-items: center;
-            justify-content: space-between;
-            z-index: 100;
-            background: linear-gradient(to bottom, rgba(255,255,255,0.95) 0%, rgba(255,255,255,0) 100%);
-        }
-        
-        .back-btn {
-            background: none;
-            border: none;
-            color: var(--text-primary);
-            cursor: pointer;
-            font-size: 20px;
-            padding: 8px;
-            border-radius: 50%;
-            transition: all 0.2s;
-        }
-        
-        .back-btn:hover {
-            background-color: var(--secondary-color);
-        }
-        
-        .friend-details-content {
-            flex: 1;
-            overflow-y: auto;
-            padding: 20px;
-            padding-top: 80px;
-        }
-        
-        .friend-profile-header {
-            text-align: center;
-            margin-bottom: 30px;
-        }
-        
-        .friend-profile-avatar {
-            width: 120px;
-            height: 120px;
-            border-radius: 50%;
-            background-color: var(--secondary-color);
-            margin: 0 auto 20px;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            font-size: 36px;
-            color: white;
-            overflow: hidden;
-            background-size: cover;
-            background-position: center;
-            position: relative;
-        }
-        
-        .friend-profile-name {
-            font-size: 24px;
-            font-weight: 600;
-            margin-bottom: 5px;
-        }
-        
-        .friend-profile-username {
-            color: var(--text-secondary);
-            font-size: 16px;
-            margin-bottom: 10px;
-        }
-        
-        .friend-profile-status {
-            display: inline-block;
-            padding: 6px 12px;
-            border-radius: 20px;
-            font-size: 14px;
-            font-weight: 500;
-            margin-bottom: 20px;
-        }
-        
-        .friend-profile-status.online {
-            background-color: rgba(52, 199, 89, 0.1);
-            color: var(--success-color);
-        }
-        
-        .friend-profile-status.offline {
-            background-color: rgba(101, 103, 107, 0.1);
-            color: var(--text-secondary);
-        }
-        
-        .friend-profile-status.away {
-            background-color: rgba(255, 149, 0, 0.1);
-            color: var(--warning-color);
-        }
-        
-        .friend-info-section {
-            background-color: var(--secondary-color);
-            border-radius: 12px;
-            padding: 20px;
-            margin-bottom: 20px;
-        }
-        
-        .info-section-title {
-            font-size: 16px;
-            font-weight: 600;
-            margin-bottom: 15px;
-            display: flex;
-            align-items: center;
-            gap: 10px;
-        }
-        
-        .info-item {
-            display: flex;
-            justify-content: space-between;
-            padding: 12px 0;
-            border-bottom: 1px solid var(--border-color);
-        }
-        
-        .info-item:last-child {
-            border-bottom: none;
-        }
-        
-        .info-label {
-            color: var(--text-secondary);
-            font-size: 14px;
-        }
-        
-        .info-value {
-            font-weight: 500;
-            text-align: right;
-        }
-        
-        .category-display {
-            display: inline-flex;
-            align-items: center;
-            gap: 6px;
-            padding: 6px 12px;
-            border-radius: 20px;
-            font-size: 14px;
-            font-weight: 500;
-        }
-        
-        .category-display.acquaintance {
-            background-color: rgba(142, 142, 147, 0.1);
-            color: var(--category-acquaintance);
-        }
-        
-        .category-display.friend {
-            background-color: rgba(52, 199, 89, 0.1);
-            color: var(--category-friend);
-        }
-        
-        .category-display.close-friend {
-            background-color: rgba(0, 122, 255, 0.1);
-            color: var(--category-close-friend);
-        }
-        
-        .category-display.family {
-            background-color: rgba(255, 45, 85, 0.1);
-            color: var(--category-family);
-        }
-        
-        .category-display.business {
-            background-color: rgba(255, 149, 0, 0.1);
-            color: var(--category-business);
-        }
-        
-        .action-buttons {
-            display: flex;
-            gap: 10px;
-            margin-top: 20px;
-        }
-        
-        .action-btn {
-            flex: 1;
-            padding: 12px;
-            border: none;
-            border-radius: 8px;
-            cursor: pointer;
-            font-weight: 500;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            gap: 8px;
-            transition: all 0.2s;
-        }
-        
-        .action-btn.primary {
-            background-color: var(--primary-color);
-            color: white;
-        }
-        
-        .action-btn.primary:hover {
-            background-color: #0073e6;
-        }
-        
-        .action-btn.secondary {
-            background-color: var(--secondary-color);
-            color: var(--text-primary);
-        }
-        
-        .action-btn.secondary:hover {
-            background-color: #e4e6e9;
-        }
-        
-        .action-btn.danger {
-            background-color: var(--danger-color);
-            color: white;
-        }
-        
-        .action-btn.danger:hover {
-            background-color: #ff1a1a;
-        }
-        
-        .action-btn.success {
-            background-color: var(--success-color);
-            color: white;
-        }
-        
-        .action-btn.success:hover {
-            background-color: #2dbb4f;
-        }
-        
-        .notes-section {
-            margin-top: 20px;
-        }
-        
-        .notes-textarea {
-            width: 100%;
-            min-height: 100px;
-            padding: 15px;
-            border: 1px solid var(--border-color);
-            border-radius: 8px;
-            font-size: 14px;
-            resize: vertical;
-            margin-bottom: 10px;
-        }
-        
-        .notes-textarea:focus {
-            outline: none;
-            border-color: var(--primary-color);
-        }
-        
-        /* Add Friend Modal */
-        .add-friend-modal {
-            display: none;
-            position: fixed;
-            top: 0;
-            left: 0;
-            width: 100%;
-            height: 100%;
-            background-color: rgba(0, 0, 0, 0.5);
-            z-index: 1000;
-            align-items: center;
-            justify-content: center;
-        }
-        
-        .add-friend-modal.active {
-            display: flex;
-        }
-        
-        .add-friend-container {
-            width: 90%;
-            max-width: 500px;
-            background-color: var(--bg-color);
-            border-radius: 20px;
-            overflow: hidden;
-            display: flex;
-            flex-direction: column;
-            max-height: 90vh;
-            box-shadow: var(--shadow-lg);
-        }
-        
-        .add-friend-header {
-            padding: 20px;
-            border-bottom: 1px solid var(--border-color);
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-            background: var(--friends-gradient);
-            color: white;
-        }
-        
-        .add-friend-header h3 {
-            font-size: 20px;
-            font-weight: 600;
-        }
-        
-        .add-friend-tabs {
-            display: flex;
-            border-bottom: 1px solid var(--border-color);
-        }
-        
-        .add-friend-tab {
-            flex: 1;
-            padding: 15px;
-            text-align: center;
-            background: none;
-            border: none;
-            cursor: pointer;
-            font-weight: 500;
-            color: var(--text-secondary);
-            transition: all 0.2s;
-            border-bottom: 3px solid transparent;
-        }
-        
-        .add-friend-tab.active {
-            color: var(--primary-color);
-            border-bottom-color: var(--primary-color);
-        }
-        
-        .add-friend-content {
-            flex: 1;
-            padding: 25px;
-            overflow-y: auto;
-        }
-        
-        .add-friend-tab-content {
-            display: none;
-        }
-        
-        .add-friend-tab-content.active {
-            display: block;
-            animation: fadeIn 0.3s ease;
-        }
-        
-        .method-item {
-            padding: 20px;
-            border: 2px solid var(--border-color);
-            border-radius: 12px;
-            margin-bottom: 15px;
-            cursor: pointer;
-            transition: all 0.2s;
-        }
-        
-        .method-item:hover {
-            border-color: var(--primary-color);
-            background-color: rgba(0, 132, 255, 0.05);
-        }
-        
-        .method-item.selected {
-            border-color: var(--primary-color);
-            background-color: rgba(0, 132, 255, 0.1);
-        }
-        
-        .method-title {
-            display: flex;
-            align-items: center;
-            gap: 12px;
-            font-weight: 600;
-            margin-bottom: 8px;
-            font-size: 16px;
-        }
-        
-        .method-icon {
-            font-size: 24px;
-            color: var(--primary-color);
-        }
-        
-        .method-description {
-            color: var(--text-secondary);
-            font-size: 14px;
-            line-height: 1.5;
-        }
-        
-        .input-group {
-            margin-bottom: 20px;
-        }
-        
-        .input-label {
-            display: block;
-            margin-bottom: 8px;
-            font-weight: 500;
-        }
-        
-        .text-input {
-            width: 100%;
-            padding: 12px 15px;
-            border: 1px solid var(--border-color);
-            border-radius: 8px;
-            font-size: 14px;
-        }
-        
-        .text-input:focus {
-            outline: none;
-            border-color: var(--primary-color);
-        }
-        
-        .qr-container {
-            text-align: center;
-            padding: 30px 0;
-        }
-        
-        .qr-code {
-            width: 200px;
-            height: 200px;
-            margin: 0 auto 20px;
-            background-color: white;
-            padding: 20px;
-            border-radius: 12px;
-            box-shadow: var(--shadow);
-            display: flex;
-            align-items: center;
-            justify-content: center;
-        }
-        
-        .qr-code canvas {
-            width: 100% !important;
-            height: 100% !important;
-            max-width: 200px;
-            max-height: 200px;
-        }
-        
-        .qr-instructions {
-            color: var(--text-secondary);
-            font-size: 14px;
-            max-width: 300px;
-            margin: 0 auto;
-        }
-        
-        /* Friend Request Modal */
-        .friend-request-modal {
-            display: none;
-            position: fixed;
-            top: 0;
-            left: 0;
-            width: 100%;
-            height: 100%;
-            background-color: rgba(0, 0, 0, 0.5);
-            z-index: 1000;
-            align-items: center;
-            justify-content: center;
-        }
-        
-        .friend-request-modal.active {
-            display: flex;
-        }
-        
-        .friend-request-container {
-            width: 90%;
-            max-width: 400px;
-            background-color: var(--bg-color);
-            border-radius: 20px;
-            overflow: hidden;
-            box-shadow: var(--shadow-lg);
-        }
-        
-        .friend-request-header {
-            padding: 20px;
-            text-align: center;
-            border-bottom: 1px solid var(--border-color);
-        }
-        
-        .friend-request-avatar {
-            width: 80px;
-            height: 80px;
-            border-radius: 50%;
-            background-color: var(--secondary-color);
-            margin: 0 auto 15px;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            font-size: 24px;
-            color: white;
-            overflow: hidden;
-            background-size: cover;
-            background-position: center;
-        }
-        
-        .friend-request-name {
-            font-size: 20px;
-            font-weight: 600;
-            margin-bottom: 5px;
-        }
-        
-        .friend-request-username {
-            color: var(--text-secondary);
-            margin-bottom: 10px;
-        }
-        
-        .mutual-friends-count {
-            background-color: var(--secondary-color);
-            padding: 6px 12px;
-            border-radius: 20px;
-            font-size: 14px;
-            display: inline-block;
-            margin-bottom: 20px;
-            cursor: pointer;
-        }
-        
-        .mutual-friends-count:hover {
-            background-color: #e4e6e9;
-        }
-        
-        .friend-request-actions {
-            display: flex;
-            gap: 10px;
-            padding: 20px;
-        }
-        
-        .friend-request-btn {
-            flex: 1;
-            padding: 12px;
-            border: none;
-            border-radius: 8px;
-            cursor: pointer;
-            font-weight: 500;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            gap: 8px;
-            transition: all 0.2s;
-        }
-        
-        .friend-request-btn.accept {
-            background-color: var(--success-color);
-            color: white;
-        }
-        
-        .friend-request-btn.accept:hover {
-            background-color: #2dbb4f;
-        }
-        
-        .friend-request-btn.decline {
-            background-color: var(--secondary-color);
-            color: var(--text-primary);
-        }
-        
-        .friend-request-btn.decline:hover {
-            background-color: #e4e6e9;
-        }
-        
-        /* Notification */
-        .notification {
-            position: fixed;
-            bottom: 20px;
-            right: 20px;
-            background-color: var(--success-color);
-            color: white;
-            padding: 12px 20px;
-            border-radius: 8px;
-            box-shadow: var(--shadow);
-            z-index: 1000;
-            display: flex;
-            align-items: center;
-            gap: 10px;
-            transform: translateY(100px);
-            opacity: 0;
-            transition: all 0.3s;
-        }
-        
-        .notification.active {
-            transform: translateY(0);
-            opacity: 1;
-        }
-        
-        .notification.error {
-            background-color: var(--danger-color);
-        }
-        
-        .notification.warning {
-            background-color: var(--warning-color);
-        }
-        
-        .notification.info {
-            background-color: var(--info-color);
-        }
-        
-        /* Trust Score */
-        .trust-score {
-            display: inline-flex;
-            align-items: center;
-            gap: 5px;
-            padding: 4px 8px;
-            border-radius: 12px;
-            font-size: 12px;
-            font-weight: 500;
-        }
-        
-        .trust-score.high {
-            background-color: rgba(52, 199, 89, 0.1);
-            color: var(--success-color);
-        }
-        
-        .trust-score.medium {
-            background-color: rgba(255, 149, 0, 0.1);
-            color: var(--warning-color);
-        }
-        
-        .trust-score.low {
-            background-color: rgba(255, 59, 48, 0.1);
-            color: var(--danger-color);
-        }
-        
-        /* Temporary Friend Badge */
-        .temp-friend-badge {
-            display: inline-flex;
-            align-items: center;
-            gap: 4px;
-            padding: 4px 8px;
-            border-radius: 12px;
-            font-size: 11px;
-            background-color: rgba(255, 149, 0, 0.1);
-            color: var(--warning-color);
-            margin-left: 8px;
-        }
-        
-        /* Business Friend Badge */
-        .business-badge {
-            display: inline-flex;
-            align-items: center;
-            gap: 4px;
-            padding: 4px 8px;
-            border-radius: 12px;
-            font-size: 11px;
-            background-color: rgba(255, 149, 0, 0.1);
-            color: var(--warning-color);
-            margin-left: 8px;
-        }
-        
-        /* Mobile Styles - REMOVED: No mobile-specific header or navigation */
-        .mobile-header {
-            display: none !important;
-        }
-        
-        .mobile-nav {
-            display: none !important;
-        }
-        
-        /* New styles for Camera Scanner */
-        .camera-scanner-modal {
-            display: none;
-            position: fixed;
-            top: 0;
-            left: 0;
-            width: 100%;
-            height: 100%;
-            background-color: #000;
-            z-index: 2000;
-            flex-direction: column;
-            align-items: center;
-            justify-content: center;
-        }
-        
-        .camera-scanner-modal.active {
-            display: flex;
-        }
-        
-        .camera-container {
-            width: 100%;
-            max-width: 500px;
-            height: 500px;
-            position: relative;
-            overflow: hidden;
-            border-radius: 10px;
-            background-color: #000;
-        }
-        
-        #cameraVideo {
-            width: 100%;
-            height: 100%;
-            object-fit: cover;
-        }
-        
-        .camera-overlay {
-            position: absolute;
-            top: 0;
-            left: 0;
-            width: 100%;
-            height: 100%;
-            pointer-events: none;
-        }
-        
-        .scanner-frame {
-            position: absolute;
-            top: 50%;
-            left: 50%;
-            transform: translate(-50%, -50%);
-            width: 250px;
-            height: 250px;
-            border: 2px solid #00ff00;
-            border-radius: 10px;
-            box-shadow: 0 0 0 5000px rgba(0, 0, 0, 0.7);
-        }
-        
-        .scanner-line {
-            position: absolute;
-            top: 0;
-            left: 0;
-            width: 100%;
-            height: 3px;
-            background-color: #00ff00;
-            animation: scanLine 2s linear infinite;
-        }
-        
-        @keyframes scanLine {
-            0% { top: 0; }
-            100% { top: 100%; }
-        }
-        
-        .camera-controls {
-            margin-top: 20px;
-            display: flex;
-            gap: 15px;
-        }
-        
-        .camera-btn {
-            padding: 12px 24px;
-            background-color: var(--primary-color);
-            color: white;
-            border: none;
-            border-radius: 8px;
-            cursor: pointer;
-            font-weight: 500;
-            display: flex;
-            align-items: center;
-            gap: 8px;
-            transition: all 0.2s;
-        }
-        
-        .camera-btn:hover {
-            background-color: #0073e6;
-        }
-        
-        .camera-btn.secondary {
-            background-color: var(--secondary-color);
-            color: var(--text-primary);
-        }
-        
-        .camera-btn.secondary:hover {
-            background-color: #e4e6e9;
-        }
-        
-        .camera-btn.danger {
-            background-color: var(--danger-color);
-            color: white;
-        }
-        
-        .camera-btn.danger:hover {
-            background-color: #ff1a1a;
-        }
-        
-        .no-camera-message {
-            color: white;
-            text-align: center;
-            padding: 40px;
-        }
-        
-        .no-camera-message i {
-            font-size: 64px;
-            margin-bottom: 20px;
-            color: var(--text-secondary);
-        }
-        
-        /* All Users Search Results */
-        .all-users-container {
-            max-height: 400px;
-            overflow-y: auto;
-            margin-top: 20px;
-            border: 1px solid var(--border-color);
-            border-radius: 12px;
-            padding: 10px;
-        }
-        
-        .all-users-title {
-            font-size: 14px;
-            font-weight: 600;
-            color: var(--text-secondary);
-            margin-bottom: 15px;
-            padding-bottom: 10px;
-            border-bottom: 1px solid var(--border-color);
-        }
-        
-        .all-users-list {
-            display: flex;
-            flex-direction: column;
-            gap: 10px;
-        }
-        
-        .user-search-item {
-            display: flex;
-            align-items: center;
-            padding: 12px;
-            background-color: var(--secondary-color);
-            border-radius: 8px;
-            cursor: pointer;
-            transition: all 0.2s;
-        }
-        
-        .user-search-item:hover {
-            background-color: #e4e6e9;
-            transform: translateY(-2px);
-        }
-        
-        .user-search-avatar {
-            width: 40px;
-            height: 40px;
-            border-radius: 50%;
-            background-color: var(--primary-color);
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            color: white;
-            margin-right: 12px;
-            flex-shrink: 0;
-        }
-        
-        .user-search-info {
-            flex: 1;
-        }
-        
-        .user-search-name {
-            font-weight: 600;
-            margin-bottom: 3px;
-        }
-        
-        .user-search-username {
-            font-size: 12px;
-            color: var(--text-secondary);
-        }
-        
-        .user-search-status {
-            display: inline-block;
-            width: 8px;
-            height: 8px;
-            border-radius: 50%;
-            margin-left: 8px;
-        }
-        
-        .user-search-status.online {
-            background-color: var(--success-color);
-        }
-        
-        .user-search-status.offline {
-            background-color: var(--text-secondary);
-        }
-        
-        .user-search-actions {
-            display: flex;
-            gap: 8px;
-        }
-        
-        /* Responsive */
-        @media (max-width: 1024px) {
-            .sidebar {
-                width: 350px;
-            }
-        }
-        
-        @media (max-width: 768px) {
-            body {
-                overflow: auto;
-            }
-            
-            .app-container {
-                flex-direction: column;
-                height: auto;
-                min-height: 100vh;
-                overflow: hidden;
-            }
-            
-            .sidebar {
-                width: 100% !important;
-                height: 100vh !important;
-                max-height: 100vh !important;
-                border-right: none !important;
-                display: flex !important;
-                position: relative !important;
-                z-index: auto !important;
-            }
-            
-            .friend-details-panel {
-                position: relative !important;
-                width: 100% !important;
-                height: auto !important;
-                z-index: auto !important;
-            }
-            
-            .friend-categories {
-                padding: 0 10px;
-                overflow-x: auto;
-            }
-            
-            .category-btn {
-                padding: 12px 15px;
-                font-size: 14px;
-                min-width: 120px;
-            }
-            
-            .quick-actions {
-                display: grid;
-                grid-template-columns: repeat(3, 1fr);
-                gap: 10px;
-            }
-            
-            .quick-action-btn {
-                padding: 15px 10px;
-            }
-            
-            .quick-action-text {
-                font-size: 12px;
-            }
-            
-            .stats-container {
-                grid-template-columns: repeat(3, 1fr);
-            }
-            
-            .friend-item {
-                padding: 12px;
-            }
-            
-            .friend-avatar {
-                width: 45px;
-                height: 45px;
-                margin-right: 12px;
-            }
-            
-            .friend-name {
-                font-size: 15px;
-            }
-            
-            .friend-details {
-                font-size: 13px;
-            }
-            
-            .friend-action-btn {
-                width: 32px;
-                height: 32px;
-                font-size: 14px;
-            }
-            
-            .qr-code {
-                width: 180px;
-                height: 180px;
-            }
-            
-            .add-friend-container {
-                width: 95%;
-                max-height: 85vh;
-            }
-            
-            .friend-list-content {
-                padding-bottom: 20px !important;
-            }
-            
-            .camera-container {
-                height: 400px;
-                max-width: 400px;
-            }
-        }
-        
-        @media (max-width: 480px) {
-            .sidebar-header h2 {
-                font-size: 20px;
-            }
-            
-            .friend-categories {
-                padding: 0 5px;
-            }
-            
-            .category-btn {
-                padding: 10px 12px;
-                font-size: 13px;
-                min-width: 100px;
-            }
-            
-            .quick-action-btn {
-                padding: 12px 8px;
-            }
-            
-            .quick-action-icon {
-                font-size: 20px;
-            }
-            
-            .stat-item {
-                padding: 10px;
-            }
-            
-            .stat-number {
-                font-size: 20px;
-            }
-            
-            .stat-label {
-                font-size: 11px;
-            }
-            
-            .friend-item {
-                padding: 10px;
-            }
-            
-            .friend-avatar {
-                width: 40px;
-                height: 40px;
-                margin-right: 10px;
-            }
-            
-            .friend-name {
-                font-size: 14px;
-            }
-            
-            .friend-details {
-                font-size: 12px;
-                gap: 5px;
-            }
-            
-            .qr-code {
-                width: 160px;
-                height: 160px;
-            }
-            
-            .add-friend-container {
-                max-height: 90vh;
-            }
-            
-            .camera-container {
-                height: 300px;
-                max-width: 300px;
-            }
-            
-            .scanner-frame {
-                width: 200px;
-                height: 200px;
-            }
-        }
-        
-        /* Animations */
-        @keyframes fadeIn {
-            from { opacity: 0; transform: translateY(20px); }
-            to { opacity: 1; transform: translateY(0); }
-        }
-        
-        .fade-in {
-            animation: fadeIn 0.3s ease;
-        }
-        
-        @keyframes slideInRight {
-            from { transform: translateX(100%); opacity: 0; }
-            to { transform: translateX(0); opacity: 1; }
-        }
-        
-        /* Instant Load Animation */
-        @keyframes fadeInInstant {
-            from { opacity: 0; }
-            to { opacity: 1; }
-        }
-        
-        .instant-load {
-            animation: fadeInInstant 0.1s ease;
-        }
-        
-        .loading-placeholder {
-            text-align: center;
-            padding: 40px 20px;
-            color: var(--text-secondary);
-        }
-        
-        .loading-placeholder i {
-            font-size: 24px;
-            margin-bottom: 15px;
-        }
-        
-        /* Friend Request Profile Styles */
-        .friend-request-profile {
-            max-height: 400px;
-            overflow-y: auto;
-        }
-        
-        .request-actions {
-            display: flex;
-            gap: 10px;
-            margin-top: 20px;
-        }
-        
-        .profile-view-btn {
-            background: var(--primary-color);
-            color: white;
-            border: none;
-            padding: 8px 15px;
-            border-radius: 8px;
-            cursor: pointer;
-            display: flex;
-            align-items: center;
-            gap: 5px;
-        }
-        
-        /* Call button styles */
-        .call-btn-fixed {
-            background: none;
-            border: none;
-            color: var(--primary-color);
-            cursor: pointer;
-            font-size: 20px;
-            padding: 8px;
-            border-radius: 50%;
-            transition: all 0.2s;
-        }
-        
-        .call-btn-fixed:hover {
-            background-color: var(--secondary-color);
-        }
-        
-        /* Mutual Friends Modal */
-        .mutual-friends-modal {
-            display: none;
-            position: fixed;
-            top: 0;
-            left: 0;
-            width: 100%;
-            height: 100%;
-            background-color: rgba(0, 0, 0, 0.5);
-            z-index: 1000;
-            align-items: center;
-            justify-content: center;
-        }
-        
-        .mutual-friends-modal.active {
-            display: flex;
-        }
-        
-        .mutual-friends-container {
-            width: 90%;
-            max-width: 400px;
-            background-color: var(--bg-color);
-            border-radius: 20px;
-            overflow: hidden;
-            box-shadow: var(--shadow-lg);
-        }
-        
-        .mutual-friends-header {
-            padding: 20px;
-            border-bottom: 1px solid var(--border-color);
-            text-align: center;
-        }
-        
-        .mutual-friends-list {
-            max-height: 400px;
-            overflow-y: auto;
-            padding: 10px;
-        }
-        
-        .mutual-friend-item {
-            display: flex;
-            align-items: center;
-            padding: 12px;
-            border-radius: 8px;
-            margin-bottom: 8px;
-            background-color: var(--secondary-color);
-            cursor: pointer;
-        }
-        
-        .mutual-friend-item:hover {
-            background-color: #e4e6e9;
-        }
-        
-        .mutual-friend-avatar {
-            width: 40px;
-            height: 40px;
-            border-radius: 50%;
-            background-color: var(--primary-color);
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            color: white;
-            margin-right: 12px;
-        }
-        
-        .mutual-friend-info {
-            flex: 1;
-        }
-
-        .mutual-friend-name {
-            font-weight: 600;
-            margin-bottom: 3px;
-        }
-        
-        .mutual-friend-username {
-            font-size: 12px;
-            color: var(--text-secondary);
-        }
     </style>
 </head>
 <body>
-    <!-- Offline elements removed -->
-    
     <!-- Mutual Friends Modal -->
     <div class="mutual-friends-modal" id="mutualFriendsModal">
         <div class="mutual-friends-container">
@@ -1933,8 +95,6 @@
                     <i class="fas fa-search search-icon"></i>
                 </div>
             </div>
-            
-            <!-- Cache Indicator removed -->
             
             <div class="friend-list">
                 <div class="quick-actions">
@@ -2377,8 +537,7 @@
 
     <script>
         // =============================================
-        // UPDATED FRIENDS SYSTEM - USING BACKEND API
-        // No Firebase references - Backend Migration
+        // FRIENDS SYSTEM - USING PARENT API
         // =============================================
 
         // Global variables
@@ -2395,14 +554,12 @@
         let currentCategoryFilter = 'all';
         let currentSearchTerm = '';
         let isMobile = window.innerWidth <= 768;
-        let pendingFriendRequests = [];
         let mutualFriendsCache = {};
         let groups = [];
-        let currentMutualFriendData = null;
-        let allUsers = []; // NEW: Store all users from backend
-        let cameraStream = null; // NEW: For camera scanner
-        let currentCamera = 'environment'; // NEW: Front or back camera
-        let flashOn = false; // NEW: Flash state
+        let allUsers = [];
+        let cameraStream = null;
+        let currentCamera = 'environment';
+        let flashOn = false;
         
         // Friend categories with colors and icons
         const friendCategories = {
@@ -2450,20 +607,13 @@
             }
         };
         
-        // Temporary friend durations (in milliseconds)
-        const temporaryDurations = {
-            '24h': 24 * 60 * 60 * 1000,
-            '7d': 7 * 24 * 60 * 60 * 1000,
-            '30d': 30 * 24 * 60 * 60 * 1000
-        };
-        
         // DOM Elements
         const friendDetailsPanel = document.getElementById('friendDetailsPanel');
         const addFriendModal = document.getElementById('addFriendModal');
         const friendRequestModal = document.getElementById('friendRequestModal');
         const startChatModal = document.getElementById('startChatModal');
         const mutualFriendsModal = document.getElementById('mutualFriendsModal');
-        const cameraScannerModal = document.getElementById('cameraScannerModal'); // NEW: Camera scanner modal
+        const cameraScannerModal = document.getElementById('cameraScannerModal');
         const notification = document.getElementById('notification');
         
         // Friend sections
@@ -2484,7 +634,7 @@
         const pinnedList = document.getElementById('pinnedList');
         const mutedList = document.getElementById('mutedList');
         
-        // Local Storage Keys - Backend Migration: Updated storage keys for new structure
+        // Local Storage Keys
         const LOCAL_STORAGE_KEYS = {
             USER: 'knecta_current_user',
             USER_TOKEN: 'knecta_user_token',
@@ -2502,135 +652,332 @@
             USER_GROUPS: 'knecta_user_groups_cache',
             LAST_INTERACTIONS: 'knecta_last_interactions',
             PRIVATE_NOTES: 'knecta_private_notes',
-            ALL_USERS_CACHE: 'knecta_all_users_cache' // NEW: Cache for all users
+            ALL_USERS_CACHE: 'knecta_all_users_cache'
         };
         
-        // Initialize the application
-        document.addEventListener('DOMContentLoaded', function() {
-            // Load cached data instantly for offline experience
-            loadCachedDataInstantly();
-            
-            // Initialize the app after a short delay
-            setTimeout(() => {
-                initializeApp();
-            }, 100);
+        // Wait for API ready event from parent
+        window.addEventListener('message', async (e) => {
+            if (e.data?.type === 'API_READY') {
+                console.log('API Ready event received, initializing friends system...');
+                await initializeFriends();
+            }
         });
+        
+        // Initialize the application
+        document.addEventListener('DOMContentLoaded', async function() {
+            console.log('Friends page loaded');
+            
+            // Check if we're already in an iframe with API available
+            if (window.parent && window.parent.api) {
+                console.log('Parent API available immediately');
+                await initializeFriends();
+            } else {
+                console.log('Waiting for API ready event...');
+                // Show loading state
+                showNotification('Connecting to server...', 'info');
+                
+                // Request API ready event
+                if (window.parent) {
+                    window.parent.postMessage({ type: 'REQUEST_API_READY' }, '*');
+                }
+                
+                // Fallback: Try to initialize after a delay
+                setTimeout(async () => {
+                    if (window.parent && window.parent.api) {
+                        console.log('API found after timeout');
+                        await initializeFriends();
+                    } else {
+                        console.log('API not available, using cached data');
+                        loadCachedDataInstantly();
+                        setupEventListeners();
+                        showNotification('Using offline mode', 'warning');
+                    }
+                }, 2000);
+            }
+            
+            // Load cached data instantly
+            loadCachedDataInstantly();
+        });
+        
+        // Initialize friends system
+        async function initializeFriends() {
+            console.log('=== INITIALIZING FRIENDS SYSTEM ===');
+            
+            try {
+                // Get API from parent
+                const api = window.parent.api;
+                if (!api) {
+                    throw new Error('API not available in parent window');
+                }
+                
+                console.log('API available:', typeof api);
+                
+                // Get current user
+                try {
+                    const userResponse = await api.get('/api/auth/user');
+                    if (userResponse && userResponse.user) {
+                        currentUser = userResponse.user;
+                        userData = currentUser;
+                        console.log('Current user loaded:', currentUser.id);
+                        
+                        // Save to cache
+                        localStorage.setItem(LOCAL_STORAGE_KEYS.USER, JSON.stringify({
+                            uid: currentUser.id,
+                            id: currentUser.id,
+                            displayName: currentUser.displayName,
+                            email: currentUser.email,
+                            photoURL: currentUser.photoURL
+                        }));
+                        
+                        localStorage.setItem(LOCAL_STORAGE_KEYS.USER_PROFILE, JSON.stringify(userData));
+                    }
+                } catch (userError) {
+                    console.log('Could not load user from API, using cache:', userError.message);
+                    await loadUserFromCache();
+                }
+                
+                // Setup event listeners
+                setupEventListeners();
+                
+                // Load initial data
+                await loadInitialData();
+                
+                // Generate QR code
+                generateUniqueQRCode();
+                
+                showNotification('Friends system ready', 'success');
+                console.log('=== FRIENDS SYSTEM INITIALIZED SUCCESSFULLY ===');
+                
+            } catch (error) {
+                console.error('Error initializing friends system:', error);
+                showNotification('Could not connect to server', 'error');
+                
+                // Fallback to cached data
+                loadCachedDataInstantly();
+                setupEventListeners();
+                updateCurrentSection();
+            }
+        }
+        
+        // Load initial data from API
+        async function loadInitialData() {
+            try {
+                const api = window.parent.api;
+                if (!api) {
+                    throw new Error('API not available');
+                }
+                
+                console.log('Loading initial data from API...');
+                
+                // Load friends
+                try {
+                    const friendsResponse = await api.get('/api/friends');
+                    if (friendsResponse && friendsResponse.friends) {
+                        friends = friendsResponse.friends;
+                        console.log('Loaded friends from API:', friends.length);
+                        
+                        // Sort by online status first, then name
+                        friends.sort((a, b) => {
+                            if (a.online !== b.online) return b.online ? 1 : -1;
+                            return (a.displayName || '').localeCompare(b.displayName || '');
+                        });
+                        
+                        // Update counts
+                        document.getElementById('friendsCount').textContent = friends.length;
+                        updateFriendCounts();
+                        
+                        // Save to cache
+                        localStorage.setItem(LOCAL_STORAGE_KEYS.FRIENDS, JSON.stringify(friends));
+                    }
+                } catch (friendsError) {
+                    console.error('Error loading friends:', friendsError);
+                }
+                
+                // Load friend requests
+                try {
+                    const requestsResponse = await api.get('/api/friend-requests/incoming');
+                    if (requestsResponse && requestsResponse.requests) {
+                        friendRequests = requestsResponse.requests;
+                        document.getElementById('requestsCount').textContent = friendRequests.length;
+                        document.getElementById('requestsSectionCount').textContent = friendRequests.length;
+                        console.log('Loaded friend requests:', friendRequests.length);
+                        localStorage.setItem(LOCAL_STORAGE_KEYS.REQUESTS, JSON.stringify(friendRequests));
+                    }
+                } catch (requestsError) {
+                    console.error('Error loading friend requests:', requestsError);
+                }
+                
+                // Load sent requests
+                try {
+                    const sentResponse = await api.get('/api/friend-requests/sent');
+                    if (sentResponse && sentResponse.requests) {
+                        sentRequests = sentResponse.requests;
+                        document.getElementById('sentRequestsCount').textContent = sentRequests.length;
+                        console.log('Loaded sent requests:', sentRequests.length);
+                        localStorage.setItem(LOCAL_STORAGE_KEYS.SENT_REQUESTS, JSON.stringify(sentRequests));
+                    }
+                } catch (sentError) {
+                    console.error('Error loading sent requests:', sentError);
+                }
+                
+                // Load pinned friends
+                try {
+                    const pinnedResponse = await api.get('/api/friends/pinned');
+                    if (pinnedResponse && pinnedResponse.friends) {
+                        pinnedFriends = pinnedResponse.friends;
+                        document.getElementById('pinnedCount').textContent = pinnedFriends.length;
+                        document.getElementById('pinnedFriends').textContent = pinnedFriends.length;
+                        console.log('Loaded pinned friends:', pinnedFriends.length);
+                        localStorage.setItem(LOCAL_STORAGE_KEYS.PINNED_FRIENDS, JSON.stringify(pinnedFriends));
+                    }
+                } catch (pinnedError) {
+                    console.error('Error loading pinned friends:', pinnedError);
+                }
+                
+                // Load muted friends
+                try {
+                    const mutedResponse = await api.get('/api/friends/muted');
+                    if (mutedResponse && mutedResponse.friends) {
+                        mutedFriends = mutedResponse.friends;
+                        document.getElementById('mutedCount').textContent = mutedFriends.length;
+                        console.log('Loaded muted friends:', mutedFriends.length);
+                        localStorage.setItem(LOCAL_STORAGE_KEYS.MUTED_FRIENDS, JSON.stringify(mutedFriends));
+                    }
+                } catch (mutedError) {
+                    console.error('Error loading muted friends:', mutedError);
+                }
+                
+                // Update UI
+                updateCurrentSection();
+                
+                // Load all users in background
+                setTimeout(() => {
+                    fetchAllUsersFromBackend();
+                }, 1000);
+                
+                showNotification('Data loaded successfully', 'success');
+                
+            } catch (error) {
+                console.error('Error loading initial data:', error);
+                showNotification('Error loading data', 'error');
+            }
+        }
         
         // Load cached data instantly for offline use
         function loadCachedDataInstantly() {
-            console.log('=== INSTANT CACHE LOAD START ===');
+            console.log('Loading cached data instantly...');
             
             try {
-                // Load user from cache immediately
+                // Load user from cache
                 const cachedUser = localStorage.getItem(LOCAL_STORAGE_KEYS.USER);
                 if (cachedUser) {
                     currentUser = JSON.parse(cachedUser);
-                    console.log('✓ Instant: User loaded from cache');
+                    console.log('Loaded user from cache');
                 }
                 
-                // Load user token for API calls
-                const userToken = localStorage.getItem(LOCAL_STORAGE_KEYS.USER_TOKEN);
-                if (userToken) {
-                    window.userToken = userToken;
-                }
-                
-                // Load user profile from cache
+                // Load user profile
                 const cachedProfile = localStorage.getItem(LOCAL_STORAGE_KEYS.USER_PROFILE);
                 if (cachedProfile) {
                     userData = JSON.parse(cachedProfile);
-                    window.userInitials = userData.displayName 
-                        ? userData.displayName.split(' ').map(n => n[0]).join('').toUpperCase().substring(0, 2)
-                        : 'ME';
-                    window.userAvatar = userData.photoURL || '';
-                    window.userUsername = userData.username || '';
                 }
                 
-                // Load friends from cache INSTANTLY
+                // Load friends
                 const friendsData = localStorage.getItem(LOCAL_STORAGE_KEYS.FRIENDS);
                 if (friendsData) {
                     friends = JSON.parse(friendsData);
-                    console.log(`✓ Instant: ${friends.length} friends loaded from cache`);
-                    
-                    // Update friend counts immediately
+                    console.log('Loaded friends from cache:', friends.length);
                     updateFriendCounts();
                     
-                    // Render friends IMMEDIATELY without waiting
+                    // Render friends immediately
                     renderFriendsListInstantly();
-                }
-                
-                // Load all users from cache (NEW)
-                const allUsersData = localStorage.getItem(LOCAL_STORAGE_KEYS.ALL_USERS_CACHE);
-                if (allUsersData) {
-                    allUsers = JSON.parse(allUsersData);
-                    console.log(`✓ Instant: ${allUsers.length} all users loaded from cache`);
                 }
                 
                 // Load other cached data
                 const contactsData = localStorage.getItem(LOCAL_STORAGE_KEYS.CONTACTS);
-                if (contactsData) {
-                    contacts = JSON.parse(contactsData);
-                    console.log(`✓ Instant: ${contacts.length} contacts loaded`);
-                }
+                if (contactsData) contacts = JSON.parse(contactsData);
                 
                 const requestsData = localStorage.getItem(LOCAL_STORAGE_KEYS.REQUESTS);
                 if (requestsData) {
                     friendRequests = JSON.parse(requestsData);
-                    console.log(`✓ Instant: ${friendRequests.length} friend requests loaded`);
+                    document.getElementById('requestsCount').textContent = friendRequests.length;
+                    document.getElementById('requestsSectionCount').textContent = friendRequests.length;
                 }
                 
                 const sentRequestsData = localStorage.getItem(LOCAL_STORAGE_KEYS.SENT_REQUESTS);
                 if (sentRequestsData) {
                     sentRequests = JSON.parse(sentRequestsData);
-                    console.log(`✓ Instant: ${sentRequests.length} sent requests loaded`);
+                    document.getElementById('sentRequestsCount').textContent = sentRequests.length;
                 }
                 
                 const tempFriendsData = localStorage.getItem(LOCAL_STORAGE_KEYS.TEMPORARY_FRIENDS);
-                if (tempFriendsData) {
-                    temporaryFriends = JSON.parse(tempFriendsData);
-                    console.log(`✓ Instant: ${temporaryFriends.length} temporary friends loaded`);
-                }
+                if (tempFriendsData) temporaryFriends = JSON.parse(tempFriendsData);
                 
                 const pinnedData = localStorage.getItem(LOCAL_STORAGE_KEYS.PINNED_FRIENDS);
                 if (pinnedData) {
                     pinnedFriends = JSON.parse(pinnedData);
-                    console.log(`✓ Instant: ${pinnedFriends.length} pinned friends loaded`);
+                    document.getElementById('pinnedCount').textContent = pinnedFriends.length;
+                    document.getElementById('pinnedFriends').textContent = pinnedFriends.length;
                 }
                 
                 const mutedData = localStorage.getItem(LOCAL_STORAGE_KEYS.MUTED_FRIENDS);
                 if (mutedData) {
                     mutedFriends = JSON.parse(mutedData);
-                    console.log(`✓ Instant: ${mutedFriends.length} muted friends loaded`);
+                    document.getElementById('mutedCount').textContent = mutedFriends.length;
+                }
+                
+                // Load all users cache
+                const allUsersData = localStorage.getItem(LOCAL_STORAGE_KEYS.ALL_USERS_CACHE);
+                if (allUsersData) {
+                    allUsers = JSON.parse(allUsersData);
+                    console.log('Loaded all users from cache:', allUsers.length);
                 }
                 
                 // Load mutual friends cache
                 const mutualCache = localStorage.getItem(LOCAL_STORAGE_KEYS.MUTUAL_FRIENDS_CACHE);
-                if (mutualCache) {
-                    mutualFriendsCache = JSON.parse(mutualCache);
-                }
+                if (mutualCache) mutualFriendsCache = JSON.parse(mutualCache);
                 
-                // Load groups from cache
+                // Load groups
                 const groupsData = localStorage.getItem(LOCAL_STORAGE_KEYS.USER_GROUPS);
-                if (groupsData) {
-                    groups = JSON.parse(groupsData);
-                    console.log(`✓ Instant: ${groups.length} groups loaded from cache`);
-                }
+                if (groupsData) groups = JSON.parse(groupsData);
                 
                 // Load last interactions
                 const interactionsData = localStorage.getItem(LOCAL_STORAGE_KEYS.LAST_INTERACTIONS);
-                if (interactionsData) {
-                    window.lastInteractions = JSON.parse(interactionsData);
-                }
+                if (interactionsData) window.lastInteractions = JSON.parse(interactionsData);
                 
                 // Load private notes
                 const notesData = localStorage.getItem(LOCAL_STORAGE_KEYS.PRIVATE_NOTES);
-                if (notesData) {
-                    window.privateNotes = JSON.parse(notesData);
-                }
+                if (notesData) window.privateNotes = JSON.parse(notesData);
                 
-                console.log('=== INSTANT CACHE LOAD COMPLETE ===');
+                console.log('Cached data loaded successfully');
                 
             } catch (error) {
-                console.error('Error in instant cache load:', error);
+                console.error('Error loading cached data:', error);
+            }
+        }
+        
+        // Load user from cache
+        async function loadUserFromCache() {
+            try {
+                const cachedUser = localStorage.getItem(LOCAL_STORAGE_KEYS.USER);
+                if (cachedUser) {
+                    currentUser = JSON.parse(cachedUser);
+                    console.log('Loaded user from cache:', currentUser.id);
+                } else {
+                    currentUser = {
+                        id: 'local_user_' + Date.now(),
+                        displayName: 'Local User',
+                        email: '',
+                        photoURL: ''
+                    };
+                }
+            } catch (error) {
+                console.error('Error loading user from cache:', error);
+                currentUser = {
+                    id: 'fallback_user_' + Date.now(),
+                    displayName: 'User',
+                    email: '',
+                    photoURL: ''
+                };
             }
         }
         
@@ -2638,12 +985,11 @@
         function renderFriendsListInstantly() {
             if (!allFriendsList) return;
             
-            // Clear the loading placeholder
             allFriendsList.innerHTML = '';
             
             // Combine all friends, contacts, and pinned friends for display
             const allToDisplay = [
-                ...pinnedFriends.filter(f => f.isPinned), // Pinned friends first
+                ...pinnedFriends.filter(f => f.isPinned),
                 ...friends,
                 ...contacts
             ].slice(0, 25);
@@ -2659,18 +1005,15 @@
                 return;
             }
             
-            // Create a container for instant rendering
             const fragment = document.createDocumentFragment();
             
             allToDisplay.forEach(item => {
                 addFriendItemInstant(item, fragment, 
                     item.isPinned ? 'pinned' : 
-                    friends.some(f => f.uid === item.uid) ? 'friend' : 'contact');
+                    friends.some(f => f.id === item.id) ? 'friend' : 'contact');
             });
             
             allFriendsList.appendChild(fragment);
-            
-            // Add instant load animation class
             allFriendsList.classList.add('instant-load');
         }
         
@@ -2678,15 +1021,13 @@
         function addFriendItemInstant(friendData, container, type) {
             const friendItem = document.createElement('div');
             friendItem.className = 'friend-item';
-            friendItem.dataset.userId = friendData.uid || friendData.id;
+            friendItem.dataset.userId = friendData.id;
             friendItem.dataset.type = type;
             
-            // Get initials for avatar
             const initials = friendData.displayName ? 
                 friendData.displayName.split(' ').map(word => word[0]).join('').toUpperCase().substring(0, 2) : 
                 'U';
             
-            // Determine status
             let statusClass = 'offline';
             let statusText = 'Offline';
             
@@ -2695,22 +1036,16 @@
                 statusText = 'Online now';
             }
             
-            // Get last interaction if available
-            const lastInteraction = getLastInteraction(friendData.uid || friendData.id);
+            const lastInteraction = getLastInteraction(friendData.id);
             if (lastInteraction) {
                 statusText = lastInteraction;
             }
             
-            // Get mutual friends count from cache
-            const userId = friendData.uid || friendData.id;
+            const userId = friendData.id;
             const mutualCount = mutualFriendsCache[userId] || 0;
-            
-            // Determine category badge
             const category = friendData.category || 'friend';
             const categoryInfo = friendCategories[category];
-            
-            // Check if friend is muted
-            const isMuted = mutedFriends.some(f => (f.uid || f.id) === userId);
+            const isMuted = mutedFriends.some(f => f.id === userId);
             
             friendItem.innerHTML = `
                 <div class="friend-avatar" ${friendData.photoURL ? `style="background-image: url('${escapeHtml(friendData.photoURL)}')"` : ''}>
@@ -2755,7 +1090,6 @@
                 </div>
             `;
             
-            // Add event listeners
             friendItem.addEventListener('click', (e) => {
                 if (!e.target.closest('.friend-actions') && !e.target.closest('.mutual-friends')) {
                     showFriendDetails(friendData, type);
@@ -2771,7 +1105,6 @@
                 });
             });
             
-            // Add mutual friends click listener
             const mutualFriendsElement = friendItem.querySelector('.mutual-friends');
             if (mutualFriendsElement) {
                 mutualFriendsElement.addEventListener('click', (e) => {
@@ -2785,192 +1118,16 @@
             container.appendChild(friendItem);
         }
         
-        // FIXED: Smart Navigation Functions - No iframe confusion
-        function navigateToChat(userId, userName) {
-            console.log('Navigating to chat with:', userId, userName);
-            
-            // Encode parameters for URL
-            const encodedName = encodeURIComponent(userName);
-            
-            // Navigate to message.html in the same window/tab
-            window.location.href = `../message.html?user=${userId}&name=${encodedName}`;
-        }
-        
-        function navigateToCall(userId, userName, callType = 'voice') {
-            console.log('Navigating to call with:', userId, userName, callType);
-            
-            // Encode parameters for URL
-            const encodedName = encodeURIComponent(userName);
-            
-            // Navigate to calls.html in the same window/tab
-            window.location.href = `../calls.html?user=${userId}&name=${encodedName}&type=${callType}`;
-        }
-        
-        // Initialize the app
-        async function initializeApp() {
-            console.log('=== FULL APP INITIALIZATION START ===');
-            
-            // Check if we're in an iframe and handle token
-            if (window.self !== window.top) {
-                console.log('Running in iframe - checking for token');
-                handleIframeToken();
-            }
-            
-            // Initialize settings manager if available
-            if (typeof settingsManager !== 'undefined') {
-                settingsManager.initializeSettings();
-            }
-            
-            // Check if we were redirected from "Start Chat" button elsewhere
-            const urlParams = new URLSearchParams(window.location.search);
-            const startChatParam = urlParams.get('startChat');
-            
-            // Check if mobile
-            checkMobile();
-            window.addEventListener('resize', checkMobile);
-            
-            // Try to get current user from app.js or API
-            await getCurrentUserData();
-            
-            // Setup event listeners
-            setupEventListeners();
-            
-            // Load data from backend in background
-            syncAllDataFromBackend();
-            
-            // Generate QR code
-            generateUniqueQRCode();
-            
-            // NEW: Load all users from backend
-            await fetchAllUsersFromBackend();
-            
-            // Show start chat modal if redirected from Start Chat button
-            if (startChatParam === 'true') {
-                setTimeout(() => {
-                    showStartChatModal();
-                }, 1000);
-            }
-            
-            showNotification('Friends system ready', 'success');
-            
-            console.log('=== FULL APP INITIALIZATION COMPLETE ===');
-        }
-        
-        // Handle iframe token passing
-        function handleIframeToken() {
-            try {
-                // Check if token is in URL (passed from parent)
-                const urlParams = new URLSearchParams(window.location.search);
-                const token = urlParams.get('token');
-                
-                if (token) {
-                    // Save token for API calls
-                    localStorage.setItem(LOCAL_STORAGE_KEYS.USER_TOKEN, token);
-                    window.userToken = token;
-                    console.log('Token received via iframe URL');
-                }
-                
-                // Also check parent window for user data
-                if (window.parent && window.parent.appState) {
-                    console.log('Parent appState available');
-                }
-                
-            } catch (error) {
-                console.log('Iframe token handling error:', error);
-            }
-        }
-        
-        // Get current user data from app.js or API
-        async function getCurrentUserData() {
-            try {
-                // First try to get from app.js
-                if (window.appState && window.appState.currentUser) {
-                    currentUser = window.appState.currentUser;
-                    console.log('User detected from app.js:', currentUser.uid || currentUser.id);
-                    
-                    // Save to cache
-                    localStorage.setItem(LOCAL_STORAGE_KEYS.USER, JSON.stringify({
-                        uid: currentUser.uid || currentUser.id,
-                        id: currentUser.id || currentUser.uid,
-                        displayName: currentUser.displayName,
-                        email: currentUser.email,
-                        photoURL: currentUser.photoURL
-                    }));
-                    
-                    return;
-                }
-                
-                // Try to get from API - USING SAFE API CALL
-                if (typeof api === 'function') {
-                    const response = await api('GET', '/api/auth/user');
-                    
-                    if (response && response.user) {
-                        currentUser = response.user;
-                        console.log('User detected from backend API:', currentUser.uid || currentUser.id);
-                        
-                        // Save to cache
-                        localStorage.setItem(LOCAL_STORAGE_KEYS.USER, JSON.stringify({
-                            uid: currentUser.uid || currentUser.id,
-                            id: currentUser.id || currentUser.uid,
-                            displayName: currentUser.displayName,
-                            email: currentUser.email,
-                            photoURL: currentUser.photoURL
-                        }));
-                        
-                        // Save user profile
-                        if (!userData) {
-                            userData = currentUser;
-                            localStorage.setItem(LOCAL_STORAGE_KEYS.USER_PROFILE, JSON.stringify(userData));
-                        }
-                    }
-                } else {
-                    console.log('API function not available, using cached data');
-                }
-                
-            } catch (error) {
-                console.log('Could not load user from backend:', error.message);
-                // Use cached user data
-                await loadUserFromCache();
-            }
-        }
-        
-        // Load user from cache
-        async function loadUserFromCache() {
-            try {
-                const cachedUser = localStorage.getItem(LOCAL_STORAGE_KEYS.USER);
-                if (cachedUser) {
-                    currentUser = JSON.parse(cachedUser);
-                    console.log('Loaded user from cache:', currentUser.uid || currentUser.id);
-                }
-                
-                // If no user found, create a minimal user object
-                if (!currentUser) {
-                    currentUser = {
-                        id: 'local_user_' + Date.now(),
-                        uid: 'local_user_' + Date.now(),
-                        displayName: 'Local User',
-                        email: '',
-                        photoURL: ''
-                    };
-                    console.log('Created minimal user object for offline use');
-                }
-                
-            } catch (error) {
-                console.error('Error loading user from cache:', error);
-                currentUser = {
-                    id: 'fallback_user_' + Date.now(),
-                    uid: 'fallback_user_' + Date.now(),
-                    displayName: 'User',
-                    email: '',
-                    photoURL: ''
-                };
-            }
-        }
-        
-        // NEW: Fetch all users from backend
+        // Fetch all users from backend
         async function fetchAllUsersFromBackend() {
             try {
                 console.log('Fetching all users from backend...');
+                
+                const api = window.parent.api;
+                if (!api) {
+                    console.log('API not available');
+                    return;
+                }
                 
                 // Check for cached data first
                 const cachedAllUsers = localStorage.getItem(LOCAL_STORAGE_KEYS.ALL_USERS_CACHE);
@@ -2985,24 +1142,14 @@
                     return;
                 }
                 
-                // SAFE API CALL with fallback
-                if (typeof api !== 'function') {
-                    console.log('API not available, using cached data if available');
-                    if (cachedAllUsers) {
-                        allUsers = JSON.parse(cachedAllUsers);
-                        renderAllUsersList();
-                    }
-                    return;
-                }
-                
                 // Fetch from backend API
-                const response = await api('GET', '/api/users/all');
+                const response = await api.get('/api/users/all');
                 
                 if (response && response.users) {
                     // Filter out current user from the list
-                    const currentUserId = currentUser?.id || currentUser?.uid;
+                    const currentUserId = currentUser?.id;
                     allUsers = response.users.filter(user => {
-                        const userId = user.id || user.uid;
+                        const userId = user.id;
                         return userId !== currentUserId;
                     });
                     
@@ -3041,7 +1188,7 @@
             }
         }
         
-        // NEW: Render all users list in the "All Users" tab
+        // Render all users list in the "All Users" tab
         function renderAllUsersList() {
             const allUsersListElement = document.getElementById('allUsersList');
             const allUsersStatusElement = document.getElementById('allUsersStatus');
@@ -3049,10 +1196,8 @@
             
             if (!allUsersListElement) return;
             
-            // Get search term
             const searchTerm = allUsersSearchElement ? allUsersSearchElement.value.toLowerCase() : '';
             
-            // Filter users based on search term
             const filteredUsers = allUsers.filter(user => {
                 if (!searchTerm) return true;
                 
@@ -3067,12 +1212,10 @@
                 return searchIn.includes(searchTerm);
             });
             
-            // Update status
             if (allUsersStatusElement) {
                 allUsersStatusElement.textContent = `${filteredUsers.length} users found${searchTerm ? ` for "${searchTerm}"` : ''}`;
             }
             
-            // Clear the list
             allUsersListElement.innerHTML = '';
             
             if (filteredUsers.length === 0) {
@@ -3086,24 +1229,22 @@
                 return;
             }
             
-            // Add users to the list
             filteredUsers.forEach(user => {
                 const userItem = createUserSearchItem(user);
                 allUsersListElement.appendChild(userItem);
             });
         }
         
-        // NEW: Create user search item for "All Users" tab
+        // Create user search item for "All Users" tab
         function createUserSearchItem(user) {
-            const userId = user.id || user.uid;
+            const userId = user.id;
             const initials = user.displayName ? 
                 user.displayName.split(' ').map(word => word[0]).join('').toUpperCase().substring(0, 2) : 
                 'U';
             
-            // Check if already a friend
-            const isAlreadyFriend = friends.some(f => (f.uid || f.id) === userId);
-            const hasPendingRequest = sentRequests.some(r => (r.to || r.receiverId) === userId);
-            const hasIncomingRequest = friendRequests.some(r => (r.from || r.senderId) === userId);
+            const isAlreadyFriend = friends.some(f => f.id === userId);
+            const hasPendingRequest = sentRequests.some(r => r.receiverId === userId);
+            const hasIncomingRequest = friendRequests.some(r => r.senderId === userId);
             
             const userItem = document.createElement('div');
             userItem.className = 'user-search-item';
@@ -3153,7 +1294,6 @@
                 </div>
             `;
             
-            // Add event listeners
             userItem.addEventListener('click', (e) => {
                 if (!e.target.closest('.user-search-actions')) {
                     showFriendDetails(user, 'user');
@@ -3171,28 +1311,21 @@
                         const userName = btn.dataset.userName;
                         navigateToChat(userId, userName);
                     } else if (action === 'add') {
-                        if (typeof settingsManager !== 'undefined') {
-                            const allowFriendRequests = settingsManager.getSetting('allowFriendRequests');
-                            if (allowFriendRequests === false) {
-                                showNotification('Friend requests are currently disabled', 'warning');
-                                return;
-                            }
-                        }
                         sendFriendRequest(userId);
                     } else if (action === 'more') {
                         showFriendOptions(user);
                     } else if (action === 'cancel-request') {
-                        const sentRequest = sentRequests.find(r => (r.to || r.receiverId) === userId);
+                        const sentRequest = sentRequests.find(r => r.receiverId === userId);
                         if (sentRequest) {
                             cancelFriendRequest(sentRequest);
                         }
                     } else if (action === 'accept') {
-                        const incomingRequest = friendRequests.find(r => (r.from || r.senderId) === userId);
+                        const incomingRequest = friendRequests.find(r => r.senderId === userId);
                         if (incomingRequest) {
                             acceptFriendRequestOnline(incomingRequest.id, userId);
                         }
                     } else if (action === 'decline') {
-                        const incomingRequest = friendRequests.find(r => (r.from || r.senderId) === userId);
+                        const incomingRequest = friendRequests.find(r => r.senderId === userId);
                         if (incomingRequest) {
                             declineFriendRequest(incomingRequest);
                         }
@@ -3203,7 +1336,20 @@
             return userItem;
         }
         
-        // NEW: Start camera for QR code scanning
+        // Navigation functions
+        function navigateToChat(userId, userName) {
+            console.log('Navigating to chat with:', userId, userName);
+            const encodedName = encodeURIComponent(userName);
+            window.location.href = `../message.html?user=${userId}&name=${encodedName}`;
+        }
+        
+        function navigateToCall(userId, userName, callType = 'voice') {
+            console.log('Navigating to call with:', userId, userName, callType);
+            const encodedName = encodeURIComponent(userName);
+            window.location.href = `../calls.html?user=${userId}&name=${encodedName}&type=${callType}`;
+        }
+        
+        // Camera functions
         async function startCameraScanner() {
             try {
                 const videoElement = document.getElementById('cameraVideo');
@@ -3212,12 +1358,10 @@
                     return;
                 }
                 
-                // Stop any existing stream
                 if (cameraStream) {
                     cameraStream.getTracks().forEach(track => track.stop());
                 }
                 
-                // Request camera access
                 const constraints = {
                     video: {
                         facingMode: currentCamera,
@@ -3229,16 +1373,11 @@
                 
                 cameraStream = await navigator.mediaDevices.getUserMedia(constraints);
                 videoElement.srcObject = cameraStream;
-                
-                // Start QR code scanning
                 startQRCodeScanning(videoElement);
-                
                 showNotification('Camera started successfully', 'success');
                 
             } catch (error) {
                 console.error('Error accessing camera:', error);
-                
-                // Show error message in camera container
                 const cameraContainer = document.querySelector('.camera-container');
                 if (cameraContainer) {
                     cameraContainer.innerHTML = `
@@ -3250,52 +1389,33 @@
                         </div>
                     `;
                 }
-                
                 showNotification('Could not access camera', 'error');
             }
         }
         
-        // NEW: Start QR code scanning from camera feed
         function startQRCodeScanning(videoElement) {
-            // This is a simplified QR code scanning implementation
-            // In a real app, you would use a proper QR code scanning library like jsQR
-            
             console.log('QR code scanning started (simulated)');
-            
-            // Simulate QR code detection for demo purposes
             setTimeout(() => {
-                // In a real implementation, this would be called when a QR code is detected
                 simulateQRCodeDetection();
             }, 3000);
         }
         
-        // NEW: Simulate QR code detection (for demo)
         function simulateQRCodeDetection() {
-            // Show success message
             showNotification('QR code detected!', 'success');
-            
-            // Simulate processing QR code data
             setTimeout(() => {
-                // Close camera scanner
                 stopCameraScanner();
                 cameraScannerModal.classList.remove('active');
-                
-                // Show friend request modal with simulated user data
                 const mockUser = {
                     id: 'user_qr_' + Date.now(),
-                    uid: 'user_qr_' + Date.now(),
                     displayName: 'QR Code User',
                     username: '@qrusername',
                     photoURL: '',
                     online: true
                 };
-                
                 showFriendRequestFromQR(mockUser);
-                
             }, 1000);
         }
         
-        // NEW: Stop camera scanner
         function stopCameraScanner() {
             if (cameraStream) {
                 cameraStream.getTracks().forEach(track => track.stop());
@@ -3310,13 +1430,11 @@
             console.log('Camera scanner stopped');
         }
         
-        // NEW: Toggle between front and back camera
         async function toggleCamera() {
             currentCamera = currentCamera === 'environment' ? 'user' : 'environment';
             await startCameraScanner();
         }
         
-        // NEW: Toggle flash (if supported)
         function toggleFlash() {
             if (!cameraStream) return;
             
@@ -3348,9 +1466,7 @@
             showNotification(flashOn ? 'Flash turned on' : 'Flash turned off', 'info');
         }
         
-        // NEW: Show friend request from QR code scan
         function showFriendRequestFromQR(userData) {
-            // Update friend request modal with user data
             document.getElementById('requestAvatar').innerHTML = userData.photoURL ? 
                 `<img src="${escapeHtml(userData.photoURL)}" style="width: 100%; height: 100%; border-radius: 50%;">` :
                 `<i class="fas fa-user"></i>`;
@@ -3359,343 +1475,11 @@
             document.getElementById('requestUsername').textContent = userData.username || '@unknown';
             document.getElementById('mutualCount').textContent = '0';
             
-            // Store the user data for the accept button
             const acceptBtn = document.getElementById('acceptRequestBtn');
-            acceptBtn.dataset.userId = userData.id || userData.uid;
+            acceptBtn.dataset.userId = userData.id;
             acceptBtn.dataset.userName = userData.displayName || 'User';
             
-            // Show the friend request modal
             friendRequestModal.classList.add('active');
-        }
-        
-        // Sync all data from backend
-        async function syncAllDataFromBackend() {
-            try {
-                console.log('Syncing all data from backend...');
-                
-                await Promise.all([
-                    syncFriendsFromServer(),
-                    syncContactsFromServer(),
-                    syncFriendRequestsFromServer(),
-                    syncSentRequestsFromServer(),
-                    syncTemporaryFriendsFromServer(),
-                    syncPinnedFriendsFromServer(),
-                    syncMutedFriendsFromServer()
-                ]);
-                
-                // Calculate mutual friends in background
-                setTimeout(() => {
-                    calculateAllMutualFriends();
-                }, 1000);
-                
-                console.log('All data synced successfully in background');
-                
-                // Save to local storage
-                saveFriendsToLocalStorage();
-                
-            } catch (error) {
-                console.error('Error syncing data from backend:', error);
-            }
-        }
-        
-        // Sync friends from server
-        async function syncFriendsFromServer() {
-            if (!currentUser) return;
-            
-            try {
-                console.log('Syncing friends from server...');
-                
-                // SAFE API CALL with fallback
-                let response;
-                if (typeof api === 'function') {
-                    response = await api('GET', '/api/friends');
-                } else {
-                    console.log('API not available, using cached friends');
-                    return;
-                }
-                
-                if (response && response.friends) {
-                    friends = response.friends;
-                    
-                    // Sort by online status first, then name
-                    friends.sort((a, b) => {
-                        if (a.online !== b.online) return b.online ? 1 : -1;
-                        return (a.displayName || '').localeCompare(b.displayName || '');
-                    });
-                    
-                    document.getElementById('friendsCount').textContent = friends.length;
-                    console.log(`Synced ${friends.length} friends from server`);
-                    
-                    // Update UI if on friends tab
-                    if (friendsSection.classList.contains('active')) {
-                        renderFriends();
-                    }
-                }
-                
-            } catch (error) {
-                console.error('Error syncing friends:', error);
-            }
-        }
-        
-        // Sync contacts from server
-        async function syncContactsFromServer() {
-            if (!currentUser) return;
-            
-            try {
-                console.log('Syncing contacts from server...');
-                
-                // SAFE API CALL with fallback
-                let response;
-                if (typeof api === 'function') {
-                    response = await api('GET', '/api/contacts');
-                } else {
-                    console.log('API not available, using cached contacts');
-                    return;
-                }
-                
-                if (response && response.contacts) {
-                    contacts = response.contacts;
-                    
-                    // Filter out users who are already friends or have pending requests
-                    const friendIds = friends.map(f => f.uid || f.id);
-                    const requestFromIds = friendRequests.map(r => r.from || r.senderId);
-                    const sentToIds = sentRequests.map(r => r.to || r.receiverId);
-                    
-                    contacts = contacts.filter(contact => {
-                        const contactId = contact.uid || contact.id;
-                        return !friendIds.includes(contactId) && 
-                               !requestFromIds.includes(contactId) && 
-                               !sentToIds.includes(contactId);
-                    });
-                    
-                    document.getElementById('contactsCount').textContent = contacts.length;
-                    console.log(`Synced ${contacts.length} contacts from server`);
-                    
-                    // Update UI if on contacts tab
-                    if (contactsSection.classList.contains('active')) {
-                        renderContacts();
-                    }
-                }
-                
-            } catch (error) {
-                console.error('Error syncing contacts:', error);
-            }
-        }
-        
-        // Sync friend requests from server
-        async function syncFriendRequestsFromServer() {
-            if (!currentUser) return;
-            
-            try {
-                console.log('Syncing friend requests from server...');
-                
-                // SAFE API CALL with fallback
-                let response;
-                if (typeof api === 'function') {
-                    response = await api('GET', '/api/friend-requests/incoming');
-                } else {
-                    console.log('API not available, using cached friend requests');
-                    return;
-                }
-                
-                if (response && response.requests) {
-                    friendRequests = response.requests;
-                    
-                    const totalRequests = friendRequests.length;
-                    document.getElementById('requestsCount').textContent = totalRequests;
-                    document.getElementById('requestsSectionCount').textContent = totalRequests;
-                    console.log(`Synced ${friendRequests.length} friend requests from server`);
-                    
-                    // Update UI if on requests tab
-                    if (requestsSection.classList.contains('active')) {
-                        renderFriendRequests();
-                    }
-                }
-                
-            } catch (error) {
-                console.error('Error syncing friend requests:', error);
-            }
-        }
-        
-        // Sync sent requests from server
-        async function syncSentRequestsFromServer() {
-            if (!currentUser) return;
-            
-            try {
-                console.log('Syncing sent requests from server...');
-                
-                // SAFE API CALL with fallback
-                let response;
-                if (typeof api === 'function') {
-                    response = await api('GET', '/api/friend-requests/sent');
-                } else {
-                    console.log('API not available, using cached sent requests');
-                    return;
-                }
-                
-                if (response && response.requests) {
-                    sentRequests = response.requests;
-                    
-                    document.getElementById('sentRequestsCount').textContent = sentRequests.length;
-                    console.log(`Synced ${sentRequests.length} sent requests from server`);
-                    
-                    // Update UI if on requests tab
-                    if (requestsSection.classList.contains('active')) {
-                        renderSentRequests();
-                    }
-                }
-                
-            } catch (error) {
-                console.error('Error syncing sent requests:', error);
-            }
-        }
-        
-        // Sync temporary friends from server
-        async function syncTemporaryFriendsFromServer() {
-            try {
-                console.log('Syncing temporary friends from server...');
-                
-                // SAFE API CALL with fallback
-                let response;
-                if (typeof api === 'function') {
-                    response = await api('GET', '/api/friends/temporary');
-                } else {
-                    console.log('API not available, using cached temporary friends');
-                    return;
-                }
-                
-                if (response && response.friends) {
-                    temporaryFriends = response.friends;
-                    
-                    console.log(`Synced ${temporaryFriends.length} temporary friends from server`);
-                    
-                    // Update UI if on temporary tab
-                    if (temporarySection.classList.contains('active')) {
-                        renderTemporaryFriends();
-                    }
-                }
-                
-            } catch (error) {
-                console.error('Error syncing temporary friends:', error);
-            }
-        }
-        
-        // Sync pinned friends from server
-        async function syncPinnedFriendsFromServer() {
-            try {
-                console.log('Syncing pinned friends from server...');
-                
-                // SAFE API CALL with fallback
-                let response;
-                if (typeof api === 'function') {
-                    response = await api('GET', '/api/friends/pinned');
-                } else {
-                    console.log('API not available, using cached pinned friends');
-                    return;
-                }
-                
-                if (response && response.friends) {
-                    pinnedFriends = response.friends;
-                    
-                    document.getElementById('pinnedCount').textContent = pinnedFriends.length;
-                    document.getElementById('pinnedFriends').textContent = pinnedFriends.length;
-                    console.log(`Synced ${pinnedFriends.length} pinned friends from server`);
-                    
-                    // Update UI if on pinned tab
-                    if (pinnedSection.classList.contains('active')) {
-                        renderPinnedFriends();
-                    }
-                }
-                
-            } catch (error) {
-                console.error('Error syncing pinned friends:', error);
-            }
-        }
-        
-        // Sync muted friends from server
-        async function syncMutedFriendsFromServer() {
-            try {
-                console.log('Syncing muted friends from server...');
-                
-                // SAFE API CALL with fallback
-                let response;
-                if (typeof api === 'function') {
-                    response = await api('GET', '/api/friends/muted');
-                } else {
-                    console.log('API not available, using cached muted friends');
-                    return;
-                }
-                
-                if (response && response.friends) {
-                    mutedFriends = response.friends;
-                    
-                    document.getElementById('mutedCount').textContent = mutedFriends.length;
-                    console.log(`Synced ${mutedFriends.length} muted friends from server`);
-                    
-                    // Update UI if on muted tab
-                    if (mutedSection.classList.contains('active')) {
-                        renderMutedFriends();
-                    }
-                }
-                
-            } catch (error) {
-                console.error('Error syncing muted friends:', error);
-            }
-        }
-        
-        // Calculate all mutual friends
-        async function calculateAllMutualFriends() {
-            if (!currentUser) return;
-            
-            try {
-                console.log('Calculating mutual friends in background...');
-                
-                // Get current user's friends list
-                const myFriendIds = friends.map(f => f.uid || f.id);
-                
-                // Calculate mutual friends for each contact and friend
-                const allUsers = [...friends, ...contacts, ...pinnedFriends];
-                
-                for (const user of allUsers) {
-                    const userId = user.uid || user.id;
-                    if (!mutualFriendsCache[userId] || Math.random() < 0.3) { // Refresh cache sometimes
-                        const mutualCount = await calculateMutualFriendsReal(userId, myFriendIds);
-                        mutualFriendsCache[userId] = mutualCount;
-                    }
-                }
-                
-                // Save cache
-                localStorage.setItem(LOCAL_STORAGE_KEYS.MUTUAL_FRIENDS_CACHE, JSON.stringify(mutualFriendsCache));
-                
-                // Update UI with new mutual counts
-                updateCurrentSection();
-                
-            } catch (error) {
-                console.error('Error calculating mutual friends:', error);
-            }
-        }
-        
-        // Calculate mutual friends with real API call
-        async function calculateMutualFriendsReal(friendId, myFriendIds) {
-            try {
-                // SAFE API CALL with fallback
-                if (typeof api !== 'function') {
-                    return Math.floor(Math.random() * 10); // Fallback
-                }
-                
-                // Get friend's friends from backend
-                const response = await api('GET', `/api/friends/mutual/${friendId}`);
-                
-                if (response && response.mutualFriends) {
-                    return response.mutualFriends.length;
-                }
-                
-                return 0;
-                
-            } catch (error) {
-                console.error('Error calculating mutual friends for', friendId, error);
-                return Math.floor(Math.random() * 10); // Fallback
-            }
         }
         
         // Generate unique QR code
@@ -3704,10 +1488,8 @@
                 const qrContainer = document.getElementById('qrCodeContainer');
                 if (!qrContainer) return;
                 
-                // Clear existing QR code
                 qrContainer.innerHTML = '';
                 
-                // Check if QRCode library is loaded
                 if (typeof QRCode === 'undefined') {
                     console.error('QRCode library not loaded');
                     qrContainer.innerHTML = `
@@ -3720,17 +1502,15 @@
                     return;
                 }
                 
-                // Create unique QR data
                 const qrData = JSON.stringify({
                     type: 'knecta_friend_request',
-                    userId: currentUser?.uid || currentUser?.id || 'demo_user',
+                    userId: currentUser?.id || 'demo_user',
                     username: userData?.username || 'demo',
                     displayName: userData?.displayName || 'Demo User',
                     timestamp: Date.now(),
                     app: 'Knecta Chat'
                 });
                 
-                // Generate QR code with proper error handling
                 try {
                     new QRCode(qrContainer, {
                         text: qrData,
@@ -3740,7 +1520,6 @@
                         colorLight: '#ffffff',
                         correctLevel: QRCode.CorrectLevel.H
                     });
-                    
                     console.log('QR code generated successfully');
                 } catch (qrError) {
                     console.error('QR code generation error:', qrError);
@@ -3764,23 +1543,6 @@
                         </div>
                     `;
                 }
-            }
-        }
-        
-        // Save friends to local storage
-        function saveFriendsToLocalStorage() {
-            try {
-                localStorage.setItem(LOCAL_STORAGE_KEYS.FRIENDS, JSON.stringify(friends));
-                localStorage.setItem(LOCAL_STORAGE_KEYS.CONTACTS, JSON.stringify(contacts));
-                localStorage.setItem(LOCAL_STORAGE_KEYS.REQUESTS, JSON.stringify(friendRequests));
-                localStorage.setItem(LOCAL_STORAGE_KEYS.SENT_REQUESTS, JSON.stringify(sentRequests));
-                localStorage.setItem(LOCAL_STORAGE_KEYS.TEMPORARY_FRIENDS, JSON.stringify(temporaryFriends));
-                localStorage.setItem(LOCAL_STORAGE_KEYS.PINNED_FRIENDS, JSON.stringify(pinnedFriends));
-                localStorage.setItem(LOCAL_STORAGE_KEYS.MUTED_FRIENDS, JSON.stringify(mutedFriends));
-                localStorage.setItem(LOCAL_STORAGE_KEYS.LAST_SYNC, Date.now().toString());
-                console.log('Friends saved to local storage');
-            } catch (error) {
-                console.error('Error saving friends to local storage:', error);
             }
         }
         
@@ -3819,10 +1581,9 @@
                 return;
             }
             
-            // Sort: pinned first, then online, then alphabetical
             const sortedFriends = [...friends].sort((a, b) => {
-                const aPinned = pinnedFriends.some(f => (f.uid || f.id) === (a.uid || a.id));
-                const bPinned = pinnedFriends.some(f => (f.uid || f.id) === (b.uid || b.id));
+                const aPinned = pinnedFriends.some(f => f.id === a.id);
+                const bPinned = pinnedFriends.some(f => f.id === b.id);
                 
                 if (aPinned !== bPinned) return bPinned ? 1 : -1;
                 if (a.online !== b.online) return b.online ? 1 : -1;
@@ -3874,73 +1635,13 @@
             });
         }
         
-        // Render temporary friends
-        function renderTemporaryFriends() {
-            temporaryList.innerHTML = '';
-            
-            if (temporaryFriends.length === 0) {
-                temporaryList.innerHTML = `
-                    <div class="empty-state">
-                        <i class="fas fa-clock"></i>
-                        <p>No temporary friends</p>
-                        <p class="subtext">Temporary friends expire after a set time</p>
-                    </div>
-                `;
-                return;
-            }
-            
-            temporaryFriends.forEach(friend => {
-                addFriendItem(friend, temporaryList, 'temporary');
-            });
-        }
-        
-        // Render pinned friends
-        function renderPinnedFriends() {
-            pinnedList.innerHTML = '';
-            
-            if (pinnedFriends.length === 0) {
-                pinnedList.innerHTML = `
-                    <div class="empty-state">
-                        <i class="fas fa-thumbtack"></i>
-                        <p>No pinned friends</p>
-                        <p class="subtext">Pin important friends to keep them at the top</p>
-                    </div>
-                `;
-                return;
-            }
-            
-            pinnedFriends.forEach(friend => {
-                addFriendItem(friend, pinnedList, 'pinned');
-            });
-        }
-        
-        // Render muted friends
-        function renderMutedFriends() {
-            mutedList.innerHTML = '';
-            
-            if (mutedFriends.length === 0) {
-                mutedList.innerHTML = `
-                    <div class="empty-state">
-                        <i class="fas fa-volume-mute"></i>
-                        <p>No muted friends</p>
-                        <p class="subtext">Mute friends to disable notifications</p>
-                    </div>
-                `;
-                return;
-            }
-            
-            mutedFriends.forEach(friend => {
-                addFriendItem(friend, mutedList, 'muted');
-            });
-        }
-        
         // Add friend item to list
         function addFriendItem(friendData, container, type) {
             if (currentCategoryFilter !== 'all' && friendData.category !== currentCategoryFilter) {
-                if (currentCategoryFilter === 'pinned' && !pinnedFriends.some(f => (f.uid || f.id) === (friendData.uid || friendData.id))) {
+                if (currentCategoryFilter === 'pinned' && !pinnedFriends.some(f => f.id === friendData.id)) {
                     return;
                 }
-                if (currentCategoryFilter === 'muted' && !mutedFriends.some(f => (f.uid || f.id) === (friendData.uid || friendData.id))) {
+                if (currentCategoryFilter === 'muted' && !mutedFriends.some(f => f.id === friendData.id)) {
                     return;
                 }
                 if (!['pinned', 'muted'].includes(currentCategoryFilter) && friendData.category !== currentCategoryFilter) {
@@ -3952,7 +1653,7 @@
                 return;
             }
             
-            const friendId = friendData.uid || friendData.id;
+            const friendId = friendData.id;
             const existingItem = container.querySelector(`[data-user-id="${friendId}"]`);
             if (existingItem) {
                 existingItem.remove();
@@ -3988,19 +1689,16 @@
                 }
             }
             
-            // Get last interaction
             const lastInteraction = getLastInteraction(friendId);
             if (lastInteraction) {
                 statusText = lastInteraction;
             }
             
             const mutualCount = mutualFriendsCache[friendId] || 0;
-            
             const category = friendData.category || 'friend';
             const categoryInfo = friendCategories[category];
-            
-            const isPinned = pinnedFriends.some(f => (f.uid || f.id) === friendId);
-            const isMuted = mutedFriends.some(f => (f.uid || f.id) === friendId);
+            const isPinned = pinnedFriends.some(f => f.id === friendId);
+            const isMuted = mutedFriends.some(f => f.id === friendId);
             
             friendItem.innerHTML = `
                 <div class="friend-avatar" ${friendData.photoURL ? `style="background-image: url('${escapeHtml(friendData.photoURL)}')"` : ''}>
@@ -4054,14 +1752,12 @@
                 </div>
             `;
             
-            // Add click listener for friend item
             friendItem.addEventListener('click', (e) => {
                 if (!e.target.closest('.friend-actions') && !e.target.closest('.mutual-friends')) {
                     showFriendDetails(friendData, type);
                 }
             });
             
-            // Add action button listeners
             const actionButtons = friendItem.querySelectorAll('.friend-action-btn');
             actionButtons.forEach(btn => {
                 btn.addEventListener('click', (e) => {
@@ -4071,7 +1767,6 @@
                 });
             });
             
-            // Add mutual friends click listener
             const mutualFriendsElement = friendItem.querySelector('.mutual-friends');
             if (mutualFriendsElement) {
                 mutualFriendsElement.addEventListener('click', (e) => {
@@ -4092,9 +1787,8 @@
             requestItem.dataset.requestId = requestData.id;
             requestItem.dataset.type = type + '_request';
             
-            // Extract user data
             const userData = requestData.user || requestData.sender || requestData.receiver || requestData;
-            const userId = userData.uid || userData.id;
+            const userId = userData.id;
             
             const initials = userData.displayName ? 
                 userData.displayName.split(' ').map(word => word[0]).join('').toUpperCase().substring(0, 2) : 
@@ -4159,7 +1853,6 @@
                 });
             });
             
-            // Add mutual friends click listener
             const mutualFriendsElement = requestItem.querySelector('.mutual-friends');
             if (mutualFriendsElement) {
                 mutualFriendsElement.addEventListener('click', (e) => {
@@ -4173,31 +1866,22 @@
             container.appendChild(requestItem);
         }
         
-        // Handle friend actions - SMART NAVIGATION IMPLEMENTED
+        // Handle friend actions
         function handleFriendAction(action, friendData, type, button) {
             const userId = button.dataset.userId;
             const userName = button.dataset.userName;
             
             switch(action) {
                 case 'start-chat':
-                    // SMART NAVIGATION: Direct navigation to chat
                     navigateToChat(userId, userName);
                     break;
                     
                 case 'call':
-                    // SMART NAVIGATION: Direct navigation to call
                     navigateToCall(userId, userName);
                     break;
                     
                 case 'add':
-                    if (typeof settingsManager !== 'undefined') {
-                        const allowFriendRequests = settingsManager.getSetting('allowFriendRequests');
-                        if (allowFriendRequests === false) {
-                            showNotification('Friend requests are currently disabled', 'warning');
-                            return;
-                        }
-                    }
-                    sendFriendRequest(friendData.uid || friendData.id);
+                    sendFriendRequest(friendData.id);
                     break;
                     
                 case 'more':
@@ -4205,7 +1889,7 @@
                     break;
                     
                 case 'accept':
-                    acceptFriendRequestOnline(friendData.id || friendData.requestId, friendData.from || friendData.senderId || friendData.uid || friendData.id);
+                    acceptFriendRequestOnline(friendData.id || friendData.requestId, friendData.senderId || friendData.id);
                     break;
                     
                 case 'decline':
@@ -4220,14 +1904,6 @@
                     showFriendRequestProfile(friendData);
                     break;
                     
-                case 'extend':
-                    extendTemporaryFriend(friendData);
-                    break;
-                    
-                case 'make-permanent':
-                    makeFriendPermanent(friendData);
-                    break;
-                    
                 default:
                     console.log('Unknown action:', action);
             }
@@ -4237,7 +1913,7 @@
         function handleRequestAction(action, requestData, button) {
             switch(action) {
                 case 'accept':
-                    acceptFriendRequestOnline(requestData.id, requestData.from || requestData.senderId);
+                    acceptFriendRequestOnline(requestData.id, requestData.senderId);
                     break;
                     
                 case 'decline':
@@ -4256,20 +1932,14 @@
         
         // Show mutual friends
         async function showMutualFriends(userId, userName) {
-            if (!currentUser) {
-                showNotification('Cannot view mutual friends', 'warning');
-                return;
-            }
-            
             try {
-                // SAFE API CALL
-                let response;
-                if (typeof api === 'function') {
-                    response = await api('GET', `/api/friends/mutual/${userId}`);
-                } else {
+                const api = window.parent.api;
+                if (!api) {
                     showNotification('API not available', 'error');
                     return;
                 }
+                
+                const response = await api.get(`/api/friends/mutual/${userId}`);
                 
                 if (response && response.mutualFriends) {
                     const mutualFriends = response.mutualFriends;
@@ -4279,7 +1949,6 @@
                         return;
                     }
                     
-                    // Display mutual friends modal
                     displayMutualFriendsModal(mutualFriends, userName);
                 } else {
                     showNotification('No mutual friends found', 'info');
@@ -4308,7 +1977,7 @@
                 `;
             } else {
                 mutualFriends.forEach(friend => {
-                    const friendId = friend.uid || friend.id;
+                    const friendId = friend.id;
                     const initials = friend.displayName ? 
                         friend.displayName.split(' ').map(word => word[0]).join('').toUpperCase().substring(0, 2) : 
                         'U';
@@ -4339,15 +2008,13 @@
         
         // Send friend request
         async function sendFriendRequest(friendId, category = 'friend', note = '', isTemporary = false, duration = null, isBusiness = false) {
-            if (typeof settingsManager !== 'undefined') {
-                const allowFriendRequests = settingsManager.getSetting('allowFriendRequests');
-                if (allowFriendRequests === false) {
-                    showNotification('Friend requests are currently disabled', 'warning');
+            try {
+                const api = window.parent.api;
+                if (!api) {
+                    showNotification('API not available', 'error');
                     return;
                 }
-            }
-            
-            try {
+                
                 const requestData = {
                     receiverId: friendId,
                     category: category,
@@ -4357,24 +2024,24 @@
                     isBusiness: isBusiness
                 };
                 
-                // SAFE API CALL
-                let response;
-                if (typeof api === 'function') {
-                    response = await api('POST', '/api/friend-requests/send', requestData);
-                } else {
-                    showNotification('API not available', 'error');
-                    return;
-                }
+                const response = await api.post('/api/friend-requests/send', requestData);
                 
                 if (response && response.success) {
-                    // Update local data
-                    await syncSentRequestsFromServer();
-                    await fetchAllUsersFromBackend(); // Refresh all users list
+                    // Refresh sent requests
+                    const sentResponse = await api.get('/api/friend-requests/sent');
+                    if (sentResponse && sentResponse.requests) {
+                        sentRequests = sentResponse.requests;
+                        document.getElementById('sentRequestsCount').textContent = sentRequests.length;
+                        localStorage.setItem(LOCAL_STORAGE_KEYS.SENT_REQUESTS, JSON.stringify(sentRequests));
+                    }
+                    
+                    // Refresh all users
+                    await fetchAllUsersFromBackend();
+                    
+                    // Update UI
                     updateCurrentSection();
-                    saveFriendsToLocalStorage();
                     
                     showNotification('Friend request sent successfully', 'success');
-                    
                     addFriendModal.classList.remove('active');
                 } else {
                     showNotification('Failed to send friend request', 'error');
@@ -4389,24 +2056,20 @@
         // Accept friend request
         async function acceptFriendRequestOnline(requestId, friendId) {
             try {
-                // SAFE API CALL
-                let response;
-                if (typeof api === 'function') {
-                    response = await api('POST', `/api/friend-requests/${requestId}/accept`);
-                } else {
+                const api = window.parent.api;
+                if (!api) {
                     showNotification('API not available', 'error');
                     return;
                 }
                 
+                const response = await api.post(`/api/friend-requests/${requestId}/accept`);
+                
                 if (response && response.success) {
-                    // Update local data
-                    await syncAllDataFromBackend();
-                    await fetchAllUsersFromBackend(); // Refresh all users list
-                    updateCurrentSection();
-                    saveFriendsToLocalStorage();
+                    // Refresh data
+                    await loadInitialData();
+                    await fetchAllUsersFromBackend();
                     
                     showNotification('Friend request accepted', 'success');
-                    
                     friendRequestModal.classList.remove('active');
                 } else {
                     showNotification('Failed to accept friend request', 'error');
@@ -4421,26 +2084,31 @@
         // Decline friend request
         async function declineFriendRequest(requestData) {
             try {
-                const requestId = requestData.id;
-                
-                // SAFE API CALL
-                let response;
-                if (typeof api === 'function') {
-                    response = await api('POST', `/api/friend-requests/${requestId}/decline`);
-                } else {
+                const api = window.parent.api;
+                if (!api) {
                     showNotification('API not available', 'error');
                     return;
                 }
                 
+                const response = await api.post(`/api/friend-requests/${requestData.id}/decline`);
+                
                 if (response && response.success) {
-                    // Update local data
-                    await syncFriendRequestsFromServer();
-                    await fetchAllUsersFromBackend(); // Refresh all users list
+                    // Refresh friend requests
+                    const requestsResponse = await api.get('/api/friend-requests/incoming');
+                    if (requestsResponse && requestsResponse.requests) {
+                        friendRequests = requestsResponse.requests;
+                        document.getElementById('requestsCount').textContent = friendRequests.length;
+                        document.getElementById('requestsSectionCount').textContent = friendRequests.length;
+                        localStorage.setItem(LOCAL_STORAGE_KEYS.REQUESTS, JSON.stringify(friendRequests));
+                    }
+                    
+                    // Refresh all users
+                    await fetchAllUsersFromBackend();
+                    
+                    // Update UI
                     updateCurrentSection();
-                    saveFriendsToLocalStorage();
                     
                     showNotification('Friend request declined', 'success');
-                    
                     friendRequestModal.classList.remove('active');
                 } else {
                     showNotification('Failed to decline friend request', 'error');
@@ -4455,26 +2123,30 @@
         // Cancel friend request
         async function cancelFriendRequest(requestData) {
             try {
-                const requestId = requestData.id;
-                
-                // SAFE API CALL
-                let response;
-                if (typeof api === 'function') {
-                    response = await api('DELETE', `/api/friend-requests/${requestId}`);
-                } else {
+                const api = window.parent.api;
+                if (!api) {
                     showNotification('API not available', 'error');
                     return;
                 }
                 
+                const response = await api.delete(`/api/friend-requests/${requestData.id}`);
+                
                 if (response && response.success) {
-                    // Update local data
-                    await syncSentRequestsFromServer();
-                    await fetchAllUsersFromBackend(); // Refresh all users list
+                    // Refresh sent requests
+                    const sentResponse = await api.get('/api/friend-requests/sent');
+                    if (sentResponse && sentResponse.requests) {
+                        sentRequests = sentResponse.requests;
+                        document.getElementById('sentRequestsCount').textContent = sentRequests.length;
+                        localStorage.setItem(LOCAL_STORAGE_KEYS.SENT_REQUESTS, JSON.stringify(sentRequests));
+                    }
+                    
+                    // Refresh all users
+                    await fetchAllUsersFromBackend();
+                    
+                    // Update UI
                     updateCurrentSection();
-                    saveFriendsToLocalStorage();
                     
                     showNotification('Friend request cancelled', 'success');
-                    
                 } else {
                     showNotification('Failed to cancel friend request', 'error');
                 }
@@ -4488,20 +2160,16 @@
         // Show friend details
         function showFriendDetails(friendData, type) {
             selectedFriend = friendData;
-            
             document.querySelector('.friend-details-title').textContent = 'Friend Details';
-            
             friendDetailsPanel.classList.add('active');
-            
             loadFriendDetails(friendData, type);
         }
         
         // Show friend request profile
         function showFriendRequestProfile(requestData) {
             const userData = requestData.user || requestData.sender || requestData.receiver || requestData;
-            const userId = userData.uid || userData.id;
+            const userId = userData.id;
             
-            // Create a detailed profile view modal
             const profileModal = document.createElement('div');
             profileModal.className = 'add-friend-modal active';
             profileModal.innerHTML = `
@@ -4595,7 +2263,6 @@
             
             document.body.appendChild(profileModal);
             
-            // Add event listeners
             profileModal.querySelector('.close-profile-modal').addEventListener('click', () => {
                 document.body.removeChild(profileModal);
             });
@@ -4604,7 +2271,6 @@
                 document.body.removeChild(profileModal);
             });
             
-            // Add mutual friends click listener
             const mutualFriendsElement = profileModal.querySelector('.mutual-friends');
             if (mutualFriendsElement) {
                 mutualFriendsElement.addEventListener('click', () => {
@@ -4641,13 +2307,12 @@
             try {
                 let detailedData = friendData;
                 
-                // Try to get more details from backend if needed
                 if (type === 'friend' || type === 'contact' || type === 'user') {
                     try {
-                        const friendId = friendData.uid || friendData.id;
-                        // SAFE API CALL
-                        if (typeof api === 'function') {
-                            const response = await api('GET', `/api/users/${friendId}`);
+                        const api = window.parent.api;
+                        if (api) {
+                            const friendId = friendData.id;
+                            const response = await api.get(`/api/users/${friendId}`);
                             if (response && response.user) {
                                 detailedData = { ...detailedData, ...response.user };
                             }
@@ -4659,7 +2324,7 @@
                 
                 let friendshipData = null;
                 if (type === 'friend') {
-                    const friend = friends.find(f => (f.uid || f.id) === (friendData.uid || friendData.id));
+                    const friend = friends.find(f => f.id === friendData.id);
                     if (friend) {
                         friendshipData = {
                             category: friend.category || 'friend',
@@ -4673,7 +2338,7 @@
                     }
                 }
                 
-                const friendId = detailedData.uid || detailedData.id;
+                const friendId = detailedData.id;
                 const mutualCount = mutualFriendsCache[friendId] || 0;
                 
                 let statusClass = 'offline';
@@ -4697,7 +2362,6 @@
                     }
                 }
                 
-                // Get last interaction
                 const lastInteraction = getLastInteraction(friendId);
                 if (lastInteraction) {
                     statusText = lastInteraction;
@@ -4705,22 +2369,20 @@
                 
                 const category = friendshipData?.category || 'friend';
                 const categoryInfo = friendCategories[category];
-                
                 const initials = detailedData.displayName ? 
                     detailedData.displayName.split(' ').map(word => word[0]).join('').toUpperCase().substring(0, 2) : 
                     'U';
                 
                 let notes = friendshipData?.notes || '';
-                // Check for private notes
                 if (window.privateNotes && window.privateNotes[friendId]) {
                     notes = window.privateNotes[friendId];
                 }
                 
-                const isPinned = pinnedFriends.some(f => (f.uid || f.id) === friendId);
-                const isMuted = mutedFriends.some(f => (f.uid || f.id) === friendId);
-                const isAlreadyFriend = friends.some(f => (f.uid || f.id) === friendId);
-                const hasPendingRequest = sentRequests.some(r => (r.to || r.receiverId) === friendId);
-                const hasIncomingRequest = friendRequests.some(r => (r.from || r.senderId) === friendId);
+                const isPinned = pinnedFriends.some(f => f.id === friendId);
+                const isMuted = mutedFriends.some(f => f.id === friendId);
+                const isAlreadyFriend = friends.some(f => f.id === friendId);
+                const hasPendingRequest = sentRequests.some(r => r.receiverId === friendId);
+                const hasIncomingRequest = friendRequests.some(r => r.senderId === friendId);
                 
                 detailsContent.innerHTML = `
                     <div class="friend-profile-header">
@@ -4893,7 +2555,6 @@
                     </div>
                 `;
                 
-                // Add event listeners for action buttons
                 if (type === 'friend' || type === 'pinned' || type === 'muted') {
                     document.getElementById('startChatDetailsBtn').addEventListener('click', function() {
                         const userId = this.dataset.userId;
@@ -4918,7 +2579,6 @@
                         });
                     }
                     
-                    // Add mutual friends click listener
                     const mutualFriendsElement = detailsContent.querySelector('.mutual-friends');
                     if (mutualFriendsElement) {
                         mutualFriendsElement.addEventListener('click', () => {
@@ -4937,13 +2597,6 @@
                     });
                     
                     document.getElementById('addContactBtn').addEventListener('click', () => {
-                        if (typeof settingsManager !== 'undefined') {
-                            const allowFriendRequests = settingsManager.getSetting('allowFriendRequests');
-                            if (allowFriendRequests === false) {
-                                showNotification('Friend requests are currently disabled', 'warning');
-                                return;
-                            }
-                        }
                         sendFriendRequest(friendId);
                     });
                 }
@@ -4959,26 +2612,12 @@
                     
                     if (document.getElementById('addUserBtn')) {
                         document.getElementById('addUserBtn').addEventListener('click', () => {
-                            if (typeof settingsManager !== 'undefined') {
-                                const allowFriendRequests = settingsManager.getSetting('allowFriendRequests');
-                                if (allowFriendRequests === false) {
-                                    showNotification('Friend requests are currently disabled', 'warning');
-                                    return;
-                                }
-                            }
                             sendFriendRequest(friendId);
                         });
                     }
                     
                     if (document.getElementById('addUserAsFriendBtn')) {
                         document.getElementById('addUserAsFriendBtn').addEventListener('click', () => {
-                            if (typeof settingsManager !== 'undefined') {
-                                const allowFriendRequests = settingsManager.getSetting('allowFriendRequests');
-                                if (allowFriendRequests === false) {
-                                    showNotification('Friend requests are currently disabled', 'warning');
-                                    return;
-                                }
-                            }
                             sendFriendRequest(friendId);
                         });
                     }
@@ -4986,7 +2625,7 @@
                 
                 if (type === 'incoming_request') {
                     document.getElementById('acceptRequestDetailsBtn').addEventListener('click', () => {
-                        acceptFriendRequestOnline(friendData.id || friendData.requestId, friendData.from || friendData.senderId || friendId);
+                        acceptFriendRequestOnline(friendData.id || friendData.requestId, friendData.senderId || friendId);
                     });
                     
                     document.getElementById('declineRequestDetailsBtn').addEventListener('click', () => {
@@ -5012,7 +2651,6 @@
         
         // Show friend options
         function showFriendOptions(friendData) {
-            // Create options modal
             const optionsModal = document.createElement('div');
             optionsModal.className = 'add-friend-modal active';
             optionsModal.innerHTML = `
@@ -5036,10 +2674,10 @@
                                 <i class="fas fa-tag"></i> Change Category
                             </button>
                             <button class="action-btn secondary" id="togglePinBtn">
-                                <i class="fas fa-thumbtack"></i> ${pinnedFriends.some(f => (f.uid || f.id) === (friendData.uid || friendData.id)) ? 'Unpin Friend' : 'Pin Friend'}
+                                <i class="fas fa-thumbtack"></i> ${pinnedFriends.some(f => f.id === friendData.id) ? 'Unpin Friend' : 'Pin Friend'}
                             </button>
                             <button class="action-btn secondary" id="toggleMuteBtn">
-                                <i class="fas fa-volume-mute"></i> ${mutedFriends.some(f => (f.uid || f.id) === (friendData.uid || friendData.id)) ? 'Unmute Friend' : 'Mute Friend'}
+                                <i class="fas fa-volume-mute"></i> ${mutedFriends.some(f => f.id === friendData.id) ? 'Unmute Friend' : 'Mute Friend'}
                             </button>
                             <button class="action-btn secondary" id="viewChatHistoryBtn">
                                 <i class="fas fa-history"></i> View Chat History
@@ -5065,7 +2703,6 @@
             
             document.body.appendChild(optionsModal);
             
-            // Add event listeners
             optionsModal.querySelector('.close-options-modal').addEventListener('click', () => {
                 document.body.removeChild(optionsModal);
             });
@@ -5113,35 +2750,32 @@
         // Toggle pin friend
         async function togglePinFriend(friendData) {
             try {
-                const friendId = friendData.uid || friendData.id;
-                const isPinned = pinnedFriends.some(f => (f.uid || f.id) === friendId);
-                
-                // SAFE API CALL
-                if (typeof api !== 'function') {
+                const api = window.parent.api;
+                if (!api) {
                     showNotification('API not available', 'error');
                     return;
                 }
                 
+                const friendId = friendData.id;
+                const isPinned = pinnedFriends.some(f => f.id === friendId);
+                
                 if (isPinned) {
-                    // Unpin
-                    const response = await api('DELETE', `/api/friends/${friendId}/pin`);
+                    const response = await api.delete(`/api/friends/${friendId}/pin`);
                     if (response && response.success) {
-                        pinnedFriends = pinnedFriends.filter(f => (f.uid || f.id) !== friendId);
+                        pinnedFriends = pinnedFriends.filter(f => f.id !== friendId);
                         showNotification('Friend unpinned', 'success');
                     }
                 } else {
-                    // Pin
-                    const response = await api('POST', `/api/friends/${friendId}/pin`);
+                    const response = await api.post(`/api/friends/${friendId}/pin`);
                     if (response && response.success) {
                         pinnedFriends.push(friendData);
                         showNotification('Friend pinned', 'success');
                     }
                 }
                 
-                // Update local storage
                 localStorage.setItem(LOCAL_STORAGE_KEYS.PINNED_FRIENDS, JSON.stringify(pinnedFriends));
-                
-                // Update UI
+                document.getElementById('pinnedCount').textContent = pinnedFriends.length;
+                document.getElementById('pinnedFriends').textContent = pinnedFriends.length;
                 updateCurrentSection();
                 updateFriendCounts();
                 
@@ -5154,35 +2788,31 @@
         // Toggle mute friend
         async function toggleMuteFriend(friendData) {
             try {
-                const friendId = friendData.uid || friendData.id;
-                const isMuted = mutedFriends.some(f => (f.uid || f.id) === friendId);
-                
-                // SAFE API CALL
-                if (typeof api !== 'function') {
+                const api = window.parent.api;
+                if (!api) {
                     showNotification('API not available', 'error');
                     return;
                 }
                 
+                const friendId = friendData.id;
+                const isMuted = mutedFriends.some(f => f.id === friendId);
+                
                 if (isMuted) {
-                    // Unmute
-                    const response = await api('DELETE', `/api/friends/${friendId}/mute`);
+                    const response = await api.delete(`/api/friends/${friendId}/mute`);
                     if (response && response.success) {
-                        mutedFriends = mutedFriends.filter(f => (f.uid || f.id) !== friendId);
+                        mutedFriends = mutedFriends.filter(f => f.id !== friendId);
                         showNotification('Friend unmuted', 'success');
                     }
                 } else {
-                    // Mute
-                    const response = await api('POST', `/api/friends/${friendId}/mute`);
+                    const response = await api.post(`/api/friends/${friendId}/mute`);
                     if (response && response.success) {
                         mutedFriends.push(friendData);
                         showNotification('Friend muted', 'success');
                     }
                 }
                 
-                // Update local storage
                 localStorage.setItem(LOCAL_STORAGE_KEYS.MUTED_FRIENDS, JSON.stringify(mutedFriends));
-                
-                // Update UI
+                document.getElementById('mutedCount').textContent = mutedFriends.length;
                 updateCurrentSection();
                 updateFriendCounts();
                 
@@ -5195,17 +2825,12 @@
         // Save private note
         function savePrivateNote(friendId, note) {
             try {
-                // Initialize private notes object if not exists
                 if (!window.privateNotes) {
                     window.privateNotes = {};
                 }
                 
-                // Save note
                 window.privateNotes[friendId] = note;
-                
-                // Save to local storage
                 localStorage.setItem(LOCAL_STORAGE_KEYS.PRIVATE_NOTES, JSON.stringify(window.privateNotes));
-                
                 showNotification('Note saved', 'success');
                 
             } catch (error) {
@@ -5261,7 +2886,6 @@
                     case 'allFriendsSection':
                         allFriendsList.innerHTML = '';
                         
-                        // Show pinned first, then friends, then contacts
                         const allToDisplay = [
                             ...pinnedFriends,
                             ...friends,
@@ -5279,8 +2903,8 @@
                             `;
                         } else {
                             allToDisplay.forEach(item => {
-                                const type = pinnedFriends.some(f => (f.uid || f.id) === (item.uid || item.id)) ? 'pinned' :
-                                           friends.some(f => f.uid === item.uid) ? 'friend' : 'contact';
+                                const type = pinnedFriends.some(f => f.id === item.id) ? 'pinned' :
+                                           friends.some(f => f.id === item.id) ? 'friend' : 'contact';
                                 addFriendItem(item, allFriendsList, type);
                             });
                         }
@@ -5355,10 +2979,8 @@
             if (!notificationText) return;
             
             notificationText.textContent = message;
-            
             notification.className = 'notification';
             notification.classList.add(type);
-            
             notification.classList.add('active');
             
             setTimeout(() => {
@@ -5370,7 +2992,6 @@
         function showStartChatModal() {
             startChatModal.classList.add('active');
             populateChatFriendsList();
-            
             window.selectedChatFriend = null;
             document.getElementById('confirmStartChatBtn').disabled = true;
             document.getElementById('searchChatUser').value = '';
@@ -5383,7 +3004,6 @@
             
             chatFriendsList.innerHTML = '';
             
-            // Combine all chattable friends (pinned first, then online, then others)
             const allChattableFriends = [
                 ...pinnedFriends,
                 ...friends.filter(f => f.online),
@@ -5403,7 +3023,7 @@
             }
             
             allChattableFriends.forEach(friend => {
-                const friendId = friend.uid || friend.id;
+                const friendId = friend.id;
                 const initials = friend.displayName ? 
                     friend.displayName.split(' ').map(word => word[0]).join('').toUpperCase().substring(0, 2) : 
                     'U';
@@ -5435,7 +3055,6 @@
                     
                     friendItem.classList.add('selected');
                     window.selectedChatFriend = friend;
-                    
                     document.getElementById('confirmStartChatBtn').disabled = false;
                 });
                 
@@ -5519,7 +3138,6 @@
             });
             
             document.getElementById('toggleCameraBtn').addEventListener('click', toggleCamera);
-            
             document.getElementById('toggleFlashBtn').addEventListener('click', toggleFlash);
             
             // Category tabs
@@ -5546,7 +3164,6 @@
                     
                     const sectionId = categoryTabs[tabId];
                     document.getElementById(sectionId).classList.add('active');
-                    
                     updateCurrentSection();
                 });
             });
@@ -5566,14 +3183,6 @@
             
             // Add friend button
             document.getElementById('addFriendBtn').addEventListener('click', () => {
-                if (typeof settingsManager !== 'undefined') {
-                    const allowFriendRequests = settingsManager.getSetting('allowFriendRequests');
-                    if (allowFriendRequests === false) {
-                        showNotification('Friend requests are currently disabled', 'warning');
-                        return;
-                    }
-                }
-                
                 addFriendModal.classList.add('active');
                 document.querySelector('.add-friend-tab[data-tab="methods"]').click();
             });
@@ -5616,11 +3225,8 @@
                     if (tabContent) {
                         tabContent.classList.add('active');
                         
-                        // Load data for specific tabs
                         if (tabName === 'all-users') {
                             renderAllUsersList();
-                        } else if (tabName === 'groups') {
-                            // Load groups if needed
                         }
                     }
                 });
@@ -5657,23 +3263,14 @@
                         return;
                     }
                     
-                    if (typeof settingsManager !== 'undefined') {
-                        const allowFriendRequests = settingsManager.getSetting('allowFriendRequests');
-                        if (allowFriendRequests === false) {
-                            showNotification('Friend requests are currently disabled', 'warning');
-                            return;
-                        }
-                    }
-                    
                     try {
-                        // SAFE API CALL
-                        let response;
-                        if (typeof api === 'function') {
-                            response = await api('GET', `/api/users/search?username=${encodeURIComponent(usernameInput)}`);
-                        } else {
+                        const api = window.parent.api;
+                        if (!api) {
                             showNotification('API not available', 'error');
                             return;
                         }
+                        
+                        const response = await api.get(`/api/users/search?username=${encodeURIComponent(usernameInput)}`);
                         
                         if (!response || !response.user) {
                             showNotification('User not found', 'error');
@@ -5682,18 +3279,16 @@
                         
                         const userData = response.user;
                         
-                        if (userData.id === currentUser.id || userData.uid === currentUser.uid) {
+                        if (userData.id === currentUser.id) {
                             showNotification('You cannot add yourself as a friend', 'warning');
                             return;
                         }
                         
                         const category = document.getElementById('friendCategorySelect').value || 'friend';
                         const note = document.getElementById('friendNote').value.trim();
-                        const isTemporary = false;
-                        const duration = null;
                         const isBusiness = category === 'business';
                         
-                        sendFriendRequest(userData.id || userData.uid, category, note, isTemporary, duration, isBusiness);
+                        sendFriendRequest(userData.id, category, note, false, null, isBusiness);
                         
                     } catch (error) {
                         console.error('Error searching for user:', error);
@@ -5727,7 +3322,7 @@
             
             document.getElementById('confirmStartChatBtn').addEventListener('click', () => {
                 if (window.selectedChatFriend) {
-                    const userId = window.selectedChatFriend.uid || window.selectedChatFriend.id;
+                    const userId = window.selectedChatFriend.id;
                     const userName = window.selectedChatFriend.displayName || 'User';
                     navigateToChat(userId, userName);
                     startChatModal.classList.remove('active');
@@ -5754,14 +3349,58 @@
             });
         }
         
+        // Save friends to local storage
+        function saveFriendsToLocalStorage() {
+            try {
+                localStorage.setItem(LOCAL_STORAGE_KEYS.FRIENDS, JSON.stringify(friends));
+                localStorage.setItem(LOCAL_STORAGE_KEYS.CONTACTS, JSON.stringify(contacts));
+                localStorage.setItem(LOCAL_STORAGE_KEYS.REQUESTS, JSON.stringify(friendRequests));
+                localStorage.setItem(LOCAL_STORAGE_KEYS.SENT_REQUESTS, JSON.stringify(sentRequests));
+                localStorage.setItem(LOCAL_STORAGE_KEYS.TEMPORARY_FRIENDS, JSON.stringify(temporaryFriends));
+                localStorage.setItem(LOCAL_STORAGE_KEYS.PINNED_FRIENDS, JSON.stringify(pinnedFriends));
+                localStorage.setItem(LOCAL_STORAGE_KEYS.MUTED_FRIENDS, JSON.stringify(mutedFriends));
+                localStorage.setItem(LOCAL_STORAGE_KEYS.LAST_SYNC, Date.now().toString());
+                console.log('Friends saved to local storage');
+            } catch (error) {
+                console.error('Error saving friends to local storage:', error);
+            }
+        }
+        
         // Simulate contact sync
         async function simulateContactSync() {
             showNotification('Syncing contacts...', 'info');
             
             try {
-                await syncContactsFromServer();
+                const api = window.parent.api;
+                if (!api) {
+                    showNotification('API not available', 'error');
+                    return;
+                }
                 
-                showNotification(`Found ${contacts.length} contacts`, 'success');
+                const response = await api.get('/api/contacts');
+                if (response && response.contacts) {
+                    contacts = response.contacts;
+                    
+                    const friendIds = friends.map(f => f.id);
+                    const requestFromIds = friendRequests.map(r => r.senderId);
+                    const sentToIds = sentRequests.map(r => r.receiverId);
+                    
+                    contacts = contacts.filter(contact => {
+                        const contactId = contact.id;
+                        return !friendIds.includes(contactId) && 
+                               !requestFromIds.includes(contactId) && 
+                               !sentToIds.includes(contactId);
+                    });
+                    
+                    document.getElementById('contactsCount').textContent = contacts.length;
+                    localStorage.setItem(LOCAL_STORAGE_KEYS.CONTACTS, JSON.stringify(contacts));
+                    
+                    if (contactsSection.classList.contains('active')) {
+                        renderContacts();
+                    }
+                    
+                    showNotification(`Found ${contacts.length} contacts`, 'success');
+                }
                 
             } catch (error) {
                 console.error('Error syncing contacts:', error);
@@ -5769,16 +3408,72 @@
             }
         }
         
-        console.log('Friends system initialized successfully with backend API integration');
-        console.log('New Features Added:');
-        console.log('1. Fetch all users from backend /users endpoint');
-        console.log('2. Filter out currently logged-in user');
-        console.log('3. Display remaining users in "All Users" tab');
-        console.log('4. Camera QR code scanner integration');
-        console.log('5. Preserved all existing event listeners and functionality');
+        // The following functions are stubs for features not fully implemented
+        function showChangeCategoryModal(friendData) {
+            showNotification('Change category feature coming soon', 'info');
+        }
+        
+        function viewChatHistory(friendData) {
+            showNotification('Chat history feature coming soon', 'info');
+        }
+        
+        function viewCallHistory(friendData) {
+            showNotification('Call history feature coming soon', 'info');
+        }
+        
+        function removeFriend(friendData) {
+            showNotification('Remove friend feature coming soon', 'info');
+        }
+        
+        function blockUser(friendData) {
+            showNotification('Block user feature coming soon', 'info');
+        }
+        
+        function renderTemporaryFriends() {
+            temporaryList.innerHTML = `
+                <div class="empty-state">
+                    <i class="fas fa-clock"></i>
+                    <p>No temporary friends</p>
+                    <p class="subtext">Temporary friends expire after a set time</p>
+                </div>
+            `;
+        }
+        
+        function renderPinnedFriends() {
+            if (pinnedFriends.length === 0) {
+                pinnedList.innerHTML = `
+                    <div class="empty-state">
+                        <i class="fas fa-thumbtack"></i>
+                        <p>No pinned friends</p>
+                        <p class="subtext">Pin important friends to keep them at the top</p>
+                    </div>
+                `;
+                return;
+            }
+            
+            pinnedFriends.forEach(friend => {
+                addFriendItem(friend, pinnedList, 'pinned');
+            });
+        }
+        
+        function renderMutedFriends() {
+            if (mutedFriends.length === 0) {
+                mutedList.innerHTML = `
+                    <div class="empty-state">
+                        <i class="fas fa-volume-mute"></i>
+                        <p>No muted friends</p>
+                        <p class="subtext">Mute friends to disable notifications</p>
+                    </div>
+                `;
+                return;
+            }
+            
+            mutedFriends.forEach(friend => {
+                addFriendItem(friend, mutedList, 'muted');
+            });
+        }
+        
+        console.log('Friends system initialized successfully with parent API integration');
     </script>
-    
-    <!-- External scripts -->
-    
 </body>
 </html>

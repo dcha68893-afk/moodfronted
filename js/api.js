@@ -3,6 +3,7 @@
 // UPDATED: Enhanced error handling for 429 and 500 errors
 // UPDATED: Support for new token structure from backend
 // CRITICAL FIX: Dynamic environment detection for backend URLs
+// CRITICAL FIX: Strict API contract - endpoint always first, method always in options
 // ============================================================================
 // CRITICAL IMPROVEMENTS APPLIED:
 // 1. SINGLE internal fetch function with comprehensive input validation
@@ -13,6 +14,7 @@
 // 6. Enhanced error handling for rate limiting and server errors
 // 7. Updated to handle new token structure from backend
 // 8. CRITICAL FIX: Dynamic environment detection for backend URLs
+// 9. CRITICAL FIX: Strict API contract - endpoint always string, method always in options
 // ============================================================================
 
 // ============================================================================
@@ -119,6 +121,7 @@ console.log(`🔧 [API] Network State: Online=${window.AppNetwork.isOnline}, Bac
 /**
  * Normalizes ANY HTTP method input to valid fetch method
  * CRITICAL: Prevents "not a valid HTTP method" errors forever
+ * STRICT RULE: Method MUST ONLY come from options.method
  */
 function _normalizeHttpMethod(method) {
   if (!method) return 'GET';
@@ -149,10 +152,12 @@ function _normalizeHttpMethod(method) {
     'API': 'GET'
   };
   
-  // Check for method containing endpoint-like patterns
-  if (methodStr.includes('/API/') || methodStr.includes('/api/')) {
-    console.warn(`⚠️ [API] Method "${method}" looks like an endpoint, defaulting to GET`);
-    return 'GET';
+  // CRITICAL FIX: If method looks like an endpoint, it's a SERIOUS ERROR
+  if (methodStr.includes('/API/') || methodStr.includes('/api/') || methodStr.startsWith('/')) {
+    console.error(`❌ [API] CRITICAL ERROR: HTTP method "${method}" contains endpoint pattern!`);
+    console.error(`❌ [API] This indicates the API is being called incorrectly`);
+    console.error(`❌ [API] FIRST argument MUST be endpoint, SECOND argument MUST be options with method`);
+    return 'GET'; // Safe default
   }
   
   // Return corrected method or default to GET
@@ -162,17 +167,21 @@ function _normalizeHttpMethod(method) {
 /**
  * Sanitizes ANY endpoint to prevent malformed URLs
  * CRITICAL: Prevents "/api/api/..." and "/api/GET" calls
+ * STRICT RULE: Endpoint MUST NEVER be an HTTP method
  */
 function _sanitizeEndpoint(endpoint) {
   if (!endpoint) return '/';
   
   const endpointStr = String(endpoint).trim();
   
-  // If endpoint is actually an HTTP method, return root
+  // CRITICAL FIX: If endpoint is actually an HTTP method, this is a SERIOUS ERROR
   const httpMethods = ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'HEAD', 'OPTIONS'];
   if (httpMethods.includes(endpointStr.toUpperCase())) {
-    console.warn(`⚠️ [API] Endpoint "${endpoint}" is an HTTP method, defaulting to "/"`);
-    return '/';
+    console.error(`❌ [API] CRITICAL ERROR: Endpoint "${endpoint}" is an HTTP method!`);
+    console.error(`❌ [API] This means the API is being called with swapped arguments`);
+    console.error(`❌ [API] Correct usage: api('/auth/login', { method: 'POST', body: {...} })`);
+    console.error(`❌ [API] NOT: api('POST', '/auth/login', {...})`);
+    return '/'; // Return root to prevent complete failure
   }
   
   // Remove any leading/trailing slashes for consistent processing
@@ -195,6 +204,7 @@ function _sanitizeEndpoint(endpoint) {
 /**
  * Builds ABSOLUTELY SAFE URL that never breaks fetch()
  * CRITICAL: Uses the dynamically determined BASE_API_URL
+ * STRICT RULE: NEVER pass HTTP method as URL
  */
 function _buildSafeUrl(endpoint) {
   const sanitizedEndpoint = _sanitizeEndpoint(endpoint);
@@ -221,6 +231,7 @@ function _buildSafeUrl(endpoint) {
  * 2. NEVER return success if response.ok === false
  * 3. Do NOT mark backend offline on 401 or 400
  * 4. All API calls MUST use BASE_API_URL derived dynamically from window.location
+ * 5. STRICT CONTRACT: endpoint is string, method is in options
  */
 function _safeFetch(fullUrl, options = {}) {
   // Validate URL
@@ -378,10 +389,17 @@ function _safeFetch(fullUrl, options = {}) {
 }
 
 // ============================================================================
-// GLOBAL API FUNCTION - ULTRA-DEFENSIVE WRAPPER
+// GLOBAL API FUNCTION - ULTRA-DEFENSIVE WRAPPER WITH STRICT CONTRACT
 // ============================================================================
 
-window.api = function(endpoint, options = {}) {
+/**
+ * GLOBAL API FUNCTION - STRICT CONTRACT:
+ * 1. First argument MUST ALWAYS be endpoint string (e.g., '/auth/login')
+ * 2. Second argument MUST ALWAYS be options object (e.g., { method: 'POST' })
+ * 3. NEVER accept HTTP methods as first argument
+ * 4. NEVER swap arguments
+ */
+const globalApiFunction = function(endpoint, options = {}) {
   // Use global network state
   if (!window.AppNetwork.isOnline) {
     console.log('🔧 [API] Offline detected, returning offline response');
@@ -398,10 +416,19 @@ window.api = function(endpoint, options = {}) {
     });
   }
   
-  // EXTREME INPUT VALIDATION
+  // STRICT VALIDATION: First argument MUST be string
   if (!endpoint || typeof endpoint !== 'string') {
-    console.warn('⚠️ [API] Invalid endpoint type:', typeof endpoint, 'defaulting to "/"');
-    endpoint = '/';
+    console.error(`❌ [API] CRITICAL: First argument must be endpoint string, got:`, typeof endpoint);
+    console.error(`❌ [API] Correct: api('/auth/login', { method: 'POST' })`);
+    console.error(`❌ [API] Wrong: api('POST', '/auth/login') or api({ method: 'POST' }, '/auth/login')`);
+    endpoint = '/'; // Safe fallback
+  }
+  
+  // STRICT VALIDATION: Second argument MUST be object (or undefined)
+  if (options && typeof options !== 'object') {
+    console.error(`❌ [API] CRITICAL: Second argument must be options object, got:`, typeof options);
+    console.error(`❌ [API] Correct: api('/auth/login', { method: 'POST' })`);
+    options = {};
   }
   
   // SANITIZE endpoint to prevent ANY malformed URLs
@@ -411,12 +438,13 @@ window.api = function(endpoint, options = {}) {
   // VALIDATE options
   const safeOptions = { ...options };
   
-  // Ensure method is never an endpoint
+  // CRITICAL: Ensure method is never an endpoint
   if (safeOptions.method && typeof safeOptions.method === 'string') {
     const methodStr = safeOptions.method.toUpperCase();
     if (methodStr.includes('/API/') || methodStr.includes('/api/') || 
-      methodStr.startsWith('API') || methodStr.endsWith('/API')) {
-      console.warn(`⚠️ [API] Method "${safeOptions.method}" contains endpoint pattern, normalizing`);
+      methodStr.startsWith('API') || methodStr.endsWith('/API') || methodStr.startsWith('/')) {
+      console.error(`❌ [API] CRITICAL: Method "${safeOptions.method}" contains endpoint pattern!`);
+      console.error(`❌ [API] Method must be 'GET', 'POST', etc., not a URL`);
       safeOptions.method = _normalizeHttpMethod(safeOptions.method);
     }
   }
@@ -447,12 +475,12 @@ window.api = function(endpoint, options = {}) {
 };
 
 // ============================================================================
-// MAIN API OBJECT - WITH HARDENED METHODS
+// MAIN API OBJECT - WITH HARDENED METHODS AND STRICT CONTRACT
 // ============================================================================
 
 const apiObject = {
   _singleton: true,
-  _version: '16.0.0', // Updated version for strict HTTP handling
+  _version: '16.1.0', // Updated version for strict API contract
   _safeInitialized: true,
   _backendReachable: null,
   _sessionChecked: false,
@@ -477,7 +505,7 @@ const apiObject = {
   login: async function(emailOrUsername, password) {
     // OFFLINE CHECK FIRST - use global network state
     if (!window.AppNetwork.isOnline) {
-      return {
+      throw {
         ok: false,
         success: false,
         message: 'Cannot login while offline',
@@ -493,13 +521,13 @@ const apiObject = {
       console.log(`🔧 [API] Using dynamic backend URL: ${BACKEND_BASE_URL}`);
       console.log(`🔧 [API] Using dynamic API URL: ${BASE_API_URL}`);
       
-      // Proper JSON body for login
+      // Proper JSON body for login - STRICT: Use correct endpoint format
       const requestData = { 
         identifier: String(emailOrUsername).trim(),
         password: String(password) 
       };
       
-      // USE THE CORE FETCH FUNCTION
+      // USE THE CORE FETCH FUNCTION WITH STRICT CONTRACT
       const result = await _safeFetch(`${BACKEND_BASE_URL}/api/auth/login`, {
         method: 'POST',
         body: requestData
@@ -538,14 +566,16 @@ const apiObject = {
         console.log(`🔧 [API] Login successful, storing authUser with new token structure`);
         
         // Store with new token structure
-        localStorage.setItem('authUser', JSON.stringify({
+        const authUserData = {
           token: accessToken, // Keep backward compatibility
           tokens: {
             accessToken: accessToken,
             refreshToken: refreshToken
           },
           user: user
-        }));
+        };
+        
+        localStorage.setItem('authUser', JSON.stringify(authUserData));
         
         // Backward compatibility with old storage keys
         localStorage.setItem('moodchat_auth_token', accessToken);
@@ -554,17 +584,25 @@ const apiObject = {
         if (refreshToken) {
           localStorage.setItem('moodchat_refresh_token', refreshToken);
         }
+        
+        // CRITICAL FIX: Also assign to window.currentUser for global access
+        window.currentUser = user;
       } else if (userData.token && userData.user) {
         // Fallback for old token structure
         console.log(`🔧 [API] Login successful (legacy token structure)`);
-        localStorage.setItem('authUser', JSON.stringify({
+        const authUserData = {
           token: userData.token,
           user: userData.user
-        }));
+        };
+        
+        localStorage.setItem('authUser', JSON.stringify(authUserData));
         
         // Backward compatibility
         localStorage.setItem('moodchat_auth_token', userData.token);
         localStorage.setItem('moodchat_auth_user', JSON.stringify(userData.user));
+        
+        // CRITICAL FIX: Also assign to window.currentUser for global access
+        window.currentUser = userData.user;
       }
       
       this._sessionChecked = true;
@@ -603,7 +641,7 @@ const apiObject = {
   register: async function(userData) {
     // OFFLINE CHECK FIRST - use global network state
     if (!window.AppNetwork.isOnline) {
-      return {
+      throw {
         ok: false,
         success: false,
         message: 'Cannot register while offline',
@@ -619,7 +657,7 @@ const apiObject = {
       console.log(`🔧 [API] Using dynamic backend URL: ${BACKEND_BASE_URL}`);
       console.log(`🔧 [API] Using dynamic API URL: ${BASE_API_URL}`);
       
-      // Proper JSON body for register
+      // Proper JSON body for register - STRICT: Use correct endpoint format
       const registerPayload = {
         username: String(userData.username || '').trim(),
         email: String(userData.email || '').trim(),
@@ -653,7 +691,7 @@ const apiObject = {
         };
       }
       
-      // USE THE CORE FETCH FUNCTION
+      // USE THE CORE FETCH FUNCTION WITH STRICT CONTRACT
       const result = await _safeFetch(`${BACKEND_BASE_URL}/api/auth/register`, {
         method: 'POST',
         body: registerPayload
@@ -690,14 +728,16 @@ const apiObject = {
         console.log(`🔧 [API] Registration successful, storing with new token structure`);
         
         // Store with new token structure
-        localStorage.setItem('authUser', JSON.stringify({
+        const authUserData = {
           token: accessToken, // Keep backward compatibility
           tokens: {
             accessToken: accessToken,
             refreshToken: refreshToken
           },
           user: user
-        }));
+        };
+        
+        localStorage.setItem('authUser', JSON.stringify(authUserData));
         
         // Backward compatibility with old storage keys
         localStorage.setItem('moodchat_auth_token', accessToken);
@@ -706,17 +746,25 @@ const apiObject = {
         if (refreshToken) {
           localStorage.setItem('moodchat_refresh_token', refreshToken);
         }
+        
+        // CRITICAL FIX: Also assign to window.currentUser for global access
+        window.currentUser = user;
       } else if (responseData.token && responseData.user) {
         // Fallback for old token structure
         console.log(`🔧 [API] Registration successful (legacy token structure)`);
-        localStorage.setItem('authUser', JSON.stringify({
+        const authUserData = {
           token: responseData.token,
           user: responseData.user
-        }));
+        };
+        
+        localStorage.setItem('authUser', JSON.stringify(authUserData));
         
         // Backward compatibility
         localStorage.setItem('moodchat_auth_token', responseData.token);
         localStorage.setItem('moodchat_auth_user', JSON.stringify(responseData.user));
+        
+        // CRITICAL FIX: Also assign to window.currentUser for global access
+        window.currentUser = responseData.user;
       }
       
       this._sessionChecked = true;
@@ -746,6 +794,132 @@ const apiObject = {
         validationError: error.validationError || false,
         isClientError: error.isClientError || false,
         isNetworkError: !error.status, // Network error if no status
+        isRateLimited: error.isRateLimited || false,
+        isServerError: error.isServerError || false
+      };
+    }
+  },
+  
+  // ============================================================================
+  // CRITICAL FIX: /auth/me METHOD WITH STRICT CONTRACT
+  // ============================================================================
+  
+  checkAuthMe: async function() {
+    try {
+      // Get token from storage
+      const authUserStr = localStorage.getItem('authUser');
+      if (!authUserStr) {
+        throw {
+          success: false,
+          message: 'No authentication data found',
+          isAuthError: true,
+          isRateLimited: false,
+          isServerError: false
+        };
+      }
+      
+      const authUser = JSON.parse(authUserStr);
+      const token = authUser.tokens?.accessToken || authUser.token;
+      
+      if (!token) {
+        throw {
+          success: false,
+          message: 'No authentication token found',
+          isAuthError: true,
+          isRateLimited: false,
+          isServerError: false
+        };
+      }
+      
+      console.log(`🔧 [API] Checking /auth/me with token`);
+      console.log(`🔧 [API] Using dynamic backend URL: ${BACKEND_BASE_URL}`);
+      
+      // STRICT CONTRACT: Use correct endpoint format
+      const result = await _safeFetch(`${BACKEND_BASE_URL}/api/auth/me`, {
+        method: 'GET',
+        headers: {
+          'Authorization': 'Bearer ' + token,
+          'Content-Type': 'application/json'
+        }
+      });
+      
+      // STRICT: Check response.ok - if false, treat as HARD failure
+      if (!result.ok) {
+        console.log(`🔧 [API] /auth/me failed with status ${result.status}: ${result.message}`);
+        
+        // STRICT: Do NOT mark backend offline on 401
+        if (result.status === 401) {
+          window.AppNetwork.updateBackendStatus(true);
+          
+          // Clear invalid auth data
+          this._clearAuthData();
+          window.currentUser = null;
+          
+          throw {
+            success: false,
+            message: 'Session expired',
+            isAuthError: true,
+            status: 401,
+            isRateLimited: false,
+            isServerError: false
+          };
+        }
+        
+        throw {
+          message: result.message,
+          status: result.status,
+          isRateLimited: result.isRateLimited,
+          isServerError: result.isServerError
+        };
+      }
+      
+      // Only reach here if result.ok === true
+      const userData = result.data;
+      const user = userData.user || userData;
+      
+      if (user) {
+        console.log(`🔧 [API] /auth/me successful, updating user data`);
+        
+        // Update stored user data
+        authUser.user = user;
+        localStorage.setItem('authUser', JSON.stringify(authUser));
+        localStorage.setItem('moodchat_auth_user', JSON.stringify(user));
+        
+        // CRITICAL FIX: Also assign to window.currentUser for global access
+        window.currentUser = user;
+        
+        this._sessionChecked = true;
+        window.AppNetwork.updateBackendStatus(true);
+        
+        return {
+          ok: true,
+          success: true,
+          message: 'Authentication valid',
+          user: user,
+          data: result.data,
+          isRateLimited: false,
+          isServerError: false
+        };
+      } else {
+        throw {
+          success: false,
+          message: 'Invalid user data in response',
+          isAuthError: true,
+          isRateLimited: false,
+          isServerError: false
+        };
+      }
+      
+    } catch (error) {
+      console.error('🔧 [API] /auth/me error:', error);
+      
+      // Re-throw for UI handling
+      throw {
+        success: false,
+        message: error.message || 'Authentication check failed',
+        status: error.status || 0,
+        isAuthError: error.isAuthError || false,
+        isNetworkError: !error.status,
         isRateLimited: error.isRateLimited || false,
         isServerError: error.isServerError || false
       };
@@ -858,7 +1032,7 @@ const apiObject = {
   },
   
   // ============================================================================
-  // SESSION MANAGEMENT
+  // SESSION MANAGEMENT - UPDATED TO USE STRICT /auth/me
   // ============================================================================
   
   checkSession: async function() {
@@ -911,6 +1085,9 @@ const apiObject = {
       
       // Return cached session if offline
       if (!window.AppNetwork.isOnline) {
+        // CRITICAL FIX: Ensure window.currentUser is set from cached data
+        window.currentUser = authUser.user;
+        
         return {
           ok: true,
           success: true,
@@ -925,6 +1102,9 @@ const apiObject = {
       
       // Cached session check
       if (this._sessionChecked && window.AppNetwork.isBackendReachable !== false) {
+        // CRITICAL FIX: Ensure window.currentUser is set from cached data
+        window.currentUser = authUser.user;
+        
         return {
           ok: true,
           success: true,
@@ -937,56 +1117,8 @@ const apiObject = {
       }
       
       try {
-        // Get token from new or old structure
-        const token = authUser.tokens?.accessToken || authUser.token;
-        
-        // USE THE CORE FETCH FUNCTION
-        const result = await _safeFetch(`${BACKEND_BASE_URL}/api/auth/me`, {
-          method: 'GET',
-          headers: {
-            'Authorization': 'Bearer ' + token,
-            'Content-Type': 'application/json'
-          }
-        });
-        
-        // STRICT: Check response.ok
-        if (!result.ok) {
-          // STRICT: Do NOT mark backend offline on 401
-          if (result.status === 401 || result.status === 403) {
-            console.log('🔧 [API] Session expired, maintaining soft-auth');
-            return {
-              ok: false,
-              success: false,
-              authenticated: false,
-              message: 'Session expired',
-              softAuth: true,
-              isAuthError: true,
-              isRateLimited: false,
-              isServerError: false
-            };
-          }
-          
-          // Backend error but keep local session
-          this._sessionChecked = true;
-          return {
-            ok: true,
-            success: true,
-            authenticated: true,
-            user: authUser.user,
-            offline: true,
-            message: 'Session valid (backend error)',
-            isRateLimited: result.isRateLimited || false,
-            isServerError: result.isServerError || false
-          };
-        }
-        
-        // Only reach here if result.ok === true
-        const updatedUser = result.data.user || authUser.user;
-        
-        // Update auth data
-        authUser.user = updatedUser;
-        localStorage.setItem('authUser', JSON.stringify(authUser));
-        localStorage.setItem('moodchat_auth_user', JSON.stringify(updatedUser));
+        // Use the strict /auth/me method instead of direct fetch
+        const result = await this.checkAuthMe();
         
         this._sessionChecked = true;
         window.AppNetwork.updateBackendStatus(true);
@@ -995,7 +1127,7 @@ const apiObject = {
           ok: true,
           success: true,
           authenticated: true,
-          user: updatedUser,
+          user: result.user,
           message: 'Session valid (online)',
           isRateLimited: false,
           isServerError: false
@@ -1016,6 +1148,9 @@ const apiObject = {
         }
         
         this._sessionChecked = true;
+        
+        // CRITICAL FIX: Ensure window.currentUser is set from cached data
+        window.currentUser = authUser.user;
         
         return {
           ok: true,
@@ -1045,7 +1180,7 @@ const apiObject = {
   },
   
   // ============================================================================
-  // DATA METHODS - ALL USE CORE FETCH FUNCTION
+  // DATA METHODS - ALL USE STRICT API CONTRACT
   // ============================================================================
   
   getStatuses: async function() {
@@ -1072,8 +1207,8 @@ const apiObject = {
     }
     
     try {
-      // Use window.api which calls _safeFetch
-      const result = await window.api('/statuses/all', {
+      // Use globalApiFunction which calls _safeFetch with STRICT CONTRACT
+      const result = await globalApiFunction('/statuses/all', {
         method: 'GET',
         auth: true
       });
@@ -1166,7 +1301,7 @@ const apiObject = {
     }
     
     try {
-      const result = await window.api('/friends/list', {
+      const result = await globalApiFunction('/friends/list', {
         method: 'GET',
         auth: true
       });
@@ -1235,7 +1370,7 @@ const apiObject = {
   
   // Additional methods with strict error handling
   getUsers: async function() {
-    const result = await window.api('/users', { method: 'GET', auth: true });
+    const result = await globalApiFunction('/users', { method: 'GET', auth: true });
     
     // STRICT: Check response.ok
     if (!result.ok) {
@@ -1258,7 +1393,7 @@ const apiObject = {
   },
   
   getUserById: async function(userId) {
-    const result = await window.api(`/users/${encodeURIComponent(userId)}`, { method: 'GET', auth: true });
+    const result = await globalApiFunction(`/users/${encodeURIComponent(userId)}`, { method: 'GET', auth: true });
     
     if (!result.ok) {
       throw {
@@ -1280,7 +1415,7 @@ const apiObject = {
   },
   
   getStatus: async function(statusId) {
-    const result = await window.api(`/status/${encodeURIComponent(statusId)}`, { method: 'GET', auth: true });
+    const result = await globalApiFunction(`/status/${encodeURIComponent(statusId)}`, { method: 'GET', auth: true });
     
     if (!result.ok) {
       throw {
@@ -1302,7 +1437,7 @@ const apiObject = {
   },
   
   createStatus: async function(statusData) {
-    const result = await window.api('/status', { 
+    const result = await globalApiFunction('/status', { 
       method: 'POST', 
       body: statusData,
       auth: true 
@@ -1328,7 +1463,7 @@ const apiObject = {
   },
   
   getChats: async function() {
-    const result = await window.api('/chats', { method: 'GET', auth: true });
+    const result = await globalApiFunction('/chats', { method: 'GET', auth: true });
     
     if (!result.ok) {
       throw {
@@ -1350,7 +1485,7 @@ const apiObject = {
   },
   
   getChatById: async function(chatId) {
-    const result = await window.api(`/chats/${encodeURIComponent(chatId)}`, { method: 'GET', auth: true });
+    const result = await globalApiFunction(`/chats/${encodeURIComponent(chatId)}`, { method: 'GET', auth: true });
     
     if (!result.ok) {
       throw {
@@ -1372,7 +1507,7 @@ const apiObject = {
   },
   
   getContacts: async function() {
-    const result = await window.api('/contacts', { method: 'GET', auth: true });
+    const result = await globalApiFunction('/contacts', { method: 'GET', auth: true });
     
     if (!result.ok) {
       throw {
@@ -1460,6 +1595,10 @@ const apiObject = {
       localStorage.removeItem('moodchat_auth_token');
       localStorage.removeItem('moodchat_auth_user');
       localStorage.removeItem('moodchat_refresh_token');
+      
+      // CRITICAL FIX: Also clear window.currentUser
+      window.currentUser = null;
+      
       this._sessionChecked = false;
       console.log('🔧 [API] User logged out');
       return { 
@@ -1486,6 +1625,10 @@ const apiObject = {
     localStorage.removeItem('moodchat_auth_token');
     localStorage.removeItem('moodchat_auth_user');
     localStorage.removeItem('moodchat_refresh_token');
+    
+    // CRITICAL FIX: Also clear window.currentUser
+    window.currentUser = null;
+    
     this._sessionChecked = false;
   },
   
@@ -1520,7 +1663,8 @@ const apiObject = {
       sessionChecked: this._sessionChecked,
       hasAuthToken: !!this.getCurrentToken(),
       hasAuthUser: !!localStorage.getItem('authUser'),
-      tokenStructure: this.getCurrentToken() ? (localStorage.getItem('authUser')?.includes('"tokens"') ? 'new' : 'old') : 'none'
+      tokenStructure: this.getCurrentToken() ? (localStorage.getItem('authUser')?.includes('"tokens"') ? 'new' : 'old') : 'none',
+      currentUser: window.currentUser ? 'Set' : 'Not set'
     };
   },
   
@@ -1529,11 +1673,13 @@ const apiObject = {
   // ============================================================================
   
   initialize: async function() {
-    console.log('🔧 [API] ⚡ MoodChat API v16.0.0 (STRICT HTTP HANDLING) initializing...');
+    console.log('🔧 [API] ⚡ MoodChat API v16.1.0 (STRICT API CONTRACT) initializing...');
     console.log('🔧 [API] 🔗 Backend URL:', BACKEND_BASE_URL);
     console.log('🔧 [API] 🔗 API Base URL:', BASE_API_URL);
     console.log('🔧 [API] 🌐 Network State - Online:', window.AppNetwork.isOnline, 'Backend Reachable:', window.AppNetwork.isBackendReachable);
-    console.log('🔧 [API] ✅ CRITICAL: ALL API calls will use single dynamic source:', BASE_API_URL);
+    console.log('🔧 [API] ✅ CRITICAL: ALL API calls use strict contract: api(endpoint, options)');
+    console.log('🔧 [API] ✅ CRITICAL: First argument = endpoint string');
+    console.log('🔧 [API] ✅ CRITICAL: Second argument = options object with method');
     
     // Migrate old auth data if needed
     const oldToken = localStorage.getItem('moodchat_auth_token');
@@ -1560,6 +1706,19 @@ const apiObject = {
       }
     }
     
+    // Initialize window.currentUser from stored data
+    try {
+      if (authUserStr) {
+        const authUser = JSON.parse(authUserStr);
+        if (authUser.user) {
+          window.currentUser = authUser.user;
+          console.log('🔧 [API] Initialized window.currentUser from stored data');
+        }
+      }
+    } catch (e) {
+      console.log('🔧 [API] Could not initialize window.currentUser:', e.message);
+    }
+    
     // Auto-login if credentials exist
     if (this.isLoggedIn() && !this._sessionChecked) {
       console.log('🔧 [API] 🔄 Auto-login on initialization...');
@@ -1579,6 +1738,7 @@ const apiObject = {
         console.log('🔧 [API] 🔐 Auth:', this.isLoggedIn() ? 'Logged in' : 'Not logged in');
         console.log('🔧 [API] 🔑 Token present:', !!this.getCurrentToken());
         console.log('🔧 [API] 🔄 Token structure:', this.getConnectionStatus().tokenStructure);
+        console.log('🔧 [API] 👤 window.currentUser:', window.currentUser ? 'Set' : 'Not set');
         console.log('🔧 [API] 💾 Device ID:', this.getDeviceId());
       } catch (error) {
         console.log('🔧 [API] Initial health check failed:', error.message);
@@ -1637,6 +1797,10 @@ const apiObject = {
     
     if (this._sessionChecked) {
       const user = this.getCurrentUser();
+      
+      // CRITICAL FIX: Ensure window.currentUser is set
+      window.currentUser = user;
+      
       return {
         ok: true,
         success: true,
@@ -1659,6 +1823,7 @@ const apiObject = {
       backendUrl: BACKEND_BASE_URL,
       apiBaseUrl: BASE_API_URL,
       user: this.getCurrentUser(),
+      windowCurrentUser: window.currentUser,
       hasToken: !!this.getCurrentToken(),
       hasAuthUser: !!localStorage.getItem('authUser'),
       hardened: true,
@@ -1666,6 +1831,7 @@ const apiObject = {
       supportsNewTokenStructure: true,
       dynamicEnvironmentDetection: true,
       strictHttpHandling: true,
+      strictApiContract: true,
       environment: window.location.hostname === 'localhost' ? 'local' : 'production',
       networkState: {
         isOnline: window.AppNetwork.isOnline,
@@ -1685,7 +1851,7 @@ const apiObject = {
     });
     
     setTimeout(() => {
-      console.log('🔧 [API] API synchronization ready (strict HTTP handling)');
+      console.log('🔧 [API] API synchronization ready (strict API contract)');
     }, 1000);
   },
   
@@ -1694,7 +1860,7 @@ const apiObject = {
   // ============================================================================
   
   diagnose: async function() {
-    console.log('🔧 [API] Running diagnostics with strict HTTP handling...');
+    console.log('🔧 [API] Running diagnostics with strict API contract...');
     
     const results = {
       networkState: {
@@ -1715,7 +1881,8 @@ const apiObject = {
         user: this.getCurrentUser(),
         accessToken: this.getAccessToken() ? 'Present' : 'Missing',
         refreshToken: this.getRefreshToken() ? 'Present' : 'Missing',
-        tokenStructure: this.getConnectionStatus().tokenStructure
+        tokenStructure: this.getConnectionStatus().tokenStructure,
+        windowCurrentUser: window.currentUser ? 'Set' : 'Not set'
       },
       config: {
         backendUrl: BACKEND_BASE_URL,
@@ -1726,7 +1893,8 @@ const apiObject = {
         enhancedErrorHandling: true,
         supportsNewTokenStructure: true,
         dynamicEnvironmentDetection: true,
-        strictHttpHandling: true
+        strictHttpHandling: true,
+        strictApiContract: true
       },
       validation: {
         methodNormalization: 'ACTIVE',
@@ -1737,7 +1905,9 @@ const apiObject = {
         tokenStructureSupport: 'ACTIVE',
         dynamicEnvironmentDetection: 'ACTIVE',
         strictHttpStatusHandling: 'ACTIVE',
-        singleNetworkStateSource: 'ACTIVE'
+        strictApiContract: 'ACTIVE',
+        singleNetworkStateSource: 'ACTIVE',
+        windowCurrentUserSupport: 'ACTIVE'
       }
     };
     
@@ -1754,7 +1924,8 @@ const apiObject = {
   },
   
   request: async function(endpoint, options = {}) {
-    const result = await window.api(endpoint, options);
+    // Use the globalApiFunction with STRICT CONTRACT
+    const result = await globalApiFunction(endpoint, options);
     
     // STRICT: Check response.ok
     if (!result.ok) {
@@ -1778,13 +1949,27 @@ const apiObject = {
 };
 
 // ============================================================================
-// API SETUP
+// CRITICAL FIX: GLOBAL API SETUP WITH STRICT CONTRACT
 // ============================================================================
 
-Object.assign(window.api, apiObject);
-Object.setPrototypeOf(window.api, Object.getPrototypeOf(apiObject));
+// Create the global API function with strict contract
+const globalApi = function(endpoint, options = {}) {
+  return globalApiFunction(endpoint, options);
+};
 
-console.log('🔧 [API] Starting hardened initialization with strict HTTP handling...');
+// Attach all methods to the global API function
+Object.assign(globalApi, apiObject);
+Object.setPrototypeOf(globalApi, Object.getPrototypeOf(apiObject));
+
+// CRITICAL REQUIREMENT: Explicitly attach to window.api
+window.api = globalApi;
+
+// Also attach for backward compatibility
+if (!window.MOODCHAT_API) {
+  window.MOODCHAT_API = globalApi;
+}
+
+console.log('🔧 [API] Starting hardened initialization with strict API contract...');
 
 // Safe initialization with timeout
 setTimeout(() => {
@@ -2019,11 +2204,15 @@ window.MOODCHAT_API_READY = true;
 console.log('🔧 [API] STRICT Backend API integration complete');
 console.log('🔧 [API] ✅ Single source of truth for network state: ACTIVE');
 console.log('🔧 [API] ✅ Global network state via window.AppNetwork: ACTIVE');
+console.log('🔧 [API] ✅ STRICT API contract: ACTIVE (endpoint first, method in options)');
 console.log('🔧 [API] ✅ STRICT HTTP status handling: ACTIVE (≥400 = HARD failure)');
 console.log('🔧 [API] ✅ NEVER return success if response.ok === false: ACTIVE');
 console.log('🔧 [API] ✅ Do NOT mark backend offline on 401/400: ACTIVE');
 console.log('🔧 [API] ✅ Dynamic environment detection: ACTIVE');
-console.log('🔧 [API] ✅ All API calls use BASE_API_URL from window.location: ACTIVE');
+console.log('🔧 [API] ✅ All API calls use strict contract: api(endpoint, options)');
+console.log('🔧 [API] ✅ CRITICAL: First argument MUST be endpoint string');
+console.log('🔧 [API] ✅ CRITICAL: Second argument MUST be options object');
 console.log('🔧 [API] ✅ Backend URL: ' + BACKEND_BASE_URL);
 console.log('🔧 [API] ✅ API Base URL: ' + BASE_API_URL);
-console.log('🔧 [API] ⚡ Ready for production with strict error handling');
+console.log('🔧 [API] ✅ window.currentUser support: ACTIVE');
+console.log('🔧 [API] ⚡ Ready for production with strict API contract');

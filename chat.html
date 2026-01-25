@@ -899,7 +899,7 @@
             height: 18px;
             font-size: 10px;
             display: flex;
-            align-items: center;
+                align-items: center;
             justify-content: center;
             z-index: 1001;
         }
@@ -1439,56 +1439,7 @@
             }
             originalWarn.apply(console, args);
         };
-
-        // Soft authentication check - does NOT block UI rendering
-        function performSoftAuthCheck() {
-            try {
-                // Check for auth token in localStorage (silent check)
-                const authToken = localStorage.getItem('auth_token');
-                const storedUser = localStorage.getItem('kynecta_user');
-                
-                if (!authToken || !storedUser) {
-                    console.log('Soft auth check: Missing token or user data');
-                    // Notify parent window instead of redirecting
-                    if (window.parent !== window) {
-                        window.parent.postMessage({
-                            type: 'auth_required',
-                            reason: 'missing_token_or_user'
-                        }, '*');
-                    }
-                    return false;
-                }
-                
-                console.log('Soft auth check: Token and user data found');
-                return true;
-                
-            } catch (error) {
-                console.error('Soft auth check failed:', error);
-                return false;
-            }
-        }
-
-        // Execute soft authentication check on page load (non-blocking)
-        document.addEventListener('DOMContentLoaded', function() {
-            console.log('DOM loaded, performing soft auth check...');
-            
-            // Perform soft auth check without blocking
-            setTimeout(() => {
-                const hasAuthData = performSoftAuthCheck();
-                if (!hasAuthData) {
-                    console.log('Soft auth check failed - UI will still load');
-                    // UI will still load, api.js will handle authentication failures
-                } else {
-                    console.log('Soft auth check passed');
-                }
-            }, 100);
-            
-            // Continue with normal page initialization regardless of auth status
-            // The rest of the page will load normally
-        });
     </script>
-
-    <!-- REMOVED VISIBLE OFFLINE INDICATOR - Handled in background -->
 
     <!-- Global Notification Container (Shows on all screens) -->
     <div id="globalNotificationContainer" class="fixed top-4 right-4 z-10000 space-y-2">
@@ -1783,191 +1734,139 @@
     
     let currentPage = 'messages';
     let iframesLoaded = {};
-    let appVersion = '1.0.0'; // Default version, will be updated from service worker
+    let appVersion = '1.0.0';
     let isOnline = navigator.onLine;
     let currentUser = null;
     let activeCall = null;
     let bottomNavVisible = true;
     let fullscreenPageDetectionEnabled = true;
-    let chatHistory = []; // Track chat navigation history for back button
-    let isInChatView = false; // Track if we're in a chat conversation view
-    let isInStatusView = false; // Track if we're in a status view
-    let isInGroupView = false; // Track if we're in a group view
-    let isInFullscreenView = false; // Track if we're in any fullscreen view
+    let chatHistory = [];
+    let isInChatView = false;
+    let isInStatusView = false;
+    let isInGroupView = false;
+    let isInFullscreenView = false;
     
-    // API Helper function for backend calls
-  // API Helper function for backend calls
-async function api(endpoint, method = 'GET', data = null) {
-    const baseUrl = 'https://moodchat-fy56.onrender.com'; // Replace with your actual backend URL
-
-    // FIX 1: Ensure URL is properly constructed
-    const url = `${baseUrl}${endpoint.startsWith('/') ? endpoint : '/' + endpoint}`;
+    // Wait for api.js to be ready from parent
+    window.addEventListener('apiReady', function() {
+        console.log('API is ready from parent, broadcasting to iframes');
+        
+        // Broadcast to all iframes that API is ready
+        broadcastToAllIframes({
+            type: 'API_READY',
+            hasApi: typeof window.parent.api !== 'undefined'
+        });
+        
+        // Initialize chat app
+        initializeChatApp();
+    });
     
-    const options = {
-        method: method, // FIX 2: Explicitly set method property
-        headers: {
-            'Content-Type': 'application/json',
-            'Authorization': `Bearer ${localStorage.getItem('auth_token') || ''}`
-        }
-    };
-    
-    if (data && (method === 'POST' || method === 'PUT' || method === 'PATCH')) {
-        options.body = JSON.stringify(data);
-    }
-    
-    try {
-        // FIX 3: The fetch call - this is where line 1816 is
-        console.log('Fetching URL:', url, 'with options:', options);
-        const response = await fetch(url, options);
-        
-        if (!response.ok) {
-            const errorText = await response.text();
-            throw new Error(`API error ${response.status}: ${errorText || response.statusText}`);
-        }
-        
-        const contentType = response.headers.get('content-type');
-        if (contentType && contentType.includes('application/json')) {
-            return await response.json();
-        }
-        
-        return await response.text();
-        
-    } catch (error) {
-        console.error(`API call failed [${method} ${endpoint}]:`, error.message);
-        
-        // For offline mode, store in local storage queue
-        if (method === 'POST' && endpoint.includes('/messages/send')) {
-            const offlineQueueKey = 'kynecta_offline_queue_' + (currentUser?.id || 'guest');
-            const offlineQueue = JSON.parse(localStorage.getItem(offlineQueueKey) || '[]');
-            offlineQueue.push({
-                endpoint,
-                method,
-                data,
-                timestamp: Date.now()
+    // Fallback if apiReady event doesn't fire
+    setTimeout(function() {
+        if (typeof window.parent.api !== 'undefined') {
+            console.log('API found in parent (fallback), broadcasting to iframes');
+            broadcastToAllIframes({
+                type: 'API_READY',
+                hasApi: true
             });
-            localStorage.setItem(offlineQueueKey, JSON.stringify(offlineQueue));
+            initializeChatApp();
+        } else {
+            console.warn('API not found in parent, retrying...');
+            // Try again in 1 second
+            setTimeout(function() {
+                if (typeof window.parent.api !== 'undefined') {
+                    broadcastToAllIframes({
+                        type: 'API_READY',
+                        hasApi: true
+                    });
+                    initializeChatApp();
+                } else {
+                    console.error('API still not available after retry');
+                    // Initialize anyway, iframes will handle API errors
+                    initializeChatApp();
+                }
+            }, 1000);
         }
-        throw error;
-    }
-}
+    }, 500);
     
-    document.addEventListener('DOMContentLoaded', async function() {
-        console.log('DOM loaded, initializing iframe controller...');
+    function broadcastToAllIframes(message) {
+        const iframeIds = ['messagesIframe', 'statusIframe', 'groupIframe', 'callsIframe', 
+                          'friendsIframe', 'settingsIframe', 'toolsIframe'];
         
-        // Soft authentication check - no blocking redirects
+        iframeIds.forEach(iframeId => {
+            const iframe = document.getElementById(iframeId);
+            if (iframe && iframe.contentWindow) {
+                try {
+                    iframe.contentWindow.postMessage(message, '*');
+                } catch (e) {
+                    console.log(`Could not send message to ${iframeId}:`, e.message);
+                }
+            }
+        });
+    }
+    
+    document.addEventListener('DOMContentLoaded', function() {
+        console.log('DOM loaded, waiting for apiReady event...');
+        
+        // Minimal initialization while waiting for API
+        showLoading();
+        
+        // Try to get user from localStorage for UI purposes
         try {
-            // Try to get user from localStorage first (non-blocking)
             const storedUser = localStorage.getItem('kynecta_user');
             const authToken = localStorage.getItem('auth_token');
             
             if (storedUser && authToken) {
-                try {
-                    currentUser = JSON.parse(storedUser);
-                    console.log('User loaded from localStorage:', currentUser.name);
-                } catch (e) {
-                    console.log('Could not parse stored user data');
-                }
+                currentUser = JSON.parse(storedUser);
+                console.log('User loaded from localStorage:', currentUser.name);
             } else {
-                console.log('No stored user or auth token found - proceeding in offline/partial mode');
-                // Don't redirect - let api.js handle authentication failures
+                console.log('No stored user or auth token found');
             }
-            
-            // Initialize chat app immediately (non-blocking)
-            initializeChatApp();
-            
         } catch (error) {
-            console.error('Error during initialization:', error);
-            // Don't redirect - continue with initialization
-            initializeChatApp();
+            console.error('Error loading user data:', error);
         }
+        
+        // Setup basic navigation immediately
+        setupNavigation();
+        
+        // Hide loading after a short delay if API isn't ready yet
+        setTimeout(() => {
+            if (typeof window.parent.api === 'undefined') {
+                console.log('API not ready yet, showing basic UI');
+                hideLoading();
+                switchPage('messages');
+            }
+        }, 1000);
     });
-    
-    function initializeUserData(userId) {
-        // Initialize empty data structures for the user
-        if (!localStorage.getItem('kynecta_chats_' + userId)) {
-            localStorage.setItem('kynecta_chats_' + userId, JSON.stringify([]));
-        }
-        
-        if (!localStorage.getItem('kynecta_contacts_' + userId)) {
-            localStorage.setItem('kynecta_contacts_' + userId, JSON.stringify([]));
-        }
-        
-        if (!localStorage.getItem('kynecta_messages_' + userId)) {
-            localStorage.setItem('kynecta_messages_' + userId, JSON.stringify({}));
-        }
-        
-        if (!localStorage.getItem('kynecta_groups_' + userId)) {
-            localStorage.setItem('kynecta_groups_' + userId, JSON.stringify([]));
-        }
-        
-        if (!localStorage.getItem('kynecta_status_' + userId)) {
-            localStorage.setItem('kynecta_status_' + userId, JSON.stringify([]));
-        }
-        
-        if (!localStorage.getItem('kynecta_calls_' + userId)) {
-            localStorage.setItem('kynecta_calls_' + userId, JSON.stringify([]));
-        }
-        
-        if (!localStorage.getItem('kynecta_offline_queue_' + userId)) {
-            localStorage.setItem('kynecta_offline_queue_' + userId, JSON.stringify([]));
-        }
-    }
     
     function initializeChatApp() {
         console.log('Initializing chat app...');
         
-        // Initialize user data structures if we have a user
-        if (currentUser && currentUser.id) {
-            initializeUserData(currentUser.id);
-        } else {
-            console.log('No user ID available - skipping user data initialization');
-        }
-        
-        // Show loading screen initially
-        showLoading();
+        // Hide loading screen
+        hideLoading();
         
         // Show sidebar and mobile nav
         document.getElementById('permanentSidebar').classList.remove('hidden');
         
-        // Setup navigation
-        setupNavigation();
+        // Setup back button
+        setupBackButton();
         
-        // Setup global call notification handlers
-        setupGlobalCallNotification();
-        
-        // Pre-load iframes with cache-busting
+        // Pre-load iframes
         preloadIframes();
         
-        // Hide loading screen and load messages page immediately
-        setTimeout(() => {
-            hideLoading();
-            switchPage('messages');
-            console.log('Chat app initialization complete');
-        }, 500);
+        // Setup fullscreen page detection
+        setupFullscreenPageDetection();
         
-        // Listen for iframe messages
-        window.addEventListener('message', handleIframeMessage);
+        // Switch to messages page
+        switchPage('messages');
         
-        // Listen for service worker updates
-        if ('serviceWorker' in navigator) {
-            navigator.serviceWorker.addEventListener('message', event => {
-                if (event.data && event.data.type === 'APP_UPDATED') {
-                    appVersion = event.data.version || Date.now().toString();
-                    console.log('App updated to version:', appVersion);
-                    reloadIframes();
-                }
-            });
-        }
+        console.log('Chat app initialization complete');
     }
     
     function setupBackButton() {
-        // Add back button to window object for iframes to call
         window.goBack = function() {
             if (isInChatView || isInStatusView || isInGroupView || isInFullscreenView) {
-                // Exit fullscreen view and show bottom navigation
                 if (isInChatView) {
                     setIsInChatView(false);
-                    // Notify the messages iframe to go back to chat list
                     const messagesIframe = document.getElementById('messagesIframe');
                     if (messagesIframe && iframesLoaded['messagesIframe']) {
                         messagesIframe.contentWindow.postMessage({
@@ -1976,7 +1875,6 @@ async function api(endpoint, method = 'GET', data = null) {
                     }
                 } else if (isInStatusView) {
                     setIsInStatusView(false);
-                    // Notify the status iframe to go back to status list
                     const statusIframe = document.getElementById('statusIframe');
                     if (statusIframe && iframesLoaded['statusIframe']) {
                         statusIframe.contentWindow.postMessage({
@@ -1985,7 +1883,6 @@ async function api(endpoint, method = 'GET', data = null) {
                     }
                 } else if (isInGroupView) {
                     setIsInGroupView(false);
-                    // Notify the group iframe to go back to group list
                     const groupIframe = document.getElementById('groupIframe');
                     if (groupIframe && iframesLoaded['groupIframe']) {
                         groupIframe.contentWindow.postMessage({
@@ -2003,57 +1900,44 @@ async function api(endpoint, method = 'GET', data = null) {
     
     function setIsInChatView(inChatView) {
         isInChatView = inChatView;
-        
-        // Update body class for CSS
         if (inChatView) {
             document.body.classList.add('in-chat-view');
-            // Hide bottom navigation when in chat view (WhatsApp behavior)
             hideBottomNavigation();
         } else {
             document.body.classList.remove('in-chat-view');
-            // Show bottom navigation when exiting chat view
             showBottomNavigation();
         }
     }
     
     function setIsInStatusView(inStatusView) {
         isInStatusView = inStatusView;
-        
         if (inStatusView) {
             document.body.classList.add('in-status-view');
-            // Hide bottom navigation when in status view (WhatsApp behavior)
             hideBottomNavigation();
         } else {
             document.body.classList.remove('in-status-view');
-            // Show bottom navigation when exiting status view
             showBottomNavigation();
         }
     }
     
     function setIsInGroupView(inGroupView) {
         isInGroupView = inGroupView;
-        
         if (inGroupView) {
             document.body.classList.add('in-group-view');
-            // Hide bottom navigation when in group view (WhatsApp behavior)
             hideBottomNavigation();
         } else {
             document.body.classList.remove('in-group-view');
-            // Show bottom navigation when exiting group view
             showBottomNavigation();
         }
     }
     
     function setIsInFullscreenView(inFullscreenView) {
         isInFullscreenView = inFullscreenView;
-        
         if (inFullscreenView) {
             document.body.classList.add('in-fullscreen-view');
-            // Hide bottom navigation when in fullscreen view (WhatsApp behavior)
             hideBottomNavigation();
         } else {
             document.body.classList.remove('in-fullscreen-view');
-            // Show bottom navigation when exiting fullscreen view
             showBottomNavigation();
         }
     }
@@ -2061,7 +1945,6 @@ async function api(endpoint, method = 'GET', data = null) {
     function setupFullscreenPageDetection() {
         console.log('Setting up fullscreen page detection...');
         
-        // Detect iframe URL changes for fullscreen pages
         const iframeObserver = new MutationObserver(function(mutations) {
             mutations.forEach(function(mutation) {
                 if (mutation.type === 'attributes' && mutation.attributeName === 'src') {
@@ -2072,12 +1955,10 @@ async function api(endpoint, method = 'GET', data = null) {
             });
         });
         
-        // Observe all iframes for src changes
         document.querySelectorAll('.content-iframe').forEach(iframe => {
             iframeObserver.observe(iframe, { attributes: true });
         });
         
-        // Initial check
         setTimeout(() => {
             checkIframeForFullscreenPage();
         }, 500);
@@ -2090,11 +1971,9 @@ async function api(endpoint, method = 'GET', data = null) {
         if (!activeIframe) return;
         
         try {
-            // Check if iframe has a URL we can access
             const iframeSrc = activeIframe.src || '';
             const iframeUrl = new URL(iframeSrc, window.location.origin);
             
-            // Define patterns that indicate fullscreen pages (chat views)
             const fullscreenPatterns = [
                 /chat-view/i,
                 /conversation/i,
@@ -2110,12 +1989,10 @@ async function api(endpoint, method = 'GET', data = null) {
                 /#fullscreen/i
             ];
             
-            // Check if current URL matches any fullscreen pattern
             const isFullscreenPage = fullscreenPatterns.some(pattern => 
                 pattern.test(iframeUrl.pathname) || pattern.test(iframeUrl.search) || pattern.test(iframeUrl.hash)
             );
             
-            // Also check for specific page names in hash
             const hash = iframeUrl.hash.toLowerCase();
             const isFullscreenHash = hash.includes('chat') && !hash.includes('chats') || 
                                     hash.includes('status') && !hash.includes('status-list') ||
@@ -2132,17 +2009,14 @@ async function api(endpoint, method = 'GET', data = null) {
                 showBottomNavigation();
             }
         } catch (e) {
-            // Can't access iframe URL due to cross-origin, use alternative method
             checkIframeForFullscreenViaMessages();
         }
     }
     
     function checkIframeForFullscreenViaMessages() {
-        // Try to get fullscreen status via postMessage
         const activeIframe = document.querySelector('.content-area:not(.hidden) .content-iframe');
         if (activeIframe && activeIframe.contentWindow) {
             try {
-                // Request fullscreen status from iframe
                 activeIframe.contentWindow.postMessage({
                     type: 'get_fullscreen_status'
                 }, '*');
@@ -2153,228 +2027,33 @@ async function api(endpoint, method = 'GET', data = null) {
     }
     
     function showBottomNavigation() {
-        if (window.innerWidth >= 768) return; // Only for mobile
-        
-        // Don't show if we're in any fullscreen view (WhatsApp behavior)
+        if (window.innerWidth >= 768) return;
         if (isInChatView || isInStatusView || isInGroupView || isInFullscreenView) return;
         
         const mobileNavBar = document.getElementById('mobileNavBar');
         if (mobileNavBar && mobileNavBar.classList.contains('hidden-nav')) {
             mobileNavBar.classList.remove('hidden-nav');
             bottomNavVisible = true;
-            console.log('Bottom navigation shown');
         }
     }
     
     function hideBottomNavigation() {
-        if (window.innerWidth >= 768) return; // Only for mobile
+        if (window.innerWidth >= 768) return;
         
         const mobileNavBar = document.getElementById('mobileNavBar');
         if (mobileNavBar && !mobileNavBar.classList.contains('hidden-nav')) {
             mobileNavBar.classList.add('hidden-nav');
             bottomNavVisible = false;
-            console.log('Bottom navigation hidden (fullscreen view detected)');
         }
-    }
-    
-    function setupGlobalCallNotification() {
-        const globalAcceptBtn = document.getElementById('globalAcceptCall');
-        const globalRejectBtn = document.getElementById('globalRejectCall');
-        
-        if (globalAcceptBtn) {
-            globalAcceptBtn.addEventListener('click', function() {
-                if (activeCall) {
-                    // Notify the calls iframe to accept the call
-                    const callsIframe = document.getElementById('callsIframe');
-                    if (callsIframe && iframesLoaded['callsIframe']) {
-                        callsIframe.contentWindow.postMessage({
-                            type: 'accept_call',
-                            callId: activeCall.id
-                        }, '*');
-                    }
-                    hideGlobalCallNotification();
-                }
-            });
-        }
-        
-        if (globalRejectBtn) {
-            globalRejectBtn.addEventListener('click', function() {
-                if (activeCall) {
-                    // Notify the calls iframe to reject the call
-                    const callsIframe = document.getElementById('callsIframe');
-                    if (callsIframe && iframesLoaded['callsIframe']) {
-                        callsIframe.contentWindow.postMessage({
-                            type: 'reject_call',
-                            callId: activeCall.id
-                        }, '*');
-                    }
-                    hideGlobalCallNotification();
-                    activeCall = null;
-                }
-            });
-        }
-    }
-    
-    function showGlobalCallNotification(callerName, callType, callData) {
-        const notification = document.getElementById('globalCallNotification');
-        const callerNameEl = document.getElementById('globalCallerName');
-        const callTypeEl = document.getElementById('globalCallType');
-        
-        if (notification && callerNameEl && callTypeEl) {
-            callerNameEl.textContent = callerName || 'Unknown';
-            callTypeEl.textContent = callType || 'Incoming call';
-            notification.classList.remove('hidden');
-            
-            // Store active call data
-            activeCall = callData || { id: 'call_' + Date.now() };
-            
-            // Auto-hide after 30 seconds if not answered
-            setTimeout(() => {
-                if (notification && !notification.classList.contains('hidden')) {
-                    hideGlobalCallNotification();
-                    activeCall = null;
-                }
-            }, 30000);
-        }
-    }
-    
-    function hideGlobalCallNotification() {
-        const notification = document.getElementById('globalCallNotification');
-        if (notification) {
-            notification.classList.add('hidden');
-        }
-    }
-    
-    function showGlobalNotification(message, type = 'info', duration = 5000) {
-        const container = document.getElementById('globalNotificationContainer');
-        if (!container) return;
-        
-        const notificationId = 'notification_' + Date.now();
-        const notification = document.createElement('div');
-        notification.id = notificationId;
-        notification.className = `global-notification ${type}`;
-        
-        // Set icon based on type
-        let icon = 'fa-info-circle';
-        if (type === 'success') icon = 'fa-check-circle';
-        if (type === 'error') icon = 'fa-exclamation-circle';
-        if (type === 'warning') icon = 'fa-exclamation-triangle';
-        if (type === 'message') icon = 'fa-comment-alt';
-        
-        notification.innerHTML = `
-            <div class="notification-content">
-                <div class="flex items-center">
-                    <i class="fas ${icon} mr-2"></i>
-                    <span>${message}</span>
-                </div>
-            </div>
-            <button class="notification-close" onclick="removeNotification('${notificationId}')">
-                <i class="fas fa-times"></i>
-            </button>
-        `;
-        
-        container.appendChild(notification);
-        
-        // Auto-remove after duration
-        setTimeout(() => {
-            removeNotification(notificationId);
-        }, duration);
-    }
-    
-    function removeNotification(notificationId) {
-        const notification = document.getElementById(notificationId);
-        if (notification) {
-            notification.remove();
-        }
-    }
-    
-    function setupOnlineStatus() {
-        window.addEventListener('online', () => {
-            isOnline = true;
-            console.log('App is online (silent background sync)');
-            
-            // Notify all iframes about online status silently
-            notifyIframesOnlineStatus();
-            
-            // Sync offline data when coming online (silently)
-            if (currentUser) {
-                syncOfflineData();
-            }
-        });
-        
-        window.addEventListener('offline', () => {
-            isOnline = false;
-            console.log('App is offline - offline mode enabled (silently)');
-            
-            // Notify all iframes about offline status silently
-            notifyIframesOnlineStatus();
-        });
-    }
-    
-    async function syncOfflineData() {
-        if (!currentUser) return;
-        
-        // Check for offline messages to sync
-        const offlineQueueKey = 'kynecta_offline_queue_' + currentUser.id;
-        const offlineQueue = JSON.parse(localStorage.getItem(offlineQueueKey) || '[]');
-        
-        if (offlineQueue.length > 0) {
-            console.log('Silently syncing', offlineQueue.length, 'offline messages');
-            
-            // Process offline queue with API calls
-            const successfulSyncs = [];
-            const failedSyncs = [];
-            
-            for (const item of offlineQueue) {
-                try {
-                    // Use the api() helper to send the queued request
-                    const result = await api(item.endpoint, item.method, item.data);
-                    successfulSyncs.push(item);
-                } catch (error) {
-                    console.error('Failed to sync item:', item, error);
-                    failedSyncs.push(item);
-                }
-            }
-            
-            // Update offline queue with failed items only
-            localStorage.setItem(offlineQueueKey, JSON.stringify(failedSyncs));
-            
-            // Show subtle success notification for sync
-            if (successfulSyncs.length > 0) {
-                showGlobalNotification(`${successfulSyncs.length} messages synced`, 'success', 3000);
-            }
-        }
-    }
-    
-    function notifyIframesOnlineStatus() {
-        // Notify all loaded iframes about online/offline status
-        const iframeIds = ['messagesIframe', 'statusIframe', 'groupIframe', 'callsIframe', 
-                          'friendsIframe', 'settingsIframe', 'toolsIframe'];
-        
-        iframeIds.forEach(iframeId => {
-            const iframe = document.getElementById(iframeId);
-            if (iframe && iframesLoaded[iframeId]) {
-                try {
-                    iframe.contentWindow.postMessage({
-                        type: 'online_status',
-                        isOnline: isOnline
-                    }, '*');
-                } catch (e) {
-                    // Silently ignore cross-origin errors
-                }
-            }
-        });
     }
     
     function setupNavigation() {
         console.log('Setting up navigation...');
         
-        // Setup desktop navigation icons
         document.querySelectorAll('.nav-icon').forEach(icon => {
             icon.addEventListener('click', function() {
                 const page = this.dataset.page;
                 if (page) {
-                    // Exit any fullscreen view when switching pages (WhatsApp behavior)
                     if (isInChatView) setIsInChatView(false);
                     if (isInStatusView) setIsInStatusView(false);
                     if (isInGroupView) setIsInGroupView(false);
@@ -2384,12 +2063,10 @@ async function api(endpoint, method = 'GET', data = null) {
             });
         });
         
-        // Setup mobile navigation icons
         document.querySelectorAll('.mobile-nav-icon').forEach(icon => {
             icon.addEventListener('click', function() {
                 const page = this.dataset.page;
                 if (page) {
-                    // Exit any fullscreen view when switching pages (WhatsApp behavior)
                     if (isInChatView) setIsInChatView(false);
                     if (isInStatusView) setIsInStatusView(false);
                     if (isInGroupView) setIsInGroupView(false);
@@ -2399,12 +2076,10 @@ async function api(endpoint, method = 'GET', data = null) {
             });
         });
         
-        // Show mobile nav bar on mobile devices
         if (window.innerWidth < 768) {
             const mobileNavBar = document.getElementById('mobileNavBar');
             if (mobileNavBar) {
                 mobileNavBar.classList.remove('hidden');
-                console.log('Mobile nav bar shown with 7 icons');
             }
         }
     }
@@ -2425,10 +2100,8 @@ async function api(endpoint, method = 'GET', data = null) {
         iframes.forEach(iframe => {
             const element = document.getElementById(iframe.id);
             if (element) {
-                // Mark as not loaded yet
                 iframesLoaded[iframe.id] = false;
                 
-                // Add cache-busting parameter for offline support
                 const cacheBuster = `?v=${appVersion}&t=${Date.now()}`;
                 const iframeSrc = iframe.src + cacheBuster;
                 
@@ -2446,6 +2119,14 @@ async function api(endpoint, method = 'GET', data = null) {
                             isOnline: isOnline,
                             version: appVersion
                         }, '*');
+                        
+                        // Send API status if we have it
+                        if (typeof window.parent.api !== 'undefined') {
+                            this.contentWindow.postMessage({
+                                type: 'API_READY',
+                                hasApi: true
+                            }, '*');
+                        }
                     } catch (e) {
                         // Silently ignore cross-origin errors
                     }
@@ -2453,102 +2134,59 @@ async function api(endpoint, method = 'GET', data = null) {
                 
                 element.onerror = function() {
                     console.error(`Failed to load ${iframe.id}`);
-                    // Even if iframe fails to load, mark as loaded to prevent infinite loading
                     iframesLoaded[iframe.id] = true;
                     this.classList.add('loaded');
-                    
-                    // For offline mode, show a fallback message
-                    if (!isOnline) {
-                        try {
-                            this.contentWindow.document.body.innerHTML = `
-                                <div class="p-4 text-center">
-                                    <h3 class="text-lg font-semibold mb-2">Offline Mode</h3>
-                                    <p class="text-gray-600">This page is not available offline.</p>
-                                    <p class="text-gray-500 text-sm mt-2">You can still use cached data.</p>
-                                </div>
-                            `;
-                        } catch (e) {
-                            // Cross-origin error, can't modify iframe content
-                        }
-                    }
                 };
                 
-                // Set src to pre-load with cache-busting
                 element.src = iframeSrc;
-            }
-        });
-    }
-    function goBack() {
-    window.history.back();
-}
-    
-    function reloadIframes() {
-        console.log('Reloading iframes due to app update...');
-        Object.keys(iframesLoaded).forEach(iframeId => {
-            iframesLoaded[iframeId] = false;
-            const iframe = document.getElementById(iframeId);
-            if (iframe) {
-                const src = iframe.src.split('?')[0]; // Remove existing query params
-                iframe.src = src + `?v=${appVersion}&t=${Date.now()}`;
             }
         });
     }
     
     function switchPage(pageName) {
-        // Allow switching pages even without currentUser
         console.log('Switching to page:', pageName);
         currentPage = pageName;
         
-        // When switching pages, exit all fullscreen views and show bottom nav (WhatsApp behavior)
         if (isInChatView) setIsInChatView(false);
         if (isInStatusView) setIsInStatusView(false);
         if (isInGroupView) setIsInGroupView(false);
         if (isInFullscreenView) setIsInFullscreenView(false);
         
-        // Hide loading screen immediately (will be shown only if needed)
         hideLoading();
         
-        // Hide all content areas with smooth transition
         const contentAreas = document.querySelectorAll('.content-area');
         contentAreas.forEach(area => {
             area.classList.add('hidden');
         });
         
-        // Update active navigation icon
         updateActiveNavIcon(pageName);
         
-        // Show the specific iframe container
         const iframeContainer = document.getElementById(`${pageName}Content`);
         if (iframeContainer) {
-            // Remove hidden class first
             iframeContainer.classList.remove('hidden');
             
-            // Load iframe content
             const iframe = document.getElementById(`${pageName}Iframe`);
             if (iframe) {
-                // Show iframe with smooth transition
                 iframe.classList.remove('hidden');
                 iframe.style.display = 'block';
                 iframe.style.width = '100%';
                 iframe.style.height = '100%';
                 
-                // Check if iframe is already loaded
                 if (iframesLoaded[`${pageName}Iframe`]) {
                     iframe.classList.add('loaded');
-                    console.log(`${pageName} iframe already loaded, showing instantly`);
                     
-                    // Send user data and online status to iframe
+                    // Send page switch message
                     try {
                         iframe.contentWindow.postMessage({
                             type: 'page_switch',
+                            page: pageName,
                             user: currentUser,
                             isOnline: isOnline
                         }, '*');
                     } catch (e) {
-                        // Silently ignore cross-origin errors
+                        // Silently ignore
                     }
                 } else {
-                    // Show loading briefly
                     showLoading();
                     setTimeout(() => {
                         hideLoading();
@@ -2556,38 +2194,32 @@ async function api(endpoint, method = 'GET', data = null) {
                     }, 300);
                 }
                 
-                // Send online status update to iframe
+                // Send online status
                 try {
                     iframe.contentWindow.postMessage({
                         type: 'online_status',
                         isOnline: isOnline
                     }, '*');
                 } catch (e) {
-                    // Silently ignore cross-origin errors
+                    // Silently ignore
                 }
             }
         }
         
-        // Check if we're on a fullscreen page after a short delay (WhatsApp behavior)
         setTimeout(() => {
             checkIframeForFullscreenPage();
         }, 200);
     }
     
     function handleIframeMessage(event) {
-        // Handle messages from iframes
         if (event.data && event.data.type) {
-            console.log('Received message from iframe:', event.data.type, event.data);
+            console.log('Received message from iframe:', event.data.type);
             
             switch(event.data.type) {
                 case 'iframe_loaded':
-                    console.log('Iframe loaded confirmation:', event.data.page);
                     break;
                     
                 case 'auth_required':
-                    // Handle auth requirement - api.js will handle this
-                    console.log('Auth required message received from iframe');
-                    // Notify parent window if we're in an iframe
                     if (window.parent !== window) {
                         window.parent.postMessage({
                             type: 'auth_required',
@@ -2597,9 +2229,7 @@ async function api(endpoint, method = 'GET', data = null) {
                     break;
                     
                 case 'navigate_to':
-                    // Navigate to a different page
                     if (event.data.page) {
-                        // Exit any fullscreen view when navigating (WhatsApp behavior)
                         if (isInChatView) setIsInChatView(false);
                         if (isInStatusView) setIsInStatusView(false);
                         if (isInGroupView) setIsInGroupView(false);
@@ -2608,24 +2238,11 @@ async function api(endpoint, method = 'GET', data = null) {
                     }
                     break;
                     
-                case 'offline_status':
-                    // Update offline message count (silently in background)
-                    if (event.data.messageCount !== undefined) {
-                        // Don't show any offline indicator to user
-                        // Just log for debugging
-                        if (event.data.messageCount > 0) {
-                            console.log(`${event.data.messageCount} messages in offline queue`);
-                        }
-                    }
-                    break;
-                    
                 case 'user_logout':
-                    // Handle user logout
                     handleLogout();
                     break;
                     
                 case 'global_notification':
-                    // Show global notification on all screens
                     if (event.data.message) {
                         showGlobalNotification(
                             event.data.message, 
@@ -2635,27 +2252,8 @@ async function api(endpoint, method = 'GET', data = null) {
                     }
                     break;
                     
-                case 'incoming_call':
-                    // Show global incoming call notification
-                    if (event.data.callerName || event.data.callType) {
-                        showGlobalCallNotification(
-                            event.data.callerName,
-                            event.data.callType,
-                            event.data.callData
-                        );
-                    }
-                    break;
-                    
-                case 'call_ended':
-                    // Hide global call notification when call ends
-                    hideGlobalCallNotification();
-                    activeCall = null;
-                    break;
-                    
                 case 'enter_chat_view':
-                    // User entered a chat conversation
                     setIsInChatView(true);
-                    // Add to chat history
                     chatHistory.push({
                         page: currentPage,
                         chatId: event.data.chatId,
@@ -2664,44 +2262,35 @@ async function api(endpoint, method = 'GET', data = null) {
                     break;
                     
                 case 'exit_chat_view':
-                    // User exited a chat conversation
                     setIsInChatView(false);
-                    // Clear chat history
                     chatHistory = [];
                     break;
                     
                 case 'enter_status_view':
-                    // User entered a status view
                     setIsInStatusView(true);
                     break;
                     
                 case 'exit_status_view':
-                    // User exited a status view
                     setIsInStatusView(false);
                     break;
                     
                 case 'enter_group_view':
-                    // User entered a group view
                     setIsInGroupView(true);
                     break;
                     
                 case 'exit_group_view':
-                    // User exited a group view
                     setIsInGroupView(false);
                     break;
                     
                 case 'enter_fullscreen_view':
-                    // User entered any fullscreen view
                     setIsInFullscreenView(true);
                     break;
                     
                 case 'exit_fullscreen_view':
-                    // User exited any fullscreen view
                     setIsInFullscreenView(false);
                     break;
                     
                 case 'fullscreen_status':
-                    // Handle fullscreen status from iframe
                     if (window.innerWidth < 768) {
                         if (event.data.isFullscreen) {
                             hideBottomNavigation();
@@ -2712,62 +2301,62 @@ async function api(endpoint, method = 'GET', data = null) {
                     break;
                     
                 case 'hide_bottom_nav':
-                    // Direct command to hide bottom navigation (WhatsApp behavior)
                     if (window.innerWidth < 768) {
                         hideBottomNavigation();
                     }
                     break;
                     
                 case 'show_bottom_nav':
-                    // Direct command to show bottom navigation (WhatsApp behavior)
                     if (window.innerWidth < 768) {
                         showBottomNavigation();
                     }
                     break;
                     
                 case 'back_button_clicked':
-                    // Handle back button click from iframe
-                    goBack();
+                    window.goBack();
                     break;
                     
-                case 'sync_complete':
-                    // Handle sync completion notification
-                    if (event.data.messageCount && event.data.messageCount > 0) {
-                        // Show subtle notification for sync
-                        showGlobalNotification(`${event.data.messageCount} messages synced`, 'success', 3000);
+                case 'user_data_updated':
+                    if (event.data.user) {
+                        currentUser = event.data.user;
+                        console.log('User data updated from iframe:', currentUser.name);
                     }
                     break;
                     
                 case 'api_request':
-                    // Handle API requests from iframes
-                    if (event.data.endpoint && event.data.method) {
-                        handleApiRequest(event.data);
-                    }
-                    break;
-                    
-                case 'user_data_updated':
-                    // Update currentUser when iframe sends updated user data
-                    if (event.data.user) {
-                        currentUser = event.data.user;
-                        console.log('User data updated from iframe:', currentUser.name);
+                    // Forward API requests to parent's api.js
+                    if (event.data.endpoint && event.data.method && typeof window.parent.api !== 'undefined') {
+                        forwardApiRequest(event.data);
+                    } else {
+                        // Send error back to iframe
+                        const activeIframe = document.querySelector('.content-area:not(.hidden) .content-iframe');
+                        if (activeIframe && activeIframe.contentWindow) {
+                            activeIframe.contentWindow.postMessage({
+                                type: 'api_response',
+                                requestId: event.data.requestId,
+                                success: false,
+                                error: 'API not available'
+                            }, '*');
+                        }
                     }
                     break;
             }
         }
     }
     
-    async function handleApiRequest(requestData) {
+    async function forwardApiRequest(requestData) {
         try {
-            const result = await api(
+            // Use parent's api function
+            const result = await window.parent.api(
                 requestData.endpoint,
                 requestData.method,
                 requestData.data
             );
             
             // Send result back to iframe
-            const iframe = document.querySelector('.content-area:not(.hidden) .content-iframe');
-            if (iframe && iframe.contentWindow) {
-                iframe.contentWindow.postMessage({
+            const activeIframe = document.querySelector('.content-area:not(.hidden) .content-iframe');
+            if (activeIframe && activeIframe.contentWindow) {
+                activeIframe.contentWindow.postMessage({
                     type: 'api_response',
                     requestId: requestData.requestId,
                     success: true,
@@ -2776,9 +2365,9 @@ async function api(endpoint, method = 'GET', data = null) {
             }
         } catch (error) {
             // Send error back to iframe
-            const iframe = document.querySelector('.content-area:not(.hidden) .content-iframe');
-            if (iframe && iframe.contentWindow) {
-                iframe.contentWindow.postMessage({
+            const activeIframe = document.querySelector('.content-area:not(.hidden) .content-iframe');
+            if (activeIframe && activeIframe.contentWindow) {
+                activeIframe.contentWindow.postMessage({
                     type: 'api_response',
                     requestId: requestData.requestId,
                     success: false,
@@ -2789,19 +2378,14 @@ async function api(endpoint, method = 'GET', data = null) {
     }
     
     function handleLogout() {
-        console.log('Logging out user:', currentUser?.name);
-        
-        // Clear current user
+        console.log('Logging out user');
         currentUser = null;
         localStorage.removeItem('kynecta_user');
         localStorage.removeItem('auth_token');
-        
-        // Redirect back to index.html for login
         window.location.href = '../index.html';
     }
     
     function updateActiveNavIcon(pageName) {
-        // Update desktop nav icons
         const navIcons = document.querySelectorAll('.nav-icon');
         navIcons.forEach(icon => {
             icon.classList.remove('text-white', 'bg-purple-700');
@@ -2814,7 +2398,6 @@ async function api(endpoint, method = 'GET', data = null) {
             activeIcon.classList.add('text-white', 'bg-purple-700');
         }
         
-        // Update mobile nav icons
         const mobileNavIcons = document.querySelectorAll('.mobile-nav-icon');
         mobileNavIcons.forEach(icon => {
             icon.classList.remove('active');
@@ -2840,74 +2423,79 @@ async function api(endpoint, method = 'GET', data = null) {
         }
     }
     
-    function closeModal(modalId) {
-        const modal = document.getElementById(modalId);
-        if (modal) {
-            modal.classList.add('hidden');
+    function showGlobalNotification(message, type = 'info', duration = 5000) {
+        const container = document.getElementById('globalNotificationContainer');
+        if (!container) return;
+        
+        const notificationId = 'notification_' + Date.now();
+        const notification = document.createElement('div');
+        notification.id = notificationId;
+        notification.className = `global-notification ${type}`;
+        
+        let icon = 'fa-info-circle';
+        if (type === 'success') icon = 'fa-check-circle';
+        if (type === 'error') icon = 'fa-exclamation-circle';
+        if (type === 'warning') icon = 'fa-exclamation-triangle';
+        if (type === 'message') icon = 'fa-comment-alt';
+        
+        notification.innerHTML = `
+            <div class="notification-content">
+                <div class="flex items-center">
+                    <i class="fas ${icon} mr-2"></i>
+                    <span>${message}</span>
+                </div>
+            </div>
+            <button class="notification-close" onclick="removeNotification('${notificationId}')">
+                <i class="fas fa-times"></i>
+            </button>
+        `;
+        
+        container.appendChild(notification);
+        
+        setTimeout(() => {
+            removeNotification(notificationId);
+        }, duration);
+    }
+    
+    function removeNotification(notificationId) {
+        const notification = document.getElementById(notificationId);
+        if (notification) {
+            notification.remove();
         }
     }
     
-    function showToast(message, type = 'info') {
-        const notificationContainer = document.getElementById('notificationContainer');
-        if (!notificationContainer) return;
-        
-        const toast = document.createElement('div');
-        toast.className = `p-3 rounded-lg shadow-lg text-white ${type === 'error' ? 'bg-red-500' : type === 'success' ? 'bg-green-500' : 'bg-blue-500'}`;
-        toast.innerHTML = `
-            <div class="flex items-center">
-                <i class="fas fa-${type === 'error' ? 'exclamation-circle' : type === 'success' ? 'check-circle' : 'info-circle'} mr-2"></i>
-                <span>${message}</span>
-            </div>
-        `;
-        
-        notificationContainer.appendChild(toast);
-        
-        // Auto-remove after 3 seconds
-        setTimeout(() => {
-            toast.remove();
-        }, 3000);
-    }
+    // Setup message listener
+    window.addEventListener('message', handleIframeMessage);
     
-    // Make functions globally available
-    window.removeNotification = removeNotification;
-    window.showBottomNavigation = showBottomNavigation;
-    window.hideBottomNavigation = hideBottomNavigation;
-    window.goBack = goBack;
-    window.setIsInChatView = setIsInChatView;
-    window.setIsInStatusView = setIsInStatusView;
-    window.setIsInGroupView = setIsInGroupView;
-    window.setIsInFullscreenView = setIsInFullscreenView;
-    window.api = api;
-    
-    // Handle window resize (WhatsApp behavior)
+    // Handle window resize
     window.addEventListener('resize', function() {
         if (window.innerWidth < 768) {
-            // On mobile, check if we should show/hide nav based on current view
             setTimeout(() => {
                 checkIframeForFullscreenPage();
                 
-                // Show mobile nav if not in any fullscreen view (WhatsApp behavior)
                 if (!isInChatView && !isInStatusView && !isInGroupView && !isInFullscreenView) {
                     showBottomNavigation();
                 }
             }, 100);
         } else {
-            // On desktop, always show sidebar and hide mobile nav
             document.getElementById('permanentSidebar').classList.remove('hidden');
             document.getElementById('mobileNavBar').classList.add('hidden-nav');
         }
     });
     
-    // Handle Android back button (WhatsApp behavior)
-    document.addEventListener('backbutton', function(e) {
-        if (isInChatView || isInStatusView || isInGroupView || isInFullscreenView) {
-            e.preventDefault();
-            goBack();
-        }
-    }, false);
+    // Make functions globally available
+    window.removeNotification = removeNotification;
+    window.showBottomNavigation = showBottomNavigation;
+    window.hideBottomNavigation = hideBottomNavigation;
+    window.goBack = function() {
+        window.history.back();
+    };
+    window.setIsInChatView = setIsInChatView;
+    window.setIsInStatusView = setIsInStatusView;
+    window.setIsInGroupView = setIsInGroupView;
+    window.setIsInFullscreenView = setIsInFullscreenView;
     
-    console.log('Iframe controller loaded successfully with WhatsApp-like navigation behavior');
-    console.log('Soft authentication mode enabled - api.js handles auth failures');
+    console.log('Iframe controller loaded successfully');
     </script>
 </body>
 </html>

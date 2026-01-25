@@ -27,2134 +27,12 @@
     
     <!-- Chart.js for Analytics -->
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
-    
+    <!-- Link CSS -->
+    <link rel="stylesheet" href="Tool.css">
+
     <style>
-        /* CSS with same structure as status.html */
-        * {
-            margin: 0;
-            padding: 0;
-            box-sizing: border-box;
-            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
-        }
+        /* Existing CSS styles remain unchanged */
         
-        :root {
-            --primary-color: #0084ff;
-            --secondary-color: #f0f2f5;
-            --danger-color: #ff3b30;
-            --success-color: #34c759;
-            --warning-color: #ff9500;
-            --info-color: #5ac8fa;
-            --text-primary: #050505;
-            --text-secondary: #65676b;
-            --bg-color: #ffffff;
-            --border-color: #dddfe2;
-            --marketplace-gradient: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-            --shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
-            --shadow-lg: 0 10px 30px rgba(0, 0, 0, 0.2);
-            --service-busy: linear-gradient(45deg, #ff6b6b, #ffa726);
-            --service-free: linear-gradient(45deg, #4caf50, #8bc34a);
-            --service-urgent: linear-gradient(45deg, #ff3b30, #ff9500);
-            --dark-bg: #121212;
-            --dark-card: #1e1e1e;
-            --dark-text: #e4e6eb;
-            --premium-gold: linear-gradient(45deg, #FFD700, #FFA500);
-            --premium-purple: linear-gradient(45deg, #8A2BE2, #4B0082);
-            --featured-gradient: linear-gradient(45deg, #FF6B6B, #4ECDC4, #45B7D1, #96CEB4, #FFEAA7);
-            --team-color: #6C63FF;
-        }
-        
-        [data-theme="dark"] {
-            --bg-color: var(--dark-bg);
-            --secondary-color: var(--dark-card);
-            --text-primary: var(--dark-text);
-            --text-secondary: #a0a0a0;
-            --border-color: #333;
-        }
-        
-        body {
-            background-color: var(--bg-color);
-            color: var(--text-primary);
-            height: 100vh;
-            overflow: hidden;
-            transition: background-color 0.3s ease;
-        }
-        
-        .app-container {
-            display: flex;
-            height: 100vh;
-            position: relative;
-        }
-        
-        /* Sidebar Styles */
-        .sidebar {
-            width: 380px;
-            background-color: var(--bg-color);
-            border-right: 1px solid var(--border-color);
-            display: flex;
-            flex-direction: column;
-            height: 100%;
-            overflow: hidden;
-            position: relative;
-            transition: all 0.3s ease;
-        }
-        
-        @media (min-width: 769px) {
-            .sidebar {
-                display: flex;
-            }
-        }
-        
-        @media (max-width: 768px) {
-            .sidebar {
-                display: flex !important;
-                position: relative !important;
-                width: 100% !important;
-                height: 100vh !important;
-                border-right: none !important;
-                z-index: auto !important;
-            }
-            
-            .marketplace-detail-panel {
-                position: relative !important;
-                width: 100% !important;
-                height: auto !important;
-                z-index: auto !important;
-            }
-            
-            .app-container {
-                flex-direction: column !important;
-                height: auto !important;
-                min-height: 100vh !important;
-            }
-            
-            .marketplace-list-content {
-                padding-bottom: 20px !important;
-            }
-        }
-        
-        .sidebar-header {
-            padding: 20px;
-            background: var(--marketplace-gradient);
-            color: white;
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-            flex-shrink: 0;
-        }
-        
-        .sidebar-header h2 {
-            font-size: 24px;
-            font-weight: 600;
-        }
-        
-        .add-listing-btn {
-            background-color: rgba(255, 255, 255, 0.2);
-            color: white;
-            border: 1px solid rgba(255, 255, 255, 0.3);
-            border-radius: 50%;
-            width: 45px;
-            height: 45px;
-            cursor: pointer;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            font-size: 20px;
-            transition: all 0.2s;
-            backdrop-filter: blur(10px);
-        }
-        
-        .add-listing-btn:hover {
-            background-color: rgba(255, 255, 255, 0.3);
-            transform: scale(1.05);
-        }
-        
-        /* Premium Badge */
-        .premium-badge {
-            background: var(--premium-gold);
-            color: #000;
-            font-size: 10px;
-            padding: 2px 6px;
-            border-radius: 10px;
-            font-weight: 700;
-            margin-left: 5px;
-            display: inline-flex;
-            align-items: center;
-            gap: 2px;
-        }
-        
-        .featured-badge {
-            background: var(--featured-gradient);
-            color: white;
-            font-size: 10px;
-            padding: 2px 8px;
-            border-radius: 12px;
-            font-weight: 700;
-            margin-left: 5px;
-            display: inline-flex;
-            align-items: center;
-            gap: 3px;
-            animation: pulse 2s infinite;
-        }
-        
-        @keyframes pulse {
-            0% { opacity: 0.8; }
-            50% { opacity: 1; }
-            100% { opacity: 0.8; }
-        }
-        
-        .verified-badge {
-            background: linear-gradient(45deg, #00C9FF, #92FE9D);
-            color: white;
-            font-size: 10px;
-            padding: 2px 6px;
-            border-radius: 10px;
-            font-weight: 700;
-            margin-left: 5px;
-            display: inline-flex;
-            align-items: center;
-            gap: 2px;
-        }
-        
-        .team-badge {
-            background-color: var(--team-color);
-            color: white;
-            font-size: 10px;
-            padding: 2px 6px;
-            border-radius: 10px;
-            font-weight: 700;
-            margin-left: 5px;
-            display: inline-flex;
-            align-items: center;
-            gap: 2px;
-        }
-        
-        /* Marketplace Categories */
-        .marketplace-categories {
-            display: flex;
-            border-bottom: 1px solid var(--border-color);
-            background-color: var(--bg-color);
-            flex-shrink: 0;
-            overflow-x: auto;
-            scrollbar-width: none;
-        }
-        
-        .marketplace-categories::-webkit-scrollbar {
-            display: none;
-        }
-        
-        .marketplace-category-btn {
-            padding: 15px 20px;
-            text-align: center;
-            font-weight: 500;
-            background: none;
-            border: none;
-            cursor: pointer;
-            color: var(--text-secondary);
-            transition: all 0.2s;
-            border-bottom: 3px solid transparent;
-            white-space: nowrap;
-            flex-shrink: 0;
-        }
-        
-        .marketplace-category-btn.active {
-            color: var(--primary-color);
-            border-bottom-color: var(--primary-color);
-        }
-        
-        .marketplace-category-btn:hover {
-            background-color: var(--secondary-color);
-        }
-        
-        /* Spotlight Section */
-        .spotlight-section {
-            padding: 15px;
-            background: linear-gradient(135deg, rgba(255, 215, 0, 0.1), rgba(255, 165, 0, 0.1));
-            border-bottom: 1px solid rgba(255, 215, 0, 0.3);
-            margin-bottom: 10px;
-            border-radius: 0 0 12px 12px;
-        }
-        
-        .spotlight-header {
-            display: flex;
-            align-items: center;
-            gap: 8px;
-            margin-bottom: 10px;
-            color: #FFA500;
-            font-weight: 600;
-        }
-        
-        .spotlight-listings {
-            display: flex;
-            gap: 10px;
-            overflow-x: auto;
-            padding-bottom: 5px;
-        }
-        
-        .spotlight-item {
-            min-width: 250px;
-            border: 2px solid rgba(255, 215, 0, 0.5);
-            border-radius: 12px;
-            overflow: hidden;
-            background: white;
-            cursor: pointer;
-            transition: transform 0.2s;
-            box-shadow: 0 4px 12px rgba(255, 215, 0, 0.2);
-        }
-        
-        [data-theme="dark"] .spotlight-item {
-            background: var(--dark-card);
-        }
-        
-        .spotlight-item:hover {
-            transform: translateY(-2px);
-            box-shadow: 0 6px 16px rgba(255, 215, 0, 0.3);
-        }
-        
-        .spotlight-preview {
-            height: 100px;
-            background: linear-gradient(45deg, #FFD700, #FFA500);
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            font-size: 24px;
-            color: white;
-        }
-        
-        .spotlight-info {
-            padding: 10px;
-        }
-        
-        .spotlight-title {
-            font-weight: 600;
-            margin-bottom: 5px;
-            display: flex;
-            align-items: center;
-            justify-content: space-between;
-        }
-        
-        /* My Listings Section */
-        .my-listings-section {
-            padding: 20px;
-            border-bottom: 1px solid var(--border-color);
-        }
-        
-        .my-listings-header {
-            display: flex;
-            align-items: center;
-            margin-bottom: 15px;
-        }
-        
-        .my-listings-avatar {
-            width: 60px;
-            height: 60px;
-            border-radius: 50%;
-            background-color: var(--secondary-color);
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            font-size: 20px;
-            color: white;
-            margin-right: 15px;
-            position: relative;
-            overflow: hidden;
-            background-size: cover;
-            background-position: center;
-        }
-        
-        .my-listings-info {
-            flex: 1;
-        }
-        
-        .my-listings-name {
-            font-weight: 600;
-            font-size: 18px;
-            margin-bottom: 5px;
-            display: flex;
-            align-items: center;
-            gap: 5px;
-        }
-        
-        .my-listings-text {
-            color: var(--text-secondary);
-            font-size: 14px;
-        }
-        
-        .my-listings-actions {
-            display: flex;
-            gap: 10px;
-            margin-top: 15px;
-        }
-        
-        .my-listing-action-btn {
-            flex: 1;
-            padding: 12px;
-            background-color: var(--secondary-color);
-            border: none;
-            border-radius: 8px;
-            cursor: pointer;
-            font-weight: 500;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            gap: 8px;
-            transition: all 0.2s;
-        }
-        
-        .my-listing-action-btn:hover {
-            background-color: #e4e6e9;
-        }
-        
-        .my-listing-action-btn.primary {
-            background-color: var(--primary-color);
-            color: white;
-        }
-        
-        .my-listing-action-btn.primary:hover {
-            background-color: #0073e6;
-        }
-        
-        .my-listing-action-btn.premium {
-            background: var(--premium-gold);
-            color: #000;
-            font-weight: 700;
-        }
-        
-        .my-listing-action-btn.premium:hover {
-            background: linear-gradient(45deg, #FFC107, #FF9800);
-        }
-        
-        /* Marketplace List */
-        .marketplace-list {
-            flex: 1;
-            display: flex;
-            flex-direction: column;
-            overflow: hidden;
-        }
-        
-        .marketplace-list-content {
-            flex: 1;
-            overflow-y: auto;
-            padding: 10px 0;
-        }
-        
-        .section-title {
-            padding: 15px 20px;
-            font-size: 14px;
-            font-weight: 600;
-            color: var(--text-secondary);
-            text-transform: uppercase;
-            letter-spacing: 0.5px;
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-        }
-        
-        .listing-item {
-            display: flex;
-            align-items: center;
-            padding: 15px;
-            background-color: var(--bg-color);
-            cursor: pointer;
-            transition: all 0.2s;
-            border-bottom: 1px solid var(--border-color);
-            position: relative;
-        }
-        
-        .listing-item.featured {
-            background: linear-gradient(90deg, rgba(255, 215, 0, 0.05), rgba(255, 215, 0, 0.02));
-            border-left: 4px solid #FFD700;
-        }
-        
-        .listing-item:hover {
-            background-color: var(--secondary-color);
-        }
-        
-        .listing-avatar {
-            width: 56px;
-            height: 56px;
-            border-radius: 12px;
-            background-color: var(--secondary-color);
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            font-size: 18px;
-            color: white;
-            margin-right: 15px;
-            position: relative;
-            overflow: hidden;
-            background-size: cover;
-            background-position: center;
-        }
-        
-        .listing-info {
-            flex: 1;
-            min-width: 0;
-        }
-        
-        .listing-name {
-            font-weight: 600;
-            font-size: 16px;
-            margin-bottom: 5px;
-            display: flex;
-            align-items: center;
-            justify-content: space-between;
-        }
-        
-        .listing-time {
-            color: var(--text-secondary);
-            font-size: 13px;
-            display: flex;
-            align-items: center;
-            gap: 8px;
-            flex-wrap: wrap;
-        }
-        
-        .listing-preview {
-            color: var(--text-secondary);
-            font-size: 14px;
-            overflow: hidden;
-            text-overflow: ellipsis;
-            white-space: nowrap;
-        }
-        
-        .listing-price {
-            background-color: var(--primary-color);
-            color: white;
-            font-size: 12px;
-            padding: 2px 8px;
-            border-radius: 10px;
-            margin-left: 5px;
-        }
-        
-        .availability-badge {
-            font-size: 11px;
-            padding: 2px 8px;
-            border-radius: 10px;
-            color: white;
-            margin-left: 5px;
-        }
-        
-        .availability-busy {
-            background: var(--service-busy);
-        }
-        
-        .availability-free {
-            background: var(--service-free);
-        }
-        
-        .availability-urgent {
-            background: var(--service-urgent);
-        }
-        
-        /* Mood Filter Badge */
-        .mood-filter-badge {
-            background-color: rgba(255, 255, 255, 0.1);
-            border: 1px solid rgba(255, 255, 255, 0.2);
-            border-radius: 15px;
-            padding: 4px 12px;
-            font-size: 12px;
-            margin-left: 10px;
-            backdrop-filter: blur(10px);
-        }
-        
-        /* Marketplace Detail Panel */
-        .marketplace-detail-panel {
-            flex: 1;
-            background-color: var(--bg-color);
-            position: relative;
-            display: none;
-            overflow: hidden;
-        }
-        
-        .marketplace-detail-panel.active {
-            display: flex;
-            flex-direction: column;
-        }
-        
-        .marketplace-detail-header {
-            position: absolute;
-            top: 0;
-            left: 0;
-            right: 0;
-            padding: 20px;
-            display: flex;
-            align-items: center;
-            justify-content: space-between;
-            z-index: 100;
-            background: linear-gradient(to bottom, rgba(255,255,255,0.95) 0%, rgba(255,255,255,0) 100%);
-        }
-        
-        [data-theme="dark"] .marketplace-detail-header {
-            background: linear-gradient(to bottom, rgba(30,30,30,0.95) 0%, rgba(30,30,30,0) 100%);
-        }
-        
-        .back-btn {
-            background: none;
-            border: none;
-            color: var(--text-primary);
-            cursor: pointer;
-            font-size: 20px;
-            padding: 8px;
-            border-radius: 50%;
-            transition: all 0.2s;
-        }
-        
-        .back-btn:hover {
-            background-color: var(--secondary-color);
-        }
-        
-        .marketplace-detail-info {
-            display: flex;
-            align-items: center;
-            gap: 10px;
-            color: var(--text-primary);
-        }
-        
-        .marketplace-detail-avatar {
-            width: 40px;
-            height: 40px;
-            border-radius: 50%;
-            overflow: hidden;
-            background-size: cover;
-            background-position: center;
-        }
-        
-        .marketplace-detail-name {
-            font-weight: 600;
-            font-size: 16px;
-        }
-        
-        .marketplace-detail-time {
-            font-size: 12px;
-            color: var(--text-secondary);
-        }
-        
-        .marketplace-detail-content {
-            flex: 1;
-            display: flex;
-            flex-direction: column;
-            padding: 80px 20px 20px;
-            overflow-y: auto;
-        }
-        
-        .listing-detail-media {
-            max-width: 100%;
-            max-height: 300px;
-            object-fit: contain;
-            border-radius: 12px;
-            margin-bottom: 20px;
-        }
-        
-        .listing-detail-title {
-            font-size: 24px;
-            font-weight: 600;
-            margin-bottom: 10px;
-            display: flex;
-            align-items: center;
-            gap: 10px;
-        }
-        
-        .listing-detail-price {
-            font-size: 20px;
-            font-weight: 600;
-            color: var(--primary-color);
-            margin-bottom: 15px;
-        }
-        
-        .listing-detail-description {
-            font-size: 16px;
-            line-height: 1.6;
-            margin-bottom: 20px;
-            color: var(--text-primary);
-        }
-        
-        .listing-detail-meta {
-            display: flex;
-            flex-wrap: wrap;
-            gap: 10px;
-            margin-bottom: 20px;
-        }
-        
-        .meta-badge {
-            background-color: var(--secondary-color);
-            padding: 6px 12px;
-            border-radius: 20px;
-            font-size: 14px;
-            display: flex;
-            align-items: center;
-            gap: 5px;
-        }
-        
-        .trust-badge {
-            background-color: rgba(52, 199, 89, 0.1);
-            color: var(--success-color);
-            border: 1px solid rgba(52, 199, 89, 0.2);
-        }
-        
-        .marketplace-detail-controls {
-            position: absolute;
-            bottom: 0;
-            left: 0;
-            right: 0;
-            padding: 20px;
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-            z-index: 100;
-            background: linear-gradient(to top, var(--bg-color) 0%, rgba(255,255,255,0) 100%);
-            border-top: 1px solid var(--border-color);
-        }
-        
-        .marketplace-detail-actions {
-            display: flex;
-            gap: 15px;
-        }
-        
-        .marketplace-action-btn {
-            background: none;
-            border: none;
-            color: var(--text-primary);
-            cursor: pointer;
-            font-size: 20px;
-            width: 44px;
-            height: 44px;
-            border-radius: 50%;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            transition: all 0.2s;
-            background-color: var(--secondary-color);
-        }
-        
-        .marketplace-action-btn:hover {
-            background-color: #e4e6e9;
-            transform: scale(1.1);
-        }
-        
-        .marketplace-action-btn.tip-btn {
-            background: var(--premium-gold);
-            color: #000;
-            font-weight: 600;
-        }
-        
-        /* Tip Button Styles */
-        .tip-container {
-            position: relative;
-        }
-        
-        .tip-amounts {
-            position: absolute;
-            bottom: 60px;
-            left: 0;
-            background: white;
-            border-radius: 12px;
-            box-shadow: var(--shadow-lg);
-            padding: 15px;
-            display: none;
-            flex-direction: column;
-            gap: 10px;
-            z-index: 1000;
-            min-width: 200px;
-        }
-        
-        [data-theme="dark"] .tip-amounts {
-            background: var(--dark-card);
-        }
-        
-        .tip-amounts.show {
-            display: flex;
-        }
-        
-        .tip-option {
-            padding: 10px 15px;
-            background: var(--secondary-color);
-            border-radius: 8px;
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-            cursor: pointer;
-            transition: all 0.2s;
-        }
-        
-        .tip-option:hover {
-            background: var(--primary-color);
-            color: white;
-        }
-        
-        /* Create Listing Modal */
-        .create-listing-modal {
-            display: none;
-            position: fixed;
-            top: 0;
-            left: 0;
-            width: 100%;
-            height: 100%;
-            background-color: rgba(0, 0, 0, 0.9);
-            z-index: 2000;
-            align-items: center;
-            justify-content: center;
-        }
-        
-        .create-listing-modal.active {
-            display: flex;
-        }
-        
-        .create-listing-container {
-            width: 90%;
-            max-width: 600px;
-            background-color: var(--bg-color);
-            border-radius: 20px;
-            overflow: hidden;
-            display: flex;
-            flex-direction: column;
-            max-height: 90vh;
-            box-shadow: var(--shadow-lg);
-        }
-        
-        .create-listing-header {
-            padding: 20px;
-            border-bottom: 1px solid var(--border-color);
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-            background: var(--marketplace-gradient);
-            color: white;
-        }
-        
-        .create-listing-header h3 {
-            font-size: 20px;
-            font-weight: 600;
-        }
-        
-        .create-listing-tabs {
-            display: flex;
-            border-bottom: 1px solid var(--border-color);
-            overflow-x: auto;
-        }
-        
-        .create-listing-tab {
-            padding: 15px;
-            text-align: center;
-            background: none;
-            border: none;
-            cursor: pointer;
-            font-weight: 500;
-            color: var(--text-secondary);
-            transition: all 0.2s;
-            border-bottom: 3px solid transparent;
-            white-space: nowrap;
-            min-width: 100px;
-        }
-        
-        .create-listing-tab.active {
-            color: var(--primary-color);
-            border-bottom-color: var(--primary-color);
-        }
-        
-        .create-listing-content {
-            flex: 1;
-            padding: 25px;
-            overflow-y: auto;
-        }
-        
-        .create-listing-tab-content {
-            display: none;
-        }
-        
-        .create-listing-tab-content.active {
-            display: block;
-            animation: fadeIn 0.3s ease;
-        }
-        
-        /* Premium Tab Styles */
-        .premium-feature-tag {
-            background: var(--premium-gold);
-            color: #000;
-            font-size: 10px;
-            padding: 2px 6px;
-            border-radius: 10px;
-            font-weight: 700;
-            margin-left: 5px;
-        }
-        
-        .premium-feature {
-            border: 2px solid #FFD700;
-            border-radius: 12px;
-            padding: 15px;
-            margin-bottom: 15px;
-            background: linear-gradient(45deg, rgba(255, 215, 0, 0.05), rgba(255, 215, 0, 0.02));
-        }
-        
-        /* Service Listing Tab */
-        .service-listing-container {
-            display: flex;
-            flex-direction: column;
-            gap: 20px;
-        }
-        
-        .input-group {
-            margin-bottom: 20px;
-        }
-        
-        .input-group label {
-            display: block;
-            margin-bottom: 8px;
-            font-weight: 500;
-            color: var(--text-primary);
-        }
-        
-        .text-input {
-            width: 100%;
-            padding: 12px;
-            border: 1px solid var(--border-color);
-            border-radius: 8px;
-            font-size: 16px;
-            background-color: var(--bg-color);
-            color: var(--text-primary);
-        }
-        
-        .text-input:focus {
-            outline: none;
-            border-color: var(--primary-color);
-        }
-        
-        .textarea-input {
-            width: 100%;
-            padding: 12px;
-            border: 1px solid var(--border-color);
-            border-radius: 8px;
-            font-size: 16px;
-            min-height: 100px;
-            resize: vertical;
-            background-color: var(--bg-color);
-            color: var(--text-primary);
-        }
-        
-        .availability-options {
-            display: flex;
-            gap: 10px;
-            margin-top: 10px;
-        }
-        
-        .availability-option {
-            flex: 1;
-            padding: 10px;
-            border: 2px solid var(--border-color);
-            border-radius: 8px;
-            cursor: pointer;
-            text-align: center;
-            transition: all 0.2s;
-        }
-        
-        .availability-option.selected {
-            border-color: var(--primary-color);
-            background-color: rgba(0, 132, 255, 0.1);
-        }
-        
-        /* Digital Items Tab */
-        .digital-items-container {
-            display: flex;
-            flex-direction: column;
-            gap: 20px;
-        }
-        
-        .file-upload-area {
-            border: 2px dashed var(--border-color);
-            border-radius: 12px;
-            padding: 40px 20px;
-            text-align: center;
-            cursor: pointer;
-            transition: all 0.3s;
-        }
-        
-        .file-upload-area:hover {
-            border-color: var(--primary-color);
-            background-color: rgba(0, 132, 255, 0.05);
-        }
-        
-        .file-upload-icon {
-            font-size: 48px;
-            color: var(--primary-color);
-            margin-bottom: 15px;
-        }
-        
-        .file-preview {
-            margin-top: 20px;
-            border-radius: 12px;
-            overflow: hidden;
-            position: relative;
-        }
-        
-        .file-preview img,
-        .file-preview video {
-            width: 100%;
-            max-height: 200px;
-            object-fit: contain;
-        }
-        
-        .file-info {
-            padding: 10px;
-            background-color: var(--secondary-color);
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-        }
-        
-        /* Trust Circles Tab */
-        .trust-circles-container {
-            display: flex;
-            flex-direction: column;
-            gap: 20px;
-        }
-        
-        .circles-selection {
-            display: grid;
-            grid-template-columns: repeat(2, 1fr);
-            gap: 10px;
-            margin-top: 10px;
-        }
-        
-        .circle-option {
-            padding: 12px;
-            border: 2px solid var(--border-color);
-            border-radius: 8px;
-            cursor: pointer;
-            text-align: center;
-            transition: all 0.2s;
-        }
-        
-        .circle-option.selected {
-            border-color: var(--primary-color);
-            background-color: rgba(0, 132, 255, 0.1);
-        }
-        
-        /* Premium Templates Tab */
-        .premium-templates-container {
-            display: grid;
-            grid-template-columns: repeat(2, 1fr);
-            gap: 15px;
-            margin-top: 10px;
-        }
-        
-        .template-option {
-            border: 2px solid var(--border-color);
-            border-radius: 12px;
-            padding: 15px;
-            cursor: pointer;
-            transition: all 0.2s;
-            position: relative;
-            overflow: hidden;
-        }
-        
-        .template-option.premium {
-            border-color: #FFD700;
-            background: linear-gradient(45deg, rgba(255, 215, 0, 0.05), rgba(255, 215, 0, 0.02));
-        }
-        
-        .template-option.selected {
-            border-color: var(--primary-color);
-            background-color: rgba(0, 132, 255, 0.1);
-        }
-        
-        .template-option.premium.selected {
-            border-color: #FFA500;
-            background: linear-gradient(45deg, rgba(255, 165, 0, 0.1), rgba(255, 215, 0, 0.05));
-        }
-        
-        .template-icon {
-            font-size: 24px;
-            margin-bottom: 10px;
-            color: var(--primary-color);
-        }
-        
-        .template-option.premium .template-icon {
-            color: #FFD700;
-        }
-        
-        .template-name {
-            font-weight: 600;
-            margin-bottom: 5px;
-        }
-        
-        .template-description {
-            font-size: 12px;
-            color: var(--text-secondary);
-        }
-        
-        /* Mood Filter Section */
-        .mood-filter-container {
-            background-color: var(--secondary-color);
-            border-radius: 12px;
-            padding: 20px;
-            margin-top: 20px;
-        }
-        
-        .mood-options {
-            display: flex;
-            flex-wrap: wrap;
-            gap: 10px;
-            margin-top: 10px;
-        }
-        
-        .mood-option {
-            padding: 8px 16px;
-            background-color: var(--bg-color);
-            border: 2px solid var(--border-color);
-            border-radius: 20px;
-            cursor: pointer;
-            transition: all 0.2s;
-        }
-        
-        .mood-option.selected {
-            border-color: var(--primary-color);
-            background-color: rgba(0, 132, 255, 0.1);
-        }
-        
-        /* Duration Options */
-        .duration-options {
-            display: flex;
-            gap: 10px;
-            margin-top: 10px;
-        }
-        
-        .duration-option {
-            flex: 1;
-            padding: 10px;
-            border: 2px solid var(--border-color);
-            border-radius: 8px;
-            cursor: pointer;
-            text-align: center;
-            transition: all 0.2s;
-        }
-        
-        .duration-option.selected {
-            border-color: var(--primary-color);
-            background-color: rgba(0, 132, 255, 0.1);
-        }
-        
-        /* Notes Section */
-        .notes-container {
-            margin-top: 20px;
-        }
-        
-        .private-notes {
-            width: 100%;
-            padding: 12px;
-            border: 1px solid var(--border-color);
-            border-radius: 8px;
-            font-size: 14px;
-            min-height: 60px;
-            resize: vertical;
-            background-color: var(--bg-color);
-            color: var(--text-primary);
-        }
-        
-        /* Action Buttons */
-        .action-buttons {
-            display: flex;
-            gap: 10px;
-            padding: 20px;
-            border-top: 1px solid var(--border-color);
-        }
-        
-        .action-btn {
-            flex: 1;
-            padding: 12px;
-            border: none;
-            border-radius: 8px;
-            cursor: pointer;
-            font-weight: 500;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            gap: 8px;
-            transition: all 0.2s;
-        }
-        
-        .action-btn.primary {
-            background-color: var(--primary-color);
-            color: white;
-        }
-        
-        .action-btn.primary:hover {
-            background-color: #0073e6;
-        }
-        
-        .action-btn.secondary {
-            background-color: var(--secondary-color);
-            color: var(--text-primary);
-        }
-        
-        .action-btn.secondary:hover {
-            background-color: #e4e6e9;
-        }
-        
-        .action-btn.premium {
-            background: var(--premium-gold);
-            color: #000;
-            font-weight: 700;
-        }
-        
-        .action-btn.premium:hover {
-            background: linear-gradient(45deg, #FFC107, #FF9800);
-        }
-        
-        /* Saved Items Modal */
-        .saved-items-modal {
-            display: none;
-            position: fixed;
-            top: 0;
-            left: 0;
-            width: 100%;
-            height: 100%;
-            background-color: rgba(0, 0, 0, 0.9);
-            z-index: 2000;
-            align-items: center;
-            justify-content: center;
-        }
-        
-        .saved-items-modal.active {
-            display: flex;
-        }
-        
-        .saved-items-container {
-            width: 90%;
-            max-width: 600px;
-            background-color: var(--bg-color);
-            border-radius: 20px;
-            overflow: hidden;
-            display: flex;
-            flex-direction: column;
-            max-height: 90vh;
-        }
-        
-        .saved-items-grid {
-            display: grid;
-            grid-template-columns: repeat(2, 1fr);
-            gap: 15px;
-            padding: 20px;
-            overflow-y: auto;
-        }
-        
-        @media (max-width: 480px) {
-            .saved-items-grid {
-                grid-template-columns: 1fr;
-            }
-        }
-        
-        .saved-item {
-            border: 1px solid var(--border-color);
-            border-radius: 12px;
-            overflow: hidden;
-            cursor: pointer;
-            transition: all 0.2s;
-        }
-        
-        .saved-item:hover {
-            transform: translateY(-2px);
-            box-shadow: var(--shadow);
-        }
-        
-        .saved-item-preview {
-            height: 120px;
-            background-color: var(--secondary-color);
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            font-size: 32px;
-        }
-        
-        .saved-item-info {
-            padding: 10px;
-            background-color: var(--bg-color);
-        }
-        
-        .saved-item-title {
-            font-weight: 600;
-            margin-bottom: 5px;
-            overflow: hidden;
-            text-overflow: ellipsis;
-            white-space: nowrap;
-        }
-        
-        .saved-item-price {
-            color: var(--primary-color);
-            font-weight: 500;
-        }
-        
-        /* My Notes Modal */
-        .my-notes-modal {
-            display: none;
-            position: fixed;
-            top: 0;
-            left: 0;
-            width: 100%;
-            height: 100%;
-            background-color: rgba(0, 0, 0, 0.9);
-            z-index: 2000;
-            align-items: center;
-            justify-content: center;
-        }
-        
-        .my-notes-modal.active {
-            display: flex;
-        }
-        
-        .my-notes-container {
-            width: 90%;
-            max-width: 500px;
-            background-color: var(--bg-color);
-            border-radius: 20px;
-            overflow: hidden;
-            display: flex;
-            flex-direction: column;
-            max-height: 90vh;
-        }
-        
-        .my-notes-list {
-            padding: 20px;
-            overflow-y: auto;
-        }
-        
-        .note-item {
-            background-color: var(--secondary-color);
-            border-radius: 12px;
-            padding: 15px;
-            margin-bottom: 10px;
-            border-left: 4px solid var(--primary-color);
-        }
-        
-        .note-content {
-            margin-bottom: 10px;
-        }
-        
-        .note-meta {
-            display: flex;
-            justify-content: space-between;
-            font-size: 12px;
-            color: var(--text-secondary);
-        }
-        
-        /* Trust Stats Modal */
-        .trust-stats-modal {
-            display: none;
-            position: fixed;
-            top: 0;
-            left: 0;
-            width: 100%;
-            height: 100%;
-            background-color: rgba(0, 0, 0, 0.9);
-            z-index: 2000;
-            align-items: center;
-            justify-content: center;
-        }
-        
-        .trust-stats-modal.active {
-            display: flex;
-        }
-        
-        .trust-stats-container {
-            width: 90%;
-            max-width: 500px;
-            background-color: var(--bg-color);
-            border-radius: 20px;
-            overflow: hidden;
-            display: flex;
-            flex-direction: column;
-            max-height: 90vh;
-        }
-        
-        .trust-stats-content {
-            padding: 20px;
-            overflow-y: auto;
-        }
-        
-        .trust-stat-item {
-            display: flex;
-            justify-content: space-between;
-            padding: 15px 0;
-            border-bottom: 1px solid var(--border-color);
-        }
-        
-        .trust-stat-label {
-            color: var(--text-secondary);
-        }
-        
-        .trust-stat-value {
-            font-weight: 600;
-        }
-        
-        /* Analytics Dashboard Modal */
-        .analytics-modal {
-            display: none;
-            position: fixed;
-            top: 0;
-            left: 0;
-            width: 100%;
-            height: 100%;
-            background-color: rgba(0, 0, 0, 0.9);
-            z-index: 2000;
-            align-items: center;
-            justify-content: center;
-        }
-        
-        .analytics-modal.active {
-            display: flex;
-        }
-        
-        .analytics-container {
-            width: 90%;
-            max-width: 800px;
-            background-color: var(--bg-color);
-            border-radius: 20px;
-            overflow: hidden;
-            display: flex;
-            flex-direction: column;
-            max-height: 90vh;
-        }
-        
-        .analytics-content {
-            padding: 20px;
-            overflow-y: auto;
-        }
-        
-        .analytics-grid {
-            display: grid;
-            grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
-            gap: 20px;
-            margin-bottom: 20px;
-        }
-        
-        .analytics-card {
-            background: var(--secondary-color);
-            border-radius: 12px;
-            padding: 20px;
-            display: flex;
-            flex-direction: column;
-            gap: 10px;
-        }
-        
-        .analytics-card-title {
-            font-weight: 600;
-            font-size: 14px;
-            color: var(--text-secondary);
-        }
-        
-        .analytics-card-value {
-            font-size: 24px;
-            font-weight: 700;
-            color: var(--primary-color);
-        }
-        
-        .analytics-card-change {
-            font-size: 12px;
-            display: flex;
-            align-items: center;
-            gap: 5px;
-        }
-        
-        .analytics-card-change.positive {
-            color: var(--success-color);
-        }
-        
-        .analytics-card-change.negative {
-            color: var(--danger-color);
-        }
-        
-        .chart-container {
-            background: var(--secondary-color);
-            border-radius: 12px;
-            padding: 20px;
-            margin-bottom: 20px;
-            height: 300px;
-            position: relative;
-        }
-        
-        .heatmap-container {
-            background: var(--secondary-color);
-            border-radius: 12px;
-            padding: 20px;
-            margin-bottom: 20px;
-        }
-        
-        .heatmap-grid {
-            display: grid;
-            grid-template-columns: repeat(7, 1fr);
-            gap: 5px;
-            margin-top: 15px;
-        }
-        
-        .heatmap-cell {
-            height: 30px;
-            border-radius: 4px;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            font-size: 10px;
-            color: white;
-            transition: all 0.2s;
-        }
-        
-        .heatmap-cell:hover {
-            transform: scale(1.1);
-            z-index: 1;
-        }
-        
-        /* Premium Options Modal */
-        .premium-options-modal {
-            display: none;
-            position: fixed;
-            top: 0;
-            left: 0;
-            width: 100%;
-            height: 100%;
-            background-color: rgba(0, 0, 0, 0.9);
-            z-index: 2000;
-            align-items: center;
-            justify-content: center;
-        }
-        
-        .premium-options-modal.active {
-            display: flex;
-        }
-        
-        .premium-options-container {
-            width: 90%;
-            max-width: 500px;
-            background-color: var(--bg-color);
-            border-radius: 20px;
-            overflow: hidden;
-            display: flex;
-            flex-direction: column;
-            max-height: 90vh;
-        }
-        
-        .premium-plans {
-            display: grid;
-            grid-template-columns: repeat(2, 1fr);
-            gap: 15px;
-            padding: 20px;
-        }
-        
-        .premium-plan {
-            border: 2px solid var(--border-color);
-            border-radius: 12px;
-            padding: 20px;
-            cursor: pointer;
-            transition: all 0.2s;
-            text-align: center;
-        }
-        
-        .premium-plan.popular {
-            border-color: #FFD700;
-            background: linear-gradient(45deg, rgba(255, 215, 0, 0.05), rgba(255, 215, 0, 0.02));
-            position: relative;
-            overflow: hidden;
-        }
-        
-        .premium-plan.popular::before {
-            content: "POPULAR";
-            position: absolute;
-            top: 10px;
-            right: -30px;
-            background: var(--premium-gold);
-            color: #000;
-            font-size: 10px;
-            font-weight: 700;
-            padding: 3px 30px;
-            transform: rotate(45deg);
-        }
-        
-        .premium-plan:hover {
-            border-color: var(--primary-color);
-            transform: translateY(-2px);
-        }
-        
-        .plan-name {
-            font-size: 18px;
-            font-weight: 700;
-            margin-bottom: 10px;
-        }
-        
-        .plan-price {
-            font-size: 24px;
-            font-weight: 700;
-            margin-bottom: 15px;
-        }
-        
-        .plan-features {
-            text-align: left;
-            font-size: 12px;
-            margin-bottom: 15px;
-        }
-        
-        .plan-feature {
-            margin-bottom: 5px;
-            display: flex;
-            align-items: center;
-            gap: 5px;
-        }
-        
-        /* Team Management Modal */
-        .team-management-modal {
-            display: none;
-            position: fixed;
-            top: 0;
-            left: 0;
-            width: 100%;
-            height: 100%;
-            background-color: rgba(0, 0, 0, 0.9);
-            z-index: 2000;
-            align-items: center;
-            justify-content: center;
-        }
-        
-        .team-management-modal.active {
-            display: flex;
-        }
-        
-        .team-management-container {
-            width: 90%;
-            max-width: 600px;
-            background-color: var(--bg-color);
-            border-radius: 20px;
-            overflow: hidden;
-            display: flex;
-            flex-direction: column;
-            max-height: 90vh;
-        }
-        
-        .team-members {
-            padding: 20px;
-            overflow-y: auto;
-        }
-        
-        .team-member {
-            display: flex;
-            align-items: center;
-            justify-content: space-between;
-            padding: 15px;
-            background: var(--secondary-color);
-            border-radius: 12px;
-            margin-bottom: 10px;
-        }
-        
-        .team-member-info {
-            display: flex;
-            align-items: center;
-            gap: 10px;
-        }
-        
-        .team-member-avatar {
-            width: 40px;
-            height: 40px;
-            border-radius: 50%;
-            background-size: cover;
-            background-position: center;
-            background-color: var(--primary-color);
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            color: white;
-        }
-        
-        .team-member-role {
-            font-size: 12px;
-            color: var(--text-secondary);
-        }
-        
-        /* Streak & Gamification */
-        .streak-indicator {
-            display: flex;
-            align-items: center;
-            gap: 5px;
-            background: linear-gradient(45deg, #FF6B6B, #4ECDC4);
-            color: white;
-            padding: 4px 10px;
-            border-radius: 15px;
-            font-size: 12px;
-            font-weight: 600;
-            margin-left: 10px;
-        }
-        
-        .leaderboard-item {
-            display: flex;
-            align-items: center;
-            justify-content: space-between;
-            padding: 15px;
-            background: var(--secondary-color);
-            border-radius: 12px;
-            margin-bottom: 10px;
-        }
-        
-        .leaderboard-rank {
-            font-size: 18px;
-            font-weight: 700;
-            color: var(--primary-color);
-            min-width: 30px;
-        }
-        
-        .leaderboard-info {
-            flex: 1;
-            margin-left: 15px;
-        }
-        
-        .leaderboard-stats {
-            display: flex;
-            gap: 15px;
-            font-size: 12px;
-            color: var(--text-secondary);
-        }
-        
-        /* Notification */
-        .notification {
-            position: fixed;
-            bottom: 20px;
-            right: 20px;
-            background-color: var(--success-color);
-            color: white;
-            padding: 12px 20px;
-            border-radius: 8px;
-            box-shadow: var(--shadow);
-            z-index: 1000;
-            display: flex;
-            align-items: center;
-            gap: 10px;
-            transform: translateY(100px);
-            opacity: 0;
-            transition: all 0.3s;
-        }
-        
-        .notification.active {
-            transform: translateY(0);
-            opacity: 1;
-        }
-        
-        .notification.error {
-            background-color: var(--danger-color);
-        }
-        
-        .notification.warning {
-            background-color: var(--warning-color);
-        }
-        
-        .notification.info {
-            background-color: var(--info-color);
-        }
-        
-        /* Animations */
-        @keyframes fadeIn {
-            from { opacity: 0; transform: translateY(20px); }
-            to { opacity: 1; transform: translateY(0); }
-        }
-        
-        .fade-in {
-            animation: fadeIn 0.3s ease;
-        }
-        
-        /* Responsive */
-        @media (max-width: 768px) {
-            body {
-                overflow: auto;
-            }
-            
-            .app-container {
-                flex-direction: column;
-                height: auto;
-                min-height: 100vh;
-                overflow: hidden;
-            }
-            
-            .sidebar {
-                width: 100% !important;
-                height: 100vh !important;
-                max-height: 100vh !important;
-                border-right: none !important;
-                display: flex !important;
-                position: relative !important;
-                z-index: auto !important;
-            }
-            
-            .marketplace-detail-panel {
-                position: relative !important;
-                width: 100% !important;
-                height: auto !important;
-                z-index: auto !important;
-            }
-            
-            .marketplace-categories {
-                padding: 0 10px;
-                overflow-x: auto;
-            }
-            
-            .marketplace-category-btn {
-                padding: 12px 15px;
-                font-size: 14px;
-                min-width: 120px;
-            }
-            
-            .create-listing-tabs {
-                overflow-x: auto;
-            }
-            
-            .create-listing-tab {
-                min-width: 80px;
-                padding: 12px;
-                font-size: 14px;
-            }
-            
-            .circles-selection {
-                grid-template-columns: 1fr;
-            }
-            
-            .marketplace-list-content {
-                padding-bottom: 20px !important;
-            }
-            
-            .analytics-grid {
-                grid-template-columns: 1fr;
-            }
-            
-            .premium-templates-container {
-                grid-template-columns: 1fr;
-            }
-            
-            .premium-plans {
-                grid-template-columns: 1fr;
-            }
-        }
-        
-        @media (max-width: 480px) {
-            .sidebar-header h2 {
-                font-size: 20px;
-            }
-            
-            .marketplace-categories {
-                padding: 0 5px;
-            }
-            
-            .marketplace-category-btn {
-                padding: 10px 12px;
-                font-size: 13px;
-                min-width: 100px;
-            }
-        }
-        
-        /* Dark mode preview */
-        .dark-mode-preview {
-            position: absolute;
-            top: 10px;
-            right: 10px;
-            background: rgba(0, 0, 0, 0.5);
-            color: white;
-            padding: 5px 10px;
-            border-radius: 15px;
-            font-size: 12px;
-            display: none;
-        }
-        
-        [data-theme="dark"] .dark-mode-preview {
-            display: block;
-        }
-        
-        /* Upload Progress */
-        .upload-progress {
-            position: fixed;
-            top: 0;
-            left: 0;
-            right: 0;
-            height: 3px;
-            background-color: var(--primary-color);
-            width: 0%;
-            z-index: 3000;
-            transition: width 0.3s ease;
-        }
-        
-        /* Trust Indicator */
-        .trust-indicator {
-            display: inline-flex;
-            align-items: center;
-            gap: 5px;
-            padding: 4px 8px;
-            border-radius: 12px;
-            font-size: 12px;
-            font-weight: 500;
-        }
-        
-        .trust-responsive {
-            background-color: rgba(0, 132, 255, 0.1);
-            color: var(--primary-color);
-            border: 1px solid rgba(0, 132, 255, 0.2);
-        }
-        
-        .trust-reliable {
-            background-color: rgba(52, 199, 89, 0.1);
-            color: var(--success-color);
-            border: 1px solid rgba(52, 199, 89, 0.2);
-        }
-        
-        .trust-new {
-            background-color: rgba(255, 149, 0, 0.1);
-            color: var(--warning-color);
-            border: 1px solid rgba(255, 149, 0, 0.2);
-        }
-        
-        .trust-verified {
-            background: linear-gradient(45deg, #00C9FF, #92FE9D);
-            color: white;
-            border: none;
-        }
-        
-        .trust-pro {
-            background: var(--premium-gold);
-            color: #000;
-            border: none;
-            font-weight: 700;
-        }
-        
-        /* Reserve Badge */
-        .reserve-badge {
-            background-color: rgba(255, 149, 0, 0.1);
-            color: var(--warning-color);
-            padding: 4px 8px;
-            border-radius: 10px;
-            font-size: 12px;
-            border: 1px solid rgba(255, 149, 0, 0.2);
-        }
-        
-        /* Mood Filter Indicator */
-        .mood-filter-indicator {
-            position: fixed;
-            top: 80px;
-            right: 20px;
-            background-color: rgba(0, 132, 255, 0.1);
-            color: var(--primary-color);
-            padding: 8px 12px;
-            border-radius: 20px;
-            font-size: 12px;
-            display: flex;
-            align-items: center;
-            gap: 5px;
-            z-index: 100;
-            backdrop-filter: blur(10px);
-            border: 1px solid rgba(0, 132, 255, 0.2);
-        }
-        
-        /* Empty State */
-        .empty-state {
-            text-align: center;
-            padding: 40px 20px;
-            color: var(--text-secondary);
-        }
-        
-        .empty-state i {
-            font-size: 48px;
-            margin-bottom: 15px;
-        }
-        
-        /* Loading Spinner */
-        .loading-spinner {
-            display: inline-block;
-            width: 20px;
-            height: 20px;
-            border: 3px solid rgba(0, 132, 255, 0.3);
-            border-radius: 50%;
-            border-top-color: var(--primary-color);
-            animation: spin 1s ease-in-out infinite;
-        }
-        
-        @keyframes spin {
-            to { transform: rotate(360deg); }
-        }
-        
-        /* Premium Features Grid */
-        .premium-features-grid {
-            display: grid;
-            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
-            gap: 15px;
-            margin-top: 15px;
-        }
-        
-        .premium-feature-card {
-            background: var(--secondary-color);
-            border-radius: 12px;
-            padding: 15px;
-            text-align: center;
-        }
-        
-        .premium-feature-icon {
-            font-size: 24px;
-            margin-bottom: 10px;
-            color: #FFD700;
-        }
-        
-        /* Export Options */
-        .export-options {
-            display: flex;
-            gap: 10px;
-            margin-top: 10px;
-        }
-        
-        .export-option {
-            flex: 1;
-            padding: 10px;
-            border: 2px solid var(--border-color);
-            border-radius: 8px;
-            cursor: pointer;
-            text-align: center;
-            transition: all 0.2s;
-        }
-        
-        .export-option.selected {
-            border-color: var(--primary-color);
-            background-color: rgba(0, 132, 255, 0.1);
-        }
-        
-        /* Schedule Options */
-        .schedule-options {
-            display: flex;
-            gap: 10px;
-            margin-top: 10px;
-        }
-        
-        .schedule-option {
-            flex: 1;
-            padding: 10px;
-            border: 2px solid var(--border-color);
-            border-radius: 8px;
-            cursor: pointer;
-            text-align: center;
-            transition: all 0.2s;
-        }
-        
-        .schedule-option.selected {
-            border-color: var(--primary-color);
-            background-color: rgba(0, 132, 255, 0.1);
-        }
-        
-        /* Bulk Upload */
-        .bulk-upload-container {
-            border: 2px dashed var(--border-color);
-            border-radius: 12px;
-            padding: 40px 20px;
-            text-align: center;
-            cursor: pointer;
-            transition: all 0.3s;
-            margin-bottom: 20px;
-        }
-        
-        .bulk-upload-container:hover {
-            border-color: var(--primary-color);
-            background-color: rgba(0, 132, 255, 0.05);
-        }
-        
-        .bulk-upload-list {
-            max-height: 200px;
-            overflow-y: auto;
-            margin-top: 15px;
-        }
-        
-        .bulk-upload-item {
-            display: flex;
-            align-items: center;
-            justify-content: space-between;
-            padding: 10px;
-            background: var(--secondary-color);
-            border-radius: 8px;
-            margin-bottom: 5px;
-        }
-        
-        /* Exclusive Reactions */
-        .reaction-picker {
-            display: flex;
-            gap: 10px;
-            margin-top: 10px;
-            flex-wrap: wrap;
-        }
-        
-        .reaction-option {
-            width: 40px;
-            height: 40px;
-            border-radius: 50%;
-            background: var(--secondary-color);
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            cursor: pointer;
-            transition: all 0.2s;
-            font-size: 18px;
-        }
-        
-        .reaction-option:hover {
-            transform: scale(1.2);
-        }
-        
-        .reaction-option.premium {
-            background: var(--premium-gold);
-            color: #000;
-        }
-        
-        /* Payment Processing */
-        .payment-container {
-            padding: 20px;
-            background: var(--secondary-color);
-            border-radius: 12px;
-            margin-top: 20px;
-        }
-        
-        .payment-methods {
-            display: flex;
-            gap: 10px;
-            margin-top: 15px;
-        }
-        
-        .payment-method {
-            flex: 1;
-            padding: 15px;
-            border: 2px solid var(--border-color);
-            border-radius: 8px;
-            cursor: pointer;
-            text-align: center;
-            transition: all 0.2s;
-        }
-        
-        .payment-method.selected {
-            border-color: var(--primary-color);
-            background-color: rgba(0, 132, 255, 0.1);
-        }
-        
-        .payment-form {
-            margin-top: 20px;
-        }
-        
-        .payment-form input {
-            width: 100%;
-            padding: 12px;
-            margin-bottom: 10px;
-            border: 1px solid var(--border-color);
-            border-radius: 8px;
-            background: var(--bg-color);
-            color: var(--text-primary);
-        }
-        
-        /* AR Preview Container */
-        .ar-preview-container {
-            width: 100%;
-            height: 300px;
-            background: var(--secondary-color);
-            border-radius: 12px;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            margin-bottom: 20px;
-            position: relative;
-            overflow: hidden;
-        }
-        
-        .ar-preview-placeholder {
-            text-align: center;
-            color: var(--text-secondary);
-        }
     </style>
 </head>
 <body>
@@ -3253,15 +1131,14 @@
     <!-- Upload Progress Bar -->
     <div class="upload-progress" id="uploadProgress"></div>
 
-    <!-- Load api.js first -->
-    <script src="js/api.js"></script>
+    <!-- Script removed: api.js is already loaded in parent -->
     
     <script>
         // =============================================
         // ENHANCED MARKETPLACE SYSTEM WITH PREMIUM FEATURES
         // =============================================
 
-        // Global variables
+        // Global variables (only marketplace-specific)
         let currentUser = null;
         let userData = null;
         let myListings = [];
@@ -3281,21 +1158,19 @@
         let premiumFeatures = {};
         let paymentMethods = [];
         
-        // Listing types
+        // Marketplace constants
         const LISTING_TYPES = {
             SERVICE: 'service',
             DIGITAL: 'digital',
             PHYSICAL: 'physical'
         };
         
-        // Availability status
         const AVAILABILITY = {
             FREE: 'free',
             BUSY: 'busy',
             URGENT: 'urgent'
         };
         
-        // Mood contexts
         const MOOD_CONTEXTS = {
             HELP: 'help',
             BROWSE: 'browse',
@@ -3305,7 +1180,6 @@
             BUSINESS: 'business'
         };
         
-        // Trust circles
         const TRUST_CIRCLES = {
             FRIENDS: 'friends',
             GROUPS: 'groups',
@@ -3315,7 +1189,6 @@
             MICRO: 'micro'
         };
         
-        // Duration options
         const DURATION_OPTIONS = {
             '24h': 24 * 60 * 60 * 1000,
             '3d': 3 * 24 * 60 * 60 * 1000,
@@ -3324,7 +1197,6 @@
             'event': null
         };
         
-        // Trust indicators
         const TRUST_INDICATORS = {
             NEW: { text: 'New', class: 'trust-new' },
             RESPONSIVE: { text: 'Responsive', class: 'trust-responsive' },
@@ -3333,7 +1205,6 @@
             PRO: { text: 'Pro', class: 'trust-pro' }
         };
         
-        // Premium subscription plans
         const SUBSCRIPTION_PLANS = {
             MONTHLY: { id: 'monthly', price: 9.99, name: 'Monthly' },
             QUARTERLY: { id: 'quarterly', price: 24.99, name: 'Quarterly' },
@@ -3341,32 +1212,27 @@
             BUSINESS: { id: 'business', price: 199.99, name: 'Business' }
         };
         
-        // Service categories for quick selection
         const SERVICE_CATEGORIES = [
             'Tutoring', 'Design', 'Repair', 'Writing', 'Consulting',
             'Programming', 'Marketing', 'Cleaning', 'Cooking', 'Fitness',
             'Music Lessons', 'Art', 'Photography', 'Video Editing', 'Translation'
         ];
         
-        // Premium service categories
         const PREMIUM_CATEGORIES = [
             'Business Consulting', 'Executive Coaching', 'VIP Services',
             'Enterprise Solutions', 'Premium Content', 'Exclusive Access'
         ];
         
-        // Digital item types
         const DIGITAL_TYPES = [
             'Study Notes', 'Templates', 'Design Assets', 'E-books', 'Guides',
             'Worksheets', 'Presentations', 'Code Snippets', 'Audio Lessons', 'Wallpapers'
         ];
         
-        // Premium digital types
         const PREMIUM_DIGITAL_TYPES = [
             'Premium Templates', 'Master Classes', 'Pro Tools',
             'Exclusive Content', 'AR Assets', '3D Models'
         ];
         
-        // Template types
         const TEMPLATE_TYPES = {
             BASIC: 'basic',
             BUSINESS: 'business',
@@ -3423,6 +1289,9 @@
         const premiumStatusBadge = document.getElementById('premiumStatusBadge');
         const listingStreak = document.getElementById('listingStreak');
         
+        // API state
+        let apiReady = false;
+        
         // Initialize the application
         document.addEventListener('DOMContentLoaded', function() {
             // Handle iframe token passing
@@ -3430,30 +1299,41 @@
                 handleIframeAuth();
             }
             
-            // Load data from localStorage for instant display
-            loadCachedDataInstantly();
+            // Listen for API ready event
+            window.addEventListener('message', function(event) {
+                if (event.data === 'API_READY') {
+                    apiReady = true;
+                    initializeEnhancedMarketplace();
+                }
+            });
             
-            // Initialize app after a short delay
-            setTimeout(() => {
+            // Also check if API is already available
+            if (window.parent && window.parent.api) {
+                apiReady = true;
                 initializeEnhancedMarketplace();
-            }, 100);
+            } else {
+                // Load data from localStorage for instant display
+                loadCachedDataInstantly();
+                
+                // Try to initialize after a short delay
+                setTimeout(() => {
+                    if (!apiReady) {
+                        console.log('API not ready, initializing with cached data only');
+                        loadCachedDataInstantly();
+                        setupEnhancedEventListeners();
+                        renderMarketplaceList();
+                    }
+                }, 1000);
+            }
         });
         
         function handleIframeAuth() {
             try {
-                if (window.parent && window.parent.getAuthToken) {
-                    const token = window.parent.getAuthToken();
-                    if (token) {
-                        localStorage.setItem('knecta_auth_token', token);
-                    }
-                }
-                
                 const urlParams = new URLSearchParams(window.location.search);
                 const tokenFromUrl = urlParams.get('token');
                 if (tokenFromUrl) {
                     localStorage.setItem('knecta_auth_token', tokenFromUrl);
                 }
-                
             } catch (error) {
                 console.log('Iframe auth handling:', error);
             }
@@ -3617,11 +1497,6 @@
         async function initializeEnhancedMarketplace() {
             console.log('=== ENHANCED MARKETPLACE SYSTEM INITIALIZATION START ===');
             
-            // Initialize settings manager
-            if (typeof settingsManager !== 'undefined') {
-                settingsManager.initializeSettings();
-            }
-            
             // Check for dark mode preference
             checkDarkMode();
             
@@ -3631,8 +1506,10 @@
             // Check premium status
             await checkUserPremiumStatus();
             
-            // Load initial data from backend in background
-            loadEnhancedMarketplaceData();
+            // Load initial data from backend in background if API is ready
+            if (apiReady) {
+                loadEnhancedMarketplaceData();
+            }
             
             // Setup event listeners
             setupEnhancedEventListeners();
@@ -3655,6 +1532,10 @@
             // Generate heatmap
             generateHeatmap();
             
+            // Render initial listings
+            renderMarketplaceList();
+            updateAvailableListingsCount();
+            
             console.log('=== ENHANCED MARKETPLACE SYSTEM INITIALIZATION COMPLETE ===');
         }
         
@@ -3666,22 +1547,16 @@
                     currentUser = JSON.parse(cachedUser);
                 }
                 
-                // Try to get user data from app.js
-                if (window.appState && window.appState.currentUser) {
-                    currentUser = window.appState.currentUser;
-                }
-                
                 // Load user profile from cache
                 const cachedProfile = localStorage.getItem(LOCAL_STORAGE_KEYS.USER_PROFILE);
                 if (cachedProfile) {
                     userData = JSON.parse(cachedProfile);
                 }
                 
-                // If no user found, try to fetch from backend
-                if (!currentUser || !currentUser.id) {
+                // If no user found and API is ready, try to fetch from backend
+                if ((!currentUser || !currentUser.id) && apiReady && window.parent.api) {
                     try {
-                        // Use window.api instead of api
-                        const response = await window.api('GET', '/api/auth/me');
+                        const response = await window.parent.api('GET', '/api/auth/me');
                         if (response && response.user) {
                             currentUser = response.user;
                             userData = response.user;
@@ -3698,6 +1573,15 @@
                         };
                         userData = currentUser;
                     }
+                } else if (!currentUser || !currentUser.id) {
+                    // Use offline user
+                    currentUser = {
+                        id: 'offline_user_' + Date.now(),
+                        displayName: 'Guest User',
+                        photoURL: '',
+                        isOffline: true
+                    };
+                    userData = currentUser;
                 }
                 
             } catch (error) {
@@ -3729,12 +1613,14 @@
                     }
                 }
                 
-                // Check with backend
-                const response = await window.api('GET', '/api/user/subscription');
-                if (response && response.subscription) {
-                    userSubscription = response.subscription;
-                    localStorage.setItem(LOCAL_STORAGE_KEYS.USER_SUBSCRIPTION, JSON.stringify(userSubscription));
-                    updatePremiumStatusUI();
+                // Check with backend if API is ready
+                if (apiReady && window.parent.api) {
+                    const response = await window.parent.api('GET', '/api/user/subscription');
+                    if (response && response.subscription) {
+                        userSubscription = response.subscription;
+                        localStorage.setItem(LOCAL_STORAGE_KEYS.USER_SUBSCRIPTION, JSON.stringify(userSubscription));
+                        updatePremiumStatusUI();
+                    }
                 }
                 
             } catch (error) {
@@ -3746,17 +1632,19 @@
             // Load data from backend in background
             setTimeout(async () => {
                 try {
-                    await loadListingsFromBackend();
-                    await loadUserGroups();
-                    await loadUserFriends();
-                    await loadTeamMembers();
-                    await loadLeaderboard();
-                    await loadAnalyticsData();
-                    await loadPremiumFeatures();
-                    await loadSpotlightListingsFromBackend();
-                    
-                    updateListingCounts();
-                    showNotification('Marketplace data loaded', 'success');
+                    if (apiReady && window.parent.api) {
+                        await loadListingsFromBackend();
+                        await loadUserGroups();
+                        await loadUserFriends();
+                        await loadTeamMembers();
+                        await loadLeaderboard();
+                        await loadAnalyticsData();
+                        await loadPremiumFeatures();
+                        await loadSpotlightListingsFromBackend();
+                        
+                        updateListingCounts();
+                        showNotification('Marketplace data loaded', 'success');
+                    }
                 } catch (error) {
                     console.error('Error loading marketplace data:', error);
                     showNotification('Using cached marketplace data', 'info');
@@ -3766,8 +1654,11 @@
         
         async function loadListingsFromBackend() {
             try {
-                // Use window.api instead of api
-                const response = await window.api('GET', '/api/marketplace/listings');
+                if (!apiReady || !window.parent.api) {
+                    throw new Error('API not available');
+                }
+                
+                const response = await window.parent.api('GET', '/api/marketplace/listings');
                 
                 if (response && response.listings) {
                     allListings = response.listings;
@@ -3808,8 +1699,9 @@
         
         async function loadUserGroups() {
             try {
-                // Use window.api instead of api
-                const response = await window.api('GET', '/api/user/groups');
+                if (!apiReady || !window.parent.api) return;
+                
+                const response = await window.parent.api('GET', '/api/user/groups');
                 
                 if (response && response.groups) {
                     userGroups = response.groups;
@@ -3823,8 +1715,9 @@
         
         async function loadUserFriends() {
             try {
-                // Use window.api instead of api
-                const response = await window.api('GET', '/api/user/friends');
+                if (!apiReady || !window.parent.api) return;
+                
+                const response = await window.parent.api('GET', '/api/user/friends');
                 
                 if (response && response.friends) {
                     userFriends = response.friends;
@@ -3838,9 +1731,9 @@
         
         async function loadTeamMembers() {
             try {
-                // Only load if user has team subscription
-                if (userSubscription && (userSubscription.plan === 'business' || userSubscription.plan === 'team')) {
-                    const response = await window.api('GET', '/api/team/members');
+                // Only load if user has team subscription and API is ready
+                if (userSubscription && (userSubscription.plan === 'business' || userSubscription.plan === 'team') && apiReady && window.parent.api) {
+                    const response = await window.parent.api('GET', '/api/team/members');
                     
                     if (response && response.members) {
                         teamMembers = response.members;
@@ -3855,7 +1748,9 @@
         
         async function loadLeaderboard() {
             try {
-                const response = await window.api('GET', '/api/marketplace/leaderboard');
+                if (!apiReady || !window.parent.api) return;
+                
+                const response = await window.parent.api('GET', '/api/marketplace/leaderboard');
                 
                 if (response && response.leaderboard) {
                     leaderboardData = response.leaderboard;
@@ -3869,8 +1764,8 @@
         
         async function loadAnalyticsData() {
             try {
-                if (isUserPremium()) {
-                    const response = await window.api('GET', '/api/marketplace/analytics');
+                if (isUserPremium() && apiReady && window.parent.api) {
+                    const response = await window.parent.api('GET', '/api/marketplace/analytics');
                     
                     if (response && response.analytics) {
                         analyticsData = response.analytics;
@@ -3886,7 +1781,9 @@
         
         async function loadPremiumFeatures() {
             try {
-                const response = await window.api('GET', '/api/premium/features');
+                if (!apiReady || !window.parent.api) return;
+                
+                const response = await window.parent.api('GET', '/api/premium/features');
                 
                 if (response && response.features) {
                     premiumFeatures = response.features;
@@ -3900,7 +1797,9 @@
         
         async function loadSpotlightListingsFromBackend() {
             try {
-                const response = await window.api('GET', '/api/marketplace/spotlight');
+                if (!apiReady || !window.parent.api) return;
+                
+                const response = await window.parent.api('GET', '/api/marketplace/spotlight');
                 
                 if (response && response.spotlightListings) {
                     renderSpotlightListings(response.spotlightListings);
@@ -3914,8 +1813,9 @@
         
         function updatePremiumStatusUI() {
             if (userSubscription && userSubscription.status === 'active') {
-                premiumStatusBadge.style.display = 'inline-flex';
-                document.getElementById('premiumOptionsBtn').innerHTML = '<i class="fas fa-crown"></i> Premium';
+                if (premiumStatusBadge) premiumStatusBadge.style.display = 'inline-flex';
+                const premiumOptionsBtn = document.getElementById('premiumOptionsBtn');
+                if (premiumOptionsBtn) premiumOptionsBtn.innerHTML = '<i class="fas fa-crown"></i> Premium';
                 
                 // Show premium features in create modal
                 document.querySelectorAll('.premium-feature').forEach(feature => {
@@ -3923,46 +1823,57 @@
                 });
                 
                 // Show premium tabs
-                document.getElementById('publishPremiumBtn').style.display = 'flex';
+                const publishPremiumBtn = document.getElementById('publishPremiumBtn');
+                if (publishPremiumBtn) publishPremiumBtn.style.display = 'flex';
                 
                 // Enable premium uploads
-                document.querySelector('#digitalUploadArea p:nth-child(4)').textContent = 'Max: 500MB';
+                const uploadInfo = document.querySelector('#digitalUploadArea p:nth-child(4)');
+                if (uploadInfo) uploadInfo.textContent = 'Max: 500MB';
                 
                 // Show AR preview option
-                document.getElementById('arPreviewFeature').style.display = 'block';
+                const arPreview = document.getElementById('arPreviewFeature');
+                if (arPreview) arPreview.style.display = 'block';
                 
                 // Show team features
                 if (userSubscription.plan === 'business' || userSubscription.plan === 'team') {
-                    document.getElementById('teamNotesFeature').style.display = 'block';
-                    document.getElementById('teamManagementBtn').style.display = 'block';
+                    const teamNotes = document.getElementById('teamNotesFeature');
+                    if (teamNotes) teamNotes.style.display = 'block';
+                    const teamManagementBtn = document.getElementById('teamManagementBtn');
+                    if (teamManagementBtn) teamManagementBtn.style.display = 'block';
                 }
                 
                 // Show analytics features
-                document.getElementById('analyticsAlertsFeature').style.display = 'block';
+                const analyticsAlerts = document.getElementById('analyticsAlertsFeature');
+                if (analyticsAlerts) analyticsAlerts.style.display = 'block';
                 
             } else {
-                premiumStatusBadge.style.display = 'none';
-                document.getElementById('premiumOptionsBtn').innerHTML = '<i class="fas fa-crown"></i> Premium';
+                if (premiumStatusBadge) premiumStatusBadge.style.display = 'none';
+                const premiumOptionsBtn = document.getElementById('premiumOptionsBtn');
+                if (premiumOptionsBtn) premiumOptionsBtn.innerHTML = '<i class="fas fa-crown"></i> Premium';
                 
                 // Hide premium features
                 document.querySelectorAll('.premium-feature').forEach(feature => {
                     feature.style.display = 'none';
                 });
                 
-                document.getElementById('publishPremiumBtn').style.display = 'none';
+                const publishPremiumBtn = document.getElementById('publishPremiumBtn');
+                if (publishPremiumBtn) publishPremiumBtn.style.display = 'none';
             }
         }
         
         function updateStreakIndicator() {
-            if (streakData.currentStreak > 0) {
+            if (listingStreak && streakData.currentStreak > 0) {
                 listingStreak.style.display = 'flex';
-                document.getElementById('streakCount').textContent = streakData.currentStreak;
-            } else {
+                const streakCount = document.getElementById('streakCount');
+                if (streakCount) streakCount.textContent = streakData.currentStreak;
+            } else if (listingStreak) {
                 listingStreak.style.display = 'none';
             }
         }
         
         function updateMyListingsPreview() {
+            if (!myListingsText) return;
+            
             if (myListings.length > 0) {
                 const activeListings = myListings.filter(listing => !isListingExpired(listing));
                 myListingsText.textContent = `${activeListings.length} active listings`;
@@ -3972,6 +1883,8 @@
         }
         
         function renderSpotlightListings(spotlightData) {
+            if (!spotlightSection || !spotlightListings) return;
+            
             if (!spotlightData || spotlightData.length === 0) {
                 spotlightSection.style.display = 'none';
                 return;
@@ -4022,6 +1935,8 @@
         }
         
         function renderMarketplaceList() {
+            if (!marketplaceListContent) return;
+            
             marketplaceListContent.innerHTML = '';
             
             if (allListings.length === 0) {
@@ -4137,6 +2052,8 @@
         }
         
         function addListingItem(listingData) {
+            if (!marketplaceListContent) return;
+            
             const listingItem = document.createElement('div');
             listingItem.className = 'listing-item';
             if (listingData.featured || listingData.boosted) {
@@ -4205,22 +2122,30 @@
         }
         
         function viewListingDetail(listingData) {
+            if (!marketplaceDetailPanel) return;
+            
             // Update detail panel
-            document.getElementById('detailName').textContent = listingData.user?.displayName || 'User';
-            document.getElementById('detailTime').textContent = formatTimeAgo(new Date(listingData.createdAt));
+            const detailName = document.getElementById('detailName');
+            const detailTime = document.getElementById('detailTime');
+            if (detailName) detailName.textContent = listingData.user?.displayName || 'User';
+            if (detailTime) detailTime.textContent = formatTimeAgo(new Date(listingData.createdAt));
             
             // Update avatar
             const detailAvatar = document.getElementById('detailAvatar');
-            if (listingData.user?.photoURL) {
-                detailAvatar.style.backgroundImage = `url('${escapeHtml(listingData.user.photoURL)}')`;
-                detailAvatar.innerHTML = '';
-            } else {
-                const initials = listingData.user?.displayName?.split(' ').map(word => word[0]).join('').toUpperCase().substring(0, 2) || 'U';
-                detailAvatar.innerHTML = `<span style="color: white; font-size: 20px;">${initials}</span>`;
+            if (detailAvatar) {
+                if (listingData.user?.photoURL) {
+                    detailAvatar.style.backgroundImage = `url('${escapeHtml(listingData.user.photoURL)}')`;
+                    detailAvatar.innerHTML = '';
+                } else {
+                    const initials = listingData.user?.displayName?.split(' ').map(word => word[0]).join('').toUpperCase().substring(0, 2) || 'U';
+                    detailAvatar.innerHTML = `<span style="color: white; font-size: 20px;">${initials}</span>`;
+                }
             }
             
             // Clear previous content
             const detailContent = document.getElementById('marketplaceDetailContent');
+            if (!detailContent) return;
+            
             detailContent.innerHTML = '';
             
             // Load listing detail based on type
@@ -4238,6 +2163,8 @@
         }
         
         function loadListingDetail(listingData, container) {
+            if (!container) return;
+            
             let detailHTML = '';
             
             // Add video intro if available (premium feature)
@@ -4423,8 +2350,10 @@
         
         async function downloadDigitalFile(listingId, fileUrl) {
             try {
-                // Track download
-                await window.api('POST', `/api/marketplace/listings/${listingId}/download`);
+                // Track download if API is ready
+                if (apiReady && window.parent.api) {
+                    await window.parent.api('POST', `/api/marketplace/listings/${listingId}/download`);
+                }
                 
                 // Create download link
                 const link = document.createElement('a');
@@ -4507,15 +2436,20 @@
             premiumListings.unshift(listing);
             localStorage.setItem(LOCAL_STORAGE_KEYS.PREMIUM_LISTINGS, JSON.stringify(premiumListings));
             
-            // Send to backend using window.api
-            try {
-                const response = await window.api('POST', '/api/marketplace/listings/premium', listing);
-                if (response && response.listing) {
-                    listing.id = response.listing.id || listingId;
-                    console.log('Premium service listing posted to backend');
+            // Send to backend using parent API if available
+            if (apiReady && window.parent.api) {
+                try {
+                    const response = await window.parent.api('POST', '/api/marketplace/listings/premium', listing);
+                    if (response && response.listing) {
+                        listing.id = response.listing.id || listingId;
+                        console.log('Premium service listing posted to backend');
+                    }
+                } catch (error) {
+                    console.log('Offline: Premium listing saved locally');
+                    queueForSync(listing, 'premium_listing');
                 }
-            } catch (error) {
-                console.log('Offline: Premium listing saved locally');
+            } else {
+                console.log('API not ready: Premium listing saved locally');
                 queueForSync(listing, 'premium_listing');
             }
             
@@ -4602,15 +2536,20 @@
             premiumListings.unshift(listing);
             localStorage.setItem(LOCAL_STORAGE_KEYS.PREMIUM_LISTINGS, JSON.stringify(premiumListings));
             
-            // Send to backend using window.api
-            try {
-                const response = await window.api('POST', '/api/marketplace/listings/premium', listing);
-                if (response && response.listing) {
-                    listing.id = response.listing.id || listingId;
-                    console.log('Premium digital listing posted to backend');
+            // Send to backend using parent API if available
+            if (apiReady && window.parent.api) {
+                try {
+                    const response = await window.parent.api('POST', '/api/marketplace/listings/premium', listing);
+                    if (response && response.listing) {
+                        listing.id = response.listing.id || listingId;
+                        console.log('Premium digital listing posted to backend');
+                    }
+                } catch (error) {
+                    console.log('Offline: Premium listing saved locally');
+                    queueForSync(listing, 'premium_listing');
                 }
-            } catch (error) {
-                console.log('Offline: Premium listing saved locally');
+            } else {
+                console.log('API not ready: Premium listing saved locally');
                 queueForSync(listing, 'premium_listing');
             }
             
@@ -4649,8 +2588,10 @@
                 // Update UI
                 renderSpotlightListings(spotlightListings);
                 
-                // Send to backend
-                await window.api('POST', '/api/marketplace/spotlight', { listingId: listing.id });
+                // Send to backend if API is ready
+                if (apiReady && window.parent.api) {
+                    await window.parent.api('POST', '/api/marketplace/spotlight', { listingId: listing.id });
+                }
                 
             } catch (error) {
                 console.error('Error processing featured listing:', error);
@@ -4659,11 +2600,13 @@
         
         async function processBoostedListing(listing) {
             try {
-                // Send boost request to backend
-                await window.api('POST', '/api/marketplace/boost', { 
-                    listingId: listing.id,
-                    duration: '24h'
-                });
+                // Send boost request to backend if API is ready
+                if (apiReady && window.parent.api) {
+                    await window.parent.api('POST', '/api/marketplace/boost', { 
+                        listingId: listing.id,
+                        duration: '24h'
+                    });
+                }
                 
             } catch (error) {
                 console.error('Error processing boosted listing:', error);
@@ -4674,6 +2617,11 @@
             const paymentAmount = calculatePremiumCost(options);
             
             try {
+                if (!apiReady || !window.parent.api) {
+                    showNotification('Payment processing requires internet connection', 'error');
+                    return false;
+                }
+                
                 const paymentData = {
                     amount: paymentAmount,
                     currency: 'USD',
@@ -4686,7 +2634,7 @@
                     }
                 };
                 
-                const response = await window.api('POST', '/api/payments/process', paymentData);
+                const response = await window.parent.api('POST', '/api/payments/process', paymentData);
                 
                 if (response && response.success) {
                     showNotification('Premium features activated successfully', 'success');
@@ -4717,6 +2665,11 @@
             const finalAmount = customAmount || amount;
             
             try {
+                if (!apiReady || !window.parent.api) {
+                    showNotification('Tipping requires internet connection', 'error');
+                    return false;
+                }
+                
                 const tipData = {
                     listingId: listingId,
                     amount: finalAmount,
@@ -4724,7 +2677,7 @@
                     message: 'Thanks for your great listing!'
                 };
                 
-                const response = await window.api('POST', '/api/marketplace/tips', tipData);
+                const response = await window.parent.api('POST', '/api/marketplace/tips', tipData);
                 
                 if (response && response.success) {
                     showNotification(`Tip of $${finalAmount} sent successfully!`, 'success');
@@ -4780,12 +2733,19 @@
             if (!analyticsData) return;
             
             // Update summary cards
-            document.getElementById('analyticsViews').textContent = analyticsData.views || 0;
-            document.getElementById('analyticsSaves').textContent = analyticsData.saves || 0;
-            document.getElementById('analyticsShares').textContent = analyticsData.shares || 0;
-            document.getElementById('analyticsMessages').textContent = analyticsData.messages || 0;
-            document.getElementById('analyticsConversion').textContent = analyticsData.conversionRate ? `${analyticsData.conversionRate}%` : '0%';
-            document.getElementById('analyticsEngagement').textContent = analyticsData.avgEngagement ? `${analyticsData.avgEngagement}s` : '0s';
+            const analyticsViews = document.getElementById('analyticsViews');
+            const analyticsSaves = document.getElementById('analyticsSaves');
+            const analyticsShares = document.getElementById('analyticsShares');
+            const analyticsMessages = document.getElementById('analyticsMessages');
+            const analyticsConversion = document.getElementById('analyticsConversion');
+            const analyticsEngagement = document.getElementById('analyticsEngagement');
+            
+            if (analyticsViews) analyticsViews.textContent = analyticsData.views || 0;
+            if (analyticsSaves) analyticsSaves.textContent = analyticsData.saves || 0;
+            if (analyticsShares) analyticsShares.textContent = analyticsData.shares || 0;
+            if (analyticsMessages) analyticsMessages.textContent = analyticsData.messages || 0;
+            if (analyticsConversion) analyticsConversion.textContent = analyticsData.conversionRate ? `${analyticsData.conversionRate}%` : '0%';
+            if (analyticsEngagement) analyticsEngagement.textContent = analyticsData.avgEngagement ? `${analyticsData.avgEngagement}s` : '0s';
             
             // Update changes
             updateChangeIndicator('viewsChange', analyticsData.viewsChange);
@@ -4797,14 +2757,17 @@
             
             // Update competitor insights for premium users
             if (isUserPremium() && analyticsData.competitorInsights) {
-                document.getElementById('competitorInsights').innerHTML = `
-                    <div style="margin-bottom: 10px;">
-                        <strong>Category Average:</strong> ${analyticsData.competitorInsights.categoryAvg} views/day
-                    </div>
-                    <div>
-                        <strong>Top Performers:</strong> ${analyticsData.competitorInsights.topPerformers} views/day
-                    </div>
-                `;
+                const competitorInsights = document.getElementById('competitorInsights');
+                if (competitorInsights) {
+                    competitorInsights.innerHTML = `
+                        <div style="margin-bottom: 10px;">
+                            <strong>Category Average:</strong> ${analyticsData.competitorInsights.categoryAvg} views/day
+                        </div>
+                        <div>
+                            <strong>Top Performers:</strong> ${analyticsData.competitorInsights.topPerformers} views/day
+                        </div>
+                    `;
+                }
             }
         }
         
@@ -4865,7 +2828,7 @@
             localStorage.setItem(LOCAL_STORAGE_KEYS.ANALYTICS, JSON.stringify(analyticsData));
             
             // Update dashboard if open
-            if (analyticsModal.classList.contains('active')) {
+            if (analyticsModal && analyticsModal.classList.contains('active')) {
                 updateAnalyticsDashboard();
             }
         }
@@ -4993,6 +2956,8 @@
         
         async function uploadBulkListings(listings) {
             const bulkUploadList = document.getElementById('bulkUploadList');
+            if (!bulkUploadList) return;
+            
             bulkUploadList.innerHTML = '';
             
             for (let i = 0; i < listings.length; i++) {
@@ -5012,12 +2977,18 @@
                 bulkUploadList.appendChild(item);
                 
                 try {
-                    // Upload listing
-                    const response = await window.api('POST', '/api/marketplace/listings/bulk', listing);
-                    
-                    if (response && response.success) {
+                    // Upload listing if API is ready
+                    if (apiReady && window.parent.api) {
+                        const response = await window.parent.api('POST', '/api/marketplace/listings/bulk', listing);
+                        
+                        if (response && response.success) {
+                            item.querySelector('.loading-spinner').style.display = 'none';
+                            item.innerHTML += '<i class="fas fa-check" style="color: var(--success-color);"></i>';
+                        }
+                    } else {
                         item.querySelector('.loading-spinner').style.display = 'none';
                         item.innerHTML += '<i class="fas fa-check" style="color: var(--success-color);"></i>';
+                        console.log('Bulk upload saved locally (offline mode)');
                     }
                 } catch (error) {
                     item.querySelector('.loading-spinner').style.display = 'none';
@@ -5144,7 +3115,12 @@
         // Export Functions
         async function exportAnalytics(format) {
             try {
-                const response = await window.api('GET', `/api/analytics/export?format=${format}`);
+                if (!apiReady || !window.parent.api) {
+                    showNotification('Export requires internet connection', 'error');
+                    return;
+                }
+                
+                const response = await window.parent.api('GET', `/api/analytics/export?format=${format}`);
                 
                 if (response && response.downloadUrl) {
                     // Create download link
@@ -5309,11 +3285,8 @@
         }
         
         function checkDarkMode() {
-            if (typeof settingsManager !== 'undefined') {
-                const darkMode = settingsManager.getSetting('darkMode');
-                if (darkMode) {
-                    document.body.setAttribute('data-theme', 'dark');
-                }
+            if (window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches) {
+                document.body.setAttribute('data-theme', 'dark');
             }
         }
         
@@ -5331,6 +3304,8 @@
         function updateMoodFilterIndicator() {
             const indicator = document.getElementById('moodFilterIndicator');
             const filterText = document.getElementById('currentMoodFilter');
+            
+            if (!indicator || !filterText) return;
             
             if (currentMoodFilter) {
                 indicator.style.display = 'flex';
@@ -5465,10 +3440,189 @@
             }
         }
         
+        function trackListingView(listingId) {
+            // Track view locally
+            if (!analyticsData.views) analyticsData.views = 0;
+            analyticsData.views++;
+            saveToLocalStorage(LOCAL_STORAGE_KEYS.ANALYTICS, analyticsData);
+            
+            // Send to backend if API is ready
+            if (apiReady && window.parent.api) {
+                try {
+                    window.parent.api('POST', `/api/marketplace/listings/${listingId}/view`);
+                } catch (error) {
+                    console.error('Error tracking view:', error);
+                }
+            }
+        }
+        
+        function updateTrustStats(action) {
+            if (!trustStats[action]) trustStats[action] = 0;
+            trustStats[action]++;
+            saveToLocalStorage(LOCAL_STORAGE_KEYS.TRUST_STATS, trustStats);
+        }
+        
+        function createServiceListing(title, description, options = {}) {
+            const listingId = 'listing_' + Date.now() + '_' + Math.random().toString(36).substr(2, 9);
+            
+            const listing = {
+                id: listingId,
+                userId: currentUser.id || currentUser._id,
+                user: userData,
+                type: LISTING_TYPES.SERVICE,
+                title: title,
+                description: description,
+                price: options.price,
+                availability: options.availability || AVAILABILITY.FREE,
+                visibility: options.visibility || TRUST_CIRCLES.FRIENDS,
+                moodContext: options.moodContext,
+                template: options.template,
+                allowedGroups: options.allowedGroups,
+                allowedUsers: options.allowedUsers,
+                visibilitySchedule: options.visibilitySchedule,
+                expiresAt: options.expiresAt || new Date(Date.now() + DURATION_OPTIONS['7d']).toISOString(),
+                privateNotes: options.privateNotes,
+                teamNotes: options.teamNotes,
+                createdAt: new Date().toISOString(),
+                updatedAt: new Date().toISOString()
+            };
+            
+            // Add to my listings
+            myListings.unshift(listing);
+            
+            // Update local storage
+            saveToLocalStorage(LOCAL_STORAGE_KEYS.MY_LISTINGS, myListings);
+            
+            // Send to backend using parent API if available
+            if (apiReady && window.parent.api) {
+                try {
+                    window.parent.api('POST', '/api/marketplace/listings', listing).then(response => {
+                        if (response && response.listing) {
+                            listing.id = response.listing.id || listingId;
+                            console.log('Service listing posted to backend');
+                        }
+                    }).catch(error => {
+                        console.log('Offline: Listing saved locally');
+                        queueForSync(listing, 'listing');
+                    });
+                } catch (error) {
+                    console.log('Offline: Listing saved locally');
+                    queueForSync(listing, 'listing');
+                }
+            } else {
+                console.log('API not ready: Listing saved locally');
+                queueForSync(listing, 'listing');
+            }
+            
+            // Update UI
+            updateMyListingsPreview();
+            addListingItem(listing);
+            updateAvailableListingsCount();
+            
+            // Update streak
+            updateListingStreak();
+            
+            // Update all listings
+            allListings.unshift(listing);
+            localStorage.setItem('knecta_marketplace_listings', JSON.stringify(allListings));
+            
+            // Update trust stats
+            updateTrustStats('listingCreated');
+            
+            showNotification('Service listing published successfully', 'success');
+            
+            return listing;
+        }
+        
+        function createDigitalListing(title, description, fileData, options = {}) {
+            const listingId = 'listing_' + Date.now() + '_' + Math.random().toString(36).substr(2, 9);
+            
+            const listing = {
+                id: listingId,
+                userId: currentUser.id || currentUser._id,
+                user: userData,
+                type: LISTING_TYPES.DIGITAL,
+                title: title,
+                description: description,
+                price: options.price,
+                mediaUrl: fileData.url,
+                fileUrl: fileData.url,
+                fileName: fileData.name,
+                fileSize: fileData.size,
+                fileType: fileData.type,
+                visibility: options.visibility || TRUST_CIRCLES.FRIENDS,
+                moodContext: options.moodContext,
+                template: options.template,
+                allowedGroups: options.allowedGroups,
+                allowedUsers: options.allowedUsers,
+                visibilitySchedule: options.visibilitySchedule,
+                expiresAt: options.expiresAt || new Date(Date.now() + DURATION_OPTIONS['7d']).toISOString(),
+                privateNotes: options.privateNotes,
+                teamNotes: options.teamNotes,
+                createdAt: new Date().toISOString(),
+                updatedAt: new Date().toISOString()
+            };
+            
+            // Add to my listings
+            myListings.unshift(listing);
+            
+            // Update local storage
+            saveToLocalStorage(LOCAL_STORAGE_KEYS.MY_LISTINGS, myListings);
+            
+            // Send to backend using parent API if available
+            if (apiReady && window.parent.api) {
+                try {
+                    window.parent.api('POST', '/api/marketplace/listings', listing).then(response => {
+                        if (response && response.listing) {
+                            listing.id = response.listing.id || listingId;
+                            console.log('Digital listing posted to backend');
+                        }
+                    }).catch(error => {
+                        console.log('Offline: Listing saved locally');
+                        queueForSync(listing, 'listing');
+                    });
+                } catch (error) {
+                    console.log('Offline: Listing saved locally');
+                    queueForSync(listing, 'listing');
+                }
+            } else {
+                console.log('API not ready: Listing saved locally');
+                queueForSync(listing, 'listing');
+            }
+            
+            // Update UI
+            updateMyListingsPreview();
+            addListingItem(listing);
+            updateAvailableListingsCount();
+            
+            // Update streak
+            updateListingStreak();
+            
+            // Update all listings
+            allListings.unshift(listing);
+            localStorage.setItem('knecta_marketplace_listings', JSON.stringify(allListings));
+            
+            // Update trust stats
+            updateTrustStats('listingCreated');
+            
+            showNotification('Digital listing published successfully', 'success');
+            
+            return listing;
+        }
+        
         // Enhanced Event Listeners Setup
         function setupEnhancedEventListeners() {
             // Category tabs
-            document.getElementById('allTab').addEventListener('click', function() {
+            const allTab = document.getElementById('allTab');
+            const servicesTab = document.getElementById('servicesTab');
+            const digitalTab = document.getElementById('digitalTab');
+            const friendsTab = document.getElementById('friendsTab');
+            const groupsTab = document.getElementById('groupsTab');
+            const myTab = document.getElementById('myTab');
+            const premiumTab = document.getElementById('premiumTab');
+            const spotlightTab = document.getElementById('spotlightTab');
+            
+            if (allTab) allTab.addEventListener('click', function() {
                 document.querySelectorAll('.marketplace-category-btn').forEach(btn => {
                     btn.classList.remove('active');
                 });
@@ -5476,7 +3630,7 @@
                 renderMarketplaceList();
             });
             
-            document.getElementById('servicesTab').addEventListener('click', function() {
+            if (servicesTab) servicesTab.addEventListener('click', function() {
                 document.querySelectorAll('.marketplace-category-btn').forEach(btn => {
                     btn.classList.remove('active');
                 });
@@ -5484,7 +3638,7 @@
                 renderServicesList();
             });
             
-            document.getElementById('digitalTab').addEventListener('click', function() {
+            if (digitalTab) digitalTab.addEventListener('click', function() {
                 document.querySelectorAll('.marketplace-category-btn').forEach(btn => {
                     btn.classList.remove('active');
                 });
@@ -5492,7 +3646,7 @@
                 renderDigitalList();
             });
             
-            document.getElementById('friendsTab').addEventListener('click', function() {
+            if (friendsTab) friendsTab.addEventListener('click', function() {
                 document.querySelectorAll('.marketplace-category-btn').forEach(btn => {
                     btn.classList.remove('active');
                 });
@@ -5500,7 +3654,7 @@
                 renderFriendsListings();
             });
             
-            document.getElementById('groupsTab').addEventListener('click', function() {
+            if (groupsTab) groupsTab.addEventListener('click', function() {
                 document.querySelectorAll('.marketplace-category-btn').forEach(btn => {
                     btn.classList.remove('active');
                 });
@@ -5508,7 +3662,7 @@
                 renderGroupListings();
             });
             
-            document.getElementById('myTab').addEventListener('click', function() {
+            if (myTab) myTab.addEventListener('click', function() {
                 document.querySelectorAll('.marketplace-category-btn').forEach(btn => {
                     btn.classList.remove('active');
                 });
@@ -5516,7 +3670,7 @@
                 renderMyListings();
             });
             
-            document.getElementById('premiumTab').addEventListener('click', function() {
+            if (premiumTab) premiumTab.addEventListener('click', function() {
                 document.querySelectorAll('.marketplace-category-btn').forEach(btn => {
                     btn.classList.remove('active');
                 });
@@ -5524,7 +3678,7 @@
                 renderPremiumListings();
             });
             
-            document.getElementById('spotlightTab').addEventListener('click', function() {
+            if (spotlightTab) spotlightTab.addEventListener('click', function() {
                 document.querySelectorAll('.marketplace-category-btn').forEach(btn => {
                     btn.classList.remove('active');
                 });
@@ -5533,34 +3687,38 @@
             });
             
             // Create listing buttons
-            document.getElementById('createListingBtn').addEventListener('click', () => {
+            const createListingBtn = document.getElementById('createListingBtn');
+            if (createListingBtn) createListingBtn.addEventListener('click', () => {
                 showCreateListingModal();
             });
             
-            document.getElementById('createListingQuickBtn').addEventListener('click', () => {
+            const createListingQuickBtn = document.getElementById('createListingQuickBtn');
+            if (createListingQuickBtn) createListingQuickBtn.addEventListener('click', () => {
                 showCreateListingModal();
             });
             
-            document.getElementById('sellServiceBtn').addEventListener('click', () => {
+            const sellServiceBtn = document.getElementById('sellServiceBtn');
+            if (sellServiceBtn) sellServiceBtn.addEventListener('click', () => {
                 showCreateListingModal();
-                document.querySelector('.create-listing-tab[data-tab="service"]').click();
+                const serviceTab = document.querySelector('.create-listing-tab[data-tab="service"]');
+                if (serviceTab) serviceTab.click();
             });
             
-            document.getElementById('sellDigitalBtn').addEventListener('click', () => {
+            const sellDigitalBtn = document.getElementById('sellDigitalBtn');
+            if (sellDigitalBtn) sellDigitalBtn.addEventListener('click', () => {
                 showCreateListingModal();
-                document.querySelector('.create-listing-tab[data-tab="digital"]').click();
+                const digitalTab = document.querySelector('.create-listing-tab[data-tab="digital"]');
+                if (digitalTab) digitalTab.click();
             });
             
-            document.getElementById('premiumOptionsBtn').addEventListener('click', () => {
-                if (isUserPremium()) {
-                    showPremiumOptionsModal();
-                } else {
-                    showPremiumOptionsModal();
-                }
+            const premiumOptionsBtn = document.getElementById('premiumOptionsBtn');
+            if (premiumOptionsBtn) premiumOptionsBtn.addEventListener('click', () => {
+                showPremiumOptionsModal();
             });
             
             // View analytics
-            document.getElementById('viewAnalyticsBtn').addEventListener('click', () => {
+            const viewAnalyticsBtn = document.getElementById('viewAnalyticsBtn');
+            if (viewAnalyticsBtn) viewAnalyticsBtn.addEventListener('click', () => {
                 if (isUserPremium()) {
                     showAnalyticsModal();
                 } else {
@@ -5570,12 +3728,14 @@
             });
             
             // View saved items
-            document.getElementById('viewSavedBtn').addEventListener('click', () => {
+            const viewSavedBtn = document.getElementById('viewSavedBtn');
+            if (viewSavedBtn) viewSavedBtn.addEventListener('click', () => {
                 showSavedItemsModal();
             });
             
             // View notes
-            document.getElementById('viewNotesBtn').addEventListener('click', () => {
+            const viewNotesBtn = document.getElementById('viewNotesBtn');
+            if (viewNotesBtn) viewNotesBtn.addEventListener('click', () => {
                 showMyNotesModal();
             });
             
@@ -5605,14 +3765,20 @@
                     
                     // Handle premium features visibility
                     if (tabName === 'premium' && !isUserPremium()) {
-                        document.getElementById('publishPremiumBtn').style.display = 'none';
-                        document.getElementById('publishListingBtn').style.display = 'flex';
+                        const publishPremiumBtn = document.getElementById('publishPremiumBtn');
+                        const publishListingBtn = document.getElementById('publishListingBtn');
+                        if (publishPremiumBtn) publishPremiumBtn.style.display = 'none';
+                        if (publishListingBtn) publishListingBtn.style.display = 'flex';
                     } else if (tabName === 'premium' && isUserPremium()) {
-                        document.getElementById('publishPremiumBtn').style.display = 'flex';
-                        document.getElementById('publishListingBtn').style.display = 'none';
+                        const publishPremiumBtn = document.getElementById('publishPremiumBtn');
+                        const publishListingBtn = document.getElementById('publishListingBtn');
+                        if (publishPremiumBtn) publishPremiumBtn.style.display = 'flex';
+                        if (publishListingBtn) publishListingBtn.style.display = 'none';
                     } else {
-                        document.getElementById('publishPremiumBtn').style.display = 'none';
-                        document.getElementById('publishListingBtn').style.display = 'flex';
+                        const publishPremiumBtn = document.getElementById('publishPremiumBtn');
+                        const publishListingBtn = document.getElementById('publishListingBtn');
+                        if (publishPremiumBtn) publishPremiumBtn.style.display = 'none';
+                        if (publishListingBtn) publishListingBtn.style.display = 'flex';
                     }
                 });
             });
@@ -5774,102 +3940,122 @@
             }
             
             // Video upload button
-            document.getElementById('uploadVideoBtn')?.addEventListener('click', () => {
-                if (!isUserPremium()) {
-                    showNotification('Upgrade to Premium for video intros', 'info');
-                    return;
-                }
-                
-                const input = document.createElement('input');
-                input.type = 'file';
-                input.accept = 'video/*';
-                input.addEventListener('change', (e) => {
-                    if (e.target.files.length > 0) {
-                        handleVideoUpload(e.target.files[0]);
+            const uploadVideoBtn = document.getElementById('uploadVideoBtn');
+            if (uploadVideoBtn) {
+                uploadVideoBtn.addEventListener('click', () => {
+                    if (!isUserPremium()) {
+                        showNotification('Upgrade to Premium for video intros', 'info');
+                        return;
                     }
+                    
+                    const input = document.createElement('input');
+                    input.type = 'file';
+                    input.accept = 'video/*';
+                    input.addEventListener('change', (e) => {
+                        if (e.target.files.length > 0) {
+                            handleVideoUpload(e.target.files[0]);
+                        }
+                    });
+                    input.click();
                 });
-                input.click();
-            });
+            }
             
             // Publish listing buttons
-            document.getElementById('publishListingBtn').addEventListener('click', () => {
+            const publishListingBtn = document.getElementById('publishListingBtn');
+            if (publishListingBtn) publishListingBtn.addEventListener('click', () => {
                 publishListingFromModal();
             });
             
-            document.getElementById('publishPremiumBtn').addEventListener('click', () => {
+            const publishPremiumBtn = document.getElementById('publishPremiumBtn');
+            if (publishPremiumBtn) publishPremiumBtn.addEventListener('click', () => {
                 publishPremiumListingFromModal();
             });
             
             // Save draft button
-            document.getElementById('saveDraftBtn').addEventListener('click', () => {
+            const saveDraftBtn = document.getElementById('saveDraftBtn');
+            if (saveDraftBtn) saveDraftBtn.addEventListener('click', () => {
                 saveCurrentAsDraft();
             });
             
             // Close modals
-            document.getElementById('closeCreateListingModal').addEventListener('click', () => {
-                createListingModal.classList.remove('active');
+            const closeCreateListingModal = document.getElementById('closeCreateListingModal');
+            if (closeCreateListingModal) closeCreateListingModal.addEventListener('click', () => {
+                if (createListingModal) createListingModal.classList.remove('active');
             });
             
-            document.getElementById('closeAnalyticsModal').addEventListener('click', () => {
-                analyticsModal.classList.remove('active');
+            const closeAnalyticsModal = document.getElementById('closeAnalyticsModal');
+            if (closeAnalyticsModal) closeAnalyticsModal.addEventListener('click', () => {
+                if (analyticsModal) analyticsModal.classList.remove('active');
             });
             
-            document.getElementById('closePremiumModal').addEventListener('click', () => {
-                premiumOptionsModal.classList.remove('active');
+            const closePremiumModal = document.getElementById('closePremiumModal');
+            if (closePremiumModal) closePremiumModal.addEventListener('click', () => {
+                if (premiumOptionsModal) premiumOptionsModal.classList.remove('active');
             });
             
-            document.getElementById('closeTeamModal').addEventListener('click', () => {
-                teamManagementModal.classList.remove('active');
+            const closeTeamModal = document.getElementById('closeTeamModal');
+            if (closeTeamModal) closeTeamModal.addEventListener('click', () => {
+                if (teamManagementModal) teamManagementModal.classList.remove('active');
             });
             
-            document.getElementById('closeLeaderboardModal').addEventListener('click', () => {
-                leaderboardModal.classList.remove('active');
+            const closeLeaderboardModal = document.getElementById('closeLeaderboardModal');
+            if (closeLeaderboardModal) closeLeaderboardModal.addEventListener('click', () => {
+                if (leaderboardModal) leaderboardModal.classList.remove('active');
             });
             
-            document.getElementById('closeReactionModal').addEventListener('click', () => {
-                reactionPickerModal.classList.remove('active');
+            const closeReactionModal = document.getElementById('closeReactionModal');
+            if (closeReactionModal) closeReactionModal.addEventListener('click', () => {
+                if (reactionPickerModal) reactionPickerModal.classList.remove('active');
             });
             
-            document.getElementById('closeSavedModal').addEventListener('click', () => {
-                savedItemsModal.classList.remove('active');
+            const closeSavedModal = document.getElementById('closeSavedModal');
+            if (closeSavedModal) closeSavedModal.addEventListener('click', () => {
+                if (savedItemsModal) savedItemsModal.classList.remove('active');
             });
             
-            document.getElementById('closeNotesModal').addEventListener('click', () => {
-                myNotesModal.classList.remove('active');
+            const closeNotesModal = document.getElementById('closeNotesModal');
+            if (closeNotesModal) closeNotesModal.addEventListener('click', () => {
+                if (myNotesModal) myNotesModal.classList.remove('active');
             });
             
-            document.getElementById('closeTrustStatsModal').addEventListener('click', () => {
-                trustStatsModal.classList.remove('active');
+            const closeTrustStatsModal = document.getElementById('closeTrustStatsModal');
+            if (closeTrustStatsModal) closeTrustStatsModal.addEventListener('click', () => {
+                if (trustStatsModal) trustStatsModal.classList.remove('active');
             });
             
             // Back button in detail panel
-            document.getElementById('backBtn').addEventListener('click', () => {
-                marketplaceDetailPanel.classList.remove('active');
+            const backBtn = document.getElementById('backBtn');
+            if (backBtn) backBtn.addEventListener('click', () => {
+                if (marketplaceDetailPanel) marketplaceDetailPanel.classList.remove('active');
             });
             
             // Detail panel actions
-            document.getElementById('saveListingBtn').addEventListener('click', () => {
+            const saveListingBtn = document.getElementById('saveListingBtn');
+            if (saveListingBtn) saveListingBtn.addEventListener('click', () => {
                 const listingId = getCurrentListingId();
                 if (listingId) {
                     saveToSavedItems(listingId);
                 }
             });
             
-            document.getElementById('addNoteBtn').addEventListener('click', () => {
+            const addNoteBtn = document.getElementById('addNoteBtn');
+            if (addNoteBtn) addNoteBtn.addEventListener('click', () => {
                 const listingId = getCurrentListingId();
                 if (listingId) {
                     showAddNoteDialog(listingId);
                 }
             });
             
-            document.getElementById('addReactionBtn').addEventListener('click', () => {
+            const addReactionBtn = document.getElementById('addReactionBtn');
+            if (addReactionBtn) addReactionBtn.addEventListener('click', () => {
                 const listingId = getCurrentListingId();
                 if (listingId) {
                     showReactionPicker(listingId);
                 }
             });
             
-            document.getElementById('reserveBtn').addEventListener('click', () => {
+            const reserveBtn = document.getElementById('reserveBtn');
+            if (reserveBtn) reserveBtn.addEventListener('click', () => {
                 const listingId = getCurrentListingId();
                 if (listingId) {
                     reserveListing(listingId);
@@ -5877,9 +4063,10 @@
             });
             
             // Tip button
-            document.getElementById('tipBtn').addEventListener('click', () => {
+            const tipBtn = document.getElementById('tipBtn');
+            if (tipBtn) tipBtn.addEventListener('click', () => {
                 const tipAmounts = document.getElementById('tipAmounts');
-                tipAmounts.classList.toggle('show');
+                if (tipAmounts) tipAmounts.classList.toggle('show');
             });
             
             // Tip options
@@ -5899,18 +4086,21 @@
                         await sendTip(listingId, parseFloat(amount));
                     }
                     
-                    document.getElementById('tipAmounts').classList.remove('show');
+                    const tipAmounts = document.getElementById('tipAmounts');
+                    if (tipAmounts) tipAmounts.classList.remove('show');
                 });
             });
             
-            document.getElementById('contactSellerBtn').addEventListener('click', () => {
+            const contactSellerBtn = document.getElementById('contactSellerBtn');
+            if (contactSellerBtn) contactSellerBtn.addEventListener('click', () => {
                 const currentListing = getCurrentListing();
                 if (currentListing) {
                     openChat(currentListing.userId, currentListing.user?.displayName || 'Seller');
                 }
             });
             
-            document.getElementById('shareListingBtn').addEventListener('click', () => {
+            const shareListingBtn = document.getElementById('shareListingBtn');
+            if (shareListingBtn) shareListingBtn.addEventListener('click', () => {
                 const currentListing = getCurrentListing();
                 if (currentListing) {
                     shareListing(currentListing);
@@ -5918,7 +4108,8 @@
             });
             
             // Detail menu button
-            document.getElementById('detailMenuBtn').addEventListener('click', () => {
+            const detailMenuBtn = document.getElementById('detailMenuBtn');
+            if (detailMenuBtn) detailMenuBtn.addEventListener('click', () => {
                 showDetailMenu();
             });
             
@@ -5931,12 +4122,14 @@
             }
             
             // Mood filter indicator click
-            document.getElementById('moodFilterIndicator').addEventListener('click', () => {
+            const moodFilterIndicator = document.getElementById('moodFilterIndicator');
+            if (moodFilterIndicator) moodFilterIndicator.addEventListener('click', () => {
                 clearMoodFilter();
             });
             
             // Analytics refresh button
-            document.getElementById('refreshAnalyticsBtn').addEventListener('click', async () => {
+            const refreshAnalyticsBtn = document.getElementById('refreshAnalyticsBtn');
+            if (refreshAnalyticsBtn) refreshAnalyticsBtn.addEventListener('click', async () => {
                 try {
                     await loadAnalyticsData();
                     showNotification('Analytics refreshed', 'success');
@@ -5946,7 +4139,8 @@
             });
             
             // Analytics export button
-            document.getElementById('exportAnalyticsBtn').addEventListener('click', () => {
+            const exportAnalyticsBtn = document.getElementById('exportAnalyticsBtn');
+            if (exportAnalyticsBtn) exportAnalyticsBtn.addEventListener('click', () => {
                 const selectedFormat = document.querySelector('.export-option.selected')?.dataset.format || 'csv';
                 exportAnalytics(selectedFormat);
             });
@@ -5973,36 +4167,44 @@
             });
             
             // Complete payment button
-            document.getElementById('completePaymentBtn').addEventListener('click', async () => {
+            const completePaymentBtn = document.getElementById('completePaymentBtn');
+            if (completePaymentBtn) completePaymentBtn.addEventListener('click', async () => {
                 await processSubscriptionPayment();
             });
             
             // Cancel payment button
-            document.getElementById('cancelPaymentBtn').addEventListener('click', () => {
-                document.getElementById('paymentContainer').style.display = 'none';
+            const cancelPaymentBtn = document.getElementById('cancelPaymentBtn');
+            if (cancelPaymentBtn) cancelPaymentBtn.addEventListener('click', () => {
+                const paymentContainer = document.getElementById('paymentContainer');
+                if (paymentContainer) paymentContainer.style.display = 'none';
             });
             
             // Free trial button
-            document.getElementById('startFreeTrialBtn').addEventListener('click', async () => {
+            const startFreeTrialBtn = document.getElementById('startFreeTrialBtn');
+            if (startFreeTrialBtn) startFreeTrialBtn.addEventListener('click', async () => {
                 await startFreeTrial();
             });
             
             // Restore purchase button
-            document.getElementById('restorePurchaseBtn').addEventListener('click', async () => {
+            const restorePurchaseBtn = document.getElementById('restorePurchaseBtn');
+            if (restorePurchaseBtn) restorePurchaseBtn.addEventListener('click', async () => {
                 await restorePurchase();
             });
             
             // Team management buttons
-            document.getElementById('inviteTeamMemberBtn')?.addEventListener('click', () => {
+            const inviteTeamMemberBtn = document.getElementById('inviteTeamMemberBtn');
+            if (inviteTeamMemberBtn) inviteTeamMemberBtn.addEventListener('click', () => {
                 inviteTeamMember();
             });
             
-            document.getElementById('saveTeamBtn')?.addEventListener('click', async () => {
+            const saveTeamBtn = document.getElementById('saveTeamBtn');
+            if (saveTeamBtn) saveTeamBtn.addEventListener('click', async () => {
                 await saveTeamChanges();
             });
             
             // Leaderboard refresh
-            document.getElementById('refreshLeaderboardBtn')?.addEventListener('click', async () => {
+            const refreshLeaderboardBtn = document.getElementById('refreshLeaderboardBtn');
+            if (refreshLeaderboardBtn) refreshLeaderboardBtn.addEventListener('click', async () => {
                 await loadLeaderboard();
                 renderLeaderboard();
                 showNotification('Leaderboard refreshed', 'success');
@@ -6057,14 +4259,14 @@
             const peopleContainer = document.getElementById('peopleSelectionContainer');
             
             if (window.selectedTrustCircle === TRUST_CIRCLES.GROUPS) {
-                groupsContainer.style.display = 'block';
-                peopleContainer.style.display = 'none';
+                if (groupsContainer) groupsContainer.style.display = 'block';
+                if (peopleContainer) peopleContainer.style.display = 'none';
             } else if (window.selectedTrustCircle === TRUST_CIRCLES.SELECTED || window.selectedTrustCircle === TRUST_CIRCLES.MICRO) {
-                groupsContainer.style.display = 'none';
-                peopleContainer.style.display = 'block';
+                if (groupsContainer) groupsContainer.style.display = 'none';
+                if (peopleContainer) peopleContainer.style.display = 'block';
             } else {
-                groupsContainer.style.display = 'none';
-                peopleContainer.style.display = 'none';
+                if (groupsContainer) groupsContainer.style.display = 'none';
+                if (peopleContainer) peopleContainer.style.display = 'none';
             }
         }
         
@@ -6090,26 +4292,28 @@
             
             // Show upload progress
             const progressBar = document.getElementById('uploadProgress');
-            progressBar.style.width = '0%';
+            if (progressBar) progressBar.style.width = '0%';
             
             // Create preview
             const reader = new FileReader();
             reader.onloadstart = function() {
-                progressBar.style.width = '10%';
+                if (progressBar) progressBar.style.width = '10%';
             };
             
             reader.onprogress = function(e) {
-                if (e.lengthComputable) {
+                if (e.lengthComputable && progressBar) {
                     const percentLoaded = Math.round((e.loaded / e.total) * 100);
                     progressBar.style.width = percentLoaded + '%';
                 }
             };
             
             reader.onload = function(e) {
-                progressBar.style.width = '100%';
-                setTimeout(() => {
-                    progressBar.style.width = '0%';
-                }, 500);
+                if (progressBar) {
+                    progressBar.style.width = '100%';
+                    setTimeout(() => {
+                        progressBar.style.width = '0%';
+                    }, 500);
+                }
                 
                 preview.innerHTML = '';
                 
@@ -6218,22 +4422,38 @@
         }
         
         function showCreateListingModal() {
+            if (!createListingModal) return;
+            
             createListingModal.classList.add('active');
             
             // Reset form
-            document.getElementById('serviceTitle').value = '';
-            document.getElementById('serviceDescription').value = '';
-            document.getElementById('servicePrice').value = '';
-            document.getElementById('digitalTitle').value = '';
-            document.getElementById('digitalDescription').value = '';
-            document.getElementById('digitalPrice').value = '';
-            document.getElementById('expiryDate').value = '';
-            document.getElementById('sellerNotes').value = '';
-            document.getElementById('teamNotes').value = '';
-            document.getElementById('visibilityStart').value = '';
-            document.getElementById('visibilityEnd').value = '';
-            document.getElementById('templatePrimaryColor').value = '#0084ff';
-            document.getElementById('templateFont').value = 'Default';
+            const serviceTitle = document.getElementById('serviceTitle');
+            const serviceDescription = document.getElementById('serviceDescription');
+            const servicePrice = document.getElementById('servicePrice');
+            const digitalTitle = document.getElementById('digitalTitle');
+            const digitalDescription = document.getElementById('digitalDescription');
+            const digitalPrice = document.getElementById('digitalPrice');
+            const expiryDate = document.getElementById('expiryDate');
+            const sellerNotes = document.getElementById('sellerNotes');
+            const teamNotes = document.getElementById('teamNotes');
+            const visibilityStart = document.getElementById('visibilityStart');
+            const visibilityEnd = document.getElementById('visibilityEnd');
+            const templatePrimaryColor = document.getElementById('templatePrimaryColor');
+            const templateFont = document.getElementById('templateFont');
+            
+            if (serviceTitle) serviceTitle.value = '';
+            if (serviceDescription) serviceDescription.value = '';
+            if (servicePrice) servicePrice.value = '';
+            if (digitalTitle) digitalTitle.value = '';
+            if (digitalDescription) digitalDescription.value = '';
+            if (digitalPrice) digitalPrice.value = '';
+            if (expiryDate) expiryDate.value = '';
+            if (sellerNotes) sellerNotes.value = '';
+            if (teamNotes) teamNotes.value = '';
+            if (visibilityStart) visibilityStart.value = '';
+            if (visibilityEnd) visibilityEnd.value = '';
+            if (templatePrimaryColor) templatePrimaryColor.value = '#0084ff';
+            if (templateFont) templateFont.value = 'Default';
             
             // Reset selections
             document.querySelectorAll('.availability-option').forEach(opt => {
@@ -6262,15 +4482,25 @@
             }
             
             // Reset premium checkboxes
-            document.getElementById('featuredListingCheckbox').checked = false;
-            document.getElementById('boostListingCheckbox').checked = false;
-            document.getElementById('priorityMessagingCheckbox').checked = false;
-            document.getElementById('autoRenewCheckbox').checked = false;
-            document.getElementById('verifiedBadgeCheckbox').checked = false;
-            document.getElementById('alertPoorPerformance').checked = false;
-            document.getElementById('alertTrending').checked = false;
-            document.getElementById('autoPublishBulk').checked = false;
-            document.getElementById('scheduleBulk').checked = false;
+            const featuredListingCheckbox = document.getElementById('featuredListingCheckbox');
+            const boostListingCheckbox = document.getElementById('boostListingCheckbox');
+            const priorityMessagingCheckbox = document.getElementById('priorityMessagingCheckbox');
+            const autoRenewCheckbox = document.getElementById('autoRenewCheckbox');
+            const verifiedBadgeCheckbox = document.getElementById('verifiedBadgeCheckbox');
+            const alertPoorPerformance = document.getElementById('alertPoorPerformance');
+            const alertTrending = document.getElementById('alertTrending');
+            const autoPublishBulk = document.getElementById('autoPublishBulk');
+            const scheduleBulk = document.getElementById('scheduleBulk');
+            
+            if (featuredListingCheckbox) featuredListingCheckbox.checked = false;
+            if (boostListingCheckbox) boostListingCheckbox.checked = false;
+            if (priorityMessagingCheckbox) priorityMessagingCheckbox.checked = false;
+            if (autoRenewCheckbox) autoRenewCheckbox.checked = false;
+            if (verifiedBadgeCheckbox) verifiedBadgeCheckbox.checked = false;
+            if (alertPoorPerformance) alertPoorPerformance.checked = false;
+            if (alertTrending) alertTrending.checked = false;
+            if (autoPublishBulk) autoPublishBulk.checked = false;
+            if (scheduleBulk) scheduleBulk.checked = false;
             
             window.selectedAvailability = AVAILABILITY.FREE;
             window.selectedTrustCircle = TRUST_CIRCLES.FRIENDS;
@@ -6282,11 +4512,17 @@
             window.selectedVideoIntro = null;
             
             // Set default selections
-            document.querySelector('.availability-option[data-availability="free"]').classList.add('selected');
-            document.querySelector('.circle-option[data-circle="friends"]').classList.add('selected');
-            document.querySelector('.template-option[data-template="basic"]').classList.add('selected');
-            document.querySelector('.mood-option[data-mood="browse"]').classList.add('selected');
-            document.querySelector('.duration-option[data-duration="7d"]').classList.add('selected');
+            const freeAvailability = document.querySelector('.availability-option[data-availability="free"]');
+            const friendsCircle = document.querySelector('.circle-option[data-circle="friends"]');
+            const basicTemplate = document.querySelector('.template-option[data-template="basic"]');
+            const browseMood = document.querySelector('.mood-option[data-mood="browse"]');
+            const sevenDayDuration = document.querySelector('.duration-option[data-duration="7d"]');
+            
+            if (freeAvailability) freeAvailability.classList.add('selected');
+            if (friendsCircle) friendsCircle.classList.add('selected');
+            if (basicTemplate) basicTemplate.classList.add('selected');
+            if (browseMood) browseMood.classList.add('selected');
+            if (sevenDayDuration) sevenDayDuration.classList.add('selected');
             
             // Show/hide premium features based on user status
             updatePremiumFeaturesVisibility();
@@ -6308,26 +4544,37 @@
         }
         
         function showAnalyticsModal() {
+            if (!analyticsModal) return;
+            
             analyticsModal.classList.add('active');
             updateAnalyticsDashboard();
         }
         
         function showPremiumOptionsModal() {
+            if (!premiumOptionsModal) return;
+            
             premiumOptionsModal.classList.add('active');
-            document.getElementById('paymentContainer').style.display = 'none';
+            const paymentContainer = document.getElementById('paymentContainer');
+            if (paymentContainer) paymentContainer.style.display = 'none';
         }
         
         function showTeamManagementModal() {
+            if (!teamManagementModal) return;
+            
             teamManagementModal.classList.add('active');
             renderTeamMembers();
         }
         
         function showLeaderboardModal() {
+            if (!leaderboardModal) return;
+            
             leaderboardModal.classList.add('active');
             renderLeaderboard();
         }
         
         function showReactionPicker(listingId) {
+            if (!reactionPickerModal) return;
+            
             reactionPickerModal.classList.add('active');
             window.currentListingId = listingId;
         }
@@ -6340,19 +4587,19 @@
             
             // Get common options
             const price = tabName === 'service' ? 
-                document.getElementById('servicePrice').value.trim() : 
-                document.getElementById('digitalPrice').value.trim();
+                document.getElementById('servicePrice')?.value.trim() : 
+                document.getElementById('digitalPrice')?.value.trim();
             
             const visibility = window.selectedTrustCircle || TRUST_CIRCLES.FRIENDS;
             const moodContext = window.selectedMoodContext || MOOD_CONTEXTS.BROWSE;
             const duration = window.selectedDuration || '7d';
             const expiresAt = duration === 'event' ? null : new Date(Date.now() + DURATION_OPTIONS[duration]).toISOString();
             
-            const customExpiry = document.getElementById('expiryDate').value;
+            const customExpiry = document.getElementById('expiryDate')?.value;
             const finalExpiry = customExpiry ? new Date(customExpiry).toISOString() : expiresAt;
             
-            const privateNotes = document.getElementById('sellerNotes').value.trim();
-            const teamNotes = document.getElementById('teamNotes').value.trim();
+            const privateNotes = document.getElementById('sellerNotes')?.value.trim() || '';
+            const teamNotes = document.getElementById('teamNotes')?.value.trim() || '';
             
             // Get allowed groups/users based on visibility
             let allowedGroups = [];
@@ -6367,8 +4614,8 @@
             }
             
             // Get visibility schedule
-            const visibilityStart = document.getElementById('visibilityStart').value;
-            const visibilityEnd = document.getElementById('visibilityEnd').value;
+            const visibilityStart = document.getElementById('visibilityStart')?.value;
+            const visibilityEnd = document.getElementById('visibilityEnd')?.value;
             const visibilitySchedule = (visibilityStart && visibilityEnd) ? {
                 start: new Date(visibilityStart).toISOString(),
                 end: new Date(visibilityEnd).toISOString()
@@ -6376,8 +4623,8 @@
             
             switch (tabName) {
                 case 'service':
-                    const serviceTitle = document.getElementById('serviceTitle').value.trim();
-                    const serviceDescription = document.getElementById('serviceDescription').value.trim();
+                    const serviceTitle = document.getElementById('serviceTitle')?.value.trim();
+                    const serviceDescription = document.getElementById('serviceDescription')?.value.trim();
                     
                     if (!serviceTitle) {
                         showNotification('Please enter a service title', 'error');
@@ -6386,8 +4633,8 @@
                     
                     const serviceData = {
                         title: serviceTitle,
-                        description: serviceDescription,
-                        price: price,
+                        description: serviceDescription || '',
+                        price: price || '',
                         availability: window.selectedAvailability || AVAILABILITY.FREE,
                         visibility: visibility,
                         moodContext: moodContext,
@@ -6400,12 +4647,12 @@
                         teamNotes: teamNotes
                     };
                     
-                    createServiceListing(serviceTitle, serviceDescription, serviceData);
+                    createServiceListing(serviceTitle, serviceDescription || '', serviceData);
                     break;
                     
                 case 'digital':
-                    const digitalTitle = document.getElementById('digitalTitle').value.trim();
-                    const digitalDescription = document.getElementById('digitalDescription').value.trim();
+                    const digitalTitle = document.getElementById('digitalTitle')?.value.trim();
+                    const digitalDescription = document.getElementById('digitalDescription')?.value.trim();
                     
                     if (!digitalTitle) {
                         showNotification('Please enter an item title', 'error');
@@ -6419,8 +4666,8 @@
                     
                     const digitalData = {
                         title: digitalTitle,
-                        description: digitalDescription,
-                        price: price,
+                        description: digitalDescription || '',
+                        price: price || '',
                         visibility: visibility,
                         moodContext: moodContext,
                         template: window.selectedTemplate || TEMPLATE_TYPES.BASIC,
@@ -6432,7 +4679,7 @@
                         teamNotes: teamNotes
                     };
                     
-                    createDigitalListing(digitalTitle, digitalDescription, window.selectedDigitalFile, digitalData);
+                    createDigitalListing(digitalTitle, digitalDescription || '', window.selectedDigitalFile, digitalData);
                     break;
                     
                 default:
@@ -6441,7 +4688,7 @@
             }
             
             // Close modal
-            createListingModal.classList.remove('active');
+            if (createListingModal) createListingModal.classList.remove('active');
         }
         
         function publishPremiumListingFromModal() {
@@ -6451,33 +4698,33 @@
             const tabName = activeTab.dataset.tab;
             
             // Get premium options
-            const featured = document.getElementById('featuredListingCheckbox').checked;
-            const boosted = document.getElementById('boostListingCheckbox').checked;
-            const priorityMessaging = document.getElementById('priorityMessagingCheckbox').checked;
-            const autoRenew = document.getElementById('autoRenewCheckbox').checked;
-            const verified = document.getElementById('verifiedBadgeCheckbox').checked;
+            const featured = document.getElementById('featuredListingCheckbox')?.checked || false;
+            const boosted = document.getElementById('boostListingCheckbox')?.checked || false;
+            const priorityMessaging = document.getElementById('priorityMessagingCheckbox')?.checked || false;
+            const autoRenew = document.getElementById('autoRenewCheckbox')?.checked || false;
+            const verified = document.getElementById('verifiedBadgeCheckbox')?.checked || false;
             const acceptsTips = true; // Premium listings always accept tips
             
             // Get common options
             const price = tabName === 'service' ? 
-                document.getElementById('servicePrice').value.trim() : 
-                document.getElementById('digitalPrice').value.trim();
+                document.getElementById('serviceTitle')?.value.trim() : 
+                document.getElementById('digitalTitle')?.value.trim();
             
             const visibility = window.selectedTrustCircle || TRUST_CIRCLES.FRIENDS;
             const moodContext = window.selectedMoodContext || MOOD_CONTEXTS.BROWSE;
             const duration = window.selectedDuration || '7d';
             const expiresAt = duration === 'event' ? null : new Date(Date.now() + DURATION_OPTIONS[duration]).toISOString();
             
-            const customExpiry = document.getElementById('expiryDate').value;
+            const customExpiry = document.getElementById('expiryDate')?.value;
             const finalExpiry = customExpiry ? new Date(customExpiry).toISOString() : expiresAt;
             
-            const privateNotes = document.getElementById('sellerNotes').value.trim();
-            const teamNotes = document.getElementById('teamNotes').value.trim();
+            const privateNotes = document.getElementById('sellerNotes')?.value.trim() || '';
+            const teamNotes = document.getElementById('teamNotes')?.value.trim() || '';
             
             // Get template settings
             const template = window.selectedTemplate || TEMPLATE_TYPES.BASIC;
-            const templateColor = document.getElementById('templatePrimaryColor').value;
-            const templateFont = document.getElementById('templateFont').value;
+            const templateColor = document.getElementById('templatePrimaryColor')?.value || '#0084ff';
+            const templateFont = document.getElementById('templateFont')?.value || 'Default';
             
             // Get recurring promotions
             const schedule = window.selectedSchedule || 'daily';
@@ -6495,8 +4742,8 @@
             }
             
             // Get visibility schedule
-            const visibilityStart = document.getElementById('visibilityStart').value;
-            const visibilityEnd = document.getElementById('visibilityEnd').value;
+            const visibilityStart = document.getElementById('visibilityStart')?.value;
+            const visibilityEnd = document.getElementById('visibilityEnd')?.value;
             const visibilitySchedule = (visibilityStart && visibilityEnd) ? {
                 start: new Date(visibilityStart).toISOString(),
                 end: new Date(visibilityEnd).toISOString()
@@ -6513,8 +4760,8 @@
             
             switch (tabName) {
                 case 'service':
-                    const serviceTitle = document.getElementById('serviceTitle').value.trim();
-                    const serviceDescription = document.getElementById('serviceDescription').value.trim();
+                    const serviceTitle = document.getElementById('serviceTitle')?.value.trim();
+                    const serviceDescription = document.getElementById('serviceDescription')?.value.trim();
                     
                     if (!serviceTitle) {
                         showNotification('Please enter a service title', 'error');
@@ -6523,8 +4770,8 @@
                     
                     const premiumServiceData = {
                         title: serviceTitle,
-                        description: serviceDescription,
-                        price: price,
+                        description: serviceDescription || '',
+                        price: price || '',
                         availability: window.selectedAvailability || AVAILABILITY.FREE,
                         visibility: visibility,
                         moodContext: moodContext,
@@ -6550,12 +4797,12 @@
                         teamNotes: teamNotes
                     };
                     
-                    createPremiumServiceListing(serviceTitle, serviceDescription, premiumServiceData);
+                    createPremiumServiceListing(serviceTitle, serviceDescription || '', premiumServiceData);
                     break;
                     
                 case 'digital':
-                    const digitalTitle = document.getElementById('digitalTitle').value.trim();
-                    const digitalDescription = document.getElementById('digitalDescription').value.trim();
+                    const digitalTitle = document.getElementById('digitalTitle')?.value.trim();
+                    const digitalDescription = document.getElementById('digitalDescription')?.value.trim();
                     
                     if (!digitalTitle) {
                         showNotification('Please enter an item title', 'error');
@@ -6569,8 +4816,8 @@
                     
                     const premiumDigitalData = {
                         title: digitalTitle,
-                        description: digitalDescription,
-                        price: price,
+                        description: digitalDescription || '',
+                        price: price || '',
                         visibility: visibility,
                         moodContext: moodContext,
                         template: template,
@@ -6596,7 +4843,7 @@
                         teamNotes: teamNotes
                     };
                     
-                    createPremiumDigitalListing(digitalTitle, digitalDescription, window.selectedDigitalFile, premiumDigitalData);
+                    createPremiumDigitalListing(digitalTitle, digitalDescription || '', window.selectedDigitalFile, premiumDigitalData);
                     break;
                     
                 default:
@@ -6605,7 +4852,7 @@
             }
             
             // Close modal
-            createListingModal.classList.remove('active');
+            if (createListingModal) createListingModal.classList.remove('active');
         }
         
         function saveCurrentAsDraft() {
@@ -6617,8 +4864,8 @@
             
             switch (tabName) {
                 case 'service':
-                    const serviceTitle = document.getElementById('serviceTitle').value.trim();
-                    const serviceDescription = document.getElementById('serviceDescription').value.trim();
+                    const serviceTitle = document.getElementById('serviceTitle')?.value.trim();
+                    const serviceDescription = document.getElementById('serviceDescription')?.value.trim();
                     
                     if (!serviceTitle) {
                         showNotification('No service to save as draft', 'warning');
@@ -6628,8 +4875,8 @@
                     draftData = {
                         type: 'service',
                         title: serviceTitle,
-                        description: serviceDescription,
-                        price: document.getElementById('servicePrice').value.trim(),
+                        description: serviceDescription || '',
+                        price: document.getElementById('servicePrice')?.value.trim() || '',
                         availability: window.selectedAvailability,
                         visibility: window.selectedTrustCircle,
                         moodContext: window.selectedMoodContext,
@@ -6639,8 +4886,8 @@
                     break;
                     
                 case 'digital':
-                    const digitalTitle = document.getElementById('digitalTitle').value.trim();
-                    const digitalDescription = document.getElementById('digitalDescription').value.trim();
+                    const digitalTitle = document.getElementById('digitalTitle')?.value.trim();
+                    const digitalDescription = document.getElementById('digitalDescription')?.value.trim();
                     
                     if (!digitalTitle) {
                         showNotification('No digital item to save as draft', 'warning');
@@ -6650,8 +4897,8 @@
                     draftData = {
                         type: 'digital',
                         title: digitalTitle,
-                        description: digitalDescription,
-                        price: document.getElementById('digitalPrice').value.trim(),
+                        description: digitalDescription || '',
+                        price: document.getElementById('digitalPrice')?.value.trim() || '',
                         file: window.selectedDigitalFile,
                         visibility: window.selectedTrustCircle,
                         moodContext: window.selectedMoodContext,
@@ -6661,7 +4908,7 @@
                     break;
                     
                 case 'premium':
-                    const premiumTitle = document.getElementById('serviceTitle').value.trim() || document.getElementById('digitalTitle').value.trim();
+                    const premiumTitle = document.getElementById('serviceTitle')?.value.trim() || document.getElementById('digitalTitle')?.value.trim();
                     
                     if (!premiumTitle) {
                         showNotification('No premium listing to save as draft', 'warning');
@@ -6671,10 +4918,10 @@
                     draftData = {
                         type: 'premium',
                         title: premiumTitle,
-                        featured: document.getElementById('featuredListingCheckbox').checked,
-                        boosted: document.getElementById('boostListingCheckbox').checked,
-                        verified: document.getElementById('verifiedBadgeCheckbox').checked,
-                        autoRenew: document.getElementById('autoRenewCheckbox').checked,
+                        featured: document.getElementById('featuredListingCheckbox')?.checked || false,
+                        boosted: document.getElementById('boostListingCheckbox')?.checked || false,
+                        verified: document.getElementById('verifiedBadgeCheckbox')?.checked || false,
+                        autoRenew: document.getElementById('autoRenewCheckbox')?.checked || false,
                         videoIntro: window.selectedVideoIntro,
                         visibility: window.selectedTrustCircle,
                         duration: window.selectedDuration
@@ -6687,8 +4934,8 @@
             }
             
             // Add notes
-            draftData.privateNotes = document.getElementById('sellerNotes').value.trim();
-            draftData.teamNotes = document.getElementById('teamNotes').value.trim();
+            draftData.privateNotes = document.getElementById('sellerNotes')?.value.trim() || '';
+            draftData.teamNotes = document.getElementById('teamNotes')?.value.trim() || '';
             draftData.savedAt = new Date().toISOString();
             draftData.id = 'draft_' + Date.now();
             
@@ -6699,17 +4946,21 @@
         }
         
         function showPaymentForm(plan) {
-            document.getElementById('paymentContainer').style.display = 'block';
-            window.selectedPlan = plan;
+            const paymentContainer = document.getElementById('paymentContainer');
+            if (paymentContainer) {
+                paymentContainer.style.display = 'block';
+                window.selectedPlan = plan;
+            }
         }
         
         function showPaymentFormForMethod(method) {
             // Hide all payment forms
-            document.getElementById('cardPaymentForm').style.display = 'none';
+            const cardPaymentForm = document.getElementById('cardPaymentForm');
+            if (cardPaymentForm) cardPaymentForm.style.display = 'none';
             
             // Show selected payment form
             if (method === 'card') {
-                document.getElementById('cardPaymentForm').style.display = 'block';
+                if (cardPaymentForm) cardPaymentForm.style.display = 'block';
             }
             // Add other payment methods as needed
         }
@@ -6723,29 +4974,34 @@
             }
             
             try {
+                if (!apiReady || !window.parent.api) {
+                    showNotification('Payment requires internet connection', 'error');
+                    return;
+                }
+                
                 const paymentData = {
                     plan: window.selectedPlan,
                     paymentMethod: selectedMethod,
-                    amount: SUBSCRIPTION_PLANS[window.selectedPlan.toUpperCase()].price
+                    amount: SUBSCRIPTION_PLANS[window.selectedPlan.toUpperCase()]?.price || 9.99
                 };
                 
                 if (selectedMethod === 'card') {
                     paymentData.cardDetails = {
-                        number: document.getElementById('cardNumber').value,
-                        expiry: document.getElementById('cardExpiry').value,
-                        cvc: document.getElementById('cardCvc').value,
-                        name: document.getElementById('cardName').value
+                        number: document.getElementById('cardNumber')?.value || '',
+                        expiry: document.getElementById('cardExpiry')?.value || '',
+                        cvc: document.getElementById('cardCvc')?.value || '',
+                        name: document.getElementById('cardName')?.value || ''
                     };
                 }
                 
-                const response = await window.api('POST', '/api/subscriptions/purchase', paymentData);
+                const response = await window.parent.api('POST', '/api/subscriptions/purchase', paymentData);
                 
                 if (response && response.success) {
                     userSubscription = response.subscription;
                     localStorage.setItem(LOCAL_STORAGE_KEYS.USER_SUBSCRIPTION, JSON.stringify(userSubscription));
                     
                     updatePremiumStatusUI();
-                    premiumOptionsModal.classList.remove('active');
+                    if (premiumOptionsModal) premiumOptionsModal.classList.remove('active');
                     
                     showNotification('Premium subscription activated successfully!', 'success');
                 }
@@ -6758,14 +5014,19 @@
         
         async function startFreeTrial() {
             try {
-                const response = await window.api('POST', '/api/subscriptions/trial');
+                if (!apiReady || !window.parent.api) {
+                    showNotification('Free trial requires internet connection', 'error');
+                    return;
+                }
+                
+                const response = await window.parent.api('POST', '/api/subscriptions/trial');
                 
                 if (response && response.success) {
                     userSubscription = response.subscription;
                     localStorage.setItem(LOCAL_STORAGE_KEYS.USER_SUBSCRIPTION, JSON.stringify(userSubscription));
                     
                     updatePremiumStatusUI();
-                    premiumOptionsModal.classList.remove('active');
+                    if (premiumOptionsModal) premiumOptionsModal.classList.remove('active');
                     
                     showNotification('7-day free trial started!', 'success');
                 }
@@ -6778,14 +5039,19 @@
         
         async function restorePurchase() {
             try {
-                const response = await window.api('POST', '/api/subscriptions/restore');
+                if (!apiReady || !window.parent.api) {
+                    showNotification('Restore requires internet connection', 'error');
+                    return;
+                }
+                
+                const response = await window.parent.api('POST', '/api/subscriptions/restore');
                 
                 if (response && response.success) {
                     userSubscription = response.subscription;
                     localStorage.setItem(LOCAL_STORAGE_KEYS.USER_SUBSCRIPTION, JSON.stringify(userSubscription));
                     
                     updatePremiumStatusUI();
-                    premiumOptionsModal.classList.remove('active');
+                    if (premiumOptionsModal) premiumOptionsModal.classList.remove('active');
                     
                     showNotification('Purchase restored successfully!', 'success');
                 } else {
@@ -6803,7 +5069,12 @@
             if (!email) return;
             
             try {
-                const response = await window.api('POST', '/api/team/invite', { email });
+                if (!apiReady || !window.parent.api) {
+                    showNotification('Invitation requires internet connection', 'error');
+                    return;
+                }
+                
+                const response = await window.parent.api('POST', '/api/team/invite', { email });
                 
                 if (response && response.success) {
                     showNotification('Invitation sent successfully', 'success');
@@ -6817,6 +5088,11 @@
         
         async function saveTeamChanges() {
             try {
+                if (!apiReady || !window.parent.api) {
+                    showNotification('Team update requires internet connection', 'error');
+                    return;
+                }
+                
                 // Collect role changes
                 const roleChanges = [];
                 document.querySelectorAll('select[data-member-id]').forEach(select => {
@@ -6826,11 +5102,11 @@
                     });
                 });
                 
-                const response = await window.api('POST', '/api/team/update', { roleChanges });
+                const response = await window.parent.api('POST', '/api/team/update', { roleChanges });
                 
                 if (response && response.success) {
                     showNotification('Team updated successfully', 'success');
-                    teamManagementModal.classList.remove('active');
+                    if (teamManagementModal) teamManagementModal.classList.remove('active');
                 }
                 
             } catch (error) {
@@ -6841,14 +5117,19 @@
         
         async function addReaction(listingId, reaction) {
             try {
-                const response = await window.api('POST', `/api/marketplace/listings/${listingId}/reactions`, {
+                if (!apiReady || !window.parent.api) {
+                    showNotification('Reaction requires internet connection', 'error');
+                    return;
+                }
+                
+                const response = await window.parent.api('POST', `/api/marketplace/listings/${listingId}/reactions`, {
                     reaction: reaction,
                     premium: reaction.length > 2 // Premium reactions are usually longer emoji sequences
                 });
                 
                 if (response && response.success) {
                     showNotification('Reaction added!', 'success');
-                    reactionPickerModal.classList.remove('active');
+                    if (reactionPickerModal) reactionPickerModal.classList.remove('active');
                 }
                 
             } catch (error) {
@@ -6858,36 +5139,38 @@
         }
         
         function setupBackupRestoreButtons() {
-            // Add backup button to my listings section
-            const backupBtn = document.createElement('button');
-            backupBtn.className = 'my-listing-action-btn secondary';
-            backupBtn.id = 'backupDataBtn';
-            backupBtn.innerHTML = '<i class="fas fa-download"></i> Backup';
-            backupBtn.addEventListener('click', backupMarketplaceData);
-            
-            // Add restore button
-            const restoreBtn = document.createElement('button');
-            restoreBtn.className = 'my-listing-action-btn secondary';
-            restoreBtn.id = 'restoreDataBtn';
-            restoreBtn.innerHTML = '<i class="fas fa-upload"></i> Restore';
-            restoreBtn.addEventListener('click', () => {
-                const input = document.createElement('input');
-                input.type = 'file';
-                input.accept = '.json';
-                input.addEventListener('change', (e) => {
-                    if (e.target.files.length > 0) {
-                        restoreMarketplaceData(e.target.files[0]);
-                    }
-                });
-                input.click();
-            });
-            
-            // Add to my listings actions if premium user
+            // Add backup button to my listings section if premium user
             if (isUserPremium()) {
                 const actionsContainer = document.querySelector('.my-listings-actions');
                 if (actionsContainer) {
-                    actionsContainer.appendChild(backupBtn);
-                    actionsContainer.appendChild(restoreBtn);
+                    // Check if buttons already exist
+                    if (!document.getElementById('backupDataBtn')) {
+                        const backupBtn = document.createElement('button');
+                        backupBtn.className = 'my-listing-action-btn secondary';
+                        backupBtn.id = 'backupDataBtn';
+                        backupBtn.innerHTML = '<i class="fas fa-download"></i> Backup';
+                        backupBtn.addEventListener('click', backupMarketplaceData);
+                        actionsContainer.appendChild(backupBtn);
+                    }
+                    
+                    if (!document.getElementById('restoreDataBtn')) {
+                        const restoreBtn = document.createElement('button');
+                        restoreBtn.className = 'my-listing-action-btn secondary';
+                        restoreBtn.id = 'restoreDataBtn';
+                        restoreBtn.innerHTML = '<i class="fas fa-upload"></i> Restore';
+                        restoreBtn.addEventListener('click', () => {
+                            const input = document.createElement('input');
+                            input.type = 'file';
+                            input.accept = '.json';
+                            input.addEventListener('change', (e) => {
+                                if (e.target.files.length > 0) {
+                                    restoreMarketplaceData(e.target.files[0]);
+                                }
+                            });
+                            input.click();
+                        });
+                        actionsContainer.appendChild(restoreBtn);
+                    }
                 }
             }
         }
@@ -6953,6 +5236,8 @@
         }
         
         function renderFilteredListings(listings, emptyMessage) {
+            if (!marketplaceListContent) return;
+            
             marketplaceListContent.innerHTML = '';
             
             if (listings.length === 0) {
@@ -6977,16 +5262,21 @@
             
             if (marketplaceItems.length === 0) return;
             
+            if (!apiReady || !window.parent.api) {
+                showNotification('Sync requires internet connection', 'info');
+                return;
+            }
+            
             showNotification(`Syncing ${marketplaceItems.length} marketplace items...`, 'info');
             
             for (let i = 0; i < marketplaceItems.length; i++) {
                 const item = marketplaceItems[i];
                 try {
                     if (item.type === 'marketplace_listing') {
-                        await window.api('POST', '/api/marketplace/listings', item.data);
+                        await window.parent.api('POST', '/api/marketplace/listings', item.data);
                         syncQueue.splice(syncQueue.indexOf(item), 1);
                     } else if (item.type === 'marketplace_premium_listing') {
-                        await window.api('POST', '/api/marketplace/listings/premium', item.data);
+                        await window.parent.api('POST', '/api/marketplace/listings/premium', item.data);
                         syncQueue.splice(syncQueue.indexOf(item), 1);
                     }
                 } catch (error) {
@@ -7024,11 +5314,150 @@
             console.log('All marketplace data saved to localStorage');
         }
         
-        // Keep the existing functions that are still needed
-        // ... (keep all other existing functions from the original code)
+        // Utility functions for missing features
+        function saveToSavedItems(listingId) {
+            const listing = allListings.find(l => l.id === listingId);
+            if (listing && !savedItems.find(item => item.id === listingId)) {
+                savedItems.push(listing);
+                saveToLocalStorage(LOCAL_STORAGE_KEYS.SAVED_ITEMS, savedItems);
+                showNotification('Listing saved', 'success');
+            }
+        }
+        
+        function showAddNoteDialog(listingId) {
+            const note = prompt('Add a private note for this listing:');
+            if (note) {
+                privateNotes.push({
+                    listingId: listingId,
+                    note: note,
+                    createdAt: new Date().toISOString()
+                });
+                saveToLocalStorage(LOCAL_STORAGE_KEYS.PRIVATE_NOTES, privateNotes);
+                showNotification('Note added', 'success');
+            }
+        }
+        
+        function showDetailMenu() {
+            // Simple context menu for listing details
+            const menuItems = [
+                'Report Listing',
+                'Block User',
+                'Copy Link',
+                'Open in Browser'
+            ];
+            
+            const selected = prompt('Select action:\n' + menuItems.map((item, i) => `${i + 1}. ${item}`).join('\n'));
+            if (selected) {
+                const index = parseInt(selected) - 1;
+                if (index >= 0 && index < menuItems.length) {
+                    showNotification(`Action: ${menuItems[index]}`, 'info');
+                }
+            }
+        }
+        
+        function reserveListing(listingId) {
+            showNotification('Listing reserved - you will be notified when available', 'success');
+        }
+        
+        function openChat(userId, userName) {
+            showNotification(`Opening chat with ${userName}`, 'info');
+            // In a real app, this would open a chat window
+        }
+        
+        function shareListing(listing) {
+            if (navigator.share) {
+                navigator.share({
+                    title: listing.title,
+                    text: listing.description,
+                    url: window.location.href
+                });
+            } else {
+                navigator.clipboard.writeText(window.location.href);
+                showNotification('Link copied to clipboard', 'success');
+            }
+        }
+        
+        function clearMoodFilter() {
+            currentMoodFilter = null;
+            localStorage.removeItem(LOCAL_STORAGE_KEYS.MOOD_FILTER);
+            updateMoodFilterIndicator();
+            renderMarketplaceList();
+            showNotification('Mood filter cleared', 'info');
+        }
+        
+        function showSavedItemsModal() {
+            if (!savedItemsModal) return;
+            
+            savedItemsModal.classList.add('active');
+            const savedItemsGrid = document.getElementById('savedItemsGrid');
+            if (savedItemsGrid) {
+                savedItemsGrid.innerHTML = '';
+                
+                if (savedItems.length === 0) {
+                    savedItemsGrid.innerHTML = `
+                        <div style="text-align: center; padding: 40px; color: var(--text-secondary);">
+                            <i class="fas fa-bookmark" style="font-size: 48px; margin-bottom: 15px;"></i>
+                            <p>No saved items yet</p>
+                            <p style="font-size: 14px; margin-top: 10px;">Save listings you're interested in</p>
+                        </div>
+                    `;
+                    return;
+                }
+                
+                savedItems.forEach(item => {
+                    const savedItem = document.createElement('div');
+                    savedItem.className = 'saved-item';
+                    savedItem.innerHTML = `
+                        <div style="font-weight: 500;">${escapeHtml(item.title)}</div>
+                        <div style="font-size: 12px; color: var(--text-secondary); margin-top: 5px;">
+                            ${formatTimeAgo(new Date(item.createdAt))}
+                        </div>
+                    `;
+                    savedItem.addEventListener('click', () => {
+                        viewListingDetail(item);
+                        savedItemsModal.classList.remove('active');
+                    });
+                    savedItemsGrid.appendChild(savedItem);
+                });
+            }
+        }
+        
+        function showMyNotesModal() {
+            if (!myNotesModal) return;
+            
+            myNotesModal.classList.add('active');
+            const myNotesList = document.getElementById('myNotesList');
+            if (myNotesList) {
+                myNotesList.innerHTML = '';
+                
+                if (privateNotes.length === 0) {
+                    myNotesList.innerHTML = `
+                        <div style="text-align: center; padding: 40px; color: var(--text-secondary);">
+                            <i class="fas fa-sticky-note" style="font-size: 48px; margin-bottom: 15px;"></i>
+                            <p>No notes yet</p>
+                            <p style="font-size: 14px; margin-top: 10px;">Add private notes to listings</p>
+                        </div>
+                    `;
+                    return;
+                }
+                
+                privateNotes.forEach(note => {
+                    const noteItem = document.createElement('div');
+                    noteItem.className = 'note-item';
+                    noteItem.innerHTML = `
+                        <div style="font-weight: 500;">${escapeHtml(note.note.substring(0, 50))}${note.note.length > 50 ? '...' : ''}</div>
+                        <div style="font-size: 12px; color: var(--text-secondary); margin-top: 5px;">
+                            ${formatTimeAgo(new Date(note.createdAt))}
+                        </div>
+                    `;
+                    myNotesList.appendChild(noteItem);
+                });
+            }
+        }
         
         console.log('Enhanced marketplace system initialized successfully');
         console.log('Premium features enabled: Featured Listings, Advanced Analytics, Team Tools, AR Previews, Bulk Uploads, Backup & Restore');
+        console.log('API Ready:', apiReady);
     </script>
     
     <!-- Load other scripts after api.js -->

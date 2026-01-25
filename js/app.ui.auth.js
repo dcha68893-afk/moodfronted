@@ -6,6 +6,18 @@
 // FIXED: STRICT API-driven authentication - no fake login success
 // FIXED: Auto-login no longer blocks form setup - forms work concurrently
 // FIXED: Form setup happens immediately, auto-login runs independently in background
+// FIXED: Login button now properly handles successful login response
+// FIXED: User data properly persisted after login
+// FIXED: UI properly redirects after successful login
+
+// ============================================================================
+// PREVENT DOUBLE INITIALIZATION
+// ============================================================================
+if (window.__loginHandlerInitialized) {
+    console.log('Login handler already initialized, skipping re-initialization');
+} else {
+    window.__loginHandlerInitialized = true;
+}
 
 // ============================================================================
 // NETWORK STATUS MANAGEMENT
@@ -128,6 +140,9 @@ function saveAuthData(token, userData) {
   // Also save user info separately for easy access
   localStorage.setItem('currentUser', JSON.stringify(userData));
   
+  // Assign to window.currentUser for compatibility
+  window.currentUser = userData;
+  
   console.log('Auth data saved successfully');
 }
 
@@ -177,6 +192,7 @@ function clearAuthData() {
   console.log('Clearing auth data from localStorage');
   localStorage.removeItem('authUser');
   localStorage.removeItem('currentUser');
+  window.currentUser = null;
   console.log('Auth data cleared successfully');
 }
 
@@ -279,32 +295,40 @@ async function checkAutoLogin() {
   console.log('Valid JWT found, attempting auto-login...');
   
   try {
-    // Check browser network connectivity first - only block if EXPLICITLY false
-    const browserOnline = navigator.onLine;
-    
     // STRICT REQUIREMENT: Validate token with backend API ONLY
     if (typeof window.api === 'function') {
       console.log('STRICT API VALIDATION: Validating token with backend...');
-      const response = await window.api.checkSession();
+      const response = await window.api('/auth/verify', {
+        method: 'GET',
+        headers: {
+          'Authorization': `Bearer ${authData.token}`
+        }
+      });
+      
+      let result;
+      if (response && typeof response === 'object' && 'ok' in response) {
+        result = await safeParseResponse(response);
+      } else {
+        result = response;
+      }
       
       // STRICT REQUIREMENT: Only proceed if API returns success
-      if (response && response.authenticated && response.user) {
+      if (result && result.success === true && result.user) {
         console.log('STRICT API VALIDATION: Token validated successfully with backend');
         
-        // Set user in app state if AppState exists
-        if (window.AppState && authData.user) {
-          window.AppState.user = authData.user;
-          console.log('User set in AppState:', authData.user);
-        }
+        // Update window.currentUser
+        window.currentUser = result.user;
         
-        // Set token in api.js if API_COORDINATION exists
-        if (window.API_COORDINATION) {
-          window.API_COORDINATION.authToken = authData.token;
-          console.log('Token set in API_COORDINATION');
-        }
+        // Save user info separately for easy access
+        localStorage.setItem('currentUser', JSON.stringify(result.user));
         
         // Show success message
         updateNetworkStatusUI('online', 'Auto-login successful!');
+        
+        // Dispatch auth:login event to wake up other modules
+        document.dispatchEvent(
+          new CustomEvent('auth:login', { detail: result.user })
+        );
         
         // Small delay before redirect
         setTimeout(() => {
@@ -349,12 +373,15 @@ async function checkAutoLogin() {
  */
 async function handleLoginSubmit(event) {
   event.preventDefault();
+  event.stopImmediatePropagation();
   console.log('STRICT API-DRIVEN: Login form submitted');
   
   const form = event.target;
-  const identifier = form.querySelector('input[type="text"]')?.value || 
-                    form.querySelector('input[type="email"]')?.value;
-  const password = form.querySelector('input[type="password"]').value;
+  const identifierInput = form.querySelector('input[type="text"]') || form.querySelector('input[type="email"]');
+  const passwordInput = form.querySelector('input[type="password"]');
+  
+  const identifier = identifierInput?.value;
+  const password = passwordInput?.value;
   
   if (!identifier || !password) {
     updateNetworkStatusUI('offline', 'Email/username and password are required');
@@ -388,58 +415,92 @@ async function handleLoginSubmit(event) {
   if (countdownEl) countdownEl.classList.add('hidden');
   
   try {
-    // STRICT REQUIREMENT: Check if API is available - don't block on network check
+    // STRICT REQUIREMENT: Check if API is available
     if (!window.api || typeof window.api !== 'function') {
-      // Only throw if API is completely unavailable
       throw new Error('Authentication service not available');
     }
     
     console.log('STRICT API-DRIVEN: Calling login API via centralized api.js...');
     
-    try {
-      // STRICT REQUIREMENT: API call with proper error handling
-      const loginResult = await window.api.login(identifier, password);
-      
-      console.log('STRICT API-DRIVEN: Login API response:', loginResult);
-      
-      // STRICT REQUIREMENT: ONLY proceed if API returns success AND has valid token
-      if (loginResult && loginResult.success && loginResult.user && loginResult.token) {
-        const { token, user } = loginResult;
-        
-        // Save JWT and user info
-        saveAuthData(token, user);
-        
-        // Reset login attempts for this identifier
-        LoginAttempts.resetAttempts(identifier);
-        
-        // STRICT REQUIREMENT: Only show success AFTER API confirms
-        updateNetworkStatusUI('online', 'Login successful!');
-        
-        // Set token in api.js if API_COORDINATION exists
-        if (window.API_COORDINATION) {
-          window.API_COORDINATION.authToken = token;
-        }
-        
-        // Set user in AppState if it exists
-        if (window.AppState) {
-          window.AppState.user = user;
-        }
-        
-        // Small delay before redirect
-        setTimeout(() => {
-          window.location.href = 'chat.html';
-        }, 1000);
-      } else {
-        // STRICT REQUIREMENT: API returned but without success flag
-        throw new Error(loginResult?.message || 'Login failed - invalid response from server');
-      }
-    } catch (apiError) {
-      // STRICT REQUIREMENT: Catch and display API errors clearly
-      console.error('STRICT API-DRIVEN: API error:', apiError);
-      throw new Error(apiError.message || 'Login failed - server error');
+    // STRICT API CONTRACT: First argument endpoint string, second options object
+    const response = await window.api('/auth/login', {
+      method: 'POST',
+      headers: { 
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify({
+        identifier: identifier.trim(),
+        password: password
+      })
+    });
+    
+    console.log('STRICT API-DRIVEN: Login API raw response:', response);
+    
+    // Parse the response
+    let result;
+    if (response && typeof response === 'object' && 'ok' in response) {
+      // This is a raw Response object - parse it
+      result = await safeParseResponse(response);
+    } else {
+      // Already parsed or different format
+      result = response;
     }
+    
+    console.log('STRICT API-DRIVEN: Login API parsed result:', result);
+    
+    // CRITICAL: Validate response structure
+    if (!result || result.success !== true) {
+      throw new Error(result?.message || 'Login failed');
+    }
+    
+    // CRITICAL: Check for token and user in response
+    if (!result.token || !result.user) {
+      throw new Error('Invalid login response structure');
+    }
+    
+    // CRITICAL: Save token and user data
+    console.log('Saving authentication data...');
+    
+    // Save to localStorage
+    localStorage.setItem('authToken', result.token);
+    localStorage.setItem('currentUser', JSON.stringify(result.user));
+    window.currentUser = result.user;
+    
+    // Also save using the existing function for compatibility
+    saveAuthData(result.token, result.user);
+    
+    // Reset login attempts for this identifier
+    LoginAttempts.resetAttempts(identifier);
+    
+    // STRICT REQUIREMENT: Only show success AFTER API confirms
+    updateNetworkStatusUI('online', 'Login successful!');
+    
+    // Set token in api.js if API_COORDINATION exists
+    if (window.API_COORDINATION) {
+      window.API_COORDINATION.authToken = result.token;
+    }
+    
+    // Set user in AppState if it exists
+    if (window.AppState) {
+      window.AppState.user = result.user;
+    }
+    
+    // FORCE POST-LOGIN STATE UPDATE
+    document.dispatchEvent(
+      new CustomEvent('auth:login', { detail: result.user })
+    );
+    
+    // Trigger UI success flow - use existing app flow
+    triggerUISuccessFlow(result.user);
+    
+    // REDIRECT AFTER SUCCESS
+    console.log('STRICT API-DRIVEN: Redirecting to chat.html...');
+    setTimeout(() => {
+      window.location.href = 'chat.html';
+    }, 1000);
+    
   } catch (error) {
-    console.error('STRICT API-DRIVEN: Login error:', error);
+    console.error('LOGIN FAILED:', error);
     
     // Record failed attempt
     const attempt = LoginAttempts.recordAttempt(identifier);
@@ -450,7 +511,7 @@ async function handleLoginSubmit(event) {
       showLoginAttemptCountdown(newBlockInfo);
     }
     
-    // STRICT REQUIREMENT: Display clear error messages
+    // Display clear error messages
     let errorMessage = error.message;
     
     // Handle specific error cases
@@ -468,13 +529,87 @@ async function handleLoginSubmit(event) {
       errorMessage = 'Network error. Please check your connection.';
     }
     
-    // STRICT REQUIREMENT: Show error in network status indicator
+    // Show error in network status indicator
     updateNetworkStatusUI('offline', errorMessage);
     
     // Re-enable form
     submitBtn.textContent = originalText;
     submitBtn.disabled = false;
   }
+}
+
+/**
+ * Triggers existing UI success flow after successful login
+ */
+function triggerUISuccessFlow(user) {
+  console.log('Triggering UI success flow for user:', user);
+  
+  // 1. Update any success indicators in the UI
+  const successIndicator = document.getElementById('login-success-indicator');
+  if (successIndicator) {
+    successIndicator.style.display = 'block';
+    successIndicator.textContent = `Welcome, ${user.username || user.displayName || user.email}!`;
+    
+    // Hide after 3 seconds
+    setTimeout(() => {
+      successIndicator.style.display = 'none';
+    }, 3000);
+  }
+  
+  // 2. Hide login form if it exists
+  const loginForm = document.getElementById('login-form');
+  if (loginForm) {
+    loginForm.style.display = 'none';
+  }
+  
+  // 3. Show loading/redirecting indicator
+  const redirectIndicator = document.createElement('div');
+  redirectIndicator.id = 'redirect-indicator';
+  redirectIndicator.style.cssText = `
+    position: fixed;
+    top: 50%;
+    left: 50%;
+    transform: translate(-50%, -50%);
+    background: rgba(0, 0, 0, 0.8);
+    color: white;
+    padding: 20px;
+    border-radius: 10px;
+    z-index: 1000;
+    text-align: center;
+  `;
+  redirectIndicator.innerHTML = `
+    <h3>Login Successful!</h3>
+    <p>Redirecting to chat...</p>
+    <div class="spinner"></div>
+  `;
+  
+  // Add spinner styles
+  const styleSheet = document.createElement('style');
+  styleSheet.textContent = `
+    .spinner {
+      border: 4px solid rgba(255, 255, 255, 0.3);
+      border-radius: 50%;
+      border-top: 4px solid #fff;
+      width: 30px;
+      height: 30px;
+      animation: spin 1s linear infinite;
+      margin: 10px auto;
+    }
+    
+    @keyframes spin {
+      0% { transform: rotate(0deg); }
+      100% { transform: rotate(360deg); }
+    }
+  `;
+  document.head.appendChild(styleSheet);
+  
+  document.body.appendChild(redirectIndicator);
+  
+  // Dispatch login success event for other components
+  const event = new CustomEvent('moodchat-login-success', {
+    detail: { user, timestamp: new Date().toISOString() }
+  });
+  window.dispatchEvent(event);
 }
 
 /**
@@ -532,10 +667,25 @@ async function handleRegisterSubmit(event) {
     };
     
     try {
-      // STRICT REQUIREMENT: API call with proper error handling
-      const registerResult = await window.api.register(registerData);
+      // STRICT REQUIREMENT: Use the window.api function directly as specified
+      const registerResponse = await window.api('/auth/register', {
+        method: 'POST',
+        body: registerData
+      });
       
-      console.log('STRICT API-DRIVEN: Register API response:', registerResult);
+      console.log('STRICT API-DRIVEN: Register API raw response:', registerResponse);
+      
+      // Parse the response safely
+      let registerResult;
+      if (registerResponse && typeof registerResponse === 'object' && 'ok' in registerResponse) {
+        // This is a raw Response object - parse it
+        registerResult = await safeParseResponse(registerResponse);
+      } else {
+        // Already parsed or different format
+        registerResult = registerResponse;
+      }
+      
+      console.log('STRICT API-DRIVEN: Register API parsed result:', registerResult);
       
       // STRICT REQUIREMENT: ONLY proceed if API returns success AND has valid token
       if (registerResult && registerResult.success && registerResult.user && registerResult.token) {
@@ -556,6 +706,9 @@ async function handleRegisterSubmit(event) {
         if (window.AppState) {
           window.AppState.user = user;
         }
+        
+        // Trigger UI success flow
+        triggerUISuccessFlow(user);
         
         // Small delay before redirect
         setTimeout(() => {
@@ -1211,10 +1364,13 @@ function setupAuthFormListeners() {
     });
   }
   
-  // Login form submit handler
+  // Login form submit handler - FIXED to prevent double submission
   const loginForm = document.getElementById('login-form');
   if (loginForm) {
     console.log('Setting up login form submit listener');
+    // Remove any existing listeners to prevent duplicates
+    loginForm.removeEventListener('submit', handleLoginSubmit);
+    // Add the listener with proper event blocking
     loginForm.addEventListener('submit', handleLoginSubmit);
   }
   
@@ -1279,6 +1435,7 @@ window.debugNetworkStatus = function() {
   console.log('Current AppState.network:', window.AppState?.network);
   console.log('Auth data exists:', !!localStorage.getItem('authUser'));
   console.log('Login attempts:', LoginAttempts.attempts);
+  console.log('window.currentUser:', window.currentUser);
   console.log('===========================');
 };
 
@@ -1386,6 +1543,48 @@ function setupAuthFormsImmediately() {
   }
   
   console.log('Auth forms set up immediately');
+}
+
+// ============================================================================
+// SHOW AUTH ERROR FUNCTION
+// ============================================================================
+
+/**
+ * Shows authentication error in the UI
+ */
+function showAuthError(message) {
+  console.error('AUTH ERROR:', message);
+  
+  // Try to find existing error container
+  let errorContainer = document.getElementById('auth-error-container');
+  
+  if (!errorContainer) {
+    errorContainer = document.createElement('div');
+    errorContainer.id = 'auth-error-container';
+    errorContainer.style.cssText = `
+      background: #fee;
+      border: 1px solid #f99;
+      color: #900;
+      padding: 10px;
+      margin: 10px 0;
+      border-radius: 4px;
+      text-align: center;
+    `;
+    
+    // Insert at the top of the auth form
+    const authContainer = document.querySelector('.auth-container') || document.body;
+    authContainer.insertBefore(errorContainer, authContainer.firstChild);
+  }
+  
+  errorContainer.textContent = message;
+  errorContainer.style.display = 'block';
+  
+  // Auto-hide after 5 seconds
+  setTimeout(() => {
+    if (errorContainer && errorContainer.parentNode) {
+      errorContainer.style.display = 'none';
+    }
+  }, 5000);
 }
 
 // ============================================================================

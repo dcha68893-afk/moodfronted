@@ -10,8 +10,6 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Video Calls | Chat App</title>
     
-    <!-- Removed Firebase SDK imports -->
-    
     <!-- Font Awesome -->
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
     
@@ -24,422 +22,269 @@
     <!-- M-Pesa payment integration -->
     <script src="https://js.paystack.co/v1/inline.js"></script>
     
+    <link rel="stylesheet" href="calls.css">
+
     <style>
-        * {
-            margin: 0;
-            padding: 0;
-            box-sizing: border-box;
-            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+        /* Existing CSS styles remain unchanged */
+        
+        /* Additional styles for new features */
+        .mood-indicator {
+            display: inline-flex;
+            align-items: center;
+            gap: 5px;
+            padding: 3px 8px;
+            border-radius: 12px;
+            font-size: 12px;
+            margin-right: 5px;
         }
         
-        :root {
-            --primary-color: #0084ff;
-            --secondary-color: #f0f2f5;
-            --danger-color: #ff3b30;
-            --success-color: #34c759;
-            --warning-color: #ff9500;
-            --text-primary: #050505;
-            --text-secondary: #65676b;
-            --bg-color: #ffffff;
-            --border-color: #dddfe2;
-            --call-gradient: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-            --shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
-            --shadow-lg: 0 10px 30px rgba(0, 0, 0, 0.2);
-            --video-bg: #1a1a1a;
-            --offline-overlay: rgba(255, 255, 255, 0.95);
-            --premium-color: #FFD700;
-            --premium-gradient: linear-gradient(135deg, #FFD700 0%, #FFA500 100%);
-            --happy-color: #FFD700;
-            --neutral-color: #A0A0A0;
-            --sad-color: #6495ED;
-            --angry-color: #FF4500;
-            --tired-color: #9370DB;
+        .mood-happy {
+            background-color: #e6f7e6;
+            color: #2e7d32;
         }
         
-        body {
-            background-color: var(--bg-color);
-            color: var(--text-primary);
-            height: 100vh;
-            overflow: hidden;
+        .mood-neutral {
+            background-color: #f5f5f5;
+            color: #757575;
         }
         
-        .app-container {
-            display: flex;
-            height: 100vh;
-            position: relative;
+        .mood-sad {
+            background-color: #ffeaea;
+            color: #c62828;
         }
         
-        /* Improved Offline Indicator */
-        .offline-banner {
+        .mood-angry {
+            background-color: #ffebee;
+            color: #d32f2f;
+        }
+        
+        .mood-tired {
+            background-color: #fff3e0;
+            color: #f57c00;
+        }
+        
+        .intention-indicator {
+            display: inline-flex;
+            align-items: center;
+            gap: 5px;
+            padding: 3px 8px;
+            border-radius: 12px;
+            font-size: 12px;
+        }
+        
+        .intention-quick {
+            background-color: #e3f2fd;
+            color: #1565c0;
+        }
+        
+        .intention-important {
+            background-color: #fff3e0;
+            color: #ef6c00;
+        }
+        
+        .intention-emergency {
+            background-color: #ffebee;
+            color: #d32f2f;
+        }
+        
+        .intention-checkin {
+            background-color: #f3e5f5;
+            color: #7b1fa2;
+        }
+        
+        .intention-work {
+            background-color: #e8f5e9;
+            color: #2e7d32;
+        }
+        
+        .focus-mode .call-container {
+            background-color: #000000;
+        }
+        
+        .focus-mode .video-container:not(.pinned) {
+            opacity: 0.3;
+        }
+        
+        .focus-mode .video-container.pinned {
+            opacity: 1;
+            border: 3px solid #4F46E5;
+        }
+        
+        .private-notes-container,
+        .call-summary-modal,
+        .mood-selection-modal,
+        .intention-selection-modal {
+            display: none;
             position: fixed;
             top: 0;
             left: 0;
             right: 0;
-            background-color: var(--warning-color);
-            color: white;
-            padding: 12px 20px;
-            font-size: 14px;
-            font-weight: 500;
-            text-align: center;
-            z-index: 9999;
-            display: none;
-            align-items: center;
-            justify-content: center;
-            gap: 10px;
-            box-shadow: 0 2px 5px rgba(0,0,0,0.1);
-            border-bottom: 1px solid rgba(255,255,255,0.2);
-        }
-        
-        .offline-banner.active {
-            display: flex;
-            animation: slideDown 0.3s ease;
-        }
-        
-        @keyframes slideDown {
-            from { transform: translateY(-100%); }
-            to { transform: translateY(0); }
-        }
-        
-        /* Sidebar Styles */
-        .sidebar {
-            width: 380px;
-            background-color: var(--bg-color);
-            border-right: 1px solid var(--border-color);
-            display: flex;
-            flex-direction: column;
-            height: 100%;
-            overflow: hidden;
-            position: relative;
-        }
-        
-        .sidebar-header {
-            padding: 20px;
-            background: var(--call-gradient);
-            color: white;
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-            flex-shrink: 0;
-        }
-        
-        .sidebar-header h2 {
-            font-size: 24px;
-            font-weight: 600;
-        }
-        
-        .new-call-btn {
-            background-color: rgba(255, 255, 255, 0.2);
-            color: white;
-            border: 1px solid rgba(255, 255, 255, 0.3);
-            border-radius: 50%;
-            width: 45px;
-            height: 45px;
-            cursor: pointer;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            font-size: 20px;
-            transition: all 0.2s;
-            backdrop-filter: blur(10px);
-        }
-        
-        .new-call-btn:disabled {
-            opacity: 0.5;
-            cursor: not-allowed;
-            background-color: rgba(255, 255, 255, 0.1);
-        }
-        
-        .new-call-btn:hover:not(:disabled) {
-            background-color: rgba(255, 255, 255, 0.3);
-            transform: scale(1.05);
-        }
-        
-        .call-categories {
-            display: flex;
-            border-bottom: 1px solid var(--border-color);
-            background-color: var(--bg-color);
-            flex-shrink: 0;
-        }
-        
-        .category-btn {
-            flex: 1;
-            padding: 15px;
-            text-align: center;
-            font-weight: 500;
-            background: none;
-            border: none;
-            cursor: pointer;
-            color: var(--text-secondary);
-            transition: all 0.2s;
-            border-bottom: 3px solid transparent;
-        }
-        
-        .category-btn.active {
-            color: var(--primary-color);
-            border-bottom-color: var(--primary-color);
-        }
-        
-        .category-btn:hover {
-            background-color: var(--secondary-color);
-        }
-        
-        .call-list {
-            flex: 1;
-            display: flex;
-            flex-direction: column;
-            overflow: hidden;
-        }
-        
-        .call-list-content {
-            flex: 1;
-            display: flex;
-            flex-direction: column;
-            overflow: hidden;
-        }
-        
-        .section-title {
-            padding: 15px 20px;
-            font-size: 14px;
-            font-weight: 600;
-            color: var(--text-secondary);
-            text-transform: uppercase;
-            letter-spacing: 0.5px;
-            flex-shrink: 0;
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-        }
-        
-        .offline-badge {
-            background-color: var(--secondary-color);
-            color: var(--text-secondary);
-            font-size: 11px;
-            padding: 3px 8px;
-            border-radius: 10px;
-            font-weight: 500;
-        }
-        
-        /* Sync Indicator */
-        .sync-indicator {
-            display: inline-flex;
-            align-items: center;
-            gap: 5px;
-            font-size: 11px;
-            padding: 2px 8px;
-            border-radius: 10px;
-            font-weight: 500;
-            margin-left: 8px;
-            background-color: var(--secondary-color);
-            color: var(--text-secondary);
-        }
-        
-        .sync-indicator.syncing {
-            background-color: rgba(0, 132, 255, 0.1);
-            color: var(--primary-color);
-            animation: pulse 2s infinite;
-        }
-        
-        .sync-indicator i {
-            font-size: 10px;
-        }
-        
-        .quick-actions {
-            padding: 0 20px;
-            margin-bottom: 20px;
-            display: flex;
-            gap: 15px;
-            flex-shrink: 0;
-        }
-        
-        .quick-action-btn {
-            flex: 1;
-            padding: 20px 15px;
-            background-color: var(--secondary-color);
-            border: none;
-            border-radius: 12px;
-            cursor: pointer;
-            display: flex;
-            flex-direction: column;
-            align-items: center;
-            gap: 10px;
-            transition: all 0.2s;
-            position: relative;
-        }
-        
-        .quick-action-btn:disabled {
-            opacity: 0.5;
-            cursor: not-allowed;
-            background-color: var(--secondary-color);
-        }
-        
-        .quick-action-btn:hover:not(:disabled) {
-            background-color: #e4e6e9;
-            transform: translateY(-2px);
-        }
-        
-        .quick-action-icon {
-            font-size: 24px;
-            color: var(--primary-color);
-        }
-        
-        .quick-action-text {
-            font-size: 14px;
-            font-weight: 500;
-        }
-        
-        .call-settings {
-            padding: 0 20px;
-            margin-bottom: 20px;
-            flex-shrink: 0;
-        }
-        
-        .settings-toggle {
-            display: flex;
-            align-items: center;
-            justify-content: space-between;
-            padding: 15px;
-            background-color: var(--secondary-color);
-            border-radius: 12px;
-            cursor: pointer;
-            transition: all 0.2s;
-        }
-        
-        .settings-toggle:hover {
-            background-color: #e4e6e9;
-        }
-        
-        .settings-toggle-title {
-            display: flex;
-            align-items: center;
-            gap: 10px;
-            font-weight: 500;
-        }
-        
-        .settings-toggle-icon {
-            font-size: 18px;
-            color: var(--primary-color);
-        }
-        
-        .settings-panel {
-            background-color: var(--secondary-color);
-            border-radius: 12px;
-            padding: 20px;
-            margin-top: 10px;
-            display: none;
-        }
-        
-        .settings-panel.active {
-            display: block;
-            animation: fadeIn 0.3s ease;
-        }
-        
-        .settings-item {
-            display: flex;
-            align-items: center;
-            justify-content: space-between;
-            padding: 12px 0;
-            border-bottom: 1px solid var(--border-color);
-        }
-        
-        .settings-item:last-child {
-            border-bottom: none;
-        }
-        
-        .settings-item-label {
-            display: flex;
-            align-items: center;
-            gap: 10px;
-            font-size: 14px;
-        }
-        
-        .settings-item-icon {
-            font-size: 16px;
-            color: var(--primary-color);
-            width: 24px;
-        }
-        
-        .toggle-switch {
-            position: relative;
-            display: inline-block;
-            width: 50px;
-            height: 24px;
-        }
-        
-        .toggle-switch input {
-            opacity: 0;
-            width: 0;
-            height: 0;
-        }
-        
-        .toggle-slider {
-            position: absolute;
-            cursor: pointer;
-            top: 0;
-            left: 0;
-            right: 0;
             bottom: 0;
-            background-color: #ccc;
-            transition: .4s;
-            border-radius: 34px;
-        }
-        
-        .toggle-slider:before {
-            position: absolute;
-            content: "";
-            height: 16px;
-            width: 16px;
-            left: 4px;
-            bottom: 4px;
-            background-color: white;
-            transition: .4s;
-            border-radius: 50%;
-        }
-        
-        input:checked + .toggle-slider {
-            background-color: var(--primary-color);
-        }
-        
-        input:checked + .toggle-slider:before {
-            transform: translateX(26px);
-        }
-        
-        .recent-calls {
-            flex: 1;
-            display: flex;
-            flex-direction: column;
-            overflow: hidden;
-        }
-        
-        .calls-section {
-            display: none;
-            flex: 1;
-            flex-direction: column;
-            overflow: hidden;
-        }
-        
-        .calls-section.active {
-            display: flex;
-            animation: fadeIn 0.3s ease;
-        }
-        
-        .calls-list {
-            flex: 1;
-            overflow-y: auto;
-            padding: 10px 0;
-            min-height: 200px;
-        }
-        
-        /* Improved Offline State */
-        .offline-state {
-            flex: 1;
-            display: flex;
-            flex-direction: column;
+            background-color: rgba(0, 0, 0, 0.5);
+            z-index: 1000;
             align-items: center;
             justify-content: center;
-            padding: 40px 20px;
-            color: var(--text-secondary);
+        }
+        
+        .private-notes-container.active,
+        .call-summary-modal.active,
+        .mood-selection-modal.active,
+        .intention-selection-modal.active {
+            display: flex;
+        }
+        
+        .private-notes-header,
+        .call-summary-container,
+        .mood-selection-container,
+        .intention-selection-container {
+            background-color: white;
+            border-radius: 12px;
+            padding: 25px;
+            max-width: 400px;
+            width: 90%;
+            box-shadow: 0 10px 25px rgba(0, 0, 0, 0.1);
+        }
+        
+        .private-notes-textarea {
+            width: 100%;
+            height: 150px;
+            margin: 15px 0;
+            padding: 12px;
+            border: 1px solid #ddd;
+            border-radius: 8px;
+            font-family: inherit;
+            resize: vertical;
+        }
+        
+        .private-notes-buttons,
+        .call-summary-content,
+        .mood-options,
+        .intention-options {
+            margin-top: 20px;
+        }
+        
+        .summary-item {
+            display: flex;
+            justify-content: space-between;
+            margin-bottom: 12px;
+            padding-bottom: 12px;
+            border-bottom: 1px solid #eee;
+        }
+        
+        .summary-label {
+            color: #666;
+            font-weight: 500;
+        }
+        
+        .summary-value {
+            font-weight: 600;
+            color: #333;
+        }
+        
+        .mood-options {
+            display: grid;
+            grid-template-columns: repeat(3, 1fr);
+            gap: 10px;
+            margin-bottom: 20px;
+        }
+        
+        .mood-option {
             text-align: center;
-            background-color: var(--bg-color);
+            padding: 15px 5px;
+            border-radius: 10px;
+            cursor: pointer;
+            transition: all 0.2s;
+            border: 2px solid transparent;
+        }
+        
+        .mood-option:hover {
+            background-color: #f5f5f5;
+        }
+        
+        .mood-option.selected {
+            border-color: #4F46E5;
+            background-color: #f0f0ff;
+        }
+        
+        .mood-emoji {
+            font-size: 24px;
+            margin-bottom: 5px;
+        }
+        
+        .mood-name {
+            font-size: 12px;
+            color: #666;
+        }
+        
+        .intention-option {
+            display: flex;
+            align-items: center;
+            padding: 12px;
+            border-radius: 10px;
+            cursor: pointer;
+            transition: all 0.2s;
+            border: 2px solid transparent;
+            margin-bottom: 8px;
+        }
+        
+        .intention-option:hover {
+            background-color: #f5f5f5;
+        }
+        
+        .intention-option.selected {
+            border-color: #4F46E5;
+            background-color: #f0f0ff;
+        }
+        
+        .intention-icon {
+            font-size: 20px;
+            color: #4F46E5;
+            margin-right: 12px;
+            width: 30px;
+        }
+        
+        .intention-title {
+            font-weight: 600;
+            margin-bottom: 3px;
+        }
+        
+        .intention-desc {
+            font-size: 12px;
+            color: #666;
+        }
+        
+        .relationship-memory {
+            font-size: 11px;
+            color: #666;
+            margin-top: 3px;
+            display: flex;
+            align-items: center;
+            gap: 4px;
+        }
+        
+        .relationship-memory.frequent-contact {
+            color: #2e7d32;
+        }
+        
+        .relationship-memory.recent-contact {
+            color: #1976d2;
+        }
+        
+        .relationship-memory.occasional-contact {
+            color: #757575;
+        }
+        
+        .participant-emotional-context {
+            font-size: 11px;
+            margin-top: 3px;
+            display: flex;
+            gap: 5px;
+        }
+        
+        .offline-state {
+            text-align: center;
+            padding: 40px 20px;
+            color: #666;
         }
         
         .offline-state i {
@@ -449,1334 +294,51 @@
         }
         
         .offline-state p {
-            margin-bottom: 10px;
-            font-size: 16px;
+            margin-bottom: 5px;
         }
         
         .offline-state .subtext {
-            font-size: 14px;
-            margin-top: 10px;
-            opacity: 0.7;
-        }
-        
-        .call-item {
-            display: flex;
-            align-items: center;
-            padding: 15px 20px;
-            background-color: var(--bg-color);
-            border-radius: 12px;
-            margin: 0 20px 10px 20px;
-            cursor: pointer;
-            transition: all 0.2s;
-            border: 2px solid transparent;
-        }
-        
-        .call-item:hover {
-            background-color: var(--secondary-color);
-            border-color: var(--primary-color);
-        }
-        
-        .call-avatar {
-            width: 50px;
-            height: 50px;
-            border-radius: 50%;
-            background-color: var(--secondary-color);
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            font-size: 18px;
-            color: white;
-            margin-right: 15px;
-            position: relative;
-            overflow: hidden;
-            background-size: cover;
-            background-position: center;
-        }
-        
-        .call-status-icon {
-            position: absolute;
-            bottom: 0;
-            right: 0;
-            width: 18px;
-            height: 18px;
-            border-radius: 50%;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            border: 2px solid var(--bg-color);
-            font-size: 10px;
-        }
-        
-        .call-status-icon.incoming {
-            background-color: var(--success-color);
-            color: white;
-        }
-        
-        .call-status-icon.outgoing {
-            background-color: var(--primary-color);
-            color: white;
-        }
-        
-        .call-status-icon.missed {
-            background-color: var(--danger-color);
-            color: white;
-        }
-        
-        .call-info {
-            flex: 1;
-        }
-        
-        .call-name {
-            font-weight: 600;
-            font-size: 16px;
-            margin-bottom: 5px;
-            display: flex;
-            align-items: center;
-            justify-content: space-between;
-        }
-        
-        .call-details {
-            color: var(--text-secondary);
-            font-size: 14px;
-            display: flex;
-            align-items: center;
-            gap: 8px;
-        }
-        
-        .call-time {
             font-size: 12px;
-            color: var(--text-secondary);
+            color: #999;
         }
         
-        .call-action-btn {
-            background: none;
-            border: none;
-            color: var(--primary-color);
-            cursor: pointer;
-            font-size: 18px;
-            padding: 5px;
-            border-radius: 50%;
-            transition: all 0.2s;
-        }
-        
-        .call-action-btn:disabled {
-            opacity: 0.5;
-            cursor: not-allowed;
-        }
-        
-        .call-action-btn:hover:not(:disabled) {
-            background-color: var(--secondary-color);
-        }
-        
-        /* Call Container */
-        .call-container {
-            flex: 1;
-            background-color: var(--video-bg);
-            position: relative;
-            display: none;
-            overflow: hidden;
-        }
-        
-        .call-container.active {
-            display: flex;
-            flex-direction: column;
-        }
-        
-        .call-header {
-            position: absolute;
-            top: 0;
-            left: 0;
-            right: 0;
-            padding: 20px;
-            display: flex;
-            align-items: center;
-            justify-content: space-between;
-            z-index: 100;
-            background: linear-gradient(to bottom, rgba(0,0,0,0.7) 0%, rgba(0,0,0,0) 100%);
-        }
-        
-        .call-info-bar {
-            display: flex;
-            align-items: center;
-            color: white;
-        }
-        
-        .call-type-icon {
-            background: rgba(255, 255, 255, 0.1);
-            width: 40px;
-            height: 40px;
-            border-radius: 50%;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            margin-right: 12px;
-            font-size: 18px;
-            backdrop-filter: blur(10px);
-        }
-        
-        .call-info-text h4 {
-            font-size: 17px;
-            font-weight: 600;
-            margin-bottom: 3px;
-        }
-        
-        .call-info-text p {
-            font-size: 14px;
-            opacity: 0.8;
-        }
-        
-        .call-duration {
-            color: white;
-            font-weight: 500;
-            font-size: 18px;
-        }
-        
-        /* Video Grid */
-        .video-grid {
-            flex: 1;
-            display: grid;
-            grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
-            gap: 10px;
-            padding: 20px;
-            overflow: auto;
-        }
-        
-        .video-container {
-            position: relative;
-            border-radius: 12px;
-            overflow: hidden;
-            background-color: #2a2a2a;
-            aspect-ratio: 16/9;
-        }
-        
-        .video-container.large {
-            grid-column: span 2;
-            grid-row: span 2;
-        }
-        
-        .video-container.pinned {
-            border: 3px solid var(--primary-color);
-            box-shadow: 0 0 20px rgba(0, 132, 255, 0.5);
-        }
-        
-        .video-element {
-            width: 100%;
-            height: 100%;
-            object-fit: cover;
-            transform: scaleX(-1);
-        }
-        
-        .video-overlay {
-            position: absolute;
-            bottom: 0;
-            left: 0;
-            right: 0;
-            padding: 15px;
-            background: linear-gradient(to top, rgba(0,0,0,0.8) 0%, rgba(0,0,0,0) 100%);
-            color: white;
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-        }
-        
-        .video-name {
-            font-weight: 500;
-            font-size: 14px;
-            display: flex;
-            align-items: center;
-            gap: 8px;
-        }
-        
-        .video-status {
-            font-size: 12px;
-            opacity: 0.8;
-        }
-        
-        .video-actions {
-            display: flex;
-            gap: 5px;
-        }
-        
-        .video-action-btn {
-            background: rgba(255, 255, 255, 0.1);
-            color: white;
-            border: none;
-            width: 32px;
-            height: 32px;
-            border-radius: 50%;
-            cursor: pointer;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            font-size: 14px;
-            backdrop-filter: blur(10px);
-            transition: all 0.2s;
-        }
-        
-        .video-action-btn:hover {
-            background: rgba(255, 255, 255, 0.2);
-        }
-        
-        .video-action-btn.active {
-            background-color: var(--primary-color);
-        }
-        
-        .video-action-btn.danger {
-            background-color: var(--danger-color);
-        }
-        
-        /* Call Controls */
-        .call-controls {
-            position: absolute;
-            bottom: 0;
-            left: 0;
-            right: 0;
-            padding: 25px;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            gap: 20px;
-            z-index: 100;
-            background: linear-gradient(to top, rgba(0,0,0,0.8) 0%, rgba(0,0,0,0) 100%);
-        }
-        
-        .control-btn {
-            background: rgba(255, 255, 255, 0.1);
-            color: white;
-            border: none;
-            width: 60px;
-            height: 60px;
-            border-radius: 50%;
-            cursor: pointer;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            font-size: 24px;
-            backdrop-filter: blur(10px);
-            transition: all 0.2s;
-        }
-        
-        .control-btn:hover {
-            background: rgba(255, 255, 255, 0.2);
-            transform: scale(1.05);
-        }
-        
-        .control-btn.active {
-            background-color: var(--primary-color);
-        }
-        
-        .control-btn.danger {
-            background-color: var(--danger-color);
-        }
-        
-        .control-btn.danger:hover {
-            background-color: #ff1a1a;
-        }
-        
-        /* Premium Badge */
-        .premium-badge {
-            background: var(--premium-gradient);
-            color: #000;
+        .sync-indicator {
             font-size: 11px;
-            padding: 3px 8px;
+            padding: 2px 8px;
             border-radius: 10px;
-            font-weight: 600;
-            margin-left: 8px;
+            background-color: #f0f0f0;
         }
         
-        /* Call Side Panel */
-        .call-side-panel {
-            width: 300px;
-            background-color: var(--bg-color);
-            border-left: 1px solid var(--border-color);
-            display: flex;
-            flex-direction: column;
-            height: 100%;
-            overflow: hidden;
-            transition: transform 0.3s ease;
+        .sync-indicator.syncing {
+            background-color: #fff3cd;
+            color: #856404;
         }
         
-        .call-side-panel.collapsed {
-            transform: translateX(100%);
-        }
-        
-        .panel-header {
-            padding: 20px;
-            border-bottom: 1px solid var(--border-color);
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-        }
-        
-        .panel-header h3 {
-            font-size: 18px;
-            font-weight: 600;
-        }
-        
-        .panel-tabs {
-            display: flex;
-            border-bottom: 1px solid var(--border-color);
-            overflow-x: auto;
-        }
-        
-        .panel-tab {
-            flex: 1;
-            min-width: 80px;
-            padding: 15px;
-            text-align: center;
-            background: none;
-            border: none;
-            cursor: pointer;
-            font-weight: 500;
-            color: var(--text-secondary);
-            transition: all 0.2s;
-            border-bottom: 3px solid transparent;
-            white-space: nowrap;
-        }
-        
-        .panel-tab.active {
-            color: var(--primary-color);
-            border-bottom-color: var(--primary-color);
-        }
-        
-        .panel-content {
-            flex: 1;
-            overflow-y: auto;
-            padding: 20px;
-        }
-        
-        .panel-section {
-            display: none;
-        }
-        
-        .panel-section.active {
-            display: block;
-        }
-        
-        /* Participants List */
-        .participants-list {
-            display: flex;
-            flex-direction: column;
-            gap: 10px;
-        }
-        
-        .participant-item {
-            display: flex;
-            align-items: center;
-            padding: 12px;
-            border-radius: 8px;
-            background-color: var(--bg-color);
-            transition: all 0.2s;
-        }
-        
-        .participant-item:hover {
-            background-color: var(--secondary-color);
-        }
-        
-        .participant-avatar {
-            width: 40px;
-            height: 40px;
-            border-radius: 50%;
-            background-color: var(--secondary-color);
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            font-size: 16px;
-            color: white;
-            margin-right: 12px;
-            overflow: hidden;
-            background-size: cover;
-            background-position: center;
-        }
-        
-        .participant-info {
-            flex: 1;
-        }
-        
-        .participant-name {
-            font-weight: 500;
-            font-size: 14px;
-            margin-bottom: 3px;
-        }
-        
-        .participant-status {
-            font-size: 12px;
-            color: var(--text-secondary);
-            display: flex;
-            align-items: center;
-            gap: 5px;
-        }
-        
-        .participant-status.active {
-            color: var(--success-color);
-        }
-        
-        .participant-status.offline {
-            color: var(--text-secondary);
-        }
-        
-        .participant-actions {
-            display: flex;
-            gap: 5px;
-        }
-        
-        /* Chat Panel */
-        .chat-messages {
-            display: flex;
-            flex-direction: column;
-            gap: 10px;
-            margin-bottom: 15px;
-            max-height: 400px;
-            overflow-y: auto;
-        }
-        
-        .chat-message {
-            padding: 10px 15px;
-            border-radius: 12px;
-            max-width: 80%;
-            word-wrap: break-word;
-        }
-        
-        .chat-message.sent {
-            background-color: var(--primary-color);
-            color: white;
-            align-self: flex-end;
-        }
-        
-        .chat-message.received {
-            background-color: var(--secondary-color);
-            align-self: flex-start;
-        }
-        
-        .message-sender {
-            font-weight: 600;
-            font-size: 12px;
-            margin-bottom: 3px;
-        }
-        
-        .message-content {
-            font-size: 14px;
-        }
-        
-        .chat-input {
-            display: flex;
-            gap: 10px;
-        }
-        
-        .chat-input-field {
-            flex: 1;
-            padding: 12px 15px;
-            border: 1px solid var(--border-color);
-            border-radius: 20px;
-            font-size: 14px;
-        }
-        
-        /* Notes Panel */
-        .notes-editor {
-            display: flex;
-            flex-direction: column;
-            gap: 15px;
-        }
-        
-        .notes-toolbar {
-            display: flex;
-            gap: 10px;
-            flex-wrap: wrap;
-        }
-        
-        .notes-btn {
-            padding: 8px 12px;
-            background-color: var(--secondary-color);
-            border: none;
-            border-radius: 8px;
-            cursor: pointer;
-            font-size: 14px;
-            display: flex;
-            align-items: center;
-            gap: 5px;
-            transition: all 0.2s;
-        }
-        
-        .notes-btn:hover {
-            background-color: #e4e6e9;
-        }
-        
-        .notes-input {
-            width: 100%;
-            min-height: 200px;
-            padding: 15px;
-            border: 1px solid var(--border-color);
-            border-radius: 8px;
-            font-size: 14px;
-            resize: vertical;
-            font-family: 'Monaco', 'Menlo', 'Ubuntu Mono', monospace;
-        }
-        
-        .notes-preview {
-            padding: 15px;
-            border: 1px solid var(--border-color);
-            border-radius: 8px;
-            background-color: var(--secondary-color);
-            min-height: 100px;
-            max-height: 300px;
-            overflow-y: auto;
-        }
-        
-        /* Whiteboard Panel */
-        .whiteboard-container {
-            width: 100%;
-            height: 400px;
-            border: 1px solid var(--border-color);
-            border-radius: 8px;
-            overflow: hidden;
-            background-color: white;
-            margin-bottom: 15px;
-        }
-        
-        .whiteboard-tools {
-            display: flex;
-            gap: 10px;
-            margin-bottom: 15px;
-            flex-wrap: wrap;
-        }
-        
-        /* Poll Panel */
-        .poll-container {
-            display: flex;
-            flex-direction: column;
-            gap: 15px;
-        }
-        
-        .poll-question {
-            padding: 15px;
-            border: 1px solid var(--border-color);
-            border-radius: 8px;
-            background-color: var(--secondary-color);
-        }
-        
-        .poll-options {
-            display: flex;
-            flex-direction: column;
-            gap: 10px;
-        }
-        
-        .poll-option {
-            display: flex;
-            align-items: center;
-            padding: 12px 15px;
-            border: 1px solid var(--border-color);
-            border-radius: 8px;
-            cursor: pointer;
-            transition: all 0.2s;
-        }
-        
-        .poll-option:hover {
-            background-color: var(--secondary-color);
-        }
-        
-        .poll-option.selected {
-            border-color: var(--primary-color);
-            background-color: rgba(0, 132, 255, 0.1);
-        }
-        
-        .poll-option-text {
-            flex: 1;
-        }
-        
-        .poll-votes {
-            font-size: 12px;
-            color: var(--text-secondary);
-        }
-        
-        /* Reactions */
-        .reactions-container {
-            position: absolute;
-            bottom: 120px;
-            right: 20px;
-            display: flex;
-            gap: 10px;
-            z-index: 50;
-        }
-        
-        .reaction-btn {
-            background: rgba(255, 255, 255, 0.9);
-            width: 45px;
-            height: 45px;
-            border-radius: 50%;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            font-size: 24px;
-            cursor: pointer;
-            transition: all 0.2s;
-            box-shadow: 0 4px 12px rgba(0,0,0,0.2);
-        }
-        
-        .reaction-btn:hover {
-            transform: scale(1.1);
-        }
-        
-        /* Floating Reactions Animation */
+        /* Floating reactions */
         .floating-reaction {
             position: absolute;
-            font-size: 40px;
-            z-index: 1000;
+            font-size: 32px;
             pointer-events: none;
-            animation: floatUp 3s ease-out forwards;
+            z-index: 100;
+            animation: floatUp 3s ease-in-out forwards;
         }
         
         @keyframes floatUp {
             0% {
-                transform: translateY(0) scale(0.5);
+                transform: translateY(0) scale(1);
                 opacity: 1;
             }
             100% {
-                transform: translateY(-100px) scale(1);
+                transform: translateY(-100px) scale(0.5);
                 opacity: 0;
             }
         }
         
-        /* Incoming Call Modal */
-        .incoming-call-modal {
-            display: none;
-            position: fixed;
-            top: 0;
-            left: 0;
-            width: 100%;
-            height: 100%;
-            background-color: rgba(0, 0, 0, 0.8);
-            z-index: 1000;
-            align-items: center;
-            justify-content: center;
-        }
-        
-        .incoming-call-modal.active {
-            display: flex;
-        }
-        
-        .incoming-call-container {
-            width: 90%;
-            max-width: 400px;
-            background-color: var(--bg-color);
-            border-radius: 20px;
-            overflow: hidden;
-            text-align: center;
-            padding: 30px;
-            box-shadow: var(--shadow-lg);
-        }
-        
-        .incoming-call-avatar {
-            width: 100px;
-            height: 100px;
-            border-radius: 50%;
-            background-color: var(--secondary-color);
-            margin: 0 auto 20px;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            font-size: 36px;
-            color: white;
-            overflow: hidden;
-            background-size: cover;
-            background-position: center;
-        }
-        
-        .incoming-call-name {
-            font-size: 24px;
-            font-weight: 600;
-            margin-bottom: 10px;
-        }
-        
-        .incoming-call-type {
-            color: var(--text-secondary);
-            margin-bottom: 30px;
-        }
-        
-        .incoming-call-actions {
-            display: flex;
-            justify-content: center;
-            gap: 20px;
-        }
-        
-        /* New Call Modal */
-        .new-call-modal {
-            display: none;
-            position: fixed;
-            top: 0;
-            left: 0;
-            width: 100%;
-            height: 100%;
-            background-color: rgba(0, 0, 0, 0.5);
-            z-index: 1000;
-            align-items: center;
-            justify-content: center;
-        }
-        
-        .new-call-modal.active {
-            display: flex;
-        }
-        
-        .new-call-container {
-            width: 90%;
-            max-width: 500px;
-            background-color: var(--bg-color);
-            border-radius: 20px;
-            overflow: hidden;
-            display: flex;
-            flex-direction: column;
-            max-height: 90vh;
-            box-shadow: var(--shadow-lg);
-        }
-        
-        .new-call-header {
-            padding: 20px;
-            border-bottom: 1px solid var(--border-color);
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-            background: var(--call-gradient);
-            color: white;
-        }
-        
-        .new-call-header h3 {
-            font-size: 20px;
-            font-weight: 600;
-        }
-        
-        .new-call-tabs {
-            display: flex;
-            border-bottom: 1px solid var(--border-color);
-            overflow-x: auto;
-        }
-        
-        .new-call-tab {
-            flex: 1;
-            min-width: 100px;
-            padding: 15px;
-            text-align: center;
-            background: none;
-            border: none;
-            cursor: pointer;
-            font-weight: 500;
-            color: var(--text-secondary);
-            transition: all 0.2s;
-            border-bottom: 3px solid transparent;
-            white-space: nowrap;
-        }
-        
-        .new-call-tab.active {
-            color: var(--primary-color);
-            border-bottom-color: var(--primary-color);
-        }
-        
-        .new-call-content {
-            flex: 1;
-            padding: 25px;
-            overflow-y: auto;
-        }
-        
-        .new-call-tab-content {
-            display: none;
-        }
-        
-        .new-call-tab-content.active {
-            display: block;
-        }
-        
-        .contact-search {
-            margin-bottom: 20px;
-        }
-        
-        .search-input {
-            width: 100%;
-            padding: 12px 15px;
-            border: 1px solid var(--border-color);
-            border-radius: 8px;
-            font-size: 14px;
-        }
-        
-        .contacts-list {
-            max-height: 300px;
-            overflow-y: auto;
-        }
-        
-        .contact-item {
-            display: flex;
-            align-items: center;
-            padding: 12px;
-            border-radius: 8px;
-            cursor: pointer;
-            transition: all 0.2s;
-        }
-        
-        .contact-item:hover {
-            background-color: var(--secondary-color);
-        }
-        
-        .contact-item.selected {
-            background-color: rgba(0, 132, 255, 0.1);
-            border: 1px solid var(--primary-color);
-        }
-        
-        .contact-checkbox {
-            margin-right: 12px;
-        }
-        
-        .group-call-options {
-            display: flex;
-            flex-direction: column;
-            gap: 15px;
-        }
-        
-        .option-item {
-            padding: 15px;
-            border: 1px solid var(--border-color);
-            border-radius: 8px;
-            cursor: pointer;
-            transition: all 0.2s;
-        }
-        
-        .option-item:hover {
-            background-color: var(--secondary-color);
-        }
-        
-        .option-item.selected {
-            border-color: var(--primary-color);
-            background-color: rgba(0, 132, 255, 0.1);
-        }
-        
-        .option-title {
-            font-weight: 600;
-            margin-bottom: 5px;
-            display: flex;
-            align-items: center;
-            gap: 8px;
-        }
-        
-        .option-desc {
-            font-size: 14px;
-            color: var(--text-secondary);
-        }
-        
-        /* Call Link Tab */
-        .link-tab-content {
-            text-align: center;
-            padding: 30px 0;
-        }
-        
-        .link-icon {
-            font-size: 48px;
-            margin-bottom: 20px;
-            color: var(--primary-color);
-        }
-        
-        /* Payment Modal */
-        .payment-modal {
-            display: none;
-            position: fixed;
-            top: 0;
-            left: 0;
-            width: 100%;
-            height: 100%;
-            background-color: rgba(0, 0, 0, 0.8);
-            z-index: 1001;
-            align-items: center;
-            justify-content: center;
-        }
-        
-        .payment-modal.active {
-            display: flex;
-        }
-        
-        .payment-container {
-            width: 90%;
-            max-width: 400px;
-            background-color: var(--bg-color);
-            border-radius: 20px;
-            overflow: hidden;
-            text-align: center;
-            padding: 30px;
-            box-shadow: var(--shadow-lg);
-        }
-        
-        .payment-header {
-            margin-bottom: 20px;
-        }
-        
-        .payment-header h3 {
-            font-size: 24px;
-            margin-bottom: 10px;
-        }
-        
-        .payment-amount {
-            font-size: 32px;
-            font-weight: bold;
-            color: var(--primary-color);
-            margin: 20px 0;
-        }
-        
-        .payment-option {
-            display: flex;
-            align-items: center;
-            padding: 15px;
-            border: 1px solid var(--border-color);
-            border-radius: 8px;
-            margin-bottom: 10px;
-            cursor: pointer;
-            transition: all 0.2s;
-        }
-        
-        .payment-option:hover {
-            background-color: var(--secondary-color);
-        }
-        
-        .payment-option.selected {
-            border-color: var(--primary-color);
-            background-color: rgba(0, 132, 255, 0.1);
-        }
-        
-        .payment-icon {
-            font-size: 24px;
-            margin-right: 15px;
-            color: var(--primary-color);
-        }
-        
-        .payment-details {
-            flex: 1;
-            text-align: left;
-        }
-        
-        .payment-details h4 {
-            font-size: 16px;
-            margin-bottom: 5px;
-        }
-        
-        .payment-details p {
-            font-size: 14px;
-            color: var(--text-secondary);
-        }
-        
-        .payment-form {
-            margin-top: 20px;
-            text-align: left;
-        }
-        
-        .form-group {
-            margin-bottom: 15px;
-        }
-        
-        .form-label {
-            display: block;
-            margin-bottom: 5px;
-            font-weight: 500;
-        }
-        
-        .form-input {
-            width: 100%;
-            padding: 12px;
-            border: 1px solid var(--border-color);
-            border-radius: 8px;
-            font-size: 14px;
-        }
-        
-        .payment-buttons {
-            display: flex;
-            gap: 10px;
-            margin-top: 20px;
-        }
-        
-        .payment-btn {
-            flex: 1;
-            padding: 12px;
-            border: none;
-            border-radius: 8px;
-            font-size: 14px;
-            font-weight: 500;
-            cursor: pointer;
-            transition: all 0.2s;
-        }
-        
-        .payment-btn.primary {
-            background-color: var(--primary-color);
-            color: white;
-        }
-        
-        .payment-btn.primary:hover {
-            background-color: #0066cc;
-        }
-        
-        .payment-btn.secondary {
-            background-color: var(--secondary-color);
-            color: var(--text-primary);
-        }
-        
-        .payment-btn.secondary:hover {
-            background-color: #e4e6e9;
-        }
-        
-        /* Notification */
-        .notification {
-            position: fixed;
-            bottom: 20px;
-            right: 20px;
-            background-color: var(--success-color);
-            color: white;
-            padding: 12px 20px;
-            border-radius: 8px;
-            box-shadow: var(--shadow);
-            z-index: 1000;
-            display: flex;
-            align-items: center;
-            gap: 10px;
-            transform: translateY(100px);
-            opacity: 0;
-            transition: all 0.3s;
-        }
-        
-        .notification.active {
-            transform: translateY(0);
-            opacity: 1;
-        }
-        
-        .notification.error {
-            background-color: var(--danger-color);
-        }
-        
-        .notification.warning {
-            background-color: var(--warning-color);
-        }
-        
-        /* Picture in Picture */
-        .pip-container {
-            position: fixed;
-            bottom: 20px;
-            right: 20px;
-            width: 200px;
-            height: 150px;
-            border-radius: 12px;
-            overflow: hidden;
-            background-color: var(--video-bg);
-            box-shadow: var(--shadow-lg);
-            z-index: 999;
-            cursor: move;
-            resize: both;
-            overflow: hidden;
-            display: none;
-        }
-        
-        .pip-video {
-            width: 100%;
-            height: 100%;
-            object-fit: cover;
-        }
-        
-        .pip-controls {
-            position: absolute;
-            bottom: 0;
-            left: 0;
-            right: 0;
-            padding: 10px;
-            background: linear-gradient(to top, rgba(0,0,0,0.8) 0%, rgba(0,0,0,0) 100%);
-            display: flex;
-            justify-content: center;
-            gap: 5px;
-        }
-        
-        /* Responsive */
-        @media (max-width: 1024px) {
-            .sidebar {
-                width: 350px;
-            }
-            
-            .call-side-panel {
-                width: 250px;
-            }
-        }
-        
-        @media (max-width: 768px) {
-            .app-container {
-                flex-direction: column;
-            }
-            
-            .sidebar {
-                width: 100%;
-                height: auto;
-                max-height: 70vh;
-                min-height: 500px;
-            }
-            
-            .call-container {
-                position: fixed;
-                top: 0;
-                left: 0;
-                width: 100%;
-                height: 100%;
-                z-index: 100;
-            }
-            
-            .call-side-panel {
-                position: fixed;
-                top: 0;
-                right: 0;
-                width: 100%;
-                height: 100%;
-                z-index: 200;
-            }
-            
-            .call-list {
-                display: flex;
-                flex-direction: column;
-                flex: 1;
-                min-height: 300px;
-            }
-            
-            .recent-calls {
-                flex: 1;
-                display: flex;
-                flex-direction: column;
-                overflow: hidden;
-            }
-            
-            .calls-section {
-                flex: 1;
-                display: none;
-                flex-direction: column;
-                overflow: hidden;
-            }
-            
-            .calls-section.active {
-                display: flex;
-                animation: fadeIn 0.3s ease;
-            }
-            
-            .calls-list {
-                flex: 1;
-                overflow-y: auto;
-                padding: 10px 0;
-                min-height: 250px;
-            }
-            
-            .call-item {
-                padding: 12px 20px;
-                margin: 0 15px 8px 15px;
-            }
-            
-            .call-avatar {
-                width: 45px;
-                height: 45px;
-                font-size: 16px;
-            }
-            
-            .call-name {
-                font-size: 15px;
-            }
-            
-            .call-details {
-                font-size: 13px;
-            }
-            
-            .quick-actions {
-                padding: 0 15px;
-                gap: 10px;
-                flex-wrap: wrap;
-            }
-            
-            .quick-action-btn {
-                padding: 15px 10px;
-                min-width: 100px;
-            }
-            
-            .quick-action-icon {
-                font-size: 20px;
-            }
-            
-            .quick-action-text {
-                font-size: 13px;
-            }
-            
-            .call-settings {
-                padding: 0 15px;
-            }
-            
-            .section-title {
-                padding: 15px;
-            }
-        }
-        
-        /* Animations */
-        @keyframes pulse {
-            0% { transform: scale(1); }
-            50% { transform: scale(1.05); }
-            100% { transform: scale(1); }
-        }
-        
-        .pulsing {
-            animation: pulse 2s infinite;
-        }
-        
-        @keyframes fadeIn {
-            from { opacity: 0; transform: translateY(20px); }
-            to { opacity: 1; transform: translateY(0); }
-        }
-        
-        .fade-in {
-            animation: fadeIn 0.3s ease;
-        }
-        
-        /* Offline UI - Clean like Friends Page */
-        .offline-ui .quick-action-btn,
-        .offline-ui .new-call-btn,
-        .offline-ui .control-btn:not(#endCallBtn),
-        .offline-ui .call-action-btn,
-        .offline-ui .notes-btn:not(#resetSettingsBtn),
-        .offline-ui .panel-tab:not(.active) {
-            opacity: 0.5;
-            cursor: not-allowed;
-            pointer-events: none;
-        }
-        
-        .offline-ui .contact-checkbox {
-            opacity: 0.5;
-            cursor: not-allowed;
-        }
-        
-        /* Improved Offline Call Container */
-        .offline-call-placeholder {
-            flex: 1;
-            display: flex;
-            flex-direction: column;
-            align-items: center;
-            justify-content: center;
-            color: white;
-            text-align: center;
-            padding: 40px;
-            background-color: var(--video-bg);
-        }
-        
-        .offline-call-placeholder i {
-            font-size: 64px;
-            margin-bottom: 20px;
-            opacity: 0.7;
-        }
-        
-        .offline-call-placeholder h3 {
-            font-size: 24px;
-            margin-bottom: 10px;
-        }
-        
-        .offline-call-placeholder p {
-            font-size: 16px;
-            opacity: 0.8;
-            margin-bottom: 30px;
-            max-width: 400px;
-            line-height: 1.5;
-        }
-        
-        /* Offline Contacts */
+        /* Offline contacts message */
         .offline-contacts-message {
             text-align: center;
             padding: 40px 20px;
-            color: var(--text-secondary);
+            color: #666;
         }
         
         .offline-contacts-message i {
@@ -1786,473 +348,52 @@
         }
         
         .offline-contacts-message p {
-            font-size: 16px;
-            margin-bottom: 10px;
-        }
-        
-        .offline-contacts-message .subtext {
-            font-size: 14px;
-            opacity: 0.7;
-        }
-        
-        /* Premium Features */
-        .premium-feature {
-            position: relative;
-        }
-        
-        .premium-badge-small {
-            position: absolute;
-            top: -5px;
-            right: -5px;
-            background: var(--premium-gradient);
-            color: #000;
-            font-size: 9px;
-            padding: 2px 6px;
-            border-radius: 10px;
-            font-weight: 600;
-            z-index: 1;
-        }
-        
-        /* Loading Spinner */
-        .loading-placeholder {
-            text-align: center;
-            padding: 40px 20px;
-            color: var(--text-secondary);
-        }
-        
-        .loading-spinner {
-            display: inline-block;
-            width: 24px;
-            height: 24px;
-            border: 3px solid rgba(0, 132, 255, 0.3);
-            border-radius: 50%;
-            border-top-color: var(--primary-color);
-            animation: spin 1s ease-in-out infinite;
-            margin-bottom: 15px;
-        }
-        
-        @keyframes spin {
-            to { transform: rotate(360deg); }
-        }
-        
-        /* ==================== NEW UNIQUE FEATURES STYLES ==================== */
-        
-        /* Emotional Context Styles */
-        .mood-indicator {
-            display: inline-flex;
-            align-items: center;
-            gap: 5px;
-            padding: 4px 8px;
-            border-radius: 12px;
-            font-size: 12px;
-            font-weight: 500;
-            margin-left: 8px;
-            background-color: rgba(255, 255, 255, 0.1);
-            backdrop-filter: blur(10px);
-        }
-        
-        .mood-happy {
-            background-color: rgba(255, 215, 0, 0.2);
-            color: var(--happy-color);
-        }
-        
-        .mood-neutral {
-            background-color: rgba(160, 160, 160, 0.2);
-            color: var(--neutral-color);
-        }
-        
-        .mood-sad {
-            background-color: rgba(100, 149, 237, 0.2);
-            color: var(--sad-color);
-        }
-        
-        .mood-angry {
-            background-color: rgba(255, 69, 0, 0.2);
-            color: var(--angry-color);
-        }
-        
-        .mood-tired {
-            background-color: rgba(147, 112, 219, 0.2);
-            color: var(--tired-color);
-        }
-        
-        /* Call Intention Styles */
-        .intention-indicator {
-            display: inline-flex;
-            align-items: center;
-            gap: 5px;
-            padding: 3px 10px;
-            border-radius: 15px;
-            font-size: 11px;
-            font-weight: 500;
-            margin-top: 3px;
-            background-color: rgba(255, 255, 255, 0.15);
-            backdrop-filter: blur(10px);
-            border: 1px solid rgba(255, 255, 255, 0.2);
-        }
-        
-        .intention-quick {
-            background-color: rgba(76, 175, 80, 0.3);
-            color: #4CAF50;
-        }
-        
-        .intention-important {
-            background-color: rgba(255, 152, 0, 0.3);
-            color: #FF9800;
-        }
-        
-        .intention-emergency {
-            background-color: rgba(244, 67, 54, 0.3);
-            color: #F44336;
-        }
-        
-        .intention-checkin {
-            background-color: rgba(33, 150, 243, 0.3);
-            color: #2196F3;
-        }
-        
-        .intention-work {
-            background-color: rgba(156, 39, 176, 0.3);
-            color: #9C27B0;
-        }
-        
-        /* Private Call Notes Styles */
-        .private-notes-container {
-            position: absolute;
-            top: 50%;
-            left: 50%;
-            transform: translate(-50%, -50%);
-            width: 90%;
-            max-width: 500px;
-            background-color: rgba(26, 26, 26, 0.95);
-            border-radius: 16px;
-            padding: 25px;
-            z-index: 200;
-            display: none;
-            backdrop-filter: blur(20px);
-            border: 1px solid rgba(255, 255, 255, 0.1);
-            box-shadow: 0 20px 60px rgba(0, 0, 0, 0.5);
-        }
-        
-        .private-notes-container.active {
-            display: block;
-            animation: fadeIn 0.3s ease;
-        }
-        
-        .private-notes-header {
-            margin-bottom: 20px;
-            text-align: center;
-        }
-        
-        .private-notes-header h3 {
-            color: white;
-            font-size: 20px;
-            margin-bottom: 8px;
-        }
-        
-        .private-notes-header p {
-            color: rgba(255, 255, 255, 0.7);
-            font-size: 14px;
-        }
-        
-        .private-notes-textarea {
-            width: 100%;
-            min-height: 150px;
-            padding: 15px;
-            border-radius: 12px;
-            border: 1px solid rgba(255, 255, 255, 0.2);
-            background-color: rgba(255, 255, 255, 0.05);
-            color: white;
-            font-size: 14px;
-            resize: vertical;
-            margin-bottom: 20px;
-            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
-        }
-        
-        .private-notes-textarea:focus {
-            outline: none;
-            border-color: var(--primary-color);
-            background-color: rgba(255, 255, 255, 0.08);
-        }
-        
-        .private-notes-buttons {
-            display: flex;
-            gap: 10px;
-            justify-content: flex-end;
-        }
-        
-        /* Call Summary Snapshot */
-        .call-summary-modal {
-            display: none;
-            position: fixed;
-            top: 0;
-            left: 0;
-            width: 100%;
-            height: 100%;
-            background-color: rgba(0, 0, 0, 0.9);
-            z-index: 1002;
-            align-items: center;
-            justify-content: center;
-        }
-        
-        .call-summary-modal.active {
-            display: flex;
-        }
-        
-        .call-summary-container {
-            width: 90%;
-            max-width: 500px;
-            background-color: var(--bg-color);
-            border-radius: 20px;
-            overflow: hidden;
-            box-shadow: var(--shadow-lg);
-        }
-        
-        .call-summary-header {
-            padding: 25px;
-            background: var(--call-gradient);
-            color: white;
-            text-align: center;
-        }
-        
-        .call-summary-header h3 {
-            font-size: 22px;
             margin-bottom: 5px;
         }
         
-        .call-summary-content {
-            padding: 25px;
-        }
-        
-        .summary-item {
-            display: flex;
-            justify-content: space-between;
-            padding: 12px 0;
-            border-bottom: 1px solid var(--border-color);
-        }
-        
-        .summary-item:last-child {
-            border-bottom: none;
-        }
-        
-        .summary-label {
-            color: var(--text-secondary);
-            font-weight: 500;
-        }
-        
-        .summary-value {
-            font-weight: 500;
-        }
-        
-        /* Relationship Memory */
-        .relationship-memory {
-            font-size: 11px;
-            color: var(--text-secondary);
-            margin-top: 3px;
-            display: flex;
-            align-items: center;
-            gap: 5px;
-        }
-        
-        .relationship-memory i {
-            font-size: 10px;
-        }
-        
-        .frequent-contact {
-            color: var(--success-color);
-        }
-        
-        .recent-contact {
-            color: var(--primary-color);
-        }
-        
-        .occasional-contact {
-            color: var(--warning-color);
-        }
-        
-        /* Focus Mode */
-        .focus-mode-btn {
-            position: absolute;
-            top: 20px;
-            right: 90px;
-            z-index: 101;
-        }
-        
-        .focus-mode .video-overlay,
-        .focus-mode .reactions-container,
-        .focus-mode .call-side-panel:not(.collapsed) {
-            opacity: 0;
-            pointer-events: none;
-            transition: opacity 0.3s;
-        }
-        
-        .focus-mode .call-header {
-            background: rgba(0, 0, 0, 0.9);
-        }
-        
-        .focus-mode .call-controls {
-            opacity: 0.3;
-            transition: opacity 0.3s;
-        }
-        
-        .focus-mode .call-controls:hover {
-            opacity: 1;
-        }
-        
-        /* Mood Selection Modal */
-        .mood-selection-modal {
-            display: none;
-            position: fixed;
-            top: 0;
-            left: 0;
-            width: 100%;
-            height: 100%;
-            background-color: rgba(0, 0, 0, 0.8);
-            z-index: 1003;
-            align-items: center;
-            justify-content: center;
-        }
-        
-        .mood-selection-modal.active {
-            display: flex;
-        }
-        
-        .mood-selection-container {
-            width: 90%;
-            max-width: 400px;
-            background-color: var(--bg-color);
-            border-radius: 20px;
-            overflow: hidden;
-            padding: 30px;
-            text-align: center;
-            box-shadow: var(--shadow-lg);
-        }
-        
-        .mood-selection-title {
-            font-size: 20px;
-            margin-bottom: 20px;
-            font-weight: 600;
-        }
-        
-        .mood-options {
-            display: grid;
-            grid-template-columns: repeat(3, 1fr);
-            gap: 15px;
-            margin-bottom: 25px;
-        }
-        
-        .mood-option {
-            padding: 20px;
-            border: 2px solid var(--border-color);
-            border-radius: 12px;
-            cursor: pointer;
-            transition: all 0.2s;
-            display: flex;
-            flex-direction: column;
-            align-items: center;
-            gap: 10px;
-        }
-        
-        .mood-option:hover {
-            transform: translateY(-2px);
-            border-color: var(--primary-color);
-        }
-        
-        .mood-option.selected {
-            border-color: var(--primary-color);
-            background-color: rgba(0, 132, 255, 0.1);
-        }
-        
-        .mood-emoji {
-            font-size: 32px;
-        }
-        
-        .mood-name {
-            font-size: 14px;
-            font-weight: 500;
-        }
-        
-        /* Intention Selection Modal */
-        .intention-selection-modal {
-            display: none;
-            position: fixed;
-            top: 0;
-            left: 0;
-            width: 100%;
-            height: 100%;
-            background-color: rgba(0, 0, 0, 0.8);
-            z-index: 1004;
-            align-items: center;
-            justify-content: center;
-        }
-        
-        .intention-selection-modal.active {
-            display: flex;
-        }
-        
-        .intention-selection-container {
-            width: 90%;
-            max-width: 450px;
-            background-color: var(--bg-color);
-            border-radius: 20px;
-            overflow: hidden;
-            padding: 30px;
-            text-align: center;
-            box-shadow: var(--shadow-lg);
-        }
-        
-        .intention-selection-title {
-            font-size: 20px;
-            margin-bottom: 20px;
-            font-weight: 600;
-        }
-        
-        .intention-options {
-            display: flex;
-            flex-direction: column;
-            gap: 10px;
-            margin-bottom: 25px;
-        }
-        
-        .intention-option {
-            padding: 15px;
-            border: 2px solid var(--border-color);
-            border-radius: 12px;
-            cursor: pointer;
-            transition: all 0.2s;
-            text-align: left;
-            display: flex;
-            align-items: center;
-            gap: 12px;
-        }
-        
-        .intention-option:hover {
-            transform: translateY(-2px);
-            border-color: var(--primary-color);
-        }
-        
-        .intention-option.selected {
-            border-color: var(--primary-color);
-            background-color: rgba(0, 132, 255, 0.1);
-        }
-        
-        .intention-icon {
-            font-size: 20px;
-            color: var(--primary-color);
-        }
-        
-        .intention-text {
-            flex: 1;
-        }
-        
-        .intention-title {
-            font-weight: 500;
-            margin-bottom: 3px;
-        }
-        
-        .intention-desc {
+        .offline-contacts-message .subtext {
             font-size: 12px;
-            color: var(--text-secondary);
+            color: #999;
+        }
+        
+        /* Contact selection */
+        .contact-item.selected {
+            background-color: #f0f0ff;
+            border-color: #4F46E5;
+        }
+        
+        .contact-checkbox {
+            margin-right: 10px;
+        }
+        
+        /* Call link container */
+        #callLinkInput {
+            width: 100%;
+            padding: 10px;
+            border: 1px solid #ddd;
+            border-radius: 8px;
+            background-color: #f5f5f5;
+            font-size: 14px;
+        }
+        
+        /* Pulsing animation for incoming call */
+        .pulsing {
+            animation: pulse 1.5s infinite;
+        }
+        
+        @keyframes pulse {
+            0% {
+                transform: scale(1);
+                box-shadow: 0 0 0 0 rgba(79, 70, 229, 0.7);
+            }
+            70% {
+                transform: scale(1.05);
+                box-shadow: 0 0 0 10px rgba(79, 70, 229, 0);
+            }
+            100% {
+                transform: scale(1);
+                box-shadow: 0 0 0 0 rgba(79, 70, 229, 0);
+            }
         }
     </style>
 </head>
@@ -2975,344 +1116,6 @@
     </div>
 
     <script>
-        // ==================== BACKEND MIGRATION CHANGES START ====================
-        // All Firebase references have been removed and replaced with API calls
-        // ========================================================================
-        
-        // Import settingsManager.js
-        const SettingsManager = {
-            // Default settings for calls - UPDATED with new features
-            defaultSettings: {
-                liveReactions: true,
-                inCallChat: true,
-                sharedWhiteboard: true,
-                polls: true,
-                sharedNotes: true,
-                emotionalContext: true,
-                callIntention: true,
-                focusMode: false,
-                theme: 'light',
-                notifications: true,
-                notificationSound: true,
-                whoCanFriendMe: 'everyone',
-                moodVisibility: 'friends',
-                callPermissions: 'everyone'
-            },
-            
-            // Initialize settings
-            initializeSettings: function() {
-                // Load settings from localStorage or use defaults
-                const savedSettings = localStorage.getItem('userSettings');
-                if (savedSettings) {
-                    try {
-                        window.userSettings = JSON.parse(savedSettings);
-                    } catch (e) {
-                        window.userSettings = { ...this.defaultSettings };
-                        this.saveSettings();
-                    }
-                } else {
-                    window.userSettings = { ...this.defaultSettings };
-                    this.saveSettings();
-                }
-                
-                // Apply settings to UI
-                this.applySettings();
-                
-                // Set up storage event listener for cross-tab synchronization
-                window.addEventListener('storage', (event) => {
-                    if (event.key === 'userSettings') {
-                        try {
-                            window.userSettings = JSON.parse(event.newValue);
-                            this.applySettings();
-                            this.showNotification('Settings updated', 'success');
-                        } catch (e) {
-                            console.error('Error parsing settings from storage event:', e);
-                        }
-                    }
-                });
-                
-                console.log('SettingsManager initialized:', window.userSettings);
-            },
-            
-            // Save a single setting
-            saveSetting: function(settingName, value) {
-                if (!window.userSettings) {
-                    window.userSettings = { ...this.defaultSettings };
-                }
-                
-                window.userSettings[settingName] = value;
-                this.saveSettings();
-                this.applySetting(settingName, value);
-                
-                // Broadcast to other tabs
-                this.broadcastSettingChange(settingName, value);
-                
-                console.log('Setting saved:', settingName, value);
-            },
-            
-            // Save all settings to localStorage
-            saveSettings: function() {
-                try {
-                    localStorage.setItem('userSettings', JSON.stringify(window.userSettings));
-                } catch (e) {
-                    console.error('Error saving settings:', e);
-                }
-            },
-            
-            // Apply a specific setting
-            applySetting: function(settingName, value) {
-                const element = document.querySelector(`[data-setting="${settingName}"]`);
-                if (element) {
-                    if (element.type === 'checkbox') {
-                        element.checked = value;
-                    } else if (element.type === 'select-one') {
-                        element.value = value;
-                    } else {
-                        element.value = value;
-                    }
-                }
-                
-                // Apply visual changes based on setting
-                this.applyVisualSetting(settingName, value);
-            },
-            
-            // Apply all settings to UI
-            applySettings: function() {
-                if (!window.userSettings) return;
-                
-                // Apply to all settings elements
-                document.querySelectorAll('[data-setting]').forEach(element => {
-                    const settingName = element.dataset.setting;
-                    if (window.userSettings.hasOwnProperty(settingName)) {
-                        const value = window.userSettings[settingName];
-                        if (element.type === 'checkbox') {
-                            element.checked = value;
-                        } else if (element.type === 'select-one') {
-                            element.value = value;
-                        } else {
-                            element.value = value;
-                        }
-                    }
-                });
-                
-                // Apply all visual settings
-                Object.keys(window.userSettings).forEach(settingName => {
-                    this.applyVisualSetting(settingName, window.userSettings[settingName]);
-                });
-            },
-            
-            // Apply visual changes for specific settings
-            applyVisualSetting: function(settingName, value) {
-                switch(settingName) {
-                    case 'theme':
-                        this.applyTheme(value);
-                        break;
-                    case 'liveReactions':
-                        this.applyReactionsSetting(value);
-                        break;
-                    case 'inCallChat':
-                        this.applyChatSetting(value);
-                        break;
-                    case 'sharedWhiteboard':
-                        this.applyWhiteboardSetting(value);
-                        break;
-                    case 'polls':
-                        this.applyPollsSetting(value);
-                        break;
-                    case 'sharedNotes':
-                        this.applyNotesSetting(value);
-                        break;
-                    case 'emotionalContext':
-                        this.applyEmotionalContextSetting(value);
-                        break;
-                    case 'callIntention':
-                        this.applyCallIntentionSetting(value);
-                        break;
-                    case 'focusMode':
-                        this.applyFocusModeSetting(value);
-                        break;
-                }
-            },
-            
-            // Apply theme
-            applyTheme: function(theme) {
-                document.body.classList.remove('light-theme', 'dark-theme');
-                document.body.classList.add(`${theme}-theme`);
-                
-                if (theme === 'dark') {
-                    document.documentElement.style.setProperty('--bg-color', '#1a1a1a');
-                    document.documentElement.style.setProperty('--text-primary', '#ffffff');
-                    document.documentElement.style.setProperty('--text-secondary', '#b0b3b8');
-                    document.documentElement.style.setProperty('--secondary-color', '#2d2d2d');
-                    document.documentElement.style.setProperty('--border-color', '#3e4042');
-                } else {
-                    document.documentElement.style.setProperty('--bg-color', '#ffffff');
-                    document.documentElement.style.setProperty('--text-primary', '#050505');
-                    document.documentElement.style.setProperty('--text-secondary', '#65676b');
-                    document.documentElement.style.setProperty('--secondary-color', '#f0f2f5');
-                    document.documentElement.style.setProperty('--border-color', '#dddfe2');
-                }
-            },
-            
-            // Apply reactions setting
-            applyReactionsSetting: function(enabled) {
-                const reactionsContainer = document.getElementById('reactionsContainer');
-                if (reactionsContainer) {
-                    reactionsContainer.style.display = enabled ? 'flex' : 'none';
-                }
-            },
-            
-            // Apply chat setting
-            applyChatSetting: function(enabled) {
-                const chatTab = document.querySelector('.panel-tab[data-panel="chat"]');
-                if (chatTab) {
-                    chatTab.style.display = enabled ? 'flex' : 'none';
-                }
-                
-                // If chat is disabled and currently active, switch to participants
-                if (!enabled) {
-                    const activeTab = document.querySelector('.panel-tab.active');
-                    if (activeTab && activeTab.dataset.panel === 'chat') {
-                        const participantsTab = document.querySelector('.panel-tab[data-panel="participants"]');
-                        if (participantsTab) {
-                            participantsTab.click();
-                        }
-                    }
-                }
-            },
-            
-            // Apply whiteboard setting
-            applyWhiteboardSetting: function(enabled) {
-                const whiteboardTab = document.querySelector('.panel-tab[data-panel="whiteboard"]');
-                if (whiteboardTab) {
-                    whiteboardTab.style.display = enabled ? 'flex' : 'none';
-                }
-            },
-            
-            // Apply polls setting
-            applyPollsSetting: function(enabled) {
-                const pollsTab = document.querySelector('.panel-tab[data-panel="polls"]');
-                if (pollsTab) {
-                    pollsTab.style.display = enabled ? 'flex' : 'none';
-                }
-            },
-            
-            // Apply notes setting
-            applyNotesSetting: function(enabled) {
-                const notesTab = document.querySelector('.panel-tab[data-panel="notes"]');
-                if (notesTab) {
-                    notesTab.style.display = enabled ? 'flex' : 'none';
-                }
-            },
-            
-            // NEW: Apply emotional context setting
-            applyEmotionalContextSetting: function(enabled) {
-                const moodBtn = document.getElementById('moodBtn');
-                const emotionalContextDisplay = document.getElementById('emotionalContextDisplay');
-                
-                if (moodBtn) {
-                    moodBtn.style.display = enabled ? 'flex' : 'none';
-                }
-                
-                if (emotionalContextDisplay) {
-                    emotionalContextDisplay.style.display = enabled ? 'block' : 'none';
-                }
-                
-                // Update incoming call display
-                const incomingContext = document.getElementById('incomingCallEmotionalContext');
-                if (incomingContext) {
-                    incomingContext.style.display = enabled ? 'block' : 'none';
-                }
-            },
-            
-            // NEW: Apply call intention setting
-            applyCallIntentionSetting: function(enabled) {
-                const intentionBtn = document.getElementById('intentionBtn');
-                const callIntentionDisplay = document.getElementById('callIntentionDisplay');
-                
-                if (intentionBtn) {
-                    intentionBtn.style.display = enabled ? 'flex' : 'none';
-                }
-                
-                if (callIntentionDisplay) {
-                    callIntentionDisplay.style.display = enabled ? 'inline-flex' : 'none';
-                }
-            },
-            
-            // NEW: Apply focus mode setting
-            applyFocusModeSetting: function(enabled) {
-                const focusModeBtn = document.getElementById('focusModeBtn');
-                if (focusModeBtn) {
-                    focusModeBtn.style.display = enabled ? 'flex' : 'none';
-                }
-                
-                if (enabled && window.userSettings && window.userSettings.focusMode) {
-                    document.body.classList.add('focus-mode');
-                } else {
-                    document.body.classList.remove('focus-mode');
-                }
-            },
-            
-            // Reset settings to defaults
-            resetToDefaults: function() {
-                window.userSettings = { ...this.defaultSettings };
-                this.saveSettings();
-                this.applySettings();
-                this.showNotification('Settings reset to defaults', 'success');
-                console.log('Settings reset to defaults');
-            },
-            
-            // Reset call-specific settings to defaults
-            resetCallSettings: function() {
-                const callSettings = ['liveReactions', 'inCallChat', 'sharedWhiteboard', 'polls', 'sharedNotes', 'emotionalContext', 'callIntention', 'focusMode'];
-                callSettings.forEach(setting => {
-                    window.userSettings[setting] = this.defaultSettings[setting];
-                });
-                this.saveSettings();
-                this.applySettings();
-                this.showNotification('Call settings reset to defaults', 'success');
-                console.log('Call settings reset to defaults');
-            },
-            
-            // Broadcast setting change to other tabs
-            broadcastSettingChange: function(settingName, value) {
-                try {
-                    // Update localStorage to trigger storage event
-                    const currentSettings = JSON.parse(localStorage.getItem('userSettings') || '{}');
-                    currentSettings[settingName] = value;
-                    localStorage.setItem('userSettings', JSON.stringify(currentSettings));
-                    
-                    // Also dispatch a custom event for same-tab listening
-                    window.dispatchEvent(new CustomEvent('settingChanged', {
-                        detail: { settingName, value }
-                    }));
-                } catch (e) {
-                    console.error('Error broadcasting setting change:', e);
-                }
-            },
-            
-            // Show notification
-            showNotification: function(message, type = 'success') {
-                // Use existing notification system
-                const notificationText = document.getElementById('notificationText');
-                const notification = document.getElementById('notification');
-                
-                if (notificationText && notification) {
-                    notificationText.textContent = message;
-                    notification.className = 'notification';
-                    notification.classList.add(type);
-                    notification.classList.add('active');
-                    
-                    setTimeout(() => {
-                        notification.classList.remove('active');
-                    }, 3000);
-                } else {
-                    // Fallback if notification element doesn't exist
-                    console.log(`${type}: ${message}`);
-                }
-            }
-        };
-
         // Global variables
         let currentUser = null;
         let peer = null;
@@ -3347,10 +1150,6 @@
         let lastNavigationContext = null;
         let relationshipMemory = new Map();
         let callNotes = new Map();
-        
-        // Connection state management
-        let isOnline = navigator.onLine;
-        let connectionCheckInterval = null;
         
         // Premium subscription management
         let userSubscription = {
@@ -3403,7 +1202,7 @@
         const missedCallsList = document.getElementById('missedCallsList');
         const groupCallsList = document.getElementById('groupCallsList');
         
-        // Enhanced Cache Management
+        // Cache Management
         const CACHE_VERSION = 'calls_v3';
         const CACHE_KEYS = {
             CALLS_HISTORY: 'calls_history',
@@ -3417,121 +1216,74 @@
         // Call initiation from friends.html
         let pendingCallRequest = null;
         
+        // API Ready flag
+        let apiReady = false;
+        
         // Initialize the application
         document.addEventListener('DOMContentLoaded', function() {
             initializeApp();
         });
         
-        async function initializeApp() {
-            // ==================== BACKEND MIGRATION: Initialize with API system ====================
-            try {
-                // Check if running in iframe for token handling
-                if (window !== window.top) {
-                    console.log('Running in iframe, checking parent for authentication...');
-                    
-                    // Listen for authentication messages from parent
-                    window.addEventListener('message', async function(event) {
-                        if (event.data && event.data.type === 'authToken') {
-                            console.log('Received auth token from parent');
-                            // Store token for API calls
-                            localStorage.setItem('authToken', event.data.token);
-                            
-                            // Initialize user with token
-                            await initializeWithToken(event.data.token);
-                        }
-                    });
-                    
-                    // Request token from parent
-                    window.parent.postMessage({ type: 'requestAuthToken' }, '*');
-                    
-                } else {
-                    // Not in iframe, check localStorage for token
-                    const token = localStorage.getItem('authToken');
-                    if (token) {
-                        await initializeWithToken(token);
-                    } else {
-                        // Try to get current user from api.js
-                        await initializeWithAPI();
-                    }
+        function initializeApp() {
+            console.log('Initializing calls app...');
+            
+            // Listen for API_READY message from parent
+            window.addEventListener('message', async function(event) {
+                if (event.data && event.data.type === 'API_READY') {
+                    console.log('API_READY message received');
+                    await initializeWithAPI();
                 }
-                
-            } catch (error) {
-                console.error('Error initializing app:', error);
-                // Fallback to offline mode
-                initializeOffline();
-            }
+            });
+            
+            // Request API_READY status from parent
+            window.parent.postMessage({ type: 'REQUEST_API_READY' }, '*');
+            
+            // Also try to initialize with existing api
+            setTimeout(async () => {
+                if (window.parent && window.parent.api) {
+                    console.log('Found parent API, initializing...');
+                    await initializeWithAPI();
+                }
+            }, 1000);
         }
         
-        // ==================== BACKEND MIGRATION: Token-based initialization ====================
-        async function initializeWithToken(token) {
-            try {
-                // Use api.js to get current user with token
-                if (window.api && typeof window.api.getCurrentUser === 'function') {
-                    const user = await window.api.getCurrentUser();
-                    if (user) {
-                        currentUser = user;
-                        console.log('User authenticated via token:', currentUser.uid);
-                        
-                        // Cache user for offline use
-                        localStorage.setItem('currentUser', JSON.stringify({
-                            uid: user.uid,
-                            displayName: user.displayName,
-                            email: user.email,
-                            photoURL: user.photoURL
-                        }));
-                        
-                        await completeInitialization();
-                    }
-                }
-            } catch (error) {
-                console.error('Error initializing with token:', error);
-                initializeOffline();
-            }
-        }
-        
-        // ==================== BACKEND MIGRATION: API-based initialization ====================
         async function initializeWithAPI() {
             try {
-                // First try to get user from localStorage for immediate UI
-                const cachedUser = localStorage.getItem('currentUser');
-                if (cachedUser) {
-                    currentUser = JSON.parse(cachedUser);
-                    console.log('Using cached user:', currentUser.uid);
+                console.log('Initializing with API...');
+                
+                // Wait for api to be ready
+                if (!window.parent.api) {
+                    console.log('Parent API not available yet');
+                    return;
                 }
                 
-                // Then try auth from api.js
-                if (window.api && typeof window.api.getCurrentUser === 'function') {
-                    const user = await window.api.getCurrentUser();
-                    if (user) {
-                        currentUser = user;
-                        console.log('User detected via api:', currentUser.uid);
-                        
-                        // Cache user for offline use
-                        localStorage.setItem('currentUser', JSON.stringify({
-                            uid: user.uid,
-                            displayName: user.displayName,
-                            email: user.email,
-                            photoURL: user.photoURL
-                        }));
-                    }
+                // Get current user from parent api
+                const user = await window.parent.api.getCurrentUser();
+                if (!user) {
+                    console.log('No user logged in, cannot initialize calls');
+                    return;
                 }
                 
-                if (currentUser) {
-                    await completeInitialization();
-                } else {
-                    console.log('No user detected, redirecting to login');
-                    // Check if we're in the app.js context
-                    if (typeof window !== 'undefined' && window.location.pathname.includes('calls.html')) {
-                        window.location.href = 'index.html';
-                    }
-                }
+                currentUser = user;
+                console.log('User authenticated:', currentUser.uid);
+                
+                // Cache user for offline use
+                localStorage.setItem('currentUser', JSON.stringify({
+                    uid: user.uid,
+                    displayName: user.displayName,
+                    email: user.email,
+                    photoURL: user.photoURL
+                }));
+                
+                // Complete initialization
+                await completeInitialization();
+                
             } catch (error) {
-                console.error('Error checking user via api:', error);
+                console.error('Error initializing with API:', error);
                 initializeOffline();
             }
         }
         
-        // ==================== BACKEND MIGRATION: Offline initialization ====================
         function initializeOffline() {
             console.log('Initializing in offline mode');
             
@@ -3549,25 +1301,16 @@
             // Initialize settings
             SettingsManager.initializeSettings();
             
-            // Initialize connection detection
-            initializeConnectionDetection();
-            
             // Setup event listeners
             setupEventListeners();
             
             // Initialize UI with offline data
             initializeOfflineUI();
-            
-            // Update UI for connectivity state
-            updateUIForConnectivity();
         }
         
         async function completeInitialization() {
             // Initialize settings manager
             SettingsManager.initializeSettings();
-            
-            // Initialize connection detection
-            initializeConnectionDetection();
             
             // Initialize user data
             await initializeUser();
@@ -3592,23 +1335,22 @@
             // Check for URL parameters for call initiation
             checkUrlForCallInitiation();
             
-            // Update UI for connectivity state
-            updateUIForConnectivity();
-            
             // Check for call continuity data
             checkCallContinuity();
             
-            // Start background sync if online
-            if (isOnline) {
-                startBackgroundSync();
-            }
-            
             // Initialize PeerJS if online
-            if (isOnline) {
+            if (isOnline()) {
                 setTimeout(() => {
                     initializePeerJS();
                     setupPresenceTracking();
                 }, 1000);
+            }
+            
+            // Start loading calls from backend
+            if (isOnline()) {
+                setTimeout(() => {
+                    loadCallsFromBackend();
+                }, 2000);
             }
             
             console.log('App initialization complete');
@@ -3624,9 +1366,6 @@
             // Fix mobile layout
             fixMobileLayout();
             
-            // Update UI for offline state
-            updateUIForConnectivity();
-            
             // Show call container in view-only mode
             callContainer.classList.add('active');
             document.getElementById('callParticipants').textContent = 'Connection Required';
@@ -3636,60 +1375,241 @@
             console.log('Offline UI initialized');
         }
         
-        function checkUrlForCallInitiation() {
-            // Check if URL has call parameters
-            const urlParams = new URLSearchParams(window.location.search);
-            const callUserId = urlParams.get('call');
-            const callType = urlParams.get('type') || 'video';
+        function isOnline() {
+            // Use parent's network detection if available
+            if (window.parent.AppNetwork) {
+                return window.parent.AppNetwork.isOnline;
+            }
+            return navigator.onLine;
+        }
+        
+        // ==================== BACKEND COMMUNICATION ====================
+        
+        async function loadCallsFromBackend() {
+            if (!isOnline() || !currentUser || !window.parent.api) {
+                console.log('Cannot load calls from backend: offline, no user, or no API');
+                return;
+            }
             
-            if (callUserId) {
-                console.log('Call initiated via URL:', callUserId, callType);
+            console.log('Loading calls from backend...');
+            updateSyncIndicator('syncing');
+            
+            try {
+                // Use parent api to get calls
+                const calls = await window.parent.api.getCalls();
                 
-                // Store the pending call request
-                pendingCallRequest = {
-                    userId: callUserId,
-                    type: callType,
-                    timestamp: Date.now()
-                };
-                
-                // If we're already initialized with user, start the call immediately
-                if (currentUser) {
-                    setTimeout(() => {
-                        if (isOnline) {
-                            startCallFromFriend(callUserId, callType);
-                        } else {
-                            showNotification('Call features require connection', 'info');
+                if (calls && Array.isArray(calls)) {
+                    console.log(`Loaded ${calls.length} calls from backend`);
+                    
+                    // Convert to our format
+                    const callsToSave = calls.map(call => ({
+                        ...call,
+                        id: call._id || call.id,
+                        timestamp: call.timestamp || call.createdAt,
+                        isLocal: false
+                    }));
+                    
+                    // Save to cache
+                    const savedCount = await saveCallsToCache(callsToSave);
+                    
+                    // Update UI with merged data
+                    if (savedCount > 0) {
+                        // Reload from cache to show merged data
+                        await loadCallsFromCache();
+                        
+                        // Show subtle notification
+                        if (calls.length > 0) {
+                            showNotification(`Synced ${calls.length} calls`, 'success');
                         }
-                    }, 2000);
+                    }
+                    
+                    updateSyncIndicator('ready', savedCount);
+                } else {
+                    console.log('No calls returned from backend');
+                    updateSyncIndicator('ready', 0);
                 }
                 
-                // Clean URL
-                window.history.replaceState({}, document.title, window.location.pathname);
+            } catch (error) {
+                console.error('Error loading calls from backend:', error);
+                updateSyncIndicator('error');
+                
+                // Don't show error notification for backend failures
+                // Just log it and continue with cached data
             }
         }
         
-        function startCallFromFriend(userId, type = 'video') {
-            console.log('Starting call from friend request:', userId, type);
-            
-            if (!isOnline) {
-                showNotification('Call features require connection', 'info');
-                return;
+        async function loadContactsFromBackend() {
+            if (!isOnline() || !currentUser || !window.parent.api) {
+                console.log('Cannot load contacts: offline, no user, or no API');
+                return [];
             }
             
-            if (!currentUser) {
-                showNotification('Please login to make calls', 'info');
-                return;
+            try {
+                // Use parent api to get contacts
+                const contacts = await window.parent.api.getContacts();
+                return contacts || [];
+                
+            } catch (error) {
+                console.error('Error loading contacts from backend:', error);
+                return [];
             }
-            
-            // Hide sidebar and show call container immediately
-            document.querySelector('.sidebar').style.display = 'none';
-            callContainer.classList.add('active');
-            
-            // Start the call
-            startCall(userId, type);
         }
         
-        // ==================== BACKEND MIGRATION: Enhanced Cache Management ====================
+        async function sendCallInvitation(toUserId, callType, callId) {
+            if (!isOnline() || !currentUser || !window.parent.api) {
+                console.log('Cannot send call invitation: offline, no user, or no API');
+                return null;
+            }
+            
+            try {
+                const result = await window.parent.api.sendCallInvitation(
+                    toUserId,
+                    callType,
+                    callId,
+                    currentMood,
+                    currentIntention
+                );
+                return result;
+                
+            } catch (error) {
+                console.error('Error sending call invitation:', error);
+                return null;
+            }
+        }
+        
+        async function updateUserPresence(online) {
+            if (!window.parent.api) return;
+            
+            try {
+                await window.parent.api.updatePresence(online);
+            } catch (error) {
+                console.error('Error updating user presence:', error);
+            }
+        }
+        
+        async function checkUserOnlineStatus(userId) {
+            if (!isOnline() || !window.parent.api) {
+                return { online: false, lastOnline: 999, peerId: null };
+            }
+            
+            try {
+                return await window.parent.api.checkUserOnlineStatus(userId);
+            } catch (error) {
+                console.error('Error checking user status:', error);
+                return { online: false, lastOnline: 999, peerId: null };
+            }
+        }
+        
+        async function savePrivateNotesToBackend(callId, targetId, notes) {
+            if (!isOnline() || !currentUser || !window.parent.api) {
+                return false;
+            }
+            
+            try {
+                await window.parent.api.saveCallNotes(callId, targetId, notes);
+                return true;
+            } catch (error) {
+                console.error('Error saving notes to backend:', error);
+                return false;
+            }
+        }
+        
+        async function saveRelationshipMemoryToBackend(userId, memory) {
+            if (!isOnline() || !currentUser || !window.parent.api) {
+                return false;
+            }
+            
+            try {
+                await window.parent.api.saveRelationshipMemory(userId, memory);
+                return true;
+            } catch (error) {
+                console.error('Error saving relationship memory:', error);
+                return false;
+            }
+        }
+        
+        async function loadRelationshipMemoryFromBackend() {
+            if (!isOnline() || !currentUser || !window.parent.api) {
+                return null;
+            }
+            
+            try {
+                return await window.parent.api.getRelationshipMemory();
+            } catch (error) {
+                console.error('Error loading relationship memory:', error);
+                return null;
+            }
+        }
+        
+        async function processPremiumPayment(phoneNumber, amount) {
+            if (!isOnline() || !currentUser || !window.parent.api) {
+                throw new Error('Payment requires connection and API');
+            }
+            
+            try {
+                showNotification('Processing payment...', 'success');
+                
+                const paymentResult = await window.parent.api.processPayment(
+                    phoneNumber,
+                    amount,
+                    'premium_upgrade'
+                );
+                
+                if (paymentResult.success) {
+                    // Update user subscription
+                    userSubscription.isPremium = true;
+                    userSubscription.subscriptionType = 'premium_monthly';
+                    userSubscription.maxGroupParticipants = 50;
+                    userSubscription.paymentHistory.push({
+                        transactionId: paymentResult.transactionId,
+                        amount: amount,
+                        phoneNumber: phoneNumber,
+                        date: new Date().toISOString(),
+                        status: 'completed'
+                    });
+                    
+                    // Save to localStorage
+                    localStorage.setItem(`subscription_${currentUser.uid}`, JSON.stringify(userSubscription));
+                    
+                    // Update UI
+                    updateSubscriptionUI();
+                    
+                    return paymentResult;
+                } else {
+                    throw new Error(paymentResult.message || 'Payment failed');
+                }
+                
+            } catch (error) {
+                console.error('Payment error:', error);
+                throw new Error('Payment failed: ' + error.message);
+            }
+        }
+        
+        async function getUserInfo(userId) {
+            if (!isOnline() || !window.parent.api) {
+                // Try to get from cache
+                const cachedUser = localStorage.getItem(`userInfo_${userId}`);
+                if (cachedUser) {
+                    return JSON.parse(cachedUser);
+                }
+                return null;
+            }
+            
+            try {
+                const userInfo = await window.parent.api.getUserInfo(userId);
+                if (userInfo) {
+                    // Cache it
+                    localStorage.setItem(`userInfo_${userId}`, JSON.stringify(userInfo));
+                }
+                return userInfo;
+            } catch (error) {
+                console.error('Error getting user info:', error);
+                return null;
+            }
+        }
+        
+        // ==================== CACHE MANAGEMENT ====================
+        
         async function loadCallsFromCache() {
             console.log('Loading calls from cache...');
             
@@ -3773,7 +1693,7 @@
                             <div class="offline-state">
                                 <i class="fas fa-phone"></i>
                                 <p>No recent calls</p>
-                                <p class="subtext>Make your first call to see history here</p>
+                                <p class="subtext">Make your first call to see history here</p>
                             </div>
                         `;
                 }
@@ -3791,20 +1711,14 @@
             });
             
             // Process each call
-            const promises = [];
             callsArray.forEach(callData => {
-                promises.push(displayCallItemFromData(callData, container));
-            });
-            
-            Promise.all(promises).catch(error => {
-                console.error('Error displaying cached calls:', error);
+                displayCallItemFromData(callData, container);
             });
             
             // Ensure at least 5 items are visible without scrolling
             setTimeout(() => {
                 const callItems = container.querySelectorAll('.call-item');
                 if (callItems.length > 0) {
-                    // Calculate height needed for 5 items
                     const itemHeight = callItems[0].offsetHeight || 80;
                     const minHeight = itemHeight * Math.min(5, callItems.length);
                     container.style.minHeight = minHeight + 'px';
@@ -3814,7 +1728,7 @@
         
         async function saveCallsToCache(callsArray) {
             try {
-                if (!currentUser) return;
+                if (!currentUser) return 0;
                 
                 const cacheKey = `${CACHE_KEYS.CALLS_HISTORY}_${currentUser.uid}`;
                 
@@ -3911,62 +1825,6 @@
             }
         }
         
-        async function startBackgroundSync() {
-            if (!isOnline || !currentUser) {
-                console.log('Cannot start background sync: offline or no user');
-                return;
-            }
-            
-            console.log('Starting background sync...');
-            updateSyncIndicator('syncing');
-            
-            try {
-                // ==================== BACKEND MIGRATION: Use API instead of Firebase ====================
-                if (window.api && typeof window.api.get === 'function') {
-                    const response = await window.api.get('/api/calls/history', {
-                        params: {
-                            userId: currentUser.uid,
-                            limit: 50,
-                            orderBy: 'timestamp',
-                            order: 'desc'
-                        }
-                    });
-                    
-                    if (response && response.data) {
-                        const callsToSave = response.data.map(call => ({
-                            ...call,
-                            id: call._id || call.id,
-                            timestamp: call.timestamp || call.createdAt,
-                            isLocal: false
-                        }));
-                        
-                        // Save to cache
-                        const savedCount = await saveCallsToCache(callsToSave);
-                        
-                        // Update UI with merged data
-                        if (savedCount > 0) {
-                            // Reload from cache to show merged data
-                            await loadCallsFromCache();
-                            
-                            // Show subtle notification
-                            if (response.data.length > 0) {
-                                showNotification(`Synced ${response.data.length} calls`, 'success');
-                            }
-                        }
-                        
-                        updateSyncIndicator('online', savedCount);
-                    }
-                }
-                
-            } catch (error) {
-                console.error('Background sync error:', error);
-                updateSyncIndicator('ready', 0);
-                
-                // Don't show error notification for background sync failures
-                // Just log it and continue with cached data
-            }
-        }
-        
         // ==================== NEW UNIQUE FEATURE: Call Continuity ====================
         function checkCallContinuity() {
             const continuityData = localStorage.getItem('callContinuityData');
@@ -3998,7 +1856,7 @@
                             offlineCallPlaceholder.style.display = 'none';
                             
                             // Attempt to reconnect if online
-                            if (isOnline && callContinuityData.targetId) {
+                            if (isOnline() && callContinuityData.targetId) {
                                 setTimeout(() => {
                                     startCall(callContinuityData.targetId, callContinuityData.type || 'video');
                                 }, 1000);
@@ -4089,14 +1947,14 @@
                         moodText.textContent = 'Tired';
                         break;
                     case 'excited':
-                        moodDisplay.classList.add('mood-happy'); // Use happy style for excited
+                        moodDisplay.classList.add('mood-happy');
                         moodText.textContent = 'Excited';
                         break;
                 }
             }
             
             // Broadcast mood to other participants if in a call
-            if (currentCall && isOnline) {
+            if (currentCall && isOnline()) {
                 broadcastDataMessage({
                     type: 'mood',
                     mood: mood,
@@ -4171,7 +2029,7 @@
             }
             
             // Broadcast intention to other participants if in a call
-            if (currentCall && isOnline) {
+            if (currentCall && isOnline()) {
                 broadcastDataMessage({
                     type: 'intention',
                     intention: intention,
@@ -4216,19 +2074,9 @@
                 });
             }
             
-            // ==================== BACKEND MIGRATION: Save to backend if online ====================
-            if (isOnline && window.api && typeof window.api.post === 'function') {
-                try {
-                    await window.api.post('/api/calls/notes', {
-                        userId: currentUser.uid,
-                        targetId: currentCall.targetId,
-                        notes: notes,
-                        callId: currentCall.callId,
-                        timestamp: new Date().toISOString()
-                    });
-                } catch (error) {
-                    console.error('Error saving notes to backend:', error);
-                }
+            // Save to backend if online
+            if (isOnline() && currentCall.targetId) {
+                await savePrivateNotesToBackend(currentCall.callId, currentCall.targetId, notes);
             }
             
             showNotification('Private notes saved', 'success');
@@ -4333,12 +2181,12 @@
                     console.log('Loaded relationship memory from cache:', relationshipMemory.size, 'contacts');
                 }
                 
-                // ==================== BACKEND MIGRATION: Load from backend if online ====================
-                if (isOnline && window.api && typeof window.api.get === 'function') {
+                // Load from backend if online
+                if (isOnline()) {
                     try {
-                        const response = await window.api.get(`/api/users/${currentUser.uid}/relationship-memory`);
-                        if (response && response.data) {
-                            relationshipMemory = new Map(Object.entries(response.data));
+                        const backendMemory = await loadRelationshipMemoryFromBackend();
+                        if (backendMemory) {
+                            relationshipMemory = new Map(Object.entries(backendMemory));
                             
                             // Save to cache
                             localStorage.setItem(cacheKey, JSON.stringify(Object.fromEntries(relationshipMemory)));
@@ -4401,18 +2249,9 @@
             const cacheKey = `${CACHE_KEYS.RELATIONSHIP_MEMORY}_${currentUser.uid}`;
             localStorage.setItem(cacheKey, JSON.stringify(Object.fromEntries(relationshipMemory)));
             
-            // ==================== BACKEND MIGRATION: Save to backend if online ====================
-            if (isOnline && window.api && typeof window.api.post === 'function') {
-                try {
-                    window.api.post(`/api/users/${currentUser.uid}/relationship-memory`, {
-                        targetId: userId,
-                        memory: userMemory
-                    }).catch(error => {
-                        console.error('Error saving relationship memory to backend:', error);
-                    });
-                } catch (error) {
-                    console.error('Error saving relationship memory:', error);
-                }
+            // Save to backend if online
+            if (isOnline()) {
+                saveRelationshipMemoryToBackend(userId, userMemory);
             }
         }
         
@@ -4492,6 +2331,59 @@
             }
         }
         
+        function checkUrlForCallInitiation() {
+            // Check if URL has call parameters
+            const urlParams = new URLSearchParams(window.location.search);
+            const callUserId = urlParams.get('call');
+            const callType = urlParams.get('type') || 'video';
+            
+            if (callUserId) {
+                console.log('Call initiated via URL:', callUserId, callType);
+                
+                // Store the pending call request
+                pendingCallRequest = {
+                    userId: callUserId,
+                    type: callType,
+                    timestamp: Date.now()
+                };
+                
+                // If we're already initialized with user, start the call immediately
+                if (currentUser) {
+                    setTimeout(() => {
+                        if (isOnline()) {
+                            startCallFromFriend(callUserId, callType);
+                        } else {
+                            showNotification('Call features require connection', 'info');
+                        }
+                    }, 2000);
+                }
+                
+                // Clean URL
+                window.history.replaceState({}, document.title, window.location.pathname);
+            }
+        }
+        
+        function startCallFromFriend(userId, type = 'video') {
+            console.log('Starting call from friend request:', userId, type);
+            
+            if (!isOnline()) {
+                showNotification('Call features require connection', 'info');
+                return;
+            }
+            
+            if (!currentUser) {
+                showNotification('Please login to make calls', 'info');
+                return;
+            }
+            
+            // Hide sidebar and show call container immediately
+            document.querySelector('.sidebar').style.display = 'none';
+            callContainer.classList.add('active');
+            
+            // Start the call
+            startCall(userId, type);
+        }
+        
         function fixMobileLayout() {
             if (window.innerWidth <= 768) {
                 // Ensure sections display properly on mobile
@@ -4519,346 +2411,6 @@
             }
         }
         
-        function initializeConnectionDetection() {
-            // Check initial online status
-            updateConnectionStatus();
-            
-            // Listen for online/offline events
-            window.addEventListener('online', handleOnline);
-            window.addEventListener('offline', handleOffline);
-            
-            // Start periodic connectivity check
-            connectionCheckInterval = setInterval(checkConnectivity, 30000);
-            
-            // Initial UI update
-            updateUIForConnectivity();
-        }
-        
-        function updateConnectionStatus() {
-            isOnline = navigator.onLine;
-            console.log('Network status:', isOnline ? 'Online' : 'Offline');
-        }
-        
-        function handleOnline() {
-            console.log('App is now online');
-            isOnline = true;
-            updateUIForConnectivity();
-            
-            // Update sync indicator
-            updateSyncIndicator('syncing');
-            
-            // Start background sync
-            setTimeout(() => {
-                startBackgroundSync();
-            }, 1000);
-            
-            // Try to reinitialize PeerJS when network is restored
-            if (!peer && currentUser) {
-                setTimeout(() => {
-                    initializePeerJS();
-                }, 2000);
-            }
-            
-            // Show notification
-            showNotification('Connected. Syncing call history...', 'success');
-            
-            // Update user presence
-            if (currentUser) {
-                updateUserPresence(true);
-            }
-            
-            // Remove offline UI state
-            document.body.classList.remove('offline-ui');
-            
-            // Hide offline placeholder if showing
-            if (offlineCallPlaceholder.style.display !== 'none') {
-                offlineCallPlaceholder.style.display = 'none';
-            }
-            
-            // Update subscription info
-            if (currentUser) {
-                loadUserSubscription();
-            }
-            
-            // Process any pending call request
-            if (pendingCallRequest) {
-                setTimeout(() => {
-                    startCallFromFriend(pendingCallRequest.userId, pendingCallRequest.type);
-                    pendingCallRequest = null;
-                }, 1000);
-            }
-            
-            // ==================== BACKEND MIGRATION: Sync data with backend ====================
-            syncOfflineData();
-        }
-        
-        function handleOffline() {
-            console.log('App is now offline');
-            isOnline = false;
-            updateUIForConnectivity();
-            
-            // Update sync indicator
-            updateSyncIndicator('offline');
-            
-            // Show notification
-            showNotification('Connection lost. Using local data.', 'warning');
-
-            // End any active calls gracefully
-            if (currentCall) {
-                // Save call continuity data before ending
-                saveCallContinuity();
-                endCall();
-            }
-            
-            // Update user presence
-            if (currentUser) {
-                updateUserPresence(false);
-            }
-            
-            // Add offline UI state for visual indication
-            document.body.classList.add('offline-ui');
-            
-            // Show offline placeholder in video grid if call container is active
-            if (callContainer.classList.contains('active')) {
-                offlineCallPlaceholder.style.display = 'flex';
-            }
-        }
-        
-        // ==================== BACKEND MIGRATION: Sync offline data when back online ====================
-        async function syncOfflineData() {
-            if (!isOnline || !currentUser) return;
-            
-            try {
-                // Sync call notes
-                const notesToSync = [];
-                for (let i = 0; i < localStorage.length; i++) {
-                    const key = localStorage.key(i);
-                    if (key.startsWith('call_note_')) {
-                        const note = localStorage.getItem(key);
-                        const parts = key.split('_');
-                        const targetId = parts[2];
-                        const timestamp = parts[3];
-                        
-                        notesToSync.push({
-                            targetId: targetId,
-                            notes: note,
-                            timestamp: timestamp
-                        });
-                    }
-                }
-                
-                if (notesToSync.length > 0 && window.api && typeof window.api.post === 'function') {
-                    await window.api.post('/api/calls/sync-notes', {
-                        userId: currentUser.uid,
-                        notes: notesToSync
-                    });
-                    console.log(`Synced ${notesToSync.length} call notes`);
-                }
-                
-                // Sync relationship memory
-                const cacheKey = `${CACHE_KEYS.RELATIONSHIP_MEMORY}_${currentUser.uid}`;
-                const cachedMemory = localStorage.getItem(cacheKey);
-                if (cachedMemory && window.api && typeof window.api.post === 'function') {
-                    await window.api.post(`/api/users/${currentUser.uid}/sync-relationship-memory`, {
-                        memory: JSON.parse(cachedMemory)
-                    });
-                    console.log('Synced relationship memory');
-                }
-                
-            } catch (error) {
-                console.error('Error syncing offline data:', error);
-            }
-        }
-        
-        async function updateUserPresence(online) {
-            try {
-                // ==================== BACKEND MIGRATION: Use API instead of Firebase ====================
-                if (window.api && typeof window.api.post === 'function' && currentUser) {
-                    await window.api.post('/api/users/presence', {
-                        userId: currentUser.uid,
-                        online: online,
-                        lastOnline: new Date().toISOString()
-                    });
-                }
-            } catch (error) {
-                console.error('Error updating user presence:', error);
-            }
-        }
-        
-        function checkConnectivity() {
-            // Simple connectivity check
-            if (navigator.onLine !== isOnline) {
-                if (navigator.onLine) {
-                    handleOnline();
-                } else {
-                    handleOffline();
-                }
-            }
-        }
-        
-        function updateUIForConnectivity() {
-            if (!isOnline) {
-                // Show offline banner
-                offlineBanner.classList.add('active');
-                offlineBanner.innerHTML = `
-                    <i class="fas fa-wifi-slash"></i>
-                    <span>Connection lost. Using local data.</span>
-                `;
-                
-                // Disable call buttons when offline
-                const callButtons = [
-                    'newCallBtn',
-                    'voiceCallBtn',
-                    'videoCallBtn',
-                    'groupCallBtn',
-                    'startCallBtn',
-                    'createVoiceLinkBtn',
-                    'createVideoLinkBtn',
-                    'addParticipantsBtn'
-                ];
-                
-                callButtons.forEach(buttonId => {
-                    const button = document.getElementById(buttonId);
-                    if (button) {
-                        button.disabled = true;
-                        button.title = 'Call features require connection';
-                    }
-                });
-                
-                // Disable call-back buttons in call history
-                const callbackButtons = document.querySelectorAll('.call-action-btn');
-                callbackButtons.forEach(button => {
-                    button.disabled = true;
-                    button.title = 'Call features require connection';
-                });
-                
-                // Disable contact checkboxes in new call modal
-                const contactCheckboxes = document.querySelectorAll('.contact-checkbox');
-                contactCheckboxes.forEach(checkbox => {
-                    checkbox.disabled = true;
-                });
-                
-                // Close new call modal if open
-                if (newCallModal.classList.contains('active')) {
-                    newCallModal.classList.remove('active');
-                    showNotification('Call features require connection', 'warning');
-                }
-                
-                // Close incoming call modal if open
-                if (incomingCallModal.classList.contains('active')) {
-                    incomingCallModal.classList.remove('active');
-                    showNotification('Cannot accept calls while offline', 'warning');
-                }
-                
-                // Close payment modal if open
-                if (paymentModal.classList.contains('active')) {
-                    paymentModal.classList.remove('active');
-                    showNotification('Payment requires connection', 'warning');
-                }
-                
-                // Disable panel tabs that require internet
-                const panelTabs = document.querySelectorAll('.panel-tab');
-                panelTabs.forEach(tab => {
-                    if (tab.dataset.panel !== 'participants') {
-                        tab.disabled = true;
-                        tab.title = 'Feature unavailable offline';
-                    }
-                });
-                
-                // Update call status to show offline state
-                if (callContainer.classList.contains('active')) {
-                    document.getElementById('callParticipants').textContent = 'Connection Required';
-                    document.getElementById('callStatus').textContent = 'Call features require connection';
-                    offlineCallPlaceholder.style.display = 'flex';
-                }
-                
-                // Update contacts list to show offline message
-                updateContactsForOffline();
-                
-            } else {
-                // Hide offline banner
-                offlineBanner.classList.remove('active');
-                
-                // Enable call buttons when online
-                const callButtons = [
-                    'newCallBtn',
-                    'voiceCallBtn',
-                    'videoCallBtn',
-                    'groupCallBtn',
-                    'startCallBtn',
-                    'createVoiceLinkBtn',
-                    'createVideoLinkBtn',
-                    'addParticipantsBtn'
-                ];
-                
-                callButtons.forEach(buttonId => {
-                    const button = document.getElementById(buttonId);
-                    if (button) {
-                        button.disabled = false;
-                        button.title = button.getAttribute('data-original-title') || '';
-                    }
-                });
-                
-                // Enable call-back buttons in call history
-                const callbackButtons = document.querySelectorAll('.call-action-btn');
-                callbackButtons.forEach(button => {
-                    button.disabled = false;
-                    button.title = 'Call Back';
-                });
-                
-                // Enable contact checkboxes
-                const contactCheckboxes = document.querySelectorAll('.contact-checkbox');
-                contactCheckboxes.forEach(checkbox => {
-                    checkbox.disabled = false;
-                });
-                
-                // Enable panel tabs
-                const panelTabs = document.querySelectorAll('.panel-tab');
-                panelTabs.forEach(tab => {
-                    tab.disabled = false;
-                    tab.title = '';
-                });
-                
-                // Remove offline UI state
-                document.body.classList.remove('offline-ui');
-                
-                // Hide offline placeholder
-                offlineCallPlaceholder.style.display = 'none';
-                
-                // Update call status if in call
-                if (callContainer.classList.contains('active') && !currentCall) {
-                    document.getElementById('callParticipants').textContent = 'Ready to call';
-                    document.getElementById('callStatus').textContent = 'Start a new call or wait for incoming calls';
-                }
-            }
-        }
-        
-        function updateContactsForOffline() {
-            const contactsList = document.getElementById('contactsList');
-            const groupContactsList = document.getElementById('groupContactsList');
-            
-            if (contactsList && contactsList.innerHTML.includes('Loading contacts')) {
-                contactsList.innerHTML = `
-                    <div class="offline-contacts-message">
-                        <i class="fas fa-wifi-slash"></i>
-                        <p>Contacts unavailable while offline</p>
-                        <p class="subtext">Call features require connection</p>
-                    </div>
-                `;
-            }
-            
-            if (groupContactsList && groupContactsList.innerHTML.includes('Loading contacts')) {
-                groupContactsList.innerHTML = `
-                    <div class="offline-contacts-message">
-                        <i class="fas fa-wifi-slash"></i>
-                        <p>Contacts unavailable while offline</p>
-                        <p class="subtext">Call features require connection</p>
-                    </div>
-                `;
-            }
-        }
-        
-        // Enhanced localStorage management for calls
         function getLocalStorageKey(key) {
             return currentUser ? `calls_${currentUser.uid}_${key}` : `calls_${key}`;
         }
@@ -4952,16 +2504,15 @@
                 () => localStorage.getItem(`contact_${userId}_name`),
                 () => localStorage.getItem(`friend_${userId}_name`),
                 async () => {
-                    if (isOnline && window.api && typeof window.api.get === 'function') {
+                    if (isOnline()) {
                         try {
-                            const response = await window.api.get(`/api/users/${userId}`);
-                            if (response && response.data) {
-                                const userData = response.data;
-                                localStorage.setItem(`userInfo_${userId}_displayName`, userData.displayName || 'Contact');
-                                if (userData.photoURL) {
-                                    localStorage.setItem(`userInfo_${userId}_photoURL`, userData.photoURL);
+                            const userInfo = await getUserInfo(userId);
+                            if (userInfo) {
+                                localStorage.setItem(`userInfo_${userId}_displayName`, userInfo.displayName || 'Contact');
+                                if (userInfo.photoURL) {
+                                    localStorage.setItem(`userInfo_${userId}_photoURL`, userInfo.photoURL);
                                 }
-                                return userData.displayName || 'Contact';
+                                return userInfo.displayName || 'Contact';
                             }
                         } catch (error) {
                             console.error('Error fetching user from backend:', error);
@@ -5090,7 +2641,7 @@
                     </div>
                     ${relationshipInsight ? `<div class="relationship-memory ${insights.frequency === 'Frequent contact' ? 'frequent-contact' : insights.frequency === 'Regular contact' ? 'recent-contact' : 'occasional-contact'}"><i class="fas fa-history"></i> ${relationshipInsight}</div>` : ''}
                 </div>
-                <button class="call-action-btn" title="Call Back" ${!isOnline ? 'disabled' : ''}>
+                <button class="call-action-btn" title="Call Back" ${!isOnline() ? 'disabled' : ''}>
                     <i class="fas fa-phone"></i>
                 </button>
             `;
@@ -5098,7 +2649,7 @@
             const callbackBtn = callItem.querySelector('.call-action-btn');
             callbackBtn.addEventListener('click', (e) => {
                 e.stopPropagation();
-                if (!isOnline) {
+                if (!isOnline()) {
                     showNotification('Call features require connection', 'info');
                     return;
                 }
@@ -5123,7 +2674,7 @@
                 console.log('Message received from friends.html:', event.data);
                 
                 // Check if offline before processing call requests
-                if (!isOnline) {
+                if (!isOnline()) {
                     showNotification('Call features require connection', 'info');
                     return;
                 }
@@ -5157,8 +2708,8 @@
                     // Ensure calls page is properly loaded
                     if (window.location.pathname.includes('calls.html')) {
                         // Already on calls page, refresh call history
-                        if (isOnline) {
-                            startBackgroundSync();
+                        if (isOnline()) {
+                            loadCallsFromBackend();
                         } else {
                             loadCallsFromCache();
                         }
@@ -5242,11 +2793,10 @@
                 }
                 
                 // Only try backend if online
-                if (isOnline && window.api && typeof window.api.get === 'function') {
+                if (isOnline() && window.parent.api) {
                     try {
-                        const response = await window.api.get(`/api/users/${currentUser.uid}/subscription`);
-                        if (response && response.data) {
-                            const subscriptionData = response.data;
+                        const subscriptionData = await window.parent.api.getSubscription();
+                        if (subscriptionData) {
                             userSubscription = {
                                 isPremium: subscriptionData.isPremium || false,
                                 trialDaysLeft: subscriptionData.trialDaysLeft || 30,
@@ -5357,60 +2907,6 @@
             };
         }
         
-        async function processPremiumPayment(phoneNumber, amount) {
-            if (!isOnline) {
-                throw new Error('Payment requires connection');
-            }
-            
-            try {
-                showNotification('Processing payment...', 'success');
-                
-                // ==================== BACKEND MIGRATION: Use API for payment ====================
-                if (window.api && typeof window.api.post === 'function') {
-                    const response = await window.api.post('/api/payments/mpesa', {
-                        phoneNumber: phoneNumber,
-                        amount: amount,
-                        userId: currentUser.uid,
-                        service: 'premium_upgrade'
-                    });
-                    
-                    if (response && response.success) {
-                        // Update user subscription
-                        userSubscription.isPremium = true;
-                        userSubscription.subscriptionType = 'premium_monthly';
-                        userSubscription.maxGroupParticipants = 50; // Premium allows up to 50 participants
-                        userSubscription.paymentHistory.push({
-                            transactionId: response.transactionId,
-                            amount: amount,
-                            phoneNumber: phoneNumber,
-                            date: new Date().toISOString(),
-                            status: 'completed'
-                        });
-                        
-                        // Save to localStorage
-                        localStorage.setItem(`subscription_${currentUser.uid}`, JSON.stringify(userSubscription));
-                        
-                        // Update UI
-                        updateSubscriptionUI();
-                        
-                        return {
-                            success: true,
-                            transactionId: response.transactionId,
-                            message: 'Payment successful! Your account has been upgraded to Premium.'
-                        };
-                    } else {
-                        throw new Error(response?.message || 'Payment failed');
-                    }
-                } else {
-                    throw new Error('Payment API not available');
-                }
-                
-            } catch (error) {
-                console.error('Payment error:', error);
-                throw new Error('Payment failed: ' + error.message);
-            }
-        }
-        
         function showPaymentModal(requiredLimit) {
             paymentModal.classList.add('active');
             
@@ -5424,7 +2920,7 @@
         }
         
         function setupPresenceTracking() {
-            if (!currentUser || !isOnline) return;
+            if (!currentUser || !isOnline()) return;
             
             // Update presence periodically
             setInterval(() => {
@@ -5433,7 +2929,7 @@
         }
         
         function initializePeerJS() {
-            if (!currentUser || !isOnline) {
+            if (!currentUser || !isOnline()) {
                 console.error('Cannot initialize PeerJS: No user logged in or offline');
                 return;
             }
@@ -5513,12 +3009,9 @@
                         let callerData = null;
                         
                         // Try to get caller info from backend IMMEDIATELY
-                        if (isOnline && window.api && typeof window.api.get === 'function') {
+                        if (isOnline()) {
                             try {
-                                const response = await window.api.get(`/api/users/${callerId}`);
-                                if (response && response.data) {
-                                    callerData = response.data;
-                                }
+                                callerData = await getUserInfo(callerId);
                             } catch (error) {
                                 console.error('Error fetching caller info:', error);
                             }
@@ -5622,7 +3115,7 @@
                 peer.on('disconnected', () => {
                     console.log('PeerJS disconnected, attempting reconnect...');
                     setTimeout(() => {
-                        if (peer && peer.disconnected && isOnline) {
+                        if (peer && peer.disconnected && isOnline()) {
                             peer.reconnect();
                         }
                     }, 1000);
@@ -5638,41 +3131,11 @@
             }
         }
         
-        async function checkUserOnlineStatus(userId) {
-            // If we're offline, all users appear offline
-            if (!isOnline) {
-                return { online: false, lastOnline: 999, peerId: null };
-            }
-            
-            try {
-                // ==================== BACKEND MIGRATION: Use API instead of Firebase ====================
-                if (window.api && typeof window.api.get === 'function') {
-                    const response = await window.api.get(`/api/users/${userId}/presence`);
-                    if (response && response.data) {
-                        const presenceData = response.data;
-                        const lastOnline = presenceData.lastOnline ? new Date(presenceData.lastOnline) : null;
-                        const now = new Date();
-                        const minutesAgo = lastOnline ? Math.floor((now - lastOnline) / 60000) : 999;
-                        
-                        return {
-                            online: presenceData.online === true,
-                            lastOnline: minutesAgo,
-                            peerId: presenceData.peerId
-                        };
-                    }
-                }
-                return { online: false, lastOnline: 999, peerId: null };
-            } catch (error) {
-                console.error('Error checking user status:', error);
-                return { online: false, lastOnline: 999, peerId: null };
-            }
-        }
-        
         async function startCall(userId, type = 'video') {
             console.log('Starting call to:', userId, 'type:', type);
             
             // Check if offline before starting call
-            if (!isOnline) {
+            if (!isOnline()) {
                 showNotification('Call features require connection', 'info');
                 
                 // Save as missed call attempt to cache
@@ -5726,19 +3189,11 @@
                 });
                 
                 let callId = null;
-                // ==================== BACKEND MIGRATION: Use API for call invitation ====================
-                if (window.api && typeof window.api.post === 'function') {
-                    const response = await window.api.post('/api/calls/invite', {
-                        from: currentUser.uid,
-                        to: userId,
-                        type: type,
-                        callId: `call_${Date.now()}`,
-                        mood: currentMood,
-                        intention: currentIntention
-                    });
-                    
-                    if (response && response.data) {
-                        callId = response.data.callId;
+                // Send call invitation via API
+                if (isOnline()) {
+                    const invitationResult = await sendCallInvitation(userId, type, `call_${Date.now()}`);
+                    if (invitationResult) {
+                        callId = invitationResult.callId;
                     }
                 }
                 
@@ -5848,11 +3303,6 @@
                         document.getElementById('callParticipants').textContent = `Connected with ${contactName}`;
                     });
                     document.getElementById('callStatus').textContent = 'In call';
-                    
-                    // ==================== BACKEND MIGRATION: Use API to delete invitation ====================
-                    if (callId && window.api && typeof window.api.delete === 'function') {
-                        window.api.delete(`/api/calls/invite/${callId}`);
-                    }
                     
                     // Save connected call to cache
                     saveCallToLocalStorage({
@@ -6101,7 +3551,7 @@
             console.log('Starting group call with:', userIds);
             
             // Check if offline
-            if (!isOnline) {
+            if (!isOnline()) {
                 showNotification('Call features require connection', 'info');
                 
                 // Save group call attempt to cache
@@ -6458,12 +3908,20 @@
             currentIntention = 'checkin';
             
             // Show private notes modal if this was a meaningful call
-            if (currentCall && currentCall.duration > 60) { // More than 1 minute
-                setTimeout(() => {
-                    showPrivateNotesModal();
-                }, 500);
+            if (currentCall && callStartTime) {
+                const callDuration = Math.floor((new Date() - callStartTime) / 1000);
+                if (callDuration > 60) { // More than 1 minute
+                    setTimeout(() => {
+                        showPrivateNotesModal();
+                    }, 500);
+                } else {
+                    // Show call summary for short calls
+                    setTimeout(() => {
+                        showCallSummary();
+                    }, 500);
+                }
             } else {
-                // Show call summary
+                // Show call summary for other cases
                 setTimeout(() => {
                     showCallSummary();
                 }, 500);
@@ -6486,7 +3944,7 @@
         async function acceptCall(type = 'voice') {
             try {
                 // Check if offline before accepting call
-                if (!isOnline) {
+                if (!isOnline()) {
                     showNotification('Call features require connection', 'info');
                     declineCall();
                     return;
@@ -6574,11 +4032,6 @@
                 callStartTime = new Date();
                 startCallTimer();
                 
-                // ==================== BACKEND MIGRATION: Use API to delete invitation ====================
-                if (incomingCall.metadata && incomingCall.metadata.callId && window.api && typeof window.api.delete === 'function') {
-                    await window.api.delete(`/api/calls/invite/${incomingCall.metadata.callId}`);
-                }
-                
                 // Save accepted call to cache
                 await saveCallToLocalStorage({
                     participants: [currentUser.uid, window.callerData.id],
@@ -6632,22 +4085,6 @@
             
             incomingCallModal.classList.remove('active');
             showNotification('Call declined', 'success');
-        }
-        
-        async function loadAllCalls() {
-            try {
-                // Show cached data immediately
-                await loadCallsFromCache();
-                
-                // Then try to sync from server in background
-                if (isOnline) {
-                    startBackgroundSync();
-                }
-                
-            } catch (error) {
-                console.error('Error loading all calls:', error);
-                showNotification('Failed to load call history', 'error');
-            }
         }
         
         function formatTimeAgo(date) {
@@ -6913,7 +4350,7 @@
             const groupContactsList = document.getElementById('groupContactsList');
             
             // If offline, show offline message
-            if (!isOnline) {
+            if (!isOnline()) {
                 const offlineMessage = '<div class="offline-contacts-message"><i class="fas fa-wifi-slash"></i><p>Contacts unavailable while offline</p><p class="subtext">Call features require connection</p></div>';
                 contactsList.innerHTML = offlineMessage;
                 groupContactsList.innerHTML = offlineMessage;
@@ -6924,30 +4361,19 @@
             groupContactsList.innerHTML = '<div style="text-align: center; padding: 20px; color: var(--text-secondary);">Loading contacts...</div>';
             
             try {
-                if (!window.api || typeof window.api.get !== 'function') {
-                    throw new Error('API not available');
-                }
-                
-                // ==================== BACKEND MIGRATION: Use API for contacts ====================
-                const response = await window.api.get('/api/users/contacts', {
-                    params: {
-                        userId: currentUser.uid,
-                        limit: 50,
-                        excludeSelf: true
-                    }
-                });
+                const contacts = await loadContactsFromBackend();
                 
                 contactsList.innerHTML = '';
                 groupContactsList.innerHTML = '';
                 
-                if (!response || !response.data || response.data.length === 0) {
+                if (!contacts || contacts.length === 0) {
                     const emptyMessage = '<div class="offline-contacts-message"><i class="fas fa-users"></i><p>No contacts found</p></div>';
                     contactsList.innerHTML = emptyMessage;
                     groupContactsList.innerHTML = emptyMessage;
                     return;
                 }
                 
-                for (const userData of response.data) {
+                for (const userData of contacts) {
                     const status = await checkUserOnlineStatus(userData.uid);
                     userData.online = status.online;
                     userData.lastOnline = status.lastOnline;
@@ -6993,7 +4419,7 @@
             }
             
             contactItem.innerHTML = `
-                <input type="checkbox" class="contact-checkbox" id="contact_${userData.uid}" ${!isOnline ? 'disabled' : ''}>
+                <input type="checkbox" class="contact-checkbox" id="contact_${userData.uid}" ${!isOnline() ? 'disabled' : ''}>
                 <div class="call-avatar" ${userData.photoURL ? `style="background-image: url('${userData.photoURL}')"` : ''}>
                     ${userData.photoURL ? '' : `<span>${initials}</span>`}
                     <div class="call-status-icon ${userData.online ? 'incoming' : 'missed'}" style="width: 12px; height: 12px;">
@@ -7015,7 +4441,7 @@
             
             const checkbox = contactItem.querySelector('.contact-checkbox');
             checkbox.addEventListener('change', function() {
-                if (!isOnline) {
+                if (!isOnline()) {
                     showNotification('Cannot select contacts while offline', 'info');
                     this.checked = false;
                     return;
@@ -7224,7 +4650,7 @@
             
             // New call button
             document.getElementById('newCallBtn').addEventListener('click', () => {
-                if (!isOnline) {
+                if (!isOnline()) {
                     showNotification('Call features require connection', 'info');
                     return;
                 }
@@ -7236,7 +4662,7 @@
             
             // Quick action buttons
             document.getElementById('voiceCallBtn').addEventListener('click', () => {
-                if (!isOnline) {
+                if (!isOnline()) {
                     showNotification('Call features require connection', 'info');
                     return;
                 }
@@ -7246,7 +4672,7 @@
             });
             
             document.getElementById('videoCallBtn').addEventListener('click', () => {
-                if (!isOnline) {
+                if (!isOnline()) {
                     showNotification('Call features require connection', 'info');
                     return;
                 }
@@ -7256,7 +4682,7 @@
             });
             
             document.getElementById('groupCallBtn').addEventListener('click', () => {
-                if (!isOnline) {
+                if (!isOnline()) {
                     showNotification('Call features require connection', 'info');
                     return;
                 }
@@ -7299,7 +4725,7 @@
             
             // Start call button
             document.getElementById('startCallBtn').addEventListener('click', async () => {
-                if (!isOnline) {
+                if (!isOnline()) {
                     showNotification('Call features require connection', 'info');
                     return;
                 }
@@ -7372,7 +4798,7 @@
                         showNotification(isMuted ? 'Microphone muted' : 'Microphone unmuted', 'success');
                         
                         // Only broadcast if online and in a call
-                        if (isOnline && currentCall) {
+                        if (isOnline() && currentCall) {
                             broadcastDataMessage({
                                 type: 'call-control',
                                 action: 'mute-status',
@@ -7381,7 +4807,7 @@
                             });
                         }
                     }
-                } else if (!isOnline) {
+                } else if (!isOnline()) {
                     // When offline, just toggle the UI state
                     isMuted = !isMuted;
                     this.classList.toggle('active', isMuted);
@@ -7414,7 +4840,7 @@
                         showNotification(isVideoOff ? 'Video turned off' : 'Video turned on', 'success');
                         
                         // Only broadcast if online and in a call
-                        if (isOnline && currentCall) {
+                        if (isOnline() && currentCall) {
                             broadcastDataMessage({
                                 type: 'call-control',
                                 action: 'video-status',
@@ -7423,7 +4849,7 @@
                             });
                         }
                     }
-                } else if (!isOnline) {
+                } else if (!isOnline()) {
                     // When offline, just toggle the UI state
                     isVideoOff = !isVideoOff;
                     this.classList.toggle('active', isVideoOff);
@@ -7453,7 +4879,7 @@
             });
             
             document.getElementById('screenShareBtn').addEventListener('click', function() {
-                if (!isOnline) {
+                if (!isOnline()) {
                     showNotification('Screen sharing requires connection', 'info');
                     return;
                 }
@@ -7485,7 +4911,7 @@
                     const panelName = this.dataset.panel;
                     
                     // Check if offline and trying to access features that require internet
-                    if (!isOnline && panelName !== 'participants') {
+                    if (!isOnline() && panelName !== 'participants') {
                         showNotification('This feature requires connection', 'info');
                         return;
                     }
@@ -7542,7 +4968,7 @@
             
             // Add participants button
             document.getElementById('addParticipantsBtn').addEventListener('click', () => {
-                if (!isOnline) {
+                if (!isOnline()) {
                     showNotification('Cannot add participants while offline', 'info');
                     return;
                 }
@@ -7558,7 +4984,7 @@
                     return;
                 }
                 
-                if (!isOnline) {
+                if (!isOnline()) {
                     showNotification('Chat requires connection', 'info');
                     return;
                 }
@@ -7595,7 +5021,7 @@
                         return;
                     }
                     
-                    if (!isOnline) {
+                    if (!isOnline()) {
                         showNotification('Whiteboard requires connection', 'info');
                         return;
                     }
@@ -7679,14 +5105,14 @@
                     showFloatingReaction(reaction);
                     
                     // Only broadcast if online and in a call
-                    if (isOnline && currentCall) {
+                    if (isOnline() && currentCall) {
                         broadcastDataMessage({
                             type: 'reaction',
                             reaction: reaction,
                             userId: currentUser.uid,
                             timestamp: new Date().toISOString()
                         });
-                    } else if (!isOnline) {
+                    } else if (!isOnline()) {
                         showNotification('Reaction shown locally (offline mode)', 'info');
                     }
                 });
@@ -7721,7 +5147,7 @@
                 
                 // Load missed calls if not already loaded
                 if (missedCallsList.children.length === 0) {
-                    loadAllCalls();
+                    loadCallsFromCache();
                 }
                 
                 // Ensure mobile layout is correct
@@ -7741,7 +5167,7 @@
                 
                 // Load group calls if not already loaded
                 if (groupCallsList.children.length === 0) {
-                    loadAllCalls();
+                    loadCallsFromCache();
                 }
                 
                 // Ensure mobile layout is correct
@@ -7807,18 +5233,13 @@
                     endCall();
                 }
                 
-                if (currentUser && isOnline) {
+                if (currentUser && isOnline()) {
                     updateUserPresence(false);
-                }
-                
-                // Clear connection check interval
-                if (connectionCheckInterval) {
-                    clearInterval(connectionCheckInterval);
                 }
             });
             
             // Initialize call container in view-only mode when offline
-            if (!isOnline) {
+            if (!isOnline()) {
                 // Show call container with placeholder when offline
                 callContainer.classList.add('active');
                 document.getElementById('callParticipants').textContent = 'Connection Required';
@@ -7827,10 +5248,10 @@
             }
             
             // Auto-refresh calls every 5 minutes if online
-            if (isOnline) {
+            if (isOnline()) {
                 setInterval(() => {
-                    if (isOnline) {
-                        startBackgroundSync();
+                    if (isOnline()) {
+                        loadCallsFromBackend();
                     }
                 }, 300000); // 5 minutes
             }
@@ -7889,6 +5310,307 @@
                 });
             });
         }
+        
+        // SettingsManager (unchanged from original, but included for completeness)
+        const SettingsManager = {
+            defaultSettings: {
+                liveReactions: true,
+                inCallChat: true,
+                sharedWhiteboard: true,
+                polls: true,
+                sharedNotes: true,
+                emotionalContext: true,
+                callIntention: true,
+                focusMode: false,
+                theme: 'light',
+                notifications: true,
+                notificationSound: true,
+                whoCanFriendMe: 'everyone',
+                moodVisibility: 'friends',
+                callPermissions: 'everyone'
+            },
+            
+            initializeSettings: function() {
+                const savedSettings = localStorage.getItem('userSettings');
+                if (savedSettings) {
+                    try {
+                        window.userSettings = JSON.parse(savedSettings);
+                    } catch (e) {
+                        window.userSettings = { ...this.defaultSettings };
+                        this.saveSettings();
+                    }
+                } else {
+                    window.userSettings = { ...this.defaultSettings };
+                    this.saveSettings();
+                }
+                
+                this.applySettings();
+                
+                window.addEventListener('storage', (event) => {
+                    if (event.key === 'userSettings') {
+                        try {
+                            window.userSettings = JSON.parse(event.newValue);
+                            this.applySettings();
+                            this.showNotification('Settings updated', 'success');
+                        } catch (e) {
+                            console.error('Error parsing settings from storage event:', e);
+                        }
+                    }
+                });
+                
+                console.log('SettingsManager initialized:', window.userSettings);
+            },
+            
+            saveSetting: function(settingName, value) {
+                if (!window.userSettings) {
+                    window.userSettings = { ...this.defaultSettings };
+                }
+                
+                window.userSettings[settingName] = value;
+                this.saveSettings();
+                this.applySetting(settingName, value);
+                
+                this.broadcastSettingChange(settingName, value);
+                
+                console.log('Setting saved:', settingName, value);
+            },
+            
+            saveSettings: function() {
+                try {
+                    localStorage.setItem('userSettings', JSON.stringify(window.userSettings));
+                } catch (e) {
+                    console.error('Error saving settings:', e);
+                }
+            },
+            
+            applySetting: function(settingName, value) {
+                const element = document.querySelector(`[data-setting="${settingName}"]`);
+                if (element) {
+                    if (element.type === 'checkbox') {
+                        element.checked = value;
+                    } else if (element.type === 'select-one') {
+                        element.value = value;
+                    } else {
+                        element.value = value;
+                    }
+                }
+                
+                this.applyVisualSetting(settingName, value);
+            },
+            
+            applySettings: function() {
+                if (!window.userSettings) return;
+                
+                document.querySelectorAll('[data-setting]').forEach(element => {
+                    const settingName = element.dataset.setting;
+                    if (window.userSettings.hasOwnProperty(settingName)) {
+                        const value = window.userSettings[settingName];
+                        if (element.type === 'checkbox') {
+                            element.checked = value;
+                        } else if (element.type === 'select-one') {
+                            element.value = value;
+                        } else {
+                            element.value = value;
+                        }
+                    }
+                });
+                
+                Object.keys(window.userSettings).forEach(settingName => {
+                    this.applyVisualSetting(settingName, window.userSettings[settingName]);
+                });
+            },
+            
+            applyVisualSetting: function(settingName, value) {
+                switch(settingName) {
+                    case 'theme':
+                        this.applyTheme(value);
+                        break;
+                    case 'liveReactions':
+                        this.applyReactionsSetting(value);
+                        break;
+                    case 'inCallChat':
+                        this.applyChatSetting(value);
+                        break;
+                    case 'sharedWhiteboard':
+                        this.applyWhiteboardSetting(value);
+                        break;
+                    case 'polls':
+                        this.applyPollsSetting(value);
+                        break;
+                    case 'sharedNotes':
+                        this.applyNotesSetting(value);
+                        break;
+                    case 'emotionalContext':
+                        this.applyEmotionalContextSetting(value);
+                        break;
+                    case 'callIntention':
+                        this.applyCallIntentionSetting(value);
+                        break;
+                    case 'focusMode':
+                        this.applyFocusModeSetting(value);
+                        break;
+                }
+            },
+            
+            applyTheme: function(theme) {
+                document.body.classList.remove('light-theme', 'dark-theme');
+                document.body.classList.add(`${theme}-theme`);
+                
+                if (theme === 'dark') {
+                    document.documentElement.style.setProperty('--bg-color', '#1a1a1a');
+                    document.documentElement.style.setProperty('--text-primary', '#ffffff');
+                    document.documentElement.style.setProperty('--text-secondary', '#b0b3b8');
+                    document.documentElement.style.setProperty('--secondary-color', '#2d2d2d');
+                    document.documentElement.style.setProperty('--border-color', '#3e4042');
+                } else {
+                    document.documentElement.style.setProperty('--bg-color', '#ffffff');
+                    document.documentElement.style.setProperty('--text-primary', '#050505');
+                    document.documentElement.style.setProperty('--text-secondary', '#65676b');
+                    document.documentElement.style.setProperty('--secondary-color', '#f0f2f5');
+                    document.documentElement.style.setProperty('--border-color', '#dddfe2');
+                }
+            },
+            
+            applyReactionsSetting: function(enabled) {
+                const reactionsContainer = document.getElementById('reactionsContainer');
+                if (reactionsContainer) {
+                    reactionsContainer.style.display = enabled ? 'flex' : 'none';
+                }
+            },
+            
+            applyChatSetting: function(enabled) {
+                const chatTab = document.querySelector('.panel-tab[data-panel="chat"]');
+                if (chatTab) {
+                    chatTab.style.display = enabled ? 'flex' : 'none';
+                }
+                
+                if (!enabled) {
+                    const activeTab = document.querySelector('.panel-tab.active');
+                    if (activeTab && activeTab.dataset.panel === 'chat') {
+                        const participantsTab = document.querySelector('.panel-tab[data-panel="participants"]');
+                        if (participantsTab) {
+                            participantsTab.click();
+                        }
+                    }
+                }
+            },
+            
+            applyWhiteboardSetting: function(enabled) {
+                const whiteboardTab = document.querySelector('.panel-tab[data-panel="whiteboard"]');
+                if (whiteboardTab) {
+                    whiteboardTab.style.display = enabled ? 'flex' : 'none';
+                }
+            },
+            
+            applyPollsSetting: function(enabled) {
+                const pollsTab = document.querySelector('.panel-tab[data-panel="polls"]');
+                if (pollsTab) {
+                    pollsTab.style.display = enabled ? 'flex' : 'none';
+                }
+            },
+            
+            applyNotesSetting: function(enabled) {
+                const notesTab = document.querySelector('.panel-tab[data-panel="notes"]');
+                if (notesTab) {
+                    notesTab.style.display = enabled ? 'flex' : 'none';
+                }
+            },
+            
+            applyEmotionalContextSetting: function(enabled) {
+                const moodBtn = document.getElementById('moodBtn');
+                const emotionalContextDisplay = document.getElementById('emotionalContextDisplay');
+                
+                if (moodBtn) {
+                    moodBtn.style.display = enabled ? 'flex' : 'none';
+                }
+                
+                if (emotionalContextDisplay) {
+                    emotionalContextDisplay.style.display = enabled ? 'block' : 'none';
+                }
+                
+                const incomingContext = document.getElementById('incomingCallEmotionalContext');
+                if (incomingContext) {
+                    incomingContext.style.display = enabled ? 'block' : 'none';
+                }
+            },
+            
+            applyCallIntentionSetting: function(enabled) {
+                const intentionBtn = document.getElementById('intentionBtn');
+                const callIntentionDisplay = document.getElementById('callIntentionDisplay');
+                
+                if (intentionBtn) {
+                    intentionBtn.style.display = enabled ? 'flex' : 'none';
+                }
+                
+                if (callIntentionDisplay) {
+                    callIntentionDisplay.style.display = enabled ? 'inline-flex' : 'none';
+                }
+            },
+            
+            applyFocusModeSetting: function(enabled) {
+                const focusModeBtn = document.getElementById('focusModeBtn');
+                if (focusModeBtn) {
+                    focusModeBtn.style.display = enabled ? 'flex' : 'none';
+                }
+                
+                if (enabled && window.userSettings && window.userSettings.focusMode) {
+                    document.body.classList.add('focus-mode');
+                } else {
+                    document.body.classList.remove('focus-mode');
+                }
+            },
+            
+            resetToDefaults: function() {
+                window.userSettings = { ...this.defaultSettings };
+                this.saveSettings();
+                this.applySettings();
+                this.showNotification('Settings reset to defaults', 'success');
+                console.log('Settings reset to defaults');
+            },
+            
+            resetCallSettings: function() {
+                const callSettings = ['liveReactions', 'inCallChat', 'sharedWhiteboard', 'polls', 'sharedNotes', 'emotionalContext', 'callIntention', 'focusMode'];
+                callSettings.forEach(setting => {
+                    window.userSettings[setting] = this.defaultSettings[setting];
+                });
+                this.saveSettings();
+                this.applySettings();
+                this.showNotification('Call settings reset to defaults', 'success');
+                console.log('Call settings reset to defaults');
+            },
+            
+            broadcastSettingChange: function(settingName, value) {
+                try {
+                    const currentSettings = JSON.parse(localStorage.getItem('userSettings') || '{}');
+                    currentSettings[settingName] = value;
+                    localStorage.setItem('userSettings', JSON.stringify(currentSettings));
+                    
+                    window.dispatchEvent(new CustomEvent('settingChanged', {
+                        detail: { settingName, value }
+                    }));
+                } catch (e) {
+                    console.error('Error broadcasting setting change:', e);
+                }
+            },
+            
+            showNotification: function(message, type = 'success') {
+                const notificationText = document.getElementById('notificationText');
+                const notification = document.getElementById('notification');
+                
+                if (notificationText && notification) {
+                    notificationText.textContent = message;
+                    notification.className = 'notification';
+                    notification.classList.add(type);
+                    notification.classList.add('active');
+                    
+                    setTimeout(() => {
+                        notification.classList.remove('active');
+                    }, 3000);
+                } else {
+                    console.log(`${type}: ${message}`);
+                }
+            }
+        };
         
         console.log('Video call system initialized successfully');
         showNotification('Call history loaded', 'success');
