@@ -4,6 +4,7 @@
 // UPDATED: Support for new token structure from backend
 // CRITICAL FIX: Dynamic environment detection for backend URLs
 // CRITICAL FIX: Strict API contract - endpoint always first, method always in options
+// CRITICAL FIX: HTTP 500 errors no longer mark backend as offline
 // ============================================================================
 // CRITICAL IMPROVEMENTS APPLIED:
 // 1. SINGLE internal fetch function with comprehensive input validation
@@ -15,6 +16,7 @@
 // 7. Updated to handle new token structure from backend
 // 8. CRITICAL FIX: Dynamic environment detection for backend URLs
 // 9. CRITICAL FIX: Strict API contract - endpoint always string, method always in options
+// 10. CRITICAL FIX: HTTP 500 errors DO NOT mark backend as offline
 // ============================================================================
 
 // ============================================================================
@@ -229,9 +231,10 @@ function _buildSafeUrl(endpoint) {
  * CORE FETCH FUNCTION - STRICT REQUIREMENTS:
  * 1. Treat ANY HTTP status ≥400 as a HARD failure
  * 2. NEVER return success if response.ok === false
- * 3. Do NOT mark backend offline on 401 or 400
- * 4. All API calls MUST use BASE_API_URL derived dynamically from window.location
- * 5. STRICT CONTRACT: endpoint is string, method is in options
+ * 3. Do NOT mark backend offline on ANY HTTP status errors (400, 401, 500, etc.)
+ * 4. Only mark backend offline on actual network connection failures
+ * 5. All API calls MUST use BASE_API_URL derived dynamically from window.location
+ * 6. STRICT CONTRACT: endpoint is string, method is in options
  */
 function _safeFetch(fullUrl, options = {}) {
   // Validate URL
@@ -301,6 +304,9 @@ function _safeFetch(fullUrl, options = {}) {
           } else if (status >= 500) {
             errorMessage = 'Server error. Please try again later.';
             result.isServerError = true;
+            // CRITICAL FIX: HTTP 500 errors DO NOT mark backend offline
+            console.warn(`⚠️ [API] HTTP ${status} error from backend: ${errorMessage}`);
+            console.warn(`⚠️ [API] Backend is reachable but returned an error (not marking as offline)`);
           } else if (status === 401) {
             errorMessage = data.message || 'Invalid credentials';
             result.isAuthError = true;
@@ -319,14 +325,10 @@ function _safeFetch(fullUrl, options = {}) {
           result.message = data.message || 'Success';
         }
         
-        // STRICT: Do NOT mark backend offline on 401 or 400
-        // Only mark backend as unreachable on network errors or 5xx errors
-        if (status >= 500) {
-          window.AppNetwork.updateBackendStatus(false);
-        } else if (status < 500) {
-          // Any response with status < 500 means backend is reachable
-          window.AppNetwork.updateBackendStatus(true);
-        }
+        // CRITICAL FIX: Only mark backend as reachable if we got ANY response
+        // HTTP errors (400, 401, 500, etc.) mean backend IS reachable
+        // Only network errors (no response) mean backend is unreachable
+        window.AppNetwork.updateBackendStatus(true);
         
         return result;
       } catch (jsonError) {
@@ -348,6 +350,9 @@ function _safeFetch(fullUrl, options = {}) {
           result.success = false;
         }
         
+        // CRITICAL FIX: Even with JSON parsing errors, backend IS reachable
+        window.AppNetwork.updateBackendStatus(true);
+        
         return result;
       }
     })
@@ -357,7 +362,9 @@ function _safeFetch(fullUrl, options = {}) {
       const isNetworkError = error.message && (
         error.message.includes('Failed to fetch') ||
         error.message.includes('NetworkError') ||
-        error.message.includes('network request failed')
+        error.message.includes('network request failed') ||
+        error.message.includes('NetworkError when attempting to fetch resource') ||
+        error.message.includes('Load failed')
       );
       
       // Check for AbortError - don't mark as network error
@@ -365,9 +372,13 @@ function _safeFetch(fullUrl, options = {}) {
                           error.message.includes('aborted') ||
                           error.message.includes('The user aborted');
       
-      // Update backend reachability for network errors
+      // CRITICAL FIX: Only update backend reachability for actual network errors
       if (isNetworkError && !isAbortError) {
+        console.warn(`⚠️ [API] Network error detected, marking backend as unreachable: ${error.message}`);
         window.AppNetwork.updateBackendStatus(false);
+      } else {
+        // For non-network errors or abort errors, backend might still be reachable
+        console.warn(`⚠️ [API] Non-network error (${error.name || 'unknown'}), not changing backend status: ${error.message}`);
       }
       
       return {
@@ -376,7 +387,7 @@ function _safeFetch(fullUrl, options = {}) {
         status: 0,
         message: isAbortError 
           ? 'Request aborted' 
-          : (isNetworkError 
+          : (isNetworkError && !isAbortError
             ? 'Network error. Please check your connection.' 
             : 'Request failed: ' + error.message),
         error: error.message,
@@ -480,7 +491,7 @@ const globalApiFunction = function(endpoint, options = {}) {
 
 const apiObject = {
   _singleton: true,
-  _version: '16.1.0', // Updated version for strict API contract
+  _version: '16.2.0', // Updated version for HTTP 500 fix
   _safeInitialized: true,
   _backendReachable: null,
   _sessionChecked: false,
@@ -538,11 +549,9 @@ const apiObject = {
         // STRICT: Do NOT return success if response.ok === false
         console.log(`🔧 [API] Login failed with status ${result.status}: ${result.message}`);
         
-        // STRICT: Do NOT mark backend offline on 401 or 400
-        if (result.status === 401 || result.status === 400) {
-          // These are client errors, backend is still reachable
-          window.AppNetwork.updateBackendStatus(true);
-        }
+        // CRITICAL FIX: HTTP errors (400, 401, 500) mean backend IS reachable
+        // Do NOT mark backend offline on ANY HTTP status errors
+        window.AppNetwork.updateBackendStatus(true);
         
         // Throw error to be caught by frontend - STRICT REQUIREMENT
         throw {
@@ -701,10 +710,8 @@ const apiObject = {
       if (!result.ok) {
         console.log(`🔧 [API] Registration failed with status ${result.status}: ${result.message}`);
         
-        // STRICT: Do NOT mark backend offline on 400 or 409
-        if (result.status === 400 || result.status === 409) {
-          window.AppNetwork.updateBackendStatus(true);
-        }
+        // CRITICAL FIX: HTTP errors (400, 409, 500) mean backend IS reachable
+        window.AppNetwork.updateBackendStatus(true);
         
         // Throw error to be caught by frontend - STRICT REQUIREMENT
         throw {
@@ -847,10 +854,10 @@ const apiObject = {
       if (!result.ok) {
         console.log(`🔧 [API] /auth/me failed with status ${result.status}: ${result.message}`);
         
-        // STRICT: Do NOT mark backend offline on 401
+        // CRITICAL FIX: HTTP errors (401, 500) mean backend IS reachable
+        window.AppNetwork.updateBackendStatus(true);
+        
         if (result.status === 401) {
-          window.AppNetwork.updateBackendStatus(true);
-          
           // Clear invalid auth data
           this._clearAuthData();
           window.currentUser = null;
@@ -971,7 +978,8 @@ const apiObject = {
         
         clearTimeout(timeoutId);
         
-        if (response.ok || response.status < 500) {
+        // CRITICAL FIX: Any response (even HTTP error) means backend is reachable
+        if (response.status < 500) {
           console.log(`✅ [API] Backend reachable (status: ${response.status})`);
           window.AppNetwork.updateBackendStatus(true);
           
@@ -984,6 +992,21 @@ const apiObject = {
             message: 'Backend is reachable',
             isRateLimited: false,
             isServerError: false
+          };
+        } else {
+          // HTTP 500+ error but backend IS reachable
+          console.warn(`⚠️ [API] Backend returned HTTP ${response.status} but is reachable`);
+          window.AppNetwork.updateBackendStatus(true);
+          
+          return {
+            ok: false,
+            success: false,
+            reachable: true, // Backend IS reachable
+            endpoint: endpoint || 'root',
+            status: response.status,
+            message: 'Backend reachable but returned error',
+            isServerError: true,
+            isRateLimited: false
           };
         }
       } catch (error) {
@@ -1142,6 +1165,10 @@ const apiObject = {
         if (isAbortError) {
           console.log('🔧 [API] Session check aborted, using cached session');
           // For abort errors, keep current backend reachability status
+        } else if (backendError.status && backendError.status >= 400) {
+          // CRITICAL FIX: HTTP errors mean backend IS reachable
+          console.log(`🔧 [API] Backend returned HTTP ${backendError.status}, but is reachable`);
+          window.AppNetwork.updateBackendStatus(true);
         } else {
           console.log('🔧 [API] Backend unreachable, using cached session');
           window.AppNetwork.updateBackendStatus(false);
@@ -1673,10 +1700,12 @@ const apiObject = {
   // ============================================================================
   
   initialize: async function() {
-    console.log('🔧 [API] ⚡ MoodChat API v16.1.0 (STRICT API CONTRACT) initializing...');
+    console.log('🔧 [API] ⚡ MoodChat API v16.2.0 (HTTP 500 FIX) initializing...');
     console.log('🔧 [API] 🔗 Backend URL:', BACKEND_BASE_URL);
     console.log('🔧 [API] 🔗 API Base URL:', BASE_API_URL);
     console.log('🔧 [API] 🌐 Network State - Online:', window.AppNetwork.isOnline, 'Backend Reachable:', window.AppNetwork.isBackendReachable);
+    console.log('🔧 [API] ✅ CRITICAL: HTTP 500 errors DO NOT mark backend as offline');
+    console.log('🔧 [API] ✅ CRITICAL: Backend marked offline ONLY on network failures');
     console.log('🔧 [API] ✅ CRITICAL: ALL API calls use strict contract: api(endpoint, options)');
     console.log('🔧 [API] ✅ CRITICAL: First argument = endpoint string');
     console.log('🔧 [API] ✅ CRITICAL: Second argument = options object with method');
@@ -1832,6 +1861,7 @@ const apiObject = {
       dynamicEnvironmentDetection: true,
       strictHttpHandling: true,
       strictApiContract: true,
+      http500Fix: true, // Added flag for HTTP 500 fix
       environment: window.location.hostname === 'localhost' ? 'local' : 'production',
       networkState: {
         isOnline: window.AppNetwork.isOnline,
@@ -1851,7 +1881,7 @@ const apiObject = {
     });
     
     setTimeout(() => {
-      console.log('🔧 [API] API synchronization ready (strict API contract)');
+      console.log('🔧 [API] API synchronization ready (HTTP 500 fix applied)');
     }, 1000);
   },
   
@@ -1860,7 +1890,7 @@ const apiObject = {
   // ============================================================================
   
   diagnose: async function() {
-    console.log('🔧 [API] Running diagnostics with strict API contract...');
+    console.log('🔧 [API] Running diagnostics with HTTP 500 fix...');
     
     const results = {
       networkState: {
@@ -1894,7 +1924,8 @@ const apiObject = {
         supportsNewTokenStructure: true,
         dynamicEnvironmentDetection: true,
         strictHttpHandling: true,
-        strictApiContract: true
+        strictApiContract: true,
+        http500Fix: true
       },
       validation: {
         methodNormalization: 'ACTIVE',
@@ -1907,7 +1938,8 @@ const apiObject = {
         strictHttpStatusHandling: 'ACTIVE',
         strictApiContract: 'ACTIVE',
         singleNetworkStateSource: 'ACTIVE',
-        windowCurrentUserSupport: 'ACTIVE'
+        windowCurrentUserSupport: 'ACTIVE',
+        http500Fix: 'ACTIVE'
       }
     };
     
@@ -1969,7 +2001,7 @@ if (!window.MOODCHAT_API) {
   window.MOODCHAT_API = globalApi;
 }
 
-console.log('🔧 [API] Starting hardened initialization with strict API contract...');
+console.log('🔧 [API] Starting hardened initialization with HTTP 500 fix...');
 
 // Safe initialization with timeout
 setTimeout(() => {
@@ -2207,7 +2239,8 @@ console.log('🔧 [API] ✅ Global network state via window.AppNetwork: ACTIVE')
 console.log('🔧 [API] ✅ STRICT API contract: ACTIVE (endpoint first, method in options)');
 console.log('🔧 [API] ✅ STRICT HTTP status handling: ACTIVE (≥400 = HARD failure)');
 console.log('🔧 [API] ✅ NEVER return success if response.ok === false: ACTIVE');
-console.log('🔧 [API] ✅ Do NOT mark backend offline on 401/400: ACTIVE');
+console.log('🔧 [API] ✅ CRITICAL FIX: HTTP 500 errors DO NOT mark backend offline: ACTIVE');
+console.log('🔧 [API] ✅ CRITICAL FIX: Backend marked offline ONLY on network failures: ACTIVE');
 console.log('🔧 [API] ✅ Dynamic environment detection: ACTIVE');
 console.log('🔧 [API] ✅ All API calls use strict contract: api(endpoint, options)');
 console.log('🔧 [API] ✅ CRITICAL: First argument MUST be endpoint string');
@@ -2215,4 +2248,4 @@ console.log('🔧 [API] ✅ CRITICAL: Second argument MUST be options object');
 console.log('🔧 [API] ✅ Backend URL: ' + BACKEND_BASE_URL);
 console.log('🔧 [API] ✅ API Base URL: ' + BASE_API_URL);
 console.log('🔧 [API] ✅ window.currentUser support: ACTIVE');
-console.log('🔧 [API] ⚡ Ready for production with strict API contract');
+console.log('🔧 [API] ⚡ Ready for production with HTTP 500 fix');

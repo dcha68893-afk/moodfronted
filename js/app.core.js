@@ -6,6 +6,7 @@
 // FIXED: Removed duplicate isOnline declaration to avoid SyntaxError
 // FIXED: Wrapped in IIFE to avoid global scope pollution and conflicts
 // FIXED: Global collision prevention - removed all isOnline declarations
+// ENHANCED: Reduced console noise for periodic network polling - only log on status changes
 
 (function () {
   // ============================================================================
@@ -84,7 +85,10 @@
     api: null,
     healthChecked: false,
     initialized: false,
-    networkStatus: 'checking' // NEW: 'checking', 'online', 'offline'
+    networkStatus: 'checking', // NEW: 'checking', 'online', 'offline'
+    lastLoggedBackendStatus: null, // NEW: Track last logged status to reduce noise
+    lastHealthCheckTime: 0, // NEW: Track last health check time
+    healthCheckInterval: null // NEW: Store interval reference
   };
 
   const API_COORDINATION = {
@@ -95,6 +99,8 @@
     waitPromise: null,
     pollAttempts: 0,
     healthCheckInProgress: false, // NEW: Track health check status
+    lastBackendStatus: null, // NEW: Track last known backend status to detect changes
+    healthCheckCount: 0, // NEW: Count health checks for debugging
     
     // Wait for window.api to be available using multiple detection methods
     waitForApi: function() {
@@ -214,6 +220,31 @@
       setTimeout(() => {
         this.checkBackendHealth();
       }, 100);
+      
+      // Start periodic health checks with reduced logging
+      this.startPeriodicHealthChecks();
+    },
+    
+    // Start periodic health checks with intelligent logging
+    startPeriodicHealthChecks: function() {
+      // Clear any existing interval
+      if (window.MoodChatConfig.healthCheckInterval) {
+        clearInterval(window.MoodChatConfig.healthCheckInterval);
+      }
+      
+      // Start periodic health checks (every 30 seconds)
+      window.MoodChatConfig.healthCheckInterval = setInterval(() => {
+        this.healthCheckCount++;
+        
+        // Only log every 10th check or if it's been a while
+        if (this.healthCheckCount % 10 === 0) {
+          console.log(`🔄 Periodic health check #${this.healthCheckCount} running...`);
+        }
+        
+        this.checkBackendHealthSilent();
+      }, 30000); // 30 seconds
+      
+      console.log('✅ Periodic health checks started (30s interval)');
     },
     
     // Check backend health using api.js - UPDATED: AbortError does not mark backend as unreachable
@@ -249,11 +280,16 @@
         });
         
         if (healthResponse && healthResponse.success !== false) {
+          const previousStatus = window.MoodChatConfig.backendReachable;
           window.MoodChatConfig.backendReachable = true;
           window.MoodChatConfig.healthChecked = true;
           window.MoodChatConfig.networkStatus = 'online';
+          window.MoodChatConfig.lastHealthCheckTime = Date.now();
           
-          console.log('✅ Backend reachable: true');
+          // Only log if status changed
+          if (previousStatus !== true) {
+            console.log('✅ Backend reachable: true (status changed)');
+          }
           
           // Notify UI
           this.notifyNetworkStatus('online', 'Connected to backend');
@@ -270,9 +306,15 @@
           
           return true;
         } else {
+          const previousStatus = window.MoodChatConfig.backendReachable;
           window.MoodChatConfig.backendReachable = false;
           window.MoodChatConfig.networkStatus = 'offline';
-          console.log('⚠️ Backend health check failed:', healthResponse);
+          window.MoodChatConfig.lastHealthCheckTime = Date.now();
+          
+          // Only log if status changed
+          if (previousStatus !== false) {
+            console.log('⚠️ Backend health check failed (status changed):', healthResponse);
+          }
           
           // Notify UI
           this.notifyNetworkStatus('offline', 'Backend unreachable');
@@ -294,9 +336,15 @@
           return false;
         } else {
           // Real network failure (DNS, connection refused, etc.)
+          const previousStatus = window.MoodChatConfig.backendReachable;
           window.MoodChatConfig.backendReachable = false;
           window.MoodChatConfig.networkStatus = 'offline';
-          console.log('⚠️ Backend health check error (real network failure):', error.message);
+          window.MoodChatConfig.lastHealthCheckTime = Date.now();
+          
+          // Only log if status changed
+          if (previousStatus !== false) {
+            console.log('⚠️ Backend health check error (real network failure, status changed):', error.message);
+          }
           
           // Notify UI
           this.notifyNetworkStatus('offline', 'Backend connection failed: ' + error.message);
@@ -308,9 +356,102 @@
       }
     },
     
+    // Silent version of health check for periodic polling - logs only on status changes
+    checkBackendHealthSilent: async function() {
+      if (!this.apiReady || !window.MoodChatConfig.api) {
+        // Only log if this is a significant change
+        if (window.MoodChatConfig.backendReachable !== false) {
+          console.log('Silent health check: api.js not ready');
+        }
+        window.MoodChatConfig.backendReachable = false;
+        window.MoodChatConfig.networkStatus = 'offline';
+        return false;
+      }
+      
+      // Prevent duplicate health checks
+      if (this.healthCheckInProgress) {
+        return false;
+      }
+      
+      this.healthCheckInProgress = true;
+      
+      try {
+        // Store previous status for comparison
+        const previousStatus = window.MoodChatConfig.backendReachable;
+        const previousNetworkStatus = window.MoodChatConfig.networkStatus;
+        
+        // Try to call health endpoint with timeout
+        const healthResponse = await window.MoodChatConfig.api('/health', { 
+          method: 'GET',
+          timeout: 5000,
+          silent: true // Add flag for silent requests
+        });
+        
+        if (healthResponse && healthResponse.success !== false) {
+          window.MoodChatConfig.backendReachable = true;
+          window.MoodChatConfig.healthChecked = true;
+          window.MoodChatConfig.networkStatus = 'online';
+          window.MoodChatConfig.lastHealthCheckTime = Date.now();
+          
+          // Only log if status changed
+          if (previousStatus !== true || previousNetworkStatus !== 'online') {
+            console.log('✅ Periodic check: Backend reachable (status changed)');
+            this.notifyNetworkStatus('online', 'Connected to backend');
+          }
+          
+          return true;
+        } else {
+          window.MoodChatConfig.backendReachable = false;
+          window.MoodChatConfig.networkStatus = 'offline';
+          window.MoodChatConfig.lastHealthCheckTime = Date.now();
+          
+          // Only log if status changed
+          if (previousStatus !== false || previousNetworkStatus !== 'offline') {
+            console.log('⚠️ Periodic check: Backend unreachable (status changed)');
+            this.notifyNetworkStatus('offline', 'Backend unreachable');
+          }
+          
+          return false;
+        }
+      } catch (error) {
+        // UPDATED: AbortError does not mark backend as unreachable
+        if (error.name === 'AbortError' || error.message?.includes('aborted') || error.message?.includes('timeout')) {
+          // Don't change status on timeout during periodic checks
+          // Only log if we've been in this state for a while
+          const timeSinceLastCheck = Date.now() - window.MoodChatConfig.lastHealthCheckTime;
+          if (timeSinceLastCheck > 120000) { // 2 minutes
+            console.log('🔄 Periodic check: Backend check timed out, status remains checking');
+          }
+          return false;
+        } else {
+          // Real network failure
+          const previousStatus = window.MoodChatConfig.backendReachable;
+          const previousNetworkStatus = window.MoodChatConfig.networkStatus;
+          
+          window.MoodChatConfig.backendReachable = false;
+          window.MoodChatConfig.networkStatus = 'offline';
+          window.MoodChatConfig.lastHealthCheckTime = Date.now();
+          
+          // Only log if status changed
+          if (previousStatus !== false || previousNetworkStatus !== 'offline') {
+            console.log('⚠️ Periodic check: Network error (status changed):', error.message);
+            this.notifyNetworkStatus('offline', 'Backend connection failed');
+          }
+          
+          return false;
+        }
+      } finally {
+        this.healthCheckInProgress = false;
+      }
+    },
+    
     // Notify UI about network status changes
     notifyNetworkStatus: function(status, message) {
-      console.log(`Network status: ${status} - ${message}`);
+      // Only log if status changed or it's an important message
+      const currentStatus = window.MoodChatConfig.networkStatus;
+      if (currentStatus !== status || message.includes('changed') || message.includes('failed') || message.includes('Connected')) {
+        console.log(`Network status: ${status} - ${message}`);
+      }
       
       const event = new CustomEvent('moodchat-network-status', {
         detail: {
@@ -4052,8 +4193,7 @@
 
   // Default send functions (Updated to use api.js where possible)
   function defaultSendMessage(message) {
-    console.log('Sending queued message:', message);
-    // Use api.js to send message if available and backend is reachable
+    // Silent version for periodic checks - less verbose logging
     const networkStatus = API_COORDINATION.getNetworkStatus();
     if (API_COORDINATION.isApiAvailable() && window.MoodChatConfig.backendReachable === true && 
         networkStatus === 'online' && window.currentUser && JWT_VALIDATION.hasToken()) {
@@ -4073,8 +4213,6 @@
   }
 
   function defaultSendStatus(status) {
-    console.log('Sending queued status:', status);
-    // Use api.js to update status if available and backend is reachable
     const networkStatus = API_COORDINATION.getNetworkStatus();
     if (API_COORDINATION.isApiAvailable() && window.MoodChatConfig.backendReachable === true && 
         networkStatus === 'online' && window.currentUser && JWT_VALIDATION.hasToken()) {
@@ -4093,8 +4231,6 @@
   }
 
   function defaultSendFriendRequest(request) {
-    console.log('Sending queued friend request:', request);
-    // Use api.js to send friend request if available and backend is reachable
     const networkStatus = API_COORDINATION.getNetworkStatus();
     if (API_COORDINATION.isApiAvailable() && window.MoodChatConfig.backendReachable === true && 
         networkStatus === 'online' && window.currentUser && JWT_VALIDATION.hasToken()) {
@@ -4113,8 +4249,6 @@
   }
 
   function defaultSendCallLog(callLog) {
-    console.log('Sending queued call log:', callLog);
-    // Use api.js to log call if available and backend is reachable
     const networkStatus = API_COORDINATION.getNetworkStatus();
     if (API_COORDINATION.isApiAvailable() && window.MoodChatConfig.backendReachable === true && 
         networkStatus === 'online' && window.currentUser && JWT_VALIDATION.hasToken()) {
@@ -4135,7 +4269,6 @@
   }
 
   function defaultSendItem(item) {
-    console.log('Sending queued item:', item);
     return Promise.resolve();
   }
 

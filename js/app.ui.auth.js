@@ -1,14 +1,7 @@
 // app.ui.auth.js - MoodChat Network Status Detection with JWT Auth
-// UPDATED: Added progressive login attempts, password guidance, and better error handling
-// FOCUS: Network status detection, backend health checks, JWT auth handling, and progressive login limits
-// CRITICAL FIX: All auth calls use centralized api.js with correct endpoints
-// FIXED: Removed duplicate isOnline declaration that conflicts with app.core.js
-// FIXED: STRICT API-driven authentication - no fake login success
-// FIXED: Auto-login no longer blocks form setup - forms work concurrently
-// FIXED: Form setup happens immediately, auto-login runs independently in background
-// FIXED: Login button now properly handles successful login response
-// FIXED: User data properly persisted after login
-// FIXED: UI properly redirects after successful login
+// UPDATED: Fixed response handling - no more response.text() or response.json() calls
+// FIXED: TypeError: response.text is not a function - api.js returns parsed JSON
+// FIXED: All API response handling now treats response as already-parsed JSON
 
 // ============================================================================
 // PREVENT DOUBLE INITIALIZATION
@@ -197,28 +190,25 @@ function clearAuthData() {
 }
 
 /**
- * Safely parses HTTP response with error handling
+ * Safely handles API response (api.js returns parsed JSON, not Response object)
  */
-async function safeParseResponse(response) {
-  const text = await response.text();
-  let data;
-  
-  try {
-    data = JSON.parse(text);
-  } catch {
-    // If response is not JSON, throw error with the text
-    throw new Error(text || `HTTP ${response.status}: ${response.statusText}`);
+function handleApiResponse(response) {
+  // api.js returns already-parsed JSON, not a Response object
+  if (!response || typeof response !== 'object') {
+    throw new Error('Invalid API response format');
   }
   
-  // Check for HTTP errors (400, 401, 429, 500, etc.)
-  if (!response.ok) {
-    // Try to extract error message from JSON response
-    const errorMessage = data?.error || data?.message || data?.details || 
-                        `HTTP ${response.status}: ${response.statusText}`;
-    throw new Error(errorMessage);
+  // Check for HTTP errors in the response object
+  const success = response.success;
+  const message = response.data?.message || response.message || 'Unknown server error';
+  const status = response.status || response.statusCode || 500;
+  
+  // If not successful, throw error with message
+  if (!success) {
+    throw new Error(message);
   }
   
-  return data;
+  return response;
 }
 
 /**
@@ -273,7 +263,6 @@ function showLoginAttemptCountdown(blockInfo) {
 /**
  * Checks if user is already logged in via JWT and validates token
  * Returns true if auto-login succeeds, false otherwise
- * This function runs independently and does NOT interfere with form setup
  */
 async function checkAutoLogin() {
   console.log('Checking for auto-login...');
@@ -295,7 +284,7 @@ async function checkAutoLogin() {
   console.log('Valid JWT found, attempting auto-login...');
   
   try {
-    // STRICT REQUIREMENT: Validate token with backend API ONLY
+    // Validate token with backend API ONLY
     if (typeof window.api === 'function') {
       console.log('STRICT API VALIDATION: Validating token with backend...');
       const response = await window.api('/auth/verify', {
@@ -305,12 +294,8 @@ async function checkAutoLogin() {
         }
       });
       
-      let result;
-      if (response && typeof response === 'object' && 'ok' in response) {
-        result = await safeParseResponse(response);
-      } else {
-        result = response;
-      }
+      // Handle the parsed JSON response from api.js
+      const result = handleApiResponse(response);
       
       // STRICT REQUIREMENT: Only proceed if API returns success
       if (result && result.success === true && result.user) {
@@ -369,7 +354,6 @@ async function checkAutoLogin() {
 
 /**
  * STRICT API-DRIVEN LOGIN HANDLER
- * NEVER shows "Login Successful" unless API returns HTTP 200
  */
 async function handleLoginSubmit(event) {
   event.preventDefault();
@@ -422,7 +406,7 @@ async function handleLoginSubmit(event) {
     
     console.log('STRICT API-DRIVEN: Calling login API via centralized api.js...');
     
-    // STRICT API CONTRACT: First argument endpoint string, second options object
+    // Call api.js - it returns parsed JSON
     const response = await window.api('/auth/login', {
       method: 'POST',
       headers: { 
@@ -434,24 +418,12 @@ async function handleLoginSubmit(event) {
       })
     });
     
-    console.log('STRICT API-DRIVEN: Login API raw response:', response);
+    console.log('STRICT API-DRIVEN: Login API response:', response);
     
-    // Parse the response
-    let result;
-    if (response && typeof response === 'object' && 'ok' in response) {
-      // This is a raw Response object - parse it
-      result = await safeParseResponse(response);
-    } else {
-      // Already parsed or different format
-      result = response;
-    }
+    // Handle the parsed JSON response (no response.text() or response.json() needed)
+    const result = handleApiResponse(response);
     
     console.log('STRICT API-DRIVEN: Login API parsed result:', result);
-    
-    // CRITICAL: Validate response structure
-    if (!result || result.success !== true) {
-      throw new Error(result?.message || 'Login failed');
-    }
     
     // CRITICAL: Check for token and user in response
     if (!result.token || !result.user) {
@@ -490,7 +462,7 @@ async function handleLoginSubmit(event) {
       new CustomEvent('auth:login', { detail: result.user })
     );
     
-    // Trigger UI success flow - use existing app flow
+    // Trigger UI success flow
     triggerUISuccessFlow(result.user);
     
     // REDIRECT AFTER SUCCESS
@@ -613,7 +585,7 @@ function triggerUISuccessFlow(user) {
 }
 
 /**
- * STRICT API-DRIVEN REGISTRATION HANDLER
+ * STRICT API-DRIVEN REGISTRATION HANDLER - FIXED response handling
  */
 async function handleRegisterSubmit(event) {
   event.preventDefault();
@@ -649,9 +621,8 @@ async function handleRegisterSubmit(event) {
   submitBtn.disabled = true;
   
   try {
-    // STRICT REQUIREMENT: Check if API is available - don't block on network check
+    // STRICT REQUIREMENT: Check if API is available
     if (!window.api || typeof window.api !== 'function') {
-      // Only throw if API is completely unavailable
       throw new Error('Registration service not available');
     }
     
@@ -666,67 +637,54 @@ async function handleRegisterSubmit(event) {
       displayName: displayName || username
     };
     
-    try {
-      // STRICT REQUIREMENT: Use the window.api function directly as specified
-      const registerResponse = await window.api('/auth/register', {
-        method: 'POST',
-        body: registerData
-      });
+    // Call api.js - it returns parsed JSON
+    const response = await window.api('/auth/register', {
+      method: 'POST',
+      body: registerData
+    });
+    
+    console.log('STRICT API-DRIVEN: Register API response:', response);
+    
+    // Handle the parsed JSON response (NO response.text() or response.json() calls)
+    const result = handleApiResponse(response);
+    
+    console.log('STRICT API-DRIVEN: Register API parsed result:', result);
+    
+    // STRICT REQUIREMENT: ONLY proceed if API returns success AND has valid token
+    if (result && result.success && result.user && result.token) {
+      const { token, user } = result;
       
-      console.log('STRICT API-DRIVEN: Register API raw response:', registerResponse);
+      // Save JWT and user info
+      saveAuthData(token, user);
       
-      // Parse the response safely
-      let registerResult;
-      if (registerResponse && typeof registerResponse === 'object' && 'ok' in registerResponse) {
-        // This is a raw Response object - parse it
-        registerResult = await safeParseResponse(registerResponse);
-      } else {
-        // Already parsed or different format
-        registerResult = registerResponse;
+      // STRICT REQUIREMENT: Only show success AFTER API confirms
+      updateNetworkStatusUI('online', 'Registration successful!');
+      
+      // Set token in api.js if API_COORDINATION exists
+      if (window.API_COORDINATION) {
+        window.API_COORDINATION.authToken = token;
       }
       
-      console.log('STRICT API-DRIVEN: Register API parsed result:', registerResult);
-      
-      // STRICT REQUIREMENT: ONLY proceed if API returns success AND has valid token
-      if (registerResult && registerResult.success && registerResult.user && registerResult.token) {
-        const { token, user } = registerResult;
-        
-        // Save JWT and user info
-        saveAuthData(token, user);
-        
-        // STRICT REQUIREMENT: Only show success AFTER API confirms
-        updateNetworkStatusUI('online', 'Registration successful!');
-        
-        // Set token in api.js if API_COORDINATION exists
-        if (window.API_COORDINATION) {
-          window.API_COORDINATION.authToken = token;
-        }
-        
-        // Set user in AppState if it exists
-        if (window.AppState) {
-          window.AppState.user = user;
-        }
-        
-        // Trigger UI success flow
-        triggerUISuccessFlow(user);
-        
-        // Small delay before redirect
-        setTimeout(() => {
-          window.location.href = 'chat.html';
-        }, 1000);
-      } else {
-        // STRICT REQUIREMENT: API returned but without success flag
-        throw new Error(registerResult?.message || 'Registration failed - invalid response from server');
+      // Set user in AppState if it exists
+      if (window.AppState) {
+        window.AppState.user = user;
       }
-    } catch (apiError) {
-      // STRICT REQUIREMENT: Catch and display API errors clearly
-      console.error('STRICT API-DRIVEN: API error:', apiError);
-      throw new Error(apiError.message || 'Registration failed - server error');
+      
+      // Trigger UI success flow
+      triggerUISuccessFlow(user);
+      
+      // Small delay before redirect
+      setTimeout(() => {
+        window.location.href = 'chat.html';
+      }, 1000);
+    } else {
+      // STRICT REQUIREMENT: API returned but without success flag
+      throw new Error(result?.message || 'Registration failed - invalid response from server');
     }
   } catch (error) {
     console.error('STRICT API-DRIVEN: Registration error:', error);
     
-    // STRICT REQUIREMENT: Display clear error messages
+    // Display clear error messages
     let errorMessage = error.message;
     
     // Handle specific error cases
@@ -753,7 +711,7 @@ async function handleRegisterSubmit(event) {
 }
 
 /**
- * Handles forgot password form submission
+ * Handles forgot password form submission - FIXED response handling
  */
 async function handleForgotPasswordSubmit(event) {
   event.preventDefault();
@@ -769,35 +727,27 @@ async function handleForgotPasswordSubmit(event) {
   submitBtn.disabled = true;
   
   try {
-    // Check if API is available - don't block on network check
+    // Check if API is available
     if (!window.api || typeof window.api !== 'function') {
-      // Only throw if API is completely unavailable
       throw new Error('Password reset service not available');
     }
     
     // Call forgot password API using centralized api.js
     console.log('Calling forgot password API via centralized api.js...');
     
-    // Use window.api for consistency
+    // Call api.js - it returns parsed JSON
     const response = await window.api('/auth/forgot-password', {
       method: 'POST',
       body: { email }
     });
     
-    // Safely parse the response
-    let parsedResponse;
-    if (response && typeof response === 'object' && 'ok' in response) {
-      // This is a raw Response object
-      parsedResponse = await safeParseResponse(response);
-    } else {
-      // Already parsed or different format
-      parsedResponse = response;
-    }
+    console.log('Forgot password API response:', response);
     
-    console.log('Forgot password API response:', parsedResponse);
+    // Handle the parsed JSON response (NO response.text() or response.json() calls)
+    const result = handleApiResponse(response);
     
     // Show success/error message
-    if (parsedResponse && parsedResponse.success) {
+    if (result && result.success) {
       updateNetworkStatusUI('online', 'Password reset email sent!');
       
       // Switch back to login form after delay
@@ -805,7 +755,7 @@ async function handleForgotPasswordSubmit(event) {
         showLoginForm();
       }, 3000);
     } else {
-      throw new Error(parsedResponse?.message || 'Password reset failed');
+      throw new Error(result?.message || 'Password reset failed');
     }
   } catch (error) {
     console.error('Forgot password error:', error);
@@ -823,8 +773,6 @@ async function handleForgotPasswordSubmit(event) {
 
 /**
  * Updates the network status indicator in the UI
- * Reads status from api.js or falls back to browser status
- * This ONLY updates the indicator, doesn't block any UI actions
  */
 function updateNetworkStatusUI(status, message) {
   console.log(`STRICT UI: Network status update: ${status} - ${message}`);
@@ -949,23 +897,22 @@ function updateNetworkStatusUI(status, message) {
 }
 
 // ============================================================================
-// NETWORK STATUS READING FROM API.JS (UPDATED TO HANDLE /STATUS ENDPOINT)
+// NETWORK STATUS READING FROM API.JS (UPDATED)
 // ============================================================================
 
 /**
  * Reads network status from api.js using multiple methods
- * Returns the current network status for UI display only
  */
 async function readNetworkStatusFromApi() {
   console.log('readNetworkStatusFromApi called - checking multiple sources...');
   
-  // Method 1: Check browser network status first (fastest)
+  // Method 1: Check browser network status first
   if (!navigator.onLine) {
     console.log('Browser reports offline');
     return { status: 'offline', message: 'No internet connection', backendReachable: false };
   }
   
-  // Method 2: Check AppNetwork if available (most reliable)
+  // Method 2: Check AppNetwork if available
   if (window.AppNetwork && typeof window.AppNetwork.isOnline === 'function') {
     const isOnline = window.AppNetwork.isOnline();
     console.log('AppNetwork says isOnline:', isOnline);
@@ -1012,7 +959,7 @@ async function readNetworkStatusFromApi() {
     };
   }
   
-  // Method 5: Direct API call to /status endpoint (fallback)
+  // Method 5: Direct API call to /status endpoint
   if (typeof window.api === 'function') {
     try {
       console.log('Attempting direct /status API call...');
@@ -1025,33 +972,18 @@ async function readNetworkStatusFromApi() {
       
       const response = await Promise.race([statusPromise, timeoutPromise]);
       
-      // Handle both raw Response objects and parsed responses
-      let parsedResponse;
-      if (response && typeof response === 'object') {
-        // Check if it's a Response object
-        if ('ok' in response && typeof response.text === 'function') {
-          // This is a raw Response object
-          parsedResponse = await safeParseResponse(response);
-        } else if (response.status || response.healthy || response.success) {
-          // Already parsed response
-          parsedResponse = response;
-        } else if (response.ok !== undefined) {
-          // It might already be the parsed response with ok property
-          parsedResponse = response;
-        }
-      }
-      
-      console.log('/status API response:', parsedResponse);
+      // api.js returns parsed JSON, so just use it directly
+      console.log('/status API response:', response);
       
       // Check if response indicates backend is reachable
-      const isReachable = parsedResponse && (
-        parsedResponse.status === 'ok' || 
-        parsedResponse.success === true ||
-        parsedResponse.healthy === true ||
-        (parsedResponse.statusCode && parsedResponse.statusCode === 200) ||
-        (parsedResponse.code && parsedResponse.code === 200) ||
-        parsedResponse.ok === true ||
-        parsedResponse.ok === 200
+      const isReachable = response && (
+        response.status === 'ok' || 
+        response.success === true ||
+        response.healthy === true ||
+        (response.statusCode && response.statusCode === 200) ||
+        (response.code && response.code === 200) ||
+        response.ok === true ||
+        response.ok === 200
       );
       
       console.log('Direct API check says backendReachable:', isReachable);
@@ -1070,7 +1002,7 @@ async function readNetworkStatusFromApi() {
   console.log('Checking for cached network status...');
   if (window.NetworkStatus.lastChecked && 
       Date.now() - window.NetworkStatus.lastChecked.getTime() < 30000) {
-    // Use cached status if it's recent (less than 30 seconds old)
+    // Use cached status if it's recent
     console.log('Using cached network status:', window.NetworkStatus.status);
     return {
       status: window.NetworkStatus.status,
@@ -1088,7 +1020,6 @@ async function readNetworkStatusFromApi() {
 
 /**
  * Updates UI based on network status from api.js
- * This runs in the background and does NOT block UI interactions
  */
 async function updateNetworkStatusFromApi() {
   try {
@@ -1108,7 +1039,7 @@ async function updateNetworkStatusFromApi() {
 }
 
 // ============================================================================
-// API.JS EVENT LISTENER (UPDATED TO HANDLE MORE EVENTS)
+// API.JS EVENT LISTENER
 // ============================================================================
 
 /**
@@ -1142,7 +1073,7 @@ function setupApiStatusListener() {
     window.NetworkStatus.lastChecked = new Date();
   });
   
-  // Listen for api-ready events (multiple variants)
+  // Listen for api-ready events
   const handleApiReady = () => {
     console.log('API ready event received, checking network status...');
     setTimeout(() => {
@@ -1156,12 +1087,11 @@ function setupApiStatusListener() {
 }
 
 // ============================================================================
-// PERIODIC STATUS UPDATES (IMPROVED LOGIC)
+// PERIODIC STATUS UPDATES
 // ============================================================================
 
 /**
  * Starts periodic network status updates from api.js
- * Reads status every 10 seconds without blocking UI
  */
 function startPeriodicNetworkUpdates() {
   // Clear any existing interval
@@ -1178,7 +1108,7 @@ function startPeriodicNetworkUpdates() {
     });
   }, 2000);
   
-  // Set up periodic updates (every 10 seconds - non-blocking)
+  // Set up periodic updates
   window.NetworkStatus.checkInterval = setInterval(() => {
     if (navigator.onLine) {
       console.log('Periodic network status check...');
@@ -1208,7 +1138,7 @@ function handleBrowserOnline() {
   console.log('Browser online event detected');
   updateNetworkStatusUI('checking', 'Reconnecting...');
   
-  // Wait a moment before updating (allow network to stabilize)
+  // Wait a moment before updating
   setTimeout(() => {
     updateNetworkStatusFromApi().catch(console.error);
   }, 1000);
@@ -1225,7 +1155,7 @@ function handleBrowserOffline() {
 }
 
 // ============================================================================
-// AUTH FORM TOGGLING FUNCTIONS (NON-BLOCKING)
+// AUTH FORM TOGGLING FUNCTIONS
 // ============================================================================
 
 /**
@@ -1328,12 +1258,11 @@ function updateAuthButtonStates(activeForm) {
 }
 
 // ============================================================================
-// SETUP AUTH FORM EVENT LISTENERS WITH SUBMIT HANDLERS (IMMEDIATE SETUP)
+// SETUP AUTH FORM EVENT LISTENERS WITH SUBMIT HANDLERS
 // ============================================================================
 
 /**
  * Sets up event listeners for auth form toggling and submission
- * This runs IMMEDIATELY and sets up forms before anything else
  */
 function setupAuthFormListeners() {
   console.log('Setting up auth form event listeners...');
@@ -1364,13 +1293,11 @@ function setupAuthFormListeners() {
     });
   }
   
-  // Login form submit handler - FIXED to prevent double submission
+  // Login form submit handler
   const loginForm = document.getElementById('login-form');
   if (loginForm) {
     console.log('Setting up login form submit listener');
-    // Remove any existing listeners to prevent duplicates
     loginForm.removeEventListener('submit', handleLoginSubmit);
-    // Add the listener with proper event blocking
     loginForm.addEventListener('submit', handleLoginSubmit);
   }
   
@@ -1491,12 +1418,11 @@ function integrateWithAppState() {
 }
 
 // ============================================================================
-// FORM SETUP FUNCTION (RUNS IMMEDIATELY)
+// FORM SETUP FUNCTION
 // ============================================================================
 
 /**
  * Sets up all auth forms immediately
- * This function should run as soon as the DOM is ready
  */
 function setupAuthFormsImmediately() {
   console.log('Setting up auth forms immediately...');
@@ -1588,17 +1514,16 @@ function showAuthError(message) {
 }
 
 // ============================================================================
-// INITIALIZATION (WITH IMMEDIATE FORM SETUP)
+// INITIALIZATION
 // ============================================================================
 
 /**
  * Initializes network status monitoring and auth forms
- * Forms are set up immediately, auto-login runs independently
  */
 async function initializeAuthUI() {
   console.log('STRICT API-DRIVEN: Initializing auth UI and network status monitoring...');
   
-  // 1. IMMEDIATELY set up auth forms (this runs first, before anything else)
+  // 1. IMMEDIATELY set up auth forms
   const currentPage = window.location.pathname;
   const isLoginPage = currentPage.includes('index.html') || currentPage === '/' || currentPage.endsWith('/');
   
@@ -1607,37 +1532,30 @@ async function initializeAuthUI() {
     setupAuthFormsImmediately();
   }
   
-  // 2. Check for auto-login (runs independently in the background)
+  // 2. Check for auto-login in background
   if (isLoginPage) {
     console.log('STRICT API-DRIVEN: Starting auto-login check in background...');
     
-    // Start auto-login check in the background (async, non-blocking)
-    // Don't wait for it to complete - forms are already set up
     setTimeout(async () => {
       try {
         console.log('STRICT API-DRIVEN: Background auto-login check starting...');
         const autoLoginSucceeded = await checkAutoLogin();
         if (autoLoginSucceeded) {
           console.log('STRICT API-DRIVEN: Auto-login succeeded, user will be redirected');
-          // Auto-login succeeded, forms were already set up but will be redirected anyway
         } else {
           console.log('STRICT API-DRIVEN: Auto-login failed or not attempted, forms remain active');
-          // Auto-login failed, forms are already active for manual login
         }
       } catch (error) {
         console.error('STRICT API-DRIVEN: Auto-login check error:', error);
-        // Error during auto-login, forms remain active
       }
-    }, 1000); // Delay auto-login check slightly to let forms set up first
+    }, 1000);
   } else {
     console.log('Not on login page, skipping auto-login check');
   }
   
-  // 3. Set initial network UI state (non-blocking)
-  // Check if backend is reachable via api.js
+  // 3. Set initial network UI state
   if (typeof window.api === 'function') {
     try {
-      // Simple check to see if API is responding
       const healthCheck = await window.api('/status');
       if (healthCheck && (healthCheck.ok || healthCheck.status === 'ok' || healthCheck.success)) {
         updateNetworkStatusUI('online', 'Connected to MoodChat');
@@ -1651,17 +1569,17 @@ async function initializeAuthUI() {
     updateNetworkStatusUI('checking', 'Checking connection...');
   }
   
-  // 4. Set up api.js event listener for real-time status updates
+  // 4. Set up api.js event listener
   setupApiStatusListener();
   
   // 5. Integrate with existing AppState
   integrateWithAppState();
   
-  // 6. Set up browser event listeners for network status
+  // 6. Set up browser event listeners
   window.addEventListener('online', handleBrowserOnline);
   window.addEventListener('offline', handleBrowserOffline);
   
-  // 7. Start periodic network status updates from api.js (non-blocking)
+  // 7. Start periodic network status updates
   setTimeout(() => {
     startPeriodicNetworkUpdates();
   }, 1000);
@@ -1715,11 +1633,11 @@ window.logoutUser = function() {
 };
 
 // ============================================================================
-// START AUTH UI WHEN DOCUMENT IS READY (WITH IMMEDIATE FORM SETUP)
+// START AUTH UI WHEN DOCUMENT IS READY
 // ============================================================================
 
 /**
- * Main initialization function that runs when DOM is ready
+ * Main initialization function
  */
 function initialize() {
   console.log('Initializing auth system...');
@@ -1761,4 +1679,4 @@ function initialize() {
 // Start initialization
 initialize();
 
-console.log('app.ui.auth.js - STRICT API-DRIVEN Auth UI and network status module loaded');
+console.log('app.ui.auth.js - STRICT API-DRIVEN Auth UI and network status module loaded - FIXED RESPONSE HANDLING');
