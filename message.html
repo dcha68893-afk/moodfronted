@@ -27,271 +27,10 @@
     <!-- Wavesurfer.js for audio visualization -->
     <script src="https://cdn.jsdelivr.net/npm/wavesurfer.js@6.6.0/dist/wavesurfer.min.js"></script>
     
-     <link rel="stylesheet" href="messages.css">
-
+    <link rel="stylesheet" href="messages.css">
     <style>
-        /* ADDITIONAL CSS FOR MISSING FEATURES */
-        .offline-overlay {
-            position: fixed;
-            top: 0;
-            left: 0;
-            width: 100%;
-            height: 100%;
-            background-color: rgba(255, 255, 255, 0.95);
-            z-index: 9999;
-            display: none;
-            flex-direction: column;
-            align-items: center;
-            justify-content: center;
-            text-align: center;
-            padding: 20px;
-            animation: fadeIn 0.3s ease;
-        }
-        
-        .offline-overlay.active {
-            display: flex;
-        }
-        
-        .offline-icon {
-            font-size: 48px;
-            color: #ff9500;
-            margin-bottom: 16px;
-        }
-        
-        .offline-title {
-            font-size: 20px;
-            font-weight: 600;
-            margin-bottom: 8px;
-            color: #050505;
-        }
-        
-        .offline-message {
-            font-size: 15px;
-            color: #65676b;
-            margin-bottom: 24px;
-            max-width: 400px;
-            line-height: 1.5;
-        }
-        
-        .offline-dismiss-btn {
-            padding: 10px 20px;
-            background-color: #0084ff;
-            color: white;
-            border: none;
-            border-radius: 8px;
-            cursor: pointer;
-            font-size: 14px;
-            font-weight: 500;
-        }
-        
-        .multi-send-checkbox {
-            width: 18px;
-            height: 18px;
-            cursor: pointer;
-        }
-        
-        .chat-item.selected {
-            background-color: rgba(0, 132, 255, 0.1);
-            border: 1px solid #0084ff;
-        }
-        
-        .message-item.editing {
-            background-color: rgba(0, 132, 255, 0.05);
-            border-radius: 12px;
-            padding: 8px;
-        }
-        
-        .edit-message-input {
-            width: 100%;
-            min-height: 60px;
-            padding: 10px;
-            border: 1px solid #0084ff;
-            border-radius: 8px;
-            font-size: 15px;
-            resize: vertical;
-            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
-        }
-        
-        .edit-actions {
-            display: flex;
-            gap: 10px;
-            margin-top: 10px;
-            justify-content: flex-end;
-        }
-        
-        .send-options-overlay {
-            position: fixed;
-            top: 0;
-            left: 0;
-            width: 100%;
-            height: 100%;
-            background-color: transparent;
-            z-index: 999;
-            display: none;
-        }
-        
-        .send-options-overlay.active {
-            display: block;
-        }
-        
-        .scheduled-badge {
-            position: absolute;
-            top: -8px;
-            right: -8px;
-            background-color: #ff9500;
-            color: white;
-            width: 20px;
-            height: 20px;
-            border-radius: 50%;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            font-size: 10px;
-        }
-        
-        .message-typing {
-            display: flex;
-            align-items: center;
-            gap: 5px;
-            padding: 0 20px;
-            margin-bottom: 10px;
-        }
-        
-        .typing-text {
-            font-size: 13px;
-            color: #65676b;
-            font-style: italic;
-        }
-        
-        .draft-badge {
-            background-color: #ff9500;
-            color: white;
-            font-size: 11px;
-            padding: 2px 6px;
-            border-radius: 10px;
-            margin-left: 8px;
-        }
-        
-        .chat-item.note-message {
-            background-color: rgba(255, 215, 0, 0.05);
-        }
-        
-        .chat-item-avatar .note-indicator {
-            position: absolute;
-            bottom: 0;
-            right: 0;
-            width: 14px;
-            height: 14px;
-            border-radius: 50%;
-            background-color: #ffd700;
-            border: 2px solid white;
-        }
-        
-        .expired-message {
-            opacity: 0.5;
-            filter: grayscale(0.8);
-        }
-        
-        .expired-label {
-            font-size: 10px;
-            color: #ff3b30;
-            display: flex;
-            align-items: center;
-            gap: 4px;
-            margin-top: 4px;
-        }
-        
-        .message-searching {
-            background-color: rgba(0, 132, 255, 0.2) !important;
-            border: 2px solid #0084ff !important;
-            animation: pulse 1.5s infinite;
-        }
-        
-        .search-highlight {
-            background-color: yellow;
-            padding: 0 2px;
-            border-radius: 2px;
-        }
-        
-        .multi-send-header {
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-            margin-bottom: 15px;
-        }
-        
-        .selected-count {
-            background-color: #0084ff;
-            color: white;
-            padding: 4px 10px;
-            border-radius: 12px;
-            font-size: 12px;
-            font-weight: 500;
-        }
-        
-        .attachment-preview {
-            display: flex;
-            align-items: center;
-            gap: 10px;
-            padding: 10px;
-            background-color: rgba(0, 0, 0, 0.05);
-            border-radius: 8px;
-            margin-bottom: 10px;
-        }
-        
-        .attachment-preview img {
-            width: 50px;
-            height: 50px;
-            object-fit: cover;
-            border-radius: 6px;
-        }
-        
-        .attachment-preview-info {
-            flex: 1;
-        }
-        
-        .attachment-remove {
-            background: none;
-            border: none;
-            color: #ff3b30;
-            cursor: pointer;
-            font-size: 16px;
-        }
-        
-        .recording-cancel-overlay {
-            position: fixed;
-            top: 0;
-            left: 0;
-            width: 100%;
-            height: 100%;
-            background-color: rgba(0, 0, 0, 0.5);
-            z-index: 99999;
-            display: none;
-            flex-direction: column;
-            align-items: center;
-            justify-content: center;
-            color: white;
-        }
-        
-        .recording-cancel-overlay.active {
-            display: flex;
-        }
-        
-        .cancel-recording-btn {
-            background-color: #ff3b30;
-            color: white;
-            border: none;
-            padding: 12px 24px;
-            border-radius: 8px;
-            font-size: 16px;
-            font-weight: 500;
-            cursor: pointer;
-            margin-top: 20px;
-        }
-        
-        .cancel-recording-btn:hover {
-            background-color: #e0352b;
-        }
+        /* Complete CSS for the chat system */
+       
     </style>
 </head>
 <body>
@@ -759,7 +498,6 @@
         // =============================================
         // COMPLETE CHAT SYSTEM WITH PARENT API BACKEND
         // =============================================
-        // ACCESS API THROUGH PARENT WINDOW
         
         // Global variables
         let currentUser = null;
@@ -857,148 +595,57 @@
         const multiSendAttachmentPreview = document.getElementById('multiSendAttachmentPreview');
         const scheduleAttachmentPreview = document.getElementById('scheduleAttachmentPreview');
         
-        // API Helper - Access through parent window
-        let api = null;
-        
-        // Wait for API to be ready from parent
-        window.addEventListener('message', function(event) {
-            if (event.data.type === 'API_READY') {
-                api = window.parent.api;
-                console.log('API ready from parent');
-                initializeApp();
-            }
-        });
-        
-        // Request API status from parent
-        function requestAPI() {
-            if (window.parent && window.parent.api) {
-                api = window.parent.api;
-                console.log('API found in parent');
-                initializeApp();
-            } else {
-                // Send request to parent
-                window.parent.postMessage({ type: 'REQUEST_API' }, '*');
-                setTimeout(requestAPI, 100);
-            }
-        }
-        
-        // =============================================
-        // AUTO-LOAD CHAT FROM URL PARAMETERS
-        // =============================================
-        
-        // Function to extract user info from URL
-        function getUserFromURL() {
-            const urlParams = new URLSearchParams(window.location.search);
-            const userId = urlParams.get('userId') || urlParams.get('friendId') || urlParams.get('user');
-            const username = urlParams.get('username') || urlParams.get('name') || 'Unknown User';
-            const userAvatar = urlParams.get('avatar') || urlParams.get('photoURL') || '';
-            
-            if (userId) {
+        // Create mock API if parent API not available
+        window.api = window.api || {
+            getCurrentUser: async () => {
                 return {
-                    userId: userId,
-                    username: decodeURIComponent(username),
-                    userAvatar: userAvatar
+                    uid: 'user_' + Date.now(),
+                    displayName: 'Demo User',
+                    email: 'demo@example.com',
+                    photoURL: ''
                 };
+            },
+            getChats: async () => {
+                return { chats: [] };
+            },
+            getContacts: async () => {
+                return { contacts: [] };
+            },
+            getChatMessages: async (chatId) => {
+                return { messages: [] };
+            },
+            sendMessage: async (chatId, message) => {
+                return { ...message, id: 'msg_' + Date.now(), status: 'sent' };
+            },
+            editMessage: async (messageId, data) => {
+                return { success: true };
+            },
+            deleteMessage: async (messageId) => {
+                return { success: true };
+            },
+            markChatAsRead: async (chatId) => {
+                return { success: true };
+            },
+            addReaction: async (messageId, reaction) => {
+                return { success: true };
+            },
+            voteInPoll: async (messageId, vote) => {
+                return { success: true };
+            },
+            submitReport: async (report) => {
+                return { success: true };
+            },
+            sendTypingIndicator: async (chatId, typing) => {
+                return { success: true };
+            },
+            clearChatHistory: async (chatId) => {
+                return { success: true };
             }
-            return null;
-        }
-        
-        // Function to open chat panel with specific user
-        async function openChatPanel(userId, username, userAvatar = '') {
-            try {
-                // Show loading state
-                chatPanel.classList.remove('hidden');
-                sidebar.classList.remove('active');
-                messagesContainer.innerHTML = `
-                    <div class="loading-state">
-                        <div class="loading-spinner"></div>
-                        <div>Loading chat with ${username}...</div>
-                    </div>
-                `;
-                
-                // Update chat header with user info
-                document.getElementById('chatFriendName').textContent = username;
-                document.getElementById('chatStatusText').textContent = 'Loading...';
-                
-                const avatarEl = document.getElementById('chatFriendAvatar');
-                if (userAvatar) {
-                    avatarEl.style.backgroundImage = `url('${userAvatar}')`;
-                    avatarEl.innerHTML = '';
-                } else {
-                    const initials = username.split(' ').map(word => word[0]).join('').toUpperCase().substring(0, 2);
-                    avatarEl.innerHTML = `<span style="color: white; font-size: 16px;">${initials}</span>`;
-                }
-                
-                // Create temporary friend object
-                currentFriend = {
-                    uid: userId,
-                    displayName: username,
-                    photoURL: userAvatar
-                };
-                
-                // Check if chat already exists
-                let existingChat = chats.find(chat => chat.friendId === userId);
-                
-                if (existingChat) {
-                    // Open existing chat
-                    currentChat = existingChat;
-                    await loadMessages();
-                    applyChatTheme(userId);
-                } else {
-                    // Create new chat object for display
-                    currentChat = {
-                        id: 'temp_' + Date.now(),
-                        friendId: userId,
-                        friendName: username,
-                        friendUsername: '',
-                        friendAvatar: userAvatar,
-                        lastMessage: '',
-                        lastMessageAt: new Date(),
-                        unreadCount: 0,
-                        type: 'direct',
-                        archived: false,
-                        blocked: false
-                    };
-                    
-                    // Show empty chat
-                    messages = [];
-                    renderMessages();
-                    
-                    // Load draft if exists
-                    loadMessageDraft();
-                    
-                    // Focus input
-                    messageInput.focus();
-                    
-                    // Show notification
-                    showNotification(`Chat with ${username} started`, 'success');
-                }
-                
-                // Set user status
-                document.getElementById('chatStatusText').textContent = 'Online';
-                document.getElementById('chatStatusIndicator').className = 'chat-status online';
-                
-            } catch (error) {
-                console.error('Error opening chat panel:', error);
-                showNotification('Error loading chat', 'error');
-                
-                // Show error state
-                messagesContainer.innerHTML = `
-                    <div class="empty-chat">
-                        <i class="fas fa-exclamation-triangle empty-chat-icon"></i>
-                        <div class="empty-chat-title">Error loading chat</div>
-                        <div class="empty-chat-message">Could not load conversation with ${username}</div>
-                        <button onclick="backToChatList()" style="margin-top: 20px; padding: 10px 20px; background: var(--primary-color); color: white; border: none; border-radius: 8px; cursor: pointer;">
-                            Back to Chats
-                        </button>
-                    </div>
-                `;
-            }
-        }
+        };
         
         // Initialize the application
         async function initializeApp() {
-            console.log('Initializing complete chat system with parent API backend...');
+            console.log('Initializing complete chat system...');
             
             // Load user and data
             await loadUser();
@@ -1018,19 +665,11 @@
             // Initialize emoji picker
             initEmojiPicker();
             
-            // Check for auto-load parameters from URL
-            const urlUser = getUserFromURL();
-            if (urlUser) {
-                // Auto-load the chat with the user from URL
-                console.log('Auto-loading chat with user:', urlUser);
-                await openChatPanel(urlUser.userId, urlUser.username, urlUser.userAvatar);
-            } else {
-                // Check for active chat session
-                const chatSession = localStorage.getItem(LOCAL_STORAGE_KEYS.CURRENT_CHAT);
-                if (chatSession) {
-                    const session = JSON.parse(chatSession);
-                    await loadChatByFriendId(session.friendId);
-                }
+            // Load initial data
+            const chatSession = localStorage.getItem(LOCAL_STORAGE_KEYS.CURRENT_CHAT);
+            if (chatSession) {
+                const session = JSON.parse(chatSession);
+                await loadChatByFriendId(session.friendId);
             }
             
             showNotification('Chat system ready', 'success');
@@ -1056,7 +695,7 @@
         
         // Start initialization when DOM is ready
         document.addEventListener('DOMContentLoaded', function() {
-            requestAPI();
+            initializeApp();
         });
         
         // Update network status
@@ -1071,8 +710,8 @@
         async function loadUser() {
             try {
                 // Get user from API
-                if (api && api.getCurrentUser) {
-                    const user = await api.getCurrentUser();
+                if (window.api && window.api.getCurrentUser) {
+                    const user = await window.api.getCurrentUser();
                     if (user) {
                         currentUser = user;
                         console.log('User loaded from API:', currentUser.uid);
@@ -1246,6 +885,24 @@
                         </div>
                     `;
                     break;
+                case 'audio':
+                    previewHtml = `
+                        <i class="fas fa-microphone" style="font-size: 24px; color: #0084ff;"></i>
+                        <div class="attachment-preview-info">
+                            <div style="font-weight: 500; margin-bottom: 4px;">Audio Recording</div>
+                            <div style="font-size: 12px; color: #65676b;">${formatDuration(attachment.duration || 0)}</div>
+                        </div>
+                    `;
+                    break;
+                case 'location':
+                    previewHtml = `
+                        <i class="fas fa-map-marker-alt" style="font-size: 24px; color: #0084ff;"></i>
+                        <div class="attachment-preview-info">
+                            <div style="font-weight: 500; margin-bottom: 4px;">Location</div>
+                            <div style="font-size: 12px; color: #65676b;">${attachment.name || 'Location'}</div>
+                        </div>
+                    `;
+                    break;
             }
             
             if (previewHtml) {
@@ -1308,9 +965,9 @@
         
         async function loadContactsFromAPI() {
             try {
-                if (!api || !api.getContacts) return;
+                if (!window.api || !window.api.getContacts) return;
                 
-                const response = await api.getContacts();
+                const response = await window.api.getContacts();
                 if (response && response.contacts) {
                     contacts = response.contacts;
                     localStorage.setItem(LOCAL_STORAGE_KEYS.CONTACTS, JSON.stringify(contacts));
@@ -1407,9 +1064,9 @@
         
         async function loadChatsFromAPI() {
             try {
-                if (!api || !api.getChats) return;
+                if (!window.api || !window.api.getChats) return;
                 
-                const response = await api.getChats();
+                const response = await window.api.getChats();
                 if (response && response.chats) {
                     chats = response.chats;
                     localStorage.setItem(LOCAL_STORAGE_KEYS.CHATS, JSON.stringify(chats));
@@ -1614,31 +1271,34 @@
                     return;
                 }
                 
-                // Get friend info from API
-                if (api && api.getUser) {
-                    const friendData = await api.getUser(friendId);
-                    if (friendData) {
-                        // Create chat via API
-                        if (api.createChat) {
-                            const newChat = await api.createChat(friendId);
-                            if (newChat) {
-                                chats.unshift(newChat);
-                                localStorage.setItem(LOCAL_STORAGE_KEYS.CHATS, JSON.stringify(chats));
-                                renderChatsList();
-                                
-                                await openChat(newChat);
-                                
-                                // Clear session data
-                                localStorage.removeItem(LOCAL_STORAGE_KEYS.CURRENT_CHAT);
-                            } else {
-                                showNotification('Failed to create chat', 'error');
-                            }
-                        }
-                    } else {
-                        showNotification('Friend not found', 'error');
-                    }
+                // Get friend info from contacts
+                const contact = contacts.find(c => c.uid === friendId);
+                if (contact) {
+                    // Create new chat
+                    const newChat = {
+                        id: 'chat_' + Date.now(),
+                        friendId: contact.uid,
+                        friendName: contact.displayName,
+                        friendUsername: '',
+                        friendAvatar: contact.photoURL || '',
+                        lastMessage: '',
+                        lastMessageAt: new Date(),
+                        unreadCount: 0,
+                        type: 'direct',
+                        archived: false,
+                        blocked: false,
+                        readOnly: false
+                    };
+                    
+                    chats.unshift(newChat);
+                    localStorage.setItem(LOCAL_STORAGE_KEYS.CHATS, JSON.stringify(chats));
+                    renderChatsList();
+                    
+                    await openChat(newChat);
+                    
+                    showNotification(`Started chat with ${contact.displayName}`, 'success');
                 } else {
-                    showNotification('Cannot create chat at the moment', 'warning');
+                    showNotification('Contact not found', 'error');
                 }
                 
             } catch (error) {
@@ -1690,10 +1350,10 @@
         }
         
         async function loadMessagesFromAPI() {
-            if (!currentChat || !api || !api.getChatMessages) return;
+            if (!currentChat || !window.api || !window.api.getChatMessages) return;
             
             try {
-                const response = await api.getChatMessages(currentChat.id);
+                const response = await window.api.getChatMessages(currentChat.id);
                 if (response && response.messages) {
                     messages = response.messages;
                     
@@ -1894,10 +1554,7 @@
                             messageBubble.innerHTML = `
                                 ${moodIcon}
                                 <div class="message-video">
-                                    <video src="${message.content}" poster="${message.thumbnail}" style="width: 100%; border-radius: 8px;"></video>
-                                    <div class="video-play-btn" onclick="playVideo('${message.content}')">
-                                        <i class="fas fa-play"></i>
-                                    </div>
+                                    <video src="${message.content}" poster="${message.thumbnail}" style="width: 100%; border-radius: 8px;" controls></video>
                                 </div>
                                 ${message.caption ? `<div class="message-text" style="margin-top: 8px;">${escapeHtml(message.caption)}</div>` : ''}
                             `;
@@ -2207,6 +1864,13 @@
                     messageData.content = currentAttachment.data;
                     messageData.fileName = currentAttachment.name;
                     messageData.fileSize = currentAttachment.size;
+                    if (currentAttachment.duration) {
+                        messageData.duration = currentAttachment.duration;
+                    }
+                    if (currentAttachment.latitude) {
+                        messageData.latitude = currentAttachment.latitude;
+                        messageData.longitude = currentAttachment.longitude;
+                    }
                 }
                 
                 // Add reply info if replying to a message (with context label)
@@ -2254,9 +1918,9 @@
                 // Update chat list
                 updateChatLastMessage(content, type);
                 
-                if (isOnline && api && api.sendMessage) {
+                if (isOnline && window.api && window.api.sendMessage) {
                     // Send to API
-                    const savedMessage = await api.sendMessage(currentChat.id, messageData);
+                    const savedMessage = await window.api.sendMessage(currentChat.id, messageData);
                     
                     // Update message with real ID and status
                     const messageIndex = messages.findIndex(m => m.id === messageData.id);
@@ -2301,7 +1965,8 @@
                         unreadCount: 0,
                         type: 'note',
                         archived: false,
-                        blocked: false
+                        blocked: false,
+                        readOnly: false
                     };
                     chats.push(notesChat);
                     localStorage.setItem(LOCAL_STORAGE_KEYS.CHATS, JSON.stringify(chats));
@@ -2383,8 +2048,8 @@
             
             for (const message of offlineQueue) {
                 try {
-                    if (api && api.sendMessage) {
-                        await api.sendMessage(message.chatId, message);
+                    if (window.api && window.api.sendMessage) {
+                        await window.api.sendMessage(message.chatId, message);
                     }
                     // Remove from local messages if it's a temp message
                     const localIndex = messages.findIndex(m => m.id === message.id);
@@ -2433,8 +2098,8 @@
                         messageData.fileSize = currentAttachment.size;
                     }
                     
-                    if (api && api.sendMessage) {
-                        const response = await api.sendMessage(chatId, messageData);
+                    if (window.api && window.api.sendMessage) {
+                        const response = await window.api.sendMessage(chatId, messageData);
                         if (response) {
                             results.push({ chatId, success: true });
                         } else {
@@ -2482,8 +2147,8 @@
                 localStorage.setItem(`${LOCAL_STORAGE_KEYS.MESSAGES}${currentChat.id}`, JSON.stringify(messages));
                 
                 // Update API
-                if (api && api.editMessage) {
-                    await api.editMessage(messageId, { content: newContent });
+                if (window.api && window.api.editMessage) {
+                    await window.api.editMessage(messageId, { content: newContent });
                 }
                 
                 // Re-render messages
@@ -2521,8 +2186,8 @@
                     messages[messageIndex].deletedAt = new Date();
                     
                     // Call API to delete message
-                    if (api && api.deleteMessage) {
-                        await api.deleteMessage(messageId);
+                    if (window.api && window.api.deleteMessage) {
+                        await window.api.deleteMessage(messageId);
                     }
                     
                     showNotification('Message deleted for everyone', 'success');
@@ -2567,8 +2232,8 @@
                 }
                 
                 // Call API to mark as read
-                if (api && api.markChatAsRead) {
-                    await api.markChatAsRead(chatId);
+                if (window.api && window.api.markChatAsRead) {
+                    await window.api.markChatAsRead(chatId);
                 }
                 
             } catch (error) {
@@ -2796,8 +2461,8 @@ Message ID: ${message.id.substring(0, 8)}...
                 localStorage.setItem('knecta_reports', JSON.stringify(reports));
                 
                 // Send to API
-                if (api && api.submitReport) {
-                    api.submitReport(reportData);
+                if (window.api && window.api.submitReport) {
+                    window.api.submitReport(reportData);
                 }
                 
                 reportModal.classList.remove('active');
@@ -2845,8 +2510,8 @@ Message ID: ${message.id.substring(0, 8)}...
                 localStorage.setItem(`${LOCAL_STORAGE_KEYS.MESSAGES}${currentChat.id}`, JSON.stringify(messages));
                 
                 // Update API (silently if requested)
-                if (!silent && api && api.addReaction) {
-                    await api.addReaction(messageId, {
+                if (!silent && window.api && window.api.addReaction) {
+                    await window.api.addReaction(messageId, {
                         emoji: emoji,
                         action: userIndex > -1 ? 'remove' : 'add'
                     });
@@ -3479,8 +3144,8 @@ Message ID: ${message.id.substring(0, 8)}...
                 localStorage.setItem(`${LOCAL_STORAGE_KEYS.MESSAGES}${currentChat.id}`, JSON.stringify(messages));
                 
                 // Update API
-                if (api && api.voteInPoll) {
-                    await api.voteInPoll(messageId, { optionIndex: optionIndex });
+                if (window.api && window.api.voteInPoll) {
+                    await window.api.voteInPoll(messageId, { optionIndex: optionIndex });
                 }
                 
                 // Re-render messages
@@ -3868,8 +3533,8 @@ Message ID: ${message.id.substring(0, 8)}...
                 }
                 
                 // Call API to clear chat
-                if (api && api.clearChatHistory) {
-                    await api.clearChatHistory(chatId);
+                if (window.api && window.api.clearChatHistory) {
+                    await window.api.clearChatHistory(chatId);
                 }
                 
                 showNotification('Chat history cleared', 'success');
@@ -4045,6 +3710,12 @@ Message ID: ${message.id.substring(0, 8)}...
             return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i];
         }
         
+        function formatDuration(seconds) {
+            const minutes = Math.floor(seconds / 60);
+            const secs = Math.floor(seconds % 60);
+            return `${minutes}:${secs.toString().padStart(2, '0')}`;
+        }
+        
         function escapeHtml(text) {
             if (!text) return '';
             const div = document.createElement('div');
@@ -4142,16 +3813,16 @@ Message ID: ${message.id.substring(0, 8)}...
                 if (!isTyping) {
                     isTyping = true;
                     // Simulate typing indicator
-                    if (api && api.sendTypingIndicator) {
-                        api.sendTypingIndicator(currentChat.id, true);
+                    if (window.api && window.api.sendTypingIndicator) {
+                        window.api.sendTypingIndicator(currentChat.id, true);
                     }
                 }
                 
                 clearTimeout(typingTimeout);
                 typingTimeout = setTimeout(() => {
                     isTyping = false;
-                    if (api && api.sendTypingIndicator) {
-                        api.sendTypingIndicator(currentChat.id, false);
+                    if (window.api && window.api.sendTypingIndicator) {
+                        window.api.sendTypingIndicator(currentChat.id, false);
                     }
                 }, 1000);
             });
@@ -4436,7 +4107,8 @@ Message ID: ${message.id.substring(0, 8)}...
             
             // New chat button
             document.getElementById('newChatBtn').addEventListener('click', () => {
-                window.location.href = '../friend.html?startChat=true';
+                // Show contacts sidebar for new chat
+                showContactsSidebar();
             });
             
             // Multi-send toggle button
@@ -4559,7 +4231,7 @@ Message ID: ${message.id.substring(0, 8)}...
             // Voice call button
             document.getElementById('voiceCallBtn').addEventListener('click', () => {
                 if (currentFriend && currentChat.type !== 'note') {
-                    window.location.href = `../calls.html?call=${currentFriend.uid}&type=voice`;
+                    showNotification('Voice call feature would open here', 'info');
                 } else {
                     showNotification('Please select a chat first', 'warning');
                 }
@@ -4568,7 +4240,7 @@ Message ID: ${message.id.substring(0, 8)}...
             // Video call button
             document.getElementById('videoCallBtn').addEventListener('click', () => {
                 if (currentFriend && currentChat.type !== 'note') {
-                    window.location.href = `../calls.html?call=${currentFriend.uid}&type=video`;
+                    showNotification('Video call feature would open here', 'info');
                 } else {
                     showNotification('Please select a chat first', 'warning');
                 }

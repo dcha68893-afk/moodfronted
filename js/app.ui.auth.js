@@ -2,8 +2,7 @@
 // UPDATED: Fixed response handling - no more response.text() or response.json() calls
 // FIXED: TypeError: response.text is not a function - api.js returns parsed JSON
 // FIXED: All API response handling now treats response as already-parsed JSON
-// FIXED: Login form submission now properly sends POST request to backend
-// URGENT FIX: Direct form binding to ensure login form submits
+// URGENT FIX: Persistent login form binding with event delegation
 
 // ============================================================================
 // PREVENT DOUBLE INITIALIZATION
@@ -364,20 +363,48 @@ async function checkAutoLogin() {
 // ============================================================================
 
 /**
- * SIMPLIFIED LOGIN HANDLER - DIRECT FORM BINDING
- * This fixes the issue where form submission wasn't triggering
+ * UNIVERSAL LOGIN HANDLER - Works even if forms are recreated
  */
 async function handleLoginSubmit(event) {
-  console.log('✅ LOGIN SUBMIT HANDLER TRIGGERED - FIXED VERSION');
-  event.preventDefault();
-  event.stopPropagation();
+  console.log('🔐 LOGIN SUBMIT HANDLER TRIGGERED - UNIVERSAL');
+  
+  // Prevent default form submission
+  if (event && event.preventDefault) {
+    event.preventDefault();
+    event.stopPropagation();
+  }
   
   console.log('📋 Collecting form data...');
   
-  // Get the form that was submitted
-  const form = event.target;
+  // Get the form - handle both event target and direct form finding
+  let form;
+  if (event && event.target && event.target.tagName === 'FORM') {
+    form = event.target;
+  } else {
+    // Find the login form dynamically
+    form = document.getElementById('login-form');
+    if (!form) {
+      // Try to find any form with login inputs
+      const forms = document.querySelectorAll('form');
+      for (const f of forms) {
+        if (f.querySelector('input[type="email"], input[name="email"], input[name="identifier"]') &&
+            f.querySelector('input[type="password"]')) {
+          form = f;
+          break;
+        }
+      }
+    }
+  }
   
-  // Find form inputs - try multiple selectors to be safe
+  if (!form) {
+    console.error('❌ No login form found on page');
+    updateNetworkStatusUI('offline', 'Login form not found');
+    return;
+  }
+  
+  console.log('✅ Found form:', form.id || 'no-id', form.className);
+  
+  // Find form inputs - try multiple selectors
   let identifierInput = form.querySelector('input[name="identifier"]') ||
                        form.querySelector('input[name="email"]') ||
                        form.querySelector('input[name="username"]') ||
@@ -387,21 +414,13 @@ async function handleLoginSubmit(event) {
   let passwordInput = form.querySelector('input[name="password"]') ||
                      form.querySelector('input[type="password"]');
   
-  console.log('🔍 Found inputs:', {
-    identifierInput: identifierInput ? identifierInput.name || identifierInput.type : 'NOT FOUND',
-    passwordInput: passwordInput ? passwordInput.name || passwordInput.type : 'NOT FOUND'
+  console.log('🔍 Inputs found:', {
+    identifier: identifierInput ? identifierInput.name || identifierInput.type : 'NOT FOUND',
+    password: passwordInput ? passwordInput.name || passwordInput.type : 'NOT FOUND'
   });
   
   if (!identifierInput || !passwordInput) {
-    console.error('❌ Form inputs not found. Searching all inputs in form...');
-    const allInputs = form.querySelectorAll('input');
-    console.log('All inputs in form:', Array.from(allInputs).map(input => ({
-      name: input.name,
-      type: input.type,
-      id: input.id,
-      className: input.className
-    })));
-    
+    console.error('❌ Form inputs not found');
     updateNetworkStatusUI('offline', 'Login form configuration error');
     return;
   }
@@ -409,7 +428,7 @@ async function handleLoginSubmit(event) {
   const identifier = identifierInput.value.trim();
   const password = passwordInput.value;
   
-  console.log('📝 Form data collected:', { 
+  console.log('📝 Form data:', { 
     identifier: identifier ? identifier.substring(0, 3) + '...' : 'empty', 
     password: password ? '***' : 'empty' 
   });
@@ -422,15 +441,11 @@ async function handleLoginSubmit(event) {
   // Check if this identifier is currently blocked
   const blockInfo = LoginAttempts.isBlocked(identifier);
   if (blockInfo) {
-    // Show countdown timer
     showLoginAttemptCountdown(blockInfo);
-    
-    // Update UI message based on attempt count
     let message = 'Account temporarily locked. Please wait ';
     if (blockInfo.attemptCount >= LoginAttempts.maxAttempts) {
       message += 'and consider using password recovery.';
     }
-    
     updateNetworkStatusUI('offline', message);
     return;
   }
@@ -448,7 +463,7 @@ async function handleLoginSubmit(event) {
   if (countdownEl) countdownEl.classList.add('hidden');
   
   try {
-    // STRICT REQUIREMENT: Check if API is available
+    // Check if API is available
     if (!window.api || typeof window.api !== 'function') {
       console.error('❌ API helper function not available');
       throw new Error('Authentication service not available. Please check your connection.');
@@ -462,31 +477,26 @@ async function handleLoginSubmit(event) {
       password: password
     };
     
-    console.log('📦 Login payload:', { 
-      identifier: identifier,
-      password: '***'
-    });
+    console.log('📦 Login payload prepared');
     
-    // Call api.js - it returns parsed JSON
-    console.log('🔌 Calling window.api("/auth/login", { method: "POST", body: loginData })');
-    
+    // Call api.js
     const response = await window.api('/auth/login', {
       method: 'POST',
       body: loginData
     });
     
-    console.log('✅ Login API response received:', response);
+    console.log('✅ Login API response received:', response ? 'Success' : 'No response');
     
-    // Check if response indicates success (handle both formats)
+    // Check if response indicates success
     if (response && (response.success === true || response.ok === true || response.status === 'success')) {
-      console.log('🎉 LOGIN SUCCESS: Valid response received');
+      console.log('🎉 LOGIN SUCCESS');
       
       // Extract token and user from response
       const token = response.token || response.data?.token;
       const user = response.user || response.data?.user;
       
       if (!token || !user) {
-        console.error('❌ Invalid login response - missing token or user:', response);
+        console.error('❌ Invalid login response - missing token or user');
         throw new Error('Invalid login response: missing token or user data');
       }
       
@@ -503,7 +513,7 @@ async function handleLoginSubmit(event) {
       // Reset login attempts for this identifier
       LoginAttempts.resetAttempts(identifier);
       
-      // STRICT REQUIREMENT: Only show success AFTER API confirms
+      // Show success message
       updateNetworkStatusUI('online', 'Login successful!');
       
       // Set token in api.js if API_COORDINATION exists
@@ -516,7 +526,7 @@ async function handleLoginSubmit(event) {
         window.AppState.user = user;
       }
       
-      // FORCE POST-LOGIN STATE UPDATE
+      // Dispatch auth:login event
       document.dispatchEvent(
         new CustomEvent('auth:login', { detail: user })
       );
@@ -525,7 +535,7 @@ async function handleLoginSubmit(event) {
       triggerUISuccessFlow(user);
       
       // REDIRECT AFTER SUCCESS
-      console.log('🔄 Redirecting to chat.html in 1 second...');
+      console.log('🔄 Redirecting to chat.html...');
       setTimeout(() => {
         window.location.href = 'chat.html';
       }, 1000);
@@ -538,7 +548,7 @@ async function handleLoginSubmit(event) {
     }
     
   } catch (error) {
-    console.error('❌ LOGIN FAILED:', error);
+    console.error('❌ LOGIN FAILED:', error.message);
     
     // Record failed attempt
     const attempt = LoginAttempts.recordAttempt(identifier);
@@ -582,26 +592,43 @@ async function handleLoginSubmit(event) {
 }
 
 /**
- * Direct login button click handler as backup
+ * Event delegation for login form - handles dynamically created forms
  */
-async function handleLoginButtonClick(event) {
-  console.log('🔄 Direct login button click handler triggered');
+function handleLoginFormClick(event) {
+  console.log('🎯 EVENT DELEGATION: Click detected');
   
-  // Find the login form
-  const loginForm = document.getElementById('login-form');
-  if (!loginForm) {
-    console.error('❌ Login form not found');
-    return;
+  // Check if this is a submit button click
+  const target = event.target;
+  if (target.tagName === 'BUTTON' && 
+      (target.type === 'submit' || 
+       target.getAttribute('type') === 'submit' ||
+       target.textContent.toLowerCase().includes('login'))) {
+    
+    console.log('🎯 Submit button clicked via event delegation');
+    
+    // Find the parent form
+    let form = target.closest('form');
+    if (!form) {
+      // Look for any form with login inputs
+      const forms = document.querySelectorAll('form');
+      for (const f of forms) {
+        if (f.querySelector('input[type="email"], input[name="email"], input[name="identifier"]') &&
+            f.querySelector('input[type="password"]')) {
+          form = f;
+          break;
+        }
+      }
+    }
+    
+    if (form) {
+      console.log('🎯 Found form via button click:', form.id || 'no-id');
+      event.preventDefault();
+      event.stopPropagation();
+      
+      // Trigger the login handler
+      handleLoginSubmit({ target: form });
+    }
   }
-  
-  // Create a synthetic submit event
-  const submitEvent = new Event('submit', {
-    bubbles: true,
-    cancelable: true
-  });
-  
-  // Trigger the form submission
-  loginForm.dispatchEvent(submitEvent);
 }
 
 /**
@@ -1262,7 +1289,7 @@ function handleBrowserOffline() {
  * Shows login form and hides other auth forms
  */
 function showLoginForm() {
-  console.log('Showing login form');
+  console.log('🔄 Showing login form');
   
   // Hide other forms
   const registerForm = document.getElementById('register-form');
@@ -1274,6 +1301,12 @@ function showLoginForm() {
   const loginForm = document.getElementById('login-form');
   if (loginForm) {
     loginForm.style.display = 'block';
+    
+    // Re-bind the submit handler when form is shown
+    setTimeout(() => {
+      bindLoginForm();
+    }, 100);
+    
     // Focus on first input
     const emailInput = loginForm.querySelector('input[type="email"]');
     if (emailInput) emailInput.focus();
@@ -1358,63 +1391,30 @@ function updateAuthButtonStates(activeForm) {
 }
 
 // ============================================================================
-// SETUP AUTH FORM EVENT LISTENERS WITH SUBMIT HANDLERS - DIRECT FIX
+// PERSISTENT FORM BINDING WITH EVENT DELEGATION
 // ============================================================================
 
 /**
- * Direct form binding - ensures login form submits properly
+ * Binds login form with event delegation for persistence
  */
-function setupLoginFormDirectBinding() {
-  console.log('🔧 DIRECT FIX: Setting up login form binding...');
+function bindLoginForm() {
+  console.log('🔧 Binding login form with event delegation...');
   
   const loginForm = document.getElementById('login-form');
   if (!loginForm) {
-    console.error('❌ DIRECT FIX: Login form not found with ID #login-form');
-    
-    // Try alternative selectors
-    const alternativeForms = document.querySelectorAll('form');
-    console.log('All forms on page:', alternativeForms.length);
-    alternativeForms.forEach((form, i) => {
-      console.log(`Form ${i}:`, {
-        id: form.id,
-        className: form.className,
-        action: form.action,
-        method: form.method
-      });
-    });
-    
+    console.log('⚠️ Login form not found yet, will retry');
     return;
   }
   
-  console.log('✅ DIRECT FIX: Found login form:', {
-    id: loginForm.id,
-    className: loginForm.className,
-    action: loginForm.action,
-    method: loginForm.method,
-    childElements: loginForm.children.length
-  });
+  console.log('✅ Found login form, setting up event delegation');
   
-  // Remove ALL existing submit listeners
-  const newForm = loginForm.cloneNode(true);
-  loginForm.parentNode.replaceChild(newForm, loginForm);
+  // Remove any existing listeners
+  loginForm.removeEventListener('submit', handleLoginSubmit);
   
-  // Get the new form reference
-  const freshLoginForm = document.getElementById('login-form');
+  // Add the submit handler
+  loginForm.addEventListener('submit', handleLoginSubmit);
   
-  // Add submit handler DIRECTLY
-  freshLoginForm.addEventListener('submit', handleLoginSubmit);
-  
-  console.log('✅ DIRECT FIX: Login form submit handler bound DIRECTLY');
-  
-  // Also bind to any submit button as backup
-  const submitButton = freshLoginForm.querySelector('button[type="submit"]');
-  if (submitButton) {
-    submitButton.addEventListener('click', function(e) {
-      console.log('🔄 Submit button clicked directly');
-      e.preventDefault();
-      freshLoginForm.dispatchEvent(new Event('submit'));
-    });
-  }
+  console.log('✅ Login form bound successfully');
 }
 
 /**
@@ -1449,8 +1449,18 @@ function setupAuthFormListeners() {
     });
   }
   
-  // URGENT FIX: Use direct binding for login form
-  setupLoginFormDirectBinding();
+  // Bind login form with event delegation
+  bindLoginForm();
+  
+  // Set up periodic form binding to handle dynamic form changes
+  setInterval(() => {
+    const loginForm = document.getElementById('login-form');
+    if (loginForm && !loginForm.__loginBound) {
+      console.log('🔄 Periodic check: Binding login form');
+      bindLoginForm();
+      loginForm.__loginBound = true;
+    }
+  }, 2000);
   
   // Register form submit handler (unchanged)
   const registerForm = document.getElementById('register-form');
@@ -1482,7 +1492,10 @@ function setupAuthFormListeners() {
     });
   });
   
-  console.log('Auth form event listeners set up');
+  // Set up event delegation at document level as backup
+  document.addEventListener('click', handleLoginFormClick);
+  
+  console.log('✅ Auth form event listeners set up with event delegation');
 }
 
 // ============================================================================
@@ -1528,6 +1541,20 @@ window.resetLoginAttempts = function(identifier) {
     LoginAttempts.attempts = {};
     LoginAttempts.save();
     console.log('Reset all login attempts');
+  }
+};
+
+/**
+ * Manual login trigger for testing
+ */
+window.triggerLoginManually = function() {
+  console.log('🔧 Manual login trigger called');
+  const form = document.getElementById('login-form');
+  if (form) {
+    console.log('✅ Found form, triggering submit');
+    form.dispatchEvent(new Event('submit'));
+  } else {
+    console.error('❌ No login form found');
   }
 };
 
@@ -1750,35 +1777,6 @@ async function checkSessionOnLoad() {
 }
 
 // ============================================================================
-// DIRECT FORM TEST FUNCTION
-// ============================================================================
-
-/**
- * Test function to manually trigger login
- */
-window.testLoginManually = async function(email, password) {
-  console.log('🧪 MANUAL LOGIN TEST:', { email, password: '***' });
-  
-  const loginData = {
-    identifier: email,
-    password: password
-  };
-  
-  try {
-    const response = await window.api('/auth/login', {
-      method: 'POST',
-      body: loginData
-    });
-    
-    console.log('🧪 MANUAL TEST RESPONSE:', response);
-    return response;
-  } catch (error) {
-    console.error('🧪 MANUAL TEST ERROR:', error);
-    throw error;
-  }
-};
-
-// ============================================================================
 // INITIALIZATION - ENHANCED
 // ============================================================================
 
@@ -1927,4 +1925,4 @@ function initialize() {
 // Start initialization
 initialize();
 
-console.log('app.ui.auth.js - STRICT API-DRIVEN Auth UI and network status module loaded - LOGIN FORM SUBMISSION DIRECT FIX APPLIED');
+console.log('app.ui.auth.js - STRICT API-DRIVEN Auth UI and network status module loaded - PERSISTENT LOGIN FIX APPLIED');

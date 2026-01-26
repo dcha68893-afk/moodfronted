@@ -7,6 +7,7 @@
 // FIXED: Wrapped in IIFE to avoid global scope pollution and conflicts
 // FIXED: Global collision prevention - removed all isOnline declarations
 // ENHANCED: Reduced console noise for periodic network polling - only log on status changes
+// UPDATED: Auth restoration logic - only mark user as authenticated if /auth/me succeeds
 
 (function () {
   // ============================================================================
@@ -549,6 +550,62 @@
       
       // If api.js not ready or backend status unknown, rely on browser status
       return (window.AppNetwork?.isOnline?.() ?? navigator.onLine) ? 'online' : 'offline';
+    },
+    
+    // NEW: Validate authentication via /auth/me endpoint
+    checkAuthMe: async function() {
+      try {
+        // Wait for API to be ready
+        await this.waitForApi();
+        
+        if (!this.apiReady || !window.MoodChatConfig.api) {
+          console.log('Cannot check auth: api.js not ready');
+          return { valid: false, reason: 'API service not available' };
+        }
+        
+        // Check if we have a JWT token
+        if (!JWT_VALIDATION.hasToken()) {
+          console.log('No JWT token found for auth check');
+          return { valid: false, reason: 'No token found' };
+        }
+        
+        const token = JWT_VALIDATION.getToken();
+        
+        try {
+          console.log('🔄 Validating authentication via /auth/me endpoint...');
+          const response = await this.safeApiCall('/auth/me', {
+            method: 'GET',
+            headers: {
+              'Authorization': `Bearer ${token}`
+            },
+            timeout: 10000 // 10 second timeout
+          });
+          
+          if (response && response.success && response.data) {
+            console.log('✅ Authentication validation successful');
+            return { 
+              valid: true, 
+              user: response.data,
+              tokenValid: true
+            };
+          } else {
+            console.log('⚠️ Authentication validation failed:', response);
+            return { 
+              valid: false, 
+              reason: response?.message || 'Invalid response from server'
+            };
+          }
+        } catch (apiError) {
+          console.log('API request failed for auth validation:', apiError);
+          return { 
+            valid: false, 
+            reason: 'API validation failed: ' + apiError.message 
+          };
+        }
+      } catch (error) {
+        console.error('Auth validation error:', error);
+        return { valid: false, reason: error.message || 'Validation failed' };
+      }
     }
   };
 
@@ -626,31 +683,8 @@
       }
       
       try {
-        // Wait for api.js to be ready
-        await API_COORDINATION.waitForApi();
-        
-        if (API_COORDINATION.isApiAvailable() && window.MoodChatConfig.backendReachable) {
-          try {
-            const response = await API_COORDINATION.safeApiCall('/auth/me', {
-              method: 'GET',
-              headers: {
-                'Authorization': `Bearer ${token}`
-              }
-            });
-            
-            if (response && response.success) {
-              return { valid: true, user: response.data };
-            } else {
-              return { valid: false, reason: 'Invalid token response' };
-            }
-          } catch (apiError) {
-            console.log('API request failed:', apiError);
-            return { valid: false, reason: 'API validation failed: ' + apiError.message };
-          }
-        } else {
-          // api.js not available or backend unreachable
-          return { valid: false, reason: 'API service not available or backend unreachable' };
-        }
+        // Use the new checkAuthMe function
+        return await API_COORDINATION.checkAuthMe();
       } catch (error) {
         console.error('Token validation error:', error);
         return { valid: false, reason: error.message || 'Validation failed' };
@@ -781,9 +815,10 @@
   // Track startup state
   let appStartupPerformed = false;
   let backgroundValidationScheduled = false;
+  let authValidationComplete = false; // NEW: Track if auth validation is complete
 
   // ============================================================================
-  // INSTANT AUTH STATE RESTORATION (CRITICAL - RUNS FIRST)
+  // INSTANT AUTH STATE RESTORATION (CRITICAL - RUNS FIRST) - UPDATED
   // ============================================================================
 
   function restoreAuthStateInstantly() {
@@ -805,58 +840,16 @@
       return false;
     }
     
-    // FIRST: Check for JWT token - if exists, UI loads instantly
-    if (JWT_VALIDATION.hasToken()) {
-      console.log('✓ JWT token found, allowing instant UI load');
-      
-      // Create a provisional user from token (fast, non-blocking)
-      try {
-        const token = JWT_VALIDATION.getToken();
-        const tokenParts = token.split('.');
-        if (tokenParts.length === 3) {
-          const payload = JSON.parse(atob(tokenParts[1]));
-          
-          const provisionalUser = {
-            uid: payload.sub || payload.id || payload._id || 'temp_user_' + Date.now(),
-            email: payload.email || 'user@example.com',
-            displayName: payload.name || payload.username || 'User',
-            photoURL: payload.avatar || `https://ui-avatars.com/api/?name=User&background=8b5cf6&color=fff`,
-            emailVerified: payload.emailVerified || false,
-            isOffline: false,
-            providerId: 'api',
-            refreshToken: token,
-            getIdToken: () => Promise.resolve(token),
-            isProvisional: true, // Mark as provisional until background validation
-            fromCache: true // Mark that this user was created from cached token
-          };
-          
-          // Set user immediately
-          window.currentUser = provisionalUser;
-          authStateRestored = true;
-          
-          // Setup user isolation
-          USER_DATA_ISOLATION.setCurrentUser(provisionalUser.uid);
-          DATA_CACHE.setCurrentUser(provisionalUser.uid);
-          SETTINGS_SERVICE.setCurrentUser(provisionalUser.uid);
-          
-          // Update global state
-          updateGlobalAuthState(provisionalUser);
-          
-          console.log('✓ Provisional user created from JWT token');
-          return true;
-        }
-      } catch (error) {
-        console.log('Error parsing JWT token for provisional user:', error);
-      }
-    }
+    // NEW: If token exists, we need to validate it before assuming logged-in state
+    // DO NOT create provisional user from token alone
     
-    // SECOND: Check cached auth state (fastest)
+    // Check for cached auth state (fastest) - but only use if we've already validated
     const cachedAuthState = localStorage.getItem('moodchat-auth-state');
     if (cachedAuthState) {
       try {
         const authData = JSON.parse(cachedAuthState);
-        if (authData && authData.isAuthenticated && authData.user) {
-          console.log('✓ Using cached auth state for instant UI');
+        if (authData && authData.isAuthenticated && authData.user && authData.validated === true) {
+          console.log('✓ Using validated cached auth state for instant UI');
           
           // Create user object from cached data
           const user = {
@@ -869,7 +862,8 @@
             providerId: authData.user.authMethod === 'device' ? 'device' : 'api',
             refreshToken: 'cached-token',
             getIdToken: () => Promise.resolve('cached-token'),
-            fromCache: true // Mark that this user was created from cache
+            fromCache: true, // Mark that this user was created from cache
+            validated: true // NEW: Mark as validated
           };
           
           // Set user immediately
@@ -884,7 +878,7 @@
           // Update global state
           updateGlobalAuthState(user);
           
-          console.log('✓ Auth state restored instantly from cache');
+          console.log('✓ Auth state restored instantly from validated cache');
           return true;
         }
       } catch (error) {
@@ -892,7 +886,7 @@
       }
     }
     
-    // THIRD: Check device-based session
+    // Check device-based session
     const storedSession = localStorage.getItem('moodchat_device_session');
     if (storedSession) {
       try {
@@ -943,8 +937,8 @@
       }
     }
     
-    // FOURTH: No auth data at all - check if we should redirect
-    console.log('No auth data found in any cache');
+    // No auth data at all - check if we should redirect
+    console.log('No validated auth data found in any cache');
     
     // Only suggest redirect if we're on a main page (not iframe)
     if (window === window.top && !window.location.pathname.includes('chat.html') &&
@@ -960,9 +954,140 @@
       }
     }
     
-    // FIFTH: Create offline user for UI (non-blocking)
+    // Create offline user for UI (non-blocking)
     createOfflineUserForUI();
     return true;
+  }
+
+  // NEW: Enhanced auth validation function that validates tokens before marking user as authenticated
+  async function validateAuthOnStartup() {
+    console.log('🔄 Starting authentication validation on startup...');
+    
+    // Check if we have a token
+    if (!JWT_VALIDATION.hasToken()) {
+      console.log('No JWT token found, auth validation not needed');
+      authValidationComplete = true;
+      return false;
+    }
+    
+    // Wait for API to be ready first
+    console.log('Waiting for API to be ready for auth validation...');
+    const apiAvailable = await API_COORDINATION.waitForApi();
+    
+    if (!apiAvailable) {
+      console.log('API not available, cannot validate auth');
+      authValidationComplete = true;
+      return false;
+    }
+    
+    // Wait for backend health check if needed
+    if (window.MoodChatConfig.networkStatus === 'checking') {
+      console.log('Waiting for backend health check before auth validation...');
+      await new Promise(resolve => {
+        const checkInterval = setInterval(() => {
+          if (window.MoodChatConfig.networkStatus !== 'checking') {
+            clearInterval(checkInterval);
+            resolve();
+          }
+        }, 100);
+        
+        // Timeout after 5 seconds
+        setTimeout(() => {
+          clearInterval(checkInterval);
+          resolve();
+        }, 5000);
+      });
+    }
+    
+    // Check if backend is reachable
+    if (window.MoodChatConfig.backendReachable !== true) {
+      console.log('Backend not reachable, cannot validate auth');
+      authValidationComplete = true;
+      return false;
+    }
+    
+    try {
+      // Call /auth/me to validate the token
+      console.log('🔐 Validating authentication via API...');
+      const validation = await API_COORDINATION.checkAuthMe();
+      
+      if (validation.valid && validation.user) {
+        console.log('✅ Authentication validation successful on startup');
+        
+        // Create validated user object
+        const validatedUser = {
+          uid: validation.user.id || validation.user._id || validation.user.sub,
+          email: validation.user.email || 'user@example.com',
+          displayName: validation.user.name || validation.user.username || 'User',
+          photoURL: validation.user.avatar || `https://ui-avatars.com/api/?name=User&background=8b5cf6&color=fff`,
+          emailVerified: validation.user.emailVerified || false,
+          isOffline: false,
+          providerId: 'api',
+          refreshToken: JWT_VALIDATION.getToken(),
+          getIdToken: () => Promise.resolve(JWT_VALIDATION.getToken()),
+          ...validation.user,
+          validated: true // Mark as validated
+        };
+        
+        // Set user
+        window.currentUser = validatedUser;
+        authStateRestored = true;
+        
+        // Setup user isolation
+        USER_DATA_ISOLATION.setCurrentUser(validatedUser.uid);
+        DATA_CACHE.setCurrentUser(validatedUser.uid);
+        SETTINGS_SERVICE.setCurrentUser(validatedUser.uid);
+        
+        // Update global state
+        updateGlobalAuthState(validatedUser);
+        
+        // Update cached auth state with validation flag
+        const authData = {
+          type: 'auth-state',
+          user: {
+            uid: validatedUser.uid,
+            email: validatedUser.email,
+            displayName: validatedUser.displayName,
+            photoURL: validatedUser.photoURL,
+            emailVerified: validatedUser.emailVerified || false,
+            authMethod: 'api'
+          },
+          isAuthenticated: true,
+          validated: true, // NEW: Mark as validated
+          timestamp: new Date().toISOString()
+        };
+        
+        localStorage.setItem('moodchat-auth-state', JSON.stringify(authData));
+        
+        console.log('✓ User authenticated and validated on startup');
+        authValidationComplete = true;
+        return true;
+      } else {
+        console.log('❌ Authentication validation failed:', validation.reason);
+        
+        // Clear invalid token
+        JWT_VALIDATION.clearToken();
+        
+        // Clear cached auth state
+        localStorage.removeItem('moodchat-auth-state');
+        
+        // Create offline user
+        createOfflineUserForUI();
+        
+        console.log('✓ Invalid token cleared, using offline user');
+        authValidationComplete = true;
+        return false;
+      }
+    } catch (error) {
+      console.log('❌ Auth validation error:', error);
+      
+      // On error, create offline user but keep token (might be network issue)
+      createOfflineUserForUI();
+      
+      console.log('✓ Auth validation failed, using offline user');
+      authValidationComplete = true;
+      return false;
+    }
   }
 
   // Create offline user for UI (non-blocking)
@@ -1002,7 +1127,7 @@
   }
 
   // ============================================================================
-  // BACKGROUND VALIDATION (NON-BLOCKING)
+  // BACKGROUND VALIDATION (NON-BLOCKING) - UPDATED
   // ============================================================================
 
   function scheduleBackgroundValidation() {
@@ -1016,6 +1141,12 @@
     // Wait for UI to load first, then validate
     setTimeout(() => {
       console.log('Starting background token validation...');
+      
+      // Skip if we already did auth validation on startup
+      if (authValidationComplete && window.currentUser && window.currentUser.validated) {
+        console.log('Auth already validated on startup, skipping background validation');
+        return;
+      }
       
       // Perform validation in background
       JWT_VALIDATION.performBackgroundAuthCheck()
@@ -1034,11 +1165,30 @@
               providerId: 'api',
               refreshToken: JWT_VALIDATION.getToken(),
               getIdToken: () => Promise.resolve(JWT_VALIDATION.getToken()),
-              ...validationResult.user
+              ...validationResult.user,
+              validated: true
             };
             
             // Update auth state silently
             handleAuthStateChange(validatedUser);
+            
+            // Update cached auth state with validation flag
+            const authData = {
+              type: 'auth-state',
+              user: {
+                uid: validatedUser.uid,
+                email: validatedUser.email,
+                displayName: validatedUser.displayName,
+                photoURL: validatedUser.photoURL,
+                emailVerified: validatedUser.emailVerified || false,
+                authMethod: 'api'
+              },
+              isAuthenticated: true,
+              validated: true,
+              timestamp: new Date().toISOString()
+            };
+            
+            localStorage.setItem('moodchat-auth-state', JSON.stringify(authData));
             
             // Broadcast silent update
             broadcastSilentAuthUpdate(validatedUser);
@@ -1230,10 +1380,17 @@
       }, 300);
     }
     
-    // STEP 5: Restore auth state INSTANTLY from cache (NON-BLOCKING)
+    // STEP 5: NEW - Validate authentication before restoring state
+    console.log('🔄 Validating authentication before restoring state...');
+    
+    // Run auth validation in parallel with other startup tasks
+    const authValidationPromise = validateAuthOnStartup();
+    
+    // STEP 6: Restore auth state INSTANTLY from cache (NON-BLOCKING)
+    // This will only work if we have device session or validated cache
     const authRestored = restoreAuthStateInstantly();
     
-    // STEP 6: Initialize core services (non-blocking)
+    // STEP 7: Initialize core services (non-blocking)
     setTimeout(() => {
       // Initialize settings
       SETTINGS_SERVICE.initialize();
@@ -1256,12 +1413,20 @@
       console.log('✓ Core services initialized');
     }, 50);
     
-    // STEP 7: Initialize UI IMMEDIATELY (NON-BLOCKING)
-    setTimeout(() => {
-      initializeAppUI();
-    }, 100);
+    // STEP 8: Initialize UI IMMEDIATELY (NON-BLOCKING) - but wait for auth validation
+    // Wait for auth validation to complete before fully initializing UI
+    authValidationPromise.then(() => {
+      setTimeout(() => {
+        initializeAppUI();
+      }, 100);
+    }).catch(() => {
+      // Even if auth validation fails, still initialize UI with offline user
+      setTimeout(() => {
+        initializeAppUI();
+      }, 100);
+    });
     
-    // STEP 8: Schedule background validation ONLY if backend becomes reachable
+    // STEP 9: Schedule background validation ONLY if backend becomes reachable
     // This will be triggered by the health check completion event
     window.addEventListener('moodchat-backend-ready', (event) => {
       if (event.detail.reachable && JWT_VALIDATION.hasToken()) {
@@ -1305,9 +1470,9 @@
       document.body.appendChild(contentArea);
     }
     
-    // Load default page (non-blocking) - ONLY if authenticated
+    // Load default page (non-blocking) - ONLY if authenticated AND validated
     setTimeout(() => {
-      if (window.currentUser && !window.currentUser.isOfflineMode) {
+      if (window.currentUser && !window.currentUser.isOfflineMode && window.currentUser.validated) {
         loadPage(APP_CONFIG.defaultPage);
       } else {
         // Show offline or login page
@@ -1315,9 +1480,9 @@
       }
     }, 150);
     
-    // Set default tab (non-blocking) - ONLY if authenticated
+    // Set default tab (non-blocking) - ONLY if authenticated AND validated
     setTimeout(() => {
-      if (window.currentUser && !window.currentUser.isOfflineMode) {
+      if (window.currentUser && !window.currentUser.isOfflineMode && window.currentUser.validated) {
         try {
           const groupsTab = document.querySelector(TAB_CONFIG.groups.container);
           if (groupsTab) {
@@ -1340,19 +1505,20 @@
     authStateRestored = true;
     broadcastAuthReady();
     
-    // Load cached data instantly - ONLY if authenticated
+    // Load cached data instantly - ONLY if authenticated AND validated
     setTimeout(() => {
-      if (window.currentUser && !window.currentUser.isOfflineMode) {
+      if (window.currentUser && !window.currentUser.isOfflineMode && window.currentUser.validated) {
         loadCachedDataInstantly();
       }
     }, 300);
     
-    // Start background services after delay - ONLY if online AND backend reachable
+    // Start background services after delay - ONLY if online AND backend reachable AND validated
     // This will be triggered when network status becomes "online"
     window.addEventListener('moodchat-network-status', (event) => {
       if (event.detail.status === 'online' && 
           window.currentUser && 
-          !window.currentUser.isOfflineMode) {
+          !window.currentUser.isOfflineMode &&
+          window.currentUser.validated) {
         setTimeout(() => {
           NETWORK_SERVICE_MANAGER.startAllServices();
           NETWORK_SERVICE_MANAGER.startBackgroundSync();
@@ -2927,6 +3093,7 @@
         authMethod: user.isOffline ? 'device' : 'api'
       } : null,
       isAuthenticated: !!user,
+      validated: user?.validated || false, // NEW: Include validation flag
       timestamp: new Date().toISOString()
     };
     
@@ -2950,7 +3117,8 @@
         isReady: true,
         user: window.currentUser,
         timestamp: new Date().toISOString(),
-        isOffline: (window.currentUser && window.currentUser.isOffline)
+        isOffline: (window.currentUser && window.currentUser.isOffline),
+        validated: window.currentUser?.validated || false // NEW: Include validation flag
       }
     });
     window.dispatchEvent(event);
@@ -3054,11 +3222,30 @@
               providerId: 'api',
               refreshToken: response.data.refreshToken || response.data.token,
               getIdToken: () => Promise.resolve(response.data.token),
-              ...userData
+              ...userData,
+              validated: true // NEW: Mark as validated
             };
             
             // Store device session for offline use
             storeDeviceBasedSession(user);
+            
+            // Update cached auth state with validation flag
+            const authData = {
+              type: 'auth-state',
+              user: {
+                uid: user.uid,
+                email: user.email,
+                displayName: user.displayName,
+                photoURL: user.photoURL,
+                emailVerified: user.emailVerified || false,
+                authMethod: 'api'
+              },
+              isAuthenticated: true,
+              validated: true, // NEW: Mark as validated
+              timestamp: new Date().toISOString()
+            };
+            
+            localStorage.setItem('moodchat-auth-state', JSON.stringify(authData));
             
             // Generate offline data for this user
             setTimeout(() => {
@@ -3260,11 +3447,30 @@
               providerId: 'api',
               refreshToken: response.data.refreshToken || response.data.token,
               getIdToken: () => Promise.resolve(response.data.token),
-              ...userData
+              ...userData,
+              validated: true // NEW: Mark as validated
             };
             
             // Store device session for offline use
             storeDeviceBasedSession(user);
+            
+            // Update cached auth state with validation flag
+            const authData = {
+              type: 'auth-state',
+              user: {
+                uid: user.uid,
+                email: user.email,
+                displayName: user.displayName,
+                photoURL: user.photoURL,
+                emailVerified: user.emailVerified || false,
+                authMethod: 'api'
+              },
+              isAuthenticated: true,
+              validated: true, // NEW: Mark as validated
+              timestamp: new Date().toISOString()
+            };
+            
+            localStorage.setItem('moodchat-auth-state', JSON.stringify(authData));
             
             // Generate offline data for this user
             setTimeout(() => {
@@ -4675,7 +4881,8 @@
       auth: {
         currentUser: window.currentUser,
         isAuthenticated: !!window.currentUser,
-        isReady: authStateRestored
+        isReady: authStateRestored,
+        validated: window.currentUser?.validated || false // NEW: Add validation status
       },
       api: {
         isReady: API_COORDINATION.apiReady,
@@ -5438,7 +5645,7 @@
             console.log('Auth state changed in another tab:', authData.user ? `User ${authData.user.uid}` : 'No user');
             
             // Update local auth state
-            if (authData.user) {
+            if (authData.user && authData.validated) {
               // Create user object from stored data
               const user = {
                 uid: authData.user.uid,
@@ -5449,12 +5656,16 @@
                 isOffline: authData.user.authMethod === 'device',
                 providerId: authData.user.authMethod === 'device' ? 'device' : 'api',
                 refreshToken: 'cross-tab-token',
-                getIdToken: () => Promise.resolve('cross-tab-token')
+                getIdToken: () => Promise.resolve('cross-tab-token'),
+                validated: true // NEW: Only use validated auth states
               };
               
               handleAuthStateChange(user, authData.user.authMethod === 'device');
             } else {
-              handleAuthStateChange(null);
+              // Only clear if not validated
+              if (!authData.validated) {
+                handleAuthStateChange(null);
+              }
             }
           }
         } catch (error) {
@@ -5480,7 +5691,8 @@
     currentUser: null,
     isAuthenticated: false,
     userId: null,
-    isAuthReady: false
+    isAuthReady: false,
+    validated: false // NEW: Add validation flag
   };
 
   // NETWORK CONNECTIVITY - UPDATED with status
@@ -5976,7 +6188,8 @@
               providerId: 'api',
               refreshToken: JWT_VALIDATION.getToken(),
               getIdToken: () => Promise.resolve(JWT_VALIDATION.getToken()),
-              ...validation.user
+              ...validation.user,
+              validated: true // NEW: Mark as validated
             };
             
             // Show a loading message
@@ -5987,6 +6200,24 @@
               window.currentUser = validatedUser;
               authStateRestored = true;
               updateGlobalAuthState(validatedUser);
+              
+              // Update cached auth state with validation flag
+              const authData = {
+                type: 'auth-state',
+                user: {
+                  uid: validatedUser.uid,
+                  email: validatedUser.email,
+                  displayName: validatedUser.displayName,
+                  photoURL: validatedUser.photoURL,
+                  emailVerified: validatedUser.emailVerified || false,
+                  authMethod: 'api'
+                },
+                isAuthenticated: true,
+                validated: true,
+                timestamp: new Date().toISOString()
+              };
+              
+              localStorage.setItem('moodchat-auth-state', JSON.stringify(authData));
               
               // Redirect to chat page
               console.log('Auto-login: Redirecting to chat page...');

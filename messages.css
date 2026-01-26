@@ -1999,3 +1999,265 @@
             from { opacity: 0; transform: translateY(20px); }
             to { opacity: 1; transform: translateY(0); }
         }
+        /* ADDITIONAL CSS FOR MISSING FEATURES */
+        .offline-overlay {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background-color: rgba(255, 255, 255, 0.95);
+            z-index: 9999;
+            display: none;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            text-align: center;
+            padding: 20px;
+            animation: fadeIn 0.3s ease;
+        }
+        
+        .offline-overlay.active {
+            display: flex;
+        }
+        
+        .offline-icon {
+            font-size: 48px;
+            color: #ff9500;
+            margin-bottom: 16px;
+        }
+        
+        .offline-title {
+            font-size: 20px;
+            font-weight: 600;
+            margin-bottom: 8px;
+            color: #050505;
+        }
+        
+        .offline-message {
+            font-size: 15px;
+            color: #65676b;
+            margin-bottom: 24px;
+            max-width: 400px;
+            line-height: 1.5;
+        }
+        
+        .offline-dismiss-btn {
+            padding: 10px 20px;
+            background-color: #0084ff;
+            color: white;
+            border: none;
+            border-radius: 8px;
+            cursor: pointer;
+            font-size: 14px;
+            font-weight: 500;
+        }
+        
+        .multi-send-checkbox {
+            width: 18px;
+            height: 18px;
+            cursor: pointer;
+        }
+        
+        .chat-item.selected {
+            background-color: rgba(0, 132, 255, 0.1);
+            border: 1px solid #0084ff;
+        }
+        
+        .message-item.editing {
+            background-color: rgba(0, 132, 255, 0.05);
+            border-radius: 12px;
+            padding: 8px;
+        }
+        
+        .edit-message-input {
+            width: 100%;
+            min-height: 60px;
+            padding: 10px;
+            border: 1px solid #0084ff;
+            border-radius: 8px;
+            font-size: 15px;
+            resize: vertical;
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+        }
+        
+        .edit-actions {
+            display: flex;
+            gap: 10px;
+            margin-top: 10px;
+            justify-content: flex-end;
+        }
+        
+        .send-options-overlay {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background-color: transparent;
+            z-index: 999;
+            display: none;
+        }
+        
+        .send-options-overlay.active {
+            display: block;
+        }
+        
+        .scheduled-badge {
+            position: absolute;
+            top: -8px;
+            right: -8px;
+            background-color: #ff9500;
+            color: white;
+            width: 20px;
+            height: 20px;
+            border-radius: 50%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 10px;
+        }
+        
+        .message-typing {
+            display: flex;
+            align-items: center;
+            gap: 5px;
+            padding: 0 20px;
+            margin-bottom: 10px;
+        }
+        
+        .typing-text {
+            font-size: 13px;
+            color: #65676b;
+            font-style: italic;
+        }
+        
+        .draft-badge {
+            background-color: #ff9500;
+            color: white;
+            font-size: 11px;
+            padding: 2px 6px;
+            border-radius: 10px;
+            margin-left: 8px;
+        }
+        
+        .chat-item.note-message {
+            background-color: rgba(255, 215, 0, 0.05);
+        }
+        
+        .chat-item-avatar .note-indicator {
+            position: absolute;
+            bottom: 0;
+            right: 0;
+            width: 14px;
+            height: 14px;
+            border-radius: 50%;
+            background-color: #ffd700;
+            border: 2px solid white;
+        }
+        
+        .expired-message {
+            opacity: 0.5;
+            filter: grayscale(0.8);
+        }
+        
+        .expired-label {
+            font-size: 10px;
+            color: #ff3b30;
+            display: flex;
+            align-items: center;
+            gap: 4px;
+            margin-top: 4px;
+        }
+        
+        .message-searching {
+            background-color: rgba(0, 132, 255, 0.2) !important;
+            border: 2px solid #0084ff !important;
+            animation: pulse 1.5s infinite;
+        }
+        
+        .search-highlight {
+            background-color: yellow;
+            padding: 0 2px;
+            border-radius: 2px;
+        }
+        
+        .multi-send-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 15px;
+        }
+        
+        .selected-count {
+            background-color: #0084ff;
+            color: white;
+            padding: 4px 10px;
+            border-radius: 12px;
+            font-size: 12px;
+            font-weight: 500;
+        }
+        
+        .attachment-preview {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            padding: 10px;
+            background-color: rgba(0, 0, 0, 0.05);
+            border-radius: 8px;
+            margin-bottom: 10px;
+        }
+        
+        .attachment-preview img {
+            width: 50px;
+            height: 50px;
+            object-fit: cover;
+            border-radius: 6px;
+        }
+        
+        .attachment-preview-info {
+            flex: 1;
+        }
+        
+        .attachment-remove {
+            background: none;
+            border: none;
+            color: #ff3b30;
+            cursor: pointer;
+            font-size: 16px;
+        }
+        
+        .recording-cancel-overlay {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background-color: rgba(0, 0, 0, 0.5);
+            z-index: 99999;
+            display: none;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            color: white;
+        }
+        
+        .recording-cancel-overlay.active {
+            display: flex;
+        }
+        
+        .cancel-recording-btn {
+            background-color: #ff3b30;
+            color: white;
+            border: none;
+            padding: 12px 24px;
+            border-radius: 8px;
+            font-size: 16px;
+            font-weight: 500;
+            cursor: pointer;
+            margin-top: 20px;
+        }
+        
+        .cancel-recording-btn:hover {
+            background-color: #e0352b;
+        }
