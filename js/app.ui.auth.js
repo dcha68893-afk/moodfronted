@@ -2,6 +2,8 @@
 // UPDATED: Fixed response handling - no more response.text() or response.json() calls
 // FIXED: TypeError: response.text is not a function - api.js returns parsed JSON
 // FIXED: All API response handling now treats response as already-parsed JSON
+// FIXED: Login form submission now properly sends POST request to backend
+// URGENT FIX: Direct form binding to ensure login form submits
 
 // ============================================================================
 // PREVENT DOUBLE INITIALIZATION
@@ -185,6 +187,7 @@ function clearAuthData() {
   console.log('Clearing auth data from localStorage');
   localStorage.removeItem('authUser');
   localStorage.removeItem('currentUser');
+  localStorage.removeItem('authToken');
   window.currentUser = null;
   console.log('Auth data cleared successfully');
 }
@@ -287,6 +290,14 @@ async function checkAutoLogin() {
     // Validate token with backend API ONLY
     if (typeof window.api === 'function') {
       console.log('STRICT API VALIDATION: Validating token with backend...');
+      
+      // Check if we're already on chat page
+      const isChatPage = window.location.pathname.includes('chat.html');
+      if (isChatPage) {
+        console.log('Already on chat page, skipping redirect');
+        return true;
+      }
+      
       const response = await window.api('/auth/verify', {
         method: 'GET',
         headers: {
@@ -315,11 +326,11 @@ async function checkAutoLogin() {
           new CustomEvent('auth:login', { detail: result.user })
         );
         
-        // Small delay before redirect
-        setTimeout(() => {
+        // Only redirect if we're not already on chat page
+        if (!window.location.pathname.includes('chat.html')) {
           console.log('Redirecting to chat.html...');
           window.location.href = 'chat.html';
-        }, 1500);
+        }
         
         return true;
       } else {
@@ -353,19 +364,55 @@ async function checkAutoLogin() {
 // ============================================================================
 
 /**
- * STRICT API-DRIVEN LOGIN HANDLER
+ * SIMPLIFIED LOGIN HANDLER - DIRECT FORM BINDING
+ * This fixes the issue where form submission wasn't triggering
  */
 async function handleLoginSubmit(event) {
+  console.log('✅ LOGIN SUBMIT HANDLER TRIGGERED - FIXED VERSION');
   event.preventDefault();
-  event.stopImmediatePropagation();
-  console.log('STRICT API-DRIVEN: Login form submitted');
+  event.stopPropagation();
   
+  console.log('📋 Collecting form data...');
+  
+  // Get the form that was submitted
   const form = event.target;
-  const identifierInput = form.querySelector('input[type="text"]') || form.querySelector('input[type="email"]');
-  const passwordInput = form.querySelector('input[type="password"]');
   
-  const identifier = identifierInput?.value;
-  const password = passwordInput?.value;
+  // Find form inputs - try multiple selectors to be safe
+  let identifierInput = form.querySelector('input[name="identifier"]') ||
+                       form.querySelector('input[name="email"]') ||
+                       form.querySelector('input[name="username"]') ||
+                       form.querySelector('input[type="email"]') ||
+                       form.querySelector('input[type="text"]:not([type="password"])');
+  
+  let passwordInput = form.querySelector('input[name="password"]') ||
+                     form.querySelector('input[type="password"]');
+  
+  console.log('🔍 Found inputs:', {
+    identifierInput: identifierInput ? identifierInput.name || identifierInput.type : 'NOT FOUND',
+    passwordInput: passwordInput ? passwordInput.name || passwordInput.type : 'NOT FOUND'
+  });
+  
+  if (!identifierInput || !passwordInput) {
+    console.error('❌ Form inputs not found. Searching all inputs in form...');
+    const allInputs = form.querySelectorAll('input');
+    console.log('All inputs in form:', Array.from(allInputs).map(input => ({
+      name: input.name,
+      type: input.type,
+      id: input.id,
+      className: input.className
+    })));
+    
+    updateNetworkStatusUI('offline', 'Login form configuration error');
+    return;
+  }
+  
+  const identifier = identifierInput.value.trim();
+  const password = passwordInput.value;
+  
+  console.log('📝 Form data collected:', { 
+    identifier: identifier ? identifier.substring(0, 3) + '...' : 'empty', 
+    password: password ? '***' : 'empty' 
+  });
   
   if (!identifier || !password) {
     updateNetworkStatusUI('offline', 'Email/username and password are required');
@@ -390,9 +437,11 @@ async function handleLoginSubmit(event) {
   
   // Disable form during submission
   const submitBtn = form.querySelector('button[type="submit"]');
-  const originalText = submitBtn.textContent;
-  submitBtn.textContent = 'Logging in...';
-  submitBtn.disabled = true;
+  const originalText = submitBtn ? submitBtn.textContent : 'Login';
+  if (submitBtn) {
+    submitBtn.textContent = 'Logging in...';
+    submitBtn.disabled = true;
+  }
   
   // Hide any existing countdown
   const countdownEl = document.getElementById('loginAttemptCountdown');
@@ -401,78 +450,95 @@ async function handleLoginSubmit(event) {
   try {
     // STRICT REQUIREMENT: Check if API is available
     if (!window.api || typeof window.api !== 'function') {
-      throw new Error('Authentication service not available');
+      console.error('❌ API helper function not available');
+      throw new Error('Authentication service not available. Please check your connection.');
     }
     
-    console.log('STRICT API-DRIVEN: Calling login API via centralized api.js...');
+    console.log('📤 Sending login request to /auth/login...');
     
-    // Call api.js - it returns parsed JSON
-    const response = await window.api('/auth/login', {
-      method: 'POST',
-      headers: { 
-        'Content-Type': 'application/json'
-      },
-      body: JSON.stringify({
-        identifier: identifier.trim(),
-        password: password
-      })
+    // Prepare login data
+    const loginData = {
+      identifier: identifier,
+      password: password
+    };
+    
+    console.log('📦 Login payload:', { 
+      identifier: identifier,
+      password: '***'
     });
     
-    console.log('STRICT API-DRIVEN: Login API response:', response);
+    // Call api.js - it returns parsed JSON
+    console.log('🔌 Calling window.api("/auth/login", { method: "POST", body: loginData })');
     
-    // Handle the parsed JSON response (no response.text() or response.json() needed)
-    const result = handleApiResponse(response);
+    const response = await window.api('/auth/login', {
+      method: 'POST',
+      body: loginData
+    });
     
-    console.log('STRICT API-DRIVEN: Login API parsed result:', result);
+    console.log('✅ Login API response received:', response);
     
-    // CRITICAL: Check for token and user in response
-    if (!result.token || !result.user) {
-      throw new Error('Invalid login response structure');
+    // Check if response indicates success (handle both formats)
+    if (response && (response.success === true || response.ok === true || response.status === 'success')) {
+      console.log('🎉 LOGIN SUCCESS: Valid response received');
+      
+      // Extract token and user from response
+      const token = response.token || response.data?.token;
+      const user = response.user || response.data?.user;
+      
+      if (!token || !user) {
+        console.error('❌ Invalid login response - missing token or user:', response);
+        throw new Error('Invalid login response: missing token or user data');
+      }
+      
+      console.log('💾 Saving authentication data...');
+      
+      // Save to localStorage
+      localStorage.setItem('authToken', token);
+      localStorage.setItem('currentUser', JSON.stringify(user));
+      window.currentUser = user;
+      
+      // Also save using the existing function for compatibility
+      saveAuthData(token, user);
+      
+      // Reset login attempts for this identifier
+      LoginAttempts.resetAttempts(identifier);
+      
+      // STRICT REQUIREMENT: Only show success AFTER API confirms
+      updateNetworkStatusUI('online', 'Login successful!');
+      
+      // Set token in api.js if API_COORDINATION exists
+      if (window.API_COORDINATION) {
+        window.API_COORDINATION.authToken = token;
+      }
+      
+      // Set user in AppState if it exists
+      if (window.AppState) {
+        window.AppState.user = user;
+      }
+      
+      // FORCE POST-LOGIN STATE UPDATE
+      document.dispatchEvent(
+        new CustomEvent('auth:login', { detail: user })
+      );
+      
+      // Trigger UI success flow
+      triggerUISuccessFlow(user);
+      
+      // REDIRECT AFTER SUCCESS
+      console.log('🔄 Redirecting to chat.html in 1 second...');
+      setTimeout(() => {
+        window.location.href = 'chat.html';
+      }, 1000);
+      
+    } else {
+      // Login failed
+      const errorMessage = response?.message || response?.data?.message || 'Login failed';
+      console.error('❌ Login API returned failure:', errorMessage);
+      throw new Error(errorMessage);
     }
-    
-    // CRITICAL: Save token and user data
-    console.log('Saving authentication data...');
-    
-    // Save to localStorage
-    localStorage.setItem('authToken', result.token);
-    localStorage.setItem('currentUser', JSON.stringify(result.user));
-    window.currentUser = result.user;
-    
-    // Also save using the existing function for compatibility
-    saveAuthData(result.token, result.user);
-    
-    // Reset login attempts for this identifier
-    LoginAttempts.resetAttempts(identifier);
-    
-    // STRICT REQUIREMENT: Only show success AFTER API confirms
-    updateNetworkStatusUI('online', 'Login successful!');
-    
-    // Set token in api.js if API_COORDINATION exists
-    if (window.API_COORDINATION) {
-      window.API_COORDINATION.authToken = result.token;
-    }
-    
-    // Set user in AppState if it exists
-    if (window.AppState) {
-      window.AppState.user = result.user;
-    }
-    
-    // FORCE POST-LOGIN STATE UPDATE
-    document.dispatchEvent(
-      new CustomEvent('auth:login', { detail: result.user })
-    );
-    
-    // Trigger UI success flow
-    triggerUISuccessFlow(result.user);
-    
-    // REDIRECT AFTER SUCCESS
-    console.log('STRICT API-DRIVEN: Redirecting to chat.html...');
-    setTimeout(() => {
-      window.location.href = 'chat.html';
-    }, 1000);
     
   } catch (error) {
-    console.error('LOGIN FAILED:', error);
+    console.error('❌ LOGIN FAILED:', error);
     
     // Record failed attempt
     const attempt = LoginAttempts.recordAttempt(identifier);
@@ -497,17 +563,45 @@ async function handleLoginSubmit(event) {
       }
     } else if (errorMessage.includes('500') || errorMessage.includes('Internal Server Error')) {
       errorMessage = 'Server error. Please try again later.';
-    } else if (errorMessage.includes('Network') || errorMessage.includes('network')) {
+    } else if (errorMessage.includes('Network') || errorMessage.includes('network') || errorMessage.includes('fetch')) {
       errorMessage = 'Network error. Please check your connection.';
     }
     
     // Show error in network status indicator
     updateNetworkStatusUI('offline', errorMessage);
     
+    // Also show error in form
+    showAuthError(errorMessage);
+    
     // Re-enable form
-    submitBtn.textContent = originalText;
-    submitBtn.disabled = false;
+    if (submitBtn) {
+      submitBtn.textContent = originalText;
+      submitBtn.disabled = false;
+    }
   }
+}
+
+/**
+ * Direct login button click handler as backup
+ */
+async function handleLoginButtonClick(event) {
+  console.log('🔄 Direct login button click handler triggered');
+  
+  // Find the login form
+  const loginForm = document.getElementById('login-form');
+  if (!loginForm) {
+    console.error('❌ Login form not found');
+    return;
+  }
+  
+  // Create a synthetic submit event
+  const submitEvent = new Event('submit', {
+    bubbles: true,
+    cancelable: true
+  });
+  
+  // Trigger the form submission
+  loginForm.dispatchEvent(submitEvent);
 }
 
 /**
@@ -645,14 +739,15 @@ async function handleRegisterSubmit(event) {
     
     console.log('STRICT API-DRIVEN: Register API response:', response);
     
-    // Handle the parsed JSON response (NO response.text() or response.json() calls)
-    const result = handleApiResponse(response);
-    
-    console.log('STRICT API-DRIVEN: Register API parsed result:', result);
-    
-    // STRICT REQUIREMENT: ONLY proceed if API returns success AND has valid token
-    if (result && result.success && result.user && result.token) {
-      const { token, user } = result;
+    // Check if response indicates success
+    if (response && (response.success === true || response.ok === true)) {
+      // Extract token and user from response
+      const token = response.token || response.data?.token;
+      const user = response.user || response.data?.user;
+      
+      if (!token || !user) {
+        throw new Error('Invalid registration response: missing token or user data');
+      }
       
       // Save JWT and user info
       saveAuthData(token, user);
@@ -678,8 +773,9 @@ async function handleRegisterSubmit(event) {
         window.location.href = 'chat.html';
       }, 1000);
     } else {
-      // STRICT REQUIREMENT: API returned but without success flag
-      throw new Error(result?.message || 'Registration failed - invalid response from server');
+      // Registration failed
+      const errorMessage = response?.message || response?.data?.message || 'Registration failed';
+      throw new Error(errorMessage);
     }
   } catch (error) {
     console.error('STRICT API-DRIVEN: Registration error:', error);
@@ -703,6 +799,9 @@ async function handleRegisterSubmit(event) {
     }
     
     updateNetworkStatusUI('offline', `Registration failed: ${errorMessage}`);
+    
+    // Show error in form
+    showAuthError(errorMessage);
     
     // Re-enable form
     submitBtn.textContent = originalText;
@@ -743,11 +842,8 @@ async function handleForgotPasswordSubmit(event) {
     
     console.log('Forgot password API response:', response);
     
-    // Handle the parsed JSON response (NO response.text() or response.json() calls)
-    const result = handleApiResponse(response);
-    
-    // Show success/error message
-    if (result && result.success) {
+    // Check if response indicates success
+    if (response && (response.success === true || response.ok === true)) {
       updateNetworkStatusUI('online', 'Password reset email sent!');
       
       // Switch back to login form after delay
@@ -755,11 +851,15 @@ async function handleForgotPasswordSubmit(event) {
         showLoginForm();
       }, 3000);
     } else {
-      throw new Error(result?.message || 'Password reset failed');
+      const errorMessage = response?.message || response?.data?.message || 'Password reset failed';
+      throw new Error(errorMessage);
     }
   } catch (error) {
     console.error('Forgot password error:', error);
     updateNetworkStatusUI('offline', `Password reset failed: ${error.message}`);
+    
+    // Show error in form
+    showAuthError(error.message);
   } finally {
     // Re-enable form
     submitBtn.textContent = originalText;
@@ -1258,8 +1358,64 @@ function updateAuthButtonStates(activeForm) {
 }
 
 // ============================================================================
-// SETUP AUTH FORM EVENT LISTENERS WITH SUBMIT HANDLERS
+// SETUP AUTH FORM EVENT LISTENERS WITH SUBMIT HANDLERS - DIRECT FIX
 // ============================================================================
+
+/**
+ * Direct form binding - ensures login form submits properly
+ */
+function setupLoginFormDirectBinding() {
+  console.log('🔧 DIRECT FIX: Setting up login form binding...');
+  
+  const loginForm = document.getElementById('login-form');
+  if (!loginForm) {
+    console.error('❌ DIRECT FIX: Login form not found with ID #login-form');
+    
+    // Try alternative selectors
+    const alternativeForms = document.querySelectorAll('form');
+    console.log('All forms on page:', alternativeForms.length);
+    alternativeForms.forEach((form, i) => {
+      console.log(`Form ${i}:`, {
+        id: form.id,
+        className: form.className,
+        action: form.action,
+        method: form.method
+      });
+    });
+    
+    return;
+  }
+  
+  console.log('✅ DIRECT FIX: Found login form:', {
+    id: loginForm.id,
+    className: loginForm.className,
+    action: loginForm.action,
+    method: loginForm.method,
+    childElements: loginForm.children.length
+  });
+  
+  // Remove ALL existing submit listeners
+  const newForm = loginForm.cloneNode(true);
+  loginForm.parentNode.replaceChild(newForm, loginForm);
+  
+  // Get the new form reference
+  const freshLoginForm = document.getElementById('login-form');
+  
+  // Add submit handler DIRECTLY
+  freshLoginForm.addEventListener('submit', handleLoginSubmit);
+  
+  console.log('✅ DIRECT FIX: Login form submit handler bound DIRECTLY');
+  
+  // Also bind to any submit button as backup
+  const submitButton = freshLoginForm.querySelector('button[type="submit"]');
+  if (submitButton) {
+    submitButton.addEventListener('click', function(e) {
+      console.log('🔄 Submit button clicked directly');
+      e.preventDefault();
+      freshLoginForm.dispatchEvent(new Event('submit'));
+    });
+  }
+}
 
 /**
  * Sets up event listeners for auth form toggling and submission
@@ -1293,22 +1449,17 @@ function setupAuthFormListeners() {
     });
   }
   
-  // Login form submit handler
-  const loginForm = document.getElementById('login-form');
-  if (loginForm) {
-    console.log('Setting up login form submit listener');
-    loginForm.removeEventListener('submit', handleLoginSubmit);
-    loginForm.addEventListener('submit', handleLoginSubmit);
-  }
+  // URGENT FIX: Use direct binding for login form
+  setupLoginFormDirectBinding();
   
-  // Register form submit handler
+  // Register form submit handler (unchanged)
   const registerForm = document.getElementById('register-form');
   if (registerForm) {
     console.log('Setting up register form submit listener');
     registerForm.addEventListener('submit', handleRegisterSubmit);
   }
   
-  // Forgot password form submit handler
+  // Forgot password form submit handler (unchanged)
   const forgotForm = document.getElementById('forgot-form');
   if (forgotForm) {
     console.log('Setting up forgot password form submit listener');
@@ -1418,11 +1569,11 @@ function integrateWithAppState() {
 }
 
 // ============================================================================
-// FORM SETUP FUNCTION
+// FORM SETUP FUNCTION - ENHANCED
 // ============================================================================
 
 /**
- * Sets up all auth forms immediately
+ * Sets up all auth forms immediately with better error handling
  */
 function setupAuthFormsImmediately() {
   console.log('Setting up auth forms immediately...');
@@ -1514,7 +1665,121 @@ function showAuthError(message) {
 }
 
 // ============================================================================
-// INITIALIZATION
+// IMPROVED AUTO-LOGIN FUNCTION FOR SESSION RESTORE
+// ============================================================================
+
+/**
+ * Improved auto-login function that checks session on app load
+ */
+async function checkSessionOnLoad() {
+  console.log('Checking session on app load...');
+  
+  // Check localStorage for token
+  const token = localStorage.getItem('authToken') || localStorage.getItem('authUser');
+  if (!token) {
+    console.log('No token found in localStorage');
+    return;
+  }
+  
+  // Check if we're on login page
+  const isLoginPage = window.location.pathname.includes('index.html') || 
+                      window.location.pathname === '/' || 
+                      window.location.pathname.endsWith('/');
+  
+  if (isLoginPage) {
+    console.log('On login page, attempting auto-login...');
+    await checkAutoLogin();
+    return;
+  }
+  
+  // We're on another page (like chat.html), validate the token
+  try {
+    if (typeof window.api === 'function') {
+      console.log('Validating existing token on non-login page...');
+      
+      // Try to get user info
+      const response = await window.api('/auth/me', {
+        method: 'GET',
+        headers: {
+          'Authorization': `Bearer ${token}`
+        }
+      });
+      
+      console.log('Session validation response:', response);
+      
+      // Handle both response formats
+      const user = response.user || response.data?.user;
+      
+      if (user) {
+        console.log('Session is valid, user:', user);
+        window.currentUser = user;
+        
+        // Save user info if not already saved
+        if (!localStorage.getItem('currentUser')) {
+          localStorage.setItem('currentUser', JSON.stringify(user));
+        }
+        
+        // Dispatch auth:login event
+        document.dispatchEvent(
+          new CustomEvent('auth:login', { detail: user })
+        );
+        
+        // Update network status
+        updateNetworkStatusUI('online', 'Session restored');
+      } else {
+        console.log('Invalid session, clearing auth data');
+        clearAuthData();
+        
+        // If we're on chat page without valid session, redirect to login
+        if (window.location.pathname.includes('chat.html')) {
+          console.log('Redirecting to login page...');
+          window.location.href = 'index.html';
+        }
+      }
+    }
+  } catch (error) {
+    console.error('Session validation failed:', error);
+    clearAuthData();
+    
+    // If we're on chat page and validation fails, redirect to login
+    if (window.location.pathname.includes('chat.html')) {
+      console.log('Redirecting to login page due to validation error...');
+      window.location.href = 'index.html';
+    }
+  }
+}
+
+// ============================================================================
+// DIRECT FORM TEST FUNCTION
+// ============================================================================
+
+/**
+ * Test function to manually trigger login
+ */
+window.testLoginManually = async function(email, password) {
+  console.log('🧪 MANUAL LOGIN TEST:', { email, password: '***' });
+  
+  const loginData = {
+    identifier: email,
+    password: password
+  };
+  
+  try {
+    const response = await window.api('/auth/login', {
+      method: 'POST',
+      body: loginData
+    });
+    
+    console.log('🧪 MANUAL TEST RESPONSE:', response);
+    return response;
+  } catch (error) {
+    console.error('🧪 MANUAL TEST ERROR:', error);
+    throw error;
+  }
+};
+
+// ============================================================================
+// INITIALIZATION - ENHANCED
 // ============================================================================
 
 /**
@@ -1532,26 +1797,9 @@ async function initializeAuthUI() {
     setupAuthFormsImmediately();
   }
   
-  // 2. Check for auto-login in background
-  if (isLoginPage) {
-    console.log('STRICT API-DRIVEN: Starting auto-login check in background...');
-    
-    setTimeout(async () => {
-      try {
-        console.log('STRICT API-DRIVEN: Background auto-login check starting...');
-        const autoLoginSucceeded = await checkAutoLogin();
-        if (autoLoginSucceeded) {
-          console.log('STRICT API-DRIVEN: Auto-login succeeded, user will be redirected');
-        } else {
-          console.log('STRICT API-DRIVEN: Auto-login failed or not attempted, forms remain active');
-        }
-      } catch (error) {
-        console.error('STRICT API-DRIVEN: Auto-login check error:', error);
-      }
-    }, 1000);
-  } else {
-    console.log('Not on login page, skipping auto-login check');
-  }
+  // 2. Check for session on load (improved auto-login)
+  console.log('STRICT API-DRIVEN: Checking session on load...');
+  await checkSessionOnLoad();
   
   // 3. Set initial network UI state
   if (typeof window.api === 'function') {
@@ -1679,4 +1927,4 @@ function initialize() {
 // Start initialization
 initialize();
 
-console.log('app.ui.auth.js - STRICT API-DRIVEN Auth UI and network status module loaded - FIXED RESPONSE HANDLING');
+console.log('app.ui.auth.js - STRICT API-DRIVEN Auth UI and network status module loaded - LOGIN FORM SUBMISSION DIRECT FIX APPLIED');

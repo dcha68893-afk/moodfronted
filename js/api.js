@@ -5,6 +5,7 @@
 // CRITICAL FIX: Dynamic environment detection for backend URLs
 // CRITICAL FIX: Strict API contract - endpoint always first, method always in options
 // CRITICAL FIX: HTTP 500 errors no longer mark backend as offline
+// CRITICAL FIX: Added api.get(), api.post(), api.put(), api.delete() methods
 // ============================================================================
 // CRITICAL IMPROVEMENTS APPLIED:
 // 1. SINGLE internal fetch function with comprehensive input validation
@@ -17,6 +18,7 @@
 // 8. CRITICAL FIX: Dynamic environment detection for backend URLs
 // 9. CRITICAL FIX: Strict API contract - endpoint always string, method always in options
 // 10. CRITICAL FIX: HTTP 500 errors DO NOT mark backend as offline
+// 11. CRITICAL FIX: Added api.get(), api.post(), api.put(), api.delete() methods
 // ============================================================================
 
 // ============================================================================
@@ -491,7 +493,7 @@ const globalApiFunction = function(endpoint, options = {}) {
 
 const apiObject = {
   _singleton: true,
-  _version: '16.2.0', // Updated version for HTTP 500 fix
+  _version: '16.3.0', // Updated version for api.get(), api.post() methods fix
   _safeInitialized: true,
   _backendReachable: null,
   _sessionChecked: false,
@@ -507,6 +509,154 @@ const apiObject = {
     RETRY_DELAY: 1000,
     SESSION_CHECK_INTERVAL: 300000,
     STATUS_FETCH_TIMEOUT: 8000
+  },
+  
+  // ============================================================================
+  // CRITICAL FIX: ADDED api.get(), api.post(), api.put(), api.delete() METHODS
+  // ============================================================================
+  
+  /**
+   * api.get() - Simple GET method
+   * @param {string} url - The endpoint URL
+   * @returns {Promise} Promise with response data
+   */
+  get: async function(url) {
+    console.log(`🔧 [API] api.get() called for: ${url}`);
+    try {
+      const result = await globalApiFunction(url, { method: 'GET' });
+      
+      if (!result.ok) {
+        console.error(`❌ [API] GET request failed: ${result.message}`);
+        throw {
+          message: result.message,
+          status: result.status,
+          isRateLimited: result.isRateLimited,
+          isServerError: result.isServerError
+        };
+      }
+      
+      return {
+        ok: result.ok,
+        success: result.ok,
+        data: result.data,
+        message: result.message,
+        isRateLimited: result.isRateLimited || false,
+        isServerError: result.isServerError || false
+      };
+    } catch (error) {
+      console.error('🔧 [API] api.get() error:', error);
+      throw error;
+    }
+  },
+  
+  /**
+   * api.post() - Simple POST method
+   * @param {string} url - The endpoint URL
+   * @param {object} data - The data to send
+   * @returns {Promise} Promise with response data
+   */
+  post: async function(url, data) {
+    console.log(`🔧 [API] api.post() called for: ${url}`);
+    try {
+      const result = await globalApiFunction(url, { 
+        method: 'POST', 
+        body: data 
+      });
+      
+      if (!result.ok) {
+        console.error(`❌ [API] POST request failed: ${result.message}`);
+        throw {
+          message: result.message,
+          status: result.status,
+          isRateLimited: result.isRateLimited,
+          isServerError: result.isServerError
+        };
+      }
+      
+      return {
+        ok: result.ok,
+        success: result.ok,
+        data: result.data,
+        message: result.message,
+        isRateLimited: result.isRateLimited || false,
+        isServerError: result.isServerError || false
+      };
+    } catch (error) {
+      console.error('🔧 [API] api.post() error:', error);
+      throw error;
+    }
+  },
+  
+  /**
+   * api.put() - Simple PUT method
+   * @param {string} url - The endpoint URL
+   * @param {object} data - The data to send
+   * @returns {Promise} Promise with response data
+   */
+  put: async function(url, data) {
+    console.log(`🔧 [API] api.put() called for: ${url}`);
+    try {
+      const result = await globalApiFunction(url, { 
+        method: 'PUT', 
+        body: data 
+      });
+      
+      if (!result.ok) {
+        console.error(`❌ [API] PUT request failed: ${result.message}`);
+        throw {
+          message: result.message,
+          status: result.status,
+          isRateLimited: result.isRateLimited,
+          isServerError: result.isServerError
+        };
+      }
+      
+      return {
+        ok: result.ok,
+        success: result.ok,
+        data: result.data,
+        message: result.message,
+        isRateLimited: result.isRateLimited || false,
+        isServerError: result.isServerError || false
+      };
+    } catch (error) {
+      console.error('🔧 [API] api.put() error:', error);
+      throw error;
+    }
+  },
+  
+  /**
+   * api.delete() - Simple DELETE method
+   * @param {string} url - The endpoint URL
+   * @returns {Promise} Promise with response data
+   */
+  delete: async function(url) {
+    console.log(`🔧 [API] api.delete() called for: ${url}`);
+    try {
+      const result = await globalApiFunction(url, { method: 'DELETE' });
+      
+      if (!result.ok) {
+        console.error(`❌ [API] DELETE request failed: ${result.message}`);
+        throw {
+          message: result.message,
+          status: result.status,
+          isRateLimited: result.isRateLimited,
+          isServerError: result.isServerError
+        };
+      }
+      
+      return {
+        ok: result.ok,
+        success: result.ok,
+        data: result.data,
+        message: result.message,
+        isRateLimited: result.isRateLimited || false,
+        isServerError: result.isServerError || false
+      };
+    } catch (error) {
+      console.error('🔧 [API] api.delete() error:', error);
+      throw error;
+    }
   },
   
   // ============================================================================
@@ -1700,7 +1850,7 @@ const apiObject = {
   // ============================================================================
   
   initialize: async function() {
-    console.log('🔧 [API] ⚡ MoodChat API v16.2.0 (HTTP 500 FIX) initializing...');
+    console.log('🔧 [API] ⚡ MoodChat API v16.3.0 (HTTP 500 FIX + api.get/post/put/delete) initializing...');
     console.log('🔧 [API] 🔗 Backend URL:', BACKEND_BASE_URL);
     console.log('🔧 [API] 🔗 API Base URL:', BASE_API_URL);
     console.log('🔧 [API] 🌐 Network State - Online:', window.AppNetwork.isOnline, 'Backend Reachable:', window.AppNetwork.isBackendReachable);
@@ -1709,6 +1859,7 @@ const apiObject = {
     console.log('🔧 [API] ✅ CRITICAL: ALL API calls use strict contract: api(endpoint, options)');
     console.log('🔧 [API] ✅ CRITICAL: First argument = endpoint string');
     console.log('🔧 [API] ✅ CRITICAL: Second argument = options object with method');
+    console.log('🔧 [API] ✅ NEW: api.get(), api.post(), api.put(), api.delete() methods added');
     
     // Migrate old auth data if needed
     const oldToken = localStorage.getItem('moodchat_auth_token');
@@ -1769,6 +1920,10 @@ const apiObject = {
         console.log('🔧 [API] 🔄 Token structure:', this.getConnectionStatus().tokenStructure);
         console.log('🔧 [API] 👤 window.currentUser:', window.currentUser ? 'Set' : 'Not set');
         console.log('🔧 [API] 💾 Device ID:', this.getDeviceId());
+        console.log('🔧 [API] ✅ api.get() available:', typeof this.get === 'function');
+        console.log('🔧 [API] ✅ api.post() available:', typeof this.post === 'function');
+        console.log('🔧 [API] ✅ api.put() available:', typeof this.put === 'function');
+        console.log('🔧 [API] ✅ api.delete() available:', typeof this.delete === 'function');
       } catch (error) {
         console.log('🔧 [API] Initial health check failed:', error.message);
       }
@@ -1861,7 +2016,8 @@ const apiObject = {
       dynamicEnvironmentDetection: true,
       strictHttpHandling: true,
       strictApiContract: true,
-      http500Fix: true, // Added flag for HTTP 500 fix
+      http500Fix: true,
+      apiMethodsAdded: true, // Added flag for api.get(), api.post(), etc.
       environment: window.location.hostname === 'localhost' ? 'local' : 'production',
       networkState: {
         isOnline: window.AppNetwork.isOnline,
@@ -1881,7 +2037,7 @@ const apiObject = {
     });
     
     setTimeout(() => {
-      console.log('🔧 [API] API synchronization ready (HTTP 500 fix applied)');
+      console.log('🔧 [API] API synchronization ready (HTTP 500 fix + api methods applied)');
     }, 1000);
   },
   
@@ -1890,7 +2046,7 @@ const apiObject = {
   // ============================================================================
   
   diagnose: async function() {
-    console.log('🔧 [API] Running diagnostics with HTTP 500 fix...');
+    console.log('🔧 [API] Running diagnostics with HTTP 500 fix and api methods...');
     
     const results = {
       networkState: {
@@ -1925,7 +2081,8 @@ const apiObject = {
         dynamicEnvironmentDetection: true,
         strictHttpHandling: true,
         strictApiContract: true,
-        http500Fix: true
+        http500Fix: true,
+        apiMethods: true
       },
       validation: {
         methodNormalization: 'ACTIVE',
@@ -1939,7 +2096,11 @@ const apiObject = {
         strictApiContract: 'ACTIVE',
         singleNetworkStateSource: 'ACTIVE',
         windowCurrentUserSupport: 'ACTIVE',
-        http500Fix: 'ACTIVE'
+        http500Fix: 'ACTIVE',
+        apiGetMethod: typeof this.get === 'function' ? 'ACTIVE' : 'MISSING',
+        apiPostMethod: typeof this.post === 'function' ? 'ACTIVE' : 'MISSING',
+        apiPutMethod: typeof this.put === 'function' ? 'ACTIVE' : 'MISSING',
+        apiDeleteMethod: typeof this.delete === 'function' ? 'ACTIVE' : 'MISSING'
       }
     };
     
@@ -2001,7 +2162,7 @@ if (!window.MOODCHAT_API) {
   window.MOODCHAT_API = globalApi;
 }
 
-console.log('🔧 [API] Starting hardened initialization with HTTP 500 fix...');
+console.log('🔧 [API] Starting hardened initialization with HTTP 500 fix and api methods...');
 
 // Safe initialization with timeout
 setTimeout(() => {
@@ -2093,6 +2254,51 @@ setTimeout(() => {
       _singleton: true,
       _version: 'fallback',
       _hardened: true,
+      // Add the missing api methods to fallback
+      get: async function(url) {
+        console.warn(`⚠️ Using fallback api.get() for: ${url}`);
+        return Promise.resolve({
+          ok: false,
+          success: false,
+          message: 'API fallback mode',
+          fallback: true,
+          isRateLimited: false,
+          isServerError: false
+        });
+      },
+      post: async function(url, data) {
+        console.warn(`⚠️ Using fallback api.post() for: ${url}`);
+        return Promise.resolve({
+          ok: false,
+          success: false,
+          message: 'API fallback mode',
+          fallback: true,
+          isRateLimited: false,
+          isServerError: false
+        });
+      },
+      put: async function(url, data) {
+        console.warn(`⚠️ Using fallback api.put() for: ${url}`);
+        return Promise.resolve({
+          ok: false,
+          success: false,
+          message: 'API fallback mode',
+          fallback: true,
+          isRateLimited: false,
+          isServerError: false
+        });
+      },
+      delete: async function(url) {
+        console.warn(`⚠️ Using fallback api.delete() for: ${url}`);
+        return Promise.resolve({
+          ok: false,
+          success: false,
+          message: 'API fallback mode',
+          fallback: true,
+          isRateLimited: false,
+          isServerError: false
+        });
+      },
       initialize: () => {
         console.log('🔧 [API] Fallback initialized');
         return true;
@@ -2210,6 +2416,47 @@ if (!window.api) {
     _singleton: true,
     _version: 'emergency',
     _neverFails: true,
+    // Add the missing api methods to emergency API
+    get: async function(url) {
+      return Promise.resolve({
+        ok: false,
+        success: false,
+        message: 'Emergency API',
+        emergency: true,
+        isRateLimited: false,
+        isServerError: false
+      });
+    },
+    post: async function(url, data) {
+      return Promise.resolve({
+        ok: false,
+        success: false,
+        message: 'Emergency API',
+        emergency: true,
+        isRateLimited: false,
+        isServerError: false
+      });
+    },
+    put: async function(url, data) {
+      return Promise.resolve({
+        ok: false,
+        success: false,
+        message: 'Emergency API',
+        emergency: true,
+        isRateLimited: false,
+        isServerError: false
+      });
+    },
+    delete: async function(url) {
+      return Promise.resolve({
+        ok: false,
+        success: false,
+        message: 'Emergency API',
+        emergency: true,
+        isRateLimited: false,
+        isServerError: false
+      });
+    },
     isLoggedIn: () => false,
     isBackendReachable: () => false,
     initialize: () => true,
@@ -2248,4 +2495,8 @@ console.log('🔧 [API] ✅ CRITICAL: Second argument MUST be options object');
 console.log('🔧 [API] ✅ Backend URL: ' + BACKEND_BASE_URL);
 console.log('🔧 [API] ✅ API Base URL: ' + BASE_API_URL);
 console.log('🔧 [API] ✅ window.currentUser support: ACTIVE');
-console.log('🔧 [API] ⚡ Ready for production with HTTP 500 fix');
+console.log('🔧 [API] ✅ NEW: api.get() method available');
+console.log('🔧 [API] ✅ NEW: api.post() method available');
+console.log('🔧 [API] ✅ NEW: api.put() method available');
+console.log('🔧 [API] ✅ NEW: api.delete() method available');
+console.log('🔧 [API] ⚡ Ready for production with HTTP 500 fix and api methods');

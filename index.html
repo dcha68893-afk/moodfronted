@@ -2167,22 +2167,26 @@
     <div class="notification-container" id="notificationContainer"></div>
 
     <!-- ============================================= -->
-    <!-- JAVASCRIPT LOADING - CRITICAL FOR UI TOGGLING -->
+    <!-- JAVASCRIPT LOADING - CORRECTED ORDER -->
     <!-- ============================================= -->
     
-    <!-- 1. jQuery - Required for plugins and some UI components -->
-    <!-- Load from CDN with local fallback -->
+    <!-- 1. jQuery FIRST - Required for plugins -->
     <script src="https://code.jquery.com/jquery-3.6.0.min.js"></script>
     <script>
         // Fallback to local jQuery if CDN fails
         window.jQuery || document.write('<script src="js/vendor/jquery.min.js"><\/script>');
     </script>
     
-    <!-- 2. Load api.js FIRST so window.api is available -->
+    <!-- 2. api.js SECOND - Must load before auth scripts that use window.api -->
     <script src="js/api.js"></script>
     
-    <!-- 3. Auth UI JavaScript - Updated to use window.api -->
+    <!-- 3. Core app scripts THIRD -->
+    <script src="js/app.core.js"></script>
+    <script src="js/app.ui.auth.js"></script>
+    
+    <!-- 4. Auth UI script LAST - Depends on jQuery, api.js, and app.core.js -->
     <script>
+        // All your existing auth JavaScript code remains here
         // =============================================
         // CONFIGURATION
         // =============================================
@@ -3105,10 +3109,6 @@
             console.log('All initialization complete.');
         });
     </script>
-    
-    <!-- 4. Main Application Scripts (Loaded as modules) -->
-    <script src="js/app.core.js"></script>
-    <script src="js/app.ui.auth.js"></script>
     
     <!-- 5. Service Worker Registration - UPDATED WITH ENVIRONMENT CHECK -->
     <script>
