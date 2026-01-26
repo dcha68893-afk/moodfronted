@@ -1746,49 +1746,38 @@
     let isInGroupView = false;
     let isInFullscreenView = false;
     
-    // Wait for api.js to be ready from parent
-    window.addEventListener('apiReady', function() {
-        console.log('API is ready from parent, broadcasting to iframes');
-        
-        // Broadcast to all iframes that API is ready
-        broadcastToAllIframes({
-            type: 'API_READY',
-            hasApi: typeof window.parent.api !== 'undefined'
-        });
-        
-        // Initialize chat app
-        initializeChatApp();
-    });
+    // API readiness tracking
+    let apiReady = false;
+    let apiReadyEventDispatched = false;
+    let apiReadyCheckInterval = null;
+    let pendingApiRequests = [];
     
-    // Fallback if apiReady event doesn't fire
-    setTimeout(function() {
-        if (typeof window.parent.api !== 'undefined') {
-            console.log('API found in parent (fallback), broadcasting to iframes');
-            broadcastToAllIframes({
-                type: 'API_READY',
-                hasApi: true
-            });
-            initializeChatApp();
-        } else {
-            console.warn('API not found in parent, retrying...');
-            // Try again in 1 second
-            setTimeout(function() {
-                if (typeof window.parent.api !== 'undefined') {
-                    broadcastToAllIframes({
-                        type: 'API_READY',
-                        hasApi: true
-                    });
-                    initializeChatApp();
-                } else {
-                    console.error('API still not available after retry');
-                    // Initialize anyway, iframes will handle API errors
-                    initializeChatApp();
-                }
-            }, 1000);
+    // ====== API READINESS SYSTEM ======
+    function checkApiReadiness() {
+        if (typeof window.parent.api !== 'undefined' && !apiReady) {
+            console.log('API is now ready in parent window');
+            apiReady = true;
+            clearInterval(apiReadyCheckInterval);
+            
+            // Broadcast API readiness to all iframes
+            broadcastApiReady();
+            
+            // Process any pending API requests
+            processPendingApiRequests();
+            
+            // Dispatch apiReady event for iframes that are listening
+            if (!apiReadyEventDispatched) {
+                apiReadyEventDispatched = true;
+                window.dispatchEvent(new CustomEvent('apiReady'));
+            }
+            
+            return true;
         }
-    }, 500);
+        return false;
+    }
     
-    function broadcastToAllIframes(message) {
+    function broadcastApiReady() {
+        console.log('Broadcasting API_READY to all iframes');
         const iframeIds = ['messagesIframe', 'statusIframe', 'groupIframe', 'callsIframe', 
                           'friendsIframe', 'settingsIframe', 'toolsIframe'];
         
@@ -1796,18 +1785,77 @@
             const iframe = document.getElementById(iframeId);
             if (iframe && iframe.contentWindow) {
                 try {
-                    iframe.contentWindow.postMessage(message, '*');
+                    iframe.contentWindow.postMessage({
+                        type: 'API_READY',
+                        hasApi: true,
+                        timestamp: Date.now(),
+                        apiAvailable: true
+                    }, '*');
                 } catch (e) {
-                    console.log(`Could not send message to ${iframeId}:`, e.message);
+                    // Silently ignore cross-origin errors
                 }
             }
         });
     }
     
-    document.addEventListener('DOMContentLoaded', function() {
-        console.log('DOM loaded, waiting for apiReady event...');
+    function processPendingApiRequests() {
+        while (pendingApiRequests.length > 0) {
+            const request = pendingApiRequests.shift();
+            if (request && request.iframe && request.message) {
+                try {
+                    request.iframe.contentWindow.postMessage(request.message, '*');
+                } catch (e) {
+                    console.log('Failed to send pending message to iframe');
+                }
+            }
+        }
+    }
+    
+    function sendApiStatusToIframe(iframe, requestId = null) {
+        if (!iframe || !iframe.contentWindow) return;
         
-        // Minimal initialization while waiting for API
+        try {
+            iframe.contentWindow.postMessage({
+                type: 'API_READY',
+                hasApi: apiReady,
+                timestamp: Date.now(),
+                apiAvailable: apiReady,
+                requestId: requestId
+            }, '*');
+        } catch (e) {
+            // Silently ignore cross-origin errors
+        }
+    }
+    
+    // Start checking for API readiness
+    apiReadyCheckInterval = setInterval(checkApiReadiness, 500);
+    
+    // Also check immediately
+    setTimeout(checkApiReadiness, 100);
+    
+    // Wait for api.js to be ready from parent
+    window.addEventListener('apiReady', function() {
+        console.log('API is ready from parent, broadcasting to iframes');
+        checkApiReadiness();
+        initializeChatApp();
+    });
+    
+    // Fallback - check API after a delay
+    setTimeout(function() {
+        if (!apiReady) {
+            console.log('Performing fallback API check');
+            checkApiReadiness();
+            if (!apiReady) {
+                console.warn('API not available after timeout, iframes will use fallback mode');
+                // Still initialize the app even without API
+                initializeChatApp();
+            }
+        }
+    }, 2000);
+    
+    document.addEventListener('DOMContentLoaded', function() {
+        console.log('DOM loaded, initializing navigation system...');
+        
         showLoading();
         
         // Try to get user from localStorage for UI purposes
@@ -1828,9 +1876,9 @@
         // Setup basic navigation immediately
         setupNavigation();
         
-        // Hide loading after a short delay if API isn't ready yet
+        // Hide loading after a short delay
         setTimeout(() => {
-            if (typeof window.parent.api === 'undefined') {
+            if (!apiReady) {
                 console.log('API not ready yet, showing basic UI');
                 hideLoading();
                 switchPage('messages');
@@ -2121,11 +2169,8 @@
                         }, '*');
                         
                         // Send API status if we have it
-                        if (typeof window.parent.api !== 'undefined') {
-                            this.contentWindow.postMessage({
-                                type: 'API_READY',
-                                hasApi: true
-                            }, '*');
+                        if (apiReady) {
+                            sendApiStatusToIframe(this);
                         }
                     } catch (e) {
                         // Silently ignore cross-origin errors
@@ -2183,6 +2228,11 @@
                             user: currentUser,
                             isOnline: isOnline
                         }, '*');
+                        
+                        // Send API status
+                        if (apiReady) {
+                            sendApiStatusToIframe(iframe);
+                        }
                     } catch (e) {
                         // Silently ignore
                     }
@@ -2217,6 +2267,29 @@
             
             switch(event.data.type) {
                 case 'iframe_loaded':
+                    break;
+                    
+                case 'REQUEST_API_READY':
+                case 'REQUEST_API_STATUS':
+                    // Handle API readiness requests from iframes
+                    const iframe = document.querySelector('.content-area:not(.hidden) .content-iframe');
+                    if (iframe && iframe.contentWindow) {
+                        if (apiReady) {
+                            sendApiStatusToIframe(iframe, event.data.requestId);
+                        } else {
+                            // Store the request if API isn't ready yet
+                            pendingApiRequests.push({
+                                iframe: iframe,
+                                message: {
+                                    type: 'API_READY',
+                                    hasApi: false,
+                                    timestamp: Date.now(),
+                                    apiAvailable: false,
+                                    requestId: event.data.requestId
+                                }
+                            });
+                        }
+                    }
                     break;
                     
                 case 'auth_required':
@@ -2325,19 +2398,35 @@
                     
                 case 'api_request':
                     // Forward API requests to parent's api.js
-                    if (event.data.endpoint && event.data.method && typeof window.parent.api !== 'undefined') {
-                        forwardApiRequest(event.data);
-                    } else {
-                        // Send error back to iframe
-                        const activeIframe = document.querySelector('.content-area:not(.hidden) .content-iframe');
-                        if (activeIframe && activeIframe.contentWindow) {
-                            activeIframe.contentWindow.postMessage({
-                                type: 'api_response',
-                                requestId: event.data.requestId,
-                                success: false,
-                                error: 'API not available'
-                            }, '*');
+                    if (event.data.endpoint && event.data.method) {
+                        if (apiReady && typeof window.parent.api !== 'undefined') {
+                            forwardApiRequest(event.data);
+                        } else {
+                            // Send error back to iframe - API not ready
+                            const activeIframe = document.querySelector('.content-area:not(.hidden) .content-iframe');
+                            if (activeIframe && activeIframe.contentWindow) {
+                                activeIframe.contentWindow.postMessage({
+                                    type: 'api_response',
+                                    requestId: event.data.requestId,
+                                    success: false,
+                                    error: 'API not available yet',
+                                    apiReady: apiReady
+                                }, '*');
+                            }
                         }
+                    }
+                    break;
+                    
+                case 'test_api_connection':
+                    // Respond to API test requests
+                    const testIframe = document.querySelector('.content-area:not(.hidden) .content-iframe');
+                    if (testIframe && testIframe.contentWindow) {
+                        testIframe.contentWindow.postMessage({
+                            type: 'api_test_response',
+                            apiReady: apiReady,
+                            timestamp: Date.now(),
+                            hasParentApi: typeof window.parent.api !== 'undefined'
+                        }, '*');
                     }
                     break;
             }
@@ -2360,7 +2449,8 @@
                     type: 'api_response',
                     requestId: requestData.requestId,
                     success: true,
-                    data: result
+                    data: result,
+                    apiReady: true
                 }, '*');
             }
         } catch (error) {
@@ -2371,7 +2461,8 @@
                     type: 'api_response',
                     requestId: requestData.requestId,
                     success: false,
-                    error: error.message
+                    error: error.message,
+                    apiReady: true
                 }, '*');
             }
         }
@@ -2483,6 +2574,14 @@
         }
     });
     
+    // Listen for API readiness from parent
+    window.addEventListener('message', function(event) {
+        if (event.data && event.data.type === 'API_READY' && event.data.apiAvailable) {
+            console.log('Received API_READY message from parent');
+            checkApiReadiness();
+        }
+    });
+    
     // Make functions globally available
     window.removeNotification = removeNotification;
     window.showBottomNavigation = showBottomNavigation;
@@ -2495,7 +2594,7 @@
     window.setIsInGroupView = setIsInGroupView;
     window.setIsInFullscreenView = setIsInFullscreenView;
     
-    console.log('Iframe controller loaded successfully');
+    console.log('Iframe controller loaded successfully, API status:', apiReady);
     </script>
 </body>
 </html>

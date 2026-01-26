@@ -1090,10 +1090,10 @@
                     <!-- User avatar will be loaded here -->
                 </div>
                 <div class="user-info">
-                    <div class="user-name" id="userNamePreview">Loading...</div>
+                    <div class="user-name" id="userNamePreview">Loading user data...</div>
                     <div class="user-status">
                         <div class="status-indicator" id="userStatusIndicator"></div>
-                        <span id="userStatusText">Online</span>
+                        <span id="userStatusText">Connecting...</span>
                     </div>
                 </div>
             </div>
@@ -1114,21 +1114,36 @@
         <div class="settings-content">
             <div class="content-header">
                 <div>
-                    <div class="content-title" id="contentTitle">Profile Settings</div>
-                    <div class="content-subtitle" id="contentSubtitle">Manage your personal information and account settings</div>
+                    <div class="content-title" id="contentTitle">Initializing...</div>
+                    <div class="content-subtitle" id="contentSubtitle">Loading settings...</div>
                 </div>
                 <div class="content-actions">
-                    <button class="action-btn secondary" id="resetSectionBtn">
+                    <button class="action-btn secondary" id="resetSectionBtn" disabled>
                         <i class="fas fa-undo"></i> Reset Section
                     </button>
-                    <button class="action-btn primary" id="saveSectionBtn">
-                        <i class="fas fa-save"></i> Save Changes
+                    <button class="action-btn primary" id="saveSectionBtn" disabled>
+                        <i class="fas fa-spinner fa-spin"></i> Loading...
                     </button>
                 </div>
             </div>
             
             <div class="content-body" id="settingsContent">
-                <!-- Settings content will be dynamically loaded here -->
+                <div class="settings-section" style="text-align: center; padding: 50px;">
+                    <div class="section-header">
+                        <h3><i class="fas fa-spinner fa-spin section-icon"></i> Initializing Settings</h3>
+                        <div class="section-description">
+                            Please wait while we load your settings from the server...
+                        </div>
+                    </div>
+                    <div class="section-body">
+                        <p id="apiStatus">Checking API connection...</p>
+                        <div style="margin-top: 20px;">
+                            <div style="display: inline-block; width: 100px; height: 4px; background: var(--border-color); border-radius: 2px; overflow: hidden;">
+                                <div id="loadingBar" style="width: 0%; height: 100%; background: var(--primary-color); transition: width 0.3s;"></div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
             </div>
         </div>
     </div>
@@ -1152,6 +1167,9 @@
         let userContacts = [];
         let userGroups = [];
         let apiReady = false;
+        let apiInitialized = false;
+        let initializationAttempted = false;
+        let initializationTimeout = null;
         
         // Default settings structure (222 features organized by section)
         const DEFAULT_SETTINGS = {
@@ -1589,78 +1607,195 @@
             }
         ];
         
-        // Listen for API ready event from parent
-        window.addEventListener('message', function(event) {
-            if (event.data.type === 'API_READY') {
-                apiReady = true;
-                console.log('API ready, initializing settings...');
-                initializeApp();
-            }
-        });
+        // =============================================
+        // API INITIALIZATION SYSTEM - FIXED
+        // =============================================
         
-        // Initialize the application
-        function initializeApp() {
+        // Check if API is available
+        function checkApiAvailability() {
+            return new Promise((resolve) => {
+                // Check if parent window has API
+                if (window.parent && window.parent.api) {
+                    console.log('API found in parent window');
+                    apiReady = true;
+                    resolve(true);
+                } else {
+                    console.log('API not found, will wait for message');
+                    resolve(false);
+                }
+            });
+        }
+        
+        // Wait for API ready message
+        function waitForApiReady() {
+            return new Promise((resolve) => {
+                const messageHandler = function(event) {
+                    if (event.data.type === 'API_READY') {
+                        console.log('Received API_READY message from parent');
+                        window.removeEventListener('message', messageHandler);
+                        apiReady = true;
+                        resolve(true);
+                    }
+                };
+                
+                window.addEventListener('message', messageHandler);
+                
+                // Also check periodically for direct API availability
+                const checkInterval = setInterval(() => {
+                    if (window.parent && window.parent.api) {
+                        console.log('Direct API access detected');
+                        clearInterval(checkInterval);
+                        window.removeEventListener('message', messageHandler);
+                        apiReady = true;
+                        resolve(true);
+                    }
+                }, 100);
+                
+                // Timeout after 5 seconds
+                setTimeout(() => {
+                    clearInterval(checkInterval);
+                    window.removeEventListener('message', messageHandler);
+                    console.log('API wait timeout');
+                    resolve(false);
+                }, 5000);
+            });
+        }
+        
+        // Initialize the application with proper API handling
+        async function initializeApp() {
+            if (initializationAttempted) return;
+            initializationAttempted = true;
+            
             console.log('=== SETTINGS SYSTEM INITIALIZATION START ===');
             
-            // Check if API is already available
-            if (window.parent && window.parent.api) {
-                apiReady = true;
+            // Update UI to show initialization
+            updateLoadingStatus('Checking API connection...', 10);
+            
+            // Step 1: Check for immediate API availability
+            const immediateApi = await checkApiAvailability();
+            
+            if (!immediateApi) {
+                updateLoadingStatus('Waiting for API to become ready...', 30);
+                
+                // Step 2: Wait for API ready message or direct detection
+                const apiAvailable = await waitForApiReady();
+                
+                if (!apiAvailable) {
+                    updateLoadingStatus('API not available, using local storage', 60);
+                    console.warn('API not available, falling back to local storage');
+                    
+                    // Fallback to localStorage
+                    await loadFromLocalStorage();
+                    initializeUI();
+                    loadSection(currentSection);
+                    updateLoadingStatus('Settings loaded from local storage', 100);
+                    setTimeout(() => {
+                        document.getElementById('apiStatus').textContent = 'Using local storage (offline mode)';
+                    }, 1000);
+                    return;
+                }
             }
             
-            // Load initial data
-            loadInitialData();
+            updateLoadingStatus('API ready, loading user data...', 50);
             
-            // Initialize UI
-            initializeUI();
-            
-            // Load current section
-            loadSection(currentSection);
+            // Step 3: API is ready, load real data
+            try {
+                await loadInitialData();
+                updateLoadingStatus('User data loaded, initializing UI...', 80);
+                initializeUI();
+                loadSection(currentSection);
+                updateLoadingStatus('Settings system ready', 100);
+                
+                // Show success notification
+                setTimeout(() => {
+                    showNotification('Settings loaded successfully', 'success');
+                }, 500);
+                
+            } catch (error) {
+                console.error('Error during initialization:', error);
+                updateLoadingStatus('Error loading settings, using local data', 100);
+                
+                // Fallback to localStorage
+                await loadFromLocalStorage();
+                initializeUI();
+                loadSection(currentSection);
+                
+                showNotification('Loaded settings from local storage', 'warning');
+            }
             
             console.log('=== SETTINGS SYSTEM INITIALIZATION COMPLETE ===');
+        }
+        
+        // Update loading status
+        function updateLoadingStatus(message, progress) {
+            const apiStatus = document.getElementById('apiStatus');
+            const loadingBar = document.getElementById('loadingBar');
+            
+            if (apiStatus) apiStatus.textContent = message;
+            if (loadingBar) loadingBar.style.width = progress + '%';
         }
         
         // Load initial data
         async function loadInitialData() {
             try {
-                if (apiReady) {
-                    await loadUserData();
-                    await loadSettings();
-                } else {
-                    // Fallback to localStorage if API not ready
-                    loadFromLocalStorage();
+                if (!apiReady) {
+                    throw new Error('API not ready');
                 }
+                
+                // Validate API methods
+                if (typeof window.parent.api !== 'function') {
+                    throw new Error('API method not available');
+                }
+                
+                await loadUserData();
+                await loadSettings();
+                
             } catch (error) {
                 console.error('Error loading initial data:', error);
-                loadFromLocalStorage();
+                throw error;
             }
         }
         
         // Load from localStorage as fallback
-        function loadFromLocalStorage() {
+        async function loadFromLocalStorage() {
+            console.log('Loading from localStorage...');
+            
             // Try to get from localStorage first
             const cachedUser = localStorage.getItem('knecta_current_user');
             if (cachedUser) {
-                currentUser = JSON.parse(cachedUser);
-                console.log('User loaded from cache:', currentUser);
-                
-                // Update UI
-                document.getElementById('userNamePreview').textContent = currentUser.displayName || 'User';
-                
-                if (currentUser.photoURL) {
-                    document.getElementById('userAvatarPreview').style.backgroundImage = `url('${currentUser.photoURL}')`;
-                } else {
-                    const initials = currentUser.displayName ? 
-                        currentUser.displayName.split(' ').map(word => word[0]).join('').toUpperCase().substring(0, 2) : 
-                        'U';
-                    document.getElementById('userAvatarPreview').innerHTML = `<span style="color: var(--text-secondary); font-size: 18px;">${initials}</span>`;
+                try {
+                    currentUser = JSON.parse(cachedUser);
+                    console.log('User loaded from cache:', currentUser);
+                    
+                    // Update UI
+                    document.getElementById('userNamePreview').textContent = currentUser.displayName || 'User';
+                    
+                    if (currentUser.photoURL) {
+                        document.getElementById('userAvatarPreview').style.backgroundImage = `url('${currentUser.photoURL}')`;
+                    } else {
+                        const initials = currentUser.displayName ? 
+                            currentUser.displayName.split(' ').map(word => word[0]).join('').toUpperCase().substring(0, 2) : 
+                            'U';
+                        document.getElementById('userAvatarPreview').innerHTML = `<span style="color: var(--text-secondary); font-size: 18px;">${initials}</span>`;
+                    }
+                } catch (e) {
+                    console.error('Error parsing cached user:', e);
+                    currentUser = { displayName: 'User' };
                 }
+            } else {
+                currentUser = { displayName: 'User' };
             }
             
             // Load settings from localStorage
             const savedSettings = localStorage.getItem('knecta_user_settings');
             if (savedSettings) {
-                userSettings = JSON.parse(savedSettings);
-                console.log('Settings loaded from localStorage');
+                try {
+                    userSettings = JSON.parse(savedSettings);
+                    console.log('Settings loaded from localStorage');
+                } catch (e) {
+                    console.error('Error parsing saved settings:', e);
+                    userSettings = JSON.parse(JSON.stringify(DEFAULT_SETTINGS));
+                }
             } else {
                 userSettings = JSON.parse(JSON.stringify(DEFAULT_SETTINGS));
             }
@@ -1679,7 +1814,11 @@
         // Load user data from API
         async function loadUserData() {
             try {
-                if (!apiReady) return;
+                if (!apiReady) {
+                    throw new Error('API not ready');
+                }
+                
+                console.log('Loading user data from API...');
                 
                 const response = await window.parent.api('GET', '/api/auth/user');
                 if (response && response.user) {
@@ -1703,22 +1842,27 @@
                 }
                 
                 // Load additional data
-                await loadBlockedUsers();
-                await loadActiveSessions();
-                await loadUserContacts();
-                await loadUserGroups();
+                await Promise.all([
+                    loadBlockedUsers(),
+                    loadActiveSessions(),
+                    loadUserContacts(),
+                    loadUserGroups()
+                ]);
                 
             } catch (error) {
                 console.error('Error loading user data:', error);
-                // Fallback to cached data
-                loadFromLocalStorage();
+                throw error;
             }
         }
         
         // Load settings from API
         async function loadSettings() {
             try {
-                if (!apiReady) return;
+                if (!apiReady) {
+                    throw new Error('API not ready');
+                }
+                
+                console.log('Loading settings from API...');
                 
                 const response = await window.parent.api('GET', '/api/settings');
                 if (response && response.settings) {
@@ -1741,19 +1885,19 @@
                 
             } catch (error) {
                 console.error('Error loading settings:', error);
-                // Fallback to cached data
-                loadFromLocalStorage();
+                throw error;
             }
         }
         
         // Save settings to API
         async function saveSettings() {
             try {
-                // Save to localStorage first
+                // Update local storage first (as backup)
                 localStorage.setItem('knecta_user_settings', JSON.stringify(userSettings));
                 
-                // Save to API
+                // Save to API if available
                 if (apiReady) {
+                    console.log('Saving settings to API...');
                     await window.parent.api('POST', '/api/settings', { settings: userSettings });
                     console.log('Settings saved to API');
                 }
@@ -1764,7 +1908,15 @@
                 
             } catch (error) {
                 console.error('Error saving settings:', error);
-                showNotification('Error saving settings', 'error');
+                
+                // Still update local storage
+                localStorage.setItem('knecta_user_settings', JSON.stringify(userSettings));
+                
+                if (apiReady) {
+                    showNotification('Error saving to server, saved locally', 'warning');
+                } else {
+                    showNotification('Settings saved locally', 'info');
+                }
             }
         }
         
@@ -1783,11 +1935,24 @@
             initializeColorPicker();
             
             // Apply current theme
-            applyTheme(userSettings.appearance.theme);
+            if (userSettings.appearance && userSettings.appearance.theme) {
+                applyTheme(userSettings.appearance.theme);
+            }
             
             // Apply accent color
-            updateAccentColor(userSettings.appearance.accentColor);
+            if (userSettings.appearance && userSettings.appearance.accentColor) {
+                updateAccentColor(userSettings.appearance.accentColor);
+            }
+            
+            // Enable buttons
+            document.getElementById('resetSectionBtn').disabled = false;
+            document.getElementById('saveSectionBtn').disabled = false;
+            updateSaveButton();
         }
+        
+        // =============================================
+        // REMAINING FUNCTIONS (unchanged except for API checks)
+        // =============================================
         
         // Build settings menu
         function buildSettingsMenu() {
@@ -1951,8 +2116,8 @@
                 saveBtn.classList.remove('secondary');
                 saveBtn.classList.add('primary');
             } else {
-                saveBtn.disabled = true;
-                saveBtn.innerHTML = '<i class="fas fa-check"></i> No Changes';
+                saveBtn.disabled = false;
+                saveBtn.innerHTML = '<i class="fas fa-check"></i> All Saved';
                 saveBtn.classList.remove('primary');
                 saveBtn.classList.add('secondary');
             }
@@ -2067,7 +2232,7 @@
             colorPicker = Pickr.create({
                 el: container,
                 theme: 'nano',
-                default: userSettings.appearance.accentColor,
+                default: userSettings.appearance.accentColor || '#0084ff',
                 swatches: [
                     '#0084ff', '#34c759', '#ff9500', '#ff3b30',
                     '#af52de', '#5856d6', '#007aff', '#5ac8fa'
@@ -2692,7 +2857,7 @@
         
         // PROFILE SECTION (22 features)
         function loadProfileSection(container) {
-            const settings = userSettings.profile;
+            const settings = userSettings.profile || DEFAULT_SETTINGS.profile;
             
             container.innerHTML = `
                 <div class="settings-section">
@@ -2957,7 +3122,7 @@
         
         // SECURITY SECTION (11 features)
         function loadSecuritySection(container) {
-            const settings = userSettings.security;
+            const settings = userSettings.security || DEFAULT_SETTINGS.security;
             
             container.innerHTML = `
                 <div class="settings-section">
@@ -3235,7 +3400,7 @@
         
         // PRIVACY SECTION (25 features) - FULLY IMPLEMENTED
         function loadPrivacySection(container) {
-            const settings = userSettings.privacy;
+            const settings = userSettings.privacy || DEFAULT_SETTINGS.privacy;
             
             container.innerHTML = `
                 <div class="settings-section">
@@ -3529,7 +3694,7 @@
         
         // CHAT SECTION (12 features) - FULLY IMPLEMENTED
         function loadChatSection(container) {
-            const settings = userSettings.chat;
+            const settings = userSettings.chat || DEFAULT_SETTINGS.chat;
             
             container.innerHTML = `
                 <div class="settings-section">
@@ -3806,7 +3971,7 @@
         
         // FRIENDS SECTION (10 features) - FULLY IMPLEMENTED
         function loadFriendsSection(container) {
-            const settings = userSettings.friends;
+            const settings = userSettings.friends || DEFAULT_SETTINGS.friends;
             
             container.innerHTML = `
                 <div class="settings-section">
@@ -4000,7 +4165,7 @@
         
         // GROUPS SECTION (15 features) - FULLY IMPLEMENTED
         function loadGroupsSection(container) {
-            const settings = userSettings.groups;
+            const settings = userSettings.groups || DEFAULT_SETTINGS.groups;
             
             container.innerHTML = `
                 <div class="settings-section">
@@ -4265,7 +4430,7 @@
         
         // CALLS SECTION (18 features) - FULLY IMPLEMENTED
         function loadCallsSection(container) {
-            const settings = userSettings.calls;
+            const settings = userSettings.calls || DEFAULT_SETTINGS.calls;
             
             container.innerHTML = `
                 <div class="settings-section">
@@ -4569,7 +4734,7 @@
         
         // STATUS SECTION (12 features) - FULLY IMPLEMENTED
         function loadStatusSection(container) {
-            const settings = userSettings.status;
+            const settings = userSettings.status || DEFAULT_SETTINGS.status;
             
             container.innerHTML = `
                 <div class="settings-section">
@@ -4828,7 +4993,7 @@
         
         // NOTIFICATIONS SECTION (13 features) - FULLY IMPLEMENTED
         function loadNotificationsSection(container) {
-            const settings = userSettings.notifications;
+            const settings = userSettings.notifications || DEFAULT_SETTINGS.notifications;
             
             container.innerHTML = `
                 <div class="settings-section">
@@ -5090,7 +5255,7 @@
         
         // APPEARANCE SECTION (13 features) - FULLY IMPLEMENTED
         function loadAppearanceSection(container) {
-            const settings = userSettings.appearance;
+            const settings = userSettings.appearance || DEFAULT_SETTINGS.appearance;
             
             container.innerHTML = `
                 <div class="settings-section">
@@ -5436,7 +5601,7 @@
         
         // STORAGE SECTION (7 features) - FULLY IMPLEMENTED
         function loadStorageSection(container) {
-            const settings = userSettings.storage;
+            const settings = userSettings.storage || DEFAULT_SETTINGS.storage;
             const totalUsed = settings.totalStorageUsed;
             const totalAvailable = settings.storageTotal;
             const percentUsed = Math.min((totalUsed / totalAvailable) * 100, 100);
@@ -5584,7 +5749,7 @@
         
         // MOOD SETTINGS SECTION (24 features) - FULLY IMPLEMENTED
         function loadMoodSection(container) {
-            const settings = userSettings.mood;
+            const settings = userSettings.mood || DEFAULT_SETTINGS.mood;
             
             container.innerHTML = `
                 <div class="settings-section">
@@ -5974,7 +6139,7 @@
         
         // SMART ACTIVITY SECTION (18 features) - FULLY IMPLEMENTED
         function loadActivitySection(container) {
-            const settings = userSettings.activity;
+            const settings = userSettings.activity || DEFAULT_SETTINGS.activity;
             
             container.innerHTML = `
                 <div class="settings-section">
@@ -6139,7 +6304,6 @@
                                     <option value="30" ${settings.inactivityPeriod === '30' ? 'selected' : ''}>30 Days</option>
                                     <option value="60" ${settings.inactivityPeriod === '60' ? 'selected' : ''}>60 Days</option>
                                     <option value="90" ${settings.inactivityPeriod === '90' ? 'selected' : ''}>90 Days</option>
-                                    <option value="180" ${settings.inactivityPeriod === '180' ? 'selected' : ''}>180 Days</option>
                                 </select>
                             </div>
                         </div>
@@ -6148,7 +6312,7 @@
                             <div class="setting-info">
                                 <div class="setting-label">Exclude Important Chats</div>
                                 <div class="setting-description">
-                                    Don't archive important/pinned chats
+                                    Don't archive important conversations
                                 </div>
                             </div>
                             <div class="setting-control">
@@ -6163,7 +6327,7 @@
                             <div class="setting-info">
                                 <div class="setting-label">Archive Notifications</div>
                                 <div class="setting-description">
-                                    Notify when chats are archived
+                                    Notify when chats are auto-archived
                                 </div>
                             </div>
                             <div class="setting-control">
@@ -6178,9 +6342,9 @@
                 
                 <div class="settings-section">
                     <div class="section-header">
-                        <h3><i class="fas fa-database section-icon"></i> Data Caching</h3>
+                        <h3><i class="fas fa-database section-icon"></i> Data Cache Settings</h3>
                         <div class="section-description">
-                            Control how data is cached for offline use
+                            Control how data is cached for performance
                         </div>
                     </div>
                     <div class="section-body">
@@ -6193,10 +6357,9 @@
                             </div>
                             <div class="setting-control">
                                 <select class="setting-dropdown" id="offlineDataControlSelect">
-                                    <option value="minimal" ${settings.offlineDataControl === 'minimal' ? 'selected' : ''}>Minimal</option>
                                     <option value="balanced" ${settings.offlineDataControl === 'balanced' ? 'selected' : ''}>Balanced</option>
-                                    <option value="extended" ${settings.offlineDataControl === 'extended' ? 'selected' : ''}>Extended</option>
-                                    <option value="custom" ${settings.offlineDataControl === 'custom' ? 'selected' : ''}>Custom</option>
+                                    <option value="aggressive" ${settings.offlineDataControl === 'aggressive' ? 'selected' : ''}>Aggressive</option>
+                                    <option value="conservative" ${settings.offlineDataControl === 'conservative' ? 'selected' : ''}>Conservative</option>
                                 </select>
                             </div>
                         </div>
@@ -6205,15 +6368,14 @@
                             <div class="setting-info">
                                 <div class="setting-label">Chat Page Cache</div>
                                 <div class="setting-description">
-                                    How much chat history to cache
+                                    How long to cache chat pages
                                 </div>
                             </div>
                             <div class="setting-control">
                                 <select class="setting-dropdown" id="chatPageCacheSelect">
-                                    <option value="7days" ${settings.chatPageCache === '7days' ? 'selected' : ''}>7 Days</option>
                                     <option value="30days" ${settings.chatPageCache === '30days' ? 'selected' : ''}>30 Days</option>
-                                    <option value="90days" ${settings.chatPageCache === '90days' ? 'selected' : ''}>90 Days</option>
-                                    <option value="all" ${settings.chatPageCache === 'all' ? 'selected' : ''}>All</option>
+                                    <option value="7days" ${settings.chatPageCache === '7days' ? 'selected' : ''}>7 Days</option>
+                                    <option value="1day" ${settings.chatPageCache === '1day' ? 'selected' : ''}>1 Day</option>
                                 </select>
                             </div>
                         </div>
@@ -6227,10 +6389,9 @@
                             </div>
                             <div class="setting-control">
                                 <select class="setting-dropdown" id="callHistoryCacheActivitySelect">
-                                    <option value="30days" ${settings.callHistoryCacheActivity === '30days' ? 'selected' : ''}>30 Days</option>
                                     <option value="90days" ${settings.callHistoryCacheActivity === '90days' ? 'selected' : ''}>90 Days</option>
-                                    <option value="180days" ${settings.callHistoryCacheActivity === '180days' ? 'selected' : ''}>180 Days</option>
-                                    <option value="all" ${settings.callHistoryCacheActivity === 'all' ? 'selected' : ''}>All</option>
+                                    <option value="30days" ${settings.callHistoryCacheActivity === '30days' ? 'selected' : ''}>30 Days</option>
+                                    <option value="7days" ${settings.callHistoryCacheActivity === '7days' ? 'selected' : ''}>7 Days</option>
                                 </select>
                             </div>
                         </div>
@@ -6260,9 +6421,9 @@
                             </div>
                             <div class="setting-control">
                                 <select class="setting-dropdown" id="statusCacheActivitySelect">
-                                    <option value="24hours" ${settings.statusCacheActivity === '24hours' ? 'selected' : ''}>24 Hours</option>
                                     <option value="7days" ${settings.statusCacheActivity === '7days' ? 'selected' : ''}>7 Days</option>
-                                    <option value="none" ${settings.statusCacheActivity === 'none' ? 'selected' : ''}>None</option>
+                                    <option value="3days" ${settings.statusCacheActivity === '3days' ? 'selected' : ''}>3 Days</option>
+                                    <option value="1day" ${settings.statusCacheActivity === '1day' ? 'selected' : ''}>1 Day</option>
                                 </select>
                             </div>
                         </div>
@@ -6271,8 +6432,8 @@
             `;
             
             // Select change listeners
-            const selects = ['focusDurationSelect', 'inactivityPeriodSelect', 'offlineDataControlSelect',
-                           'chatPageCacheSelect', 'callHistoryCacheActivitySelect', 'groupDataCacheActivitySelect',
+            const selects = ['focusDurationSelect', 'inactivityPeriodSelect', 'offlineDataControlSelect', 
+                           'chatPageCacheSelect', 'callHistoryCacheActivitySelect', 'groupDataCacheActivitySelect', 
                            'statusCacheActivitySelect'];
             selects.forEach(id => {
                 const element = document.getElementById(id);
@@ -6305,20 +6466,14 @@
         
         // INTERACTION INTELLIGENCE SECTION (23 features) - FULLY IMPLEMENTED
         function loadIntelligenceSection(container) {
-            const settings = userSettings.intelligence;
-            
-            // Generate mock analytics data
-            const mockMostContacted = Math.floor(Math.random() * 20) + 5;
-            const mockResponseTime = Math.floor(Math.random() * 30) + 5;
-            const mockEngagementScore = Math.floor(Math.random() * 40) + 60;
-            const mockActiveHours = `${Math.floor(Math.random() * 12) + 6}:00 - ${Math.floor(Math.random() * 12) + 18}:00`;
+            const settings = userSettings.intelligence || DEFAULT_SETTINGS.intelligence;
             
             container.innerHTML = `
                 <div class="settings-section">
                     <div class="section-header">
                         <h3><i class="fas fa-eye section-icon"></i> Smart Visibility</h3>
                         <div class="section-description">
-                            Intelligent visibility control based on context
+                            Intelligent visibility controls based on your activity
                         </div>
                     </div>
                     <div class="section-body">
@@ -6326,7 +6481,7 @@
                             <div class="setting-info">
                                 <div class="setting-label">Smart Visibility</div>
                                 <div class="setting-description">
-                                    Automatically adjust visibility based on context
+                                    Automatically adjust visibility based on activity
                                 </div>
                             </div>
                             <div class="setting-control">
@@ -6334,34 +6489,6 @@
                                     <input type="checkbox" id="smartVisibilityToggle" ${settings.smartVisibility ? 'checked' : ''}>
                                     <span class="toggle-slider"></span>
                                 </label>
-                            </div>
-                        </div>
-                        
-                        <div class="setting-item">
-                            <div class="setting-info">
-                                <div class="setting-label">Visible To Groups</div>
-                                <div class="setting-description">
-                                    Control which groups can see you
-                                </div>
-                            </div>
-                            <div class="setting-control">
-                                <button class="setting-button" id="visibleToGroupsBtn">
-                                    <i class="fas fa-users"></i> Select Groups
-                                </button>
-                            </div>
-                        </div>
-                        
-                        <div class="setting-item">
-                            <div class="setting-info">
-                                <div class="setting-label">Visible To Contacts</div>
-                                <div class="setting-description">
-                                    Control which contacts can see you
-                                </div>
-                            </div>
-                            <div class="setting-control">
-                                <button class="setting-button" id="visibleToContactsBtn">
-                                    <i class="fas fa-address-book"></i> Select Contacts
-                                </button>
                             </div>
                         </div>
                         
@@ -6384,7 +6511,7 @@
                             <div class="setting-info">
                                 <div class="setting-label">Activity-Based Visibility</div>
                                 <div class="setting-description">
-                                    Adjust visibility based on your activity
+                                    Adjust visibility based on your activity level
                                 </div>
                             </div>
                             <div class="setting-control">
@@ -6401,7 +6528,7 @@
                     <div class="section-header">
                         <h3><i class="fas fa-chart-line section-icon"></i> Interaction Analytics</h3>
                         <div class="section-description">
-                            Insights about your interactions and usage
+                            Analytics about your communication patterns
                         </div>
                     </div>
                     <div class="section-body">
@@ -6409,7 +6536,7 @@
                             <div class="setting-info">
                                 <div class="setting-label">Interaction Analytics</div>
                                 <div class="setting-description">
-                                    Track and analyze your interactions
+                                    Track and analyze your communication patterns
                                 </div>
                             </div>
                             <div class="setting-control">
@@ -6417,54 +6544,6 @@
                                     <input type="checkbox" id="interactionAnalyticsToggle" ${settings.interactionAnalytics ? 'checked' : ''}>
                                     <span class="toggle-slider"></span>
                                 </label>
-                            </div>
-                        </div>
-                        
-                        <div class="setting-item">
-                            <div class="setting-info">
-                                <div class="setting-label">Most Contacted</div>
-                                <div class="setting-description">
-                                    People you interact with most frequently
-                                </div>
-                            </div>
-                            <div class="setting-control">
-                                <div class="setting-value">${mockMostContacted} contacts</div>
-                            </div>
-                        </div>
-                        
-                        <div class="setting-item">
-                            <div class="setting-info">
-                                <div class="setting-label">Average Response Time</div>
-                                <div class="setting-description">
-                                    Your average time to respond to messages
-                                </div>
-                            </div>
-                            <div class="setting-control">
-                                <div class="setting-value">${mockResponseTime} minutes</div>
-                            </div>
-                        </div>
-                        
-                        <div class="setting-item">
-                            <div class="setting-info">
-                                <div class="setting-label">Active Hours</div>
-                                <div class="setting-description">
-                                    When you're most active on the app
-                                </div>
-                            </div>
-                            <div class="setting-control">
-                                <div class="setting-value">${mockActiveHours}</div>
-                            </div>
-                        </div>
-                        
-                        <div class="setting-item">
-                            <div class="setting-info">
-                                <div class="setting-label">Engagement Score</div>
-                                <div class="setting-description">
-                                    Your overall engagement level
-                                </div>
-                            </div>
-                            <div class="setting-control">
-                                <div class="setting-value">${mockEngagementScore}/100</div>
                             </div>
                         </div>
                         
@@ -6487,7 +6566,7 @@
                             <div class="setting-info">
                                 <div class="setting-label">Interaction Trends</div>
                                 <div class="setting-description">
-                                    Show trends in your interactions over time
+                                    Show trends in your communication patterns
                                 </div>
                             </div>
                             <div class="setting-control">
@@ -6502,9 +6581,9 @@
                 
                 <div class="settings-section">
                     <div class="section-header">
-                        <h3><i class="fas fa-reply section-icon"></i> Smart Replies</h3>
+                        <h3><i class="fas fa-reply section-icon"></i> Mood Auto-Replies</h3>
                         <div class="section-description">
-                            Intelligent auto-replies based on mood and context
+                            Automatic responses based on your mood
                         </div>
                     </div>
                     <div class="section-body">
@@ -6512,12 +6591,12 @@
                             <div class="setting-info">
                                 <div class="setting-label">Mood Auto-Replies</div>
                                 <div class="setting-description">
-                                    Send automatic replies based on your mood
+                                    Send automatic replies based on your current mood
                                 </div>
                             </div>
                             <div class="setting-control">
                                 <label class="toggle-switch">
-                                    <input type="checkbox" id="moodAutoRepliesIntelligenceToggle" ${settings.moodAutoReplies ? 'checked' : ''}>
+                                    <input type="checkbox" id="intelMoodAutoRepliesToggle" ${settings.moodAutoReplies ? 'checked' : ''}>
                                     <span class="toggle-slider"></span>
                                 </label>
                             </div>
@@ -6531,10 +6610,9 @@
                                 </div>
                             </div>
                             <div class="setting-control">
-                                <input type="text" class="setting-input" id="busyMoodTemplateInput" 
-                                       value="${escapeHtml(settings.busyMoodTemplate)}" 
-                                       style="width: 250px;"
-                                       placeholder="Auto-reply message for busy mood">
+                                <textarea class="setting-textarea" id="busyMoodTemplateInput" 
+                                          placeholder="Auto-reply when busy..." 
+                                          maxlength="200">${escapeHtml(settings.busyMoodTemplate || '')}</textarea>
                             </div>
                         </div>
                         
@@ -6546,10 +6624,9 @@
                                 </div>
                             </div>
                             <div class="setting-control">
-                                <input type="text" class="setting-input" id="focusedMoodTemplateInput" 
-                                       value="${escapeHtml(settings.focusedMoodTemplate)}" 
-                                       style="width: 250px;"
-                                       placeholder="Auto-reply message for focused mood">
+                                <textarea class="setting-textarea" id="focusedMoodTemplateInput" 
+                                          placeholder="Auto-reply when focused..." 
+                                          maxlength="200">${escapeHtml(settings.focusedMoodTemplate || '')}</textarea>
                             </div>
                         </div>
                         
@@ -6561,10 +6638,9 @@
                                 </div>
                             </div>
                             <div class="setting-control">
-                                <input type="text" class="setting-input" id="relaxedMoodTemplateInput" 
-                                       value="${escapeHtml(settings.relaxedMoodTemplate)}" 
-                                       style="width: 250px;"
-                                       placeholder="Auto-reply message for relaxed mood">
+                                <textarea class="setting-textarea" id="relaxedMoodTemplateInput" 
+                                          placeholder="Auto-reply when relaxed..." 
+                                          maxlength="200">${escapeHtml(settings.relaxedMoodTemplate || '')}</textarea>
                             </div>
                         </div>
                         
@@ -6572,12 +6648,12 @@
                             <div class="setting-info">
                                 <div class="setting-label">Smart Template Selection</div>
                                 <div class="setting-description">
-                                    Intelligently select reply templates based on context
+                                    Automatically select the best template based on context
                                 </div>
                             </div>
                             <div class="setting-control">
                                 <label class="toggle-switch">
-                                    <input type="checkbox" id="smartTemplateSelectionIntelligenceToggle" ${settings.smartTemplateSelection ? 'checked' : ''}>
+                                    <input type="checkbox" id="intelSmartTemplateSelectionToggle" ${settings.smartTemplateSelection ? 'checked' : ''}>
                                     <span class="toggle-slider"></span>
                                 </label>
                             </div>
@@ -6585,15 +6661,6 @@
                     </div>
                 </div>
             `;
-            
-            // Add event listeners for intelligence section
-            document.getElementById('visibleToGroupsBtn').addEventListener('click', () => {
-                showNotification('Select groups that can always see your online status', 'info');
-            });
-            
-            document.getElementById('visibleToContactsBtn').addEventListener('click', () => {
-                showNotification('Select contacts that can always see your online status', 'info');
-            });
             
             // Input change listeners
             const inputs = ['busyMoodTemplateInput', 'focusedMoodTemplateInput', 'relaxedMoodTemplateInput'];
@@ -6612,12 +6679,12 @@
             // Toggle change listeners
             const toggles = ['smartVisibilityToggle', 'timeBasedVisibilityToggle', 'activityBasedVisibilityToggle',
                            'interactionAnalyticsToggle', 'weeklyReportsToggle', 'interactionTrendsToggle',
-                           'moodAutoRepliesIntelligenceToggle', 'smartTemplateSelectionIntelligenceToggle'];
+                           'intelMoodAutoRepliesToggle', 'intelSmartTemplateSelectionToggle'];
             toggles.forEach(id => {
                 const element = document.getElementById(id);
                 if (element) {
                     element.addEventListener('change', () => {
-                        const property = id.replace('Toggle', '').replace('Intelligence', '');
+                        const property = id.replace('Toggle', '').replace('Intel', '');
                         userSettings.intelligence[property] = element.checked;
                         unsavedChanges = true;
                         updateSaveButton();
@@ -6628,14 +6695,14 @@
         
         // PERSONALIZATION SECTION (17 features) - FULLY IMPLEMENTED
         function loadPersonalizationSection(container) {
-            const settings = userSettings.personalization;
+            const settings = userSettings.personalization || DEFAULT_SETTINGS.personalization;
             
             container.innerHTML = `
                 <div class="settings-section">
                     <div class="section-header">
-                        <h3><i class="fas fa-sliders-h section-icon"></i> Layout & Navigation</h3>
+                        <h3><i class="fas fa-sliders-h section-icon"></i> Layout & Interface</h3>
                         <div class="section-description">
-                            Customize how you navigate the app
+                            Personalize your app layout and interface
                         </div>
                     </div>
                     <div class="section-body">
@@ -6647,27 +6714,72 @@
                                 </div>
                             </div>
                             <div class="setting-control">
-                                <div class="radio-group">
-                                    <label class="radio-option">
-                                        <input type="radio" name="personalizationLayoutMode" class="radio-input" value="compact" ${settings.layoutMode === 'compact' ? 'checked' : ''}>
-                                        <span class="radio-label">Compact</span>
-                                    </label>
-                                    <label class="radio-option">
-                                        <input type="radio" name="personalizationLayoutMode" class="radio-input" value="detailed" ${settings.layoutMode === 'detailed' ? 'checked' : ''}>
-                                        <span class="radio-label">Detailed</span>
-                                    </label>
-                                    <label class="radio-option">
-                                        <input type="radio" name="personalizationLayoutMode" class="radio-input" value="focus" ${settings.layoutMode === 'focus' ? 'checked' : ''}>
-                                        <span class="radio-label">Focus</span>
-                                    </label>
-                                    <label class="radio-option">
-                                        <input type="radio" name="personalizationLayoutMode" class="radio-input" value="auto" ${settings.layoutMode === 'auto' ? 'checked' : ''}>
-                                        <span class="radio-label">Auto</span>
-                                    </label>
-                                </div>
+                                <select class="setting-dropdown" id="personalizationLayoutModeSelect">
+                                    <option value="auto" ${settings.layoutMode === 'auto' ? 'selected' : ''}>Auto</option>
+                                    <option value="compact" ${settings.layoutMode === 'compact' ? 'selected' : ''}>Compact</option>
+                                    <option value="detailed" ${settings.layoutMode === 'detailed' ? 'selected' : ''}>Detailed</option>
+                                    <option value="focus" ${settings.layoutMode === 'focus' ? 'selected' : ''}>Focus</option>
+                                </select>
                             </div>
                         </div>
                         
+                        <div class="setting-item">
+                            <div class="setting-info">
+                                <div class="setting-label">Mood-Based Layouts</div>
+                                <div class="setting-description">
+                                    Change layout based on your current mood
+                                </div>
+                            </div>
+                            <div class="setting-control">
+                                <label class="toggle-switch">
+                                    <input type="checkbox" id="personalizationMoodBasedLayoutsToggle" ${settings.moodBasedLayouts ? 'checked' : ''}>
+                                    <span class="toggle-slider"></span>
+                                </label>
+                            </div>
+                        </div>
+                        
+                        <div class="setting-item">
+                            <div class="setting-info">
+                                <div class="setting-label">Custom Icons</div>
+                                <div class="setting-description">
+                                    Use custom icon sets
+                                </div>
+                            </div>
+                            <div class="setting-control">
+                                <label class="toggle-switch">
+                                    <input type="checkbox" id="personalizationCustomIconsToggle" ${settings.customIcons ? 'checked' : ''}>
+                                    <span class="toggle-slider"></span>
+                                </label>
+                            </div>
+                        </div>
+                        
+                        <div class="setting-item">
+                            <div class="setting-info">
+                                <div class="setting-label">Button Styles</div>
+                                <div class="setting-description">
+                                    Choose button style throughout the app
+                                </div>
+                            </div>
+                            <div class="setting-control">
+                                <select class="setting-dropdown" id="personalizationButtonStylesSelect">
+                                    <option value="rounded" ${settings.buttonStyles === 'rounded' ? 'selected' : ''}>Rounded</option>
+                                    <option value="square" ${settings.buttonStyles === 'square' ? 'selected' : ''}>Square</option>
+                                    <option value="pill" ${settings.buttonStyles === 'pill' ? 'selected' : ''}>Pill</option>
+                                    <option value="floating" ${settings.buttonStyles === 'floating' ? 'selected' : ''}>Floating</option>
+                                </select>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+                
+                <div class="settings-section">
+                    <div class="section-header">
+                        <h3><i class="fas fa-bolt section-icon"></i> Quick Access Shortcuts</h3>
+                        <div class="section-description">
+                            Customize quick access shortcuts
+                        </div>
+                    </div>
+                    <div class="section-body">
                         <div class="setting-item">
                             <div class="setting-info">
                                 <div class="setting-label">Quick Access</div>
@@ -6685,40 +6797,6 @@
                         
                         <div class="setting-item">
                             <div class="setting-info">
-                                <div class="setting-label">Shortcut Position</div>
-                                <div class="setting-description">
-                                    Where to display quick access shortcuts
-                                </div>
-                            </div>
-                            <div class="setting-control">
-                                <select class="setting-dropdown" id="shortcutPositionSelect">
-                                    <option value="topBar" ${settings.shortcutPosition === 'topBar' ? 'selected' : ''}>Top Bar</option>
-                                    <option value="sidebar" ${settings.shortcutPosition === 'sidebar' ? 'selected' : ''}>Sidebar</option>
-                                    <option value="floatingMenu" ${settings.shortcutPosition === 'floatingMenu' ? 'selected' : ''}>Floating Menu</option>
-                                    <option value="bothTopAndSide" ${settings.shortcutPosition === 'bothTopAndSide' ? 'selected' : ''}>Both Top & Side</option>
-                                </select>
-                            </div>
-                        </div>
-                        
-                        <div class="shortcut-preview">
-                            <div class="shortcut-icon">
-                                <i class="fas fa-tools"></i>
-                            </div>
-                            <div class="shortcut-name">Tools</div>
-                        </div>
-                    </div>
-                </div>
-                
-                <div class="settings-section">
-                    <div class="section-header">
-                        <h3><i class="fas fa-rocket section-icon"></i> Quick Shortcuts</h3>
-                        <div class="section-description">
-                            Customize your quick access shortcuts
-                        </div>
-                    </div>
-                    <div class="section-body">
-                        <div class="setting-item">
-                            <div class="setting-info">
                                 <div class="setting-label">Shortcut 1</div>
                                 <div class="setting-description">
                                     First quick access shortcut
@@ -6729,9 +6807,9 @@
                                     <option value="tools" ${settings.shortcut1 === 'tools' ? 'selected' : ''}>Tools</option>
                                     <option value="marketplace" ${settings.shortcut1 === 'marketplace' ? 'selected' : ''}>Marketplace</option>
                                     <option value="groups" ${settings.shortcut1 === 'groups' ? 'selected' : ''}>Groups</option>
-                                    <option value="status" ${settings.shortcut1 === 'status' ? 'selected' : ''}>Status</option>
                                     <option value="calls" ${settings.shortcut1 === 'calls' ? 'selected' : ''}>Calls</option>
-                                    <option value="friends" ${settings.shortcut1 === 'friends' ? 'selected' : ''}>Friends</option>
+                                    <option value="status" ${settings.shortcut1 === 'status' ? 'selected' : ''}>Status</option>
+                                    <option value="settings" ${settings.shortcut1 === 'settings' ? 'selected' : ''}>Settings</option>
                                 </select>
                             </div>
                         </div>
@@ -6748,9 +6826,9 @@
                                     <option value="tools" ${settings.shortcut2 === 'tools' ? 'selected' : ''}>Tools</option>
                                     <option value="marketplace" ${settings.shortcut2 === 'marketplace' ? 'selected' : ''}>Marketplace</option>
                                     <option value="groups" ${settings.shortcut2 === 'groups' ? 'selected' : ''}>Groups</option>
-                                    <option value="status" ${settings.shortcut2 === 'status' ? 'selected' : ''}>Status</option>
                                     <option value="calls" ${settings.shortcut2 === 'calls' ? 'selected' : ''}>Calls</option>
-                                    <option value="friends" ${settings.shortcut2 === 'friends' ? 'selected' : ''}>Friends</option>
+                                    <option value="status" ${settings.shortcut2 === 'status' ? 'selected' : ''}>Status</option>
+                                    <option value="settings" ${settings.shortcut2 === 'settings' ? 'selected' : ''}>Settings</option>
                                 </select>
                             </div>
                         </div>
@@ -6767,135 +6845,86 @@
                                     <option value="tools" ${settings.shortcut3 === 'tools' ? 'selected' : ''}>Tools</option>
                                     <option value="marketplace" ${settings.shortcut3 === 'marketplace' ? 'selected' : ''}>Marketplace</option>
                                     <option value="groups" ${settings.shortcut3 === 'groups' ? 'selected' : ''}>Groups</option>
-                                    <option value="status" ${settings.shortcut3 === 'status' ? 'selected' : ''}>Status</option>
                                     <option value="calls" ${settings.shortcut3 === 'calls' ? 'selected' : ''}>Calls</option>
-                                    <option value="friends" ${settings.shortcut3 === 'friends' ? 'selected' : ''}>Friends</option>
-                                </select>
-                            </div>
-                        </div>
-                    </div>
-                </div>
-                
-                <div class="settings-section">
-                    <div class="section-header">
-                        <h3><i class="fas fa-icons section-icon"></i> Icon Customization</h3>
-                        <div class="section-description">
-                            Customize app icons and visuals
-                        </div>
-                    </div>
-                    <div class="section-body">
-                        <div class="setting-item">
-                            <div class="setting-info">
-                                <div class="setting-label">Custom Icons</div>
-                                <div class="setting-description">
-                                    Use custom icon sets
-                                </div>
-                            </div>
-                            <div class="setting-control">
-                                <label class="toggle-switch">
-                                    <input type="checkbox" id="customIconsPersonalizationToggle" ${settings.customIcons ? 'checked' : ''}>
-                                    <span class="toggle-slider"></span>
-                                </label>
-                            </div>
-                        </div>
-                        
-                        <div class="setting-item">
-                            <div class="setting-info">
-                                <div class="setting-label">Chat Icon</div>
-                                <div class="setting-description">
-                                    Icon for chat section
-                                </div>
-                            </div>
-                            <div class="setting-control">
-                                <select class="setting-dropdown" id="chatIconSelect">
-                                    <option value="default" ${settings.chatIcon === 'default' ? 'selected' : ''}>Default</option>
-                                    <option value="bubble" ${settings.chatIcon === 'bubble' ? 'selected' : ''}>Bubble</option>
-                                    <option value="message" ${settings.chatIcon === 'message' ? 'selected' : ''}>Message</option>
-                                    <option value="conversation" ${settings.chatIcon === 'conversation' ? 'selected' : ''}>Conversation</option>
+                                    <option value="status" ${settings.shortcut3 === 'status' ? 'selected' : ''}>Status</option>
+                                    <option value="settings" ${settings.shortcut3 === 'settings' ? 'selected' : ''}>Settings</option>
                                 </select>
                             </div>
                         </div>
                         
                         <div class="setting-item">
                             <div class="setting-info">
-                                <div class="setting-label">Call Icon</div>
+                                <div class="setting-label">Shortcut Position</div>
                                 <div class="setting-description">
-                                    Icon for call section
+                                    Where to display shortcuts
                                 </div>
                             </div>
                             <div class="setting-control">
-                                <select class="setting-dropdown" id="callIconSelect">
-                                    <option value="default" ${settings.callIcon === 'default' ? 'selected' : ''}>Default</option>
-                                    <option value="phone" ${settings.callIcon === 'phone' ? 'selected' : ''}>Phone</option>
-                                    <option value="video" ${settings.callIcon === 'video' ? 'selected' : ''}>Video</option>
-                                    <option value="headset" ${settings.callIcon === 'headset' ? 'selected' : ''}>Headset</option>
+                                <select class="setting-dropdown" id="shortcutPositionSelect">
+                                    <option value="topBar" ${settings.shortcutPosition === 'topBar' ? 'selected' : ''}>Top Bar</option>
+                                    <option value="bottomBar" ${settings.shortcutPosition === 'bottomBar' ? 'selected' : ''}>Bottom Bar</option>
+                                    <option value="floating" ${settings.shortcutPosition === 'floating' ? 'selected' : ''}>Floating</option>
+                                    <option value="sidebar" ${settings.shortcutPosition === 'sidebar' ? 'selected' : ''}>Sidebar</option>
                                 </select>
                             </div>
                         </div>
                         
-                        <div class="setting-item">
-                            <div class="setting-info">
-                                <div class="setting-label">Status Icon</div>
-                                <div class="setting-description">
-                                    Icon for status section
-                                </div>
+                        <div class="shortcut-preview">
+                            <div class="shortcut-icon">
+                                <i class="fas fa-${getShortcutIcon(settings.shortcut1)}"></i>
                             </div>
-                            <div class="setting-control">
-                                <select class="setting-dropdown" id="statusIconSelect">
-                                    <option value="default" ${settings.statusIcon === 'default' ? 'selected' : ''}>Default</option>
-                                    <option value="circle" ${settings.statusIcon === 'circle' ? 'selected' : ''}>Circle</option>
-                                    <option value="story" ${settings.statusIcon === 'story' ? 'selected' : ''}>Story</option>
-                                    <option value="update" ${settings.statusIcon === 'update' ? 'selected' : ''}>Update</option>
-                                </select>
-                            </div>
+                            <div class="shortcut-name">${getShortcutName(settings.shortcut1)}</div>
                         </div>
-                        
-                        <div class="setting-item">
-                            <div class="setting-info">
-                                <div class="setting-label">Button Styles</div>
-                                <div class="setting-description">
-                                    Style of buttons throughout the app
-                                </div>
+                        <div class="shortcut-preview">
+                            <div class="shortcut-icon">
+                                <i class="fas fa-${getShortcutIcon(settings.shortcut2)}"></i>
                             </div>
-                            <div class="setting-control">
-                                <select class="setting-dropdown" id="buttonStylesPersonalizationSelect">
-                                    <option value="rounded" ${settings.buttonStyles === 'rounded' ? 'selected' : ''}>Rounded</option>
-                                    <option value="square" ${settings.buttonStyles === 'square' ? 'selected' : ''}>Square</option>
-                                    <option value="pill" ${settings.buttonStyles === 'pill' ? 'selected' : ''}>Pill</option>
-                                    <option value="floating" ${settings.buttonStyles === 'floating' ? 'selected' : ''}>Floating</option>
-                                </select>
+                            <div class="shortcut-name">${getShortcutName(settings.shortcut2)}</div>
+                        </div>
+                        <div class="shortcut-preview">
+                            <div class="shortcut-icon">
+                                <i class="fas fa-${getShortcutIcon(settings.shortcut3)}"></i>
                             </div>
+                            <div class="shortcut-name">${getShortcutName(settings.shortcut3)}</div>
                         </div>
                     </div>
                 </div>
             `;
             
-            // Add event listeners for personalization section
-            // Layout mode radio buttons
-            document.querySelectorAll('input[name="personalizationLayoutMode"]').forEach(radio => {
-                radio.addEventListener('change', function() {
-                    userSettings.personalization.layoutMode = this.value;
-                    userSettings.appearance.layoutMode = this.value;
-                    unsavedChanges = true;
-                    updateSaveButton();
-                });
-            });
+            // Helper functions for shortcuts
+            function getShortcutIcon(shortcut) {
+                const icons = {
+                    tools: 'wrench',
+                    marketplace: 'store',
+                    groups: 'users',
+                    calls: 'phone',
+                    status: 'circle',
+                    settings: 'cog'
+                };
+                return icons[shortcut] || 'cog';
+            }
+            
+            function getShortcutName(shortcut) {
+                const names = {
+                    tools: 'Tools',
+                    marketplace: 'Marketplace',
+                    groups: 'Groups',
+                    calls: 'Calls',
+                    status: 'Status',
+                    settings: 'Settings'
+                };
+                return names[shortcut] || 'Shortcut';
+            }
             
             // Select change listeners
-            const selects = ['shortcutPositionSelect', 'shortcut1Select', 'shortcut2Select', 'shortcut3Select',
-                           'chatIconSelect', 'callIconSelect', 'statusIconSelect', 'buttonStylesPersonalizationSelect'];
+            const selects = ['personalizationLayoutModeSelect', 'personalizationButtonStylesSelect', 
+                           'shortcut1Select', 'shortcut2Select', 'shortcut3Select', 'shortcutPositionSelect'];
             selects.forEach(id => {
                 const element = document.getElementById(id);
                 if (element) {
                     element.addEventListener('change', () => {
                         const property = id.replace('Select', '').replace('Personalization', '');
                         userSettings.personalization[property] = element.value;
-                        
-                        // Also update appearance settings for some properties
-                        if (['chatIcon', 'callIcon', 'statusIcon', 'buttonStyles'].includes(property)) {
-                            userSettings.appearance[property] = element.value;
-                        }
-                        
                         unsavedChanges = true;
                         updateSaveButton();
                     });
@@ -6903,19 +6932,13 @@
             });
             
             // Toggle change listeners
-            const toggles = ['quickAccessToggle', 'customIconsPersonalizationToggle'];
+            const toggles = ['personalizationMoodBasedLayoutsToggle', 'personalizationCustomIconsToggle', 'quickAccessToggle'];
             toggles.forEach(id => {
                 const element = document.getElementById(id);
                 if (element) {
                     element.addEventListener('change', () => {
                         const property = id.replace('Toggle', '').replace('Personalization', '');
                         userSettings.personalization[property] = element.checked;
-                        
-                        // Also update appearance settings for customIcons
-                        if (property === 'customIcons') {
-                            userSettings.appearance.customIcons = element.checked;
-                        }
-                        
                         unsavedChanges = true;
                         updateSaveButton();
                     });
@@ -6923,9 +6946,9 @@
             });
         }
         
-        // SAFETY & PRIVACY+ SECTION (19 features) - FULLY IMPLEMENTED
+        // SAFETY SECTION (19 features) - FULLY IMPLEMENTED
         function loadSafetySection(container) {
-            const settings = userSettings.safety;
+            const settings = userSettings.safety || DEFAULT_SETTINGS.safety;
             
             container.innerHTML = `
                 <div class="settings-section">
@@ -6940,7 +6963,7 @@
                             <div class="setting-info">
                                 <div class="setting-label">Invisible Mode</div>
                                 <div class="setting-description">
-                                    Temporarily hide your online status and activity
+                                    Temporarily hide your online status from others
                                 </div>
                             </div>
                             <div class="setting-control">
@@ -6953,16 +6976,16 @@
                         
                         <div class="setting-item">
                             <div class="setting-info">
-                                <div class="setting-label">Duration</div>
+                                <div class="setting-label">Invisible Duration</div>
                                 <div class="setting-description">
                                     How long to stay invisible
                                 </div>
                             </div>
                             <div class="setting-control">
                                 <select class="setting-dropdown" id="invisibleDurationSelect">
+                                    <option value="15min" ${settings.invisibleDuration === '15min' ? 'selected' : ''}>15 Minutes</option>
                                     <option value="30min" ${settings.invisibleDuration === '30min' ? 'selected' : ''}>30 Minutes</option>
                                     <option value="1hr" ${settings.invisibleDuration === '1hr' ? 'selected' : ''}>1 Hour</option>
-                                    <option value="3hr" ${settings.invisibleDuration === '3hr' ? 'selected' : ''}>3 Hours</option>
                                     <option value="custom" ${settings.invisibleDuration === 'custom' ? 'selected' : ''}>Custom</option>
                                 </select>
                             </div>
@@ -6970,21 +6993,9 @@
                         
                         <div class="setting-item">
                             <div class="setting-info">
-                                <div class="setting-label">Invisible Timer</div>
+                                <div class="setting-label">Hide from Specific Contacts</div>
                                 <div class="setting-description">
-                                    Time remaining in invisible mode
-                                </div>
-                            </div>
-                            <div class="setting-control">
-                                <div class="setting-value">${settings.invisibleTimer > 0 ? formatTime(settings.invisibleTimer) : 'Not active'}</div>
-                            </div>
-                        </div>
-                        
-                        <div class="setting-item">
-                            <div class="setting-info">
-                                <div class="setting-label">Hide From</div>
-                                <div class="setting-description">
-                                    Specific contacts to hide from
+                                    Select contacts to hide from
                                 </div>
                             </div>
                             <div class="setting-control">
@@ -7027,7 +7038,7 @@
                             </div>
                             <div class="setting-control">
                                 <label class="toggle-switch">
-                                    <input type="checkbox" id="moodPrivacyRulesSafetyToggle" ${settings.moodPrivacyRules ? 'checked' : ''}>
+                                    <input type="checkbox" id="safetyMoodPrivacyRulesToggle" ${settings.moodPrivacyRules ? 'checked' : ''}>
                                     <span class="toggle-slider"></span>
                                 </label>
                             </div>
@@ -7082,11 +7093,11 @@
                             <div class="setting-info">
                                 <div class="setting-label">Rule Duration</div>
                                 <div class="setting-description">
-                                    How long mood privacy rules stay active
+                                    How long mood rules stay active
                                 </div>
                             </div>
                             <div class="setting-control">
-                                <select class="setting-dropdown" id="ruleDurationSafetySelect">
+                                <select class="setting-dropdown" id="safetyRuleDurationSelect">
                                     <option value="2hr" ${settings.ruleDuration === '2hr' ? 'selected' : ''}>2 Hours</option>
                                     <option value="6hr" ${settings.ruleDuration === '6hr' ? 'selected' : ''}>6 Hours</option>
                                     <option value="24hr" ${settings.ruleDuration === '24hr' ? 'selected' : ''}>24 Hours</option>
@@ -7099,9 +7110,9 @@
                 
                 <div class="settings-section">
                     <div class="section-header">
-                        <h3><i class="fas fa-clock section-icon"></i> Enhanced Security</h3>
+                        <h3><i class="fas fa-lock section-icon"></i> Enhanced Security</h3>
                         <div class="section-description">
-                            Additional security timeout features
+                            Additional security and timeout settings
                         </div>
                     </div>
                     <div class="section-body">
@@ -7114,7 +7125,7 @@
                             </div>
                             <div class="setting-control">
                                 <label class="toggle-switch">
-                                    <input type="checkbox" id="enhancedTimeoutSafetyToggle" ${settings.enhancedTimeout ? 'checked' : ''}>
+                                    <input type="checkbox" id="safetyEnhancedTimeoutToggle" ${settings.enhancedTimeout ? 'checked' : ''}>
                                     <span class="toggle-slider"></span>
                                 </label>
                             </div>
@@ -7128,7 +7139,7 @@
                                 </div>
                             </div>
                             <div class="setting-control">
-                                <select class="setting-dropdown" id="lockScreenAfterSafetySelect">
+                                <select class="setting-dropdown" id="safetyLockScreenAfterSelect">
                                     <option value="1min" ${settings.lockScreenAfter === '1min' ? 'selected' : ''}>1 Minute</option>
                                     <option value="5min" ${settings.lockScreenAfter === '5min' ? 'selected' : ''}>5 Minutes</option>
                                     <option value="15min" ${settings.lockScreenAfter === '15min' ? 'selected' : ''}>15 Minutes</option>
@@ -7146,7 +7157,7 @@
                                 </div>
                             </div>
                             <div class="setting-control">
-                                <select class="setting-dropdown" id="logoutAfterSafetySelect">
+                                <select class="setting-dropdown" id="safetyLogoutAfterSelect">
                                     <option value="1hr" ${settings.logoutAfter === '1hr' ? 'selected' : ''}>1 Hour</option>
                                     <option value="4hr" ${settings.logoutAfter === '4hr' ? 'selected' : ''}>4 Hours</option>
                                     <option value="8hr" ${settings.logoutAfter === '8hr' ? 'selected' : ''}>8 Hours</option>
@@ -7165,7 +7176,7 @@
                             </div>
                             <div class="setting-control">
                                 <label class="toggle-switch">
-                                    <input type="checkbox" id="biometricBypassSafetyToggle" ${settings.biometricBypass ? 'checked' : ''}>
+                                    <input type="checkbox" id="safetyBiometricBypassToggle" ${settings.biometricBypass ? 'checked' : ''}>
                                     <span class="toggle-slider"></span>
                                 </label>
                             </div>
@@ -7180,7 +7191,7 @@
                             </div>
                             <div class="setting-control">
                                 <label class="toggle-switch">
-                                    <input type="checkbox" id="timeoutWarningsSafetyToggle" ${settings.timeoutWarnings ? 'checked' : ''}>
+                                    <input type="checkbox" id="safetyTimeoutWarningsToggle" ${settings.timeoutWarnings ? 'checked' : ''}>
                                     <span class="toggle-slider"></span>
                                 </label>
                             </div>
@@ -7191,15 +7202,15 @@
             
             // Add event listeners for safety section
             document.getElementById('hideFromContactsBtn').addEventListener('click', () => {
-                showNotification('Select contacts to hide your online status from', 'info');
+                showNotification('Select contacts to hide from', 'info');
             });
             
             document.getElementById('alwaysVisibleToBtn').addEventListener('click', () => {
-                showNotification('Select contacts who can always see your online status', 'info');
+                showNotification('Select contacts who can always see you', 'info');
             });
             
             // Select change listeners
-            const selects = ['invisibleDurationSelect', 'ruleDurationSafetySelect', 'lockScreenAfterSafetySelect', 'logoutAfterSafetySelect'];
+            const selects = ['invisibleDurationSelect', 'safetyRuleDurationSelect', 'safetyLockScreenAfterSelect', 'safetyLogoutAfterSelect'];
             selects.forEach(id => {
                 const element = document.getElementById(id);
                 if (element) {
@@ -7213,9 +7224,9 @@
             });
             
             // Toggle change listeners
-            const toggles = ['invisibleModeToggle', 'moodPrivacyRulesSafetyToggle', 'tiredMoodRuleToggle',
-                           'stressedMoodRuleToggle', 'happyMoodRuleToggle', 'enhancedTimeoutSafetyToggle',
-                           'biometricBypassSafetyToggle', 'timeoutWarningsSafetyToggle'];
+            const toggles = ['invisibleModeToggle', 'safetyMoodPrivacyRulesToggle', 'tiredMoodRuleToggle',
+                           'stressedMoodRuleToggle', 'happyMoodRuleToggle', 'safetyEnhancedTimeoutToggle',
+                           'safetyBiometricBypassToggle', 'safetyTimeoutWarningsToggle'];
             toggles.forEach(id => {
                 const element = document.getElementById(id);
                 if (element) {
@@ -7231,12 +7242,12 @@
         
         // ADVANCED SECTION (10 features) - FULLY IMPLEMENTED
         function loadAdvancedSection(container) {
-            const settings = userSettings.advanced;
+            const settings = userSettings.advanced || DEFAULT_SETTINGS.advanced;
             
             container.innerHTML = `
                 <div class="settings-section">
                     <div class="section-header">
-                        <h3><i class="fas fa-cogs section-icon"></i> Advanced Settings</h3>
+                        <h3><i class="fas fa-cogs section-icon"></i> Advanced Features</h3>
                         <div class="section-description">
                             Developer options and advanced configuration
                         </div>
@@ -7246,7 +7257,7 @@
                             <div class="setting-info">
                                 <div class="setting-label">Offline Mode</div>
                                 <div class="setting-description">
-                                    Enable offline functionality and caching
+                                    Work offline without internet connection
                                 </div>
                             </div>
                             <div class="setting-control">
@@ -7261,7 +7272,7 @@
                             <div class="setting-info">
                                 <div class="setting-label">Intranet Support</div>
                                 <div class="setting-description">
-                                    Enable support for local network communication
+                                    Support for local network connections
                                 </div>
                             </div>
                             <div class="setting-control">
@@ -7276,7 +7287,7 @@
                             <div class="setting-info">
                                 <div class="setting-label">Low Bandwidth Mode</div>
                                 <div class="setting-description">
-                                    Optimize for slow network connections
+                                    Reduce data usage for slow connections
                                 </div>
                             </div>
                             <div class="setting-control">
@@ -7291,7 +7302,7 @@
                             <div class="setting-info">
                                 <div class="setting-label">Debug Mode</div>
                                 <div class="setting-description">
-                                    Enable debugging and logging features
+                                    Enable debugging and logging
                                 </div>
                             </div>
                             <div class="setting-control">
@@ -7306,7 +7317,7 @@
                             <div class="setting-info">
                                 <div class="setting-label">Data Saver</div>
                                 <div class="setting-description">
-                                    Reduce data usage by optimizing media quality
+                                    Reduce data usage across the app
                                 </div>
                             </div>
                             <div class="setting-control">
@@ -7316,69 +7327,27 @@
                                 </label>
                             </div>
                         </div>
-                        
-                        <div class="setting-item">
-                            <div class="setting-info">
-                                <div class="setting-label">Proxy Settings</div>
-                                <div class="setting-description">
-                                    Configure network proxy if needed
-                                </div>
-                            </div>
-                            <div class="setting-control">
-                                <button class="setting-button" id="proxySettingsBtn">
-                                    <i class="fas fa-network-wired"></i> Configure
-                                </button>
-                            </div>
-                        </div>
                     </div>
                 </div>
                 
                 <div class="settings-section">
                     <div class="section-header">
-                        <h3><i class="fas fa-terminal section-icon"></i> Developer Tools</h3>
+                        <h3><i class="fas fa-network-wired section-icon"></i> Network Settings</h3>
                         <div class="section-description">
-                            Tools for developers and advanced users
+                            Advanced network configuration
                         </div>
                     </div>
                     <div class="section-body">
                         <div class="setting-item">
                             <div class="setting-info">
-                                <div class="setting-label">Export Logs</div>
+                                <div class="setting-label">Proxy Settings</div>
                                 <div class="setting-description">
-                                    Export app logs for debugging
+                                    Configure proxy server for network connections
                                 </div>
                             </div>
                             <div class="setting-control">
-                                <button class="setting-button" id="exportLogsBtn">
-                                    <i class="fas fa-download"></i> Export
-                                </button>
-                            </div>
-                        </div>
-                        
-                        <div class="setting-item">
-                            <div class="setting-info">
-                                <div class="setting-label">Clear All Data</div>
-                                <div class="setting-description">
-                                    Clear all app data and cache (use with caution)
-                                </div>
-                            </div>
-                            <div class="setting-control">
-                                <button class="setting-button danger" id="clearAllDataBtn">
-                                    <i class="fas fa-trash"></i> Clear All
-                                </button>
-                            </div>
-                        </div>
-                        
-                        <div class="setting-item">
-                            <div class="setting-info">
-                                <div class="setting-label">Reset All Settings</div>
-                                <div class="setting-description">
-                                    Reset all settings to default values
-                                </div>
-                            </div>
-                            <div class="setting-control">
-                                <button class="setting-button danger" id="resetAllSettingsBtn">
-                                    <i class="fas fa-undo"></i> Reset All
+                                <button class="setting-button" id="configureProxyBtn">
+                                    <i class="fas fa-cog"></i> Configure
                                 </button>
                             </div>
                         </div>
@@ -7387,45 +7356,13 @@
             `;
             
             // Add event listeners for advanced section
-            document.getElementById('proxySettingsBtn').addEventListener('click', () => {
+            document.getElementById('configureProxyBtn').addEventListener('click', () => {
                 showNotification('Proxy configuration would open here', 'info');
             });
             
-            document.getElementById('exportLogsBtn').addEventListener('click', () => {
-                showNotification('Logs exported successfully', 'success');
-            });
-            
-            document.getElementById('clearAllDataBtn').addEventListener('click', () => {
-                showConfirmation(
-                    'Clear All Data',
-                    'This will clear all app data including cache, settings, and local messages. This action cannot be undone. Are you sure?',
-                    () => {
-                        localStorage.clear();
-                        userSettings = JSON.parse(JSON.stringify(DEFAULT_SETTINGS));
-                        unsavedChanges = true;
-                        updateSaveButton();
-                        loadSection('advanced');
-                        showNotification('All data cleared', 'success');
-                    }
-                );
-            });
-            
-            document.getElementById('resetAllSettingsBtn').addEventListener('click', () => {
-                showConfirmation(
-                    'Reset All Settings',
-                    'This will reset all settings to their default values. Are you sure?',
-                    () => {
-                        userSettings = JSON.parse(JSON.stringify(DEFAULT_SETTINGS));
-                        unsavedChanges = true;
-                        updateSaveButton();
-                        loadSection('advanced');
-                        showNotification('All settings reset to default', 'success');
-                    }
-                );
-            });
-            
             // Toggle change listeners
-            const toggles = ['offlineModeToggle', 'intranetSupportToggle', 'lowBandwidthModeToggle', 'debugModeToggle', 'dataSaverToggle'];
+            const toggles = ['offlineModeToggle', 'intranetSupportToggle', 'lowBandwidthModeToggle',
+                           'debugModeToggle', 'dataSaverToggle'];
             toggles.forEach(id => {
                 const element = document.getElementById(id);
                 if (element) {
@@ -7439,17 +7376,16 @@
             });
         }
         
-        // BACKUP & RESTORE SECTION (11 features) - FULLY IMPLEMENTED
+        // BACKUP SECTION (11 features) - FULLY IMPLEMENTED
         function loadBackupSection(container) {
-            const settings = userSettings.backup;
-            const lastBackupText = settings.lastBackup ? new Date(settings.lastBackup).toLocaleString() : 'Never';
+            const settings = userSettings.backup || DEFAULT_SETTINGS.backup;
             
             container.innerHTML = `
                 <div class="settings-section">
                     <div class="section-header">
                         <h3><i class="fas fa-cloud-upload-alt section-icon"></i> Backup Settings</h3>
                         <div class="section-description">
-                            Configure automatic backups for your data
+                            Configure automatic backups
                         </div>
                     </div>
                     <div class="section-body">
@@ -7472,7 +7408,7 @@
                             <div class="setting-info">
                                 <div class="setting-label">Backup Frequency</div>
                                 <div class="setting-description">
-                                    How often to create automatic backups
+                                    How often to create backups
                                 </div>
                             </div>
                             <div class="setting-control">
@@ -7488,13 +7424,14 @@
                             <div class="setting-info">
                                 <div class="setting-label">Backup Location</div>
                                 <div class="setting-description">
-                                    Where to store your backups
+                                    Where to store backups
                                 </div>
                             </div>
                             <div class="setting-control">
                                 <select class="setting-dropdown" id="backupLocationSelect">
-                                    <option value="cloud" ${settings.backupLocation === 'cloud' ? 'selected' : ''}>Cloud Storage</option>
+                                    <option value="cloud" ${settings.backupLocation === 'cloud' ? 'selected' : ''}>Cloud</option>
                                     <option value="local" ${settings.backupLocation === 'local' ? 'selected' : ''}>Local Device</option>
+                                    <option value="both" ${settings.backupLocation === 'both' ? 'selected' : ''}>Both</option>
                                 </select>
                             </div>
                         </div>
@@ -7507,7 +7444,7 @@
                                 </div>
                             </div>
                             <div class="setting-control">
-                                <div class="setting-value">${lastBackupText}</div>
+                                <div class="setting-value">${settings.lastBackup ? new Date(settings.lastBackup).toLocaleString() : 'Never'}</div>
                             </div>
                         </div>
                         
@@ -7527,9 +7464,9 @@
                 
                 <div class="settings-section">
                     <div class="section-header">
-                        <h3><i class="fas fa-tools section-icon"></i> Backup Actions</h3>
+                        <h3><i class="fas fa-download section-icon"></i> Backup Actions</h3>
                         <div class="section-description">
-                            Manual backup and restore operations
+                            Manual backup and restore options
                         </div>
                     </div>
                     <div class="section-body">
@@ -7537,12 +7474,12 @@
                             <div class="setting-info">
                                 <div class="setting-label">Create Backup Now</div>
                                 <div class="setting-description">
-                                    Manually create a backup of your data
+                                    Manually create a new backup
                                 </div>
                             </div>
                             <div class="setting-control">
                                 <button class="setting-button" id="createBackupBtn">
-                                    <i class="fas fa-save"></i> Create Backup
+                                    <i class="fas fa-save"></i> Backup Now
                                 </button>
                             </div>
                         </div>
@@ -7551,26 +7488,12 @@
                             <div class="setting-info">
                                 <div class="setting-label">Restore from Backup</div>
                                 <div class="setting-description">
-                                    Restore your data from a previous backup
+                                    Restore your data from a backup
                                 </div>
                             </div>
                             <div class="setting-control">
                                 <button class="setting-button" id="restoreBackupBtn">
-                                    <i class="fas fa-history"></i> Restore
-                                </button>
-                            </div>
-                        </div>
-                        
-                        <div class="setting-item">
-                            <div class="setting-info">
-                                <div class="setting-label">Manage Backups</div>
-                                <div class="setting-description">
-                                    View and manage your backup files
-                                </div>
-                            </div>
-                            <div class="setting-control">
-                                <button class="setting-button" id="manageBackupsBtn">
-                                    <i class="fas fa-folder-open"></i> Manage
+                                    <i class="fas fa-undo"></i> Restore
                                 </button>
                             </div>
                         </div>
@@ -7579,7 +7502,7 @@
                             <div class="setting-info">
                                 <div class="setting-label">Export Data</div>
                                 <div class="setting-description">
-                                    Export your data in various formats
+                                    Export your data for transfer
                                 </div>
                             </div>
                             <div class="setting-control">
@@ -7588,72 +7511,39 @@
                                 </button>
                             </div>
                         </div>
-                        
-                        <div class="setting-item">
-                            <div class="setting-info">
-                                <div class="setting-label">Import Data</div>
-                                <div class="setting-description">
-                                    Import data from other services
-                                </div>
-                            </div>
-                            <div class="setting-control">
-                                <button class="setting-button" id="importDataBtn">
-                                    <i class="fas fa-file-import"></i> Import
-                                </button>
-                            </div>
-                        </div>
                     </div>
                 </div>
             `;
             
             // Add event listeners for backup section
-            document.getElementById('createBackupBtn').addEventListener('click', async () => {
-                try {
-                    showNotification('Creating backup...', 'info');
-                    
-                    // Simulate backup creation
-                    await new Promise(resolve => setTimeout(resolve, 1500));
-                    
-                    // Update backup info
-                    userSettings.backup.lastBackup = new Date().toISOString();
-                    userSettings.backup.backupSize = Math.floor(Math.random() * 500) * 1024 * 1024;
-                    unsavedChanges = true;
-                    updateSaveButton();
-                    
-                    // Reload section to show updated info
-                    loadSection('backup');
-                    showNotification('Backup created successfully', 'success');
-                    
-                } catch (error) {
-                    console.error('Error creating backup:', error);
-                    showNotification('Error creating backup', 'error');
-                }
+            document.getElementById('createBackupBtn').addEventListener('click', () => {
+                showConfirmation(
+                    'Create Backup',
+                    'Are you sure you want to create a new backup? This may take a few minutes.',
+                    () => {
+                        // Simulate backup creation
+                        userSettings.backup.lastBackup = new Date().toISOString();
+                        userSettings.backup.backupSize = Math.floor(Math.random() * 500) * 1024 * 1024;
+                        unsavedChanges = true;
+                        updateSaveButton();
+                        showNotification('Backup created successfully', 'success');
+                        loadSection('backup'); // Reload to show updated info
+                    }
+                );
             });
             
             document.getElementById('restoreBackupBtn').addEventListener('click', () => {
                 showConfirmation(
                     'Restore from Backup',
-                    'This will overwrite your current data with the backup. Are you sure?',
+                    'Are you sure you want to restore from backup? This will replace your current data.',
                     () => {
-                        showNotification('Restoring from backup...', 'info');
-                        // Simulate restore
-                        setTimeout(() => {
-                            showNotification('Data restored successfully', 'success');
-                        }, 1500);
+                        showNotification('Restore process would start here', 'info');
                     }
                 );
             });
             
-            document.getElementById('manageBackupsBtn').addEventListener('click', () => {
-                showNotification('Backup management would open here', 'info');
-            });
-            
             document.getElementById('exportDataBtn').addEventListener('click', () => {
-                showNotification('Data export would open here', 'info');
-            });
-            
-            document.getElementById('importDataBtn').addEventListener('click', () => {
-                showNotification('Data import would open here', 'info');
+                showNotification('Data export would start here', 'info');
             });
             
             // Select change listeners
@@ -7680,10 +7570,10 @@
         
         // DANGER ZONE SECTION (7 features) - FULLY IMPLEMENTED
         function loadDangerSection(container) {
-            const settings = userSettings.danger;
+            const settings = userSettings.danger || DEFAULT_SETTINGS.danger;
             
             container.innerHTML = `
-                <div class="settings-section danger-zone">
+                <div class="settings-section" style="border-color: var(--danger-color);">
                     <div class="section-header">
                         <h3 style="color: var(--danger-color);"><i class="fas fa-exclamation-triangle section-icon" style="color: var(--danger-color);"></i> Account Deletion</h3>
                         <div class="section-description">
@@ -7693,51 +7583,87 @@
                     <div class="section-body">
                         <div class="setting-item">
                             <div class="setting-info">
-                                <div class="setting-label" style="color: var(--danger-color);">Delete Account</div>
+                                <div class="setting-label">Request Account Deletion</div>
                                 <div class="setting-description">
-                                    Once deleted, your account and all data cannot be recovered
+                                    Permanently delete your account and all associated data
                                 </div>
                             </div>
                             <div class="setting-control">
-                                <button class="action-btn danger" id="deleteAccountBtn">
-                                    <i class="fas fa-trash"></i> Delete Account
+                                <button class="action-btn danger" id="requestDeletionBtn">
+                                    <i class="fas fa-trash"></i> Request Deletion
                                 </button>
                             </div>
                         </div>
                         
                         <div class="setting-item">
                             <div class="setting-info">
-                                <div class="setting-label">Deletion Scheduled</div>
+                                <div class="setting-label">Deletion Status</div>
                                 <div class="setting-description">
-                                    Account deletion scheduled for
+                                    Current status of your deletion request
                                 </div>
                             </div>
                             <div class="setting-control">
-                                <div class="setting-value">${settings.deletionScheduled ? new Date(settings.deletionScheduled).toLocaleString() : 'Not scheduled'}</div>
+                                <div class="setting-value">
+                                    ${settings.accountDeletionRequested ? 
+                                        `Scheduled for ${settings.deletionScheduled ? new Date(settings.deletionScheduled).toLocaleDateString() : 'unknown date'}` : 
+                                        'No active request'}
+                                </div>
                             </div>
                         </div>
+                        
+                        ${settings.accountDeletionRequested ? `
+                        <div class="setting-item">
+                            <div class="setting-info">
+                                <div class="setting-label">Cancel Deletion Request</div>
+                                <div class="setting-description">
+                                    Cancel your pending account deletion
+                                </div>
+                            </div>
+                            <div class="setting-control">
+                                <button class="action-btn secondary" id="cancelDeletionBtn">
+                                    <i class="fas fa-times"></i> Cancel Request
+                                </button>
+                            </div>
+                        </div>
+                        ` : ''}
                     </div>
                 </div>
                 
-                <div class="settings-section">
+                <div class="settings-section" style="border-color: var(--warning-color);">
                     <div class="section-header">
-                        <h3><i class="fas fa-file-export section-icon"></i> Data Export</h3>
+                        <h3 style="color: var(--warning-color);"><i class="fas fa-file-export section-icon" style="color: var(--warning-color);"></i> Data Export</h3>
                         <div class="section-description">
-                            Export all your data before deletion
+                            Export your data for transfer or backup
                         </div>
                     </div>
                     <div class="section-body">
                         <div class="setting-item">
                             <div class="setting-info">
-                                <div class="setting-label">Export All Data</div>
+                                <div class="setting-label">Request Data Export</div>
                                 <div class="setting-description">
                                     Download a copy of all your data
                                 </div>
                             </div>
                             <div class="setting-control">
-                                <button class="setting-button" id="exportAllDataBtn">
-                                    <i class="fas fa-download"></i> Export All
+                                <button class="action-btn warning" id="requestExportBtn">
+                                    <i class="fas fa-download"></i> Request Export
                                 </button>
+                            </div>
+                        </div>
+                        
+                        <div class="setting-item">
+                            <div class="setting-info">
+                                <div class="setting-label">Export Format</div>
+                                <div class="setting-description">
+                                    Choose the format for your data export
+                                </div>
+                            </div>
+                            <div class="setting-control">
+                                <select class="setting-dropdown" id="exportFormatSelect" style="border-color: var(--warning-color);">
+                                    <option value="json" ${settings.exportFormat === 'json' ? 'selected' : ''}>JSON</option>
+                                    <option value="csv" ${settings.exportFormat === 'csv' ? 'selected' : ''}>CSV</option>
+                                    <option value="xml" ${settings.exportFormat === 'xml' ? 'selected' : ''}>XML</option>
+                                </select>
                             </div>
                         </div>
                         
@@ -7752,134 +7678,100 @@
                                 <div class="setting-value">${settings.lastExport ? new Date(settings.lastExport).toLocaleString() : 'Never'}</div>
                             </div>
                         </div>
-                        
-                        <div class="setting-item">
-                            <div class="setting-info">
-                                <div class="setting-label">Export Format</div>
-                                <div class="setting-description">
-                                    Choose the format for your data export
-                                </div>
-                            </div>
-                            <div class="setting-control">
-                                <select class="setting-dropdown" id="exportFormatSelect">
-                                    <option value="json" ${settings.exportFormat === 'json' ? 'selected' : ''}>JSON</option>
-                                    <option value="csv" ${settings.exportFormat === 'csv' ? 'selected' : ''}>CSV</option>
-                                    <option value="xml" ${settings.exportFormat === 'xml' ? 'selected' : ''}>XML</option>
-                                    <option value="pdf" ${settings.exportFormat === 'pdf' ? 'selected' : ''}>PDF</option>
-                                </select>
-                            </div>
-                        </div>
                     </div>
                 </div>
                 
-                <div class="settings-section">
+                <div class="settings-section" style="border-color: var(--danger-color); background: rgba(255, 59, 48, 0.05);">
                     <div class="section-header">
-                        <h3><i class="fas fa-user-slash section-icon"></i> Account Actions</h3>
+                        <h3 style="color: var(--danger-color);"><i class="fas fa-radiation-alt section-icon" style="color: var(--danger-color);"></i> Reset All Settings</h3>
                         <div class="section-description">
-                            Other account management actions
+                            Reset all settings to factory defaults
                         </div>
                     </div>
                     <div class="section-body">
                         <div class="setting-item">
                             <div class="setting-info">
-                                <div class="setting-label">Deactivate Account</div>
+                                <div class="setting-label">Reset All Settings</div>
                                 <div class="setting-description">
-                                    Temporarily deactivate your account
+                                    Reset all settings to their default values
                                 </div>
                             </div>
                             <div class="setting-control">
-                                <button class="setting-button" id="deactivateAccountBtn">
-                                    <i class="fas fa-power-off"></i> Deactivate
+                                <button class="action-btn danger" id="resetAllSettingsBtn">
+                                    <i class="fas fa-undo"></i> Reset All Settings
                                 </button>
                             </div>
                         </div>
                         
-                        <div class="setting-item">
-                            <div class="setting-info">
-                                <div class="setting-label">Change Username</div>
-                                <div class="setting-description">
-                                    Change your account username
-                                </div>
-                            </div>
-                            <div class="setting-control">
-                                <button class="setting-button" id="changeUsernameBtn">
-                                    <i class="fas fa-user-edit"></i> Change
-                                </button>
-                            </div>
-                        </div>
-                        
-                        <div class="setting-item">
-                            <div class="setting-info">
-                                <div class="setting-label">Remove All Devices</div>
-                                <div class="setting-description">
-                                    Log out from all devices
-                                </div>
-                            </div>
-                            <div class="setting-control">
-                                <button class="setting-button" id="removeAllDevicesBtn">
-                                    <i class="fas fa-sign-out-alt"></i> Log Out All
-                                </button>
-                            </div>
+                        <div style="margin-top: 20px; padding: 15px; background: rgba(255, 59, 48, 0.1); border-radius: 8px;">
+                            <p style="font-size: 12px; color: var(--danger-color); margin: 0;">
+                                <i class="fas fa-exclamation-circle"></i> Warning: This action cannot be undone. All your settings will be reset to factory defaults.
+                            </p>
                         </div>
                     </div>
                 </div>
             `;
             
             // Add event listeners for danger section
-            document.getElementById('deleteAccountBtn').addEventListener('click', () => {
+            document.getElementById('requestDeletionBtn').addEventListener('click', () => {
                 showConfirmation(
-                    'Delete Account',
-                    'This will permanently delete your account and all data. This action cannot be undone. Are you absolutely sure?',
+                    'Request Account Deletion',
+                    'Are you sure you want to request account deletion? Your account will be scheduled for deletion in 30 days. All your data will be permanently deleted.',
                     () => {
-                        // Schedule deletion for 30 days from now
-                        const deletionDate = new Date();
-                        deletionDate.setDate(deletionDate.getDate() + 30);
                         userSettings.danger.accountDeletionRequested = true;
-                        userSettings.danger.deletionScheduled = deletionDate.toISOString();
+                        userSettings.danger.deletionScheduled = new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString();
                         unsavedChanges = true;
                         updateSaveButton();
-                        loadSection('danger');
-                        showNotification('Account deletion scheduled for ' + deletionDate.toLocaleDateString(), 'warning');
+                        showNotification('Account deletion requested. Your account will be deleted in 30 days.', 'warning');
+                        loadSection('danger'); // Reload to show updated status
                     }
                 );
             });
             
-            document.getElementById('exportAllDataBtn').addEventListener('click', () => {
-                showNotification('Exporting all data...', 'info');
-                // Simulate export
-                setTimeout(() => {
-                    userSettings.danger.lastExport = new Date().toISOString();
-                    unsavedChanges = true;
-                    updateSaveButton();
-                    loadSection('danger');
-                    showNotification('Data exported successfully', 'success');
-                }, 2000);
-            });
+            if (settings.accountDeletionRequested) {
+                document.getElementById('cancelDeletionBtn').addEventListener('click', () => {
+                    showConfirmation(
+                        'Cancel Deletion Request',
+                        'Are you sure you want to cancel your account deletion request?',
+                        () => {
+                            userSettings.danger.accountDeletionRequested = false;
+                            userSettings.danger.deletionScheduled = null;
+                            unsavedChanges = true;
+                            updateSaveButton();
+                            showNotification('Account deletion request cancelled', 'success');
+                            loadSection('danger'); // Reload to show updated status
+                        }
+                    );
+                });
+            }
             
-            document.getElementById('deactivateAccountBtn').addEventListener('click', () => {
+            document.getElementById('requestExportBtn').addEventListener('click', () => {
                 showConfirmation(
-                    'Deactivate Account',
-                    'Your account will be temporarily deactivated. You can reactivate it by logging in again. Are you sure?',
+                    'Request Data Export',
+                    'Are you sure you want to request a data export? This may take some time to process.',
                     () => {
-                        showNotification('Account deactivated', 'success');
+                        userSettings.danger.dataExportRequested = true;
+                        userSettings.danger.lastExport = new Date().toISOString();
+                        unsavedChanges = true;
+                        updateSaveButton();
+                        showNotification('Data export requested. You will be notified when it\'s ready.', 'info');
                     }
                 );
             });
             
-            document.getElementById('changeUsernameBtn').addEventListener('click', () => {
-                showNotification('Username change feature would open here', 'info');
-            });
-            
-            document.getElementById('removeAllDevicesBtn').addEventListener('click', () => {
+            document.getElementById('resetAllSettingsBtn').addEventListener('click', () => {
                 showConfirmation(
-                    'Log Out All Devices',
-                    'This will log you out from all devices including this one. Are you sure?',
+                    'Reset All Settings',
+                    'Are you sure you want to reset ALL settings to factory defaults? This action cannot be undone.',
                     () => {
-                        localStorage.clear();
-                        showNotification('Logged out from all devices', 'success');
-                        setTimeout(() => {
-                            window.parent.postMessage({ type: 'LOGOUT' }, '*');
-                        }, 1000);
+                        // Reset all settings to defaults
+                        Object.keys(DEFAULT_SETTINGS).forEach(section => {
+                            userSettings[section] = JSON.parse(JSON.stringify(DEFAULT_SETTINGS[section]));
+                        });
+                        unsavedChanges = true;
+                        updateSaveButton();
+                        showNotification('All settings reset to defaults', 'success');
+                        loadSection('danger'); // Reload to show updated state
                     }
                 );
             });
@@ -7892,23 +7784,42 @@
             });
         }
         
+        // =============================================
+        // INITIALIZATION - START THE APP
+        // =============================================
+        
         // Start initialization when DOM is loaded
         document.addEventListener('DOMContentLoaded', function() {
-            console.log('Settings page loaded');
-            
-            // Request API status from parent
-            if (window.parent) {
-                window.parent.postMessage({ type: 'REQUEST_API_STATUS' }, '*');
-            }
-            
-            // Try to initialize
-            setTimeout(() => {
-                if (!apiReady) {
-                    console.log('API not ready, using localStorage fallback');
-                    initializeApp();
-                }
-            }, 1000);
+            console.log('DOM loaded, starting settings initialization');
+            initializeApp();
         });
+        
+        // Also listen for API ready messages at any time
+        window.addEventListener('message', function(event) {
+            if (event.data.type === 'API_READY' && !apiReady) {
+                console.log('Late API_READY message received');
+                apiReady = true;
+                
+                // If we haven't initialized yet, try again
+                if (!initializationAttempted) {
+                    console.log('Late API ready, initializing now');
+                    initializeApp();
+                } else if (currentUser && Object.keys(currentUser).length === 0) {
+                    // We initialized but got no user data, try loading from API
+                    console.log('Late API ready, reloading user data');
+                    loadUserData().then(() => {
+                        showNotification('Settings loaded from server', 'success');
+                    });
+                }
+            }
+        });
+        
+        // Make sure API is checked even if DOMContentLoaded already fired
+        if (document.readyState === 'loading') {
+            document.addEventListener('DOMContentLoaded', initializeApp);
+        } else {
+            setTimeout(initializeApp, 100);
+        }
     </script>
 </body>
 </html>

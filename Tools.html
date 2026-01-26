@@ -31,8 +31,7 @@
     <link rel="stylesheet" href="Tool.css">
 
     <style>
-        /* Existing CSS styles remain unchanged */
-        
+       
     </style>
 </head>
 <body>
@@ -1131,8 +1130,6 @@
     <!-- Upload Progress Bar -->
     <div class="upload-progress" id="uploadProgress"></div>
 
-    <!-- Script removed: api.js is already loaded in parent -->
-    
     <script>
         // =============================================
         // ENHANCED MARKETPLACE SYSTEM WITH PREMIUM FEATURES
@@ -1291,40 +1288,45 @@
         
         // API state
         let apiReady = false;
+        let apiInitialized = false;
         
         // Initialize the application
         document.addEventListener('DOMContentLoaded', function() {
+            console.log('=== TOOLS.HTML INITIALIZATION STARTED ===');
+            
             // Handle iframe token passing
             if (window.self !== window.top) {
                 handleIframeAuth();
             }
             
-            // Listen for API ready event
+            // Setup message listener for API ready
             window.addEventListener('message', function(event) {
+                console.log('Message received:', event.data);
                 if (event.data === 'API_READY') {
                     apiReady = true;
-                    initializeEnhancedMarketplace();
+                    console.log('API marked as ready via message');
+                    if (!apiInitialized) {
+                        initializeEnhancedMarketplace();
+                    }
+                }
+                
+                if (event.data.type === 'AUTH_TOKEN') {
+                    localStorage.setItem('knecta_auth_token', event.data.token);
+                    console.log('Auth token received via message');
                 }
             });
             
-            // Also check if API is already available
-            if (window.parent && window.parent.api) {
-                apiReady = true;
-                initializeEnhancedMarketplace();
-            } else {
-                // Load data from localStorage for instant display
-                loadCachedDataInstantly();
-                
-                // Try to initialize after a short delay
-                setTimeout(() => {
-                    if (!apiReady) {
-                        console.log('API not ready, initializing with cached data only');
-                        loadCachedDataInstantly();
-                        setupEnhancedEventListeners();
-                        renderMarketplaceList();
-                    }
-                }, 1000);
-            }
+            // Check for existing API in parent
+            checkParentAPI();
+            
+            // Load cached data immediately for instant display
+            loadCachedDataInstantly();
+            
+            // Setup event listeners
+            setupEnhancedEventListeners();
+            
+            // Try to initialize with retry logic
+            initializeWithRetry();
         });
         
         function handleIframeAuth() {
@@ -1333,10 +1335,78 @@
                 const tokenFromUrl = urlParams.get('token');
                 if (tokenFromUrl) {
                     localStorage.setItem('knecta_auth_token', tokenFromUrl);
+                    console.log('Auth token loaded from URL');
                 }
             } catch (error) {
                 console.log('Iframe auth handling:', error);
             }
+        }
+        
+        function checkParentAPI() {
+            // Try to access parent API
+            try {
+                if (window.parent && window.parent.api) {
+                    apiReady = true;
+                    console.log('Parent API found');
+                    return true;
+                }
+                
+                // Try to access window.api directly (if loaded in same window)
+                if (window.api) {
+                    apiReady = true;
+                    console.log('Window API found');
+                    return true;
+                }
+            } catch (error) {
+                console.log('Cannot access parent API:', error);
+            }
+            return false;
+        }
+        
+        function initializeWithRetry() {
+            let retryCount = 0;
+            const maxRetries = 10;
+            
+            const tryInitialize = () => {
+                if (apiReady) {
+                    if (!apiInitialized) {
+                        initializeEnhancedMarketplace();
+                    }
+                    return;
+                }
+                
+                retryCount++;
+                if (retryCount <= maxRetries) {
+                    console.log(`Checking for API (attempt ${retryCount}/${maxRetries})...`);
+                    
+                    // Check parent API again
+                    if (checkParentAPI()) {
+                        if (!apiInitialized) {
+                            initializeEnhancedMarketplace();
+                        }
+                        return;
+                    }
+                    
+                    // Request API from parent
+                    try {
+                        if (window.parent) {
+                            window.parent.postMessage('REQUEST_API_ACCESS', '*');
+                        }
+                    } catch (e) {
+                        console.log('Cannot send message to parent');
+                    }
+                    
+                    // Retry after delay
+                    setTimeout(tryInitialize, 1000);
+                } else {
+                    console.log('API not available after max retries, using offline mode');
+                    if (!apiInitialized) {
+                        initializeEnhancedMarketplace();
+                    }
+                }
+            };
+            
+            tryInitialize();
         }
         
         function loadCachedDataInstantly() {
@@ -1347,6 +1417,7 @@
                 const cachedUser = localStorage.getItem(LOCAL_STORAGE_KEYS.USER);
                 if (cachedUser) {
                     currentUser = JSON.parse(cachedUser);
+                    console.log('Loaded user from cache:', currentUser.displayName);
                 }
                 
                 // Load user profile from cache
@@ -1489,13 +1560,23 @@
                 
                 console.log('=== INSTANT MARKETPLACE CACHE LOAD COMPLETE ===');
                 
+                // Render initial listings
+                renderMarketplaceList();
+                updateAvailableListingsCount();
+                
             } catch (error) {
                 console.error('Error in instant cache load:', error);
             }
         }
         
         async function initializeEnhancedMarketplace() {
+            if (apiInitialized) {
+                console.log('Marketplace already initialized');
+                return;
+            }
+            
             console.log('=== ENHANCED MARKETPLACE SYSTEM INITIALIZATION START ===');
+            apiInitialized = true;
             
             // Check for dark mode preference
             checkDarkMode();
@@ -1510,9 +1591,6 @@
             if (apiReady) {
                 loadEnhancedMarketplaceData();
             }
-            
-            // Setup event listeners
-            setupEnhancedEventListeners();
             
             // Load service categories
             loadServiceCategories();
@@ -1532,11 +1610,10 @@
             // Generate heatmap
             generateHeatmap();
             
-            // Render initial listings
-            renderMarketplaceList();
-            updateAvailableListingsCount();
-            
             console.log('=== ENHANCED MARKETPLACE SYSTEM INITIALIZATION COMPLETE ===');
+            
+            // Show notification
+            showNotification('Marketplace loaded successfully', 'success');
         }
         
         async function loadUserFromCache() {
@@ -1554,9 +1631,9 @@
                 }
                 
                 // If no user found and API is ready, try to fetch from backend
-                if ((!currentUser || !currentUser.id) && apiReady && window.parent.api) {
+                if ((!currentUser || !currentUser.id) && apiReady) {
                     try {
-                        const response = await window.parent.api('GET', '/api/auth/me');
+                        const response = await safeApiCall('GET', '/api/auth/me');
                         if (response && response.user) {
                             currentUser = response.user;
                             userData = response.user;
@@ -1614,8 +1691,8 @@
                 }
                 
                 // Check with backend if API is ready
-                if (apiReady && window.parent.api) {
-                    const response = await window.parent.api('GET', '/api/user/subscription');
+                if (apiReady) {
+                    const response = await safeApiCall('GET', '/api/user/subscription');
                     if (response && response.subscription) {
                         userSubscription = response.subscription;
                         localStorage.setItem(LOCAL_STORAGE_KEYS.USER_SUBSCRIPTION, JSON.stringify(userSubscription));
@@ -1632,7 +1709,7 @@
             // Load data from backend in background
             setTimeout(async () => {
                 try {
-                    if (apiReady && window.parent.api) {
+                    if (apiReady) {
                         await loadListingsFromBackend();
                         await loadUserGroups();
                         await loadUserFriends();
@@ -1643,22 +1720,21 @@
                         await loadSpotlightListingsFromBackend();
                         
                         updateListingCounts();
-                        showNotification('Marketplace data loaded', 'success');
+                        showNotification('Marketplace data refreshed', 'success');
                     }
                 } catch (error) {
                     console.error('Error loading marketplace data:', error);
-                    showNotification('Using cached marketplace data', 'info');
                 }
             }, 500);
         }
         
         async function loadListingsFromBackend() {
             try {
-                if (!apiReady || !window.parent.api) {
+                if (!apiReady) {
                     throw new Error('API not available');
                 }
                 
-                const response = await window.parent.api('GET', '/api/marketplace/listings');
+                const response = await safeApiCall('GET', '/api/marketplace/listings');
                 
                 if (response && response.listings) {
                     allListings = response.listings;
@@ -1671,37 +1747,21 @@
                     updateAvailableListingsCount();
                     
                     console.log(`Loaded ${allListings.length} listings from backend`);
-                } else {
-                    // If no listings from backend, use cache
-                    const cachedListings = localStorage.getItem('knecta_marketplace_listings');
-                    if (cachedListings) {
-                        allListings = JSON.parse(cachedListings);
-                        allListings = allListings.filter(listing => !isListingExpired(listing));
-                        renderMarketplaceList();
-                        updateAvailableListingsCount();
-                    }
+                    
+                    // Save to cache
+                    localStorage.setItem('knecta_marketplace_listings', JSON.stringify(allListings));
                 }
-                
-                // Save to cache
-                localStorage.setItem('knecta_marketplace_listings', JSON.stringify(allListings));
                 
             } catch (error) {
                 console.error('Error loading listings from backend:', error);
-                const cachedListings = localStorage.getItem('knecta_marketplace_listings');
-                if (cachedListings) {
-                    allListings = JSON.parse(cachedListings);
-                    allListings = allListings.filter(listing => !isListingExpired(listing));
-                    renderMarketplaceList();
-                    updateAvailableListingsCount();
-                }
             }
         }
         
         async function loadUserGroups() {
             try {
-                if (!apiReady || !window.parent.api) return;
+                if (!apiReady) return;
                 
-                const response = await window.parent.api('GET', '/api/user/groups');
+                const response = await safeApiCall('GET', '/api/user/groups');
                 
                 if (response && response.groups) {
                     userGroups = response.groups;
@@ -1715,9 +1775,9 @@
         
         async function loadUserFriends() {
             try {
-                if (!apiReady || !window.parent.api) return;
+                if (!apiReady) return;
                 
-                const response = await window.parent.api('GET', '/api/user/friends');
+                const response = await safeApiCall('GET', '/api/user/friends');
                 
                 if (response && response.friends) {
                     userFriends = response.friends;
@@ -1732,8 +1792,8 @@
         async function loadTeamMembers() {
             try {
                 // Only load if user has team subscription and API is ready
-                if (userSubscription && (userSubscription.plan === 'business' || userSubscription.plan === 'team') && apiReady && window.parent.api) {
-                    const response = await window.parent.api('GET', '/api/team/members');
+                if (userSubscription && (userSubscription.plan === 'business' || userSubscription.plan === 'team') && apiReady) {
+                    const response = await safeApiCall('GET', '/api/team/members');
                     
                     if (response && response.members) {
                         teamMembers = response.members;
@@ -1748,9 +1808,9 @@
         
         async function loadLeaderboard() {
             try {
-                if (!apiReady || !window.parent.api) return;
+                if (!apiReady) return;
                 
-                const response = await window.parent.api('GET', '/api/marketplace/leaderboard');
+                const response = await safeApiCall('GET', '/api/marketplace/leaderboard');
                 
                 if (response && response.leaderboard) {
                     leaderboardData = response.leaderboard;
@@ -1764,8 +1824,8 @@
         
         async function loadAnalyticsData() {
             try {
-                if (isUserPremium() && apiReady && window.parent.api) {
-                    const response = await window.parent.api('GET', '/api/marketplace/analytics');
+                if (isUserPremium() && apiReady) {
+                    const response = await safeApiCall('GET', '/api/marketplace/analytics');
                     
                     if (response && response.analytics) {
                         analyticsData = response.analytics;
@@ -1781,9 +1841,9 @@
         
         async function loadPremiumFeatures() {
             try {
-                if (!apiReady || !window.parent.api) return;
+                if (!apiReady) return;
                 
-                const response = await window.parent.api('GET', '/api/premium/features');
+                const response = await safeApiCall('GET', '/api/premium/features');
                 
                 if (response && response.features) {
                     premiumFeatures = response.features;
@@ -1797,9 +1857,9 @@
         
         async function loadSpotlightListingsFromBackend() {
             try {
-                if (!apiReady || !window.parent.api) return;
+                if (!apiReady) return;
                 
-                const response = await window.parent.api('GET', '/api/marketplace/spotlight');
+                const response = await safeApiCall('GET', '/api/marketplace/spotlight');
                 
                 if (response && response.spotlightListings) {
                     renderSpotlightListings(response.spotlightListings);
@@ -1838,8 +1898,6 @@
                 if (userSubscription.plan === 'business' || userSubscription.plan === 'team') {
                     const teamNotes = document.getElementById('teamNotesFeature');
                     if (teamNotes) teamNotes.style.display = 'block';
-                    const teamManagementBtn = document.getElementById('teamManagementBtn');
-                    if (teamManagementBtn) teamManagementBtn.style.display = 'block';
                 }
                 
                 // Show analytics features
@@ -2351,8 +2409,8 @@
         async function downloadDigitalFile(listingId, fileUrl) {
             try {
                 // Track download if API is ready
-                if (apiReady && window.parent.api) {
-                    await window.parent.api('POST', `/api/marketplace/listings/${listingId}/download`);
+                if (apiReady) {
+                    await safeApiCall('POST', `/api/marketplace/listings/${listingId}/download`);
                 }
                 
                 // Create download link
@@ -2436,10 +2494,10 @@
             premiumListings.unshift(listing);
             localStorage.setItem(LOCAL_STORAGE_KEYS.PREMIUM_LISTINGS, JSON.stringify(premiumListings));
             
-            // Send to backend using parent API if available
-            if (apiReady && window.parent.api) {
+            // Send to backend using safe API if available
+            if (apiReady) {
                 try {
-                    const response = await window.parent.api('POST', '/api/marketplace/listings/premium', listing);
+                    const response = await safeApiCall('POST', '/api/marketplace/listings/premium', listing);
                     if (response && response.listing) {
                         listing.id = response.listing.id || listingId;
                         console.log('Premium service listing posted to backend');
@@ -2536,10 +2594,10 @@
             premiumListings.unshift(listing);
             localStorage.setItem(LOCAL_STORAGE_KEYS.PREMIUM_LISTINGS, JSON.stringify(premiumListings));
             
-            // Send to backend using parent API if available
-            if (apiReady && window.parent.api) {
+            // Send to backend using safe API if available
+            if (apiReady) {
                 try {
-                    const response = await window.parent.api('POST', '/api/marketplace/listings/premium', listing);
+                    const response = await safeApiCall('POST', '/api/marketplace/listings/premium', listing);
                     if (response && response.listing) {
                         listing.id = response.listing.id || listingId;
                         console.log('Premium digital listing posted to backend');
@@ -2589,8 +2647,8 @@
                 renderSpotlightListings(spotlightListings);
                 
                 // Send to backend if API is ready
-                if (apiReady && window.parent.api) {
-                    await window.parent.api('POST', '/api/marketplace/spotlight', { listingId: listing.id });
+                if (apiReady) {
+                    await safeApiCall('POST', '/api/marketplace/spotlight', { listingId: listing.id });
                 }
                 
             } catch (error) {
@@ -2601,8 +2659,8 @@
         async function processBoostedListing(listing) {
             try {
                 // Send boost request to backend if API is ready
-                if (apiReady && window.parent.api) {
-                    await window.parent.api('POST', '/api/marketplace/boost', { 
+                if (apiReady) {
+                    await safeApiCall('POST', '/api/marketplace/boost', { 
                         listingId: listing.id,
                         duration: '24h'
                     });
@@ -2617,7 +2675,7 @@
             const paymentAmount = calculatePremiumCost(options);
             
             try {
-                if (!apiReady || !window.parent.api) {
+                if (!apiReady) {
                     showNotification('Payment processing requires internet connection', 'error');
                     return false;
                 }
@@ -2634,7 +2692,7 @@
                     }
                 };
                 
-                const response = await window.parent.api('POST', '/api/payments/process', paymentData);
+                const response = await safeApiCall('POST', '/api/payments/process', paymentData);
                 
                 if (response && response.success) {
                     showNotification('Premium features activated successfully', 'success');
@@ -2665,7 +2723,7 @@
             const finalAmount = customAmount || amount;
             
             try {
-                if (!apiReady || !window.parent.api) {
+                if (!apiReady) {
                     showNotification('Tipping requires internet connection', 'error');
                     return false;
                 }
@@ -2677,7 +2735,7 @@
                     message: 'Thanks for your great listing!'
                 };
                 
-                const response = await window.parent.api('POST', '/api/marketplace/tips', tipData);
+                const response = await safeApiCall('POST', '/api/marketplace/tips', tipData);
                 
                 if (response && response.success) {
                     showNotification(`Tip of $${finalAmount} sent successfully!`, 'success');
@@ -2978,8 +3036,8 @@
                 
                 try {
                     // Upload listing if API is ready
-                    if (apiReady && window.parent.api) {
-                        const response = await window.parent.api('POST', '/api/marketplace/listings/bulk', listing);
+                    if (apiReady) {
+                        const response = await safeApiCall('POST', '/api/marketplace/listings/bulk', listing);
                         
                         if (response && response.success) {
                             item.querySelector('.loading-spinner').style.display = 'none';
@@ -3115,12 +3173,12 @@
         // Export Functions
         async function exportAnalytics(format) {
             try {
-                if (!apiReady || !window.parent.api) {
+                if (!apiReady) {
                     showNotification('Export requires internet connection', 'error');
                     return;
                 }
                 
-                const response = await window.parent.api('GET', `/api/analytics/export?format=${format}`);
+                const response = await safeApiCall('GET', `/api/analytics/export?format=${format}`);
                 
                 if (response && response.downloadUrl) {
                     // Create download link
@@ -3447,9 +3505,9 @@
             saveToLocalStorage(LOCAL_STORAGE_KEYS.ANALYTICS, analyticsData);
             
             // Send to backend if API is ready
-            if (apiReady && window.parent.api) {
+            if (apiReady) {
                 try {
-                    window.parent.api('POST', `/api/marketplace/listings/${listingId}/view`);
+                    safeApiCall('POST', `/api/marketplace/listings/${listingId}/view`);
                 } catch (error) {
                     console.error('Error tracking view:', error);
                 }
@@ -3493,10 +3551,10 @@
             // Update local storage
             saveToLocalStorage(LOCAL_STORAGE_KEYS.MY_LISTINGS, myListings);
             
-            // Send to backend using parent API if available
-            if (apiReady && window.parent.api) {
+            // Send to backend using safe API if available
+            if (apiReady) {
                 try {
-                    window.parent.api('POST', '/api/marketplace/listings', listing).then(response => {
+                    safeApiCall('POST', '/api/marketplace/listings', listing).then(response => {
                         if (response && response.listing) {
                             listing.id = response.listing.id || listingId;
                             console.log('Service listing posted to backend');
@@ -3569,10 +3627,10 @@
             // Update local storage
             saveToLocalStorage(LOCAL_STORAGE_KEYS.MY_LISTINGS, myListings);
             
-            // Send to backend using parent API if available
-            if (apiReady && window.parent.api) {
+            // Send to backend using safe API if available
+            if (apiReady) {
                 try {
-                    window.parent.api('POST', '/api/marketplace/listings', listing).then(response => {
+                    safeApiCall('POST', '/api/marketplace/listings', listing).then(response => {
                         if (response && response.listing) {
                             listing.id = response.listing.id || listingId;
                             console.log('Digital listing posted to backend');
@@ -3608,6 +3666,56 @@
             showNotification('Digital listing published successfully', 'success');
             
             return listing;
+        }
+        
+        // Safe API call function
+        async function safeApiCall(method, endpoint, data = null) {
+            if (!apiReady) {
+                throw new Error('API not available');
+            }
+            
+            try {
+                // Try to use parent API first
+                if (window.parent && window.parent.api) {
+                    return await window.parent.api(method, endpoint, data);
+                }
+                
+                // Try to use window API
+                if (window.api) {
+                    return await window.api(method, endpoint, data);
+                }
+                
+                // If no API found, try to make a fetch request
+                const token = localStorage.getItem('knecta_auth_token');
+                const headers = {
+                    'Content-Type': 'application/json'
+                };
+                
+                if (token) {
+                    headers['Authorization'] = `Bearer ${token}`;
+                }
+                
+                const options = {
+                    method: method,
+                    headers: headers
+                };
+                
+                if (data && (method === 'POST' || method === 'PUT' || method === 'PATCH')) {
+                    options.body = JSON.stringify(data);
+                }
+                
+                const response = await fetch(endpoint, options);
+                
+                if (!response.ok) {
+                    throw new Error(`API error: ${response.status}`);
+                }
+                
+                return await response.json();
+                
+            } catch (error) {
+                console.error(`API call failed: ${method} ${endpoint}`, error);
+                throw error;
+            }
         }
         
         // Enhanced Event Listeners Setup
@@ -4974,7 +5082,7 @@
             }
             
             try {
-                if (!apiReady || !window.parent.api) {
+                if (!apiReady) {
                     showNotification('Payment requires internet connection', 'error');
                     return;
                 }
@@ -4994,7 +5102,7 @@
                     };
                 }
                 
-                const response = await window.parent.api('POST', '/api/subscriptions/purchase', paymentData);
+                const response = await safeApiCall('POST', '/api/subscriptions/purchase', paymentData);
                 
                 if (response && response.success) {
                     userSubscription = response.subscription;
@@ -5014,12 +5122,12 @@
         
         async function startFreeTrial() {
             try {
-                if (!apiReady || !window.parent.api) {
+                if (!apiReady) {
                     showNotification('Free trial requires internet connection', 'error');
                     return;
                 }
                 
-                const response = await window.parent.api('POST', '/api/subscriptions/trial');
+                const response = await safeApiCall('POST', '/api/subscriptions/trial');
                 
                 if (response && response.success) {
                     userSubscription = response.subscription;
@@ -5039,12 +5147,12 @@
         
         async function restorePurchase() {
             try {
-                if (!apiReady || !window.parent.api) {
+                if (!apiReady) {
                     showNotification('Restore requires internet connection', 'error');
                     return;
                 }
                 
-                const response = await window.parent.api('POST', '/api/subscriptions/restore');
+                const response = await safeApiCall('POST', '/api/subscriptions/restore');
                 
                 if (response && response.success) {
                     userSubscription = response.subscription;
@@ -5069,12 +5177,12 @@
             if (!email) return;
             
             try {
-                if (!apiReady || !window.parent.api) {
+                if (!apiReady) {
                     showNotification('Invitation requires internet connection', 'error');
                     return;
                 }
                 
-                const response = await window.parent.api('POST', '/api/team/invite', { email });
+                const response = await safeApiCall('POST', '/api/team/invite', { email });
                 
                 if (response && response.success) {
                     showNotification('Invitation sent successfully', 'success');
@@ -5088,7 +5196,7 @@
         
         async function saveTeamChanges() {
             try {
-                if (!apiReady || !window.parent.api) {
+                if (!apiReady) {
                     showNotification('Team update requires internet connection', 'error');
                     return;
                 }
@@ -5102,7 +5210,7 @@
                     });
                 });
                 
-                const response = await window.parent.api('POST', '/api/team/update', { roleChanges });
+                const response = await safeApiCall('POST', '/api/team/update', { roleChanges });
                 
                 if (response && response.success) {
                     showNotification('Team updated successfully', 'success');
@@ -5117,12 +5225,12 @@
         
         async function addReaction(listingId, reaction) {
             try {
-                if (!apiReady || !window.parent.api) {
+                if (!apiReady) {
                     showNotification('Reaction requires internet connection', 'error');
                     return;
                 }
                 
-                const response = await window.parent.api('POST', `/api/marketplace/listings/${listingId}/reactions`, {
+                const response = await safeApiCall('POST', `/api/marketplace/listings/${listingId}/reactions`, {
                     reaction: reaction,
                     premium: reaction.length > 2 // Premium reactions are usually longer emoji sequences
                 });
@@ -5262,7 +5370,7 @@
             
             if (marketplaceItems.length === 0) return;
             
-            if (!apiReady || !window.parent.api) {
+            if (!apiReady) {
                 showNotification('Sync requires internet connection', 'info');
                 return;
             }
@@ -5273,10 +5381,10 @@
                 const item = marketplaceItems[i];
                 try {
                     if (item.type === 'marketplace_listing') {
-                        await window.parent.api('POST', '/api/marketplace/listings', item.data);
+                        await safeApiCall('POST', '/api/marketplace/listings', item.data);
                         syncQueue.splice(syncQueue.indexOf(item), 1);
                     } else if (item.type === 'marketplace_premium_listing') {
-                        await window.parent.api('POST', '/api/marketplace/listings/premium', item.data);
+                        await safeApiCall('POST', '/api/marketplace/listings/premium', item.data);
                         syncQueue.splice(syncQueue.indexOf(item), 1);
                     }
                 } catch (error) {
@@ -5459,7 +5567,5 @@
         console.log('Premium features enabled: Featured Listings, Advanced Analytics, Team Tools, AR Previews, Bulk Uploads, Backup & Restore');
         console.log('API Ready:', apiReady);
     </script>
-    
-    <!-- Load other scripts after api.js -->
 </body>
 </html>

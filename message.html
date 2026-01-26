@@ -28,9 +28,9 @@
     <script src="https://cdn.jsdelivr.net/npm/wavesurfer.js@6.6.0/dist/wavesurfer.min.js"></script>
     
     <link rel="stylesheet" href="messages.css">
+
     <style>
-        /* Complete CSS for the chat system */
-       
+
     </style>
 </head>
 <body>
@@ -498,6 +498,7 @@
         // =============================================
         // COMPLETE CHAT SYSTEM WITH PARENT API BACKEND
         // =============================================
+        // ENHANCED API INITIALIZATION WITH ROBUST WAIT MECHANISM
         
         // Global variables
         let currentUser = null;
@@ -595,57 +596,249 @@
         const multiSendAttachmentPreview = document.getElementById('multiSendAttachmentPreview');
         const scheduleAttachmentPreview = document.getElementById('scheduleAttachmentPreview');
         
-        // Create mock API if parent API not available
-        window.api = window.api || {
-            getCurrentUser: async () => {
-                return {
-                    uid: 'user_' + Date.now(),
-                    displayName: 'Demo User',
-                    email: 'demo@example.com',
-                    photoURL: ''
-                };
-            },
-            getChats: async () => {
-                return { chats: [] };
-            },
-            getContacts: async () => {
-                return { contacts: [] };
-            },
-            getChatMessages: async (chatId) => {
-                return { messages: [] };
-            },
-            sendMessage: async (chatId, message) => {
-                return { ...message, id: 'msg_' + Date.now(), status: 'sent' };
-            },
-            editMessage: async (messageId, data) => {
-                return { success: true };
-            },
-            deleteMessage: async (messageId) => {
-                return { success: true };
-            },
-            markChatAsRead: async (chatId) => {
-                return { success: true };
-            },
-            addReaction: async (messageId, reaction) => {
-                return { success: true };
-            },
-            voteInPoll: async (messageId, vote) => {
-                return { success: true };
-            },
-            submitReport: async (report) => {
-                return { success: true };
-            },
-            sendTypingIndicator: async (chatId, typing) => {
-                return { success: true };
-            },
-            clearChatHistory: async (chatId) => {
-                return { success: true };
+        // API Helper - Access through parent window
+        let api = null;
+        let isApiReady = false;
+        let apiReadyCallbacks = [];
+        
+        // Enhanced API waiting mechanism
+        function waitForAPI(callback) {
+            if (isApiReady && api) {
+                callback(api);
+                return;
             }
-        };
+            
+            apiReadyCallbacks.push(callback);
+            
+            // Try to initialize if not already trying
+            if (!window.apiInitAttempted) {
+                window.apiInitAttempted = true;
+                initializeAPI();
+            }
+        }
+        
+        // Initialize API with retry logic
+        function initializeAPI() {
+            console.log('Initializing API connection...');
+            
+            // Check if API is available in parent
+            if (window.parent && window.parent.api) {
+                api = window.parent.api;
+                isApiReady = true;
+                console.log('API found in parent window');
+                executeApiReadyCallbacks();
+                return;
+            }
+            
+            // Try to get API via postMessage
+            window.parent.postMessage({ type: 'REQUEST_API' }, '*');
+            
+            // Set up message listener for API response
+            window.addEventListener('message', handleApiMessage);
+            
+            // Retry after delay if not ready
+            setTimeout(() => {
+                if (!isApiReady) {
+                    console.log('Retrying API initialization...');
+                    initializeAPI();
+                }
+            }, 500);
+        }
+        
+        // Handle API messages from parent
+        function handleApiMessage(event) {
+            if (event.data.type === 'API_READY') {
+                api = window.parent.api || event.data.api;
+                isApiReady = true;
+                console.log('API ready via message');
+                window.removeEventListener('message', handleApiMessage);
+                executeApiReadyCallbacks();
+            }
+        }
+        
+        // Execute all pending API callbacks
+        function executeApiReadyCallbacks() {
+            console.log('Executing', apiReadyCallbacks.length, 'pending API callbacks');
+            while (apiReadyCallbacks.length > 0) {
+                const callback = apiReadyCallbacks.shift();
+                try {
+                    callback(api);
+                } catch (error) {
+                    console.error('Error in API callback:', error);
+                }
+            }
+        }
+        
+        // Safe API method caller with verification
+        async function callApiMethod(methodName, ...args) {
+            return new Promise((resolve, reject) => {
+                waitForAPI((apiInstance) => {
+                    if (apiInstance && typeof apiInstance[methodName] === 'function') {
+                        try {
+                            const result = apiInstance[methodName](...args);
+                            if (result && typeof result.then === 'function') {
+                                result.then(resolve).catch(reject);
+                            } else {
+                                resolve(result);
+                            }
+                        } catch (error) {
+                            reject(error);
+                        }
+                    } else {
+                        reject(new Error(`API method ${methodName} not available`));
+                    }
+                });
+            });
+        }
+        
+        // =============================================
+        // AUTO-LOAD CHAT FROM URL PARAMETERS
+        // =============================================
+        
+        // Function to extract user info from URL
+        function getUserFromURL() {
+            const urlParams = new URLSearchParams(window.location.search);
+            const userId = urlParams.get('userId') || urlParams.get('friendId') || urlParams.get('user');
+            const username = urlParams.get('username') || urlParams.get('name') || 'Unknown User';
+            const userAvatar = urlParams.get('avatar') || urlParams.get('photoURL') || '';
+            
+            if (userId) {
+                return {
+                    userId: userId,
+                    username: decodeURIComponent(username),
+                    userAvatar: userAvatar
+                };
+            }
+            return null;
+        }
+        
+        // Function to open chat panel with specific user
+        async function openChatPanel(userId, username, userAvatar = '') {
+            try {
+                // Show loading state
+                chatPanel.classList.remove('hidden');
+                sidebar.classList.remove('active');
+                messagesContainer.innerHTML = `
+                    <div class="loading-state">
+                        <div class="loading-spinner"></div>
+                        <div>Loading chat with ${username}...</div>
+                    </div>
+                `;
+                
+                // Update chat header with user info
+                document.getElementById('chatFriendName').textContent = username;
+                document.getElementById('chatStatusText').textContent = 'Loading...';
+                
+                const avatarEl = document.getElementById('chatFriendAvatar');
+                if (userAvatar) {
+                    avatarEl.style.backgroundImage = `url('${userAvatar}')`;
+                    avatarEl.innerHTML = '';
+                } else {
+                    const initials = username.split(' ').map(word => word[0]).join('').toUpperCase().substring(0, 2);
+                    avatarEl.innerHTML = `<span style="color: white; font-size: 16px;">${initials}</span>`;
+                }
+                
+                // Create temporary friend object
+                currentFriend = {
+                    uid: userId,
+                    displayName: username,
+                    photoURL: userAvatar
+                };
+                
+                // Wait for API to be ready before checking chats
+                waitForAPI(async (apiInstance) => {
+                    try {
+                        // Check if chat already exists
+                        let existingChat = chats.find(chat => chat.friendId === userId);
+                        
+                        if (existingChat) {
+                            // Open existing chat
+                            currentChat = existingChat;
+                            await loadMessages();
+                            applyChatTheme(userId);
+                        } else {
+                            // Try to get chat from API
+                            if (apiInstance && typeof apiInstance.getChatByFriendId === 'function') {
+                                try {
+                                    const apiChat = await apiInstance.getChatByFriendId(userId);
+                                    if (apiChat) {
+                                        existingChat = apiChat;
+                                        // Add to local chats if not already there
+                                        if (!chats.some(c => c.id === apiChat.id)) {
+                                            chats.unshift(apiChat);
+                                            localStorage.setItem(LOCAL_STORAGE_KEYS.CHATS, JSON.stringify(chats));
+                                            renderChatsList();
+                                        }
+                                        currentChat = apiChat;
+                                        await loadMessages();
+                                        applyChatTheme(userId);
+                                        return;
+                                    }
+                                } catch (error) {
+                                    console.log('Could not fetch chat from API, creating local chat:', error);
+                                }
+                            }
+                            
+                            // Create new chat object for display
+                            currentChat = {
+                                id: 'temp_' + Date.now(),
+                                friendId: userId,
+                                friendName: username,
+                                friendUsername: '',
+                                friendAvatar: userAvatar,
+                                lastMessage: '',
+                                lastMessageAt: new Date(),
+                                unreadCount: 0,
+                                type: 'direct',
+                                archived: false,
+                                blocked: false
+                            };
+                            
+                            // Show empty chat
+                            messages = [];
+                            renderMessages();
+                            
+                            // Load draft if exists
+                            loadMessageDraft();
+                            
+                            // Focus input
+                            messageInput.focus();
+                            
+                            // Show notification
+                            showNotification(`Chat with ${username} started`, 'success');
+                        }
+                        
+                        // Set user status
+                        document.getElementById('chatStatusText').textContent = 'Online';
+                        document.getElementById('chatStatusIndicator').className = 'chat-status online';
+                        
+                    } catch (error) {
+                        console.error('Error opening chat panel:', error);
+                        showNotification('Error loading chat', 'error');
+                        
+                        // Show error state
+                        messagesContainer.innerHTML = `
+                            <div class="empty-chat">
+                                <i class="fas fa-exclamation-triangle empty-chat-icon"></i>
+                                <div class="empty-chat-title">Error loading chat</div>
+                                <div class="empty-chat-message">Could not load conversation with ${username}</div>
+                                <button onclick="backToChatList()" style="margin-top: 20px; padding: 10px 20px; background: var(--primary-color); color: white; border: none; border-radius: 8px; cursor: pointer;">
+                                    Back to Chats
+                                </button>
+                            </div>
+                        `;
+                    }
+                });
+                
+            } catch (error) {
+                console.error('Error in openChatPanel:', error);
+                showNotification('Error loading chat', 'error');
+            }
+        }
         
         // Initialize the application
         async function initializeApp() {
-            console.log('Initializing complete chat system...');
+            console.log('Initializing complete chat system with enhanced API backend...');
             
             // Load user and data
             await loadUser();
@@ -665,11 +858,19 @@
             // Initialize emoji picker
             initEmojiPicker();
             
-            // Load initial data
-            const chatSession = localStorage.getItem(LOCAL_STORAGE_KEYS.CURRENT_CHAT);
-            if (chatSession) {
-                const session = JSON.parse(chatSession);
-                await loadChatByFriendId(session.friendId);
+            // Check for auto-load parameters from URL
+            const urlUser = getUserFromURL();
+            if (urlUser) {
+                // Auto-load the chat with the user from URL
+                console.log('Auto-loading chat with user:', urlUser);
+                await openChatPanel(urlUser.userId, urlUser.username, urlUser.userAvatar);
+            } else {
+                // Check for active chat session
+                const chatSession = localStorage.getItem(LOCAL_STORAGE_KEYS.CURRENT_CHAT);
+                if (chatSession) {
+                    const session = JSON.parse(chatSession);
+                    await loadChatByFriendId(session.friendId);
+                }
             }
             
             showNotification('Chat system ready', 'success');
@@ -695,6 +896,7 @@
         
         // Start initialization when DOM is ready
         document.addEventListener('DOMContentLoaded', function() {
+            console.log('DOM loaded, starting app initialization...');
             initializeApp();
         });
         
@@ -709,42 +911,50 @@
         
         async function loadUser() {
             try {
-                // Get user from API
-                if (window.api && window.api.getCurrentUser) {
-                    const user = await window.api.getCurrentUser();
-                    if (user) {
-                        currentUser = user;
-                        console.log('User loaded from API:', currentUser.uid);
+                // Try to get user from API first
+                waitForAPI(async (apiInstance) => {
+                    try {
+                        if (apiInstance && typeof apiInstance.getCurrentUser === 'function') {
+                            const user = await apiInstance.getCurrentUser();
+                            if (user) {
+                                currentUser = user;
+                                console.log('User loaded from API:', currentUser.uid);
+                                localStorage.setItem(LOCAL_STORAGE_KEYS.USER, JSON.stringify(currentUser));
+                                return;
+                            }
+                        }
+                    } catch (error) {
+                        console.log('Could not load user from API:', error);
                     }
-                }
-                
-                // Try localStorage as fallback
-                if (!currentUser) {
-                    const cachedUser = localStorage.getItem(LOCAL_STORAGE_KEYS.USER);
-                    if (cachedUser) {
-                        currentUser = JSON.parse(cachedUser);
-                        console.log('Loaded user from cache:', currentUser.uid);
+                    
+                    // Try localStorage as fallback
+                    if (!currentUser) {
+                        const cachedUser = localStorage.getItem(LOCAL_STORAGE_KEYS.USER);
+                        if (cachedUser) {
+                            currentUser = JSON.parse(cachedUser);
+                            console.log('Loaded user from cache:', currentUser.uid);
+                        }
                     }
-                }
-                
-                // Load user profile
-                const cachedProfile = localStorage.getItem(LOCAL_STORAGE_KEYS.USER_PROFILE);
-                if (cachedProfile) {
-                    window.userProfile = JSON.parse(cachedProfile);
-                }
-                
-                if (!currentUser) {
-                    // Create minimal user for offline mode
-                    currentUser = {
-                        uid: 'local_user_' + Date.now(),
-                        displayName: 'Local User',
-                        email: ''
-                    };
-                    console.log('Created minimal user object for offline mode');
-                }
-                
-                // Save to localStorage
-                localStorage.setItem(LOCAL_STORAGE_KEYS.USER, JSON.stringify(currentUser));
+                    
+                    // Load user profile
+                    const cachedProfile = localStorage.getItem(LOCAL_STORAGE_KEYS.USER_PROFILE);
+                    if (cachedProfile) {
+                        window.userProfile = JSON.parse(cachedProfile);
+                    }
+                    
+                    if (!currentUser) {
+                        // Create minimal user for offline mode
+                        currentUser = {
+                            uid: 'local_user_' + Date.now(),
+                            displayName: 'Local User',
+                            email: ''
+                        };
+                        console.log('Created minimal user object for offline mode');
+                    }
+                    
+                    // Save to localStorage
+                    localStorage.setItem(LOCAL_STORAGE_KEYS.USER, JSON.stringify(currentUser));
+                });
                 
             } catch (error) {
                 console.error('Error loading user:', error);
@@ -885,24 +1095,6 @@
                         </div>
                     `;
                     break;
-                case 'audio':
-                    previewHtml = `
-                        <i class="fas fa-microphone" style="font-size: 24px; color: #0084ff;"></i>
-                        <div class="attachment-preview-info">
-                            <div style="font-weight: 500; margin-bottom: 4px;">Audio Recording</div>
-                            <div style="font-size: 12px; color: #65676b;">${formatDuration(attachment.duration || 0)}</div>
-                        </div>
-                    `;
-                    break;
-                case 'location':
-                    previewHtml = `
-                        <i class="fas fa-map-marker-alt" style="font-size: 24px; color: #0084ff;"></i>
-                        <div class="attachment-preview-info">
-                            <div style="font-weight: 500; margin-bottom: 4px;">Location</div>
-                            <div style="font-size: 12px; color: #65676b;">${attachment.name || 'Location'}</div>
-                        </div>
-                    `;
-                    break;
             }
             
             if (previewHtml) {
@@ -956,25 +1148,23 @@
                 }
                 
                 // Load from API
-                await loadContactsFromAPI();
+                waitForAPI(async (apiInstance) => {
+                    try {
+                        if (apiInstance && typeof apiInstance.getContacts === 'function') {
+                            const response = await apiInstance.getContacts();
+                            if (response && response.contacts) {
+                                contacts = response.contacts;
+                                localStorage.setItem(LOCAL_STORAGE_KEYS.CONTACTS, JSON.stringify(contacts));
+                                renderContactsList();
+                            }
+                        }
+                    } catch (error) {
+                        console.error('Error loading contacts from API:', error);
+                    }
+                });
                 
             } catch (error) {
                 console.error('Error loading contacts:', error);
-            }
-        }
-        
-        async function loadContactsFromAPI() {
-            try {
-                if (!window.api || !window.api.getContacts) return;
-                
-                const response = await window.api.getContacts();
-                if (response && response.contacts) {
-                    contacts = response.contacts;
-                    localStorage.setItem(LOCAL_STORAGE_KEYS.CONTACTS, JSON.stringify(contacts));
-                    renderContactsList();
-                }
-            } catch (error) {
-                console.error('Error loading contacts from API:', error);
             }
         }
         
@@ -1055,25 +1245,23 @@
                 }
                 
                 // Load from API
-                await loadChatsFromAPI();
+                waitForAPI(async (apiInstance) => {
+                    try {
+                        if (apiInstance && typeof apiInstance.getChats === 'function') {
+                            const response = await apiInstance.getChats();
+                            if (response && response.chats) {
+                                chats = response.chats;
+                                localStorage.setItem(LOCAL_STORAGE_KEYS.CHATS, JSON.stringify(chats));
+                                renderChatsList();
+                            }
+                        }
+                    } catch (error) {
+                        console.error('Error loading chats from API:', error);
+                    }
+                });
                 
             } catch (error) {
                 console.error('Error loading chats:', error);
-            }
-        }
-        
-        async function loadChatsFromAPI() {
-            try {
-                if (!window.api || !window.api.getChats) return;
-                
-                const response = await window.api.getChats();
-                if (response && response.chats) {
-                    chats = response.chats;
-                    localStorage.setItem(LOCAL_STORAGE_KEYS.CHATS, JSON.stringify(chats));
-                    renderChatsList();
-                }
-            } catch (error) {
-                console.error('Error loading chats from API:', error);
             }
         }
         
@@ -1271,40 +1459,74 @@
                     return;
                 }
                 
-                // Get friend info from contacts
-                const contact = contacts.find(c => c.uid === friendId);
-                if (contact) {
-                    // Create new chat
-                    const newChat = {
-                        id: 'chat_' + Date.now(),
-                        friendId: contact.uid,
-                        friendName: contact.displayName,
-                        friendUsername: '',
-                        friendAvatar: contact.photoURL || '',
-                        lastMessage: '',
-                        lastMessageAt: new Date(),
-                        unreadCount: 0,
-                        type: 'direct',
-                        archived: false,
-                        blocked: false,
-                        readOnly: false
-                    };
-                    
-                    chats.unshift(newChat);
-                    localStorage.setItem(LOCAL_STORAGE_KEYS.CHATS, JSON.stringify(chats));
-                    renderChatsList();
-                    
-                    await openChat(newChat);
-                    
-                    showNotification(`Started chat with ${contact.displayName}`, 'success');
-                } else {
-                    showNotification('Contact not found', 'error');
-                }
+                // Try to get chat from API
+                waitForAPI(async (apiInstance) => {
+                    try {
+                        if (apiInstance && typeof apiInstance.getUser === 'function') {
+                            const friendData = await apiInstance.getUser(friendId);
+                            if (friendData) {
+                                // Create chat via API
+                                if (typeof apiInstance.createChat === 'function') {
+                                    const newChat = await apiInstance.createChat(friendId);
+                                    if (newChat) {
+                                        chats.unshift(newChat);
+                                        localStorage.setItem(LOCAL_STORAGE_KEYS.CHATS, JSON.stringify(chats));
+                                        renderChatsList();
+                                        
+                                        await openChat(newChat);
+                                        
+                                        // Clear session data
+                                        localStorage.removeItem(LOCAL_STORAGE_KEYS.CURRENT_CHAT);
+                                    } else {
+                                        showNotification('Failed to create chat', 'error');
+                                    }
+                                } else {
+                                    // API doesn't have createChat method, create local chat
+                                    createLocalChat(friendId, friendData);
+                                }
+                            } else {
+                                showNotification('Friend not found', 'error');
+                            }
+                        } else {
+                            // API not available, create local chat
+                            createLocalChat(friendId, {
+                                displayName: 'Unknown User',
+                                photoURL: ''
+                            });
+                        }
+                    } catch (error) {
+                        console.error('Error loading chat by friend ID:', error);
+                        showNotification('Error loading chat', 'error');
+                    }
+                });
                 
             } catch (error) {
-                console.error('Error loading chat by friend ID:', error);
+                console.error('Error in loadChatByFriendId:', error);
                 showNotification('Error loading chat', 'error');
             }
+        }
+        
+        function createLocalChat(friendId, friendData) {
+            const newChat = {
+                id: 'chat_' + Date.now(),
+                friendId: friendId,
+                friendName: friendData.displayName,
+                friendUsername: '',
+                friendAvatar: friendData.photoURL,
+                lastMessage: '',
+                lastMessageAt: new Date(),
+                unreadCount: 0,
+                type: 'direct',
+                archived: false,
+                blocked: false
+            };
+            
+            chats.unshift(newChat);
+            localStorage.setItem(LOCAL_STORAGE_KEYS.CHATS, JSON.stringify(chats));
+            renderChatsList();
+            
+            openChat(newChat);
+            showNotification('Chat created', 'success');
         }
         
         async function loadMessages() {
@@ -1328,12 +1550,28 @@
                 }
                 
                 // Load from API (silent background sync)
-                await loadMessagesFromAPI();
-                
-                // Scroll to bottom
-                setTimeout(() => {
-                    messagesContainer.scrollTop = messagesContainer.scrollHeight;
-                }, 100);
+                waitForAPI(async (apiInstance) => {
+                    try {
+                        if (apiInstance && typeof apiInstance.getChatMessages === 'function') {
+                            const response = await apiInstance.getChatMessages(currentChat.id);
+                            if (response && response.messages) {
+                                messages = response.messages;
+                                
+                                // Save to localStorage for offline access
+                                localStorage.setItem(`${LOCAL_STORAGE_KEYS.MESSAGES}${currentChat.id}`, JSON.stringify(messages));
+                                
+                                renderMessages();
+                            }
+                        }
+                    } catch (error) {
+                        console.error('Error loading messages from API:', error);
+                    }
+                    
+                    // Scroll to bottom
+                    setTimeout(() => {
+                        messagesContainer.scrollTop = messagesContainer.scrollHeight;
+                    }, 100);
+                });
                 
             } catch (error) {
                 console.error('Error loading messages:', error);
@@ -1346,24 +1584,6 @@
                         </div>
                     `;
                 }
-            }
-        }
-        
-        async function loadMessagesFromAPI() {
-            if (!currentChat || !window.api || !window.api.getChatMessages) return;
-            
-            try {
-                const response = await window.api.getChatMessages(currentChat.id);
-                if (response && response.messages) {
-                    messages = response.messages;
-                    
-                    // Save to localStorage for offline access
-                    localStorage.setItem(`${LOCAL_STORAGE_KEYS.MESSAGES}${currentChat.id}`, JSON.stringify(messages));
-                    
-                    renderMessages();
-                }
-            } catch (error) {
-                console.error('Error loading messages from API:', error);
             }
         }
         
@@ -1554,7 +1774,10 @@
                             messageBubble.innerHTML = `
                                 ${moodIcon}
                                 <div class="message-video">
-                                    <video src="${message.content}" poster="${message.thumbnail}" style="width: 100%; border-radius: 8px;" controls></video>
+                                    <video src="${message.content}" poster="${message.thumbnail}" style="width: 100%; border-radius: 8px;"></video>
+                                    <div class="video-play-btn" onclick="playVideo('${message.content}')">
+                                        <i class="fas fa-play"></i>
+                                    </div>
                                 </div>
                                 ${message.caption ? `<div class="message-text" style="margin-top: 8px;">${escapeHtml(message.caption)}</div>` : ''}
                             `;
@@ -1864,13 +2087,6 @@
                     messageData.content = currentAttachment.data;
                     messageData.fileName = currentAttachment.name;
                     messageData.fileSize = currentAttachment.size;
-                    if (currentAttachment.duration) {
-                        messageData.duration = currentAttachment.duration;
-                    }
-                    if (currentAttachment.latitude) {
-                        messageData.latitude = currentAttachment.latitude;
-                        messageData.longitude = currentAttachment.longitude;
-                    }
                 }
                 
                 // Add reply info if replying to a message (with context label)
@@ -1918,17 +2134,25 @@
                 // Update chat list
                 updateChatLastMessage(content, type);
                 
-                if (isOnline && window.api && window.api.sendMessage) {
-                    // Send to API
-                    const savedMessage = await window.api.sendMessage(currentChat.id, messageData);
-                    
-                    // Update message with real ID and status
-                    const messageIndex = messages.findIndex(m => m.id === messageData.id);
-                    if (messageIndex !== -1 && savedMessage) {
-                        messages[messageIndex].id = savedMessage.id;
-                        messages[messageIndex].status = 'sent';
-                        localStorage.setItem(`${LOCAL_STORAGE_KEYS.MESSAGES}${currentChat.id}`, JSON.stringify(messages));
-                    }
+                // Send to API if online
+                if (isOnline) {
+                    waitForAPI(async (apiInstance) => {
+                        try {
+                            if (apiInstance && typeof apiInstance.sendMessage === 'function') {
+                                const savedMessage = await apiInstance.sendMessage(currentChat.id, messageData);
+                                
+                                // Update message with real ID and status
+                                const messageIndex = messages.findIndex(m => m.id === messageData.id);
+                                if (messageIndex !== -1 && savedMessage) {
+                                    messages[messageIndex].id = savedMessage.id;
+                                    messages[messageIndex].status = 'sent';
+                                    localStorage.setItem(`${LOCAL_STORAGE_KEYS.MESSAGES}${currentChat.id}`, JSON.stringify(messages));
+                                }
+                            }
+                        } catch (error) {
+                            console.error('Error sending message to API:', error);
+                        }
+                    });
                 }
                 
             } catch (error) {
@@ -1965,8 +2189,7 @@
                         unreadCount: 0,
                         type: 'note',
                         archived: false,
-                        blocked: false,
-                        readOnly: false
+                        blocked: false
                     };
                     chats.push(notesChat);
                     localStorage.setItem(LOCAL_STORAGE_KEYS.CHATS, JSON.stringify(chats));
@@ -2048,9 +2271,12 @@
             
             for (const message of offlineQueue) {
                 try {
-                    if (window.api && window.api.sendMessage) {
-                        await window.api.sendMessage(message.chatId, message);
-                    }
+                    waitForAPI(async (apiInstance) => {
+                        if (apiInstance && typeof apiInstance.sendMessage === 'function') {
+                            await apiInstance.sendMessage(message.chatId, message);
+                        }
+                    });
+                    
                     // Remove from local messages if it's a temp message
                     const localIndex = messages.findIndex(m => m.id === message.id);
                     if (localIndex !== -1) {
@@ -2098,27 +2324,34 @@
                         messageData.fileSize = currentAttachment.size;
                     }
                     
-                    if (window.api && window.api.sendMessage) {
-                        const response = await window.api.sendMessage(chatId, messageData);
-                        if (response) {
-                            results.push({ chatId, success: true });
+                    waitForAPI(async (apiInstance) => {
+                        if (apiInstance && typeof apiInstance.sendMessage === 'function') {
+                            try {
+                                const response = await apiInstance.sendMessage(chatId, messageData);
+                                if (response) {
+                                    results.push({ chatId, success: true });
+                                } else {
+                                    results.push({ chatId, success: false });
+                                }
+                            } catch (error) {
+                                console.error(`Error sending to chat ${chatId}:`, error);
+                                results.push({ chatId, success: false });
+                            }
                         } else {
-                            results.push({ chatId, success: false });
+                            // Save locally if API not available
+                            const chat = chats.find(c => c.id === chatId);
+                            if (chat) {
+                                chat.lastMessage = content || `Sent a ${currentAttachment?.type || 'message'}`;
+                                chat.lastMessageAt = new Date();
+                                localStorage.setItem(LOCAL_STORAGE_KEYS.CHATS, JSON.stringify(chats));
+                                results.push({ chatId, success: true });
+                            } else {
+                                results.push({ chatId, success: false });
+                            }
                         }
-                    } else {
-                        // Save locally if API not available
-                        const chat = chats.find(c => c.id === chatId);
-                        if (chat) {
-                            chat.lastMessage = content || `Sent a ${currentAttachment?.type || 'message'}`;
-                            chat.lastMessageAt = new Date();
-                            localStorage.setItem(LOCAL_STORAGE_KEYS.CHATS, JSON.stringify(chats));
-                            results.push({ chatId, success: true });
-                        } else {
-                            results.push({ chatId, success: false });
-                        }
-                    }
+                    });
                 } catch (error) {
-                    console.error(`Error sending to chat ${chatId}:`, error);
+                    console.error(`Error in sendToMultipleChats for ${chatId}:`, error);
                     results.push({ chatId, success: false });
                 }
             }
@@ -2147,9 +2380,11 @@
                 localStorage.setItem(`${LOCAL_STORAGE_KEYS.MESSAGES}${currentChat.id}`, JSON.stringify(messages));
                 
                 // Update API
-                if (window.api && window.api.editMessage) {
-                    await window.api.editMessage(messageId, { content: newContent });
-                }
+                waitForAPI(async (apiInstance) => {
+                    if (apiInstance && typeof apiInstance.editMessage === 'function') {
+                        await apiInstance.editMessage(messageId, { content: newContent });
+                    }
+                });
                 
                 // Re-render messages
                 editingMessageId = null;
@@ -2186,9 +2421,11 @@
                     messages[messageIndex].deletedAt = new Date();
                     
                     // Call API to delete message
-                    if (window.api && window.api.deleteMessage) {
-                        await window.api.deleteMessage(messageId);
-                    }
+                    waitForAPI(async (apiInstance) => {
+                        if (apiInstance && typeof apiInstance.deleteMessage === 'function') {
+                            await apiInstance.deleteMessage(messageId);
+                        }
+                    });
                     
                     showNotification('Message deleted for everyone', 'success');
                 } else {
@@ -2232,9 +2469,11 @@
                 }
                 
                 // Call API to mark as read
-                if (window.api && window.api.markChatAsRead) {
-                    await window.api.markChatAsRead(chatId);
-                }
+                waitForAPI(async (apiInstance) => {
+                    if (apiInstance && typeof apiInstance.markChatAsRead === 'function') {
+                        await apiInstance.markChatAsRead(chatId);
+                    }
+                });
                 
             } catch (error) {
                 console.error('Error marking chat as read:', error);
@@ -2461,9 +2700,11 @@ Message ID: ${message.id.substring(0, 8)}...
                 localStorage.setItem('knecta_reports', JSON.stringify(reports));
                 
                 // Send to API
-                if (window.api && window.api.submitReport) {
-                    window.api.submitReport(reportData);
-                }
+                waitForAPI(async (apiInstance) => {
+                    if (apiInstance && typeof apiInstance.submitReport === 'function') {
+                        await apiInstance.submitReport(reportData);
+                    }
+                });
                 
                 reportModal.classList.remove('active');
                 showNotification('Report submitted. Thank you for helping keep our community safe.', 'success');
@@ -2510,10 +2751,14 @@ Message ID: ${message.id.substring(0, 8)}...
                 localStorage.setItem(`${LOCAL_STORAGE_KEYS.MESSAGES}${currentChat.id}`, JSON.stringify(messages));
                 
                 // Update API (silently if requested)
-                if (!silent && window.api && window.api.addReaction) {
-                    await window.api.addReaction(messageId, {
-                        emoji: emoji,
-                        action: userIndex > -1 ? 'remove' : 'add'
+                if (!silent) {
+                    waitForAPI(async (apiInstance) => {
+                        if (apiInstance && typeof apiInstance.addReaction === 'function') {
+                            await apiInstance.addReaction(messageId, {
+                                emoji: emoji,
+                                action: userIndex > -1 ? 'remove' : 'add'
+                            });
+                        }
                     });
                 }
                 
@@ -3144,9 +3389,11 @@ Message ID: ${message.id.substring(0, 8)}...
                 localStorage.setItem(`${LOCAL_STORAGE_KEYS.MESSAGES}${currentChat.id}`, JSON.stringify(messages));
                 
                 // Update API
-                if (window.api && window.api.voteInPoll) {
-                    await window.api.voteInPoll(messageId, { optionIndex: optionIndex });
-                }
+                waitForAPI(async (apiInstance) => {
+                    if (apiInstance && typeof apiInstance.voteInPoll === 'function') {
+                        await apiInstance.voteInPoll(messageId, { optionIndex: optionIndex });
+                    }
+                });
                 
                 // Re-render messages
                 renderMessages();
@@ -3300,14 +3547,53 @@ Message ID: ${message.id.substring(0, 8)}...
                         syncingIndicator.classList.add('active');
                         
                         // Sync chats
-                        await loadChatsFromAPI();
+                        waitForAPI(async (apiInstance) => {
+                            try {
+                                if (apiInstance && typeof apiInstance.getChats === 'function') {
+                                    const response = await apiInstance.getChats();
+                                    if (response && response.chats) {
+                                        chats = response.chats;
+                                        localStorage.setItem(LOCAL_STORAGE_KEYS.CHATS, JSON.stringify(chats));
+                                        renderChatsList();
+                                    }
+                                }
+                            } catch (error) {
+                                console.error('Error syncing chats:', error);
+                            }
+                        });
                         
                         // Sync contacts
-                        await loadContactsFromAPI();
+                        waitForAPI(async (apiInstance) => {
+                            try {
+                                if (apiInstance && typeof apiInstance.getContacts === 'function') {
+                                    const response = await apiInstance.getContacts();
+                                    if (response && response.contacts) {
+                                        contacts = response.contacts;
+                                        localStorage.setItem(LOCAL_STORAGE_KEYS.CONTACTS, JSON.stringify(contacts));
+                                        renderContactsList();
+                                    }
+                                }
+                            } catch (error) {
+                                console.error('Error syncing contacts:', error);
+                            }
+                        });
                         
                         // Sync current chat messages if open
                         if (currentChat) {
-                            await loadMessagesFromAPI();
+                            waitForAPI(async (apiInstance) => {
+                                try {
+                                    if (apiInstance && typeof apiInstance.getChatMessages === 'function') {
+                                        const response = await apiInstance.getChatMessages(currentChat.id);
+                                        if (response && response.messages) {
+                                            messages = response.messages;
+                                            localStorage.setItem(`${LOCAL_STORAGE_KEYS.MESSAGES}${currentChat.id}`, JSON.stringify(messages));
+                                            renderMessages();
+                                        }
+                                    }
+                                } catch (error) {
+                                    console.error('Error syncing messages:', error);
+                                }
+                            });
                         }
                         
                         // Check offline queue
@@ -3533,9 +3819,11 @@ Message ID: ${message.id.substring(0, 8)}...
                 }
                 
                 // Call API to clear chat
-                if (window.api && window.api.clearChatHistory) {
-                    await window.api.clearChatHistory(chatId);
-                }
+                waitForAPI(async (apiInstance) => {
+                    if (apiInstance && typeof apiInstance.clearChatHistory === 'function') {
+                        await apiInstance.clearChatHistory(chatId);
+                    }
+                });
                 
                 showNotification('Chat history cleared', 'success');
                 
@@ -3710,12 +3998,6 @@ Message ID: ${message.id.substring(0, 8)}...
             return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i];
         }
         
-        function formatDuration(seconds) {
-            const minutes = Math.floor(seconds / 60);
-            const secs = Math.floor(seconds % 60);
-            return `${minutes}:${secs.toString().padStart(2, '0')}`;
-        }
-        
         function escapeHtml(text) {
             if (!text) return '';
             const div = document.createElement('div');
@@ -3812,18 +4094,22 @@ Message ID: ${message.id.substring(0, 8)}...
                 // Typing indicator
                 if (!isTyping) {
                     isTyping = true;
-                    // Simulate typing indicator
-                    if (window.api && window.api.sendTypingIndicator) {
-                        window.api.sendTypingIndicator(currentChat.id, true);
-                    }
+                    // Send typing indicator to API
+                    waitForAPI(async (apiInstance) => {
+                        if (apiInstance && typeof apiInstance.sendTypingIndicator === 'function') {
+                            await apiInstance.sendTypingIndicator(currentChat.id, true);
+                        }
+                    });
                 }
                 
                 clearTimeout(typingTimeout);
                 typingTimeout = setTimeout(() => {
                     isTyping = false;
-                    if (window.api && window.api.sendTypingIndicator) {
-                        window.api.sendTypingIndicator(currentChat.id, false);
-                    }
+                    waitForAPI(async (apiInstance) => {
+                        if (apiInstance && typeof apiInstance.sendTypingIndicator === 'function') {
+                            await apiInstance.sendTypingIndicator(currentChat.id, false);
+                        }
+                    });
                 }, 1000);
             });
             
@@ -4107,8 +4393,7 @@ Message ID: ${message.id.substring(0, 8)}...
             
             // New chat button
             document.getElementById('newChatBtn').addEventListener('click', () => {
-                // Show contacts sidebar for new chat
-                showContactsSidebar();
+                window.location.href = '../friend.html?startChat=true';
             });
             
             // Multi-send toggle button
@@ -4231,7 +4516,7 @@ Message ID: ${message.id.substring(0, 8)}...
             // Voice call button
             document.getElementById('voiceCallBtn').addEventListener('click', () => {
                 if (currentFriend && currentChat.type !== 'note') {
-                    showNotification('Voice call feature would open here', 'info');
+                    window.location.href = `../calls.html?call=${currentFriend.uid}&type=voice`;
                 } else {
                     showNotification('Please select a chat first', 'warning');
                 }
@@ -4240,7 +4525,7 @@ Message ID: ${message.id.substring(0, 8)}...
             // Video call button
             document.getElementById('videoCallBtn').addEventListener('click', () => {
                 if (currentFriend && currentChat.type !== 'note') {
-                    showNotification('Video call feature would open here', 'info');
+                    window.location.href = `../calls.html?call=${currentFriend.uid}&type=video`;
                 } else {
                     showNotification('Please select a chat first', 'warning');
                 }
@@ -4286,7 +4571,7 @@ Message ID: ${message.id.substring(0, 8)}...
             window.addEventListener('offline', updateNetworkStatus);
         }
         
-        console.log('Complete chat system with parent API backend initialized successfully');
+        console.log('Enhanced chat system with robust API backend initialized successfully');
     </script>
     
 </body>

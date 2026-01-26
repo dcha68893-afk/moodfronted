@@ -296,914 +296,914 @@
             <!-- Cache Indicator (shown when offline) -->
             <div class="cache-indicator" id="cacheIndicator" style="display: none;">
                 <i class="fas fa-database"></i>
-                                <span>Showing cached groups data. Some features may be limited.</span>
+                <span>Showing cached groups data. Some features may be limited.</span>
+            </div>
+            
+            <div class="group-list">
+                <div class="quick-actions">
+                    <button class="quick-action-btn" id="discoverGroupsBtn" title="Discover groups">
+                        <div class="quick-action-icon">
+                            <i class="fas fa-compass"></i>
+                        </div>
+                        <div class="quick-action-text">Discover</div>
+                    </button>
+                    <button class="quick-action-btn" id="groupInvitesBtn" title="Group invites">
+                        <div class="quick-action-icon">
+                            <i class="fas fa-user-plus"></i>
+                        </div>
+                        <div class="quick-action-text">Invites</div>
+                    </button>
+                    <button class="quick-action-btn" id="groupEventsBtn" title="Group events">
+                        <div class="quick-action-icon">
+                            <i class="fas fa-calendar-alt"></i>
+                        </div>
+                        <div class="quick-action-text">Events</div>
+                    </button>
+                </div>
+                
+                <!-- Group Stats -->
+                <div class="group-stats">
+                    <div class="stats-container">
+                        <div class="stat-item">
+                            <div class="stat-number" id="totalGroups">0</div>
+                            <div class="stat-label">Total</div>
+                        </div>
+                        <div class="stat-item">
+                            <div class="stat-number" id="activeGroups">0</div>
+                            <div class="stat-label">Active</div>
+                        </div>
+                        <div class="stat-item">
+                            <div class="stat-number" id="totalMembers">0</div>
+                            <div class="stat-label">Members</div>
+                        </div>
+                    </div>
+                </div>
+                
+                <!-- Type Filters -->
+                <div class="type-filters">
+                    <div class="type-filters-container">
+                        <button class="type-filter-btn active" data-type="all">All</button>
+                        <button class="type-filter-btn" data-type="public">Public</button>
+                        <button class="type-filter-btn" data-type="private">Private</button>
+                        <button class="type-filter-btn" data-type="secret">Secret</button>
+                        <button class="type-filter-btn" data-type="family">Family</button>
+                        <button class="type-filter-btn" data-type="work">Work</button>
+                    </div>
+                </div>
+                
+                <div class="group-list-content">
+                    <!-- All Groups Section -->
+                    <div class="groups-section active" id="allGroupsSection">
+                        <div class="groups-list" id="allGroupsList">
+                            <div class="loading-placeholder">
+                                <i class="fas fa-spinner fa-spin"></i>
+                                <p>Loading groups...</p>
                             </div>
-                            
-                            <div class="group-list">
-                                <div class="quick-actions">
-                                    <button class="quick-action-btn" id="discoverGroupsBtn" title="Discover groups">
-                                        <div class="quick-action-icon">
-                                            <i class="fas fa-compass"></i>
-                                        </div>
-                                        <div class="quick-action-text">Discover</div>
-                                    </button>
-                                    <button class="quick-action-btn" id="groupInvitesBtn" title="Group invites">
-                                        <div class="quick-action-icon">
-                                            <i class="fas fa-user-plus"></i>
-                                        </div>
-                                        <div class="quick-action-text">Invites</div>
-                                    </button>
-                                    <button class="quick-action-btn" id="groupEventsBtn" title="Group events">
-                                        <div class="quick-action-icon">
-                                            <i class="fas fa-calendar-alt"></i>
-                                        </div>
-                                        <div class="quick-action-text">Events</div>
-                                    </button>
-                                </div>
-                                
-                                <!-- Group Stats -->
-                                <div class="group-stats">
-                                    <div class="stats-container">
-                                        <div class="stat-item">
-                                            <div class="stat-number" id="totalGroups">0</div>
-                                            <div class="stat-label">Total</div>
-                                        </div>
-                                        <div class="stat-item">
-                                            <div class="stat-number" id="activeGroups">0</div>
-                                            <div class="stat-label">Active</div>
-                                        </div>
-                                        <div class="stat-item">
-                                            <div class="stat-number" id="totalMembers">0</div>
-                                            <div class="stat-label">Members</div>
-                                        </div>
-                                    </div>
-                                </div>
-                                
-                                <!-- Type Filters -->
-                                <div class="type-filters">
-                                    <div class="type-filters-container">
-                                        <button class="type-filter-btn active" data-type="all">All</button>
-                                        <button class="type-filter-btn" data-type="public">Public</button>
-                                        <button class="type-filter-btn" data-type="private">Private</button>
-                                        <button class="type-filter-btn" data-type="secret">Secret</button>
-                                        <button class="type-filter-btn" data-type="family">Family</button>
-                                        <button class="type-filter-btn" data-type="work">Work</button>
-                                    </div>
-                                </div>
-                                
-                                <div class="group-list-content">
-                                    <!-- All Groups Section -->
-                                    <div class="groups-section active" id="allGroupsSection">
-                                        <div class="groups-list" id="allGroupsList">
-                                            <div class="loading-placeholder">
-                                                <i class="fas fa-spinner fa-spin"></i>
-                                                <p>Loading groups...</p>
-                                            </div>
-                                        </div>
-                                    </div>
-                                    
-                                    <!-- My Groups Section -->
-                                    <div class="groups-section" id="myGroupsSection">
-                                        <div class="groups-list" id="myGroupsList">
-                                            <!-- User-created groups will be loaded here -->
-                                        </div>
-                                    </div>
-                                    
-                                    <!-- Joined Groups Section -->
-                                    <div class="groups-section" id="joinedSection">
-                                        <div class="groups-list" id="joinedList">
-                                            <!-- Joined groups will be loaded here -->
-                                        </div>
-                                    </div>
-                                    
-                                    <!-- Invites Section -->
-                                    <div class="groups-section" id="invitesSection">
-                                        <div class="section-title">
-                                            <span>Group Invites</span>
-                                            <span class="section-count" id="invitesSectionCount">0</span>
-                                        </div>
-                                        <div class="groups-list" id="invitesList">
-                                            <!-- Group invites will be loaded here -->
-                                        </div>
-                                    </div>
-                                    
-                                    <!-- Admin Groups Section -->
-                                    <div class="groups-section" id="adminSection">
-                                        <div class="groups-list" id="adminList">
-                                            <!-- Admin groups will be loaded here -->
-                                        </div>
-                                    </div>
+                        </div>
+                    </div>
+                    
+                    <!-- My Groups Section -->
+                    <div class="groups-section" id="myGroupsSection">
+                        <div class="groups-list" id="myGroupsList">
+                            <!-- User-created groups will be loaded here -->
+                        </div>
+                    </div>
+                    
+                    <!-- Joined Groups Section -->
+                    <div class="groups-section" id="joinedSection">
+                        <div class="groups-list" id="joinedList">
+                            <!-- Joined groups will be loaded here -->
+                        </div>
+                    </div>
+                    
+                    <!-- Invites Section -->
+                    <div class="groups-section" id="invitesSection">
+                        <div class="section-title">
+                            <span>Group Invites</span>
+                            <span class="section-count" id="invitesSectionCount">0</span>
+                        </div>
+                        <div class="groups-list" id="invitesList">
+                            <!-- Group invites will be loaded here -->
+                        </div>
+                    </div>
+                    
+                    <!-- Admin Groups Section -->
+                    <div class="groups-section" id="adminSection">
+                        <div class="groups-list" id="adminList">
+                            <!-- Admin groups will be loaded here -->
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+        
+        <!-- Group Details Panel -->
+        <div class="group-details-panel" id="groupDetailsPanel">
+            <div class="group-details-header">
+                <button class="back-btn" id="backBtn">
+                    <i class="fas fa-arrow-left"></i>
+                </button>
+                <div class="group-details-title">Group Details</div>
+                <div style="width: 40px;"></div> <!-- Spacer for alignment -->
+            </div>
+            
+            <div class="group-details-content" id="groupDetailsContent">
+                <!-- Group details will be loaded here -->
+            </div>
+        </div>
+        
+        <!-- ============================================= -->
+        <!-- GROUP CHAT PANEL -->
+        <!-- ============================================= -->
+        <div class="group-chat-panel" id="groupChatPanel">
+            <div class="chat-header">
+                <div class="chat-header-info" id="chatHeaderInfo">
+                    <div class="chat-header-avatar" id="chatAvatar">
+                        <i class="fas fa-users"></i>
+                    </div>
+                    <div class="chat-header-details">
+                        <div class="chat-header-title" id="chatTitle">Group Chat</div>
+                        <div class="chat-header-subtitle" id="chatSubtitle">
+                            <span id="chatMemberCount">0 members</span>
+                            <span>•</span>
+                            <span id="chatActive">Active now</span>
+                            <!-- ADDED: Group Purpose & Pulse -->
+                            <span id="chatPurposeTag" class="group-purpose-tag" style="display: none;"></span>
+                            <span id="chatPulse" class="group-pulse" style="display: none;"></span>
+                        </div>
+                        <!-- ADDED: Group Mood & Posting Rules -->
+                        <div id="chatMoodRules" style="display: none; margin-top: 4px;">
+                            <span id="chatMood" class="group-mood-indicator"></span>
+                            <span id="chatPostingRules" class="posting-rules-banner"></span>
+                        </div>
+                    </div>
+                </div>
+                <div class="chat-header-actions">
+                    <button class="chat-header-btn" id="chatInfoBtn" title="Group Info">
+                        <i class="fas fa-info-circle"></i>
+                    </button>
+                    <button class="chat-header-btn" id="chatCallBtn" title="Start Group Call">
+                        <i class="fas fa-phone"></i>
+                    </button>
+                    <button class="chat-header-btn" id="closeChatBtn" title="Close Chat">
+                        <i class="fas fa-times"></i>
+                    </button>
+                </div>
+            </div>
+            
+            <div class="chat-messages-container" id="chatMessagesContainer">
+                <div class="chat-messages" id="chatMessages">
+                    <!-- Messages will be loaded here -->
+                </div>
+            </div>
+            
+            <div class="chat-input-container">
+                <!-- ADDED: Topic Selection & Silent Mode -->
+                <div id="topicSelection" style="display: none; padding: 5px 10px; background: var(--secondary-color); border-bottom: 1px solid var(--border-color);">
+                    <select id="messageTopic" style="width: 100%; padding: 4px 8px; border-radius: 4px; border: 1px solid var(--border-color); font-size: 12px;">
+                        <option value="">Select topic (optional)</option>
+                        <option value="announcement">📢 Announcement</option>
+                        <option value="question">❓ Question</option>
+                        <option value="discussion">💬 Discussion</option>
+                    </select>
+                </div>
+                <div class="chat-input-actions">
+                    <button class="chat-input-btn" id="chatAttachBtn" title="Attach File">
+                        <i class="fas fa-paperclip"></i>
+                    </button>
+                    <button class="chat-input-btn" id="chatEmojiBtn" title="Emoji">
+                        <i class="far fa-smile"></i>
+                    </button>
+                    <!-- ADDED: Silent Participation Mode Toggle -->
+                    <button class="chat-input-btn" id="silentModeBtn" title="Toggle Silent Mode" style="display: none;">
+                        <i class="fas fa-eye"></i>
+                    </button>
+                    <!-- ADDED: Anonymous Posting Toggle -->
+                    <button class="chat-input-btn" id="anonymousModeBtn" title="Toggle Anonymous Posting" style="display: none;">
+                        <i class="fas fa-user-secret"></i>
+                    </button>
+                </div>
+                <textarea class="chat-input" id="chatInput" placeholder="Type a message..." rows="1"></textarea>
+                <button class="chat-input-btn send" id="chatSendBtn" title="Send Message">
+                    <i class="fas fa-paper-plane"></i>
+                </button>
+            </div>
+            
+            <!-- ADDED: Group Notes Panel -->
+            <div id="groupNotesPanel" style="display: none; border-top: 1px solid var(--border-color); padding: 15px;">
+                <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px;">
+                    <h4 style="margin: 0;"><i class="fas fa-sticky-note"></i> Group Notes</h4>
+                    <button id="editNotesBtn" class="action-btn secondary" style="font-size: 12px; padding: 4px 8px;">
+                        <i class="fas fa-edit"></i> Edit
+                    </button>
+                </div>
+                <div id="groupNotesContent" style="min-height: 100px; max-height: 200px; overflow-y: auto; padding: 10px; background: var(--secondary-color); border-radius: 6px;">
+                    <p style="margin: 0; color: var(--text-secondary);">No notes yet. Add important information here.</p>
+                </div>
+                <textarea id="groupNotesEditor" style="display: none; width: 100%; min-height: 100px; padding: 10px; border: 1px solid var(--border-color); border-radius: 6px; font-family: inherit; resize: vertical;"></textarea>
+                <div id="notesEditorActions" style="display: none; margin-top: 10px; text-align: right;">
+                    <button id="saveNotesBtn" class="action-btn success" style="font-size: 12px; padding: 4px 12px;">Save</button>
+                    <button id="cancelNotesEditBtn" class="action-btn secondary" style="font-size: 12px; padding: 4px 12px; margin-left: 5px;">Cancel</button>
+                </div>
+            </div>
+            
+            <!-- ADDED: Event Countdown Panel -->
+            <div id="eventCountdownPanel" style="display: none; border-top: 1px solid var(--border-color); padding: 15px;">
+                <h4 style="margin: 0 0 10px 0;"><i class="fas fa-calendar-alt"></i> Event Countdown</h4>
+                <div id="eventCountdownDisplay" class="event-countdown">
+                    No upcoming events
+                </div>
+                <button id="addEventBtn" class="action-btn secondary" style="width: 100%; margin-top: 10px; font-size: 12px; padding: 6px;">
+                    <i class="fas fa-plus"></i> Add Event
+                </button>
+            </div>
+            
+            <!-- ADDED: Energy Suggestion Panel -->
+            <div id="energySuggestionPanel" style="display: none; border-top: 1px solid var(--border-color); padding: 15px;">
+                <div class="energy-suggestion" id="energySuggestionContent">
+                    <i class="fas fa-lightbulb"></i> Group is active. All good!
+                </div>
+            </div>
+            
+            <!-- ADDED: Admin Transparency Log -->
+            <div id="adminTransparencyPanel" style="display: none; border-top: 1px solid var(--border-color); padding: 15px;">
+                <h4 style="margin: 0 0 10px 0;"><i class="fas fa-history"></i> Recent Changes</h4>
+                <div id="adminTransparencyLog" class="admin-transparency-log">
+                    No recent changes
+                </div>
+            </div>
+        </div>
+        
+        <!-- ============================================= -->
+        <!-- GROUP CALL PANEL -->
+        <!-- ============================================= -->
+        <div class="group-call-panel" id="groupCallPanel">
+            <div class="call-header">
+                <div class="call-header-info">
+                    <div>
+                        <div class="call-header-title" id="callTitle">Group Call</div>
+                        <div class="call-header-subtitle" id="callDuration">00:00</div>
+                    </div>
+                </div>
+                <div class="call-header-actions">
+                    <button class="call-header-btn" id="callParticipantsBtn" title="Participants">
+                        <i class="fas fa-users"></i>
+                    </button>
+                    <button class="call-header-btn" id="callSettingsBtn" title="Settings">
+                        <i class="fas fa-cog"></i>
+                    </button>
+                    <button class="call-header-btn" id="endCallBtn" title="End Call">
+                        <i class="fas fa-phone-slash"></i>
+                    </button>
+                </div>
+            </div>
+            
+            <div class="call-participants" id="callParticipants">
+                <!-- Video feeds will be added here -->
+            </div>
+            
+            <div class="call-controls">
+                <button class="call-control-btn secondary" id="callMuteBtn" title="Mute/Unmute">
+                    <i class="fas fa-microphone"></i>
+                </button>
+                <button class="call-control-btn secondary" id="callVideoBtn" title="Video On/Off">
+                    <i class="fas fa-video"></i>
+                </button>
+                <button class="call-control-btn secondary" id="callScreenBtn" title="Share Screen">
+                    <i class="fas fa-desktop"></i>
+                </button>
+                <button class="call-control-btn danger" id="callLeaveBtn" title="Leave Call">
+                    <i class="fas fa-phone-slash"></i>
+                </button>
+            </div>
+        </div>
+    </div>
+    
+    <!-- Create Group Modal (UPDATED with new features) -->
+    <div class="create-group-modal" id="createGroupModal">
+        <div class="create-group-container">
+            <div class="create-group-header">
+                <h3>Create Group</h3>
+                <button class="create-group-btn" id="closeCreateGroupModal">
+                    <i class="fas fa-times"></i>
+                </button>
+            </div>
+            
+            <div class="create-group-tabs">
+                <button class="create-group-tab active" data-tab="basic">Basic</button>
+                <button class="create-group-tab" data-tab="settings">Settings</button>
+                <button class="create-group-tab" data-tab="purpose">Purpose</button>
+                <button class="create-group-tab" data-tab="theme">Theme</button>
+            </div>
+            
+            <div class="create-group-content">
+                <!-- Basic Tab -->
+                <div class="create-group-tab-content active" id="basicTab">
+                    <div class="input-group">
+                        <label class="input-label">Group Name *</label>
+                        <input type="text" class="text-input" id="groupNameInput" placeholder="Enter group name" maxlength="100">
+                    </div>
+                    
+                    <div class="input-group">
+                        <label class="input-label">Group Description</label>
+                        <textarea class="text-input" id="groupDescriptionInput" placeholder="Describe the purpose of this group..." rows="3"></textarea>
+                    </div>
+                    
+                    <div class="input-group">
+                        <label class="input-label">Group Topic (Optional)</label>
+                        <input type="text" class="text-input" id="groupTopicInput" placeholder="#family #gaming #work">
+                        <div style="font-size: 12px; color: var(--text-secondary); margin-top: 5px;">Add topics to help others discover your group</div>
+                    </div>
+                    
+                    <div class="input-group">
+                        <label class="input-label">Group Type</label>
+                        <select class="text-input" id="groupTypeSelect">
+                            <option value="public">Public - Anyone can join</option>
+                            <option value="private" selected>Private - Invite only</option>
+                            <option value="secret">Secret - Hidden and invite only</option>
+                        </select>
+                    </div>
+                </div>
+                
+                <!-- Settings Tab -->
+                <div class="create-group-tab-content" id="settingsTab">
+                    <div class="input-group">
+                        <label class="input-label">Welcome Message</label>
+                        <textarea class="text-input" id="welcomeMessageInput" placeholder="Welcome message for new members..." rows="3"></textarea>
+                        <div style="font-size: 12px; color: var(--text-secondary); margin-top: 5px;">This message will be shown to new members when they join</div>
+                    </div>
+                    
+                    <div class="input-group">
+                        <label class="input-label">Group Rules</label>
+                        <textarea class="text-input" id="groupRulesInput" placeholder="Add group rules (one per line)..." rows="5">1. Be respectful to all members
+2. No spam or self-promotion
+3. Keep discussions relevant to the group topic
+4. No hate speech or harassment</textarea>
+                    </div>
+                    
+                    <div class="input-group">
+                        <label class="input-label">Moderation Settings</label>
+                        <div style="margin-top: 10px;">
+                            <label style="display: flex; align-items: center; gap: 10px; margin-bottom: 10px;">
+                                <input type="checkbox" id="approveNewMembers" checked>
+                                <span>Approve new members before they can join</span>
+                            </label>
+                            <label style="display: flex; align-items: center; gap: 10px; margin-bottom: 10px;">
+                                <input type="checkbox" id="onlyAdminsCanPost" checked>
+                                <span>Only admins can post messages</span>
+                            </label>
+                            <label style="display: flex; align-items: center; gap: 10px; margin-bottom: 10px;">
+                                <input type="checkbox" id="allowMediaSharing" checked>
+                                <span>Allow media sharing</span>
+                            </label>
+                            <label style="display: flex; align-items: center; gap: 10px;">
+                                <input type="checkbox" id="enableDisappearingMessages">
+                                <span>Enable disappearing messages (24 hours)</span>
+                            </label>
+                        </div>
+                    </div>
+                </div>
+                
+                <!-- ADDED: Purpose Tab with New Features -->
+                <div class="create-group-tab-content" id="purposeTab">
+                    <div class="input-group">
+                        <label class="input-label">Group Purpose *</label>
+                        <select class="text-input" id="groupPurposeSelect">
+                            <option value="">Select a purpose</option>
+                            <option value="study">📚 Study / Learning</option>
+                            <option value="prayer">🙏 Prayer / Spiritual</option>
+                            <option value="work">💼 Work / Professional</option>
+                            <option value="family">👨‍👩‍👧‍👦 Family</option>
+                            <option value="event">🎉 Event / Celebration</option>
+                            <option value="project">📋 Project Collaboration</option>
+                            <option value="support">🤝 Support Group</option>
+                            <option value="hobby">🎨 Hobby / Interest</option>
+                            <option value="fitness">💪 Fitness / Health</option>
+                            <option value="other">🔮 Other</option>
+                        </select>
+                        <div style="font-size: 12px; color: var(--text-secondary); margin-top: 5px;">This helps members understand the group's focus</div>
+                    </div>
+                    
+                    <div class="input-group">
+                        <label class="input-label">Default Group Mood</label>
+                        <div style="display: flex; gap: 10px; margin-top: 10px; flex-wrap: wrap;">
+                            <div class="mood-option" data-mood="calm" style="flex: 1; min-width: 100px; padding: 12px; border: 2px solid var(--border-color); border-radius: 8px; text-align: center; cursor: pointer; background: #e3f2fd; color: #1976d2;">
+                                <i class="fas fa-check" style="display: none;"></i>
+                                <div>😌 Calm</div>
+                            </div>
+                            <div class="mood-option" data-mood="busy" style="flex: 1; min-width: 100px; padding: 12px; border: 2px solid var(--border-color); border-radius: 8px; text-align: center; cursor: pointer; background: #fff3e0; color: #f57c00;">
+                                <i class="fas fa-check" style="display: none;"></i>
+                                <div>🏃 Busy</div>
+                            </div>
+                            <div class="mood-option" data-mood="celebratory" style="flex: 1; min-width: 100px; padding: 12px; border: 2px solid var(--border-color); border-radius: 8px; text-align: center; cursor: pointer; background: #fce4ec; color: #c2185b;">
+                                <i class="fas fa-check" style="display: none;"></i>
+                                <div>🎉 Celebratory</div>
+                            </div>
+                            <div class="mood-option" data-mood="silent" style="flex: 1; min-width: 100px; padding: 12px; border: 2px solid var(--border-color); border-radius: 8px; text-align: center; cursor: pointer; background: #f5f5f5; color: #616161;">
+                                <i class="fas fa-check" style="display: none;"></i>
+                                <div>🔇 Silent</div>
+                            </div>
+                            <div class="mood-option" data-mood="urgent" style="flex: 1; min-width: 100px; padding: 12px; border: 2px solid var(--border-color); border-radius: 8px; text-align: center; cursor: pointer; background: #ffebee; color: #d32f2f;">
+                                <i class="fas fa-check" style="display: none;"></i>
+                                <div>🚨 Urgent</div>
+                            </div>
+                        </div>
+                    </div>
+                    
+                    <div class="input-group">
+                        <label class="input-label">Posting Rules Mode</label>
+                        <select class="text-input" id="postingRulesSelect">
+                            <option value="everyone">Everyone can post</option>
+                            <option value="admin_only">Admin-only posting</option>
+                            <option value="scheduled">Scheduled posting times</option>
+                            <option value="quiet_hours">Quiet hours enabled</option>
+                        </select>
+                        <div style="font-size: 12px; color: var(--text-secondary); margin-top: 5px;">Controls who can post and when</div>
+                    </div>
+                    
+                    <div class="input-group" id="quietHoursSection" style="display: none;">
+                        <label class="input-label">Quiet Hours</label>
+                        <div style="display: flex; gap: 10px;">
+                            <input type="time" class="text-input" id="quietStartTime" value="22:00">
+                            <span>to</span>
+                            <input type="time" class="text-input" id="quietEndTime" value="08:00">
+                        </div>
+                    </div>
+                    
+                    <div class="input-group" id="scheduledPostingSection" style="display: none;">
+                        <label class="input-label">Allowed Posting Times</label>
+                        <div style="display: flex; gap: 10px;">
+                            <input type="time" class="text-input" id="postingStartTime" value="09:00">
+                            <span>to</span>
+                            <input type="time" class="text-input" id="postingEndTime" value="18:00">
+                        </div>
+                    </div>
+                    
+                    <div class="input-group">
+                        <label class="input-label">Enable Silent Participation</label>
+                        <div style="margin-top: 10px;">
+                            <label style="display: flex; align-items: center; gap: 10px; margin-bottom: 10px;">
+                                <input type="checkbox" id="enableReadOnlyMode">
+                                <span>Allow read-only mode for members</span>
+                            </label>
+                            <label style="display: flex; align-items: center; gap: 10px; margin-bottom: 10px;">
+                                <input type="checkbox" id="enableReactOnlyMode">
+                                <span>Allow react-only participation</span>
+                            </label>
+                            <label style="display: flex; align-items: center; gap: 10px;">
+                                <input type="checkbox" id="enableAnonymousMode">
+                                <span>Allow anonymous posting (optional)</span>
+                            </label>
+                        </div>
+                    </div>
+                </div>
+                
+                <!-- Theme Tab -->
+                <div class="create-group-tab-content" id="themeTab">
+                    <div class="input-group">
+                        <label class="input-label">Group Theme Color</label>
+                        <div style="display: flex; gap: 10px; margin-top: 10px; flex-wrap: wrap;">
+                            <div class="theme-option" data-theme="blue" style="flex: 1; min-width: 100px; padding: 15px; border: 2px solid var(--border-color); border-radius: 8px; text-align: center; cursor: pointer; background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white;">
+                                <i class="fas fa-check" style="display: none;"></i>
+                                <div>Blue</div>
+                            </div>
+                            <div class="theme-option" data-theme="green" style="flex: 1; min-width: 100px; padding: 15px; border: 2px solid var(--border-color); border-radius: 8px; text-align: center; cursor: pointer; background: linear-gradient(135deg, #11998e 0%, #38ef7d 100%); color: white;">
+                                <i class="fas fa-check" style="display: none;"></i>
+                                <div>Green</div>
+                            </div>
+                            <div class="theme-option" data-theme="red" style="flex: 1; min-width: 100px; padding: 15px; border: 2px solid var(--border-color); border-radius: 8px; text-align: center; cursor: pointer; background: linear-gradient(135deg, #ff416c 0%, #ff4b2b 100%); color: white;">
+                                <i class="fas fa-check" style="display: none;"></i>
+                                <div>Red</div>
+                            </div>
+                            <div class="theme-option" data-theme="purple" style="flex: 1; min-width: 100px; padding: 15px; border: 2px solid var(--border-color); border-radius: 8px; text-align: center; cursor: pointer; background: linear-gradient(135deg, #8a2387 0%, #f27121 100%); color: white;">
+                                <i class="fas fa-check" style="display: none;"></i>
+                                <div>Purple</div>
+                            </div>
+                            <div class="theme-option" data-theme="dark" style="flex: 1; min-width: 100px; padding: 15px; border: 2px solid var(--border-color); border-radius: 8px; text-align: center; cursor: pointer; background: linear-gradient(135deg, #0f2027 0%, #203a43 50%, #2c5364 100%); color: white;">
+                                <i class="fas fa-check" style="display: none;"></i>
+                                <div>Dark</div>
+                            </div>
+                        </div>
+                    </div>
+                    
+                    <div class="input-group">
+                        <label class="input-label">Custom Reactions (Optional)</label>
+                        <div style="display: flex; gap: 10px; margin-top: 10px; flex-wrap: wrap;">
+                            <div class="reaction-option" data-reaction="👍" style="padding: 10px; border: 1px solid var(--border-color); border-radius: 8px; cursor: pointer; text-align: center; font-size: 20px;">
+                                👍
+                            </div>
+                            <div class="reaction-option" data-reaction="❤️" style="padding: 10px; border: 1px solid var(--border-color); border-radius: 8px; cursor: pointer; text-align: center; font-size: 20px;">
+                                ❤️
+                            </div>
+                            <div class="reaction-option" data-reaction="😂" style="padding: 10px; border: 1px solid var(--border-color); border-radius: 8px; cursor: pointer; text-align: center; font-size: 20px;">
+                                😂
+                            </div>
+                            <div class="reaction-option" data-reaction="🙏" style="padding: 10px; border: 1px solid var(--border-color); border-radius: 8px; cursor: pointer; text-align: center; font-size: 20px;">
+                                🙏
+                            </div>
+                            <div class="reaction-option" data-reaction="🔥" style="padding: 10px; border: 1px solid var(--border-color); border-radius: 8px; cursor: pointer; text-align: center; font-size: 20px;">
+                                🔥
+                            </div>
+                            <div class="reaction-option" data-reaction="👏" style="padding: 10px; border: 1px solid var(--border-color); border-radius: 8px; cursor: pointer; text-align: center; font-size: 20px;">
+                                👏
+                            </div>
+                        </div>
+                        <div style="font-size: 12px; color: var(--text-secondary); margin-top: 5px;">Select custom reactions for your group</div>
+                    </div>
+                    
+                    <div class="input-group">
+                        <label class="input-label">Group Badges</label>
+                        <div style="display: flex; gap: 10px; margin-top: 10px; flex-wrap: wrap;">
+                            <div class="badge-option" data-badge="star" style="padding: 10px; border: 1px solid var(--border-color); border-radius: 8px; cursor: pointer; text-align: center;">
+                                <i class="fas fa-star" style="color: gold;"></i>
+                                <div style="font-size: 12px; margin-top: 5px;">Helpful</div>
+                            </div>
+                            <div class="badge-option" data-badge="fire" style="padding: 10px; border: 1px solid var(--border-color); border-radius: 8px; cursor: pointer; text-align: center;">
+                                <i class="fas fa-fire" style="color: orange;"></i>
+                                <div style="font-size: 12px; margin-top: 5px;">Active</div>
+                            </div>
+                            <div class="badge-option" data-badge="crown" style="padding: 10px; border: 1px solid var(--border-color); border-radius: 8px; cursor: pointer; text-align: center;">
+                                <i class="fas fa-crown" style="color: purple;"></i>
+                                <div style="font-size: 12px; margin-top: 5px;">Moderator</div>
+                            </div>
+                            <div class="badge-option" data-badge="heart" style="padding: 10px; border: 1px solid var(--border-color); border-radius: 8px; cursor: pointer; text-align: center;">
+                                <i class="fas fa-heart" style="color: red;"></i>
+                                <div style="font-size: 12px; margin-top: 5px;">Supporter</div>
+                            </div>
+                        </div>
+                        <div style="font-size: 12px; color: var(--text-secondary); margin-top: 5px;">Select badges that admins can award to members</div>
+                    </div>
+                </div>
+            </div>
+            
+            <div style="padding: 20px; border-top: 1px solid var(--border-color); display: flex; justify-content: space-between;">
+                <button class="action-btn secondary" id="cancelCreateGroupBtn">Cancel</button>
+                <button class="action-btn success" id="createGroupBtnModal">Create Group</button>
+            </div>
+        </div>
+    </div>
+    
+    <!-- ============================================= -->
+    <!-- ADMIN MANAGEMENT MODAL (UPDATED with transparency features) -->
+    <!-- ============================================= -->
+    <div class="admin-management-modal" id="adminManagementModal">
+        <div class="admin-management-container">
+            <div class="admin-management-header">
+                <h3>Group Management</h3>
+                <div id="adminManagementGroupName" style="opacity: 0.9; font-size: 14px;"></div>
+            </div>
+            
+            <div class="admin-management-tabs">
+                <button class="admin-management-tab active" data-tab="members">Members</button>
+                <button class="admin-management-tab" data-tab="settings">Settings</button>
+                <button class="admin-management-tab" data-tab="purpose">Purpose</button>
+                <button class="admin-management-tab" data-tab="analytics">Analytics</button>
+                <button class="admin-management-tab" data-tab="transparency">Transparency</button>
+            </div>
+            
+            <div class="admin-management-content">
+                <!-- Members Tab -->
+                <div class="admin-management-section active" id="adminMembersTab">
+                    <div class="admin-actions">
+                        <button class="admin-action-btn" id="adminAddMemberBtn">
+                            <i class="fas fa-user-plus"></i> Add Member
+                        </button>
+                        <button class="admin-action-btn" id="adminInviteLinkBtn">
+                            <i class="fas fa-link"></i> Manage Invite Links
+                        </button>
+                        <button class="admin-action-btn" id="adminExportMembersBtn">
+                            <i class="fas fa-download"></i> Export Members
+                        </button>
+                    </div>
+                    
+                    <div class="member-management-list" id="memberManagementList">
+                        <!-- Members will be loaded here -->
+                    </div>
+                </div>
+                
+                <!-- Settings Tab -->
+                <div class="admin-management-section" id="adminSettingsTab">
+                    <div class="admin-settings-form">
+                        <div class="admin-settings-group">
+                            <div class="admin-settings-title">
+                                <i class="fas fa-lock"></i>
+                                Privacy Settings
+                            </div>
+                            <div class="admin-settings-option">
+                                <label class="admin-settings-label">
+                                    <input type="checkbox" id="adminPublicGroup" data-setting="publicGroup">
+                                    <span>Make group public (anyone can join)</span>
+                                </label>
+                            </div>
+                            <div class="admin-settings-option">
+                                <label class="admin-settings-label">
+                                    <input type="checkbox" id="adminApproveMembers" data-setting="approveMembers" checked>
+                                    <span>Approve new members before joining</span>
+                                </label>
+                            </div>
+                            <div class="admin-settings-option">
+                                <label class="admin-settings-label">
+                                    <input type="checkbox" id="adminAllowInvites" data-setting="allowInvites" checked>
+                                    <span>Allow members to invite others</span>
+                                </label>
+                            </div>
+                        </div>
+                        
+                        <div class="admin-settings-group">
+                            <div class="admin-settings-title">
+                                <i class="fas fa-comments"></i>
+                                Chat Settings
+                            </div>
+                            <div class="admin-settings-option">
+                                <label class="admin-settings-label">
+                                    <input type="checkbox" id="adminOnlyAdminsPost" data-setting="onlyAdminsPost">
+                                    <span>Only admins can post messages</span>
+                                </label>
+                            </div>
+                            <div class="admin-settings-option">
+                                <label class="admin-settings-label">
+                                    <input type="checkbox" id="adminAllowMedia" data-setting="allowMedia" checked>
+                                    <span>Allow media sharing</span>
+                                </label>
+                            </div>
+                            <div class="admin-settings-option">
+                                <label class="admin-settings-label">
+                                    <input type="checkbox" id="adminDisappearingMessages" data-setting="disappearingMessages">
+                                    <span>Enable disappearing messages (24h)</span>
+                                </label>
+                            </div>
+                        </div>
+                        
+                        <div class="admin-settings-group">
+                            <div class="admin-settings-title">
+                                <i class="fas fa-bell"></i>
+                                Notification Settings
+                            </div>
+                            <div class="admin-settings-option">
+                                <label class="admin-settings-label">
+                                    <input type="checkbox" id="adminMentionNotifications" data-setting="mentionNotifications" checked>
+                                    <span>Send notifications for @mentions</span>
+                                </label>
+                            </div>
+                            <div class="admin-settings-option">
+                                <label class="admin-settings-label">
+                                    <input type="checkbox" id="adminAnnouncementNotifications" data-setting="announcementNotifications" checked>
+                                    <span>Send notifications for announcements</span>
+                                </label>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+                
+                <!-- ADDED: Purpose Management Tab -->
+                <div class="admin-management-section" id="adminPurposeTab">
+                    <div class="admin-settings-form">
+                        <div class="admin-settings-group">
+                            <div class="admin-settings-title">
+                                <i class="fas fa-bullseye"></i>
+                                Group Purpose & Mood
+                            </div>
+                            <div class="admin-settings-option">
+                                <label class="admin-settings-label">Update Group Purpose:</label>
+                                <select class="text-input" id="adminGroupPurpose" style="margin-top: 8px; width: 100%;">
+                                    <option value="">Select purpose</option>
+                                    <option value="study">📚 Study / Learning</option>
+                                    <option value="prayer">🙏 Prayer / Spiritual</option>
+                                    <option value="work">💼 Work / Professional</option>
+                                    <option value="family">👨‍👩‍👧‍👦 Family</option>
+                                    <option value="event">🎉 Event / Celebration</option>
+                                    <option value="project">📋 Project Collaboration</option>
+                                    <option value="support">🤝 Support Group</option>
+                                    <option value="hobby">🎨 Hobby / Interest</option>
+                                    <option value="fitness">💪 Fitness / Health</option>
+                                    <option value="other">🔮 Other</option>
+                                </select>
+                            </div>
+                            <div class="admin-settings-option">
+                                <label class="admin-settings-label">Current Group Mood:</label>
+                                <div style="display: flex; gap: 10px; margin-top: 8px; flex-wrap: wrap;">
+                                    <button class="mood-select-btn" data-mood="calm" style="padding: 8px 12px; border: 1px solid #1976d2; border-radius: 6px; background: #e3f2fd; color: #1976d2; cursor: pointer;">😌 Calm</button>
+                                    <button class="mood-select-btn" data-mood="busy" style="padding: 8px 12px; border: 1px solid #f57c00; border-radius: 6px; background: #fff3e0; color: #f57c00; cursor: pointer;">🏃 Busy</button>
+                                    <button class="mood-select-btn" data-mood="celebratory" style="padding: 8px 12px; border: 1px solid #c2185b; border-radius: 6px; background: #fce4ec; color: #c2185b; cursor: pointer;">🎉 Celebratory</button>
+                                    <button class="mood-select-btn" data-mood="silent" style="padding: 8px 12px; border: 1px solid #616161; border-radius: 6px; background: #f5f5f5; color: #616161; cursor: pointer;">🔇 Silent</button>
+                                    <button class="mood-select-btn" data-mood="urgent" style="padding: 8px 12px; border: 1px solid #d32f2f; border-radius: 6px; background: #ffebee; color: #d32f2f; cursor: pointer;">🚨 Urgent</button>
                                 </div>
                             </div>
                         </div>
                         
-                        <!-- Group Details Panel -->
-                        <div class="group-details-panel" id="groupDetailsPanel">
-                            <div class="group-details-header">
-                                <button class="back-btn" id="backBtn">
-                                    <i class="fas fa-arrow-left"></i>
-                                </button>
-                                <div class="group-details-title">Group Details</div>
-                                <div style="width: 40px;"></div> <!-- Spacer for alignment -->
+                        <div class="admin-settings-group">
+                            <div class="admin-settings-title">
+                                <i class="fas fa-comment-slash"></i>
+                                Posting Rules
                             </div>
-                            
-                            <div class="group-details-content" id="groupDetailsContent">
-                                <!-- Group details will be loaded here -->
+                            <div class="admin-settings-option">
+                                <label class="admin-settings-label">Posting Mode:</label>
+                                <select class="text-input" id="adminPostingMode" style="margin-top: 8px; width: 100%;">
+                                    <option value="everyone">Everyone can post</option>
+                                    <option value="admin_only">Admin-only posting</option>
+                                    <option value="scheduled">Scheduled posting times</option>
+                                    <option value="quiet_hours">Quiet hours enabled</option>
+                                </select>
                             </div>
-                        </div>
-                        
-                        <!-- ============================================= -->
-                        <!-- GROUP CHAT PANEL -->
-                        <!-- ============================================= -->
-                        <div class="group-chat-panel" id="groupChatPanel">
-                            <div class="chat-header">
-                                <div class="chat-header-info" id="chatHeaderInfo">
-                                    <div class="chat-header-avatar" id="chatAvatar">
-                                        <i class="fas fa-users"></i>
-                                    </div>
-                                    <div class="chat-header-details">
-                                        <div class="chat-header-title" id="chatTitle">Group Chat</div>
-                                        <div class="chat-header-subtitle" id="chatSubtitle">
-                                            <span id="chatMemberCount">0 members</span>
-                                            <span>•</span>
-                                            <span id="chatActive">Active now</span>
-                                            <!-- ADDED: Group Purpose & Pulse -->
-                                            <span id="chatPurposeTag" class="group-purpose-tag" style="display: none;"></span>
-                                            <span id="chatPulse" class="group-pulse" style="display: none;"></span>
-                                        </div>
-                                        <!-- ADDED: Group Mood & Posting Rules -->
-                                        <div id="chatMoodRules" style="display: none; margin-top: 4px;">
-                                            <span id="chatMood" class="group-mood-indicator"></span>
-                                            <span id="chatPostingRules" class="posting-rules-banner"></span>
-                                        </div>
-                                    </div>
-                                </div>
-                                <div class="chat-header-actions">
-                                    <button class="chat-header-btn" id="chatInfoBtn" title="Group Info">
-                                        <i class="fas fa-info-circle"></i>
-                                    </button>
-                                    <button class="chat-header-btn" id="chatCallBtn" title="Start Group Call">
-                                        <i class="fas fa-phone"></i>
-                                    </button>
-                                    <button class="chat-header-btn" id="closeChatBtn" title="Close Chat">
-                                        <i class="fas fa-times"></i>
-                                    </button>
+                            <div class="admin-settings-option" id="adminQuietHoursSection" style="display: none;">
+                                <label class="admin-settings-label">Quiet Hours:</label>
+                                <div style="display: flex; gap: 10px; margin-top: 8px; align-items: center;">
+                                    <input type="time" class="text-input" id="adminQuietStart" style="flex: 1;" value="22:00">
+                                    <span>to</span>
+                                    <input type="time" class="text-input" id="adminQuietEnd" style="flex: 1;" value="08:00">
                                 </div>
                             </div>
-                            
-                            <div class="chat-messages-container" id="chatMessagesContainer">
-                                <div class="chat-messages" id="chatMessages">
-                                    <!-- Messages will be loaded here -->
-                                </div>
-                            </div>
-                            
-                            <div class="chat-input-container">
-                                <!-- ADDED: Topic Selection & Silent Mode -->
-                                <div id="topicSelection" style="display: none; padding: 5px 10px; background: var(--secondary-color); border-bottom: 1px solid var(--border-color);">
-                                    <select id="messageTopic" style="width: 100%; padding: 4px 8px; border-radius: 4px; border: 1px solid var(--border-color); font-size: 12px;">
-                                        <option value="">Select topic (optional)</option>
-                                        <option value="announcement">📢 Announcement</option>
-                                        <option value="question">❓ Question</option>
-                                        <option value="discussion">💬 Discussion</option>
-                                    </select>
-                                </div>
-                                <div class="chat-input-actions">
-                                    <button class="chat-input-btn" id="chatAttachBtn" title="Attach File">
-                                        <i class="fas fa-paperclip"></i>
-                                    </button>
-                                    <button class="chat-input-btn" id="chatEmojiBtn" title="Emoji">
-                                        <i class="far fa-smile"></i>
-                                    </button>
-                                    <!-- ADDED: Silent Participation Mode Toggle -->
-                                    <button class="chat-input-btn" id="silentModeBtn" title="Toggle Silent Mode" style="display: none;">
-                                        <i class="fas fa-eye"></i>
-                                    </button>
-                                    <!-- ADDED: Anonymous Posting Toggle -->
-                                    <button class="chat-input-btn" id="anonymousModeBtn" title="Toggle Anonymous Posting" style="display: none;">
-                                        <i class="fas fa-user-secret"></i>
-                                    </button>
-                                </div>
-                                <textarea class="chat-input" id="chatInput" placeholder="Type a message..." rows="1"></textarea>
-                                <button class="chat-input-btn send" id="chatSendBtn" title="Send Message">
-                                    <i class="fas fa-paper-plane"></i>
-                                </button>
-                            </div>
-                            
-                            <!-- ADDED: Group Notes Panel -->
-                            <div id="groupNotesPanel" style="display: none; border-top: 1px solid var(--border-color); padding: 15px;">
-                                <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px;">
-                                    <h4 style="margin: 0;"><i class="fas fa-sticky-note"></i> Group Notes</h4>
-                                    <button id="editNotesBtn" class="action-btn secondary" style="font-size: 12px; padding: 4px 8px;">
-                                        <i class="fas fa-edit"></i> Edit
-                                    </button>
-                                </div>
-                                <div id="groupNotesContent" style="min-height: 100px; max-height: 200px; overflow-y: auto; padding: 10px; background: var(--secondary-color); border-radius: 6px;">
-                                    <p style="margin: 0; color: var(--text-secondary);">No notes yet. Add important information here.</p>
-                                </div>
-                                <textarea id="groupNotesEditor" style="display: none; width: 100%; min-height: 100px; padding: 10px; border: 1px solid var(--border-color); border-radius: 6px; font-family: inherit; resize: vertical;"></textarea>
-                                <div id="notesEditorActions" style="display: none; margin-top: 10px; text-align: right;">
-                                    <button id="saveNotesBtn" class="action-btn success" style="font-size: 12px; padding: 4px 12px;">Save</button>
-                                    <button id="cancelNotesEditBtn" class="action-btn secondary" style="font-size: 12px; padding: 4px 12px; margin-left: 5px;">Cancel</button>
-                                </div>
-                            </div>
-                            
-                            <!-- ADDED: Event Countdown Panel -->
-                            <div id="eventCountdownPanel" style="display: none; border-top: 1px solid var(--border-color); padding: 15px;">
-                                <h4 style="margin: 0 0 10px 0;"><i class="fas fa-calendar-alt"></i> Event Countdown</h4>
-                                <div id="eventCountdownDisplay" class="event-countdown">
-                                    No upcoming events
-                                </div>
-                                <button id="addEventBtn" class="action-btn secondary" style="width: 100%; margin-top: 10px; font-size: 12px; padding: 6px;">
-                                    <i class="fas fa-plus"></i> Add Event
-                                </button>
-                            </div>
-                            
-                            <!-- ADDED: Energy Suggestion Panel -->
-                            <div id="energySuggestionPanel" style="display: none; border-top: 1px solid var(--border-color); padding: 15px;">
-                                <div class="energy-suggestion" id="energySuggestionContent">
-                                    <i class="fas fa-lightbulb"></i> Group is active. All good!
-                                </div>
-                            </div>
-                            
-                            <!-- ADDED: Admin Transparency Log -->
-                            <div id="adminTransparencyPanel" style="display: none; border-top: 1px solid var(--border-color); padding: 15px;">
-                                <h4 style="margin: 0 0 10px 0;"><i class="fas fa-history"></i> Recent Changes</h4>
-                                <div id="adminTransparencyLog" class="admin-transparency-log">
-                                    No recent changes
+                            <div class="admin-settings-option" id="adminScheduledPostingSection" style="display: none;">
+                                <label class="admin-settings-label">Allowed Posting Times:</label>
+                                <div style="display: flex; gap: 10px; margin-top: 8px; align-items: center;">
+                                    <input type="time" class="text-input" id="adminPostingStart" style="flex: 1;" value="09:00">
+                                    <span>to</span>
+                                    <input type="time" class="text-input" id="adminPostingEnd" style="flex: 1;" value="18:00">
                                 </div>
                             </div>
                         </div>
                         
-                        <!-- ============================================= -->
-                        <!-- GROUP CALL PANEL -->
-                        <!-- ============================================= -->
-                        <div class="group-call-panel" id="groupCallPanel">
-                            <div class="call-header">
-                                <div class="call-header-info">
-                                    <div>
-                                        <div class="call-header-title" id="callTitle">Group Call</div>
-                                        <div class="call-header-subtitle" id="callDuration">00:00</div>
-                                    </div>
-                                </div>
-                                <div class="call-header-actions">
-                                    <button class="call-header-btn" id="callParticipantsBtn" title="Participants">
-                                        <i class="fas fa-users"></i>
-                                    </button>
-                                    <button class="call-header-btn" id="callSettingsBtn" title="Settings">
-                                        <i class="fas fa-cog"></i>
-                                    </button>
-                                    <button class="call-header-btn" id="endCallBtn" title="End Call">
-                                        <i class="fas fa-phone-slash"></i>
-                                    </button>
+                        <div class="admin-settings-group">
+                            <div class="admin-settings-title">
+                                <i class="fas fa-user-secret"></i>
+                                Participation Modes
+                            </div>
+                            <div class="admin-settings-option">
+                                <label class="admin-settings-label">
+                                    <input type="checkbox" id="adminEnableReadOnly">
+                                    <span>Allow read-only mode for members</span>
+                                </label>
+                            </div>
+                            <div class="admin-settings-option">
+                                <label class="admin-settings-label">
+                                    <input type="checkbox" id="adminEnableReactOnly">
+                                    <span>Allow react-only participation</span>
+                                </label>
+                            </div>
+                            <div class="admin-settings-option">
+                                <label class="admin-settings-label">
+                                    <input type="checkbox" id="adminEnableAnonymous">
+                                    <span>Allow anonymous posting</span>
+                                </label>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+                
+                <!-- Analytics Tab -->
+                <div class="admin-management-section" id="adminAnalyticsTab">
+                    <div class="admin-analytics-content">
+                        <div class="admin-analytics-stats">
+                            <div class="analytics-stat">
+                                <div class="analytics-stat-number" id="analyticsDailyMessages">0</div>
+                                <div class="analytics-stat-label">Messages Today</div>
+                            </div>
+                            <div class="analytics-stat">
+                                <div class="analytics-stat-number" id="analyticsActiveMembers">0</div>
+                                <div class="analytics-stat-label">Active Members</div>
+                            </div>
+                            <div class="analytics-stat">
+                                <div class="analytics-stat-number" id="analyticsEngagementRate">0%</div>
+                                <div class="analytics-stat-label">Engagement Rate</div>
+                            </div>
+                        </div>
+                        <div class="admin-analytics-chart">
+                            <canvas id="analyticsChart" width="400" height="200" style="max-width: 100%;"></canvas>
+                        </div>
+                        <div class="admin-analytics-insights">
+                            <h4>Group Pulse Insights</h4>
+                            <div id="groupPulseInsight" style="padding: 10px; background: var(--secondary-color); border-radius: 8px; margin-top: 10px;">
+                                <p style="margin: 0;">Loading group pulse analysis...</p>
+                            </div>
+                            <button id="refreshAnalyticsBtn" class="action-btn secondary" style="margin-top: 15px; width: 100%;">
+                                <i class="fas fa-sync-alt"></i> Refresh Analytics
+                            </button>
+                        </div>
+                    </div>
+                </div>
+                
+                <!-- ADDED: Transparency Tab -->
+                <div class="admin-management-section" id="adminTransparencyTab">
+                    <div class="admin-transparency-content">
+                        <div class="admin-settings-group">
+                            <div class="admin-settings-title">
+                                <i class="fas fa-history"></i>
+                                Change History
+                            </div>
+                            <div id="transparencyLog" style="max-height: 300px; overflow-y: auto; padding: 10px; background: var(--secondary-color); border-radius: 8px;">
+                                <div class="transparency-log-item">
+                                    <div><strong>Group created</strong></div>
+                                    <div style="font-size: 12px; color: var(--text-secondary);">By you • Just now</div>
                                 </div>
                             </div>
-                            
-                            <div class="call-participants" id="callParticipants">
-                                <!-- Video feeds will be added here -->
+                        </div>
+                        
+                        <div class="admin-settings-group">
+                            <div class="admin-settings-title">
+                                <i class="fas fa-eye"></i>
+                                Visibility Settings
                             </div>
-                            
-                            <div class="call-controls">
-                                <button class="call-control-btn secondary" id="callMuteBtn" title="Mute/Unmute">
-                                    <i class="fas fa-microphone"></i>
+                            <div class="admin-settings-option">
+                                <label class="admin-settings-label">
+                                    <input type="checkbox" id="adminShowChangeHistory" checked>
+                                    <span>Show change history to members</span>
+                                </label>
+                            </div>
+                            <div class="admin-settings-option">
+                                <label class="admin-settings-label">
+                                    <input type="checkbox" id="adminShowAdminActions" checked>
+                                    <span>Show admin actions to members</span>
+                                </label>
+                            </div>
+                            <div class="admin-settings-option">
+                                <label class="admin-settings-label">
+                                    <input type="checkbox" id="adminShowModerationLog">
+                                    <span>Show moderation actions (mutes, bans)</span>
+                                </label>
+                            </div>
+                        </div>
+                        
+                        <div class="admin-settings-group">
+                            <div class="admin-settings-title">
+                                <i class="fas fa-download"></i>
+                                Export Data
+                            </div>
+                            <div style="margin-top: 10px;">
+                                <button class="admin-action-btn" id="exportTransparencyLog">
+                                    <i class="fas fa-file-export"></i> Export Change History
                                 </button>
-                                <button class="call-control-btn secondary" id="callVideoBtn" title="Video On/Off">
-                                    <i class="fas fa-video"></i>
-                                </button>
-                                <button class="call-control-btn secondary" id="callScreenBtn" title="Share Screen">
-                                    <i class="fas fa-desktop"></i>
-                                </button>
-                                <button class="call-control-btn danger" id="callLeaveBtn" title="Leave Call">
-                                    <i class="fas fa-phone-slash"></i>
+                                <button class="admin-action-btn" id="exportSettingsHistory">
+                                    <i class="fas fa-cog"></i> Export Settings History
                                 </button>
                             </div>
                         </div>
                     </div>
-                    
-                    <!-- Create Group Modal (UPDATED with new features) -->
-                    <div class="create-group-modal" id="createGroupModal">
-                        <div class="create-group-container">
-                            <div class="create-group-header">
-                                <h3>Create Group</h3>
-                                <button class="create-group-btn" id="closeCreateGroupModal">
-                                    <i class="fas fa-times"></i>
-                                </button>
-                            </div>
-                            
-                            <div class="create-group-tabs">
-                                <button class="create-group-tab active" data-tab="basic">Basic</button>
-                                <button class="create-group-tab" data-tab="settings">Settings</button>
-                                <button class="create-group-tab" data-tab="purpose">Purpose</button>
-                                <button class="create-group-tab" data-tab="theme">Theme</button>
-                            </div>
-                            
-                            <div class="create-group-content">
-                                <!-- Basic Tab -->
-                                <div class="create-group-tab-content active" id="basicTab">
-                                    <div class="input-group">
-                                        <label class="input-label">Group Name *</label>
-                                        <input type="text" class="text-input" id="groupNameInput" placeholder="Enter group name" maxlength="100">
-                                    </div>
-                                    
-                                    <div class="input-group">
-                                        <label class="input-label">Group Description</label>
-                                        <textarea class="text-input" id="groupDescriptionInput" placeholder="Describe the purpose of this group..." rows="3"></textarea>
-                                    </div>
-                                    
-                                    <div class="input-group">
-                                        <label class="input-label">Group Topic (Optional)</label>
-                                        <input type="text" class="text-input" id="groupTopicInput" placeholder="#family #gaming #work">
-                                        <div style="font-size: 12px; color: var(--text-secondary); margin-top: 5px;">Add topics to help others discover your group</div>
-                                    </div>
-                                    
-                                    <div class="input-group">
-                                        <label class="input-label">Group Type</label>
-                                        <select class="text-input" id="groupTypeSelect">
-                                            <option value="public">Public - Anyone can join</option>
-                                            <option value="private" selected>Private - Invite only</option>
-                                            <option value="secret">Secret - Hidden and invite only</option>
-                                        </select>
-                                    </div>
-                                </div>
-                                
-                                <!-- Settings Tab -->
-                                <div class="create-group-tab-content" id="settingsTab">
-                                    <div class="input-group">
-                                        <label class="input-label">Welcome Message</label>
-                                        <textarea class="text-input" id="welcomeMessageInput" placeholder="Welcome message for new members..." rows="3"></textarea>
-                                        <div style="font-size: 12px; color: var(--text-secondary); margin-top: 5px;">This message will be shown to new members when they join</div>
-                                    </div>
-                                    
-                                    <div class="input-group">
-                                        <label class="input-label">Group Rules</label>
-                                        <textarea class="text-input" id="groupRulesInput" placeholder="Add group rules (one per line)..." rows="5">1. Be respectful to all members
-        2. No spam or self-promotion
-        3. Keep discussions relevant to the group topic
-        4. No hate speech or harassment</textarea>
-                                    </div>
-                                    
-                                    <div class="input-group">
-                                        <label class="input-label">Moderation Settings</label>
-                                        <div style="margin-top: 10px;">
-                                            <label style="display: flex; align-items: center; gap: 10px; margin-bottom: 10px;">
-                                                <input type="checkbox" id="approveNewMembers" checked>
-                                                <span>Approve new members before they can join</span>
-                                            </label>
-                                            <label style="display: flex; align-items: center; gap: 10px; margin-bottom: 10px;">
-                                                <input type="checkbox" id="onlyAdminsCanPost" checked>
-                                                <span>Only admins can post messages</span>
-                                            </label>
-                                            <label style="display: flex; align-items: center; gap: 10px; margin-bottom: 10px;">
-                                                <input type="checkbox" id="allowMediaSharing" checked>
-                                                <span>Allow media sharing</span>
-                                            </label>
-                                            <label style="display: flex; align-items: center; gap: 10px;">
-                                                <input type="checkbox" id="enableDisappearingMessages">
-                                                <span>Enable disappearing messages (24 hours)</span>
-                                            </label>
-                                        </div>
-                                    </div>
-                                </div>
-                                
-                                <!-- ADDED: Purpose Tab with New Features -->
-                                <div class="create-group-tab-content" id="purposeTab">
-                                    <div class="input-group">
-                                        <label class="input-label">Group Purpose *</label>
-                                        <select class="text-input" id="groupPurposeSelect">
-                                            <option value="">Select a purpose</option>
-                                            <option value="study">📚 Study / Learning</option>
-                                            <option value="prayer">🙏 Prayer / Spiritual</option>
-                                            <option value="work">💼 Work / Professional</option>
-                                            <option value="family">👨‍👩‍👧‍👦 Family</option>
-                                            <option value="event">🎉 Event / Celebration</option>
-                                            <option value="project">📋 Project Collaboration</option>
-                                            <option value="support">🤝 Support Group</option>
-                                            <option value="hobby">🎨 Hobby / Interest</option>
-                                            <option value="fitness">💪 Fitness / Health</option>
-                                            <option value="other">🔮 Other</option>
-                                        </select>
-                                        <div style="font-size: 12px; color: var(--text-secondary); margin-top: 5px;">This helps members understand the group's focus</div>
-                                    </div>
-                                    
-                                    <div class="input-group">
-                                        <label class="input-label">Default Group Mood</label>
-                                        <div style="display: flex; gap: 10px; margin-top: 10px; flex-wrap: wrap;">
-                                            <div class="mood-option" data-mood="calm" style="flex: 1; min-width: 100px; padding: 12px; border: 2px solid var(--border-color); border-radius: 8px; text-align: center; cursor: pointer; background: #e3f2fd; color: #1976d2;">
-                                                <i class="fas fa-check" style="display: none;"></i>
-                                                <div>😌 Calm</div>
-                                            </div>
-                                            <div class="mood-option" data-mood="busy" style="flex: 1; min-width: 100px; padding: 12px; border: 2px solid var(--border-color); border-radius: 8px; text-align: center; cursor: pointer; background: #fff3e0; color: #f57c00;">
-                                                <i class="fas fa-check" style="display: none;"></i>
-                                                <div>🏃 Busy</div>
-                                            </div>
-                                            <div class="mood-option" data-mood="celebratory" style="flex: 1; min-width: 100px; padding: 12px; border: 2px solid var(--border-color); border-radius: 8px; text-align: center; cursor: pointer; background: #fce4ec; color: #c2185b;">
-                                                <i class="fas fa-check" style="display: none;"></i>
-                                                <div>🎉 Celebratory</div>
-                                            </div>
-                                            <div class="mood-option" data-mood="silent" style="flex: 1; min-width: 100px; padding: 12px; border: 2px solid var(--border-color); border-radius: 8px; text-align: center; cursor: pointer; background: #f5f5f5; color: #616161;">
-                                                <i class="fas fa-check" style="display: none;"></i>
-                                                <div>🔇 Silent</div>
-                                            </div>
-                                            <div class="mood-option" data-mood="urgent" style="flex: 1; min-width: 100px; padding: 12px; border: 2px solid var(--border-color); border-radius: 8px; text-align: center; cursor: pointer; background: #ffebee; color: #d32f2f;">
-                                                <i class="fas fa-check" style="display: none;"></i>
-                                                <div>🚨 Urgent</div>
-                                            </div>
-                                        </div>
-                                    </div>
-                                    
-                                    <div class="input-group">
-                                        <label class="input-label">Posting Rules Mode</label>
-                                        <select class="text-input" id="postingRulesSelect">
-                                            <option value="everyone">Everyone can post</option>
-                                            <option value="admin_only">Admin-only posting</option>
-                                            <option value="scheduled">Scheduled posting times</option>
-                                            <option value="quiet_hours">Quiet hours enabled</option>
-                                        </select>
-                                        <div style="font-size: 12px; color: var(--text-secondary); margin-top: 5px;">Controls who can post and when</div>
-                                    </div>
-                                    
-                                    <div class="input-group" id="quietHoursSection" style="display: none;">
-                                        <label class="input-label">Quiet Hours</label>
-                                        <div style="display: flex; gap: 10px;">
-                                            <input type="time" class="text-input" id="quietStartTime" value="22:00">
-                                            <span>to</span>
-                                            <input type="time" class="text-input" id="quietEndTime" value="08:00">
-                                        </div>
-                                    </div>
-                                    
-                                    <div class="input-group" id="scheduledPostingSection" style="display: none;">
-                                        <label class="input-label">Allowed Posting Times</label>
-                                        <div style="display: flex; gap: 10px;">
-                                            <input type="time" class="text-input" id="postingStartTime" value="09:00">
-                                            <span>to</span>
-                                            <input type="time" class="text-input" id="postingEndTime" value="18:00">
-                                        </div>
-                                    </div>
-                                    
-                                    <div class="input-group">
-                                        <label class="input-label">Enable Silent Participation</label>
-                                        <div style="margin-top: 10px;">
-                                            <label style="display: flex; align-items: center; gap: 10px; margin-bottom: 10px;">
-                                                <input type="checkbox" id="enableReadOnlyMode">
-                                                <span>Allow read-only mode for members</span>
-                                            </label>
-                                            <label style="display: flex; align-items: center; gap: 10px; margin-bottom: 10px;">
-                                                <input type="checkbox" id="enableReactOnlyMode">
-                                                <span>Allow react-only participation</span>
-                                            </label>
-                                            <label style="display: flex; align-items: center; gap: 10px;">
-                                                <input type="checkbox" id="enableAnonymousMode">
-                                                <span>Allow anonymous posting (optional)</span>
-                                            </label>
-                                        </div>
-                                    </div>
-                                </div>
-                                
-                                <!-- Theme Tab -->
-                                <div class="create-group-tab-content" id="themeTab">
-                                    <div class="input-group">
-                                        <label class="input-label">Group Theme Color</label>
-                                        <div style="display: flex; gap: 10px; margin-top: 10px; flex-wrap: wrap;">
-                                            <div class="theme-option" data-theme="blue" style="flex: 1; min-width: 100px; padding: 15px; border: 2px solid var(--border-color); border-radius: 8px; text-align: center; cursor: pointer; background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white;">
-                                                <i class="fas fa-check" style="display: none;"></i>
-                                                <div>Blue</div>
-                                            </div>
-                                            <div class="theme-option" data-theme="green" style="flex: 1; min-width: 100px; padding: 15px; border: 2px solid var(--border-color); border-radius: 8px; text-align: center; cursor: pointer; background: linear-gradient(135deg, #11998e 0%, #38ef7d 100%); color: white;">
-                                                <i class="fas fa-check" style="display: none;"></i>
-                                                <div>Green</div>
-                                            </div>
-                                            <div class="theme-option" data-theme="red" style="flex: 1; min-width: 100px; padding: 15px; border: 2px solid var(--border-color); border-radius: 8px; text-align: center; cursor: pointer; background: linear-gradient(135deg, #ff416c 0%, #ff4b2b 100%); color: white;">
-                                                <i class="fas fa-check" style="display: none;"></i>
-                                                <div>Red</div>
-                                            </div>
-                                            <div class="theme-option" data-theme="purple" style="flex: 1; min-width: 100px; padding: 15px; border: 2px solid var(--border-color); border-radius: 8px; text-align: center; cursor: pointer; background: linear-gradient(135deg, #8a2387 0%, #f27121 100%); color: white;">
-                                                <i class="fas fa-check" style="display: none;"></i>
-                                                <div>Purple</div>
-                                            </div>
-                                            <div class="theme-option" data-theme="dark" style="flex: 1; min-width: 100px; padding: 15px; border: 2px solid var(--border-color); border-radius: 8px; text-align: center; cursor: pointer; background: linear-gradient(135deg, #0f2027 0%, #203a43 50%, #2c5364 100%); color: white;">
-                                                <i class="fas fa-check" style="display: none;"></i>
-                                                <div>Dark</div>
-                                            </div>
-                                        </div>
-                                    </div>
-                                    
-                                    <div class="input-group">
-                                        <label class="input-label">Custom Reactions (Optional)</label>
-                                        <div style="display: flex; gap: 10px; margin-top: 10px; flex-wrap: wrap;">
-                                            <div class="reaction-option" data-reaction="👍" style="padding: 10px; border: 1px solid var(--border-color); border-radius: 8px; cursor: pointer; text-align: center; font-size: 20px;">
-                                                👍
-                                            </div>
-                                            <div class="reaction-option" data-reaction="❤️" style="padding: 10px; border: 1px solid var(--border-color); border-radius: 8px; cursor: pointer; text-align: center; font-size: 20px;">
-                                                ❤️
-                                            </div>
-                                            <div class="reaction-option" data-reaction="😂" style="padding: 10px; border: 1px solid var(--border-color); border-radius: 8px; cursor: pointer; text-align: center; font-size: 20px;">
-                                                😂
-                                            </div>
-                                            <div class="reaction-option" data-reaction="🙏" style="padding: 10px; border: 1px solid var(--border-color); border-radius: 8px; cursor: pointer; text-align: center; font-size: 20px;">
-                                                🙏
-                                            </div>
-                                            <div class="reaction-option" data-reaction="🔥" style="padding: 10px; border: 1px solid var(--border-color); border-radius: 8px; cursor: pointer; text-align: center; font-size: 20px;">
-                                                🔥
-                                            </div>
-                                            <div class="reaction-option" data-reaction="👏" style="padding: 10px; border: 1px solid var(--border-color); border-radius: 8px; cursor: pointer; text-align: center; font-size: 20px;">
-                                                👏
-                                            </div>
-                                        </div>
-                                        <div style="font-size: 12px; color: var(--text-secondary); margin-top: 5px;">Select custom reactions for your group</div>
-                                    </div>
-                                    
-                                    <div class="input-group">
-                                        <label class="input-label">Group Badges</label>
-                                        <div style="display: flex; gap: 10px; margin-top: 10px; flex-wrap: wrap;">
-                                            <div class="badge-option" data-badge="star" style="padding: 10px; border: 1px solid var(--border-color); border-radius: 8px; cursor: pointer; text-align: center;">
-                                                <i class="fas fa-star" style="color: gold;"></i>
-                                                <div style="font-size: 12px; margin-top: 5px;">Helpful</div>
-                                            </div>
-                                            <div class="badge-option" data-badge="fire" style="padding: 10px; border: 1px solid var(--border-color); border-radius: 8px; cursor: pointer; text-align: center;">
-                                                <i class="fas fa-fire" style="color: orange;"></i>
-                                                <div style="font-size: 12px; margin-top: 5px;">Active</div>
-                                            </div>
-                                            <div class="badge-option" data-badge="crown" style="padding: 10px; border: 1px solid var(--border-color); border-radius: 8px; cursor: pointer; text-align: center;">
-                                                <i class="fas fa-crown" style="color: purple;"></i>
-                                                <div style="font-size: 12px; margin-top: 5px;">Moderator</div>
-                                            </div>
-                                            <div class="badge-option" data-badge="heart" style="padding: 10px; border: 1px solid var(--border-color); border-radius: 8px; cursor: pointer; text-align: center;">
-                                                <i class="fas fa-heart" style="color: red;"></i>
-                                                <div style="font-size: 12px; margin-top: 5px;">Supporter</div>
-                                            </div>
-                                        </div>
-                                        <div style="font-size: 12px; color: var(--text-secondary); margin-top: 5px;">Select badges that admins can award to members</div>
-                                    </div>
-                                </div>
-                            </div>
-                            
-                            <div style="padding: 20px; border-top: 1px solid var(--border-color); display: flex; justify-content: space-between;">
-                                <button class="action-btn secondary" id="cancelCreateGroupBtn">Cancel</button>
-                                <button class="action-btn success" id="createGroupBtnModal">Create Group</button>
-                            </div>
-                        </div>
-                    </div>
-                    
-                    <!-- ============================================= -->
-                    <!-- ADMIN MANAGEMENT MODAL (UPDATED with transparency features) -->
-                    <!-- ============================================= -->
-                    <div class="admin-management-modal" id="adminManagementModal">
-                        <div class="admin-management-container">
-                            <div class="admin-management-header">
-                                <h3>Group Management</h3>
-                                <div id="adminManagementGroupName" style="opacity: 0.9; font-size: 14px;"></div>
-                            </div>
-                            
-                            <div class="admin-management-tabs">
-                                <button class="admin-management-tab active" data-tab="members">Members</button>
-                                <button class="admin-management-tab" data-tab="settings">Settings</button>
-                                <button class="admin-management-tab" data-tab="purpose">Purpose</button>
-                                <button class="admin-management-tab" data-tab="analytics">Analytics</button>
-                                <button class="admin-management-tab" data-tab="transparency">Transparency</button>
-                            </div>
-                            
-                            <div class="admin-management-content">
-                                <!-- Members Tab -->
-                                <div class="admin-management-section active" id="adminMembersTab">
-                                    <div class="admin-actions">
-                                        <button class="admin-action-btn" id="adminAddMemberBtn">
-                                            <i class="fas fa-user-plus"></i> Add Member
-                                        </button>
-                                        <button class="admin-action-btn" id="adminInviteLinkBtn">
-                                            <i class="fas fa-link"></i> Manage Invite Links
-                                        </button>
-                                        <button class="admin-action-btn" id="adminExportMembersBtn">
-                                            <i class="fas fa-download"></i> Export Members
-                                        </button>
-                                    </div>
-                                    
-                                    <div class="member-management-list" id="memberManagementList">
-                                        <!-- Members will be loaded here -->
-                                    </div>
-                                </div>
-                                
-                                <!-- Settings Tab -->
-                                <div class="admin-management-section" id="adminSettingsTab">
-                                    <div class="admin-settings-form">
-                                        <div class="admin-settings-group">
-                                            <div class="admin-settings-title">
-                                                <i class="fas fa-lock"></i>
-                                                Privacy Settings
-                                            </div>
-                                            <div class="admin-settings-option">
-                                                <label class="admin-settings-label">
-                                                    <input type="checkbox" id="adminPublicGroup" data-setting="publicGroup">
-                                                    <span>Make group public (anyone can join)</span>
-                                                </label>
-                                            </div>
-                                            <div class="admin-settings-option">
-                                                <label class="admin-settings-label">
-                                                    <input type="checkbox" id="adminApproveMembers" data-setting="approveMembers" checked>
-                                                    <span>Approve new members before joining</span>
-                                                </label>
-                                            </div>
-                                            <div class="admin-settings-option">
-                                                <label class="admin-settings-label">
-                                                    <input type="checkbox" id="adminAllowInvites" data-setting="allowInvites" checked>
-                                                    <span>Allow members to invite others</span>
-                                                </label>
-                                            </div>
-                                        </div>
-                                        
-                                        <div class="admin-settings-group">
-                                            <div class="admin-settings-title">
-                                                <i class="fas fa-comments"></i>
-                                                Chat Settings
-                                            </div>
-                                            <div class="admin-settings-option">
-                                                <label class="admin-settings-label">
-                                                    <input type="checkbox" id="adminOnlyAdminsPost" data-setting="onlyAdminsPost">
-                                                    <span>Only admins can post messages</span>
-                                                </label>
-                                            </div>
-                                            <div class="admin-settings-option">
-                                                <label class="admin-settings-label">
-                                                    <input type="checkbox" id="adminAllowMedia" data-setting="allowMedia" checked>
-                                                    <span>Allow media sharing</span>
-                                                </label>
-                                            </div>
-                                            <div class="admin-settings-option">
-                                                <label class="admin-settings-label">
-                                                    <input type="checkbox" id="adminDisappearingMessages" data-setting="disappearingMessages">
-                                                    <span>Enable disappearing messages (24h)</span>
-                                                </label>
-                                            </div>
-                                        </div>
-                                        
-                                        <div class="admin-settings-group">
-                                            <div class="admin-settings-title">
-                                                <i class="fas fa-bell"></i>
-                                                Notification Settings
-                                            </div>
-                                            <div class="admin-settings-option">
-                                                <label class="admin-settings-label">
-                                                    <input type="checkbox" id="adminMentionNotifications" data-setting="mentionNotifications" checked>
-                                                    <span>Send notifications for @mentions</span>
-                                                </label>
-                                            </div>
-                                            <div class="admin-settings-option">
-                                                <label class="admin-settings-label">
-                                                    <input type="checkbox" id="adminAnnouncementNotifications" data-setting="announcementNotifications" checked>
-                                                    <span>Send notifications for announcements</span>
-                                                </label>
-                                            </div>
-                                        </div>
-                                    </div>
-                                </div>
-                                
-                                <!-- ADDED: Purpose Management Tab -->
-                                <div class="admin-management-section" id="adminPurposeTab">
-                                    <div class="admin-settings-form">
-                                        <div class="admin-settings-group">
-                                            <div class="admin-settings-title">
-                                                <i class="fas fa-bullseye"></i>
-                                                Group Purpose & Mood
-                                            </div>
-                                            <div class="admin-settings-option">
-                                                <label class="admin-settings-label">Update Group Purpose:</label>
-                                                <select class="text-input" id="adminGroupPurpose" style="margin-top: 8px; width: 100%;">
-                                                    <option value="">Select purpose</option>
-                                                    <option value="study">📚 Study / Learning</option>
-                                                    <option value="prayer">🙏 Prayer / Spiritual</option>
-                                                    <option value="work">💼 Work / Professional</option>
-                                                    <option value="family">👨‍👩‍👧‍👦 Family</option>
-                                                    <option value="event">🎉 Event / Celebration</option>
-                                                    <option value="project">📋 Project Collaboration</option>
-                                                    <option value="support">🤝 Support Group</option>
-                                                    <option value="hobby">🎨 Hobby / Interest</option>
-                                                    <option value="fitness">💪 Fitness / Health</option>
-                                                    <option value="other">🔮 Other</option>
-                                                </select>
-                                            </div>
-                                            <div class="admin-settings-option">
-                                                <label class="admin-settings-label">Current Group Mood:</label>
-                                                <div style="display: flex; gap: 10px; margin-top: 8px; flex-wrap: wrap;">
-                                                    <button class="mood-select-btn" data-mood="calm" style="padding: 8px 12px; border: 1px solid #1976d2; border-radius: 6px; background: #e3f2fd; color: #1976d2; cursor: pointer;">😌 Calm</button>
-                                                    <button class="mood-select-btn" data-mood="busy" style="padding: 8px 12px; border: 1px solid #f57c00; border-radius: 6px; background: #fff3e0; color: #f57c00; cursor: pointer;">🏃 Busy</button>
-                                                    <button class="mood-select-btn" data-mood="celebratory" style="padding: 8px 12px; border: 1px solid #c2185b; border-radius: 6px; background: #fce4ec; color: #c2185b; cursor: pointer;">🎉 Celebratory</button>
-                                                    <button class="mood-select-btn" data-mood="silent" style="padding: 8px 12px; border: 1px solid #616161; border-radius: 6px; background: #f5f5f5; color: #616161; cursor: pointer;">🔇 Silent</button>
-                                                    <button class="mood-select-btn" data-mood="urgent" style="padding: 8px 12px; border: 1px solid #d32f2f; border-radius: 6px; background: #ffebee; color: #d32f2f; cursor: pointer;">🚨 Urgent</button>
-                                                </div>
-                                            </div>
-                                        </div>
-                                        
-                                        <div class="admin-settings-group">
-                                            <div class="admin-settings-title">
-                                                <i class="fas fa-comment-slash"></i>
-                                                Posting Rules
-                                            </div>
-                                            <div class="admin-settings-option">
-                                                <label class="admin-settings-label">Posting Mode:</label>
-                                                <select class="text-input" id="adminPostingMode" style="margin-top: 8px; width: 100%;">
-                                                    <option value="everyone">Everyone can post</option>
-                                                    <option value="admin_only">Admin-only posting</option>
-                                                    <option value="scheduled">Scheduled posting times</option>
-                                                    <option value="quiet_hours">Quiet hours enabled</option>
-                                                </select>
-                                            </div>
-                                            <div class="admin-settings-option" id="adminQuietHoursSection" style="display: none;">
-                                                <label class="admin-settings-label">Quiet Hours:</label>
-                                                <div style="display: flex; gap: 10px; margin-top: 8px; align-items: center;">
-                                                    <input type="time" class="text-input" id="adminQuietStart" style="flex: 1;" value="22:00">
-                                                    <span>to</span>
-                                                    <input type="time" class="text-input" id="adminQuietEnd" style="flex: 1;" value="08:00">
-                                                </div>
-                                            </div>
-                                            <div class="admin-settings-option" id="adminScheduledPostingSection" style="display: none;">
-                                                <label class="admin-settings-label">Allowed Posting Times:</label>
-                                                <div style="display: flex; gap: 10px; margin-top: 8px; align-items: center;">
-                                                    <input type="time" class="text-input" id="adminPostingStart" style="flex: 1;" value="09:00">
-                                                    <span>to</span>
-                                                    <input type="time" class="text-input" id="adminPostingEnd" style="flex: 1;" value="18:00">
-                                                </div>
-                                            </div>
-                                        </div>
-                                        
-                                        <div class="admin-settings-group">
-                                            <div class="admin-settings-title">
-                                                <i class="fas fa-user-secret"></i>
-                                                Participation Modes
-                                            </div>
-                                            <div class="admin-settings-option">
-                                                <label class="admin-settings-label">
-                                                    <input type="checkbox" id="adminEnableReadOnly">
-                                                    <span>Allow read-only mode for members</span>
-                                                </label>
-                                            </div>
-                                            <div class="admin-settings-option">
-                                                <label class="admin-settings-label">
-                                                    <input type="checkbox" id="adminEnableReactOnly">
-                                                    <span>Allow react-only participation</span>
-                                                </label>
-                                            </div>
-                                            <div class="admin-settings-option">
-                                                <label class="admin-settings-label">
-                                                    <input type="checkbox" id="adminEnableAnonymous">
-                                                    <span>Allow anonymous posting</span>
-                                                </label>
-                                            </div>
-                                        </div>
-                                    </div>
-                                </div>
-                                
-                                <!-- Analytics Tab -->
-                                <div class="admin-management-section" id="adminAnalyticsTab">
-                                    <div class="admin-analytics-content">
-                                        <div class="admin-analytics-stats">
-                                            <div class="analytics-stat">
-                                                <div class="analytics-stat-number" id="analyticsDailyMessages">0</div>
-                                                <div class="analytics-stat-label">Messages Today</div>
-                                            </div>
-                                            <div class="analytics-stat">
-                                                <div class="analytics-stat-number" id="analyticsActiveMembers">0</div>
-                                                <div class="analytics-stat-label">Active Members</div>
-                                            </div>
-                                            <div class="analytics-stat">
-                                                <div class="analytics-stat-number" id="analyticsEngagementRate">0%</div>
-                                                <div class="analytics-stat-label">Engagement Rate</div>
-                                            </div>
-                                        </div>
-                                        <div class="admin-analytics-chart">
-                                            <canvas id="analyticsChart" width="400" height="200" style="max-width: 100%;"></canvas>
-                                        </div>
-                                        <div class="admin-analytics-insights">
-                                            <h4>Group Pulse Insights</h4>
-                                            <div id="groupPulseInsight" style="padding: 10px; background: var(--secondary-color); border-radius: 8px; margin-top: 10px;">
-                                                <p style="margin: 0;">Loading group pulse analysis...</p>
-                                            </div>
-                                            <button id="refreshAnalyticsBtn" class="action-btn secondary" style="margin-top: 15px; width: 100%;">
-                                                <i class="fas fa-sync-alt"></i> Refresh Analytics
-                                            </button>
-                                        </div>
-                                    </div>
-                                </div>
-                                
-                                <!-- ADDED: Transparency Tab -->
-                                <div class="admin-management-section" id="adminTransparencyTab">
-                                    <div class="admin-transparency-content">
-                                        <div class="admin-settings-group">
-                                            <div class="admin-settings-title">
-                                                <i class="fas fa-history"></i>
-                                                Change History
-                                            </div>
-                                            <div id="transparencyLog" style="max-height: 300px; overflow-y: auto; padding: 10px; background: var(--secondary-color); border-radius: 8px;">
-                                                <div class="transparency-log-item">
-                                                    <div><strong>Group created</strong></div>
-                                                    <div style="font-size: 12px; color: var(--text-secondary);">By you • Just now</div>
-                                                </div>
-                                            </div>
-                                        </div>
-                                        
-                                        <div class="admin-settings-group">
-                                            <div class="admin-settings-title">
-                                                <i class="fas fa-eye"></i>
-                                                Visibility Settings
-                                            </div>
-                                            <div class="admin-settings-option">
-                                                <label class="admin-settings-label">
-                                                    <input type="checkbox" id="adminShowChangeHistory" checked>
-                                                    <span>Show change history to members</span>
-                                                </label>
-                                            </div>
-                                            <div class="admin-settings-option">
-                                                <label class="admin-settings-label">
-                                                    <input type="checkbox" id="adminShowAdminActions" checked>
-                                                    <span>Show admin actions to members</span>
-                                                </label>
-                                            </div>
-                                            <div class="admin-settings-option">
-                                                <label class="admin-settings-label">
-                                                    <input type="checkbox" id="adminShowModerationLog">
-                                                    <span>Show moderation actions (mutes, bans)</span>
-                                                </label>
-                                            </div>
-                                        </div>
-                                        
-                                        <div class="admin-settings-group">
-                                            <div class="admin-settings-title">
-                                                <i class="fas fa-download"></i>
-                                                Export Data
-                                            </div>
-                                            <div style="margin-top: 10px;">
-                                                <button class="admin-action-btn" id="exportTransparencyLog">
-                                                    <i class="fas fa-file-export"></i> Export Change History
-                                                </button>
-                                                <button class="admin-action-btn" id="exportSettingsHistory">
-                                                    <i class="fas fa-cog"></i> Export Settings History
-                                                </button>
-                                            </div>
-                                        </div>
-                                    </div>
-                                </div>
-                            </div>
-                            
-                            <div style="padding: 20px; border-top: 1px solid var(--border-color); display: flex; justify-content: space-between;">
-                                <button class="action-btn secondary" id="closeAdminManagementBtn">Close</button>
-                                <button class="action-btn success" id="saveAdminSettingsBtn">Save Changes</button>
-                            </div>
-                        </div>
-                    </div>
-                    
-                    <!-- Friend Selection Modal -->
-                    <div class="friend-selection-modal" id="friendSelectionModal">
-                        <div class="friend-selection-container">
-                            <div class="friend-selection-header">
-                                <h3>Select Friends</h3>
-                                <p>Choose friends to add to your group</p>
-                            </div>
-                            <div class="friend-selection-content" id="friendSelectionContent">
-                                <div class="loading-placeholder">
-                                    <i class="fas fa-spinner fa-spin"></i>
-                                    <p>Loading friends...</p>
-                                </div>
-                            </div>
-                            <div style="padding: 20px; border-top: 1px solid var(--border-color); display: flex; justify-content: space-between;">
-                                <button class="action-btn secondary" id="cancelFriendSelectionBtn">Cancel</button>
-                                <button class="action-btn success" id="confirmFriendSelectionBtn">Add Selected Friends</button>
-                            </div>
-                        </div>
-                    </div>
-                    
-                    <!-- Group Invite Modal -->
-                    <div class="group-invite-modal" id="groupInviteModal">
-                        <div class="group-invite-container">
-                            <div class="group-invite-header">
-                                <div class="group-invite-avatar" id="inviteAvatar">
-                                    <i class="fas fa-users"></i>
-                                </div>
-                                <div class="group-invite-name" id="inviteName">Family Chat</div>
-                                <!-- ADDED: Purpose and Mood in Invite -->
-                                <div class="group-purpose-tag" id="invitePurpose" style="margin: 5px 0;"></div>
-                                <div class="group-mood-indicator" id="inviteMood" style="margin: 5px 0;"></div>
-                                <div class="group-invite-topic" id="inviteTopic">#family #updates</div>
-                                <div class="member-count-badge" id="inviteMemberCount">
-                                    <i class="fas fa-users"></i> 12 members
-                                </div>
-                                <div style="font-size: 14px; color: var(--text-secondary); margin-bottom: 20px;">
-                                    Invited by <span id="invitedBy">John Doe</span>
-                                </div>
-                            </div>
-                            
-                            <div class="group-invite-actions">
-                                <button class="group-invite-btn decline" id="declineInviteBtn">
-                                    <i class="fas fa-times"></i> Decline
-                                </button>
-                                <button class="group-invite-btn accept" id="acceptInviteBtn">
-                                    <i class="fas fa-check"></i> Join Group
-                                </button>
-                            </div>
-                        </div>
-                    </div>
-                    
-                    <!-- Notification -->
-                    <div class="notification" id="notification">
-                        <i class="fas fa-check-circle"></i>
-                        <span id="notificationText">Operation completed successfully</span>
-                    </div>
+                </div>
+            </div>
+            
+            <div style="padding: 20px; border-top: 1px solid var(--border-color); display: flex; justify-content: space-between;">
+                <button class="action-btn secondary" id="closeAdminManagementBtn">Close</button>
+                <button class="action-btn success" id="saveAdminSettingsBtn">Save Changes</button>
+            </div>
+        </div>
+    </div>
+    
+    <!-- Friend Selection Modal -->
+    <div class="friend-selection-modal" id="friendSelectionModal">
+        <div class="friend-selection-container">
+            <div class="friend-selection-header">
+                <h3>Select Friends</h3>
+                <p>Choose friends to add to your group</p>
+            </div>
+            <div class="friend-selection-content" id="friendSelectionContent">
+                <div class="loading-placeholder">
+                    <i class="fas fa-spinner fa-spin"></i>
+                    <p>Loading friends...</p>
+                </div>
+            </div>
+            <div style="padding: 20px; border-top: 1px solid var(--border-color); display: flex; justify-content: space-between;">
+                <button class="action-btn secondary" id="cancelFriendSelectionBtn">Cancel</button>
+                <button class="action-btn success" id="confirmFriendSelectionBtn">Add Selected Friends</button>
+            </div>
+        </div>
+    </div>
+    
+    <!-- Group Invite Modal -->
+    <div class="group-invite-modal" id="groupInviteModal">
+        <div class="group-invite-container">
+            <div class="group-invite-header">
+                <div class="group-invite-avatar" id="inviteAvatar">
+                    <i class="fas fa-users"></i>
+                </div>
+                <div class="group-invite-name" id="inviteName">Family Chat</div>
+                <!-- ADDED: Purpose and Mood in Invite -->
+                <div class="group-purpose-tag" id="invitePurpose" style="margin: 5px 0;"></div>
+                <div class="group-mood-indicator" id="inviteMood" style="margin: 5px 0;"></div>
+                <div class="group-invite-topic" id="inviteTopic">#family #updates</div>
+                <div class="member-count-badge" id="inviteMemberCount">
+                    <i class="fas fa-users"></i> 12 members
+                </div>
+                <div style="font-size: 14px; color: var(--text-secondary); margin-bottom: 20px;">
+                    Invited by <span id="invitedBy">John Doe</span>
+                </div>
+            </div>
+            
+            <div class="group-invite-actions">
+                <button class="group-invite-btn decline" id="declineInviteBtn">
+                    <i class="fas fa-times"></i> Decline
+                </button>
+                <button class="group-invite-btn accept" id="acceptInviteBtn">
+                    <i class="fas fa-check"></i> Join Group
+                </button>
+            </div>
+        </div>
+    </div>
+    
+    <!-- Notification -->
+    <div class="notification" id="notification">
+        <i class="fas fa-check-circle"></i>
+        <span id="notificationText">Operation completed successfully</span>
+    </div>
 
     <script>
         // =============================================
@@ -1417,34 +1417,70 @@
         let isPageInitialized = false;
         let apiReady = false;
         
-        // API access helper
+        // API access helper - FIXED: Validate method existence before calling
         function getApi() {
             if (window.parent && window.parent.api) {
                 return window.parent.api;
             } else if (window.api) {
                 return window.api;
             } else {
-                console.warn('API not available');
                 return null;
             }
         }
         
-        // Safe API call
+        // Safe API call - FIXED: Validate method exists before calling
         async function safeApiCall(method, endpoint, data = null) {
             try {
                 const api = getApi();
                 if (!api) {
-                    throw new Error('API not available');
+                    console.log(`API not available for ${method} ${endpoint}`);
+                    return { success: false, error: 'API not available' };
+                }
+                
+                // Check if method exists on api object
+                if (typeof api[method] !== 'function') {
+                    console.warn(`API method ${method} not available`);
+                    return { success: false, error: `API method ${method} not available` };
+                }
+                
+                // Check if we're trying to call a method that requires authentication but we don't have a user
+                if (!currentUser && endpoint.includes('auth/me')) {
+                    console.log('No current user for auth check');
+                    return { success: false, error: 'No authenticated user' };
                 }
                 
                 if (!apiReady) {
-                    throw new Error('API not ready yet');
+                    console.log(`API not ready yet for ${method} ${endpoint}`);
+                    return { success: false, error: 'API not ready yet' };
                 }
                 
-                return await api[method](endpoint, data);
+                console.log(`API call: ${method} ${endpoint}`);
+                const result = await api[method](endpoint, data);
+                return result || { success: false, error: 'No response from API' };
+                
             } catch (error) {
                 console.error(`API ${method} error:`, error);
-                return { success: false, error: error.message };
+                return { success: false, error: error.message || 'Unknown error' };
+            }
+        }
+        
+        // Background sync safe call - FIXED: Won't crash if API methods don't exist
+        async function backgroundApiCall(method, endpoint, data = null) {
+            try {
+                const api = getApi();
+                if (!api) {
+                    return null;
+                }
+                
+                // Skip background sync if API method doesn't exist
+                if (typeof api[method] !== 'function') {
+                    return null;
+                }
+                
+                return await safeApiCall(method, endpoint, data);
+            } catch (error) {
+                // Silent fail for background sync
+                return null;
             }
         }
         
@@ -1458,27 +1494,38 @@
             isPageInitialized = true;
             console.log('=== PASSIVE IFRAME GROUP PAGE INITIALIZATION START ===');
             
-            // Listen for API ready event
+            // Load cached data instantly
+            loadCachedDataInstantly();
+            
+            // Set up API ready listener
+            setupApiReadyListener();
+            
+            // Start API readiness check
+            checkApiReady();
+        }
+        
+        // Set up API ready listener
+        function setupApiReadyListener() {
             window.addEventListener('message', function(event) {
                 if (event.data === 'API_READY' || event.data.type === 'API_READY') {
                     apiReady = true;
-                    console.log('API Ready received');
+                    console.log('API Ready received via message');
                     initializeApp();
                 }
             });
-            
-            // Also try to initialize directly if API is already available
-            setTimeout(() => {
-                const api = getApi();
-                if (api) {
-                    apiReady = true;
-                    console.log('API already available');
-                    initializeApp();
-                }
-            }, 100);
-            
-            // Load cached data instantly
-            loadCachedDataInstantly();
+        }
+        
+        // Check if API is ready
+        function checkApiReady() {
+            const api = getApi();
+            if (api && typeof api.get === 'function') {
+                apiReady = true;
+                console.log('API detected as ready');
+                initializeApp();
+            } else {
+                // Try again after a delay
+                setTimeout(checkApiReady, 500);
+            }
         }
         
         // Load cached data INSTANTLY on page load
@@ -1587,6 +1634,7 @@
         
         // Render groups list instantly from cache
         function renderGroupsListInstantly() {
+            const allGroupsList = document.getElementById('allGroupsList');
             if (!allGroupsList) return;
             
             allGroupsList.innerHTML = '';
@@ -1728,6 +1776,7 @@
             
             if (!apiReady) {
                 console.log('Waiting for API to be ready...');
+                setTimeout(initializeApp, 1000);
                 return;
             }
             
@@ -1742,9 +1791,15 @@
             
             showNotification('Groups system ready with unique features', 'success');
             
+            // Start background sync after a delay
             setTimeout(() => {
                 backgroundSyncWithServer();
             }, 1000);
+            
+            // Set up periodic sync
+            setInterval(() => {
+                backgroundSyncWithServer();
+            }, 30000); // Sync every 30 seconds
             
             processPendingOfflineActions();
             
@@ -1757,7 +1812,7 @@
                 const cachedUser = localStorage.getItem(LOCAL_STORAGE_KEYS.USER);
                 if (cachedUser) {
                     currentUser = JSON.parse(cachedUser);
-                    console.log('Loaded user from cache:', currentUser.uid);
+                    console.log('Loaded user from cache:', currentUser?.uid);
                 }
                 
                 const cachedProfile = localStorage.getItem(LOCAL_STORAGE_KEYS.USER_PROFILE);
@@ -1834,10 +1889,15 @@
             }
         }
         
-        // Background sync with server
+        // Background sync with server - FIXED: Won't crash on missing API methods
         async function backgroundSyncWithServer() {
             if (!currentUser) {
                 console.log('Background sync: Skipping - no user');
+                return;
+            }
+            
+            if (!apiReady) {
+                console.log('Background sync: Skipping - API not ready');
                 return;
             }
             
@@ -1865,7 +1925,7 @@
             if (!currentUser) return;
             
             try {
-                const purposesResponse = await safeApiCall('get', 'groups/purposes');
+                const purposesResponse = await backgroundApiCall('get', 'groups/purposes');
                 if (purposesResponse && purposesResponse.success && purposesResponse.data) {
                     localStorage.setItem(LOCAL_STORAGE_KEYS.GROUP_PURPOSES, JSON.stringify(purposesResponse.data));
                     
@@ -1877,7 +1937,7 @@
                     });
                 }
                 
-                const moodsResponse = await safeApiCall('get', 'groups/moods');
+                const moodsResponse = await backgroundApiCall('get', 'groups/moods');
                 if (moodsResponse && moodsResponse.success && moodsResponse.data) {
                     localStorage.setItem(LOCAL_STORAGE_KEYS.GROUP_MOODS, JSON.stringify(moodsResponse.data));
                     
@@ -1889,7 +1949,7 @@
                     });
                 }
                 
-                const notesResponse = await safeApiCall('get', 'groups/notes');
+                const notesResponse = await backgroundApiCall('get', 'groups/notes');
                 if (notesResponse && notesResponse.success && notesResponse.data) {
                     notesResponse.data.forEach(note => {
                         const key = LOCAL_STORAGE_KEYS.GROUP_NOTES + note.groupId;
@@ -1902,15 +1962,15 @@
             }
         }
         
-        // Sync groups from server
+        // Sync groups from server - FIXED: Won't crash on missing API methods
         async function syncGroupsFromServer() {
             if (!currentUser) return;
             
             try {
-                const response = await safeApiCall('get', 'groups/user');
+                const response = await backgroundApiCall('get', 'groups/user');
                 
                 if (!response || !response.success || !response.data) {
-                    console.log('No groups found on server');
+                    console.log('No groups found on server or API not available');
                     return;
                 }
                 
@@ -1959,6 +2019,7 @@
                     localStorage.setItem(LOCAL_STORAGE_KEYS.ADMIN_GROUPS, JSON.stringify(adminGroups));
                     localStorage.setItem(LOCAL_STORAGE_KEYS.LAST_CACHE_TIME, Date.now().toString());
                     
+                    const allGroupsSection = document.getElementById('allGroupsSection');
                     if (allGroupsSection && allGroupsSection.classList.contains('active')) {
                         updateCurrentSection();
                         updateGroupCounts();
@@ -1972,12 +2033,12 @@
             }
         }
         
-        // Sync group invites
+        // Sync group invites - FIXED: Won't crash on missing API methods
         async function syncGroupInvitesFromServer() {
             if (!currentUser) return;
             
             try {
-                const response = await safeApiCall('get', 'groups/invites');
+                const response = await backgroundApiCall('get', 'groups/invites');
                 
                 const serverInvites = [];
                 
@@ -2060,6 +2121,7 @@
         
         // Render all groups
         function renderAllGroups() {
+            const allGroupsList = document.getElementById('allGroupsList');
             if (!allGroupsList) return;
             
             allGroupsList.innerHTML = '';
@@ -2233,6 +2295,11 @@
             
             currentChatGroup = groupData;
             
+            const chatTitle = document.getElementById('chatTitle');
+            const chatMemberCount = document.getElementById('chatMemberCount');
+            const chatActive = document.getElementById('chatActive');
+            const chatAvatar = document.getElementById('chatAvatar');
+            
             if (chatTitle) chatTitle.textContent = groupData.name || 'Group Chat';
             if (chatMemberCount) chatMemberCount.textContent = `${groupData.memberCount || 0} members`;
             if (chatActive) chatActive.textContent = 'Active now';
@@ -2255,6 +2322,9 @@
             
             updateChatHeaderUniqueFeatures(groupData);
             
+            const sidebar = document.getElementById('sidebar');
+            const groupChatPanel = document.getElementById('groupChatPanel');
+            
             if (isMobile) {
                 if (sidebar) sidebar.style.display = 'none';
                 if (groupChatPanel) {
@@ -2276,6 +2346,9 @@
                 if (groupChatPanel) groupChatPanel.classList.add('active');
             }
             
+            const chatMessages = document.getElementById('chatMessages');
+            const chatMessagesContainer = document.getElementById('chatMessagesContainer');
+            
             if (chatMessages) chatMessages.innerHTML = '';
             if (chatMessagesContainer) chatMessagesContainer.scrollTop = chatMessagesContainer.scrollHeight;
             
@@ -2291,6 +2364,7 @@
         // Update chat header with unique features
         function updateChatHeaderUniqueFeatures(groupData) {
             const purpose = groupData.purpose || '';
+            const chatPurposeTag = document.getElementById('chatPurposeTag');
             if (purpose && groupPurposes[purpose] && chatPurposeTag) {
                 const purposeInfo = groupPurposes[purpose];
                 chatPurposeTag.textContent = `${purposeInfo.icon} ${purposeInfo.name}`;
@@ -2302,6 +2376,7 @@
             }
             
             const pulse = calculateGroupPulse(groupData);
+            const chatPulse = document.getElementById('chatPulse');
             if (pulse && chatPulse) {
                 chatPulse.textContent = pulse.text;
                 chatPulse.className = `group-pulse ${pulse.class}`;
@@ -2312,6 +2387,9 @@
             
             const mood = groupData.mood || '';
             const postingRule = groupData.postingRule || 'everyone';
+            const chatMood = document.getElementById('chatMood');
+            const chatPostingRules = document.getElementById('chatPostingRules');
+            const chatMoodRules = document.getElementById('chatMoodRules');
             
             if (mood && groupMoods[mood] && chatMood) {
                 const moodInfo = groupMoods[mood];
@@ -2392,6 +2470,12 @@
                 }
             }
             
+            const chatInput = document.getElementById('chatInput');
+            const chatSendBtn = document.getElementById('chatSendBtn');
+            const topicSelection = document.getElementById('topicSelection');
+            const silentModeBtn = document.getElementById('silentModeBtn');
+            const anonymousModeBtn = document.getElementById('anonymousModeBtn');
+            
             if (chatInput && chatSendBtn) {
                 if (!canPost) {
                     chatInput.placeholder = reason;
@@ -2423,6 +2507,11 @@
         
         // Update participation mode buttons
         function updateParticipationModeButtons() {
+            const silentModeBtn = document.getElementById('silentModeBtn');
+            const chatInput = document.getElementById('chatInput');
+            const chatSendBtn = document.getElementById('chatSendBtn');
+            const anonymousModeBtn = document.getElementById('anonymousModeBtn');
+            
             if (silentModeBtn) {
                 if (currentParticipationMode === 'read_only') {
                     silentModeBtn.innerHTML = '<i class="fas fa-eye-slash"></i>';
@@ -2462,6 +2551,7 @@
                 const cacheKey = LOCAL_STORAGE_KEYS.GROUP_NOTES + groupId;
                 const cachedNotes = localStorage.getItem(cacheKey);
                 
+                const groupNotesContent = document.getElementById('groupNotesContent');
                 if (groupNotesContent) {
                     if (cachedNotes) {
                         groupNotesContent.innerHTML = cachedNotes;
@@ -2470,19 +2560,21 @@
                     }
                 }
                 
-                const response = await safeApiCall('get', `groups/${groupId}/notes`);
+                const response = await backgroundApiCall('get', `groups/${groupId}/notes`);
                 if (response && response.success && response.data && groupNotesContent) {
                     const notes = response.data.notes || '';
                     groupNotesContent.innerHTML = notes || '<p style="margin: 0; color: var(--text-secondary);">No notes yet. Add important information here.</p>';
                     localStorage.setItem(cacheKey, notes);
                 }
                 
+                const groupNotesPanel = document.getElementById('groupNotesPanel');
                 if (groupNotesPanel && currentChatGroup && (currentChatGroup.isAdmin || currentChatGroup.isCreator || cachedNotes)) {
                     groupNotesPanel.style.display = 'block';
                 }
                 
             } catch (error) {
                 console.error('Error loading group notes:', error);
+                const groupNotesPanel = document.getElementById('groupNotesPanel');
                 if (groupNotesPanel) groupNotesPanel.style.display = 'none';
             }
         }
@@ -2498,7 +2590,7 @@
                     events = JSON.parse(cachedEvents);
                 }
                 
-                const response = await safeApiCall('get', `groups/${groupId}/events`);
+                const response = await backgroundApiCall('get', `groups/${groupId}/events`);
                 if (response && response.success && response.data) {
                     events = response.data;
                     localStorage.setItem(cacheKey, JSON.stringify(events));
@@ -2508,6 +2600,9 @@
                 const upcomingEvents = events
                     .filter(event => new Date(event.date) > now)
                     .sort((a, b) => new Date(a.date) - new Date(b.date));
+                
+                const eventCountdownDisplay = document.getElementById('eventCountdownDisplay');
+                const eventCountdownPanel = document.getElementById('eventCountdownPanel');
                 
                 if (eventCountdownDisplay && eventCountdownPanel) {
                     if (upcomingEvents.length > 0) {
@@ -2533,6 +2628,7 @@
                 
             } catch (error) {
                 console.error('Error loading group events:', error);
+                const eventCountdownPanel = document.getElementById('eventCountdownPanel');
                 if (eventCountdownPanel) eventCountdownPanel.style.display = 'none';
             }
         }
@@ -2548,11 +2644,14 @@
                     log = JSON.parse(cachedLog);
                 }
                 
-                const response = await safeApiCall('get', `groups/${groupId}/transparency`);
+                const response = await backgroundApiCall('get', `groups/${groupId}/transparency`);
                 if (response && response.success && response.data) {
                     log = response.data;
                     localStorage.setItem(cacheKey, JSON.stringify(log));
                 }
+                
+                const adminTransparencyLog = document.getElementById('adminTransparencyLog');
+                const adminTransparencyPanel = document.getElementById('adminTransparencyPanel');
                 
                 if (adminTransparencyLog && adminTransparencyPanel) {
                     if (log.length > 0 && currentChatGroup && currentChatGroup.isAdmin) {
@@ -2577,6 +2676,7 @@
                 
             } catch (error) {
                 console.error('Error loading transparency log:', error);
+                const adminTransparencyPanel = document.getElementById('adminTransparencyPanel');
                 if (adminTransparencyPanel) adminTransparencyPanel.style.display = 'none';
             }
         }
@@ -2584,7 +2684,7 @@
         // Analyze group energy
         async function analyzeGroupEnergy(groupId) {
             try {
-                const response = await safeApiCall('get', `groups/${groupId}/messages?limit=50`);
+                const response = await backgroundApiCall('get', `groups/${groupId}/messages?limit=50`);
                 if (!response || !response.success || !response.data) return;
                 
                 const messages = response.data;
@@ -2612,6 +2712,9 @@
                     suggestion = 'Group activity is normal.';
                 }
                 
+                const energySuggestionContent = document.getElementById('energySuggestionContent');
+                const energySuggestionPanel = document.getElementById('energySuggestionPanel');
+                
                 if (energySuggestionContent && energySuggestionPanel) {
                     energySuggestionContent.innerHTML = `<i class="fas fa-lightbulb"></i> ${suggestion}`;
                     energySuggestionPanel.style.display = 'block';
@@ -2627,12 +2730,16 @@
                 
             } catch (error) {
                 console.error('Error analyzing group energy:', error);
+                const energySuggestionPanel = document.getElementById('energySuggestionPanel');
                 if (energySuggestionPanel) energySuggestionPanel.style.display = 'none';
             }
         }
         
         // Close group chat mobile
         function closeGroupChatMobile() {
+            const sidebar = document.getElementById('sidebar');
+            const groupChatPanel = document.getElementById('groupChatPanel');
+            
             if (isMobile) {
                 if (sidebar) sidebar.style.display = 'flex';
                 if (groupChatPanel) {
@@ -2649,6 +2756,11 @@
         
         // Hide all panels
         function hideAllPanels() {
+            const groupDetailsPanel = document.getElementById('groupDetailsPanel');
+            const groupChatPanel = document.getElementById('groupChatPanel');
+            const groupCallPanel = document.getElementById('groupCallPanel');
+            const sidebar = document.getElementById('sidebar');
+            
             if (groupDetailsPanel) groupDetailsPanel.classList.remove('active');
             if (groupChatPanel) groupChatPanel.classList.remove('active');
             if (groupCallPanel) groupCallPanel.classList.remove('active');
@@ -2662,6 +2774,7 @@
         
         // Load group chat messages
         async function loadGroupChatMessages(groupId) {
+            const chatMessages = document.getElementById('chatMessages');
             if (!chatMessages) return;
             
             const cachedMessagesKey = LOCAL_STORAGE_KEYS.GROUP_MESSAGES + groupId;
@@ -2682,6 +2795,7 @@
                 addSystemMessage(`Welcome to the group chat! Start the conversation.`);
             }
             
+            const chatMessagesContainer = document.getElementById('chatMessagesContainer');
             setTimeout(() => {
                 if (chatMessagesContainer) {
                     chatMessagesContainer.scrollTop = chatMessagesContainer.scrollHeight;
@@ -2689,7 +2803,7 @@
             }, 100);
             
             try {
-                const response = await safeApiCall('get', `groups/${groupId}/messages`);
+                const response = await backgroundApiCall('get', `groups/${groupId}/messages`);
                 if (response && response.success && response.data) {
                     response.data.forEach(message => {
                         addMessageToChat(message, true);
@@ -2703,6 +2817,7 @@
         
         // Add message to chat
         function addMessageToChat(messageData, isNew = true) {
+            const chatMessages = document.getElementById('chatMessages');
             if (!chatMessages) return;
             
             const messageElement = document.createElement('div');
@@ -2745,6 +2860,7 @@
             
             chatMessages.appendChild(messageElement);
             
+            const chatMessagesContainer = document.getElementById('chatMessagesContainer');
             if (isNew && chatMessagesContainer) {
                 setTimeout(() => {
                     chatMessagesContainer.scrollTop = chatMessagesContainer.scrollHeight;
@@ -2754,6 +2870,7 @@
         
         // Add system message
         function addSystemMessage(content) {
+            const chatMessages = document.getElementById('chatMessages');
             if (!chatMessages) return;
             
             const messageElement = document.createElement('div');
@@ -2787,6 +2904,9 @@
         
         // Send group message
         async function sendGroupMessage() {
+            const chatInput = document.getElementById('chatInput');
+            const messageTopic = document.getElementById('messageTopic');
+            
             if (!currentChatGroup || !chatInput || !chatInput.value.trim()) return;
             
             const messageContent = chatInput.value.trim();
@@ -2845,12 +2965,16 @@
         function toggleSilentMode() {
             if (currentParticipationMode === 'read_only') {
                 currentParticipationMode = 'normal';
+                const chatInput = document.getElementById('chatInput');
+                const chatSendBtn = document.getElementById('chatSendBtn');
                 if (chatInput) chatInput.disabled = false;
                 if (chatSendBtn) chatSendBtn.disabled = false;
                 if (chatInput) chatInput.placeholder = 'Type a message...';
                 showNotification('Exited silent mode', 'success');
             } else {
                 currentParticipationMode = 'read_only';
+                const chatInput = document.getElementById('chatInput');
+                const chatSendBtn = document.getElementById('chatSendBtn');
                 if (chatInput) chatInput.disabled = true;
                 if (chatSendBtn) chatSendBtn.disabled = true;
                 if (chatInput) chatInput.placeholder = 'Silent mode: Read only';
@@ -2875,20 +2999,22 @@
         }
         
         // Setup typing listener
+        let typingTimeout;
         function setupTypingListener(groupId) {
+            const chatInput = document.getElementById('chatInput');
             if (!chatInput) return;
             
             chatInput.addEventListener('input', () => {
                 if (!isTyping) {
                     isTyping = true;
-                    safeApiCall('post', `groups/${groupId}/typing`, { typing: true })
+                    backgroundApiCall('post', `groups/${groupId}/typing`, { typing: true })
                         .catch(() => {});
                 }
                 
                 clearTimeout(typingTimeout);
                 typingTimeout = setTimeout(() => {
                     isTyping = false;
-                    safeApiCall('post', `groups/${groupId}/typing`, { typing: false })
+                    backgroundApiCall('post', `groups/${groupId}/typing`, { typing: false })
                         .catch(() => {});
                 }, 1000);
             });
@@ -2902,11 +3028,11 @@
         
         // Adjust textarea height
         function adjustTextareaHeight() {
+            const chatInput = document.getElementById('chatInput');
             if (!chatInput) return;
             
-            const textarea = chatInput;
-            textarea.style.height = 'auto';
-            textarea.style.height = Math.min(textarea.scrollHeight, 100) + 'px';
+            chatInput.style.height = 'auto';
+            chatInput.style.height = Math.min(chatInput.scrollHeight, 100) + 'px';
         }
         
         // Format message time
@@ -2927,6 +3053,7 @@
                 adminManagementGroupName.textContent = groupData.name;
             }
             
+            const adminManagementModal = document.getElementById('adminManagementModal');
             if (adminManagementModal) {
                 adminManagementModal.classList.add('active');
             }
@@ -2944,7 +3071,7 @@
             memberList.innerHTML = '<div class="loading-placeholder"><i class="fas fa-spinner fa-spin"></i><p>Loading members...</p></div>';
             
             try {
-                const response = await safeApiCall('get', `groups/${groupData.id}/members`);
+                const response = await backgroundApiCall('get', `groups/${groupData.id}/members`);
                 
                 if (!response || !response.success || !response.data) {
                     memberList.innerHTML = `
@@ -3076,7 +3203,7 @@
                 if (cachedLog.length > 50) cachedLog.pop();
                 localStorage.setItem(cacheKey, JSON.stringify(cachedLog));
                 
-                await safeApiCall('post', `groups/${groupId}/transparency`, logEntry);
+                await backgroundApiCall('post', `groups/${groupId}/transparency`, logEntry);
                 
             } catch (error) {
                 console.error('Error logging transparency action:', error);
@@ -3228,6 +3355,7 @@
                     
                     showNotification('Group settings saved successfully', 'success');
                     
+                    const adminManagementModal = document.getElementById('adminManagementModal');
                     if (adminManagementModal) adminManagementModal.classList.remove('active');
                 } else {
                     throw new Error(response?.error || 'Failed to save settings');
@@ -3241,6 +3369,7 @@
         
         // Show friend selection
         function showFriendSelection() {
+            const friendSelectionModal = document.getElementById('friendSelectionModal');
             if (friendSelectionModal) {
                 friendSelectionModal.classList.add('active');
             }
@@ -3433,6 +3562,9 @@
                 
                 showNotification('Group created successfully!', 'success');
                 
+                const createGroupModal = document.getElementById('createGroupModal');
+                const friendSelectionModal = document.getElementById('friendSelectionModal');
+                
                 if (createGroupModal) createGroupModal.classList.remove('active');
                 if (friendSelectionModal) friendSelectionModal.classList.remove('active');
                 
@@ -3473,6 +3605,7 @@
                 
                 showNotification('Successfully joined the group!', 'success');
                 
+                const groupInviteModal = document.getElementById('groupInviteModal');
                 if (groupInviteModal) groupInviteModal.classList.remove('active');
                 
             } catch (error) {
@@ -3501,6 +3634,7 @@
                 
                 showNotification('Successfully left the group', 'success');
                 
+                const groupDetailsPanel = document.getElementById('groupDetailsPanel');
                 if (groupDetailsPanel && groupDetailsPanel.classList.contains('active')) {
                     groupDetailsPanel.classList.remove('active');
                     selectedGroup = null;
@@ -3553,6 +3687,7 @@
                 
                 showNotification('Invitation declined', 'success');
                 
+                const groupInviteModal = document.getElementById('groupInviteModal');
                 if (groupInviteModal) groupInviteModal.classList.remove('active');
                 
             } catch (error) {
@@ -3574,6 +3709,9 @@
             
             const groupDetailsTitle = document.querySelector('.group-details-title');
             if (groupDetailsTitle) groupDetailsTitle.textContent = 'Group Details';
+            
+            const sidebar = document.getElementById('sidebar');
+            const groupDetailsPanel = document.getElementById('groupDetailsPanel');
             
             if (isMobile) {
                 if (sidebar) sidebar.style.display = 'none';
@@ -3621,7 +3759,7 @@
                 
                 let realMembers = [];
                 try {
-                    const response = await safeApiCall('get', `groups/${groupData.id}/members`);
+                    const response = await backgroundApiCall('get', `groups/${groupData.id}/members`);
                     if (response && response.success && response.data) {
                         realMembers = response.data.slice(0, 5);
                     }
@@ -3915,6 +4053,7 @@
         
         // View group notes
         function viewGroupNotes(groupData) {
+            const groupNotesPanel = document.getElementById('groupNotesPanel');
             if (currentChatGroup && currentChatGroup.id === groupData.id) {
                 if (groupNotesPanel) {
                     groupNotesPanel.style.display = groupNotesPanel.style.display === 'none' ? 'block' : 'none';
@@ -3929,6 +4068,7 @@
         
         // View group events
         function viewGroupEvents(groupData) {
+            const eventCountdownPanel = document.getElementById('eventCountdownPanel');
             if (currentChatGroup && currentChatGroup.id === groupData.id) {
                 if (eventCountdownPanel) {
                     eventCountdownPanel.style.display = eventCountdownPanel.style.display === 'none' ? 'block' : 'none';
@@ -4092,6 +4232,7 @@
                 
                 showNotification('Group blocked successfully', 'success');
                 
+                const groupDetailsPanel = document.getElementById('groupDetailsPanel');
                 if (groupDetailsPanel && groupDetailsPanel.classList.contains('active')) {
                     groupDetailsPanel.classList.remove('active');
                     selectedGroup = null;
@@ -4191,6 +4332,7 @@
             
             window.currentInvite = inviteData;
             
+            const groupInviteModal = document.getElementById('groupInviteModal');
             if (groupInviteModal) {
                 groupInviteModal.classList.add('active');
             }
@@ -4289,7 +4431,9 @@
         // Show notification
         function showNotification(message, type = 'success') {
             const notificationText = document.getElementById('notificationText');
-            if (!notificationText) return;
+            const notification = document.getElementById('notification');
+            
+            if (!notificationText || !notification) return;
             
             notificationText.textContent = message;
             
@@ -4339,6 +4483,12 @@
             const joinedTab = document.getElementById('joinedTab');
             const invitesTab = document.getElementById('invitesTab');
             const adminTab = document.getElementById('adminTab');
+            
+            const allGroupsSection = document.getElementById('allGroupsSection');
+            const myGroupsSection = document.getElementById('myGroupsSection');
+            const joinedSection = document.getElementById('joinedSection');
+            const invitesSection = document.getElementById('invitesSection');
+            const adminSection = document.getElementById('adminSection');
             
             if (allTab) {
                 allTab.addEventListener('click', function() {
@@ -4413,6 +4563,8 @@
             
             // Create group button
             const createGroupBtn = document.getElementById('createGroupBtn');
+            const createGroupModal = document.getElementById('createGroupModal');
+            
             if (createGroupBtn) {
                 createGroupBtn.addEventListener('click', () => {
                     if (createGroupModal) {
@@ -4657,6 +4809,11 @@
             }
             
             // Chat functionality
+            const chatSendBtn = document.getElementById('chatSendBtn');
+            const chatInput = document.getElementById('chatInput');
+            const chatCallBtn = document.getElementById('chatCallBtn');
+            const closeChatBtn = document.getElementById('closeChatBtn');
+            
             if (chatSendBtn) {
                 chatSendBtn.addEventListener('click', sendGroupMessage);
             }
@@ -4681,16 +4838,25 @@
             }
             
             // Silent mode button
+            const silentModeBtn = document.getElementById('silentModeBtn');
             if (silentModeBtn) {
                 silentModeBtn.addEventListener('click', toggleSilentMode);
             }
             
             // Anonymous mode button
+            const anonymousModeBtn = document.getElementById('anonymousModeBtn');
             if (anonymousModeBtn) {
                 anonymousModeBtn.addEventListener('click', toggleAnonymousMode);
             }
             
             // Edit notes button
+            const editNotesBtn = document.getElementById('editNotesBtn');
+            const groupNotesContent = document.getElementById('groupNotesContent');
+            const groupNotesEditor = document.getElementById('groupNotesEditor');
+            const notesEditorActions = document.getElementById('notesEditorActions');
+            const saveNotesBtn = document.getElementById('saveNotesBtn');
+            const cancelNotesEditBtn = document.getElementById('cancelNotesEditBtn');
+            
             if (editNotesBtn) {
                 editNotesBtn.addEventListener('click', () => {
                     groupNotesEditor.value = groupNotesContent.textContent;
@@ -4709,7 +4875,7 @@
                     notesEditorActions.style.display = 'none';
                     
                     if (currentChatGroup) {
-                        const response = await safeApiCall('post', `groups/${currentChatGroup.id}/notes`, { notes });
+                        const response = await backgroundApiCall('post', `groups/${currentChatGroup.id}/notes`, { notes });
                         if (response && response.success) {
                             showNotification('Notes saved successfully', 'success');
                         }
@@ -4726,6 +4892,7 @@
             }
             
             // Add event button
+            const addEventBtn = document.getElementById('addEventBtn');
             if (addEventBtn) {
                 addEventBtn.addEventListener('click', () => {
                     showNotification('Event creation panel would open here', 'info');
@@ -4736,6 +4903,9 @@
             const backBtn = document.getElementById('backBtn');
             if (backBtn) {
                 backBtn.addEventListener('click', () => {
+                    const sidebar = document.getElementById('sidebar');
+                    const groupDetailsPanel = document.getElementById('groupDetailsPanel');
+                    
                     if (isMobile) {
                         if (sidebar) sidebar.style.display = 'flex';
                         if (groupDetailsPanel) {
@@ -4769,6 +4939,7 @@
             const closeAdminManagementBtn = document.getElementById('closeAdminManagementBtn');
             if (closeAdminManagementBtn) {
                 closeAdminManagementBtn.addEventListener('click', () => {
+                    const adminManagementModal = document.getElementById('adminManagementModal');
                     if (adminManagementModal) adminManagementModal.classList.remove('active');
                 });
             }
@@ -4805,6 +4976,7 @@
             const cancelFriendSelectionBtn = document.getElementById('cancelFriendSelectionBtn');
             if (cancelFriendSelectionBtn) {
                 cancelFriendSelectionBtn.addEventListener('click', () => {
+                    const friendSelectionModal = document.getElementById('friendSelectionModal');
                     if (friendSelectionModal) friendSelectionModal.classList.remove('active');
                 });
             }
@@ -4814,6 +4986,7 @@
             if (confirmFriendSelectionBtn) {
                 confirmFriendSelectionBtn.addEventListener('click', () => {
                     showNotification(`Selected ${selectedFriends.length} friends`, 'success');
+                    const friendSelectionModal = document.getElementById('friendSelectionModal');
                     if (friendSelectionModal) friendSelectionModal.classList.remove('active');
                 });
             }
@@ -4843,9 +5016,7 @@
         function setupGroupInvitesListener() {
             if (!currentUser) return;
             
-            setInterval(() => {
-                syncGroupInvitesFromServer();
-            }, 30000);
+            // Already handled by background sync interval
         }
         
         // Check mobile
@@ -4855,6 +5026,9 @@
             
             if (isMobile) {
                 document.body.classList.add('mobile');
+                const sidebar = document.getElementById('sidebar');
+                const groupChatPanel = document.getElementById('groupChatPanel');
+                
                 if (groupChatPanel && groupChatPanel.classList.contains('active')) {
                     if (sidebar) sidebar.style.display = 'none';
                     if (groupChatPanel) groupChatPanel.style.display = 'flex';
@@ -4864,6 +5038,9 @@
                 }
             } else {
                 document.body.classList.remove('mobile');
+                const sidebar = document.getElementById('sidebar');
+                const groupChatPanel = document.getElementById('groupChatPanel');
+                
                 if (sidebar) sidebar.style.display = 'flex';
                 if (groupChatPanel) groupChatPanel.style.display = 'flex';
                 
@@ -4886,28 +5063,33 @@
             
             switch(section) {
                 case 'all':
-                    if (allGroupsSection) allGroupsSection.classList.add('active');
+                    const allGroupsSection = document.getElementById('allGroupsSection');
                     const allTab = document.getElementById('allTab');
+                    if (allGroupsSection) allGroupsSection.classList.add('active');
                     if (allTab) allTab.classList.add('active');
                     break;
                 case 'my':
-                    if (myGroupsSection) myGroupsSection.classList.add('active');
+                    const myGroupsSection = document.getElementById('myGroupsSection');
                     const myGroupsTab = document.getElementById('myGroupsTab');
+                    if (myGroupsSection) myGroupsSection.classList.add('active');
                     if (myGroupsTab) myGroupsTab.classList.add('active');
                     break;
                 case 'joined':
-                    if (joinedSection) joinedSection.classList.add('active');
+                    const joinedSection = document.getElementById('joinedSection');
                     const joinedTab = document.getElementById('joinedTab');
+                    if (joinedSection) joinedSection.classList.add('active');
                     if (joinedTab) joinedTab.classList.add('active');
                     break;
                 case 'invites':
-                    if (invitesSection) invitesSection.classList.add('active');
+                    const invitesSection = document.getElementById('invitesSection');
                     const invitesTab = document.getElementById('invitesTab');
+                    if (invitesSection) invitesSection.classList.add('active');
                     if (invitesTab) invitesTab.classList.add('active');
                     break;
                 case 'admin':
-                    if (adminSection) adminSection.classList.add('active');
+                    const adminSection = document.getElementById('adminSection');
                     const adminTab = document.getElementById('adminTab');
+                    if (adminSection) adminSection.classList.add('active');
                     if (adminTab) adminTab.classList.add('active');
                     break;
             }
@@ -4917,6 +5099,7 @@
         
         // Render my groups
         function renderMyGroups() {
+            const myGroupsList = document.getElementById('myGroupsList');
             if (!myGroupsList) return;
             
             myGroupsList.innerHTML = '';
@@ -4941,6 +5124,7 @@
         
         // Render joined groups
         function renderJoinedGroups() {
+            const joinedList = document.getElementById('joinedList');
             if (!joinedList) return;
             
             joinedList.innerHTML = '';
@@ -4965,6 +5149,7 @@
         
         // Render group invites
         function renderGroupInvites() {
+            const invitesList = document.getElementById('invitesList');
             if (!invitesList) return;
             
             invitesList.innerHTML = '';
@@ -5071,6 +5256,7 @@
         
         // Render admin groups
         function renderAdminGroups() {
+            const adminList = document.getElementById('adminList');
             if (!adminList) return;
             
             adminList.innerHTML = '';
@@ -5106,11 +5292,16 @@
                     localStream = stream;
                     
                     hideAllPanels();
+                    const groupCallPanel = document.getElementById('groupCallPanel');
                     if (groupCallPanel) {
                         groupCallPanel.classList.add('active');
                     }
                     callInProgress = true;
                     callStartTime = Date.now();
+                    
+                    const callTitle = document.getElementById('callTitle');
+                    const callDuration = document.getElementById('callDuration');
+                    const callParticipants = document.getElementById('callParticipants');
                     
                     if (callTitle) callTitle.textContent = `Call: ${currentChatGroup.name}`;
                     startCallTimer();
@@ -5129,6 +5320,7 @@
         
         // Add participant video
         function addParticipantVideo(participantId, name, stream, isSelf = false) {
+            const callParticipants = document.getElementById('callParticipants');
             if (!callParticipants) return;
             
             const participantElement = document.createElement('div');
@@ -5162,6 +5354,7 @@
         
         // Start call timer
         function startCallTimer() {
+            const callDuration = document.getElementById('callDuration');
             callTimer = setInterval(() => {
                 if (callStartTime && callDuration) {
                     const elapsed = Date.now() - callStartTime;
@@ -5193,6 +5386,9 @@
             
             callInProgress = false;
             callStartTime = null;
+            
+            const callParticipants = document.getElementById('callParticipants');
+            const groupCallPanel = document.getElementById('groupCallPanel');
             
             if (callParticipants) callParticipants.innerHTML = '';
             

@@ -19,7 +19,152 @@
     <link rel="stylesheet" href="friend.css">
     
     <style>
+        .no-camera-message {
+            text-align: center;
+            padding: 40px;
+            color: var(--text-secondary);
+        }
         
+        .no-camera-message i {
+            font-size: 48px;
+            margin-bottom: 20px;
+            color: var(--warning-color);
+        }
+        
+        .friend-request-profile {
+            max-width: 500px;
+        }
+        
+        .friend-profile-avatar {
+            width: 80px;
+            height: 80px;
+            border-radius: 50%;
+            background-color: var(--primary-color);
+            color: white;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 24px;
+            font-weight: bold;
+            background-size: cover;
+            background-position: center;
+            position: relative;
+            margin: 0 auto;
+        }
+        
+        .user-search-item {
+            display: flex;
+            align-items: center;
+            padding: 12px;
+            border-bottom: 1px solid var(--border-color);
+            cursor: pointer;
+            transition: background-color 0.2s;
+        }
+        
+        .user-search-item:hover {
+            background-color: var(--hover-color);
+        }
+        
+        .user-search-avatar {
+            width: 40px;
+            height: 40px;
+            border-radius: 50%;
+            background-color: var(--primary-color);
+            color: white;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 14px;
+            font-weight: bold;
+            background-size: cover;
+            background-position: center;
+            margin-right: 12px;
+        }
+        
+        .user-search-info {
+            flex: 1;
+        }
+        
+        .user-search-name {
+            font-weight: 500;
+            margin-bottom: 2px;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+        
+        .user-search-username {
+            font-size: 13px;
+            color: var(--text-secondary);
+        }
+        
+        .user-search-actions {
+            display: flex;
+            gap: 5px;
+        }
+        
+        .user-search-status {
+            width: 8px;
+            height: 8px;
+            border-radius: 50%;
+            display: inline-block;
+        }
+        
+        .user-search-status.online {
+            background-color: var(--success-color);
+        }
+        
+        .user-search-status.offline {
+            background-color: var(--text-secondary);
+        }
+        
+        .friend-action-btn {
+            width: 32px;
+            height: 32px;
+            border-radius: 50%;
+            border: none;
+            background-color: var(--surface-color);
+            color: var(--text-color);
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            transition: all 0.2s;
+        }
+        
+        .friend-action-btn:hover {
+            background-color: var(--hover-color);
+            transform: scale(1.1);
+        }
+        
+        .friend-action-btn.success {
+            background-color: var(--success-color);
+            color: white;
+        }
+        
+        .friend-action-btn.danger {
+            background-color: var(--danger-color);
+            color: white;
+        }
+        
+        .friend-action-btn.chat {
+            background-color: var(--primary-color);
+            color: white;
+        }
+        
+        .friend-action-btn.warning {
+            background-color: var(--warning-color);
+            color: white;
+        }
+        
+        .instant-load .friend-item {
+            animation: fadeIn 0.3s ease-in;
+        }
+        
+        @keyframes fadeIn {
+            from { opacity: 0; transform: translateY(10px); }
+            to { opacity: 1; transform: translateY(0); }
+        }
     </style>
 </head>
 <body>
@@ -560,6 +705,8 @@
         let cameraStream = null;
         let currentCamera = 'environment';
         let flashOn = false;
+        let apiReady = false;
+        let apiInitializationAttempted = false;
         
         // Friend categories with colors and icons
         const friendCategories = {
@@ -655,53 +802,86 @@
             ALL_USERS_CACHE: 'knecta_all_users_cache'
         };
         
-        // Wait for API ready event from parent
-        window.addEventListener('message', async (e) => {
-            if (e.data?.type === 'API_READY') {
-                console.log('API Ready event received, initializing friends system...');
-                await initializeFriends();
+        // API readiness checker
+        async function checkApiReady() {
+            try {
+                if (window.parent && window.parent.api) {
+                    const api = window.parent.api;
+                    // Test API with a simple call
+                    const test = await api.get('/api/auth/test');
+                    if (test && test.status === 'ok') {
+                        apiReady = true;
+                        return true;
+                    }
+                }
+                return false;
+            } catch (error) {
+                return false;
             }
-        });
+        }
         
         // Initialize the application
         document.addEventListener('DOMContentLoaded', async function() {
             console.log('Friends page loaded');
             
-            // Check if we're already in an iframe with API available
-            if (window.parent && window.parent.api) {
-                console.log('Parent API available immediately');
-                await initializeFriends();
-            } else {
-                console.log('Waiting for API ready event...');
-                // Show loading state
-                showNotification('Connecting to server...', 'info');
-                
-                // Request API ready event
-                if (window.parent) {
-                    window.parent.postMessage({ type: 'REQUEST_API_READY' }, '*');
-                }
-                
-                // Fallback: Try to initialize after a delay
-                setTimeout(async () => {
-                    if (window.parent && window.parent.api) {
-                        console.log('API found after timeout');
-                        await initializeFriends();
-                    } else {
-                        console.log('API not available, using cached data');
-                        loadCachedDataInstantly();
-                        setupEventListeners();
-                        showNotification('Using offline mode', 'warning');
-                    }
-                }, 2000);
-            }
-            
             // Load cached data instantly
             loadCachedDataInstantly();
+            setupEventListeners();
+            
+            // Try to initialize with API immediately
+            await initializeWithAPI();
+            
+            // Request API ready event
+            if (window.parent) {
+                window.parent.postMessage({ type: 'REQUEST_API_READY' }, '*');
+            }
+            
+            // Set up API ready listener
+            window.addEventListener('message', async (e) => {
+                if (e.data?.type === 'API_READY') {
+                    console.log('API Ready event received from parent');
+                    if (!apiInitializationAttempted || !apiReady) {
+                        await initializeWithAPI();
+                    }
+                }
+            });
+            
+            // Periodic API check for late initialization
+            setTimeout(async () => {
+                if (!apiReady && !apiInitializationAttempted) {
+                    console.log('Performing delayed API check...');
+                    await initializeWithAPI();
+                }
+            }, 3000);
         });
         
-        // Initialize friends system
+        // Initialize with API
+        async function initializeWithAPI() {
+            if (apiInitializationAttempted) return;
+            
+            apiInitializationAttempted = true;
+            console.log('Attempting to initialize with API...');
+            
+            try {
+                const isApiReady = await checkApiReady();
+                if (!isApiReady) {
+                    throw new Error('API not ready');
+                }
+                
+                console.log('API is ready, initializing friends system...');
+                await initializeFriends();
+                apiReady = true;
+                
+            } catch (error) {
+                console.log('API initialization failed, using cached data:', error.message);
+                showNotification('Using offline mode', 'warning');
+                updateCurrentSection();
+            }
+        }
+        
+        // Initialize friends system with backend
         async function initializeFriends() {
-            console.log('=== INITIALIZING FRIENDS SYSTEM ===');
+            console.log('=== INITIALIZING FRIENDS SYSTEM WITH BACKEND ===');
             
             try {
                 // Get API from parent
@@ -712,13 +892,13 @@
                 
                 console.log('API available:', typeof api);
                 
-                // Get current user
+                // Get current user from backend
                 try {
                     const userResponse = await api.get('/api/auth/user');
                     if (userResponse && userResponse.user) {
                         currentUser = userResponse.user;
                         userData = currentUser;
-                        console.log('Current user loaded:', currentUser.id);
+                        console.log('Current user loaded from backend:', currentUser.id);
                         
                         // Save to cache
                         localStorage.setItem(LOCAL_STORAGE_KEYS.USER, JSON.stringify({
@@ -726,35 +906,38 @@
                             id: currentUser.id,
                             displayName: currentUser.displayName,
                             email: currentUser.email,
-                            photoURL: currentUser.photoURL
+                            photoURL: currentUser.photoURL,
+                            username: currentUser.username
                         }));
                         
                         localStorage.setItem(LOCAL_STORAGE_KEYS.USER_PROFILE, JSON.stringify(userData));
+                        
+                        // Generate unique QR code for this user
+                        generateUniqueQRCode();
                     }
                 } catch (userError) {
                     console.log('Could not load user from API, using cache:', userError.message);
                     await loadUserFromCache();
+                    generateUniqueQRCode();
                 }
                 
-                // Setup event listeners
-                setupEventListeners();
-                
-                // Load initial data
+                // Load all data from backend
                 await loadInitialData();
                 
-                // Generate QR code
-                generateUniqueQRCode();
+                // Load all users in background
+                setTimeout(() => {
+                    fetchAllUsersFromBackend();
+                }, 1000);
                 
-                showNotification('Friends system ready', 'success');
-                console.log('=== FRIENDS SYSTEM INITIALIZED SUCCESSFULLY ===');
+                showNotification('Connected to server', 'success');
+                console.log('=== FRIENDS SYSTEM INITIALIZED WITH BACKEND SUCCESSFULLY ===');
                 
             } catch (error) {
-                console.error('Error initializing friends system:', error);
+                console.error('Error initializing friends system with backend:', error);
                 showNotification('Could not connect to server', 'error');
                 
                 // Fallback to cached data
                 loadCachedDataInstantly();
-                setupEventListeners();
                 updateCurrentSection();
             }
         }
@@ -847,19 +1030,39 @@
                     console.error('Error loading muted friends:', mutedError);
                 }
                 
+                // Load contacts
+                try {
+                    const contactsResponse = await api.get('/api/contacts/synced');
+                    if (contactsResponse && contactsResponse.contacts) {
+                        contacts = contactsResponse.contacts;
+                        document.getElementById('contactsCount').textContent = contacts.length;
+                        console.log('Loaded contacts:', contacts.length);
+                        localStorage.setItem(LOCAL_STORAGE_KEYS.CONTACTS, JSON.stringify(contacts));
+                    }
+                } catch (contactsError) {
+                    console.error('Error loading contacts:', contactsError);
+                }
+                
+                // Load groups
+                try {
+                    const groupsResponse = await api.get('/api/groups/user');
+                    if (groupsResponse && groupsResponse.groups) {
+                        groups = groupsResponse.groups;
+                        console.log('Loaded groups:', groups.length);
+                        localStorage.setItem(LOCAL_STORAGE_KEYS.USER_GROUPS, JSON.stringify(groups));
+                    }
+                } catch (groupsError) {
+                    console.error('Error loading groups:', groupsError);
+                }
+                
                 // Update UI
                 updateCurrentSection();
                 
-                // Load all users in background
-                setTimeout(() => {
-                    fetchAllUsersFromBackend();
-                }, 1000);
-                
-                showNotification('Data loaded successfully', 'success');
+                showNotification('Data loaded successfully from server', 'success');
                 
             } catch (error) {
                 console.error('Error loading initial data:', error);
-                showNotification('Error loading data', 'error');
+                showNotification('Error loading data from server', 'error');
             }
         }
         
@@ -872,13 +1075,23 @@
                 const cachedUser = localStorage.getItem(LOCAL_STORAGE_KEYS.USER);
                 if (cachedUser) {
                     currentUser = JSON.parse(cachedUser);
-                    console.log('Loaded user from cache');
+                    console.log('Loaded user from cache:', currentUser.id);
+                } else {
+                    currentUser = {
+                        id: 'local_user_' + Date.now(),
+                        displayName: 'Local User',
+                        email: '',
+                        photoURL: '',
+                        username: 'user_' + Math.random().toString(36).substr(2, 9)
+                    };
                 }
                 
                 // Load user profile
                 const cachedProfile = localStorage.getItem(LOCAL_STORAGE_KEYS.USER_PROFILE);
                 if (cachedProfile) {
                     userData = JSON.parse(cachedProfile);
+                } else {
+                    userData = currentUser;
                 }
                 
                 // Load friends
@@ -894,7 +1107,10 @@
                 
                 // Load other cached data
                 const contactsData = localStorage.getItem(LOCAL_STORAGE_KEYS.CONTACTS);
-                if (contactsData) contacts = JSON.parse(contactsData);
+                if (contactsData) {
+                    contacts = JSON.parse(contactsData);
+                    document.getElementById('contactsCount').textContent = contacts.length;
+                }
                 
                 const requestsData = localStorage.getItem(LOCAL_STORAGE_KEYS.REQUESTS);
                 if (requestsData) {
@@ -967,17 +1183,21 @@
                         id: 'local_user_' + Date.now(),
                         displayName: 'Local User',
                         email: '',
-                        photoURL: ''
+                        photoURL: '',
+                        username: 'user_' + Math.random().toString(36).substr(2, 9)
                     };
                 }
+                userData = currentUser;
             } catch (error) {
                 console.error('Error loading user from cache:', error);
                 currentUser = {
                     id: 'fallback_user_' + Date.now(),
                     displayName: 'User',
                     email: '',
-                    photoURL: ''
+                    photoURL: '',
+                    username: 'user_' + Math.random().toString(36).substr(2, 9)
                 };
+                userData = currentUser;
             }
         }
         
@@ -989,7 +1209,7 @@
             
             // Combine all friends, contacts, and pinned friends for display
             const allToDisplay = [
-                ...pinnedFriends.filter(f => f.isPinned),
+                ...pinnedFriends,
                 ...friends,
                 ...contacts
             ].slice(0, 25);
@@ -1009,7 +1229,7 @@
             
             allToDisplay.forEach(item => {
                 addFriendItemInstant(item, fragment, 
-                    item.isPinned ? 'pinned' : 
+                    pinnedFriends.some(f => f.id === item.id) ? 'pinned' : 
                     friends.some(f => f.id === item.id) ? 'friend' : 'contact');
             });
             
@@ -1134,8 +1354,8 @@
                 const lastSync = localStorage.getItem('all_users_last_sync');
                 const now = Date.now();
                 
-                // Use cache if it's less than 5 minutes old
-                if (cachedAllUsers && lastSync && (now - parseInt(lastSync)) < 5 * 60 * 1000) {
+                // Use cache if it's less than 2 minutes old
+                if (cachedAllUsers && lastSync && (now - parseInt(lastSync)) < 2 * 60 * 1000) {
                     allUsers = JSON.parse(cachedAllUsers);
                     console.log(`Using cached all users: ${allUsers.length} users`);
                     renderAllUsersList();
@@ -1143,7 +1363,7 @@
                 }
                 
                 // Fetch from backend API
-                const response = await api.get('/api/users/all');
+                const response = await api.get('/api/users/all?limit=100');
                 
                 if (response && response.users) {
                     // Filter out current user from the list
@@ -1394,26 +1614,87 @@
         }
         
         function startQRCodeScanning(videoElement) {
-            console.log('QR code scanning started (simulated)');
-            setTimeout(() => {
-                simulateQRCodeDetection();
-            }, 3000);
+            console.log('Starting QR code scanning...');
+            
+            // Create canvas for QR code detection
+            const canvas = document.createElement('canvas');
+            const context = canvas.getContext('2d');
+            
+            function scanFrame() {
+                if (!videoElement || videoElement.readyState !== videoElement.HAVE_ENOUGH_DATA) {
+                    requestAnimationFrame(scanFrame);
+                    return;
+                }
+                
+                canvas.width = videoElement.videoWidth;
+                canvas.height = videoElement.videoHeight;
+                context.drawImage(videoElement, 0, 0, canvas.width, canvas.height);
+                
+                const imageData = context.getImageData(0, 0, canvas.width, canvas.height);
+                
+                // Simple QR code detection simulation
+                // In a real app, you would use a proper QR code library like jsQR
+                detectQRCode(imageData);
+                
+                requestAnimationFrame(scanFrame);
+            }
+            
+            function detectQRCode(imageData) {
+                // This is a simplified detection for demo purposes
+                // Real implementation would use a proper QR code scanning library
+                const data = imageData.data;
+                let darkPixels = 0;
+                
+                // Count dark pixels
+                for (let i = 0; i < data.length; i += 4) {
+                    const r = data[i];
+                    const g = data[i + 1];
+                    const b = data[i + 2];
+                    
+                    // Check if pixel is dark
+                    if (r < 100 && g < 100 && b < 100) {
+                        darkPixels++;
+                    }
+                }
+                
+                const totalPixels = data.length / 4;
+                const darkRatio = darkPixels / totalPixels;
+                
+                // If we detect a pattern that might be a QR code (high contrast)
+                if (darkRatio > 0.3 && darkRatio < 0.7) {
+                    simulateQRCodeDetection();
+                }
+            }
+            
+            scanFrame();
         }
         
         function simulateQRCodeDetection() {
-            showNotification('QR code detected!', 'success');
+            // In a real app, this would parse actual QR code data
+            // For demo, we'll simulate finding a QR code after 2 seconds
             setTimeout(() => {
-                stopCameraScanner();
-                cameraScannerModal.classList.remove('active');
-                const mockUser = {
-                    id: 'user_qr_' + Date.now(),
-                    displayName: 'QR Code User',
-                    username: '@qrusername',
-                    photoURL: '',
-                    online: true
-                };
-                showFriendRequestFromQR(mockUser);
-            }, 1000);
+                if (!cameraScannerModal.classList.contains('active')) return;
+                
+                showNotification('QR code detected!', 'success');
+                processScannedQRCode();
+            }, 2000);
+        }
+        
+        function processScannedQRCode() {
+            // Simulate scanning a QR code with user data
+            const mockQRData = {
+                type: 'knecta_friend_request',
+                userId: 'user_' + Math.random().toString(36).substr(2, 9),
+                username: '@friend_' + Math.random().toString(36).substr(2, 5),
+                displayName: 'QR Friend ' + Math.floor(Math.random() * 1000),
+                timestamp: Date.now(),
+                app: 'Knecta Chat'
+            };
+            
+            // Show the friend request modal
+            showFriendRequestFromQR(mockQRData);
+            stopCameraScanner();
+            cameraScannerModal.classList.remove('active');
         }
         
         function stopCameraScanner() {
@@ -1466,23 +1747,26 @@
             showNotification(flashOn ? 'Flash turned on' : 'Flash turned off', 'info');
         }
         
-        function showFriendRequestFromQR(userData) {
-            document.getElementById('requestAvatar').innerHTML = userData.photoURL ? 
-                `<img src="${escapeHtml(userData.photoURL)}" style="width: 100%; height: 100%; border-radius: 50%;">` :
-                `<i class="fas fa-user"></i>`;
+        function showFriendRequestFromQR(qrData) {
+            document.getElementById('requestAvatar').innerHTML = `
+                <div style="width: 100%; height: 100%; border-radius: 50%; background-color: var(--primary-color); color: white; display: flex; align-items: center; justify-content: center; font-size: 24px;">
+                    ${qrData.displayName ? qrData.displayName.charAt(0).toUpperCase() : 'U'}
+                </div>
+            `;
             
-            document.getElementById('requestName').textContent = userData.displayName || 'Unknown User';
-            document.getElementById('requestUsername').textContent = userData.username || '@unknown';
+            document.getElementById('requestName').textContent = qrData.displayName || 'QR Code User';
+            document.getElementById('requestUsername').textContent = qrData.username || '@unknown';
             document.getElementById('mutualCount').textContent = '0';
             
             const acceptBtn = document.getElementById('acceptRequestBtn');
-            acceptBtn.dataset.userId = userData.id;
-            acceptBtn.dataset.userName = userData.displayName || 'User';
+            acceptBtn.dataset.userId = qrData.userId;
+            acceptBtn.dataset.userName = qrData.displayName || 'User';
+            acceptBtn.dataset.qrData = JSON.stringify(qrData);
             
             friendRequestModal.classList.add('active');
         }
         
-        // Generate unique QR code
+        // Generate unique QR code for current user
         function generateUniqueQRCode() {
             try {
                 const qrContainer = document.getElementById('qrCodeContainer');
@@ -1502,25 +1786,31 @@
                     return;
                 }
                 
+                // Generate QR data with unique user information
                 const qrData = JSON.stringify({
                     type: 'knecta_friend_request',
-                    userId: currentUser?.id || 'demo_user',
-                    username: userData?.username || 'demo',
+                    userId: currentUser?.id || 'demo_user_' + Date.now(),
+                    username: userData?.username || ('user_' + Math.random().toString(36).substr(2, 9)),
                     displayName: userData?.displayName || 'Demo User',
                     timestamp: Date.now(),
-                    app: 'Knecta Chat'
+                    app: 'Knecta Chat',
+                    version: '1.0'
                 });
                 
                 try {
                     new QRCode(qrContainer, {
                         text: qrData,
-                        width: 180,
-                        height: 180,
+                        width: 200,
+                        height: 200,
                         colorDark: '#0084ff',
                         colorLight: '#ffffff',
                         correctLevel: QRCode.CorrectLevel.H
                     });
-                    console.log('QR code generated successfully');
+                    console.log('Unique QR code generated successfully for user:', currentUser?.id);
+                    
+                    // Store the QR code data for later verification
+                    localStorage.setItem(LOCAL_STORAGE_KEYS.UNIQUE_QR_CODE, qrData);
+                    
                 } catch (qrError) {
                     console.error('QR code generation error:', qrError);
                     qrContainer.innerHTML = `
@@ -1528,6 +1818,7 @@
                             <i class="fas fa-qrcode" style="font-size: 48px; margin-bottom: 15px; color: var(--primary-color);"></i>
                             <p>Your unique QR code</p>
                             <p style="font-size: 12px; margin-top: 10px;">Scan to add as friend</p>
+                            <p style="font-size: 10px; margin-top: 5px;">User: ${userData?.username || currentUser?.id}</p>
                         </div>
                     `;
                 }
@@ -3339,6 +3630,27 @@
                 selectedFriend = null;
             });
             
+            // Friend request modal buttons
+            document.getElementById('declineRequestBtn').addEventListener('click', () => {
+                friendRequestModal.classList.remove('active');
+                showNotification('Friend request declined', 'info');
+            });
+            
+            document.getElementById('acceptRequestBtn').addEventListener('click', async function() {
+                const userId = this.dataset.userId;
+                const userName = this.dataset.userName;
+                const qrData = this.dataset.qrData ? JSON.parse(this.dataset.qrData) : null;
+                
+                if (qrData && qrData.userId) {
+                    // This came from a QR code scan
+                    sendFriendRequest(qrData.userId);
+                    friendRequestModal.classList.remove('active');
+                } else if (userId) {
+                    // This is a regular friend request
+                    acceptFriendRequestOnline(null, userId);
+                }
+            });
+            
             // Window resize
             window.addEventListener('resize', checkMobile);
             
@@ -3347,6 +3659,9 @@
                 saveFriendsToLocalStorage();
                 stopCameraScanner();
             });
+            
+            // Initial mobile check
+            checkMobile();
         }
         
         // Save friends to local storage
@@ -3377,7 +3692,7 @@
                     return;
                 }
                 
-                const response = await api.get('/api/contacts');
+                const response = await api.get('/api/contacts/sync');
                 if (response && response.contacts) {
                     contacts = response.contacts;
                     
@@ -3410,23 +3725,162 @@
         
         // The following functions are stubs for features not fully implemented
         function showChangeCategoryModal(friendData) {
-            showNotification('Change category feature coming soon', 'info');
+            const modal = document.createElement('div');
+            modal.className = 'add-friend-modal active';
+            modal.innerHTML = `
+                <div class="add-friend-container">
+                    <div class="add-friend-header">
+                        <h3>Change Category</h3>
+                        <button class="add-friend-btn close-category-modal">
+                            <i class="fas fa-times"></i>
+                        </button>
+                    </div>
+                    <div style="padding: 25px;">
+                        <div class="input-group">
+                            <label class="input-label">Select New Category</label>
+                            <select class="text-input" id="newCategorySelect">
+                                <option value="acquaintance">Acquaintance</option>
+                                <option value="friend" selected>Friend</option>
+                                <option value="close-friend">Close Friend</option>
+                                <option value="family">Family</option>
+                                <option value="business">Business</option>
+                            </select>
+                        </div>
+                    </div>
+                    <div style="padding: 20px; border-top: 1px solid var(--border-color); display: flex; justify-content: space-between;">
+                        <button class="action-btn secondary close-category-btn">Cancel</button>
+                        <button class="action-btn primary" id="saveCategoryBtn">Save Category</button>
+                    </div>
+                </div>
+            `;
+            
+            document.body.appendChild(modal);
+            
+            modal.querySelector('.close-category-modal').addEventListener('click', () => {
+                document.body.removeChild(modal);
+            });
+            
+            modal.querySelector('.close-category-btn').addEventListener('click', () => {
+                document.body.removeChild(modal);
+            });
+            
+            modal.querySelector('#saveCategoryBtn').addEventListener('click', async () => {
+                const newCategory = modal.querySelector('#newCategorySelect').value;
+                
+                try {
+                    const api = window.parent.api;
+                    if (api) {
+                        const response = await api.put(`/api/friends/${friendData.id}/category`, {
+                            category: newCategory
+                        });
+                        
+                        if (response && response.success) {
+                            // Update local data
+                            const friendIndex = friends.findIndex(f => f.id === friendData.id);
+                            if (friendIndex !== -1) {
+                                friends[friendIndex].category = newCategory;
+                                localStorage.setItem(LOCAL_STORAGE_KEYS.FRIENDS, JSON.stringify(friends));
+                            }
+                            
+                            updateCurrentSection();
+                            showNotification('Category updated successfully', 'success');
+                        }
+                    }
+                } catch (error) {
+                    console.error('Error updating category:', error);
+                    showNotification('Failed to update category', 'error');
+                }
+                
+                document.body.removeChild(modal);
+            });
         }
         
         function viewChatHistory(friendData) {
-            showNotification('Chat history feature coming soon', 'info');
+            navigateToChat(friendData.id, friendData.displayName || 'User');
         }
         
         function viewCallHistory(friendData) {
-            showNotification('Call history feature coming soon', 'info');
+            navigateToCall(friendData.id, friendData.displayName || 'User');
         }
         
-        function removeFriend(friendData) {
-            showNotification('Remove friend feature coming soon', 'info');
+        async function removeFriend(friendData) {
+            if (!confirm(`Are you sure you want to remove ${friendData.displayName} from your friends?`)) {
+                return;
+            }
+            
+            try {
+                const api = window.parent.api;
+                if (!api) {
+                    showNotification('API not available', 'error');
+                    return;
+                }
+                
+                const response = await api.delete(`/api/friends/${friendData.id}`);
+                
+                if (response && response.success) {
+                    // Remove from local arrays
+                    friends = friends.filter(f => f.id !== friendData.id);
+                    pinnedFriends = pinnedFriends.filter(f => f.id !== friendData.id);
+                    mutedFriends = mutedFriends.filter(f => f.id !== friendData.id);
+                    
+                    // Update localStorage
+                    localStorage.setItem(LOCAL_STORAGE_KEYS.FRIENDS, JSON.stringify(friends));
+                    localStorage.setItem(LOCAL_STORAGE_KEYS.PINNED_FRIENDS, JSON.stringify(pinnedFriends));
+                    localStorage.setItem(LOCAL_STORAGE_KEYS.MUTED_FRIENDS, JSON.stringify(mutedFriends));
+                    
+                    // Update UI
+                    updateCurrentSection();
+                    updateFriendCounts();
+                    
+                    showNotification('Friend removed successfully', 'success');
+                } else {
+                    showNotification('Failed to remove friend', 'error');
+                }
+                
+            } catch (error) {
+                console.error('Error removing friend:', error);
+                showNotification('Failed to remove friend', 'error');
+            }
         }
         
-        function blockUser(friendData) {
-            showNotification('Block user feature coming soon', 'info');
+        async function blockUser(friendData) {
+            if (!confirm(`Are you sure you want to block ${friendData.displayName}? This will remove them from your friends and prevent them from contacting you.`)) {
+                return;
+            }
+            
+            try {
+                const api = window.parent.api;
+                if (!api) {
+                    showNotification('API not available', 'error');
+                    return;
+                }
+                
+                const response = await api.post(`/api/users/${friendData.id}/block`);
+                
+                if (response && response.success) {
+                    // Remove from local arrays
+                    friends = friends.filter(f => f.id !== friendData.id);
+                    pinnedFriends = pinnedFriends.filter(f => f.id !== friendData.id);
+                    mutedFriends = mutedFriends.filter(f => f.id !== friendData.id);
+                    
+                    // Update localStorage
+                    localStorage.setItem(LOCAL_STORAGE_KEYS.FRIENDS, JSON.stringify(friends));
+                    localStorage.setItem(LOCAL_STORAGE_KEYS.PINNED_FRIENDS, JSON.stringify(pinnedFriends));
+                    localStorage.setItem(LOCAL_STORAGE_KEYS.MUTED_FRIENDS, JSON.stringify(mutedFriends));
+                    
+                    // Update UI
+                    updateCurrentSection();
+                    updateFriendCounts();
+                    
+                    showNotification('User blocked successfully', 'success');
+                } else {
+                    showNotification('Failed to block user', 'error');
+                }
+                
+            } catch (error) {
+                console.error('Error blocking user:', error);
+                showNotification('Failed to block user', 'error');
+            }
         }
         
         function renderTemporaryFriends() {

@@ -93,6 +93,12 @@ self.addEventListener('install', event => {
               return { asset: assetUrl, success: false, reason: 'invalid-url' };
             }
             
+            // Skip HTML files from initial cache - they'll use network-first strategy
+            if (assetUrl.endsWith('.html') || asset === '/') {
+              console.log('[Service Worker] Skipping HTML from initial cache (network-first):', assetUrl);
+              return { asset: assetUrl, success: false, reason: 'html-network-first' };
+            }
+            
             // Fetch the asset
             const response = await fetch(assetUrl, {
               credentials: 'same-origin',
@@ -215,9 +221,29 @@ function isStaticAssetRequest(request) {
   
   // Check file extension
   const extension = url.pathname.split('.').pop().toLowerCase();
-  const staticExtensions = ['css', 'js', 'json', 'png', 'jpg', 'jpeg', 'svg', 'ico', 'woff2', 'woff', 'ttf', 'webp', 'gif', 'html'];
+  const staticExtensions = ['css', 'js', 'json', 'png', 'jpg', 'jpeg', 'svg', 'ico', 'woff2', 'woff', 'ttf', 'webp', 'gif'];
   
   return staticExtensions.includes(extension);
+}
+
+// Check if request is for HTML file
+function isHtmlRequest(request) {
+  const url = new URL(request.url);
+  
+  // Skip non-GET requests
+  if (request.method !== 'GET') return false;
+  
+  // Skip cross-origin requests
+  if (url.origin !== self.location.origin) return false;
+  
+  // Check if URL contains never-cache patterns
+  if (containsNeverCachePattern(request.url)) return false;
+  
+  // Check file extension
+  const extension = url.pathname.split('.').pop().toLowerCase();
+  const isHtml = extension === 'html' || request.headers.get('Accept')?.includes('text/html');
+  
+  return isHtml;
 }
 
 // Handle static asset requests with cache-first strategy
@@ -260,11 +286,6 @@ async function handleStaticAsset(request) {
     // If network failed and no cache, handle gracefully
     console.warn('[Service Worker] Cache miss and network failed for:', request.url);
     
-    // For HTML requests, return offline page
-    if (request.headers.get('Accept')?.includes('text/html')) {
-      return getOfflinePage();
-    }
-    
     // For other assets, return a minimal error response without throwing
     return new Response('Resource not available', {
       status: 404,
@@ -279,11 +300,6 @@ async function handleStaticAsset(request) {
     // NON-BLOCKING: Log error but don't throw
     console.warn('[Service Worker] Failed to handle static asset:', request.url, error.message);
     
-    // For HTML requests, return offline page
-    if (request.headers.get('Accept')?.includes('text/html')) {
-      return getOfflinePage();
-    }
-    
     // For other assets, return a minimal error response
     return new Response('', {
       status: 500,
@@ -292,6 +308,52 @@ async function handleStaticAsset(request) {
         'X-Error': 'Service worker error'
       }
     });
+  }
+}
+
+// Handle HTML requests with network-first strategy
+async function handleHtmlRequest(request) {
+  console.log('[Service Worker] Network-first for HTML:', request.url);
+  
+  try {
+    // FIRST: Try to fetch from network
+    const networkResponse = await fetch(request).catch(error => {
+      console.warn('[Service Worker] Network fetch failed for HTML:', request.url, error.message);
+      return null;
+    });
+    
+    // If network fetch succeeded
+    if (networkResponse && networkResponse.ok) {
+      const cache = await caches.open(CACHE_NAME);
+      
+      // Clone the response before caching
+      const responseToCache = networkResponse.clone();
+      
+      // Cache the fresh HTML for offline use
+      await cache.put(request, responseToCache);
+      console.log('[Service Worker] Updated HTML in cache:', request.url);
+      
+      return networkResponse;
+    }
+    
+    // Network failed or returned error - try cache
+    console.log('[Service Worker] Network failed, trying cache for:', request.url);
+    const cache = await caches.open(CACHE_NAME);
+    const cachedResponse = await cache.match(request);
+    
+    if (cachedResponse) {
+      console.log('[Service Worker] Serving HTML from cache (offline):', request.url);
+      return cachedResponse;
+    }
+    
+    // No cache available - return offline page
+    console.log('[Service Worker] No cached HTML, showing offline page:', request.url);
+    return getOfflinePage();
+    
+  } catch (error) {
+    // NON-BLOCKING: Log error and return offline page
+    console.warn('[Service Worker] Error handling HTML request:', request.url, error.message);
+    return getOfflinePage();
   }
 }
 
@@ -431,55 +493,17 @@ self.addEventListener('fetch', event => {
     return;
   }
   
-  // Handle static asset requests (CSS, JS, images, icons, HTML)
-  if (isStaticAssetRequest(request)) {
-    console.log('[Service Worker] Handling static asset:', url);
-    event.respondWith(handleStaticAsset(request));
+  // Handle HTML requests with NETWORK-FIRST strategy
+  if (isHtmlRequest(request)) {
+    console.log('[Service Worker] Handling HTML (network-first):', url);
+    event.respondWith(handleHtmlRequest(request));
     return;
   }
   
-  // For navigation requests (HTML), try cache then network
-  if (request.headers.get('Accept')?.includes('text/html') && 
-      new URL(request.url).origin === self.location.origin &&
-      !containsNeverCachePattern(request.url)) {
-    
-    console.log('[Service Worker] Handling navigation:', url);
-    event.respondWith(
-      (async () => {
-        try {
-          // Try cache first for HTML
-          const cache = await caches.open(CACHE_NAME);
-          const cachedResponse = await cache.match(request);
-          
-          if (cachedResponse) {
-            console.log('[Service Worker] Serving HTML from cache:', url);
-            return cachedResponse;
-          }
-          
-          // Try network
-          const networkResponse = await fetch(request).catch(error => {
-            console.warn('[Service Worker] Network failed for HTML:', url, error.message);
-            return null;
-          });
-          
-          if (networkResponse && networkResponse.ok) {
-            // Cache the HTML for next time
-            const responseToCache = networkResponse.clone();
-            await cache.put(request, responseToCache);
-            return networkResponse;
-          }
-          
-          // Network failed or invalid response, return offline page
-          console.log('[Service Worker] Network failed for HTML, returning offline page:', url);
-          return getOfflinePage();
-          
-        } catch (error) {
-          // NON-BLOCKING: Log error and return offline page
-          console.warn('[Service Worker] Error handling navigation:', url, error.message);
-          return getOfflinePage();
-        }
-      })()
-    );
+  // Handle static asset requests with CACHE-FIRST strategy
+  if (isStaticAssetRequest(request)) {
+    console.log('[Service Worker] Handling static asset (cache-first):', url);
+    event.respondWith(handleStaticAsset(request));
     return;
   }
   
@@ -614,6 +638,33 @@ self.addEventListener('message', event => {
         online: navigator.onLine,
         timestamp: Date.now()
       });
+      break;
+      
+    case 'REFRESH_HTML':
+      console.log('[Service Worker] Refreshing HTML cache...');
+      event.waitUntil(
+        (async () => {
+          try {
+            const cache = await caches.open(CACHE_NAME);
+            const keys = await cache.keys();
+            
+            // Clear HTML files from cache
+            for (const request of keys) {
+              if (request.url.endsWith('.html') || new URL(request.url).pathname === '/') {
+                await cache.delete(request);
+                console.log('[Service Worker] Removed from cache:', request.url);
+              }
+            }
+            
+            event.ports[0].postMessage({
+              type: 'HTML_CACHE_CLEARED',
+              timestamp: Date.now()
+            });
+          } catch (error) {
+            console.warn('[Service Worker] Failed to refresh HTML cache:', error);
+          }
+        })()
+      );
       break;
   }
 });

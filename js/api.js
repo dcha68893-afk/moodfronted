@@ -7,6 +7,7 @@
 // CRITICAL FIX: HTTP 500 errors no longer mark backend as offline
 // CRITICAL FIX: Added api.get(), api.post(), api.put(), api.delete() methods
 // UPDATED: Enhanced token retrieval and authentication header handling
+// UPDATED: Explicitly exposed all API methods for iframe pages
 // ============================================================================
 // CRITICAL IMPROVEMENTS APPLIED:
 // 1. SINGLE internal fetch function with comprehensive input validation
@@ -23,6 +24,7 @@
 // 12. ENHANCED: Improved token retrieval from localStorage
 // 13. ENHANCED: Helper function getAuthHeaders() for all API calls
 // 14. ENHANCED: Automatic token attachment to all authenticated endpoints
+// 15. CRITICAL FIX: Explicitly exposed all API methods used by iframe pages
 // ============================================================================
 
 // ============================================================================
@@ -1112,6 +1114,703 @@ const apiObject = {
   },
   
   // ============================================================================
+  // CRITICAL FIX: EXPLICITLY ADDED ALL API METHODS USED BY IFRAME PAGES
+  // ============================================================================
+  
+  /**
+   * getMessages() - Get all messages (used by message.html)
+   * @returns {Promise} Promise with messages data
+   */
+  getMessages: async function() {
+    try {
+      const result = await globalApiFunction('/messages', { 
+        method: 'GET',
+        auth: true
+      });
+      
+      if (!result.ok) {
+        console.error(`❌ [API] getMessages failed: ${result.message}`);
+        throw {
+          message: result.message,
+          status: result.status,
+          isRateLimited: result.isRateLimited,
+          isServerError: result.isServerError
+        };
+      }
+      
+      return {
+        ok: result.ok,
+        success: result.ok,
+        data: result.data,
+        message: result.message,
+        isRateLimited: result.isRateLimited || false,
+        isServerError: result.isServerError || false
+      };
+    } catch (error) {
+      console.error('🔧 [API] getMessages error:', error);
+      throw error;
+    }
+  },
+  
+  /**
+   * getMessageById() - Get message by ID (used by message.html)
+   * @param {string} messageId - Message ID
+   * @returns {Promise} Promise with message data
+   */
+  getMessageById: async function(messageId) {
+    try {
+      const result = await globalApiFunction(`/messages/${encodeURIComponent(messageId)}`, { 
+        method: 'GET',
+        auth: true
+      });
+      
+      if (!result.ok) {
+        console.error(`❌ [API] getMessageById failed: ${result.message}`);
+        throw {
+          message: result.message,
+          status: result.status,
+          isRateLimited: result.isRateLimited,
+          isServerError: result.isServerError
+        };
+      }
+      
+      return {
+        ok: result.ok,
+        success: result.ok,
+        data: result.data,
+        message: result.message,
+        isRateLimited: result.isRateLimited || false,
+        isServerError: result.isServerError || false
+      };
+    } catch (error) {
+      console.error('🔧 [API] getMessageById error:', error);
+      throw error;
+    }
+  },
+  
+  /**
+   * sendMessage() - Send a new message (used by message.html)
+   * @param {object} messageData - Message data
+   * @returns {Promise} Promise with sent message data
+   */
+  sendMessage: async function(messageData) {
+    try {
+      const result = await globalApiFunction('/messages', { 
+        method: 'POST',
+        body: messageData,
+        auth: true
+      });
+      
+      if (!result.ok) {
+        console.error(`❌ [API] sendMessage failed: ${result.message}`);
+        throw {
+          message: result.message,
+          status: result.status,
+          isRateLimited: result.isRateLimited,
+          isServerError: result.isServerError
+        };
+      }
+      
+      return {
+        ok: result.ok,
+        success: result.ok,
+        data: result.data,
+        message: result.message,
+        isRateLimited: result.isRateLimited || false,
+        isServerError: result.isServerError || false
+      };
+    } catch (error) {
+      console.error('🔧 [API] sendMessage error:', error);
+      throw error;
+    }
+  },
+  
+  /**
+   * getFriends() - Get all friends (used by friend.html)
+   * @returns {Promise} Promise with friends data
+   */
+  getFriends: async function() {
+    // Use global network state
+    if (!window.AppNetwork.isOnline) {
+      const cached = localStorage.getItem('moodchat_cache_friends');
+      if (cached) {
+        try {
+          const cachedData = JSON.parse(cached);
+          return {
+            ok: true,
+            success: true,
+            data: cachedData.data,
+            cached: true,
+            offline: true,
+            isRateLimited: false,
+            isServerError: false
+          };
+        } catch (e) {
+          // Continue to network attempt
+        }
+      }
+    }
+    
+    try {
+      const result = await globalApiFunction('/friends/list', {
+        method: 'GET',
+        auth: true
+      });
+      
+      if (!result.ok) {
+        throw {
+          message: result.message,
+          status: result.status,
+          isRateLimited: result.isRateLimited,
+          isServerError: result.isServerError
+        };
+      }
+      
+      if (result.ok && result.data) {
+        try {
+          localStorage.setItem('moodchat_cache_friends', JSON.stringify({
+            data: result.data,
+            timestamp: Date.now()
+          }));
+        } catch (e) {
+          console.log('🔧 [API] Could not cache friends');
+        }
+      }
+      
+      return {
+        ok: result.ok,
+        success: result.ok,
+        data: result.data,
+        message: result.message,
+        isRateLimited: result.isRateLimited || false,
+        isServerError: result.isServerError || false
+      };
+    } catch (error) {
+      console.error('🔧 [API] getFriends error:', error);
+      
+      const cached = localStorage.getItem('moodchat_cache_friends');
+      if (cached) {
+        try {
+          const cachedData = JSON.parse(cached);
+          return {
+            ok: true,
+            success: true,
+            data: cachedData.data,
+            cached: true,
+            message: 'Using cached data',
+            isRateLimited: false,
+            isServerError: false
+          };
+        } catch (e) {
+          // Ignore cache errors
+        }
+      }
+      
+      return {
+        ok: false,
+        success: false,
+        message: 'Failed to fetch friends',
+        error: error.message,
+        isNetworkError: true,
+        isRateLimited: false,
+        isServerError: false
+      };
+    }
+  },
+  
+  /**
+   * addFriend() - Add a friend (used by friend.html)
+   * @param {string} userId - User ID to add as friend
+   * @returns {Promise} Promise with friend request data
+   */
+  addFriend: async function(userId) {
+    try {
+      const result = await globalApiFunction('/friends/add', { 
+        method: 'POST',
+        body: { userId: userId },
+        auth: true
+      });
+      
+      if (!result.ok) {
+        console.error(`❌ [API] addFriend failed: ${result.message}`);
+        throw {
+          message: result.message,
+          status: result.status,
+          isRateLimited: result.isRateLimited,
+          isServerError: result.isServerError
+        };
+      }
+      
+      return {
+        ok: result.ok,
+        success: result.ok,
+        data: result.data,
+        message: result.message,
+        isRateLimited: result.isRateLimited || false,
+        isServerError: result.isServerError || false
+      };
+    } catch (error) {
+      console.error('🔧 [API] addFriend error:', error);
+      throw error;
+    }
+  },
+  
+  /**
+   * getGroups() - Get all groups (used by group.html)
+   * @returns {Promise} Promise with groups data
+   */
+  getGroups: async function() {
+    try {
+      const result = await globalApiFunction('/groups', { 
+        method: 'GET',
+        auth: true
+      });
+      
+      if (!result.ok) {
+        console.error(`❌ [API] getGroups failed: ${result.message}`);
+        throw {
+          message: result.message,
+          status: result.status,
+          isRateLimited: result.isRateLimited,
+          isServerError: result.isServerError
+        };
+      }
+      
+      return {
+        ok: result.ok,
+        success: result.ok,
+        data: result.data,
+        message: result.message,
+        isRateLimited: result.isRateLimited || false,
+        isServerError: result.isServerError || false
+      };
+    } catch (error) {
+      console.error('🔧 [API] getGroups error:', error);
+      throw error;
+    }
+  },
+  
+  /**
+   * getGroupById() - Get group by ID (used by group.html)
+   * @param {string} groupId - Group ID
+   * @returns {Promise} Promise with group data
+   */
+  getGroupById: async function(groupId) {
+    try {
+      const result = await globalApiFunction(`/groups/${encodeURIComponent(groupId)}`, { 
+        method: 'GET',
+        auth: true
+      });
+      
+      if (!result.ok) {
+        console.error(`❌ [API] getGroupById failed: ${result.message}`);
+        throw {
+          message: result.message,
+          status: result.status,
+          isRateLimited: result.isRateLimited,
+          isServerError: result.isServerError
+        };
+      }
+      
+      return {
+        ok: result.ok,
+        success: result.ok,
+        data: result.data,
+        message: result.message,
+        isRateLimited: result.isRateLimited || false,
+        isServerError: result.isServerError || false
+      };
+    } catch (error) {
+      console.error('🔧 [API] getGroupById error:', error);
+      throw error;
+    }
+  },
+  
+  /**
+   * createGroup() - Create a new group (used by group.html)
+   * @param {object} groupData - Group data
+   * @returns {Promise} Promise with created group data
+   */
+  createGroup: async function(groupData) {
+    try {
+      const result = await globalApiFunction('/groups', { 
+        method: 'POST',
+        body: groupData,
+        auth: true
+      });
+      
+      if (!result.ok) {
+        console.error(`❌ [API] createGroup failed: ${result.message}`);
+        throw {
+          message: result.message,
+          status: result.status,
+          isRateLimited: result.isRateLimited,
+          isServerError: result.isServerError
+        };
+      }
+      
+      return {
+        ok: result.ok,
+        success: result.ok,
+        data: result.data,
+        message: result.message,
+        isRateLimited: result.isRateLimited || false,
+        isServerError: result.isServerError || false
+      };
+    } catch (error) {
+      console.error('🔧 [API] createGroup error:', error);
+      throw error;
+    }
+  },
+  
+  /**
+   * getStatuses() - Get all statuses (used by status.html)
+   * @returns {Promise} Promise with statuses data
+   */
+  getStatuses: async function() {
+    // Use global network state
+    if (!window.AppNetwork.isOnline) {
+      const cached = localStorage.getItem('moodchat_cache_statuses');
+      if (cached) {
+        try {
+          const cachedData = JSON.parse(cached);
+          return {
+            ok: true,
+            success: true,
+            data: cachedData.data,
+            cached: true,
+            offline: true,
+            message: 'Using cached data (offline)',
+            isRateLimited: false,
+            isServerError: false
+          };
+        } catch (e) {
+          // Continue to network attempt
+        }
+      }
+    }
+    
+    try {
+      const result = await globalApiFunction('/statuses/all', {
+        method: 'GET',
+        auth: true
+      });
+      
+      if (!result.ok) {
+        throw {
+          message: result.message,
+          status: result.status,
+          isRateLimited: result.isRateLimited,
+          isServerError: result.isServerError
+        };
+      }
+      
+      if (result.ok && result.data) {
+        try {
+          localStorage.setItem('moodchat_cache_statuses', JSON.stringify({
+            data: result.data,
+            timestamp: Date.now()
+          }));
+        } catch (e) {
+          console.log('🔧 [API] Could not cache statuses');
+        }
+      }
+      
+      return {
+        ok: result.ok,
+        success: result.ok,
+        data: result.data,
+        message: result.message,
+        isRateLimited: result.isRateLimited || false,
+        isServerError: result.isServerError || false
+      };
+    } catch (error) {
+      console.error('🔧 [API] getStatuses error:', error);
+      
+      const cached = localStorage.getItem('moodchat_cache_statuses');
+      if (cached) {
+        try {
+          const cachedData = JSON.parse(cached);
+          return {
+            ok: true,
+            success: true,
+            data: cachedData.data,
+            cached: true,
+            message: 'Using cached data',
+            error: error.message,
+            isRateLimited: false,
+            isServerError: false
+          };
+        } catch (e) {
+          // Ignore cache errors
+        }
+      }
+      
+      return {
+        ok: false,
+        success: false,
+        message: 'Failed to fetch statuses',
+        error: error.message,
+        isNetworkError: true,
+        isRateLimited: false,
+        isServerError: false
+      };
+    }
+  },
+  
+  /**
+   * getStatus() - Get status by ID (used by status.html)
+   * @param {string} statusId - Status ID
+   * @returns {Promise} Promise with status data
+   */
+  getStatus: async function(statusId) {
+    try {
+      const result = await globalApiFunction(`/status/${encodeURIComponent(statusId)}`, { 
+        method: 'GET',
+        auth: true
+      });
+      
+      if (!result.ok) {
+        console.error(`❌ [API] getStatus failed: ${result.message}`);
+        throw {
+          message: result.message,
+          status: result.status,
+          isRateLimited: result.isRateLimited,
+          isServerError: result.isServerError
+        };
+      }
+      
+      return {
+        ok: result.ok,
+        success: result.ok,
+        data: result.data,
+        message: result.message,
+        isRateLimited: result.isRateLimited || false,
+        isServerError: result.isServerError || false
+      };
+    } catch (error) {
+      console.error('🔧 [API] getStatus error:', error);
+      throw error;
+    }
+  },
+  
+  /**
+   * createStatus() - Create a new status (used by status.html)
+   * @param {object} statusData - Status data
+   * @returns {Promise} Promise with created status data
+   */
+  createStatus: async function(statusData) {
+    try {
+      const result = await globalApiFunction('/status', { 
+        method: 'POST',
+        body: statusData,
+        auth: true
+      });
+      
+      if (!result.ok) {
+        console.error(`❌ [API] createStatus failed: ${result.message}`);
+        throw {
+          message: result.message,
+          status: result.status,
+          isRateLimited: result.isRateLimited,
+          isServerError: result.isServerError
+        };
+      }
+      
+      return {
+        ok: result.ok,
+        success: result.ok,
+        data: result.data,
+        message: result.message,
+        isRateLimited: result.isRateLimited || false,
+        isServerError: result.isServerError || false
+      };
+    } catch (error) {
+      console.error('🔧 [API] createStatus error:', error);
+      throw error;
+    }
+  },
+  
+  /**
+   * getCalls() - Get all calls (used by calls.html)
+   * @returns {Promise} Promise with calls data
+   */
+  getCalls: async function() {
+    try {
+      const result = await globalApiFunction('/calls', { 
+        method: 'GET',
+        auth: true
+      });
+      
+      if (!result.ok) {
+        console.error(`❌ [API] getCalls failed: ${result.message}`);
+        throw {
+          message: result.message,
+          status: result.status,
+          isRateLimited: result.isRateLimited,
+          isServerError: result.isServerError
+        };
+      }
+      
+      return {
+        ok: result.ok,
+        success: result.ok,
+        data: result.data,
+        message: result.message,
+        isRateLimited: result.isRateLimited || false,
+        isServerError: result.isServerError || false
+      };
+    } catch (error) {
+      console.error('🔧 [API] getCalls error:', error);
+      throw error;
+    }
+  },
+  
+  /**
+   * startCall() - Start a new call (used by calls.html)
+   * @param {object} callData - Call data
+   * @returns {Promise} Promise with call data
+   */
+  startCall: async function(callData) {
+    try {
+      const result = await globalApiFunction('/calls/start', { 
+        method: 'POST',
+        body: callData,
+        auth: true
+      });
+      
+      if (!result.ok) {
+        console.error(`❌ [API] startCall failed: ${result.message}`);
+        throw {
+          message: result.message,
+          status: result.status,
+          isRateLimited: result.isRateLimited,
+          isServerError: result.isServerError
+        };
+      }
+      
+      return {
+        ok: result.ok,
+        success: result.ok,
+        data: result.data,
+        message: result.message,
+        isRateLimited: result.isRateLimited || false,
+        isServerError: result.isServerError || false
+      };
+    } catch (error) {
+      console.error('🔧 [API] startCall error:', error);
+      throw error;
+    }
+  },
+  
+  /**
+   * getSettings() - Get user settings (used by settings.html)
+   * @returns {Promise} Promise with settings data
+   */
+  getSettings: async function() {
+    try {
+      const result = await globalApiFunction('/settings', { 
+        method: 'GET',
+        auth: true
+      });
+      
+      if (!result.ok) {
+        console.error(`❌ [API] getSettings failed: ${result.message}`);
+        throw {
+          message: result.message,
+          status: result.status,
+          isRateLimited: result.isRateLimited,
+          isServerError: result.isServerError
+        };
+      }
+      
+      return {
+        ok: result.ok,
+        success: result.ok,
+        data: result.data,
+        message: result.message,
+        isRateLimited: result.isRateLimited || false,
+        isServerError: result.isServerError || false
+      };
+    } catch (error) {
+      console.error('🔧 [API] getSettings error:', error);
+      throw error;
+    }
+  },
+  
+  /**
+   * updateSettings() - Update user settings (used by settings.html)
+   * @param {object} settingsData - Settings data
+   * @returns {Promise} Promise with updated settings data
+   */
+  updateSettings: async function(settingsData) {
+    try {
+      const result = await globalApiFunction('/settings', { 
+        method: 'PUT',
+        body: settingsData,
+        auth: true
+      });
+      
+      if (!result.ok) {
+        console.error(`❌ [API] updateSettings failed: ${result.message}`);
+        throw {
+          message: result.message,
+          status: result.status,
+          isRateLimited: result.isRateLimited,
+          isServerError: result.isServerError
+        };
+      }
+      
+      return {
+        ok: result.ok,
+        success: result.ok,
+        data: result.data,
+        message: result.message,
+        isRateLimited: result.isRateLimited || false,
+        isServerError: result.isServerError || false
+      };
+    } catch (error) {
+      console.error('🔧 [API] updateSettings error:', error);
+      throw error;
+    }
+  },
+  
+  /**
+   * getTools() - Get tools data (used by Tools.html)
+   * @returns {Promise} Promise with tools data
+   */
+  getTools: async function() {
+    try {
+      const result = await globalApiFunction('/tools', { 
+        method: 'GET',
+        auth: true
+      });
+      
+      if (!result.ok) {
+        console.error(`❌ [API] getTools failed: ${result.message}`);
+        throw {
+          message: result.message,
+          status: result.status,
+          isRateLimited: result.isRateLimited,
+          isServerError: result.isServerError
+        };
+      }
+      
+      return {
+        ok: result.ok,
+        success: result.ok,
+        data: result.data,
+        message: result.message,
+        isRateLimited: result.isRateLimited || false,
+        isServerError: result.isServerError || false
+      };
+    } catch (error) {
+      console.error('🔧 [API] getTools error:', error);
+      throw error;
+    }
+  },
+  
+  // ============================================================================
   // HARDENED AUTHENTICATION METHODS - STRICT ERROR HANDLING
   // ============================================================================
   
@@ -1798,371 +2497,157 @@ const apiObject = {
   },
   
   // ============================================================================
-  // DATA METHODS - ALL USE STRICT API CONTRACT WITH AUTOMATIC TOKEN ATTACHMENT
+  // ADDITIONAL DATA METHODS - ALL USE STRICT API CONTRACT WITH AUTOMATIC TOKEN ATTACHMENT
   // ============================================================================
   
-  getStatuses: async function() {
-    // Use global network state
-    if (!window.AppNetwork.isOnline) {
-      const cached = localStorage.getItem('moodchat_cache_statuses');
-      if (cached) {
-        try {
-          const cachedData = JSON.parse(cached);
-          return {
-            ok: true,
-            success: true,
-            data: cachedData.data,
-            cached: true,
-            offline: true,
-            message: 'Using cached data (offline)',
-            isRateLimited: false,
-            isServerError: false
-          };
-        } catch (e) {
-          // Continue to network attempt
-        }
-      }
-    }
-    
-    try {
-      // Use globalApiFunction which calls _safeFetch with STRICT CONTRACT
-      // Token will be automatically attached via getAuthHeaders()
-      const result = await globalApiFunction('/statuses/all', {
-        method: 'GET',
-        auth: true // Auto-attach Authorization header
-      });
-      
-      // STRICT: Check response.ok
-      if (!result.ok) {
-        throw {
-          message: result.message,
-          status: result.status,
-          isRateLimited: result.isRateLimited,
-          isServerError: result.isServerError
-        };
-      }
-      
-      // Only cache if successful
-      if (result.ok && result.data) {
-        try {
-          localStorage.setItem('moodchat_cache_statuses', JSON.stringify({
-            data: result.data,
-            timestamp: Date.now()
-          }));
-        } catch (e) {
-          console.log('🔧 [API] Could not cache statuses');
-        }
-      }
-      
-      return {
-        ok: result.ok,
-        success: result.ok,
-        data: result.data,
-        message: result.message,
-        isRateLimited: result.isRateLimited || false,
-        isServerError: result.isServerError || false
-      };
-    } catch (error) {
-      console.error('🔧 [API] Get statuses error:', error);
-      
-      // Fallback to cached data
-      const cached = localStorage.getItem('moodchat_cache_statuses');
-      if (cached) {
-        try {
-          const cachedData = JSON.parse(cached);
-          return {
-            ok: true,
-            success: true,
-            data: cachedData.data,
-            cached: true,
-            message: 'Using cached data',
-            error: error.message,
-            isRateLimited: false,
-            isServerError: false
-          };
-        } catch (e) {
-          // Ignore cache errors
-        }
-      }
-      
-      return {
-        ok: false,
-        success: false,
-        message: 'Failed to fetch statuses',
-        error: error.message,
-        isNetworkError: true,
-        isRateLimited: false,
-        isServerError: false
-      };
-    }
-  },
-  
-  getFriends: async function() {
-    // Use global network state
-    if (!window.AppNetwork.isOnline) {
-      const cached = localStorage.getItem('moodchat_cache_friends');
-      if (cached) {
-        try {
-          const cachedData = JSON.parse(cached);
-          return {
-            ok: true,
-            success: true,
-            data: cachedData.data,
-            cached: true,
-            offline: true,
-            isRateLimited: false,
-            isServerError: false
-          };
-        } catch (e) {
-          // Continue to network attempt
-        }
-      }
-    }
-    
-    try {
-      const result = await globalApiFunction('/friends/list', {
-        method: 'GET',
-        auth: true // Auto-attach Authorization header via getAuthHeaders()
-      });
-      
-      // STRICT: Check response.ok
-      if (!result.ok) {
-        throw {
-          message: result.message,
-          status: result.status,
-          isRateLimited: result.isRateLimited,
-          isServerError: result.isServerError
-        };
-      }
-      
-      if (result.ok && result.data) {
-        try {
-          localStorage.setItem('moodchat_cache_friends', JSON.stringify({
-            data: result.data,
-            timestamp: Date.now()
-          }));
-        } catch (e) {
-          console.log('🔧 [API] Could not cache friends');
-        }
-      }
-      
-      return {
-        ok: result.ok,
-        success: result.ok,
-        data: result.data,
-        message: result.message,
-        isRateLimited: result.isRateLimited || false,
-        isServerError: result.isServerError || false
-      };
-    } catch (error) {
-      console.error('🔧 [API] Get friends error:', error);
-      
-      const cached = localStorage.getItem('moodchat_cache_friends');
-      if (cached) {
-        try {
-          const cachedData = JSON.parse(cached);
-          return {
-            ok: true,
-            success: true,
-            data: cachedData.data,
-            cached: true,
-            message: 'Using cached data',
-            isRateLimited: false,
-            isServerError: false
-          };
-        } catch (e) {
-          // Ignore cache errors
-        }
-      }
-      
-      return {
-        ok: false,
-        success: false,
-        message: 'Failed to fetch friends',
-        error: error.message,
-        isNetworkError: true,
-        isRateLimited: false,
-        isServerError: false
-      };
-    }
-  },
-  
-  // Additional methods with strict error handling and automatic token attachment
   getUsers: async function() {
-    const result = await globalApiFunction('/users', { 
-      method: 'GET', 
-      auth: true // Auto-attach Authorization header via getAuthHeaders()
-    });
-    
-    // STRICT: Check response.ok
-    if (!result.ok) {
-      throw {
+    try {
+      const result = await globalApiFunction('/users', { 
+        method: 'GET', 
+        auth: true
+      });
+      
+      if (!result.ok) {
+        throw {
+          message: result.message,
+          status: result.status,
+          isRateLimited: result.isRateLimited,
+          isServerError: result.isServerError
+        };
+      }
+      
+      return {
+        ok: result.ok,
+        success: result.ok,
+        data: result.data,
         message: result.message,
-        status: result.status,
-        isRateLimited: result.isRateLimited,
-        isServerError: result.isServerError
+        isRateLimited: result.isRateLimited || false,
+        isServerError: result.isServerError || false
       };
+    } catch (error) {
+      console.error('🔧 [API] getUsers error:', error);
+      throw error;
     }
-    
-    return {
-      ok: result.ok,
-      success: result.ok,
-      data: result.data,
-      message: result.message,
-      isRateLimited: result.isRateLimited || false,
-      isServerError: result.isServerError || false
-    };
   },
   
   getUserById: async function(userId) {
-    const result = await globalApiFunction(`/users/${encodeURIComponent(userId)}`, { 
-      method: 'GET', 
-      auth: true // Auto-attach Authorization header via getAuthHeaders()
-    });
-    
-    if (!result.ok) {
-      throw {
+    try {
+      const result = await globalApiFunction(`/users/${encodeURIComponent(userId)}`, { 
+        method: 'GET', 
+        auth: true
+      });
+      
+      if (!result.ok) {
+        throw {
+          message: result.message,
+          status: result.status,
+          isRateLimited: result.isRateLimited,
+          isServerError: result.isServerError
+        };
+      }
+      
+      return {
+        ok: result.ok,
+        success: result.ok,
+        data: result.data,
         message: result.message,
-        status: result.status,
-        isRateLimited: result.isRateLimited,
-        isServerError: result.isServerError
+        isRateLimited: result.isRateLimited || false,
+        isServerError: result.isServerError || false
       };
+    } catch (error) {
+      console.error('🔧 [API] getUserById error:', error);
+      throw error;
     }
-    
-    return {
-      ok: result.ok,
-      success: result.ok,
-      data: result.data,
-      message: result.message,
-      isRateLimited: result.isRateLimited || false,
-      isServerError: result.isServerError || false
-    };
-  },
-  
-  getStatus: async function(statusId) {
-    const result = await globalApiFunction(`/status/${encodeURIComponent(statusId)}`, { 
-      method: 'GET', 
-      auth: true // Auto-attach Authorization header via getAuthHeaders()
-    });
-    
-    if (!result.ok) {
-      throw {
-        message: result.message,
-        status: result.status,
-        isRateLimited: result.isRateLimited,
-        isServerError: result.isServerError
-      };
-    }
-    
-    return {
-      ok: result.ok,
-      success: result.ok,
-      data: result.data,
-      message: result.message,
-      isRateLimited: result.isRateLimited || false,
-      isServerError: result.isServerError || false
-    };
-  },
-  
-  createStatus: async function(statusData) {
-    const result = await globalApiFunction('/status', { 
-      method: 'POST', 
-      body: statusData,
-      auth: true // Auto-attach Authorization header via getAuthHeaders()
-    });
-    
-    if (!result.ok) {
-      throw {
-        message: result.message,
-        status: result.status,
-        isRateLimited: result.isRateLimited,
-        isServerError: result.isServerError
-      };
-    }
-    
-    return {
-      ok: result.ok,
-      success: result.ok,
-      data: result.data,
-      message: result.message,
-      isRateLimited: result.isRateLimited || false,
-      isServerError: result.isServerError || false
-    };
   },
   
   getChats: async function() {
-    const result = await globalApiFunction('/chats', { 
-      method: 'GET', 
-      auth: true // Auto-attach Authorization header via getAuthHeaders()
-    });
-    
-    if (!result.ok) {
-      throw {
+    try {
+      const result = await globalApiFunction('/chats', { 
+        method: 'GET', 
+        auth: true
+      });
+      
+      if (!result.ok) {
+        throw {
+          message: result.message,
+          status: result.status,
+          isRateLimited: result.isRateLimited,
+          isServerError: result.isServerError
+        };
+      }
+      
+      return {
+        ok: result.ok,
+        success: result.ok,
+        data: result.data,
         message: result.message,
-        status: result.status,
-        isRateLimited: result.isRateLimited,
-        isServerError: result.isServerError
+        isRateLimited: result.isRateLimited || false,
+        isServerError: result.isServerError || false
       };
+    } catch (error) {
+      console.error('🔧 [API] getChats error:', error);
+      throw error;
     }
-    
-    return {
-      ok: result.ok,
-      success: result.ok,
-      data: result.data,
-      message: result.message,
-      isRateLimited: result.isRateLimited || false,
-      isServerError: result.isServerError || false
-    };
   },
   
   getChatById: async function(chatId) {
-    const result = await globalApiFunction(`/chats/${encodeURIComponent(chatId)}`, { 
-      method: 'GET', 
-      auth: true // Auto-attach Authorization header via getAuthHeaders()
-    });
-    
-    if (!result.ok) {
-      throw {
+    try {
+      const result = await globalApiFunction(`/chats/${encodeURIComponent(chatId)}`, { 
+        method: 'GET', 
+        auth: true
+      });
+      
+      if (!result.ok) {
+        throw {
+          message: result.message,
+          status: result.status,
+          isRateLimited: result.isRateLimited,
+          isServerError: result.isServerError
+        };
+      }
+      
+      return {
+        ok: result.ok,
+        success: result.ok,
+        data: result.data,
         message: result.message,
-        status: result.status,
-        isRateLimited: result.isRateLimited,
-        isServerError: result.isServerError
+        isRateLimited: result.isRateLimited || false,
+        isServerError: result.isServerError || false
       };
+    } catch (error) {
+      console.error('🔧 [API] getChatById error:', error);
+      throw error;
     }
-    
-    return {
-      ok: result.ok,
-      success: result.ok,
-      data: result.data,
-      message: result.message,
-      isRateLimited: result.isRateLimited || false,
-      isServerError: result.isServerError || false
-    };
   },
   
   getContacts: async function() {
-    const result = await globalApiFunction('/contacts', { 
-      method: 'GET', 
-      auth: true // Auto-attach Authorization header via getAuthHeaders()
-    });
-    
-    if (!result.ok) {
-      throw {
+    try {
+      const result = await globalApiFunction('/contacts', { 
+        method: 'GET', 
+        auth: true
+      });
+      
+      if (!result.ok) {
+        throw {
+          message: result.message,
+          status: result.status,
+          isRateLimited: result.isRateLimited,
+          isServerError: result.isServerError
+        };
+      }
+      
+      return {
+        ok: result.ok,
+        success: result.ok,
+        data: result.data,
         message: result.message,
-        status: result.status,
-        isRateLimited: result.isRateLimited,
-        isServerError: result.isServerError
+        isRateLimited: result.isRateLimited || false,
+        isServerError: result.isServerError || false
       };
+    } catch (error) {
+      console.error('🔧 [API] getContacts error:', error);
+      throw error;
     }
-    
-    return {
-      ok: result.ok,
-      success: result.ok,
-      data: result.data,
-      message: result.message,
-      isRateLimited: result.isRateLimited || false,
-      isServerError: result.isServerError || false
-    };
   },
   
   // ============================================================================
@@ -2273,7 +2758,7 @@ const apiObject = {
   // ============================================================================
   
   initialize: async function() {
-    console.log('🔧 [API] ⚡ MoodChat API v16.6.0 (ENHANCED TOKEN HANDLING) initializing...');
+    console.log('🔧 [API] ⚡ MoodChat API v16.6.0 (ENHANCED TOKEN HANDLING + EXPOSED METHODS) initializing...');
     console.log('🔧 [API] 🔗 Backend URL:', BACKEND_BASE_URL);
     console.log('🔧 [API] 🔗 API Base URL:', BASE_API_URL);
     console.log('🔧 [API] 🌐 Network State - Online:', window.AppNetwork.isOnline, 'Backend Reachable:', window.AppNetwork.isBackendReachable);
@@ -2282,7 +2767,15 @@ const apiObject = {
     console.log('🔧 [API] ✅ Automatic token retrieval from localStorage');
     console.log('🔧 [API] ✅ Token attached to all API calls automatically');
     console.log('🔧 [API] ✅ Backward compatibility with legacy token storage');
-    console.log('🔧 [API] ✅ All protected endpoints (/status, /users, etc.) get Authorization headers');
+    console.log('🔧 [API] ✅ All protected endpoints get Authorization headers');
+    console.log('🔧 [API] ✅ EXPLICITLY EXPOSED METHODS FOR IFRAME PAGES:');
+    console.log('🔧 [API]   - getMessages(), sendMessage() (message.html)');
+    console.log('🔧 [API]   - getFriends(), addFriend() (friend.html)');
+    console.log('🔧 [API]   - getGroups(), createGroup() (group.html)');
+    console.log('🔧 [API]   - getStatuses(), createStatus() (status.html)');
+    console.log('🔧 [API]   - getCalls(), startCall() (calls.html)');
+    console.log('🔧 [API]   - getSettings(), updateSettings() (settings.html)');
+    console.log('🔧 [API]   - getTools() (Tools.html)');
     
     // Check for token in storage and log it
     const token = _getCurrentAccessToken();
@@ -2290,7 +2783,6 @@ const apiObject = {
       console.log('🔐 [AUTH] Token found in storage:', token.substring(0, 20) + '...');
       console.log('🔐 [AUTH] Token will be automatically attached to all API calls');
       
-      // Also check for the specific 'moodchat_token' key
       const moodchatToken = localStorage.getItem('moodchat_token');
       if (moodchatToken) {
         console.log('🔐 [AUTH] Found token in moodchat_token key as requested');
@@ -2419,7 +2911,15 @@ const apiObject = {
         loginFunction: true,
         logoutFunction: true,
         getCurrentUserFunction: true,
-        auto401Handling: true
+        auto401Handling: true,
+        exposedIframeMethods: true,
+        messageMethods: true,
+        friendMethods: true,
+        groupMethods: true,
+        statusMethods: true,
+        callMethods: true,
+        settingsMethods: true,
+        toolsMethods: true
       }
     };
     
@@ -2440,7 +2940,15 @@ const apiObject = {
       console.log('🔧 [API] ✅ getAuthHeaders() helper function available');
       console.log('🔧 [API] ✅ Authorization headers auto-attached to all API calls');
       console.log('🔧 [API] ✅ Backward compatibility maintained');
-      console.log('🔧 [API] ✅ Protected endpoints (/status, /users, etc.) will work with 200 OK');
+      console.log('🔧 [API] ✅ Protected endpoints will work with 200 OK');
+      console.log('🔧 [API] ✅ ALL IFRAME METHODS EXPOSED:');
+      console.log('🔧 [API]   - message.html: api.getMessages(), api.sendMessage()');
+      console.log('🔧 [API]   - friend.html: api.getFriends(), api.addFriend()');
+      console.log('🔧 [API]   - group.html: api.getGroups(), api.createGroup()');
+      console.log('🔧 [API]   - status.html: api.getStatuses(), api.createStatus()');
+      console.log('🔧 [API]   - calls.html: api.getCalls(), api.startCall()');
+      console.log('🔧 [API]   - settings.html: api.getSettings(), api.updateSettings()');
+      console.log('🔧 [API]   - Tools.html: api.getTools()');
       console.log('🔧 [API] ✅ Login function: api.login(email, password)');
       console.log('🔧 [API] ✅ Logout function: api.logout()');
       console.log('🔧 [API] ✅ Get current user: api.getCurrentUser()');
@@ -2493,7 +3001,23 @@ const apiObject = {
         automaticTokenAttachment: 'ACTIVE',
         loginFunction: 'ACTIVE',
         logoutFunction: 'ACTIVE',
-        getCurrentUserFunction: 'ACTIVE'
+        getCurrentUserFunction: 'ACTIVE',
+        exposedIframeMethods: 'ACTIVE'
+      },
+      exposedMethods: {
+        getMessages: 'EXPOSED',
+        sendMessage: 'EXPOSED',
+        getFriends: 'EXPOSED',
+        addFriend: 'EXPOSED',
+        getGroups: 'EXPOSED',
+        createGroup: 'EXPOSED',
+        getStatuses: 'EXPOSED',
+        createStatus: 'EXPOSED',
+        getCalls: 'EXPOSED',
+        startCall: 'EXPOSED',
+        getSettings: 'EXPOSED',
+        updateSettings: 'EXPOSED',
+        getTools: 'EXPOSED'
       }
     };
     
@@ -2559,7 +3083,7 @@ if (!window.MOODCHAT_API) {
 // Expose getAuthHeaders globally for other parts of the application
 window.getAuthHeaders = getAuthHeaders;
 
-console.log('🔧 [API] Starting hardened initialization with enhanced token handling...');
+console.log('🔧 [API] Starting hardened initialization with enhanced token handling and exposed methods...');
 
 // Safe initialization with timeout
 setTimeout(() => {
@@ -2623,6 +3147,35 @@ if (typeof window.isServerError === 'undefined') {
   };
 }
 
+// SAFETY NET: Ensure all exposed methods have a default implementation
+const exposedMethods = [
+  'getMessages', 'sendMessage', 'getMessageById',
+  'getFriends', 'addFriend',
+  'getGroups', 'getGroupById', 'createGroup',
+  'getStatuses', 'getStatus', 'createStatus',
+  'getCalls', 'startCall',
+  'getSettings', 'updateSettings',
+  'getTools'
+];
+
+// Add any missing methods with safe fallbacks
+exposedMethods.forEach(methodName => {
+  if (typeof window.api[methodName] === 'undefined') {
+    console.warn(`⚠️ [API] Method ${methodName} not found, adding safe fallback`);
+    window.api[methodName] = async function(...args) {
+      console.warn(`⚠️ [API] Using fallback for ${methodName}`);
+      return Promise.resolve({
+        ok: false,
+        success: false,
+        message: 'Method not implemented',
+        fallback: true,
+        isRateLimited: false,
+        isServerError: false
+      });
+    };
+  }
+});
+
 // FALLBACK API
 setTimeout(() => {
   if (!window.api || typeof window.api !== 'function') {
@@ -2647,16 +3200,13 @@ setTimeout(() => {
       });
     };
     
-    Object.assign(fallbackApi, {
-      _singleton: true,
-      _version: 'fallback',
-      _hardened: true,
-      // Add the missing api methods to fallback
-      getAuthHeaders: function() {
-        return getAuthHeaders();
-      },
-      get: async function(url) {
-        console.warn(`⚠️ Using fallback api.get() for: ${url}`);
+    // Copy all methods from apiObject to fallback
+    Object.assign(fallbackApi, apiObject);
+    
+    // Override specific methods with fallback implementations
+    exposedMethods.forEach(methodName => {
+      fallbackApi[methodName] = async function(...args) {
+        console.warn(`⚠️ Using fallback ${methodName}`);
         return Promise.resolve({
           ok: false,
           success: false,
@@ -2665,116 +3215,7 @@ setTimeout(() => {
           isRateLimited: false,
           isServerError: false
         });
-      },
-      post: async function(url, data) {
-        console.warn(`⚠️ Using fallback api.post() for: ${url}`);
-        return Promise.resolve({
-          ok: false,
-          success: false,
-          message: 'API fallback mode',
-          fallback: true,
-          isRateLimited: false,
-          isServerError: false
-        });
-      },
-      put: async function(url, data) {
-        console.warn(`⚠️ Using fallback api.put() for: ${url}`);
-        return Promise.resolve({
-          ok: false,
-          success: false,
-          message: 'API fallback mode',
-          fallback: true,
-          isRateLimited: false,
-          isServerError: false
-        });
-      },
-      delete: async function(url) {
-        console.warn(`⚠️ Using fallback api.delete() for: ${url}`);
-        return Promise.resolve({
-          ok: false,
-          success: false,
-          message: 'API fallback mode',
-          fallback: true,
-          isRateLimited: false,
-          isServerError: false
-        });
-      },
-      login: async function(email, password) {
-        console.warn(`⚠️ Using fallback api.login() for: ${email}`);
-        return Promise.resolve({
-          ok: false,
-          success: false,
-          message: 'API fallback mode',
-          fallback: true,
-          isRateLimited: false,
-          isServerError: false
-        });
-      },
-      logout: function() {
-        _clearAuthData();
-        return { 
-          ok: true,
-          success: true, 
-          message: 'Logged out (fallback)',
-          fallback: true,
-          isRateLimited: false,
-          isServerError: false
-        };
-      },
-      getCurrentUser: async function() {
-        console.warn(`⚠️ Using fallback api.getCurrentUser()`);
-        return null;
-      },
-      initialize: () => {
-        console.log('🔧 [API] Fallback initialized');
-        return true;
-      },
-      isLoggedIn: () => {
-        return false;
-      },
-      getCurrentUserSync: () => {
-        return null;
-      },
-      getCurrentToken: () => {
-        return null;
-      },
-      isOnline: () => window.AppNetwork.isOnline,
-      isBackendReachable: () => false,
-      checkSession: async () => ({ 
-        ok: false,
-        authenticated: false,
-        offline: true,
-        fallback: true,
-        isRateLimited: false,
-        isServerError: false
-      }),
-      autoLogin: async () => ({
-        ok: false,
-        success: false,
-        authenticated: false,
-        user: null,
-        fallback: true,
-        isRateLimited: false,
-        isServerError: false
-      }),
-      register: async () => ({ 
-        ok: false,
-        success: false, 
-        message: 'API fallback mode',
-        offline: !window.AppNetwork.isOnline,
-        fallback: true,
-        isRateLimited: false,
-        isServerError: false
-      }),
-      request: async () => ({
-        ok: false,
-        success: false,
-        message: 'API fallback mode',
-        offline: !window.AppNetwork.isOnline,
-        fallback: true,
-        isRateLimited: false,
-        isServerError: false
-      })
+      };
     });
     
     window.api = fallbackApi;
@@ -2803,15 +3244,13 @@ if (!window.api) {
     });
   };
   
-  Object.assign(emergencyApi, {
-    _singleton: true,
-    _version: 'emergency',
-    _neverFails: true,
-    // Add the missing api methods to emergency API
-    getAuthHeaders: function() {
-      return getAuthHeaders();
-    },
-    get: async function(url) {
+  // Copy all methods from apiObject to emergency API
+  Object.assign(emergencyApi, apiObject);
+  
+  // Override specific methods with emergency implementations
+  exposedMethods.forEach(methodName => {
+    emergencyApi[methodName] = async function(...args) {
+      console.error(`⚠️ Emergency API for ${methodName}`);
       return Promise.resolve({
         ok: false,
         success: false,
@@ -2820,73 +3259,7 @@ if (!window.api) {
         isRateLimited: false,
         isServerError: false
       });
-    },
-    post: async function(url, data) {
-      return Promise.resolve({
-        ok: false,
-        success: false,
-        message: 'Emergency API',
-        emergency: true,
-        isRateLimited: false,
-        isServerError: false
-      });
-    },
-    put: async function(url, data) {
-      return Promise.resolve({
-        ok: false,
-        success: false,
-        message: 'Emergency API',
-        emergency: true,
-        isRateLimited: false,
-        isServerError: false
-      });
-    },
-    delete: async function(url) {
-      return Promise.resolve({
-        ok: false,
-        success: false,
-        message: 'Emergency API',
-        emergency: true,
-        isRateLimited: false,
-        isServerError: false
-      });
-    },
-    login: async function(email, password) {
-      return Promise.resolve({
-        ok: false,
-        success: false,
-        message: 'Emergency API',
-        emergency: true,
-        isRateLimited: false,
-        isServerError: false
-      });
-    },
-    logout: function() {
-      _clearAuthData();
-      return { 
-        ok: true,
-        success: true, 
-        message: 'Logged out (emergency)',
-        emergency: true,
-        isRateLimited: false,
-        isServerError: false
-      };
-    },
-    getCurrentUser: async function() {
-      return null;
-    },
-    isLoggedIn: () => false,
-    isBackendReachable: () => false,
-    initialize: () => true,
-    autoLogin: async () => ({ 
-      ok: false,
-      success: false, 
-      authenticated: false, 
-      emergency: true,
-      isRateLimited: false,
-      isServerError: false
-    }),
-    isOnline: () => window.AppNetwork.isOnline
+    };
   });
   
   window.api = emergencyApi;
@@ -2898,12 +3271,20 @@ window.__MOODCHAT_API_INSTANCE = window.api;
 window.__MOODCHAT_API_READY = true;
 window.MOODCHAT_API_READY = true;
 
-console.log('🔧 [API] STRICT Backend API integration complete with ENHANCED TOKEN HANDLING');
+console.log('🔧 [API] STRICT Backend API integration complete with ENHANCED TOKEN HANDLING AND EXPOSED METHODS');
 console.log('🔧 [API] ✅ getAuthHeaders() helper: ACTIVE');
 console.log('🔧 [API] ✅ Automatic token retrieval from localStorage: ACTIVE');
 console.log('🔧 [API] ✅ Token attached to all API calls automatically: ACTIVE');
-console.log('🔧 [API] ✅ Protected endpoints (/status, /users, etc.) will work: ACTIVE');
+console.log('🔧 [API] ✅ Protected endpoints will work: ACTIVE');
 console.log('🔧 [API] ✅ Backward compatibility: ACTIVE');
+console.log('🔧 [API] ✅ EXPLICITLY EXPOSED METHODS FOR ALL IFRAME PAGES:');
+console.log('🔧 [API]   - message.html: api.getMessages(), api.sendMessage(), api.getMessageById()');
+console.log('🔧 [API]   - friend.html: api.getFriends(), api.addFriend()');
+console.log('🔧 [API]   - group.html: api.getGroups(), api.getGroupById(), api.createGroup()');
+console.log('🔧 [API]   - status.html: api.getStatuses(), api.getStatus(), api.createStatus()');
+console.log('🔧 [API]   - calls.html: api.getCalls(), api.startCall()');
+console.log('🔧 [API]   - settings.html: api.getSettings(), api.updateSettings()');
+console.log('🔧 [API]   - Tools.html: api.getTools()');
 console.log('🔧 [API] ✅ Login function: api.login(email, password)');
 console.log('🔧 [API] ✅ Logout function: api.logout()');
 console.log('🔧 [API] ✅ Get current user: api.getCurrentUser()');
@@ -2911,11 +3292,12 @@ console.log('🔧 [API] ✅ Auto 401 handling: Invalid tokens automatically clea
 console.log('🔧 [API] ✅ Token stored in moodchat_token key as requested');
 console.log('🔧 [API] 🔗 Backend URL: ' + BACKEND_BASE_URL);
 console.log('🔧 [API] 🔗 API Base URL: ' + BASE_API_URL);
-console.log('🔧 [API] ⚡ Ready for production with enhanced token handling');
+console.log('🔧 [API] ⚡ Ready for production with NO "api[method] is not a function" errors');
 console.log('🔧 [API] 🔐 TESTING INSTRUCTIONS:');
 console.log('🔧 [API] 1. Login using api.login(email, password)');
 console.log('🔧 [API] 2. Confirm token is stored in localStorage as moodchat_token');
-console.log('🔧 [API] 3. Call /status endpoint - should return 200 OK');
-console.log('🔧 [API] 4. All protected routes should work with authentication');
-console.log('🔧 [API] 5. Use api.getCurrentUser() to get current user');
-console.log('🔧 [API] 6. Use api.logout() to clear session');
+console.log('🔧 [API] 3. All iframe pages can now call their respective API methods');
+console.log('🔧 [API] 4. No more "api[method] is not a function" errors');
+console.log('🔧 [API] 5. All protected routes work with authentication');
+console.log('🔧 [API] 6. Use api.getCurrentUser() to get current user');
+console.log('🔧 [API] 7. Use api.logout() to clear session');

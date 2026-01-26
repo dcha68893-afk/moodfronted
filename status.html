@@ -10,6 +10,9 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
     <title>Status | Knecta Chat</title>
     
+    <!-- jQuery MUST be loaded before any dependent scripts -->
+    <script src="https://code.jquery.com/jquery-3.6.0.min.js"></script>
+    
     <!-- Font Awesome -->
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
     
@@ -2234,41 +2237,100 @@
         };
         
         // Initialize the application
-        document.addEventListener('DOMContentLoaded', async function() {
+        document.addEventListener('DOMContentLoaded', function() {
             console.log('Status page loaded');
             
-            // Check if we're already in an iframe with API available
-            if (window.parent && window.parent.api) {
-                console.log('Parent API available immediately');
-                await initializeStatusSystem();
-            } else {
-                console.log('Waiting for API ready event...');
-                // Show loading state
-                showNotification('Connecting to server...', 'info');
-                
-                // Request API ready event
-                if (window.parent) {
-                    window.parent.postMessage({ type: 'REQUEST_API_READY' }, '*');
-                }
-                
-                // Fallback: Try to initialize after a delay
-                setTimeout(async () => {
-                    if (window.parent && window.parent.api) {
-                        console.log('API found after timeout');
-                        await initializeStatusSystem();
-                    } else {
-                        console.log('API not available, using cached data');
-                        loadCachedDataInstantly();
-                        setupEventListeners();
-                        showNotification('Using offline mode', 'warning');
-                        isOfflineMode = true;
-                    }
-                }, 2000);
+            // First, check if jQuery is available for spectrum.min.js dependencies
+            if (typeof jQuery === 'undefined') {
+                console.error('jQuery is not loaded. Status system cannot initialize.');
+                errorUI.classList.add('active');
+                document.getElementById('errorTitle').textContent = 'jQuery Error';
+                document.getElementById('errorMessage').textContent = 'Required library (jQuery) is not loaded. Please refresh the page.';
+                return;
             }
             
-            // Load cached data instantly
-            loadCachedDataInstantly();
+            // Setup event listeners immediately (they don't depend on API)
+            setupEventListeners();
+            
+            // Initialize UI components (they don't depend on API)
+            initializeUIComponents();
+            
+            // Show loading state
+            showNotification('Connecting to server...', 'info');
+            
+            // Start API readiness check
+            waitForApiReady();
         });
+        
+        // Wait for API to be ready
+        function waitForApiReady() {
+            console.log('Waiting for API to be ready...');
+            
+            // First check: Is API already available?
+            if (window.parent && window.parent.api) {
+                console.log('API available immediately');
+                initializeStatusSystem();
+                return;
+            }
+            
+            // Send request for API readiness
+            if (window.parent) {
+                window.parent.postMessage({ type: 'REQUEST_API_READY' }, '*');
+            }
+            
+            // Set up message listener for API ready event
+            window.addEventListener('message', handleApiReadyMessage);
+            
+            // Also check periodically
+            let retryCount = 0;
+            const maxRetries = 10;
+            const apiCheckInterval = setInterval(() => {
+                if (window.parent && window.parent.api) {
+                    clearInterval(apiCheckInterval);
+                    console.log('API found after periodic check');
+                    initializeStatusSystem();
+                } else if (retryCount >= maxRetries) {
+                    clearInterval(apiCheckInterval);
+                    console.log('API not available after max retries');
+                    handleApiNotAvailable();
+                }
+                retryCount++;
+            }, 1000);
+        }
+        
+        // Handle API ready message from parent
+        function handleApiReadyMessage(event) {
+            if (event.data && event.data.type === 'API_READY') {
+                console.log('Received API_READY message from parent');
+                
+                // Remove the event listener
+                window.removeEventListener('message', handleApiReadyMessage);
+                
+                // Initialize the status system
+                setTimeout(() => {
+                    if (window.parent && window.parent.api) {
+                        initializeStatusSystem();
+                    } else {
+                        handleApiNotAvailable();
+                    }
+                }, 100);
+            }
+        }
+        
+        // Handle API not available
+        function handleApiNotAvailable() {
+            console.log('API not available, using cached data only');
+            
+            // Show warning
+            showNotification('Using cached data. Some features may be limited.', 'warning');
+            
+            // Load cached data
+            loadCachedDataInstantly();
+            
+            // Show offline mode
+            isOfflineMode = true;
+            errorUI.classList.add('active');
+        }
         
         // Initialize status system
         async function initializeStatusSystem() {
@@ -2277,7 +2339,7 @@
             try {
                 // Get API from parent
                 const api = window.parent.api;
-                if (!api) {
+                if (!api || typeof api !== 'object') {
                     throw new Error('API not available in parent window');
                 }
                 
@@ -2285,42 +2347,34 @@
                 
                 // Get current user
                 try {
-                    const userResponse = await api.get('/api/auth/user');
-                    if (userResponse && userResponse.user) {
-                        currentUser = userResponse.user;
-                        userData = currentUser;
-                        console.log('Current user loaded:', currentUser.id);
-                        
-                        // Save to cache
-                        localStorage.setItem(LOCAL_STORAGE_KEYS.USER, JSON.stringify({
-                            uid: currentUser.id,
-                            id: currentUser.id,
-                            displayName: currentUser.displayName,
-                            email: currentUser.email,
-                            photoURL: currentUser.photoURL
-                        }));
+                    if (api.get) {
+                        const userResponse = await api.get('/api/auth/user');
+                        if (userResponse && userResponse.user) {
+                            currentUser = userResponse.user;
+                            userData = currentUser;
+                            console.log('Current user loaded:', currentUser.id);
+                            
+                            // Save to cache
+                            localStorage.setItem(LOCAL_STORAGE_KEYS.USER, JSON.stringify({
+                                uid: currentUser.id,
+                                id: currentUser.id,
+                                displayName: currentUser.displayName,
+                                email: currentUser.email,
+                                photoURL: currentUser.photoURL
+                            }));
+                        }
                     }
                 } catch (userError) {
-                    console.log('Could not load user from API, using cache:', userError.message);
+                    console.log('Could not load user from API:', userError.message);
                     await loadUserFromCache();
                 }
                 
-                // Setup event listeners
-                setupEventListeners();
-                
-                // Initialize UI components
-                initializeUIComponents();
-                
-                // Load initial data
+                // Load initial data from API
                 await loadInitialData();
                 
-                // Update my status preview
+                // Update UI
                 updateMyStatusPreview();
-                
-                // Update streak counter
                 updateStreakCounter();
-                
-                // Update mood chart
                 updateMoodChart();
                 
                 showNotification('Status system ready', 'success');
@@ -2332,9 +2386,6 @@
                 
                 // Fallback to cached data
                 loadCachedDataInstantly();
-                setupEventListeners();
-                initializeUIComponents();
-                updateCurrentSection();
                 errorUI.classList.add('active');
             }
         }
@@ -3186,8 +3237,8 @@
         async function loadInitialData() {
             try {
                 const api = window.parent.api;
-                if (!api) {
-                    throw new Error('API not available');
+                if (!api || typeof api.get !== 'function') {
+                    throw new Error('API not available or missing get method');
                 }
                 
                 console.log('Loading initial data from API...');
@@ -3210,7 +3261,8 @@
                         updateCurrentSection();
                     }
                 } catch (statusesError) {
-                    console.error('Error loading statuses:', statusesError);
+                    console.error('Error loading statuses from API:', statusesError);
+                    // Keep cached data if API fails
                 }
                 
                 // Load my statuses
@@ -3222,7 +3274,7 @@
                         updateMyStatusPreview();
                     }
                 } catch (myStatusesError) {
-                    console.error('Error loading my statuses:', myStatusesError);
+                    console.error('Error loading my statuses from API:', myStatusesError);
                 }
                 
                 // Load highlights
@@ -3233,7 +3285,7 @@
                         localStorage.setItem(LOCAL_STORAGE_KEYS.HIGHLIGHTS, JSON.stringify(highlights));
                     }
                 } catch (highlightsError) {
-                    console.error('Error loading highlights:', highlightsError);
+                    console.error('Error loading highlights from API:', highlightsError);
                 }
                 
                 // Load drafts
@@ -3244,7 +3296,7 @@
                         localStorage.setItem(LOCAL_STORAGE_KEYS.DRAFTS, JSON.stringify(drafts));
                     }
                 } catch (draftsError) {
-                    console.error('Error loading drafts:', draftsError);
+                    console.error('Error loading drafts from API:', draftsError);
                 }
                 
                 // Load scheduled statuses
@@ -3256,7 +3308,7 @@
                         updateScheduledStatusesList();
                     }
                 } catch (scheduledError) {
-                    console.error('Error loading scheduled statuses:', scheduledError);
+                    console.error('Error loading scheduled statuses from API:', scheduledError);
                 }
                 
                 // Load muted users
@@ -3267,7 +3319,7 @@
                         localStorage.setItem(LOCAL_STORAGE_KEYS.MUTED_USERS, JSON.stringify(Array.from(mutedUsers)));
                     }
                 } catch (mutedError) {
-                    console.error('Error loading muted users:', mutedError);
+                    console.error('Error loading muted users from API:', mutedError);
                 }
                 
                 // Load mood data
@@ -3279,7 +3331,7 @@
                         updateMoodChart();
                     }
                 } catch (moodError) {
-                    console.error('Error loading mood data:', moodError);
+                    console.error('Error loading mood data from API:', moodError);
                 }
                 
                 // Load streak data
@@ -3291,18 +3343,19 @@
                         document.getElementById('streakCount').textContent = streakCount;
                     }
                 } catch (streakError) {
-                    console.error('Error loading streak data:', streakError);
+                    console.error('Error loading streak data from API:', streakError);
                 }
                 
-                showNotification('Status data loaded', 'success');
+                // Clear error UI if data loaded successfully
+                errorUI.classList.remove('active');
                 
             } catch (error) {
                 console.error('Error loading initial data:', error);
-                showNotification('Error loading status data', 'error');
+                throw error; // Re-throw to be caught by caller
             }
         }
         
-        // Filter statuses by privacy
+        // Filter statuses by privacy (friends can view each other's statuses)
         function filterStatusesByPrivacy(statuses) {
             return statuses.filter(status => {
                 // If user is muted, skip
@@ -3317,20 +3370,26 @@
                     case 'everyone':
                         return true;
                     case 'friends':
-                        // In real implementation, check if user is friends with status owner
-                        return true; // Simplified for demo
+                        // Friends can view each other's statuses
+                        // In a real implementation, you would check the friendship status
+                        // For this demo, we'll assume all users are friends
+                        return true;
                     case 'close-friends':
-                        // In real implementation, check if user is close friends with status owner
-                        return false; // Simplified for demo
+                        // Only close friends can view
+                        // In a real implementation, check if user is in close friends list
+                        return false;
                     case 'except':
-                        // In real implementation, check if user is in exception list
-                        return true; // Simplified for demo
+                        // Everyone except specific people
+                        // In a real implementation, check if user is in exception list
+                        return true;
                     case 'specific':
-                        // In real implementation, check if user is in specific list
-                        return false; // Simplified for demo
+                        // Only specific people can view
+                        // In a real implementation, check if user is in specific list
+                        return false;
                     case 'micro-circle':
-                        // In real implementation, check if user is in the micro circle
-                        return false; // Simplified for demo
+                        // Only micro circle members can view
+                        // In a real implementation, check if user is in the micro circle
+                        return false;
                     default:
                         return true;
                 }
@@ -4023,7 +4082,7 @@
                 }
                 
                 const api = window.parent.api;
-                if (!api) {
+                if (!api || typeof api.post !== 'function') {
                     throw new Error('API not available');
                 }
                 
@@ -4047,7 +4106,7 @@
                 }
                 
                 const api = window.parent.api;
-                if (!api) {
+                if (!api || typeof api.post !== 'function') {
                     throw new Error('API not available');
                 }
                 
@@ -4072,7 +4131,7 @@
         async function pinStatus(statusData) {
             try {
                 const api = window.parent.api;
-                if (!api) {
+                if (!api || typeof api.post !== 'function') {
                     showNotification('Cannot pin while offline', 'warning');
                     return;
                 }
@@ -4095,7 +4154,7 @@
         async function unpinStatus(statusData) {
             try {
                 const api = window.parent.api;
-                if (!api) {
+                if (!api || typeof api.delete !== 'function') {
                     showNotification('Cannot unpin while offline', 'warning');
                     return;
                 }
@@ -4118,7 +4177,7 @@
         async function muteUser(userId) {
             try {
                 const api = window.parent.api;
-                if (!api) {
+                if (!api || typeof api.post !== 'function') {
                     // Store for later sync
                     mutedUsers.add(userId);
                     localStorage.setItem(LOCAL_STORAGE_KEYS.MUTED_USERS, JSON.stringify(Array.from(mutedUsers)));
@@ -4145,7 +4204,7 @@
         async function unmuteUser(userId) {
             try {
                 const api = window.parent.api;
-                if (!api) {
+                if (!api || typeof api.delete !== 'function') {
                     // Store for later sync
                     mutedUsers.delete(userId);
                     localStorage.setItem(LOCAL_STORAGE_KEYS.MUTED_USERS, JSON.stringify(Array.from(mutedUsers)));
@@ -4197,7 +4256,7 @@
                 }
                 
                 const api = window.parent.api;
-                if (!api) {
+                if (!api || typeof api.post !== 'function') {
                     throw new Error('API not available');
                 }
                 
@@ -4243,7 +4302,7 @@
         async function scheduleStatus(statusData, scheduleTime) {
             try {
                 const api = window.parent.api;
-                if (!api) {
+                if (!api || typeof api.post !== 'function') {
                     throw new Error('API not available');
                 }
                 
@@ -4286,7 +4345,7 @@
         async function reportStatus(statusId, reason, details) {
             try {
                 const api = window.parent.api;
-                if (!api) {
+                if (!api || typeof api.post !== 'function') {
                     throw new Error('API not available');
                 }
                 
