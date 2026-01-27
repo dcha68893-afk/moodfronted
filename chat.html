@@ -5,7 +5,6 @@
     <meta name="theme-color" content="#4F46E5">
     <link rel="icon" href="../icons/moodchat-192.png">
     <link rel="icon" href="../icons/moodchat-512.png">
-    <meta name="theme-color" content="#000000">
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Kynecta - Advanced Mood-Based Chat</title>
@@ -623,7 +622,7 @@
         
         /* Adjust content areas for sidebar */
         #chatsContent,
-            #toolsContent {
+        #toolsContent {
             margin-left: 0;
             width: 100%;
         }
@@ -899,7 +898,7 @@
             height: 18px;
             font-size: 10px;
             display: flex;
-                align-items: center;
+            align-items: center;
             justify-content: center;
             z-index: 1001;
         }
@@ -1033,7 +1032,7 @@
             height: 20px;
             font-size: 12px;
             display: flex;
-                align-items: center;
+            align-items: center;
             justify-content: center;
             font-weight: bold;
         }
@@ -1316,7 +1315,7 @@
             animation: slideInRight 0.3s ease;
             max-width: 300px;
             display: flex;
-                align-items: center;
+            align-items: center;
             justify-content: space-between;
         }
         
@@ -1337,7 +1336,7 @@
             height: 24px;
             border-radius: 50%;
             display: flex;
-                align-items: center;
+            align-items: center;
             justify-content: center;
             cursor: pointer;
         }
@@ -1356,7 +1355,7 @@
             animation: slideInRight 0.3s ease;
             max-width: 300px;
             display: flex;
-                align-items: center;
+            align-items: center;
             justify-content: space-between;
         }
         
@@ -1378,7 +1377,7 @@
             height: 32px;
             border-radius: 50%;
             display: flex;
-                align-items: center;
+            align-items: center;
             justify-content: center;
             cursor: pointer;
         }
@@ -1730,13 +1729,246 @@
     </div>
 
     <script>
+    // ====== SINGLE SOURCE OF TRUTH ======
+    const AppState = {
+        // Core state
+        api: {
+            ready: false,
+            reference: null,
+            hasParentApi: false,
+            lastChecked: 0
+        },
+        auth: {
+            authenticated: false,
+            user: null,
+            token: null,
+            lastVerified: 0,
+            verificationAttempted: false
+        },
+        connectivity: {
+            online: navigator.onLine,
+            fallbackMode: false,
+            fallbackReason: null
+        },
+        
+        // Derived flags (computed, not stored)
+        get canUseApi() {
+            return this.api.ready && this.auth.authenticated && !this.connectivity.fallbackMode;
+        },
+        
+        get shouldShowFallback() {
+            return this.connectivity.fallbackMode && !this.auth.authenticated;
+        },
+        
+        get userData() {
+            return this.auth.user;
+        },
+        
+        // Update methods
+        setApiReady(apiRef = null) {
+            const wasReady = this.api.ready;
+            this.api.ready = true;
+            this.api.reference = apiRef || this.api.reference;
+            this.api.hasParentApi = typeof window.parent.api !== 'undefined';
+            this.api.lastChecked = Date.now();
+            
+            // Clear fallback mode if API becomes ready
+            if (this.connectivity.fallbackMode && this.connectivity.fallbackReason === 'api_unavailable') {
+                this.connectivity.fallbackMode = false;
+                this.connectivity.fallbackReason = null;
+                console.log('Cleared fallback mode because API is now ready');
+            }
+            
+            if (!wasReady) {
+                console.log('API marked as ready in AppState');
+                this.broadcastStateChange('api_ready');
+                
+                // After API is ready, verify authentication
+                this.verifyAuthenticationWithApi();
+            }
+        },
+        
+        setApiUnavailable() {
+            const wasReady = this.api.ready;
+            this.api.ready = false;
+            this.api.reference = null;
+            this.api.lastChecked = Date.now();
+            
+            if (wasReady) {
+                console.warn('API marked as unavailable in AppState');
+                this.broadcastStateChange('api_unavailable');
+            }
+        },
+        
+        setAuthenticated(user, token) {
+            const wasAuthenticated = this.auth.authenticated;
+            this.auth.authenticated = true;
+            this.auth.user = user;
+            this.auth.token = token;
+            this.auth.lastVerified = Date.now();
+            this.auth.verificationAttempted = true;
+            
+            // Clear fallback mode if user authenticates
+            if (this.connectivity.fallbackMode && this.connectivity.fallbackReason === 'unauthenticated') {
+                this.connectivity.fallbackMode = false;
+                this.connectivity.fallbackReason = null;
+                console.log('Cleared fallback mode because user authenticated');
+            }
+            
+            if (!wasAuthenticated) {
+                console.log('User authenticated in AppState:', user?.name || 'Unknown');
+                this.broadcastStateChange('auth_authenticated');
+            } else {
+                this.broadcastStateChange('auth_updated');
+            }
+        },
+        
+        setUnauthenticated() {
+            const wasAuthenticated = this.auth.authenticated;
+            this.auth.authenticated = false;
+            this.auth.user = null;
+            this.auth.token = null;
+            this.auth.lastVerified = Date.now();
+            this.auth.verificationAttempted = true;
+            
+            if (wasAuthenticated) {
+                console.log('User unauthenticated in AppState');
+                this.broadcastStateChange('auth_unauthenticated');
+            }
+        },
+        
+        async verifyAuthenticationWithApi() {
+            if (!this.api.ready || !this.api.reference) {
+                console.log('Cannot verify auth: API not ready');
+                return false;
+            }
+            
+            try {
+                // Check if we have stored auth data
+                const storedUser = localStorage.getItem('kynecta_user');
+                const authToken = localStorage.getItem('auth_token');
+                
+                if (!storedUser || !authToken) {
+                    this.setUnauthenticated();
+                    return false;
+                }
+                
+                // Try to verify with API
+                const user = JSON.parse(storedUser);
+                
+                // Verify token with API if possible
+                if (typeof this.api.reference === 'function') {
+                    try {
+                        const result = await this.api.reference('/auth/verify', 'POST', { token: authToken });
+                        if (result && result.valid) {
+                            this.setAuthenticated(user, authToken);
+                            return true;
+                        }
+                    } catch (apiError) {
+                        console.log('API verification failed, using stored auth:', apiError.message);
+                        // If API verification fails, still use stored auth (it might be a network issue)
+                        this.setAuthenticated(user, authToken);
+                        return true;
+                    }
+                } else {
+                    // No API function available, use stored auth
+                    this.setAuthenticated(user, authToken);
+                    return true;
+                }
+            } catch (error) {
+                console.error('Error verifying authentication:', error);
+                this.setUnauthenticated();
+                return false;
+            }
+        },
+        
+        setFallbackMode(reason) {
+            if (!this.connectivity.fallbackMode && !this.auth.authenticated) {
+                this.connectivity.fallbackMode = true;
+                this.connectivity.fallbackReason = reason;
+                console.warn('Entered fallback mode:', reason);
+                this.broadcastStateChange('fallback_entered');
+            }
+        },
+        
+        clearFallbackMode() {
+            if (this.connectivity.fallbackMode) {
+                this.connectivity.fallbackMode = false;
+                this.connectivity.fallbackReason = null;
+                console.log('Cleared fallback mode');
+                this.broadcastStateChange('fallback_cleared');
+            }
+        },
+        
+        setOnlineStatus(online) {
+            const wasOnline = this.connectivity.online;
+            this.connectivity.online = online;
+            
+            if (wasOnline !== online) {
+                console.log('Connectivity changed:', online ? 'Online' : 'Offline');
+                this.broadcastStateChange('connectivity_changed');
+            }
+        },
+        
+        // Broadcast changes to all iframes
+        broadcastStateChange(changeType) {
+            const message = {
+                type: 'APP_STATE_UPDATE',
+                state: this.getStateSnapshot(),
+                changeType: changeType,
+                timestamp: Date.now()
+            };
+            
+            this.broadcastToAllIframes(message);
+        },
+        
+        getStateSnapshot() {
+            return {
+                apiReady: this.api.ready,
+                apiAvailable: this.api.ready && this.api.hasParentApi,
+                authenticated: this.auth.authenticated,
+                user: this.auth.user,
+                token: this.auth.token,
+                online: this.connectivity.online,
+                fallbackMode: this.connectivity.fallbackMode,
+                canUseApi: this.canUseApi,
+                timestamp: Date.now()
+            };
+        },
+        
+        broadcastToAllIframes(message) {
+            const iframeIds = ['messagesIframe', 'statusIframe', 'groupIframe', 'callsIframe', 
+                              'friendsIframe', 'settingsIframe', 'toolsIframe'];
+            
+            iframeIds.forEach(iframeId => {
+                const iframe = document.getElementById(iframeId);
+                if (iframe && iframe.contentWindow) {
+                    try {
+                        iframe.contentWindow.postMessage(message, '*');
+                    } catch (e) {
+                        // Silently ignore cross-origin errors
+                    }
+                }
+            });
+        },
+        
+        // Initialize from existing data
+        initialize() {
+            // Do NOT check authentication here - wait for API readiness
+            console.log('AppState initialized - authentication check deferred until API is ready');
+            
+            // Set initial online status
+            this.setOnlineStatus(navigator.onLine);
+            
+            console.log('AppState initialized:', this.getStateSnapshot());
+        }
+    };
+    
     // ====== NAVIGATION SYSTEM ======
     
     let currentPage = 'messages';
     let iframesLoaded = {};
     let appVersion = '1.0.0';
-    let isOnline = navigator.onLine;
-    let currentUser = null;
     let activeCall = null;
     let bottomNavVisible = true;
     let fullscreenPageDetectionEnabled = true;
@@ -1746,150 +1978,468 @@
     let isInGroupView = false;
     let isInFullscreenView = false;
     
-    // API readiness tracking
-    let apiReady = false;
-    let apiReadyEventDispatched = false;
-    let apiReadyCheckInterval = null;
-    let pendingApiRequests = [];
+    let appInitialized = false;
+    let apiCheckInterval = null;
+    let authCheckInterval = null;
     
-    // ====== API READINESS SYSTEM ======
+    // ====== HELPER FUNCTIONS ======
+    function closeModal(modalId) {
+        const modal = document.getElementById(modalId);
+        if (modal) {
+            modal.classList.add('hidden');
+        }
+    }
+    
+    // ====== API READINESS DETECTION ======
     function checkApiReadiness() {
-        if (typeof window.parent.api !== 'undefined' && !apiReady) {
-            console.log('API is now ready in parent window');
-            apiReady = true;
-            clearInterval(apiReadyCheckInterval);
-            
-            // Broadcast API readiness to all iframes
-            broadcastApiReady();
-            
-            // Process any pending API requests
-            processPendingApiRequests();
-            
-            // Dispatch apiReady event for iframes that are listening
-            if (!apiReadyEventDispatched) {
-                apiReadyEventDispatched = true;
-                window.dispatchEvent(new CustomEvent('apiReady'));
-            }
-            
-            return true;
-        }
-        return false;
-    }
-    
-    function broadcastApiReady() {
-        console.log('Broadcasting API_READY to all iframes');
-        const iframeIds = ['messagesIframe', 'statusIframe', 'groupIframe', 'callsIframe', 
-                          'friendsIframe', 'settingsIframe', 'toolsIframe'];
+        // Check multiple ways the API might be available
+        let apiReady = false;
+        let apiRef = null;
         
-        iframeIds.forEach(iframeId => {
-            const iframe = document.getElementById(iframeId);
-            if (iframe && iframe.contentWindow) {
-                try {
-                    iframe.contentWindow.postMessage({
-                        type: 'API_READY',
-                        hasApi: true,
-                        timestamp: Date.now(),
-                        apiAvailable: true
-                    }, '*');
-                } catch (e) {
-                    // Silently ignore cross-origin errors
-                }
-            }
-        });
+        // Method 1: Direct window.parent.api
+        if (typeof window.parent.api !== 'undefined') {
+            apiReady = true;
+            apiRef = window.parent.api;
+        }
+        
+        // Method 2: Global api object
+        if (typeof window.api !== 'undefined') {
+            apiReady = true;
+            apiRef = window.api;
+        }
+        
+        // Method 3: Check for api function
+        if (typeof window.parent.api === 'function') {
+            apiReady = true;
+            apiRef = window.parent.api;
+        }
+        
+        // Update state if changed
+        if (apiReady && !AppState.api.ready) {
+            AppState.setApiReady(apiRef);
+            return true;
+        } else if (!apiReady && AppState.api.ready) {
+            AppState.setApiUnavailable();
+        }
+        
+        return apiReady;
     }
     
-    function processPendingApiRequests() {
-        while (pendingApiRequests.length > 0) {
-            const request = pendingApiRequests.shift();
-            if (request && request.iframe && request.message) {
-                try {
-                    request.iframe.contentWindow.postMessage(request.message, '*');
-                } catch (e) {
-                    console.log('Failed to send pending message to iframe');
+    function checkAuthentication() {
+        // This function only checks localStorage and updates AppState
+        // It does NOT verify with API - that happens in verifyAuthenticationWithApi
+        try {
+            const storedUser = localStorage.getItem('kynecta_user');
+            const authToken = localStorage.getItem('auth_token');
+            
+            if (storedUser && authToken) {
+                const user = JSON.parse(storedUser);
+                
+                // Only update if different
+                if (!AppState.auth.authenticated || AppState.auth.user?.id !== user.id) {
+                    // If API is ready, verify with API, otherwise use stored data
+                    if (AppState.api.ready) {
+                        AppState.verifyAuthenticationWithApi();
+                    } else {
+                        // Store temporarily but mark as unverified
+                        AppState.setAuthenticated(user, authToken);
+                    }
                 }
+                return true;
+            } else {
+                if (AppState.auth.authenticated) {
+                    AppState.setUnauthenticated();
+                }
+                return false;
+            }
+        } catch (error) {
+            console.error('Error checking authentication:', error);
+            if (AppState.auth.authenticated) {
+                AppState.setUnauthenticated();
+            }
+            return false;
+        }
+    }
+    
+    function initializeApiMonitoring() {
+        // Start checking for API
+        apiCheckInterval = setInterval(() => {
+            checkApiReadiness();
+        }, 2000);
+        
+        // Also check immediately
+        setTimeout(() => {
+            checkApiReadiness();
+        }, 100);
+    }
+    
+    function handleApiReadyEvent() {
+        console.log('API ready event received, checking API...');
+        checkApiReadiness();
+        
+        // If API is ready, clear any fallback mode and verify auth
+        if (AppState.api.ready) {
+            AppState.clearFallbackMode();
+            AppState.verifyAuthenticationWithApi();
+            
+            // Show notification
+            showGlobalNotification('API connected successfully', 'success', 3000);
+        }
+    }
+    
+    function handleLoginEvent(user, token) {
+        console.log('Login event received:', user?.name || 'Unknown');
+        
+        // Update AppState immediately
+        AppState.setAuthenticated(user, token);
+        
+        // Store in localStorage
+        localStorage.setItem('kynecta_user', JSON.stringify(user));
+        localStorage.setItem('auth_token', token);
+        
+        // Clear any fallback mode
+        AppState.clearFallbackMode();
+        
+        // Show notification
+        showGlobalNotification(`Welcome ${user.name || 'User'}!`, 'success', 3000);
+    }
+    
+    function handleLogoutEvent() {
+        console.log('Logout event received');
+        
+        // Update AppState
+        AppState.setUnauthenticated();
+        
+        // Clear localStorage
+        localStorage.removeItem('kynecta_user');
+        localStorage.removeItem('auth_token');
+        
+        // Show notification
+        showGlobalNotification('Logged out successfully', 'info', 3000);
+    }
+    
+    // ====== IFRAME MESSAGE HANDLING ======
+    function handleIframeMessage(event) {
+        if (event.data && event.data.type) {
+            console.log('Parent received from iframe:', event.data.type);
+            
+            switch(event.data.type) {
+                case 'iframe_loaded':
+                    // Send current state to newly loaded iframe
+                    const iframe = event.source && document.querySelector('iframe[src*="' + event.origin + '"]');
+                    if (iframe && iframe.contentWindow) {
+                        sendAppStateToIframe(iframe);
+                    }
+                    break;
+                    
+                case 'REQUEST_API_READY':
+                case 'REQUEST_API_STATUS':
+                case 'CHECK_API':
+                case 'REQUEST_API':
+                case 'REQUEST_AUTH_STATE':
+                case 'CHECK_AUTH':
+                case 'REQUEST_APP_STATE':
+                    // Handle state requests from iframes
+                    const targetIframe = event.source && document.querySelector('iframe[src*="' + event.origin + '"]');
+                    if (targetIframe && targetIframe.contentWindow) {
+                        sendAppStateToIframe(targetIframe, event.data.requestId);
+                    }
+                    break;
+                    
+                case 'auth_required':
+                    if (window.parent !== window) {
+                        window.parent.postMessage({
+                            type: 'auth_required',
+                            reason: 'iframe_request'
+                        }, '*');
+                    }
+                    break;
+                    
+                case 'navigate_to':
+                    if (event.data.page) {
+                        if (isInChatView) setIsInChatView(false);
+                        if (isInStatusView) setIsInStatusView(false);
+                        if (isInGroupView) setIsInGroupView(false);
+                        if (isInFullscreenView) setIsInFullscreenView(false);
+                        switchPage(event.data.page);
+                    }
+                    break;
+                    
+                case 'user_logout':
+                    handleLogout();
+                    break;
+                    
+                case 'global_notification':
+                    if (event.data.message) {
+                        showGlobalNotification(
+                            event.data.message, 
+                            event.data.notificationType || 'info', 
+                            event.data.duration || 5000
+                        );
+                    }
+                    break;
+                    
+                case 'enter_chat_view':
+                    setIsInChatView(true);
+                    chatHistory.push({
+                        page: currentPage,
+                        chatId: event.data.chatId,
+                        timestamp: Date.now()
+                    });
+                    break;
+                    
+                case 'exit_chat_view':
+                    setIsInChatView(false);
+                    chatHistory = [];
+                    break;
+                    
+                case 'enter_status_view':
+                    setIsInStatusView(true);
+                    break;
+                    
+                case 'exit_status_view':
+                    setIsInStatusView(false);
+                    break;
+                    
+                case 'enter_group_view':
+                    setIsInGroupView(true);
+                    break;
+                    
+                case 'exit_group_view':
+                    setIsInGroupView(false);
+                    break;
+                    
+                case 'enter_fullscreen_view':
+                    setIsInFullscreenView(true);
+                    break;
+                    
+                case 'exit_fullscreen_view':
+                    setIsInFullscreenView(false);
+                    break;
+                    
+                case 'fullscreen_status':
+                    if (window.innerWidth < 768) {
+                        if (event.data.isFullscreen) {
+                            hideBottomNavigation();
+                        } else {
+                            showBottomNavigation();
+                        }
+                    }
+                    break;
+                    
+                case 'hide_bottom_nav':
+                    if (window.innerWidth < 768) {
+                        hideBottomNavigation();
+                    }
+                    break;
+                    
+                case 'show_bottom_nav':
+                    if (window.innerWidth < 768) {
+                        showBottomNavigation();
+                    }
+                    break;
+                    
+                case 'back_button_clicked':
+                    window.goBack();
+                    break;
+                    
+                case 'user_data_updated':
+                    if (event.data.user) {
+                        // Update AppState with new user data
+                        const token = localStorage.getItem('auth_token');
+                        AppState.setAuthenticated(event.data.user, token);
+                    }
+                    break;
+                    
+                case 'api_request':
+                    // Forward API requests if we can
+                    if (event.data.endpoint && event.data.method) {
+                        forwardApiRequestToParent(event.data);
+                    }
+                    break;
+                    
+                case 'test_api_connection':
+                    // Respond to API test requests
+                    const testIframe = event.source && document.querySelector('iframe[src*="' + event.origin + '"]');
+                    if (testIframe && testIframe.contentWindow) {
+                        sendAppStateToIframe(testIframe);
+                    }
+                    break;
+                    
+                case 'API_LATE_READY':
+                    // If an iframe reports API might be ready, check again
+                    console.log('Iframe reported API might be ready, checking...');
+                    checkApiReadiness();
+                    break;
+                    
+                case 'AUTHENTICATION_CHANGED':
+                    // If an iframe reports auth changed, check again
+                    console.log('Iframe reported auth changed, checking...');
+                    checkAuthentication();
+                    break;
+                    
+                case 'USER_LOGIN':
+                    // Handle login events from iframes
+                    if (event.data.user && event.data.token) {
+                        handleLoginEvent(event.data.user, event.data.token);
+                    }
+                    break;
+                    
+                case 'USER_LOGOUT':
+                    // Handle logout events from iframes
+                    handleLogoutEvent();
+                    break;
+                    
+                case 'LOGIN_SUCCESS':
+                    // Another login event type
+                    if (event.data.user && event.data.token) {
+                        handleLoginEvent(event.data.user, event.data.token);
+                    }
+                    break;
             }
         }
     }
     
-    function sendApiStatusToIframe(iframe, requestId = null) {
+    function sendAppStateToIframe(iframe, requestId = null) {
         if (!iframe || !iframe.contentWindow) return;
         
         try {
+            const state = AppState.getStateSnapshot();
             iframe.contentWindow.postMessage({
-                type: 'API_READY',
-                hasApi: apiReady,
-                timestamp: Date.now(),
-                apiAvailable: apiReady,
-                requestId: requestId
+                type: 'APP_STATE_RESPONSE',
+                state: state,
+                requestId: requestId,
+                timestamp: Date.now()
             }, '*');
         } catch (e) {
             // Silently ignore cross-origin errors
         }
     }
     
-    // Start checking for API readiness
-    apiReadyCheckInterval = setInterval(checkApiReadiness, 500);
-    
-    // Also check immediately
-    setTimeout(checkApiReadiness, 100);
-    
-    // Wait for api.js to be ready from parent
-    window.addEventListener('apiReady', function() {
-        console.log('API is ready from parent, broadcasting to iframes');
-        checkApiReadiness();
-        initializeChatApp();
-    });
-    
-    // Fallback - check API after a delay
-    setTimeout(function() {
-        if (!apiReady) {
-            console.log('Performing fallback API check');
-            checkApiReadiness();
-            if (!apiReady) {
-                console.warn('API not available after timeout, iframes will use fallback mode');
-                // Still initialize the app even without API
-                initializeChatApp();
+    async function forwardApiRequestToParent(requestData) {
+        if (!AppState.canUseApi) {
+            // Send immediate response about state
+            const activeIframe = document.querySelector('.content-area:not(.hidden) .content-iframe');
+            if (activeIframe && activeIframe.contentWindow) {
+                activeIframe.contentWindow.postMessage({
+                    type: 'api_response',
+                    requestId: requestData.requestId,
+                    success: false,
+                    error: 'API not available - Current state: ' + 
+                           `API Ready: ${AppState.api.ready}, ` +
+                           `Authenticated: ${AppState.auth.authenticated}, ` +
+                           `Fallback: ${AppState.connectivity.fallbackMode}`,
+                    state: AppState.getStateSnapshot()
+                }, '*');
+            }
+            return;
+        }
+        
+        try {
+            // Use parent's api function
+            const result = await window.parent.api(
+                requestData.endpoint,
+                requestData.method,
+                requestData.data
+            );
+            
+            // Send result back to iframe
+            const activeIframe = document.querySelector('.content-area:not(.hidden) .content-iframe');
+            if (activeIframe && activeIframe.contentWindow) {
+                activeIframe.contentWindow.postMessage({
+                    type: 'api_response',
+                    requestId: requestData.requestId,
+                    success: true,
+                    data: result,
+                    state: AppState.getStateSnapshot()
+                }, '*');
+            }
+        } catch (error) {
+            // Send error back to iframe
+            const activeIframe = document.querySelector('.content-area:not(.hidden) .content-iframe');
+            if (activeIframe && activeIframe.contentWindow) {
+                activeIframe.contentWindow.postMessage({
+                    type: 'api_response',
+                    requestId: requestData.requestId,
+                    success: false,
+                    error: error.message,
+                    state: AppState.getStateSnapshot()
+                }, '*');
             }
         }
-    }, 2000);
+    }
     
     document.addEventListener('DOMContentLoaded', function() {
-        console.log('DOM loaded, initializing navigation system...');
+        console.log('DOM loaded, initializing...');
         
         showLoading();
         
-        // Try to get user from localStorage for UI purposes
-        try {
-            const storedUser = localStorage.getItem('kynecta_user');
-            const authToken = localStorage.getItem('auth_token');
-            
-            if (storedUser && authToken) {
-                currentUser = JSON.parse(storedUser);
-                console.log('User loaded from localStorage:', currentUser.name);
-            } else {
-                console.log('No stored user or auth token found');
-            }
-        } catch (error) {
-            console.error('Error loading user data:', error);
-        }
+        // Initialize AppState first
+        AppState.initialize();
         
-        // Setup basic navigation immediately
+        // Setup API monitoring
+        initializeApiMonitoring();
+        
+        // Setup event listeners for API readiness
+        window.addEventListener('api-ready', handleApiReadyEvent);
+        window.addEventListener('apiready', handleApiReadyEvent);
+        window.addEventListener('apiReady', handleApiReadyEvent);
+        
+        // Listen for messages from parent about API
+        window.addEventListener('message', function(event) {
+            if (event.data && (
+                event.data.type === 'API_READY' || 
+                event.data.type === 'api-ready' ||
+                event.data.type === 'LATE_API_READY'
+            )) {
+                console.log('Received API message from parent');
+                handleApiReadyEvent();
+            }
+            
+            // Handle auth messages
+            if (event.data && event.data.type === 'AUTH_CHANGED') {
+                console.log('Received auth change message from parent');
+                checkAuthentication();
+            }
+            
+            // Handle login/logout messages
+            if (event.data && event.data.type === 'USER_LOGIN') {
+                if (event.data.user && event.data.token) {
+                    handleLoginEvent(event.data.user, event.data.token);
+                }
+            }
+            
+            if (event.data && event.data.type === 'USER_LOGOUT') {
+                handleLogoutEvent();
+            }
+        });
+        
+        // Setup basic navigation
         setupNavigation();
         
-        // Hide loading after a short delay
+        // Initialize the app immediately
+        console.log('Initializing app with current state:', AppState.getStateSnapshot());
+        initializeChatApp();
+        
+        // Set a timeout to enter fallback mode if needed (only if not authenticated)
         setTimeout(() => {
-            if (!apiReady) {
-                console.log('API not ready yet, showing basic UI');
-                hideLoading();
-                switchPage('messages');
+            if (!AppState.api.ready && !AppState.auth.authenticated) {
+                AppState.setFallbackMode('api_unavailable');
+                showGlobalNotification('Running in limited mode - API not available', 'warning', 5000);
             }
-        }, 1000);
+        }, 8000); // Increased timeout to allow API to become ready
     });
     
     function initializeChatApp() {
-        console.log('Initializing chat app...');
+        if (appInitialized) {
+            console.log('App already initialized');
+            return;
+        }
         
-        // Hide loading screen
+        console.log('Initializing chat app...');
+        appInitialized = true;
+        
+        // Hide loading screen immediately
         hideLoading();
         
         // Show sidebar and mobile nav
@@ -1904,10 +2454,11 @@
         // Setup fullscreen page detection
         setupFullscreenPageDetection();
         
-        // Switch to messages page
+        // Switch to messages page immediately
         switchPage('messages');
         
         console.log('Chat app initialization complete');
+        console.log('Current AppState:', AppState.getStateSnapshot());
     }
     
     function setupBackButton() {
@@ -2163,15 +2714,11 @@
                         this.contentWindow.postMessage({ 
                             type: 'kynecta_init',
                             page: iframe.id.replace('Iframe', ''),
-                            user: currentUser,
-                            isOnline: isOnline,
-                            version: appVersion
+                            state: AppState.getStateSnapshot()
                         }, '*');
                         
-                        // Send API status if we have it
-                        if (apiReady) {
-                            sendApiStatusToIframe(this);
-                        }
+                        // Send current app state
+                        sendAppStateToIframe(this);
                     } catch (e) {
                         // Silently ignore cross-origin errors
                     }
@@ -2220,19 +2767,13 @@
                 if (iframesLoaded[`${pageName}Iframe`]) {
                     iframe.classList.add('loaded');
                     
-                    // Send page switch message
+                    // Send page switch message with current state
                     try {
                         iframe.contentWindow.postMessage({
                             type: 'page_switch',
                             page: pageName,
-                            user: currentUser,
-                            isOnline: isOnline
+                            state: AppState.getStateSnapshot()
                         }, '*');
-                        
-                        // Send API status
-                        if (apiReady) {
-                            sendApiStatusToIframe(iframe);
-                        }
                     } catch (e) {
                         // Silently ignore
                     }
@@ -2244,11 +2785,13 @@
                     }, 300);
                 }
                 
-                // Send online status
+                // Send current state
                 try {
                     iframe.contentWindow.postMessage({
-                        type: 'online_status',
-                        isOnline: isOnline
+                        type: 'APP_STATE_UPDATE',
+                        state: AppState.getStateSnapshot(),
+                        changeType: 'page_switch',
+                        timestamp: Date.now()
                     }, '*');
                 } catch (e) {
                     // Silently ignore
@@ -2261,218 +2804,20 @@
         }, 200);
     }
     
-    function handleIframeMessage(event) {
-        if (event.data && event.data.type) {
-            console.log('Received message from iframe:', event.data.type);
-            
-            switch(event.data.type) {
-                case 'iframe_loaded':
-                    break;
-                    
-                case 'REQUEST_API_READY':
-                case 'REQUEST_API_STATUS':
-                    // Handle API readiness requests from iframes
-                    const iframe = document.querySelector('.content-area:not(.hidden) .content-iframe');
-                    if (iframe && iframe.contentWindow) {
-                        if (apiReady) {
-                            sendApiStatusToIframe(iframe, event.data.requestId);
-                        } else {
-                            // Store the request if API isn't ready yet
-                            pendingApiRequests.push({
-                                iframe: iframe,
-                                message: {
-                                    type: 'API_READY',
-                                    hasApi: false,
-                                    timestamp: Date.now(),
-                                    apiAvailable: false,
-                                    requestId: event.data.requestId
-                                }
-                            });
-                        }
-                    }
-                    break;
-                    
-                case 'auth_required':
-                    if (window.parent !== window) {
-                        window.parent.postMessage({
-                            type: 'auth_required',
-                            reason: 'iframe_request'
-                        }, '*');
-                    }
-                    break;
-                    
-                case 'navigate_to':
-                    if (event.data.page) {
-                        if (isInChatView) setIsInChatView(false);
-                        if (isInStatusView) setIsInStatusView(false);
-                        if (isInGroupView) setIsInGroupView(false);
-                        if (isInFullscreenView) setIsInFullscreenView(false);
-                        switchPage(event.data.page);
-                    }
-                    break;
-                    
-                case 'user_logout':
-                    handleLogout();
-                    break;
-                    
-                case 'global_notification':
-                    if (event.data.message) {
-                        showGlobalNotification(
-                            event.data.message, 
-                            event.data.notificationType || 'info', 
-                            event.data.duration || 5000
-                        );
-                    }
-                    break;
-                    
-                case 'enter_chat_view':
-                    setIsInChatView(true);
-                    chatHistory.push({
-                        page: currentPage,
-                        chatId: event.data.chatId,
-                        timestamp: Date.now()
-                    });
-                    break;
-                    
-                case 'exit_chat_view':
-                    setIsInChatView(false);
-                    chatHistory = [];
-                    break;
-                    
-                case 'enter_status_view':
-                    setIsInStatusView(true);
-                    break;
-                    
-                case 'exit_status_view':
-                    setIsInStatusView(false);
-                    break;
-                    
-                case 'enter_group_view':
-                    setIsInGroupView(true);
-                    break;
-                    
-                case 'exit_group_view':
-                    setIsInGroupView(false);
-                    break;
-                    
-                case 'enter_fullscreen_view':
-                    setIsInFullscreenView(true);
-                    break;
-                    
-                case 'exit_fullscreen_view':
-                    setIsInFullscreenView(false);
-                    break;
-                    
-                case 'fullscreen_status':
-                    if (window.innerWidth < 768) {
-                        if (event.data.isFullscreen) {
-                            hideBottomNavigation();
-                        } else {
-                            showBottomNavigation();
-                        }
-                    }
-                    break;
-                    
-                case 'hide_bottom_nav':
-                    if (window.innerWidth < 768) {
-                        hideBottomNavigation();
-                    }
-                    break;
-                    
-                case 'show_bottom_nav':
-                    if (window.innerWidth < 768) {
-                        showBottomNavigation();
-                    }
-                    break;
-                    
-                case 'back_button_clicked':
-                    window.goBack();
-                    break;
-                    
-                case 'user_data_updated':
-                    if (event.data.user) {
-                        currentUser = event.data.user;
-                        console.log('User data updated from iframe:', currentUser.name);
-                    }
-                    break;
-                    
-                case 'api_request':
-                    // Forward API requests to parent's api.js
-                    if (event.data.endpoint && event.data.method) {
-                        if (apiReady && typeof window.parent.api !== 'undefined') {
-                            forwardApiRequest(event.data);
-                        } else {
-                            // Send error back to iframe - API not ready
-                            const activeIframe = document.querySelector('.content-area:not(.hidden) .content-iframe');
-                            if (activeIframe && activeIframe.contentWindow) {
-                                activeIframe.contentWindow.postMessage({
-                                    type: 'api_response',
-                                    requestId: event.data.requestId,
-                                    success: false,
-                                    error: 'API not available yet',
-                                    apiReady: apiReady
-                                }, '*');
-                            }
-                        }
-                    }
-                    break;
-                    
-                case 'test_api_connection':
-                    // Respond to API test requests
-                    const testIframe = document.querySelector('.content-area:not(.hidden) .content-iframe');
-                    if (testIframe && testIframe.contentWindow) {
-                        testIframe.contentWindow.postMessage({
-                            type: 'api_test_response',
-                            apiReady: apiReady,
-                            timestamp: Date.now(),
-                            hasParentApi: typeof window.parent.api !== 'undefined'
-                        }, '*');
-                    }
-                    break;
-            }
-        }
-    }
-    
-    async function forwardApiRequest(requestData) {
-        try {
-            // Use parent's api function
-            const result = await window.parent.api(
-                requestData.endpoint,
-                requestData.method,
-                requestData.data
-            );
-            
-            // Send result back to iframe
-            const activeIframe = document.querySelector('.content-area:not(.hidden) .content-iframe');
-            if (activeIframe && activeIframe.contentWindow) {
-                activeIframe.contentWindow.postMessage({
-                    type: 'api_response',
-                    requestId: requestData.requestId,
-                    success: true,
-                    data: result,
-                    apiReady: true
-                }, '*');
-            }
-        } catch (error) {
-            // Send error back to iframe
-            const activeIframe = document.querySelector('.content-area:not(.hidden) .content-iframe');
-            if (activeIframe && activeIframe.contentWindow) {
-                activeIframe.contentWindow.postMessage({
-                    type: 'api_response',
-                    requestId: requestData.requestId,
-                    success: false,
-                    error: error.message,
-                    apiReady: true
-                }, '*');
-            }
-        }
-    }
-    
     function handleLogout() {
         console.log('Logging out user');
-        currentUser = null;
+        
+        // Update AppState
+        AppState.setUnauthenticated();
+        
+        // Clear localStorage
         localStorage.removeItem('kynecta_user');
         localStorage.removeItem('auth_token');
+        
+        // Broadcast logout to all iframes
+        AppState.broadcastStateChange('auth_unauthenticated');
+        
+        // Redirect to login
         window.location.href = '../index.html';
     }
     
@@ -2555,7 +2900,9 @@
         }
     }
     
-    // Setup message listener
+    // ====== EVENT LISTENERS ======
+    
+    // Setup message listener for iframes
     window.addEventListener('message', handleIframeMessage);
     
     // Handle window resize
@@ -2574,12 +2921,15 @@
         }
     });
     
-    // Listen for API readiness from parent
-    window.addEventListener('message', function(event) {
-        if (event.data && event.data.type === 'API_READY' && event.data.apiAvailable) {
-            console.log('Received API_READY message from parent');
-            checkApiReadiness();
-        }
+    // Handle online/offline events
+    window.addEventListener('online', function() {
+        AppState.setOnlineStatus(true);
+        showGlobalNotification('Back online', 'success', 3000);
+    });
+    
+    window.addEventListener('offline', function() {
+        AppState.setOnlineStatus(false);
+        showGlobalNotification('You are offline', 'warning', 5000);
     });
     
     // Make functions globally available
@@ -2593,8 +2943,15 @@
     window.setIsInStatusView = setIsInStatusView;
     window.setIsInGroupView = setIsInGroupView;
     window.setIsInFullscreenView = setIsInFullscreenView;
+    window.checkApiReadiness = checkApiReadiness;
+    window.checkAuthentication = checkAuthentication;
+    window.closeModal = closeModal;
+    window.AppState = AppState;
+    window.handleLoginEvent = handleLoginEvent;
+    window.handleLogoutEvent = handleLogoutEvent;
     
-    console.log('Iframe controller loaded successfully, API status:', apiReady);
+    console.log('Iframe controller loaded successfully');
+    console.log('Initial AppState:', AppState.getStateSnapshot());
     </script>
 </body>
 </html>
