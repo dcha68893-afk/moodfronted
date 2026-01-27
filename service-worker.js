@@ -1,156 +1,120 @@
 // Service Worker for PWA Chat Application
-// Version: 7.0.1 - Static Assets Only, No API Interference
-// Cache Strategy: Cache-First for static assets ONLY, Network-Only for all API/backend
+// Version: 8.0.0 - Enhanced Dynamic Handling
+// Cache Strategy: Cache-First for static assets, Network-First for HTML/API
+// Design: Self-learning, future-proof, automatic endpoint discovery
 
-const CACHE_NAME = 'moodchat-static-v7';
-const OFFLINE_CACHE_NAME = 'moodchat-offline-v7';
+const CACHE_NAME = 'moodchat-static-v8';
+const OFFLINE_CACHE_NAME = 'moodchat-offline-v8';
+const CACHE_MAX_AGE = 7 * 24 * 60 * 60 * 1000; // 7 days in milliseconds
 
-// Static assets only - local files that should be cached
-const STATIC_ASSETS = [
-  // Core HTML files
+// Core static assets - only truly static files that never change
+const CORE_STATIC_ASSETS = [
   '/',
   '/index.html',
-  '/chat.html',
-  '/status.html',
-  '/friend.html',
-  '/group.html',
-  '/calls.html',
-  '/Tools.html',
-  '/settings.html',
-  
-  // CSS files (local only)
-  '/layout.css',
-  '/chat.css',
-  '/group.css',
-  
-  // JavaScript files (local app files only)
-  '/js/app.js',
-  '/chat.js',
-  
-  // Manifest and icons (local only)
   '/manifest.json',
   '/moodchat-192x192.png',
-  '/moodchat-512x512.png',
-  
-  // Optional static assets
-  '/apple-touch-icon.png',
-  '/images/logo.svg',
-  '/images/avatar-placeholder.png',
-  '/images/chat-bg.jpg',
-  '/icons/send.svg',
-  '/icons/menu.svg',
-  '/icons/search.svg',
-  '/icons/settings.svg'
+  '/moodchat-512x512.png'
 ];
 
-// NEVER cache these - ALWAYS go directly to network
+// Dynamic cache registry for discovered assets
+let dynamicAssetRegistry = new Set(CORE_STATIC_ASSETS);
+
+// NEVER cache these patterns - always go to network
 const NEVER_CACHE_PATTERNS = [
-  '/api/',
-  '/auth/',
-  '/login',
-  '/register',
-  '/logout',
-  '/backend/',
-  '/server/',
-  '/socket.io/',
-  '/ws/',
-  '/wss/',
-  'https://api.',
-  'http://api.',
-  ':3000',
-  ':5000',
-  ':8000',
-  ':8080',
-  'localhost',
-  '127.0.0.1',
-  '0.0.0.0'
+  /\/api\//,
+  /\/auth\//,
+  /\/login/,
+  /\/register/,
+  /\/logout/,
+  /\/backend\//,
+  /\/server\//,
+  /\/socket\.io\//,
+  /\/ws\//,
+  /\/wss\//,
+  /\/graphql/,
+  /\/webhook/,
+  /^https?:\/\/api\./,
+  /^https?:\/\/[^\/]*:[0-9]+\//, // Any port-based URLs
+  /localhost/,
+  /127\.0\.0\.1/,
+  /0\.0\.0\.0/
 ];
 
-// Install event - cache static assets only
+// Patterns that indicate static assets
+const STATIC_ASSET_PATTERNS = [
+  /\.(css|js|json|png|jpg|jpeg|svg|ico|woff2|woff|ttf|webp|gif|map)$/,
+  /\/icons\//,
+  /\/images\//,
+  /\/fonts\//,
+  /\/static\//
+];
+
+// Patterns that indicate HTML content
+const HTML_PATTERNS = [
+  /\.html$/,
+  /^\/[^\.]*$/, // Root paths without extensions
+  /text\/html/
+];
+
+// Token cache and request queue for offline
+let authToken = null;
+const pendingRequests = [];
+
+// Install event - cache only core static assets
 self.addEventListener('install', event => {
-  console.log('[Service Worker] Installing v7.0.1 - Static Assets Only');
+  console.log('[Service Worker] Installing v8.0.0 - Dynamic Handling Edition');
   
   event.waitUntil(
     (async () => {
       try {
         const cache = await caches.open(CACHE_NAME);
-        console.log('[Service Worker] Caching static assets only...');
+        console.log('[Service Worker] Caching core static assets...');
         
-        const cachePromises = STATIC_ASSETS.map(async (asset) => {
-          try {
-            // Skip if asset contains never-cache patterns
-            if (containsNeverCachePattern(asset)) {
-              console.log('[Service Worker] Skipping never-cache asset:', asset);
-              return { asset, success: false, reason: 'never-cache-pattern' };
+        const results = await Promise.allSettled(
+          CORE_STATIC_ASSETS.map(async (asset) => {
+            try {
+              if (shouldNeverCache(asset)) {
+                return { asset, status: 'skipped', reason: 'never-cache' };
+              }
+              
+              const assetUrl = asset === '/' ? '/index.html' : asset;
+              
+              // Only fetch and cache if it's a local asset
+              if (isLocalAsset(assetUrl)) {
+                const response = await fetch(assetUrl, {
+                  credentials: 'same-origin',
+                  cache: 'no-store'
+                }).catch(() => null);
+                
+                if (response && response.ok) {
+                  await cache.put(assetUrl, response.clone());
+                  dynamicAssetRegistry.add(assetUrl);
+                  return { asset: assetUrl, status: 'cached' };
+                }
+              }
+              return { asset: assetUrl, status: 'failed', reason: 'fetch-failed' };
+            } catch (error) {
+              return { asset, status: 'error', reason: error.message };
             }
-            
-            // Handle root path
-            const assetUrl = asset === '/' ? '/index.html' : asset;
-            
-            // Skip invalid URLs
-            if (!isValidLocalUrl(assetUrl)) {
-              console.log('[Service Worker] Skipping invalid URL:', assetUrl);
-              return { asset: assetUrl, success: false, reason: 'invalid-url' };
-            }
-            
-            // Skip HTML files from initial cache - they'll use network-first strategy
-            if (assetUrl.endsWith('.html') || asset === '/') {
-              console.log('[Service Worker] Skipping HTML from initial cache (network-first):', assetUrl);
-              return { asset: assetUrl, success: false, reason: 'html-network-first' };
-            }
-            
-            // Fetch the asset
-            const response = await fetch(assetUrl, {
-              credentials: 'same-origin',
-              // Non-blocking: don't fail entire installation if one asset fails
-              mode: 'no-cors'
-            }).catch(error => {
-              console.warn(`[Service Worker] Fetch failed for ${assetUrl}:`, error.message);
-              return null;
-            });
-            
-            // Only cache if response is OK and not an API endpoint
-            if (response && response.ok && response.status === 200) {
-              await cache.put(asset === '/' ? '/' : assetUrl, response);
-              console.log(`[Service Worker] Cached: ${assetUrl}`);
-              return { asset: assetUrl, success: true };
-            } else {
-              const status = response ? response.status : 'no-response';
-              console.warn(`[Service Worker] Failed to cache ${assetUrl}: Status ${status}`);
-              return { asset: assetUrl, success: false, reason: `status-${status}` };
-            }
-          } catch (error) {
-            // NON-BLOCKING: Log error but don't throw
-            console.warn(`[Service Worker] Failed to cache ${asset}:`, error.message);
-            return { asset, success: false, reason: error.message };
-          }
-        });
+          })
+        );
         
-        const results = await Promise.allSettled(cachePromises);
-        const successCount = results.filter(r => r.status === 'fulfilled' && r.value.success === true).length;
-        const failedAssets = results
-          .filter(r => r.status === 'fulfilled' && r.value.success === false)
-          .map(r => r.value);
+        const successCount = results.filter(r => r.status === 'fulfilled' && r.value.status === 'cached').length;
+        console.log(`[Service Worker] Installation complete. Cached ${successCount}/${CORE_STATIC_ASSETS.length} core assets`);
         
-        console.log(`[Service Worker] Installation complete. Cached ${successCount}/${STATIC_ASSETS.length} assets`);
-        
-        if (failedAssets.length > 0) {
-          console.log('[Service Worker] Failed assets:', failedAssets.map(f => `${f.asset} (${f.reason})`).join(', '));
-        }
-        
+        // Skip waiting to activate immediately
         return self.skipWaiting();
       } catch (error) {
-        // NON-BLOCKING: Log error but don't fail installation
-        console.error('[Service Worker] Install failed:', error);
+        console.warn('[Service Worker] Install error (non-blocking):', error.message);
         return self.skipWaiting();
       }
     })()
   );
 });
 
-// Activate event - clean up old caches
+// Activate event - clean up and claim clients
 self.addEventListener('activate', event => {
-  console.log('[Service Worker] Activating v7.0.1...');
+  console.log('[Service Worker] Activating v8.0.0...');
   
   event.waitUntil(
     (async () => {
@@ -166,16 +130,20 @@ self.addEventListener('activate', event => {
           })
         );
         
+        // Load previously discovered assets from cache
+        await loadDynamicRegistry();
+        
         // Claim clients immediately
         await self.clients.claim();
         console.log('[Service Worker] Clients claimed');
+        console.log('[Service Worker] Dynamic registry contains', dynamicAssetRegistry.size, 'assets');
         
-        // Notify clients that service worker is ready
+        // Notify clients
         const clients = await self.clients.matchAll();
         clients.forEach(client => {
           client.postMessage({
             type: 'SW_ACTIVATED',
-            version: '7.0.1',
+            version: '8.0.0',
             timestamp: Date.now()
           });
         });
@@ -187,17 +155,64 @@ self.addEventListener('activate', event => {
   );
 });
 
-// Check if URL contains never-cache patterns
-function containsNeverCachePattern(url) {
+// Load previously discovered assets from cache
+async function loadDynamicRegistry() {
+  try {
+    const cache = await caches.open(CACHE_NAME);
+    const requests = await cache.keys();
+    
+    requests.forEach(request => {
+      const url = new URL(request.url);
+      if (isLocalAsset(url.pathname) && !shouldNeverCache(url.pathname)) {
+        dynamicAssetRegistry.add(url.pathname);
+      }
+    });
+    
+    console.log('[Service Worker] Loaded', dynamicAssetRegistry.size, 'assets into dynamic registry');
+  } catch (error) {
+    console.warn('[Service Worker] Failed to load dynamic registry:', error);
+  }
+}
+
+// Enhanced pattern matching
+function shouldNeverCache(url) {
   if (!url || typeof url !== 'string') return false;
   
   return NEVER_CACHE_PATTERNS.some(pattern => {
+    if (pattern instanceof RegExp) {
+      return pattern.test(url);
+    }
     return url.includes(pattern);
   });
 }
 
-// Check if URL is a valid local URL
-function isValidLocalUrl(url) {
+function isStaticAsset(url) {
+  if (!url || typeof url !== 'string') return false;
+  
+  return STATIC_ASSET_PATTERNS.some(pattern => {
+    if (pattern instanceof RegExp) {
+      return pattern.test(url);
+    }
+    return url.includes(pattern);
+  });
+}
+
+function isHtmlRequest(url, acceptHeader) {
+  if (!url || typeof url !== 'string') return false;
+  
+  const isHtmlPath = HTML_PATTERNS.some(pattern => {
+    if (pattern instanceof RegExp) {
+      return pattern.test(url);
+    }
+    return url.includes(pattern);
+  });
+  
+  const acceptsHtml = acceptHeader && acceptHeader.includes('text/html');
+  
+  return isHtmlPath || acceptsHtml;
+}
+
+function isLocalAsset(url) {
   try {
     const parsed = new URL(url, self.location.origin);
     return parsed.origin === self.location.origin;
@@ -206,158 +221,320 @@ function isValidLocalUrl(url) {
   }
 }
 
-// Check if request is for static asset
-function isStaticAssetRequest(request) {
-  const url = new URL(request.url);
+// Dynamic request classification
+function classifyRequest(request) {
+  const url = request.url;
+  const acceptHeader = request.headers.get('Accept');
   
-  // Skip non-GET requests
-  if (request.method !== 'GET') return false;
+  // Never cache patterns take highest priority
+  if (shouldNeverCache(url)) {
+    return 'NEVER_CACHE';
+  }
   
-  // Skip cross-origin requests
-  if (url.origin !== self.location.origin) return false;
+  // HTML requests
+  if (request.method === 'GET' && isHtmlRequest(url, acceptHeader)) {
+    return 'HTML';
+  }
   
-  // Check if URL contains never-cache patterns
-  if (containsNeverCachePattern(request.url)) return false;
+  // Static assets
+  if (request.method === 'GET' && isStaticAsset(url)) {
+    return 'STATIC';
+  }
   
-  // Check file extension
-  const extension = url.pathname.split('.').pop().toLowerCase();
-  const staticExtensions = ['css', 'js', 'json', 'png', 'jpg', 'jpeg', 'svg', 'ico', 'woff2', 'woff', 'ttf', 'webp', 'gif'];
+  // API-like patterns
+  if (url.includes('/api/') || url.includes('/auth/') || url.includes('/graphql')) {
+    return 'API';
+  }
   
-  return staticExtensions.includes(extension);
+  // Default to network-only for unknown types
+  return 'NETWORK_ONLY';
 }
 
-// Check if request is for HTML file
-function isHtmlRequest(request) {
-  const url = new URL(request.url);
+// Enhanced fetch handler with automatic learning
+async function handleFetch(event) {
+  const request = event.request;
+  const classification = classifyRequest(request);
+  const url = request.url;
   
-  // Skip non-GET requests
-  if (request.method !== 'GET') return false;
+  console.log(`[Service Worker] ${classification}: ${url}`);
   
-  // Skip cross-origin requests
-  if (url.origin !== self.location.origin) return false;
-  
-  // Check if URL contains never-cache patterns
-  if (containsNeverCachePattern(request.url)) return false;
-  
-  // Check file extension
-  const extension = url.pathname.split('.').pop().toLowerCase();
-  const isHtml = extension === 'html' || request.headers.get('Accept')?.includes('text/html');
-  
-  return isHtml;
-}
-
-// Handle static asset requests with cache-first strategy
-async function handleStaticAsset(request) {
-  try {
-    // First, try to get from cache
-    const cache = await caches.open(CACHE_NAME);
-    const cachedResponse = await cache.match(request);
-    
-    if (cachedResponse) {
-      console.log('[Service Worker] Serving from cache:', request.url);
-      return cachedResponse;
-    }
-    
-    // If not in cache, fetch from network
-    const networkResponse = await fetch(request).catch(error => {
-      console.warn('[Service Worker] Network fetch failed for:', request.url, error.message);
-      return null;
-    });
-    
-    // If network fetch succeeded and should be cached
-    if (networkResponse && 
-        networkResponse.ok && 
-        networkResponse.status === 200 && 
-        !containsNeverCachePattern(request.url)) {
+  switch (classification) {
+    case 'NEVER_CACHE':
+      return handleNeverCache(request);
       
-      // Clone the response before caching
-      const responseToCache = networkResponse.clone();
-      await cache.put(request, responseToCache);
-      console.log('[Service Worker] Cached new asset:', request.url);
-      return networkResponse;
-    }
-    
-    // If network fetch failed or shouldn't be cached, return network response if available
-    if (networkResponse) {
-      console.log('[Service Worker] Returning network response (not cached):', request.url);
-      return networkResponse;
-    }
-    
-    // If network failed and no cache, handle gracefully
-    console.warn('[Service Worker] Cache miss and network failed for:', request.url);
-    
-    // For other assets, return a minimal error response without throwing
-    return new Response('Resource not available', {
-      status: 404,
-      statusText: 'Not Found',
-      headers: { 
-        'Content-Type': 'text/plain',
-        'X-Cache-Status': 'miss'
-      }
-    });
-    
-  } catch (error) {
-    // NON-BLOCKING: Log error but don't throw
-    console.warn('[Service Worker] Failed to handle static asset:', request.url, error.message);
-    
-    // For other assets, return a minimal error response
-    return new Response('', {
-      status: 500,
-      headers: { 
-        'Content-Type': 'text/plain',
-        'X-Error': 'Service worker error'
-      }
-    });
+    case 'HTML':
+      return handleHtmlWithLearning(request);
+      
+    case 'STATIC':
+      return handleStaticWithLearning(request);
+      
+    case 'API':
+      return handleApiRequest(request);
+      
+    default:
+      return fetch(request);
   }
 }
 
-// Handle HTML requests with network-first strategy
-async function handleHtmlRequest(request) {
-  console.log('[Service Worker] Network-first for HTML:', request.url);
-  
+// Handle never-cache requests
+async function handleNeverCache(request) {
+  console.log('[Service Worker] Network-only (never-cache):', request.url);
+  return fetch(request);
+}
+
+// Handle HTML with learning capability
+async function handleHtmlWithLearning(request) {
   try {
-    // FIRST: Try to fetch from network
-    const networkResponse = await fetch(request).catch(error => {
-      console.warn('[Service Worker] Network fetch failed for HTML:', request.url, error.message);
-      return null;
-    });
+    // Try network first
+    const networkResponse = await fetch(request).catch(() => null);
     
-    // If network fetch succeeded
     if (networkResponse && networkResponse.ok) {
+      // Learn about this HTML page
+      dynamicAssetRegistry.add(new URL(request.url).pathname);
+      
+      // Cache for offline use
       const cache = await caches.open(CACHE_NAME);
+      await cache.put(request, networkResponse.clone());
       
-      // Clone the response before caching
-      const responseToCache = networkResponse.clone();
-      
-      // Cache the fresh HTML for offline use
-      await cache.put(request, responseToCache);
-      console.log('[Service Worker] Updated HTML in cache:', request.url);
-      
+      console.log('[Service Worker] HTML cached (network-first):', request.url);
       return networkResponse;
     }
     
-    // Network failed or returned error - try cache
-    console.log('[Service Worker] Network failed, trying cache for:', request.url);
+    // Network failed - try cache
     const cache = await caches.open(CACHE_NAME);
     const cachedResponse = await cache.match(request);
     
     if (cachedResponse) {
-      console.log('[Service Worker] Serving HTML from cache (offline):', request.url);
+      console.log('[Service Worker] HTML served from cache (offline):', request.url);
       return cachedResponse;
     }
     
-    // No cache available - return offline page
-    console.log('[Service Worker] No cached HTML, showing offline page:', request.url);
+    // No cache - offline fallback
     return getOfflinePage();
     
   } catch (error) {
-    // NON-BLOCKING: Log error and return offline page
-    console.warn('[Service Worker] Error handling HTML request:', request.url, error.message);
+    console.warn('[Service Worker] HTML handling error:', error.message);
     return getOfflinePage();
   }
 }
 
-// Get offline page for HTML requests
+// Handle static assets with learning capability
+async function handleStaticWithLearning(request) {
+  const cache = await caches.open(CACHE_NAME);
+  
+  // Try cache first
+  const cachedResponse = await cache.match(request);
+  if (cachedResponse) {
+    // Check if cache is stale
+    const isStale = await isCacheStale(cachedResponse);
+    if (!isStale) {
+      console.log('[Service Worker] Static asset from cache:', request.url);
+      return cachedResponse;
+    }
+  }
+  
+  // Cache miss or stale - try network
+  try {
+    const networkResponse = await fetch(request);
+    
+    if (networkResponse.ok) {
+      // Learn about this static asset
+      dynamicAssetRegistry.add(new URL(request.url).pathname);
+      
+      // Update cache with fresh response
+      const responseToCache = networkResponse.clone();
+      await cache.put(request, responseToCache);
+      
+      console.log('[Service Worker] Static asset cached:', request.url);
+      return networkResponse;
+    }
+    
+    // Network failed but we have stale cache
+    if (cachedResponse) {
+      console.log('[Service Worker] Using stale cache (network failed):', request.url);
+      return cachedResponse;
+    }
+    
+    throw new Error('Network failed and no cache available');
+    
+  } catch (error) {
+    // Network failed, no cache - try to serve similar asset
+    return handleAssetFallback(request);
+  }
+}
+
+// Check if cached response is stale
+async function isCacheStale(cachedResponse) {
+  try {
+    const dateHeader = cachedResponse.headers.get('date');
+    if (!dateHeader) return false;
+    
+    const cacheTime = new Date(dateHeader).getTime();
+    const age = Date.now() - cacheTime;
+    
+    return age > CACHE_MAX_AGE;
+  } catch (error) {
+    return false;
+  }
+}
+
+// Handle API requests with auth headers
+async function handleApiRequest(request) {
+  try {
+    // Get auth token if available
+    const token = await getAuthTokenFromClient();
+    
+    // Clone request and add auth header if needed
+    const headers = new Headers(request.headers);
+    if (token && !headers.has('Authorization')) {
+      headers.set('Authorization', `Bearer ${token}`);
+    }
+    
+    const apiRequest = new Request(request.url, {
+      method: request.method,
+      headers: headers,
+      mode: request.mode,
+      credentials: request.credentials
+    });
+    
+    // Copy body for non-GET requests
+    if (!['GET', 'HEAD'].includes(request.method)) {
+      const body = await request.arrayBuffer();
+      apiRequest = new Request(request.url, {
+        method: request.method,
+        headers: headers,
+        body: body,
+        mode: request.mode,
+        credentials: request.credentials
+      });
+    }
+    
+    const response = await fetch(apiRequest);
+    
+    // Log API call for debugging
+    console.log(`[Service Worker] API: ${request.method} ${request.url} -> ${response.status}`);
+    
+    return response;
+    
+  } catch (error) {
+    console.error('[Service Worker] API request failed:', error.message);
+    
+    // For POST/PUT/PATCH, queue for retry when online
+    if (['POST', 'PUT', 'PATCH'].includes(request.method)) {
+      await queueRequestForRetry(request.clone());
+    }
+    
+    return new Response(JSON.stringify({
+      error: 'Network error',
+      offline: true,
+      queued: ['POST', 'PUT', 'PATCH'].includes(request.method)
+    }), {
+      status: 503,
+      headers: { 'Content-Type': 'application/json' }
+    });
+  }
+}
+
+// Get auth token from clients
+async function getAuthTokenFromClient() {
+  if (authToken) return authToken;
+  
+  try {
+    const clients = await self.clients.matchAll({ 
+      type: 'window',
+      includeUncontrolled: true 
+    });
+    
+    if (clients.length > 0) {
+      const messageChannel = new MessageChannel();
+      
+      return new Promise((resolve) => {
+        const timeoutId = setTimeout(() => resolve(null), 1000);
+        
+        messageChannel.port1.onmessage = (event) => {
+          clearTimeout(timeoutId);
+          if (event.data?.type === 'TOKEN_RESPONSE') {
+            authToken = event.data.token;
+            resolve(event.data.token);
+          } else {
+            resolve(null);
+          }
+        };
+        
+        clients[0].postMessage(
+          { type: 'REQUEST_TOKEN' },
+          [messageChannel.port2]
+        );
+      });
+    }
+  } catch (error) {
+    console.warn('[Service Worker] Failed to get auth token:', error.message);
+  }
+  
+  return null;
+}
+
+// Queue failed requests for retry
+async function queueRequestForRetry(request) {
+  try {
+    const requestData = {
+      url: request.url,
+      method: request.method,
+      headers: Object.fromEntries(request.headers.entries()),
+      timestamp: Date.now()
+    };
+    
+    if (!['GET', 'HEAD'].includes(request.method)) {
+      requestData.body = await request.text();
+    }
+    
+    pendingRequests.push(requestData);
+    
+    // Store in IndexedDB for persistence
+    await storePendingRequest(requestData);
+    
+    console.log('[Service Worker] Request queued for retry:', request.url);
+    
+    // Trigger sync if available
+    if ('sync' in self.registration) {
+      await self.registration.sync.register('retry-requests');
+    }
+    
+  } catch (error) {
+    console.warn('[Service Worker] Failed to queue request:', error);
+  }
+}
+
+// Handle asset fallback
+async function handleAssetFallback(request) {
+  const url = new URL(request.url);
+  const pathname = url.pathname;
+  
+  // Try to find similar asset in cache
+  const cache = await caches.open(CACHE_NAME);
+  const keys = await cache.keys();
+  
+  // Look for assets in same directory
+  const similarAssets = keys.filter(key => {
+    const keyUrl = new URL(key.url);
+    return keyUrl.pathname.startsWith(pathname.substring(0, pathname.lastIndexOf('/')));
+  });
+  
+  if (similarAssets.length > 0) {
+    // Return first similar asset
+    const fallback = await cache.match(similarAssets[0]);
+    console.log('[Service Worker] Using fallback asset:', similarAssets[0].url);
+    return fallback;
+  }
+  
+  // No fallback available
+  return new Response('Resource not available', {
+    status: 404,
+    headers: { 'Content-Type': 'text/plain' }
+  });
+}
+
+// Offline page
 function getOfflinePage() {
   const offlineHtml = `
     <!DOCTYPE html>
@@ -368,7 +545,7 @@ function getOfflinePage() {
         <title>Offline - MoodChat</title>
         <style>
           body {
-            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, sans-serif;
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
             display: flex;
             justify-content: center;
             align-items: center;
@@ -387,16 +564,8 @@ function getOfflinePage() {
             max-width: 400px;
             box-shadow: 0 8px 32px rgba(0, 0, 0, 0.1);
           }
-          h1 {
-            margin: 0 0 20px 0;
-            font-size: 2.5em;
-          }
-          p {
-            margin: 0 0 30px 0;
-            opacity: 0.9;
-            font-size: 1.1em;
-            line-height: 1.6;
-          }
+          h1 { margin: 0 0 20px 0; font-size: 2.5em; }
+          p { margin: 0 0 30px 0; opacity: 0.9; font-size: 1.1em; line-height: 1.6; }
           .buttons {
             display: flex;
             gap: 15px;
@@ -419,19 +588,11 @@ function getOfflinePage() {
             transform: translateY(-2px);
             box-shadow: 0 5px 15px rgba(0, 0, 0, 0.2);
           }
-          button:active {
-            transform: translateY(0);
-          }
-          .icon {
-            font-size: 4em;
-            margin-bottom: 20px;
-            opacity: 0.8;
-          }
         </style>
       </head>
       <body>
         <div class="container">
-          <div class="icon">📶</div>
+          <div style="font-size: 4em; margin-bottom: 20px;">📶</div>
           <h1>You're Offline</h1>
           <p>Please check your internet connection and try again.</p>
           <div class="buttons">
@@ -444,7 +605,6 @@ function getOfflinePage() {
   
   return new Response(offlineHtml, {
     status: 200,
-    statusText: 'OK',
     headers: {
       'Content-Type': 'text/html; charset=utf-8',
       'X-Service-Worker': 'offline'
@@ -452,247 +612,159 @@ function getOfflinePage() {
   });
 }
 
-// CRITICAL: Main fetch event handler - API requests bypass cache completely
+// Main fetch event
 self.addEventListener('fetch', event => {
-  const request = event.request;
-  const url = request.url;
-  
-  // CRITICAL REQUIREMENT: NEVER cache API requests - always fetch from network
-  // This ensures auth and API requests are NEVER interfered with
-  if (url.includes('/api/') || containsNeverCachePattern(url)) {
-    console.log('[Service Worker] Bypassing cache for API/Auth:', url);
-    event.respondWith(fetch(request));
+  // Skip non-GET requests for cache handling
+  if (event.request.method !== 'GET') {
+    // For API-like non-GET requests, handle with auth
+    if (shouldNeverCache(event.request.url) || event.request.url.includes('/api/')) {
+      event.respondWith(handleApiRequest(event.request));
+    } else {
+      event.respondWith(fetch(event.request));
+    }
     return;
   }
   
-  // CRITICAL: Skip all non-GET requests (POST, PUT, DELETE, etc.)
-  if (request.method !== 'GET') {
-    console.log('[Service Worker] Bypassing cache for non-GET:', request.method, url);
-    event.respondWith(fetch(request));
-    return;
-  }
-  
-  // CRITICAL: Skip all auth-related requests
-  if (url.includes('/auth/') || 
-      url.includes('/login') || 
-      url.includes('/register') || 
-      url.includes('/logout')) {
-    console.log('[Service Worker] Bypassing cache for auth:', url);
-    event.respondWith(fetch(request));
-    return;
-  }
-  
-  // CRITICAL: Skip backend, server, and socket requests
-  if (url.includes('/backend/') || 
-      url.includes('/server/') || 
-      url.includes('/socket.io/') || 
-      url.includes('/ws/') || 
-      url.includes('/wss/')) {
-    console.log('[Service Worker] Bypassing cache for backend:', url);
-    event.respondWith(fetch(request));
-    return;
-  }
-  
-  // Handle HTML requests with NETWORK-FIRST strategy
-  if (isHtmlRequest(request)) {
-    console.log('[Service Worker] Handling HTML (network-first):', url);
-    event.respondWith(handleHtmlRequest(request));
-    return;
-  }
-  
-  // Handle static asset requests with CACHE-FIRST strategy
-  if (isStaticAssetRequest(request)) {
-    console.log('[Service Worker] Handling static asset (cache-first):', url);
-    event.respondWith(handleStaticAsset(request));
-    return;
-  }
-  
-  // For all other requests, let them go to network (no caching)
-  console.log('[Service Worker] Passing through to network:', url);
+  event.respondWith(handleFetch(event));
 });
 
-// Handle push notifications
-self.addEventListener('push', event => {
-  if (!event.data) return;
-  
-  try {
-    const data = event.data.json();
-    const options = {
-      body: data.body || 'New message',
-      icon: '/moodchat-192x192.png',
-      badge: '/moodchat-192x192.png',
-      tag: data.tag || 'chat-message',
-      data: data.data || { url: '/chat.html' },
-      requireInteraction: data.important || false
-    };
-    
-    event.waitUntil(
-      self.registration.showNotification(data.title || 'MoodChat', options)
-    );
-  } catch (error) {
-    console.log('[Service Worker] Push notification error:', error);
-  }
-});
+// Store pending request in IndexedDB
+async function storePendingRequest(requestData) {
+  // Implementation for IndexedDB storage
+  // This would be implemented based on your app's needs
+}
 
-// Handle notification clicks
-self.addEventListener('notificationclick', event => {
-  event.notification.close();
-  
-  const notificationData = event.notification.data || {};
-  const urlToOpen = notificationData.url || '/chat.html';
-  
-  event.waitUntil(
-    clients.matchAll({ type: 'window', includeUncontrolled: true })
-      .then(clientList => {
-        // Look for existing chat window
-        for (const client of clientList) {
-          if (client.url.includes(urlToOpen) && 'focus' in client) {
-            return client.focus();
-          }
-        }
-        
-        // Open new window
-        if (clients.openWindow) {
-          return clients.openWindow(urlToOpen);
-        }
-      })
-  );
-});
-
-// Handle messages from main app
+// Message handling
 self.addEventListener('message', event => {
   const data = event.data;
   
-  if (!data || !data.type) return;
+  if (!data?.type) return;
   
   switch (data.type) {
     case 'SKIP_WAITING':
-      console.log('[Service Worker] Skipping waiting...');
       self.skipWaiting();
       break;
       
     case 'CLEAR_CACHE':
-      console.log('[Service Worker] Clearing cache...');
-      event.waitUntil(
-        (async () => {
-          const cacheNames = await caches.keys();
-          await Promise.all(cacheNames.map(name => caches.delete(name)));
-          
-          // Notify clients
-          const clients = await self.clients.matchAll();
-          clients.forEach(client => {
-            client.postMessage({
-              type: 'CACHE_CLEARED',
-              timestamp: Date.now()
-            });
-          });
-        })()
-      );
+      event.waitUntil(clearAllCaches());
       break;
       
     case 'GET_CACHE_INFO':
-      event.waitUntil(
-        (async () => {
-          try {
-            const cacheNames = await caches.keys();
-            const cacheInfo = {};
-            
-            for (const cacheName of cacheNames) {
-              const cache = await caches.open(cacheName);
-              const keys = await cache.keys();
-              cacheInfo[cacheName] = {
-                count: keys.length,
-                urls: keys.map(req => req.url)
-              };
-            }
-            
-            event.ports[0].postMessage({
-              type: 'CACHE_INFO',
-              caches: cacheInfo,
-              timestamp: Date.now(),
-              version: '7.0.1'
-            });
-          } catch (error) {
-            event.ports[0].postMessage({
-              type: 'CACHE_INFO',
-              error: error.message,
-              timestamp: Date.now()
-            });
-          }
-        })()
-      );
+      event.waitUntil(sendCacheInfo(event));
       break;
       
-    case 'CHECK_HEALTH':
-      event.ports[0].postMessage({
-        type: 'HEALTH_RESPONSE',
-        status: 'healthy',
-        version: '7.0.1',
-        timestamp: Date.now()
-      });
-      break;
-      
-    case 'CHECK_ONLINE_STATUS':
-      event.ports[0].postMessage({
-        type: 'ONLINE_STATUS',
-        online: navigator.onLine,
-        timestamp: Date.now()
-      });
+    case 'TOKEN_UPDATE':
+      authToken = data.token;
       break;
       
     case 'REFRESH_HTML':
-      console.log('[Service Worker] Refreshing HTML cache...');
-      event.waitUntil(
-        (async () => {
-          try {
-            const cache = await caches.open(CACHE_NAME);
-            const keys = await cache.keys();
-            
-            // Clear HTML files from cache
-            for (const request of keys) {
-              if (request.url.endsWith('.html') || new URL(request.url).pathname === '/') {
-                await cache.delete(request);
-                console.log('[Service Worker] Removed from cache:', request.url);
-              }
-            }
-            
-            event.ports[0].postMessage({
-              type: 'HTML_CACHE_CLEARED',
-              timestamp: Date.now()
-            });
-          } catch (error) {
-            console.warn('[Service Worker] Failed to refresh HTML cache:', error);
-          }
-        })()
-      );
+      event.waitUntil(refreshHtmlCache());
+      break;
+      
+    case 'CHECK_HEALTH':
+      event.ports?.[0]?.postMessage({
+        type: 'HEALTH_RESPONSE',
+        status: 'healthy',
+        version: '8.0.0',
+        registrySize: dynamicAssetRegistry.size,
+        timestamp: Date.now()
+      });
       break;
   }
 });
 
-// Background sync for failed requests
-self.addEventListener('sync', event => {
-  if (event.tag === 'sync-messages') {
-    console.log('[Service Worker] Background sync triggered');
-    event.waitUntil(syncPendingData());
-  }
-});
-
-async function syncPendingData() {
+// Clear all caches
+async function clearAllCaches() {
   try {
-    console.log('[Service Worker] Syncing pending data...');
-    // Implementation for syncing pending messages
+    const cacheNames = await caches.keys();
+    await Promise.all(cacheNames.map(name => caches.delete(name)));
+    
+    dynamicAssetRegistry = new Set(CORE_STATIC_ASSETS);
+    authToken = null;
+    
+    const clients = await self.clients.matchAll();
+    clients.forEach(client => {
+      client.postMessage({
+        type: 'CACHE_CLEARED',
+        timestamp: Date.now()
+      });
+    });
+    
+    console.log('[Service Worker] All caches cleared');
   } catch (error) {
-    console.log('[Service Worker] Sync failed:', error);
+    console.error('[Service Worker] Failed to clear caches:', error);
   }
 }
 
-// Clean up old cache entries periodically
+// Send cache info to client
+async function sendCacheInfo(event) {
+  try {
+    const cacheNames = await caches.keys();
+    const cacheInfo = {};
+    
+    for (const cacheName of cacheNames) {
+      const cache = await caches.open(cacheName);
+      const keys = await cache.keys();
+      cacheInfo[cacheName] = {
+        count: keys.length,
+        urls: keys.map(req => req.url).slice(0, 20) // Limit to 20 URLs
+      };
+    }
+    
+    event.ports[0].postMessage({
+      type: 'CACHE_INFO',
+      caches: cacheInfo,
+      registrySize: dynamicAssetRegistry.size,
+      timestamp: Date.now(),
+      version: '8.0.0'
+    });
+  } catch (error) {
+    event.ports[0].postMessage({
+      type: 'CACHE_INFO',
+      error: error.message
+    });
+  }
+}
+
+// Refresh HTML cache
+async function refreshHtmlCache() {
+  try {
+    const cache = await caches.open(CACHE_NAME);
+    const keys = await cache.keys();
+    
+    for (const request of keys) {
+      const url = new URL(request.url);
+      if (isHtmlRequest(url.pathname, null)) {
+        await cache.delete(request);
+        console.log('[Service Worker] Removed HTML from cache:', request.url);
+      }
+    }
+    
+    console.log('[Service Worker] HTML cache refreshed');
+  } catch (error) {
+    console.warn('[Service Worker] Failed to refresh HTML cache:', error);
+  }
+}
+
+// Background sync for retrying failed requests
+self.addEventListener('sync', event => {
+  if (event.tag === 'retry-requests') {
+    console.log('[Service Worker] Retrying queued requests...');
+    event.waitUntil(retryPendingRequests());
+  }
+});
+
+// Retry pending requests
+async function retryPendingRequests() {
+  // Implementation for retrying queued requests
+}
+
+// Periodic cache cleanup
 async function cleanupOldCacheEntries() {
   try {
     const cache = await caches.open(CACHE_NAME);
     const keys = await cache.keys();
-    const oneWeekAgo = Date.now() - 7 * 24 * 60 * 60 * 1000;
-    let cleanedCount = 0;
+    const oneWeekAgo = Date.now() - CACHE_MAX_AGE;
     
     for (const request of keys) {
       const response = await cache.match(request);
@@ -702,34 +774,26 @@ async function cleanupOldCacheEntries() {
           const cachedDate = new Date(dateHeader).getTime();
           if (cachedDate < oneWeekAgo) {
             await cache.delete(request);
-            cleanedCount++;
+            const url = new URL(request.url);
+            dynamicAssetRegistry.delete(url.pathname);
           }
         }
       }
-    }
-    
-    if (cleanedCount > 0) {
-      console.log(`[Service Worker] Cleaned ${cleanedCount} old cache entries`);
     }
   } catch (error) {
     console.log('[Service Worker] Cleanup error:', error);
   }
 }
 
-// Run cleanup once a day
-setInterval(cleanupOldCacheEntries, 24 * 60 * 60 * 1000);
+// Run cleanup weekly
+setInterval(cleanupOldCacheEntries, CACHE_MAX_AGE);
 
-// Error handling - log but don't throw
+// Error handling
 self.addEventListener('error', event => {
   console.warn('[Service Worker] Error:', event.error);
-  // NON-BLOCKING: Don't re-throw
 });
 
 self.addEventListener('unhandledrejection', event => {
   console.warn('[Service Worker] Unhandled rejection:', event.reason);
-  // NON-BLOCKING: Don't re-throw
   event.preventDefault();
 });
-
-// Initial cleanup
-cleanupOldCacheEntries();

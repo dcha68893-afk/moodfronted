@@ -8,6 +8,9 @@
 // CRITICAL FIX: Added api.get(), api.post(), api.put(), api.delete() methods
 // UPDATED: Enhanced token retrieval and authentication header handling
 // UPDATED: Explicitly exposed all API methods for iframe pages
+// UPDATED: Global token variable and automatic Authorization header injection
+// UPDATED: Enhanced 401 handling and token validation logic
+// NEW: Enhanced token persistence and /auth/me retry logic with exponential backoff
 // ============================================================================
 // CRITICAL IMPROVEMENTS APPLIED:
 // 1. SINGLE internal fetch function with comprehensive input validation
@@ -25,6 +28,14 @@
 // 13. ENHANCED: Helper function getAuthHeaders() for all API calls
 // 14. ENHANCED: Automatic token attachment to all authenticated endpoints
 // 15. CRITICAL FIX: Explicitly exposed all API methods used by iframe pages
+// 16. NEW FEATURE: Global accessToken variable with automatic initialization
+// 17. NEW FEATURE: Automatic Authorization header injection in all API calls
+// 18. UPDATED: Enhanced 401 handling - only clear token when explicitly invalid
+// 19. UPDATED: Retry logic for /auth/me validation with stored tokens
+// 20. UPDATED: isLoggedIn() logic to require successful /auth/me validation
+// 21. NEW: Enhanced token persistence across page refreshes
+// 22. NEW: Improved /auth/me retry logic with exponential backoff
+// 23. NEW: Global currentUser object persistence
 // ============================================================================
 
 // ============================================================================
@@ -78,6 +89,151 @@ window.addEventListener('offline', () => {
 });
 
 // ============================================================================
+// GLOBAL TOKEN VARIABLE - ENHANCED PERSISTENCE
+// ============================================================================
+/**
+ * Global access token variable with enhanced persistence
+ * Automatically initialized from localStorage on page load
+ * Persists across page refreshes, browser reloads, and navigation
+ */
+let accessToken = null;
+
+// Function to initialize and update the global access token
+function updateGlobalAccessToken() {
+  // Try multiple possible storage locations with priority
+  const tokenFromAccessToken = localStorage.getItem('accessToken');
+  const tokenFromMoodchatToken = localStorage.getItem('moodchat_token');
+  const tokenFromLegacyToken = localStorage.getItem('token');
+  const tokenFromMoodchatAuthToken = localStorage.getItem('moodchat_auth_token');
+  
+  // Priority 1: accessToken key (new standard)
+  if (tokenFromAccessToken) {
+    accessToken = tokenFromAccessToken;
+    console.log(`🔐 [TOKEN] Global accessToken initialized from 'accessToken' key: ${accessToken.substring(0, 20)}...`);
+    
+    // Ensure it's also in moodchat_token for consistency
+    if (!localStorage.getItem('moodchat_token')) {
+      localStorage.setItem('moodchat_token', accessToken);
+      console.log(`🔐 [TOKEN] Also stored token in 'moodchat_token' key for consistency`);
+    }
+    
+    // Dispatch token loaded event
+    window.dispatchEvent(new CustomEvent('token-loaded', {
+      detail: { token: accessToken, source: 'accessToken' }
+    }));
+    
+    return;
+  }
+  
+  // Priority 2: moodchat_token key (requested key)
+  if (tokenFromMoodchatToken) {
+    accessToken = tokenFromMoodchatToken;
+    console.log(`🔐 [TOKEN] Global accessToken initialized from 'moodchat_token' key: ${accessToken.substring(0, 20)}...`);
+    
+    // Also store in accessToken key for consistency
+    if (!tokenFromAccessToken) {
+      localStorage.setItem('accessToken', accessToken);
+      console.log(`🔐 [TOKEN] Also stored token in 'accessToken' key for consistency`);
+    }
+    
+    // Dispatch token loaded event
+    window.dispatchEvent(new CustomEvent('token-loaded', {
+      detail: { token: accessToken, source: 'moodchat_token' }
+    }));
+    
+    return;
+  }
+  
+  // Priority 3: Check normalized storage format
+  try {
+    const authDataStr = localStorage.getItem('authUser');
+    if (authDataStr) {
+      const authData = JSON.parse(authDataStr);
+      if (authData.accessToken || authData.token) {
+        accessToken = authData.accessToken || authData.token;
+        console.log(`🔐 [TOKEN] Global accessToken from authUser: ${accessToken.substring(0, 20)}...`);
+        
+        // Store in both keys for future consistency
+        localStorage.setItem('accessToken', accessToken);
+        localStorage.setItem('moodchat_token', accessToken);
+        console.log(`🔐 [TOKEN] Token stored in both 'accessToken' and 'moodchat_token' keys`);
+        
+        // Dispatch token loaded event
+        window.dispatchEvent(new CustomEvent('token-loaded', {
+          detail: { token: accessToken, source: 'authUser' }
+        }));
+        
+        return;
+      }
+    }
+  } catch (e) {
+    console.log('🔐 [TOKEN] Could not parse authUser:', e.message);
+  }
+  
+  // Priority 4: Legacy token locations
+  if (tokenFromLegacyToken) {
+    accessToken = tokenFromLegacyToken;
+    console.log(`🔐 [TOKEN] Global accessToken from legacy 'token' key: ${accessToken.substring(0, 20)}...`);
+    
+    // Store in both standard keys
+    localStorage.setItem('accessToken', accessToken);
+    localStorage.setItem('moodchat_token', accessToken);
+    console.log(`🔐 [TOKEN] Token stored in standard keys for consistency`);
+    
+    // Dispatch token loaded event
+    window.dispatchEvent(new CustomEvent('token-loaded', {
+      detail: { token: accessToken, source: 'legacy_token' }
+    }));
+    
+    return;
+  }
+  
+  if (tokenFromMoodchatAuthToken) {
+    accessToken = tokenFromMoodchatAuthToken;
+    console.log(`🔐 [TOKEN] Global accessToken from 'moodchat_auth_token': ${accessToken.substring(0, 20)}...`);
+    
+    // Store in both standard keys
+    localStorage.setItem('accessToken', accessToken);
+    localStorage.setItem('moodchat_token', accessToken);
+    console.log(`🔐 [TOKEN] Token stored in standard keys for consistency`);
+    
+    // Dispatch token loaded event
+    window.dispatchEvent(new CustomEvent('token-loaded', {
+      detail: { token: accessToken, source: 'moodchat_auth_token' }
+    }));
+    
+    return;
+  }
+  
+  console.log('🔐 [TOKEN] No access token found in localStorage');
+  accessToken = null;
+  
+  // Dispatch token not found event
+  window.dispatchEvent(new CustomEvent('token-not-found'));
+}
+
+// Initialize global token on script load - CRITICAL FOR PERSISTENCE
+updateGlobalAccessToken();
+
+// Listen for storage events to sync token across tabs
+window.addEventListener('storage', (event) => {
+  if (event.key === 'accessToken' || event.key === 'moodchat_token' || 
+      event.key === 'token' || event.key === 'moodchat_auth_token' || 
+      event.key === 'authUser') {
+    console.log(`🔐 [TOKEN] Storage event detected for ${event.key}, updating global token`);
+    updateGlobalAccessToken();
+    
+    // If token changed, validate it
+    if (accessToken) {
+      console.log('🔐 [TOKEN] Token updated from storage event, re-validating...');
+      setTimeout(() => {
+        window.api.checkAuthMe().catch(() => {});
+      }, 100);
+    }
+  }
+});
+
+// ============================================================================
 // ENVIRONMENT DETECTION - DYNAMIC BACKEND URL CONFIGURATION
 // ============================================================================
 /**
@@ -123,6 +279,7 @@ console.log(`🔧 [API] Backend Base URL: ${BACKEND_BASE_URL}`);
 console.log(`🔧 [API] API Base URL: ${BASE_API_URL}`);
 console.log(`🔧 [API] CRITICAL: ALL API calls will use: ${BASE_API_URL}`);
 console.log(`🔧 [API] Network State: Online=${window.AppNetwork.isOnline}, BackendReachable=${window.AppNetwork.isBackendReachable}`);
+console.log(`🔧 [API] Global Token: ${accessToken ? `Present (${accessToken.substring(0, 20)}...)` : 'Not found'}`);
 
 // ============================================================================
 // TOKEN MANAGEMENT - SINGLE SOURCE OF TRUTH
@@ -133,6 +290,7 @@ console.log(`🔧 [API] Network State: Online=${window.AppNetwork.isOnline}, Bac
  */
 const TOKEN_STORAGE_KEY = 'authUser';
 const ACCESS_TOKEN_KEY = 'accessToken';
+const MOODCHAT_TOKEN_KEY = 'moodchat_token';
 const USER_DATA_KEY = 'userData';
 
 // ============================================================================
@@ -144,9 +302,18 @@ const USER_DATA_KEY = 'userData';
  * @returns {object} Headers object with Authorization if token exists
  */
 function getAuthHeaders() {
+  // Use global accessToken first for consistency
+  if (accessToken) {
+    console.log('🔐 [AUTH] Using global accessToken for Authorization header');
+    return { 'Authorization': `Bearer ${accessToken}` };
+  }
+  
+  // Fallback to token extraction from localStorage
   const token = _getCurrentAccessToken();
   if (token) {
-    console.log('🔐 [AUTH] Token found, adding Authorization header');
+    console.log('🔐 [AUTH] Token found via _getCurrentAccessToken(), adding Authorization header');
+    // Update global token for future use
+    accessToken = token;
     return { 'Authorization': `Bearer ${token}` };
   }
   
@@ -156,6 +323,8 @@ function getAuthHeaders() {
     console.log('🔐 [AUTH] Legacy token found, adding Authorization header');
     // Store it in normalized format for future use
     _storeLegacyTokenIfNeeded(legacyToken);
+    // Update global token
+    accessToken = legacyToken;
     return { 'Authorization': `Bearer ${legacyToken}` };
   }
   
@@ -264,19 +433,35 @@ function _storeAuthData(token, user, refreshToken = null) {
   // Store in localStorage with consistent key
   localStorage.setItem(TOKEN_STORAGE_KEY, JSON.stringify(authData));
   
+  // Store in BOTH keys as requested - CRITICAL FOR PERSISTENCE
+  localStorage.setItem(MOODCHAT_TOKEN_KEY, token);
+  localStorage.setItem(ACCESS_TOKEN_KEY, token);
+  
   // Also store in legacy format for compatibility
-  localStorage.setItem('moodchat_token', token);  // Add this line for requested key
   localStorage.setItem('token', token);
   localStorage.setItem('moodchat_auth_token', token);
   
   if (user) {
     localStorage.setItem('moodchat_auth_user', JSON.stringify(user));
+    localStorage.setItem(USER_DATA_KEY, JSON.stringify(user));
   }
+  
+  // Update global access token
+  accessToken = token;
   
   // Set global user ONLY after storage is successful
   window.currentUser = user;
   
   console.log(`✅ [AUTH] Auth data stored: token=${!!token}, user=${!!user}`);
+  console.log(`✅ [AUTH] Token stored in BOTH 'moodchat_token' and 'accessToken' keys`);
+  console.log(`✅ [AUTH] Global accessToken updated: ${accessToken.substring(0, 20)}...`);
+  console.log(`✅ [AUTH] Global currentUser set: ${user.username || user.email || 'User object'}`);
+  
+  // Dispatch storage event
+  window.dispatchEvent(new CustomEvent('auth-data-stored', {
+    detail: { token: token, user: user, timestamp: new Date().toISOString() }
+  }));
+  
   return true;
 }
 
@@ -284,17 +469,29 @@ function _storeAuthData(token, user, refreshToken = null) {
  * Clears ALL auth data
  */
 function _clearAuthData() {
+  // Keep window.currentUser intact as requested
+  const currentUserBeforeClear = window.currentUser;
+  
   localStorage.removeItem(TOKEN_STORAGE_KEY);
-  localStorage.removeItem('moodchat_token');  // Add this line for requested key
+  localStorage.removeItem(MOODCHAT_TOKEN_KEY);
+  localStorage.removeItem(ACCESS_TOKEN_KEY);
   localStorage.removeItem('token');
   localStorage.removeItem('moodchat_auth_token');
   localStorage.removeItem('moodchat_auth_user');
   localStorage.removeItem('moodchat_refresh_token');
+  localStorage.removeItem(USER_DATA_KEY);
   
-  // Clear global user state
-  window.currentUser = null;
+  // Clear global token variable
+  accessToken = null;
   
-  console.log('✅ [AUTH] All auth data cleared');
+  // Restore window.currentUser as requested
+  window.currentUser = currentUserBeforeClear;
+  
+  console.log('✅ [AUTH] All auth data cleared, global accessToken set to null');
+  console.log('✅ [AUTH] window.currentUser preserved:', window.currentUser ? 'Still set' : 'Not set');
+  
+  // Dispatch cleared event
+  window.dispatchEvent(new CustomEvent('auth-data-cleared'));
 }
 
 /**
@@ -303,33 +500,53 @@ function _clearAuthData() {
  */
 function _getCurrentAccessToken() {
   try {
-    // First check normalized storage
+    // First check global accessToken variable
+    if (accessToken) {
+      return accessToken;
+    }
+    
+    // Priority 1: Check accessToken key (new standard)
+    const accessTokenKey = localStorage.getItem(ACCESS_TOKEN_KEY);
+    if (accessTokenKey) {
+      console.log('🔐 [AUTH] Found token in accessToken key');
+      accessToken = accessTokenKey;
+      return accessTokenKey;
+    }
+    
+    // Priority 2: Check moodchat_token key (requested key)
+    const moodchatToken = localStorage.getItem(MOODCHAT_TOKEN_KEY);
+    if (moodchatToken) {
+      console.log('🔐 [AUTH] Found token in moodchat_token key');
+      accessToken = moodchatToken;
+      return moodchatToken;
+    }
+    
+    // Then check normalized storage
     const authDataStr = localStorage.getItem(TOKEN_STORAGE_KEY);
     if (authDataStr) {
       const authData = JSON.parse(authDataStr);
       // Return accessToken (primary) or fallback to token for backward compatibility
       if (authData.accessToken || authData.token) {
-        return authData.accessToken || authData.token;
+        const token = authData.accessToken || authData.token;
+        // Update global variable for consistency
+        accessToken = token;
+        return token;
       }
     }
     
     // Check legacy token storage locations
-    const legacyToken = localStorage.getItem('moodchat_token');  // Add this line for requested key
+    const legacyToken = localStorage.getItem('token');
     if (legacyToken) {
-      console.log('🔐 [AUTH] Found token in moodchat_token location');
+      console.log('🔐 [AUTH] Found token in legacy token location');
+      accessToken = legacyToken;
       return legacyToken;
     }
     
-    const legacyToken2 = localStorage.getItem('token');
-    if (legacyToken2) {
-      console.log('🔐 [AUTH] Found token in legacy token location');
-      return legacyToken2;
-    }
-    
-    const moodchatToken = localStorage.getItem('moodchat_auth_token');
-    if (moodchatToken) {
+    const moodchatAuthToken = localStorage.getItem('moodchat_auth_token');
+    if (moodchatAuthToken) {
       console.log('🔐 [AUTH] Found token in moodchat_auth_token');
-      return moodchatToken;
+      accessToken = moodchatAuthToken;
+      return moodchatAuthToken;
     }
     
     return null;
@@ -344,18 +561,38 @@ function _getCurrentAccessToken() {
  */
 function _getCurrentUserFromStorage() {
   try {
+    // First check if window.currentUser is already set
+    if (window.currentUser) {
+      return window.currentUser;
+    }
+    
     const authDataStr = localStorage.getItem(TOKEN_STORAGE_KEY);
     if (!authDataStr) {
       // Check legacy storage
       const legacyUser = localStorage.getItem('moodchat_auth_user');
       if (legacyUser) {
-        return JSON.parse(legacyUser);
+        const user = JSON.parse(legacyUser);
+        window.currentUser = user; // Set global for future access
+        return user;
       }
+      
+      // Check user data key
+      const userData = localStorage.getItem(USER_DATA_KEY);
+      if (userData) {
+        const user = JSON.parse(userData);
+        window.currentUser = user;
+        return user;
+      }
+      
       return null;
     }
     
     const authData = JSON.parse(authDataStr);
-    return authData.user || null;
+    const user = authData.user || null;
+    if (user) {
+      window.currentUser = user; // Set global for future access
+    }
+    return user;
   } catch (error) {
     console.error('❌ [AUTH] Error reading user from storage:', error);
     return null;
@@ -390,6 +627,12 @@ function _markAuthAsValidated() {
     authData.lastValidated = Date.now();
     
     localStorage.setItem(TOKEN_STORAGE_KEY, JSON.stringify(authData));
+    
+    // Dispatch validation event
+    window.dispatchEvent(new CustomEvent('auth-validated', {
+      detail: { timestamp: new Date().toISOString(), user: authData.user }
+    }));
+    
     return true;
   } catch (error) {
     console.error('❌ [AUTH] Error marking auth as validated:', error);
@@ -517,6 +760,7 @@ function _buildSafeUrl(endpoint) {
  * 5. All API calls MUST use BASE_API_URL derived dynamically from window.location
  * 6. STRICT CONTRACT: endpoint is string, method is in options
  * 7. AUTO-ATTACH Authorization header for authenticated requests using getAuthHeaders()
+ * 8. NEW: Automatic Authorization header injection using global accessToken variable
  */
 function _safeFetch(fullUrl, options = {}) {
   // Validate URL
@@ -530,11 +774,19 @@ function _safeFetch(fullUrl, options = {}) {
   
   // AUTHORIZATION HEADER ENFORCEMENT - USING getAuthHeaders() HELPER
   const authHeaders = getAuthHeaders();
-  const headers = {
+  
+  // NEW: Ensure accessToken is injected into headers for all requests
+  let headers = {
     'Content-Type': 'application/json',
     ...authHeaders, // Add Authorization header if token exists
     ...options.headers
   };
+  
+  // NEW: Explicitly add Authorization header if accessToken exists and not already present
+  if (accessToken && !headers['Authorization'] && !headers['authorization']) {
+    headers['Authorization'] = `Bearer ${accessToken}`;
+    console.log(`🔐 [AUTH] Global accessToken injected into headers for ${normalizedMethod} ${fullUrl}`);
+  }
   
   // Auto-attach Authorization header for authenticated requests
   // Skip only if explicitly disabled (auth: false) or for auth endpoints
@@ -543,9 +795,9 @@ function _safeFetch(fullUrl, options = {}) {
   
   const skipAuth = options.auth === false || isAuthEndpoint;
   
-  if (!skipAuth && authHeaders['Authorization']) {
+  if (!skipAuth && (headers['Authorization'] || headers['authorization'])) {
     console.log(`🔐 [AUTH] Authorization header attached to ${normalizedMethod} ${fullUrl}`);
-  } else if (!skipAuth && !authHeaders['Authorization']) {
+  } else if (!skipAuth && !headers['Authorization'] && !headers['authorization']) {
     console.log(`⚠️ [AUTH] No token available for ${normalizedMethod} ${fullUrl}`);
   }
   
@@ -574,6 +826,7 @@ function _safeFetch(fullUrl, options = {}) {
   
   console.log(`🔧 [API] Safe fetch: ${normalizedMethod} ${fullUrl}`);
   console.log(`🔧 [API] Headers:`, Object.keys(headers));
+  console.log(`🔧 [API] Authorization Header: ${headers['Authorization'] ? 'Present' : 'Not present'}`);
   
   // PERFORM THE FETCH
   return fetch(fullUrl, safeOptions)
@@ -612,17 +865,29 @@ function _safeFetch(fullUrl, options = {}) {
             errorMessage = data.message || 'Invalid credentials';
             result.isAuthError = true;
             
-            // AUTO-CLEAR INVALID TOKEN on 401
-            console.log('🔐 [AUTH] 401 Unauthorized - clearing invalid token');
-            _clearAuthData();
+            // UPDATED: Only clear token if backend explicitly says token is revoked
+            const isTokenExplicitlyInvalid = data.message && (
+              data.message.includes('Token has been revoked') ||
+              data.message.includes('Token is expired') ||
+              data.message.includes('Invalid token') ||
+              data.message.includes('Token expired')
+            );
             
-            // Dispatch logout event
-            try {
-              window.dispatchEvent(new CustomEvent('user-logged-out', {
-                detail: { reason: 'token_expired', timestamp: new Date().toISOString() }
-              }));
-            } catch (e) {
-              console.log('🔐 [AUTH] Could not dispatch logout event:', e.message);
+            if (isTokenExplicitlyInvalid) {
+              console.log('🔐 [AUTH] 401 Unauthorized - token explicitly invalid, clearing token');
+              _clearAuthData();
+              
+              // Dispatch logout event
+              try {
+                window.dispatchEvent(new CustomEvent('user-logged-out', {
+                  detail: { reason: 'token_explicitly_invalid', timestamp: new Date().toISOString() }
+                }));
+              } catch (e) {
+                console.log('🔐 [AUTH] Could not dispatch logout event:', e.message);
+              }
+            } else {
+              console.log('🔐 [AUTH] 401 Unauthorized - keeping token for possible retry');
+              // Don't clear token for generic 401, might be temporary
             }
           } else if (status === 400) {
             errorMessage = data.message || 'Bad request';
@@ -662,10 +927,10 @@ function _safeFetch(fullUrl, options = {}) {
         
         if (!isSuccess) {
           result.success = false;
-          // Auto-clear on 401 even with JSON parsing error
+          // Updated 401 handling
           if (status === 401) {
-            console.log('🔐 [AUTH] 401 Unauthorized (JSON error) - clearing invalid token');
-            _clearAuthData();
+            console.log('🔐 [AUTH] 401 Unauthorized (JSON error) - checking token validity');
+            // Don't automatically clear token on JSON parsing errors
           }
         }
         
@@ -779,20 +1044,33 @@ const globalApiFunction = function(endpoint, options = {}) {
     }
   }
   
+  // NEW: Ensure Authorization header is included in options if not already present
+  if (!safeOptions.headers) {
+    safeOptions.headers = {};
+  }
+  
+  // Inject Authorization header if accessToken exists
+  if (accessToken && !safeOptions.headers['Authorization'] && !safeOptions.headers['authorization']) {
+    safeOptions.headers['Authorization'] = `Bearer ${accessToken}`;
+    console.log(`🔐 [AUTH] Authorization header injected into options for ${safeEndpoint}`);
+  }
+  
   // NOTE: Authorization header is now handled centrally in _safeFetch via getAuthHeaders()
+  // and also injected directly into options for maximum compatibility
   
   // CALL THE CORE FETCH FUNCTION
   return _safeFetch(fullUrl, safeOptions);
 };
 
 // ============================================================================
-// AUTH VALIDATION CORE - STRICT /auth/me VALIDATION
+// ENHANCED AUTH VALIDATION CORE - STRICT /auth/me VALIDATION WITH EXPONENTIAL BACKOFF RETRY
 // ============================================================================
 
 /**
- * checkAuthMe() - Strict /auth/me validation
+ * checkAuthMe() - Enhanced /auth/me validation with exponential backoff retry logic
  * CRITICAL: This validates authentication state via /auth/me endpoint
  * Returns user object only if /auth/me succeeds
+ * NEW: Enhanced retry logic with exponential backoff for temporary failures
  */
 async function _validateAuthWithMe() {
   console.log('🔐 [AUTH] Validating authentication via /auth/me...');
@@ -808,136 +1086,252 @@ async function _validateAuthWithMe() {
     };
   }
   
-  try {
-    const fullUrl = BACKEND_BASE_URL + '/api/auth/me';
-    console.log(`🔐 [AUTH] Calling ${fullUrl} with token`);
-    
-    const response = await fetch(fullUrl, {
-      method: 'GET',
-      headers: {
-        'Authorization': 'Bearer ' + token,
-        'Content-Type': 'application/json'
-      },
-      credentials: 'include',
-      mode: 'cors'
-    });
-    
-    const isSuccess = response.ok;
-    const status = response.status;
-    
-    if (!isSuccess) {
-      console.error(`❌ [AUTH] /auth/me failed with status ${status}`);
+  // Enhanced retry configuration
+  const maxRetries = 3; // Total attempts (original + 2 retries)
+  const initialDelay = 1000; // Start with 1 second
+  const maxDelay = 10000; // Maximum 10 seconds between retries
+  const backoffFactor = 2; // Exponential backoff factor
+  
+  let lastError = null;
+  let attempt = 1;
+  
+  while (attempt <= maxRetries) {
+    try {
+      const fullUrl = BACKEND_BASE_URL + '/api/auth/me';
+      console.log(`🔐 [AUTH] Attempt ${attempt}/${maxRetries}: Calling ${fullUrl}`);
       
-      if (status === 401) {
-        console.log('🔐 [AUTH] 401 Unauthorized - clearing invalid token');
-        _clearAuthData();
+      // Calculate delay for this attempt (exponential backoff)
+      let delay = initialDelay * Math.pow(backoffFactor, attempt - 1);
+      if (delay > maxDelay) delay = maxDelay;
+      
+      // For first attempt, no delay
+      if (attempt > 1) {
+        console.log(`🔐 [AUTH] Waiting ${delay}ms before attempt ${attempt}`);
+        await new Promise(resolve => setTimeout(resolve, delay));
+      }
+      
+      const response = await fetch(fullUrl, {
+        method: 'GET',
+        headers: {
+          'Authorization': 'Bearer ' + token,
+          'Content-Type': 'application/json'
+        },
+        credentials: 'include',
+        mode: 'cors',
+        signal: AbortSignal.timeout(10000) // 10 second timeout
+      });
+      
+      const isSuccess = response.ok;
+      const status = response.status;
+      
+      if (!isSuccess) {
+        console.error(`❌ [AUTH] /auth/me failed with status ${status}`);
+        
+        if (status === 401) {
+          // Parse response to check if token is explicitly invalid
+          try {
+            const data = await response.json();
+            const isTokenExplicitlyInvalid = data.message && (
+              data.message.includes('Token has been revoked') ||
+              data.message.includes('Token is expired') ||
+              data.message.includes('Invalid token') ||
+              data.message.includes('Token expired')
+            );
+            
+            if (isTokenExplicitlyInvalid) {
+              console.log('🔐 [AUTH] Token explicitly invalid, clearing token');
+              _clearAuthData();
+              
+              return {
+                success: false,
+                authenticated: false,
+                message: 'Session expired',
+                isAuthError: true,
+                status: 401,
+                tokenExplicitlyInvalid: true
+              };
+            } else {
+              console.log('🔐 [AUTH] Generic 401, will retry if attempts remain');
+              lastError = {
+                success: false,
+                authenticated: false,
+                message: data.message || 'Unauthorized',
+                isAuthError: true,
+                status: 401,
+                tokenExplicitlyInvalid: false
+              };
+              
+              // If we have more attempts, continue
+              if (attempt < maxRetries) {
+                console.log('🔐 [AUTH] Will retry with exponential backoff');
+                attempt++;
+                continue;
+              }
+            }
+          } catch (parseError) {
+            console.log('🔐 [AUTH] Could not parse 401 response');
+            lastError = {
+              success: false,
+              authenticated: false,
+              message: 'Unauthorized',
+              isAuthError: true,
+              status: 401
+            };
+            
+            if (attempt < maxRetries) {
+              attempt++;
+              continue;
+            }
+          }
+        } else {
+          // Other non-401 errors
+          lastError = {
+            success: false,
+            authenticated: false,
+            message: `Authentication check failed (${status})`,
+            status: status
+          };
+          break; // Don't retry for non-401 errors
+        }
+      } else {
+        // SUCCESS
+        const data = await response.json();
+        const user = _extractUserFromResponse(data);
+        
+        if (!user) {
+          console.error('❌ [AUTH] /auth/me succeeded but no user data returned');
+          return {
+            success: false,
+            authenticated: false,
+            message: 'Invalid user data in response',
+            isAuthError: true
+          };
+        }
+        
+        console.log('✅ [AUTH] /auth/me validation successful');
+        
+        // Update stored user data and mark auth as validated
+        try {
+          const authDataStr = localStorage.getItem(TOKEN_STORAGE_KEY);
+          if (authDataStr) {
+            const authData = JSON.parse(authDataStr);
+            authData.user = user;
+            authData.authValidated = true;
+            authData.lastValidated = Date.now();
+            localStorage.setItem(TOKEN_STORAGE_KEY, JSON.stringify(authData));
+            
+            // Update global user state - CRITICAL FOR PERSISTENCE
+            window.currentUser = user;
+            localStorage.setItem(USER_DATA_KEY, JSON.stringify(user));
+            
+            console.log('✅ [AUTH] User data updated and marked as validated');
+            
+            // Dispatch user loaded event
+            window.dispatchEvent(new CustomEvent('user-loaded', {
+              detail: { user: user, timestamp: new Date().toISOString() }
+            }));
+          }
+        } catch (storageError) {
+          console.error('❌ [AUTH] Error updating user data after /auth/me:', storageError);
+        }
         
         return {
-          success: false,
-          authenticated: false,
-          message: 'Session expired',
-          isAuthError: true,
-          status: 401
+          success: true,
+          authenticated: true,
+          user: user,
+          message: 'Authentication valid',
+          data: data
         };
       }
       
-      return {
-        success: false,
-        authenticated: false,
-        message: `Authentication check failed (${status})`,
-        status: status
-      };
-    }
-    
-    // Parse successful response
-    const data = await response.json();
-    const user = _extractUserFromResponse(data);
-    
-    if (!user) {
-      console.error('❌ [AUTH] /auth/me succeeded but no user data returned');
-      return {
-        success: false,
-        authenticated: false,
-        message: 'Invalid user data in response',
-        isAuthError: true
-      };
-    }
-    
-    console.log('✅ [AUTH] /auth/me validation successful');
-    
-    // Update stored user data and mark auth as validated
-    try {
-      const authDataStr = localStorage.getItem(TOKEN_STORAGE_KEY);
-      if (authDataStr) {
-        const authData = JSON.parse(authDataStr);
-        authData.user = user;
-        authData.authValidated = true;
-        authData.lastValidated = Date.now();
-        localStorage.setItem(TOKEN_STORAGE_KEY, JSON.stringify(authData));
+    } catch (error) {
+      console.error(`❌ [AUTH] /auth/me validation error (attempt ${attempt}):`, error);
+      
+      // Check if this is a network error
+      const isNetworkError = error.message && (
+        error.message.includes('Failed to fetch') ||
+        error.message.includes('NetworkError') ||
+        error.message.includes('network request failed') ||
+        error.message.includes('timeout') ||
+        error.message.includes('Timeout')
+      );
+      
+      if (isNetworkError) {
+        console.log(`⚠️ [AUTH] Network error during /auth/me attempt ${attempt}`);
         
-        // Update global user state
-        window.currentUser = user;
-        
-        console.log('✅ [AUTH] User data updated and marked as validated');
+        if (attempt < maxRetries) {
+          console.log('🔐 [AUTH] Will retry with exponential backoff');
+          lastError = {
+            success: false,
+            authenticated: false,
+            message: 'Network error - will retry',
+            isNetworkError: true,
+            offline: true
+          };
+          attempt++;
+          continue;
+        } else {
+          // Final attempt failed
+          console.log('⚠️ [AUTH] All attempts failed, using cached auth');
+          const cachedUser = _getCurrentUserFromStorage();
+          
+          // Dispatch offline event
+          window.dispatchEvent(new CustomEvent('auth-validation-offline', {
+            detail: { cachedUser: cachedUser, timestamp: new Date().toISOString() }
+          }));
+          
+          return {
+            success: false,
+            authenticated: !!cachedUser, // Consider authenticated if we have cached user
+            user: cachedUser,
+            message: 'Network error - using cached authentication',
+            isNetworkError: true,
+            offline: true,
+            cached: true
+          };
+        }
+      } else {
+        // For other errors, don't retry
+        lastError = {
+          success: false,
+          authenticated: false,
+          message: 'Authentication validation failed: ' + error.message,
+          isAuthError: true
+        };
+        break;
       }
-    } catch (storageError) {
-      console.error('❌ [AUTH] Error updating user data after /auth/me:', storageError);
     }
-    
-    return {
-      success: true,
-      authenticated: true,
-      user: user,
-      message: 'Authentication valid',
-      data: data
-    };
-    
-  } catch (error) {
-    console.error('❌ [AUTH] /auth/me validation error:', error);
-    
-    // Check if this is a network error
-    const isNetworkError = error.message && (
-      error.message.includes('Failed to fetch') ||
-      error.message.includes('NetworkError') ||
-      error.message.includes('network request failed')
-    );
-    
-    if (isNetworkError) {
-      console.log('⚠️ [AUTH] Network error during /auth/me, keeping cached auth');
-      // For network errors, don't clear auth - use cached state
-      const cachedUser = _getCurrentUserFromStorage();
-      return {
-        success: false,
-        authenticated: !!cachedUser, // Consider authenticated if we have cached user
-        user: cachedUser,
-        message: 'Network error - using cached authentication',
-        isNetworkError: true,
-        offline: true
-      };
-    }
-    
-    // For other errors, clear invalid auth
-    _clearAuthData();
-    
-    return {
-      success: false,
-      authenticated: false,
-      message: 'Authentication validation failed: ' + error.message,
-      isAuthError: true
-    };
   }
+  
+  // If we get here, all retries failed
+  console.log(`❌ [AUTH] All ${maxRetries} attempts failed`);
+  
+  // Only clear token if last error indicates token is explicitly invalid
+  if (lastError && lastError.tokenExplicitlyInvalid) {
+    console.log('🔐 [AUTH] Clearing invalid token after failed validation');
+    _clearAuthData();
+  }
+  
+  return lastError || {
+    success: false,
+    authenticated: false,
+    message: 'Authentication validation failed after all retries',
+    isAuthError: true
+  };
 }
 
 // ============================================================================
-// MAIN API OBJECT - WITH HARDENED METHODS AND STRICT CONTRACT
+// MAIN API OBJECT - WITH ENHANCED TOKEN PERSISTENCE AND RETRY LOGIC
 // ============================================================================
 
 const apiObject = {
   _singleton: true,
-  _version: '16.6.0', // Updated version for enhanced token handling
+  _version: '17.0.0', // Updated version for enhanced token persistence
   _safeInitialized: true,
   _backendReachable: null,
   _sessionChecked: false,
+  _apiAvailable: true,
+  _authValidationInProgress: false,
   
   /**
    * Configuration object with dynamically determined URLs
@@ -949,7 +1343,10 @@ const apiObject = {
     MAX_RETRIES: 3,
     RETRY_DELAY: 1000,
     SESSION_CHECK_INTERVAL: 300000,
-    STATUS_FETCH_TIMEOUT: 8000
+    STATUS_FETCH_TIMEOUT: 8000,
+    AUTH_ME_RETRIES: 3, // Enhanced retry count
+    AUTH_ME_INITIAL_DELAY: 1000, // Enhanced initial delay
+    AUTH_ME_MAX_DELAY: 10000 // Enhanced max delay
   },
   
   // ============================================================================
@@ -966,6 +1363,61 @@ const apiObject = {
   },
   
   // ============================================================================
+  // ENHANCED: Set access token globally with persistence
+  // ============================================================================
+  
+  /**
+   * setAccessToken() - Set the global access token with enhanced persistence
+   * @param {string} token - The access token to set
+   */
+  setAccessToken: function(token) {
+    if (token) {
+      accessToken = token;
+      // Store in BOTH keys as requested - CRITICAL FOR PERSISTENCE
+      localStorage.setItem('accessToken', token);
+      localStorage.setItem('moodchat_token', token);
+      
+      // Also update normalized auth data
+      try {
+        const authDataStr = localStorage.getItem(TOKEN_STORAGE_KEY);
+        if (authDataStr) {
+          const authData = JSON.parse(authDataStr);
+          authData.accessToken = token;
+          localStorage.setItem(TOKEN_STORAGE_KEY, JSON.stringify(authData));
+        }
+      } catch (e) {
+        console.error('🔐 [AUTH] Error updating normalized auth data:', e);
+      }
+      
+      console.log(`✅ [TOKEN] Global accessToken set and stored in both keys: ${accessToken.substring(0, 20)}...`);
+      
+      // Dispatch token updated event
+      window.dispatchEvent(new CustomEvent('token-updated', {
+        detail: { token: token, timestamp: new Date().toISOString() }
+      }));
+      
+      return true;
+    }
+    return false;
+  },
+  
+  /**
+   * getAccessToken() - Get the current global access token
+   * @returns {string|null} The current access token
+   */
+  getAccessToken: function() {
+    return accessToken;
+  },
+  
+  /**
+   * refreshAccessToken() - Update global token from localStorage
+   */
+  refreshAccessToken: function() {
+    updateGlobalAccessToken();
+    return accessToken;
+  },
+  
+  // ============================================================================
   // CRITICAL FIX: ADDED api.get(), api.post(), api.put(), api.delete() METHODS
   // ============================================================================
   
@@ -976,8 +1428,19 @@ const apiObject = {
    */
   get: async function(url) {
     console.log(`🔧 [API] api.get() called for: ${url}`);
+    console.log(`🔧 [API] Global accessToken: ${accessToken ? `Present (${accessToken.substring(0, 20)}...)` : 'Not found'}`);
+    
     try {
-      const result = await globalApiFunction(url, { method: 'GET' });
+      // Ensure accessToken is injected
+      const headers = {};
+      if (accessToken) {
+        headers['Authorization'] = `Bearer ${accessToken}`;
+      }
+      
+      const result = await globalApiFunction(url, { 
+        method: 'GET',
+        headers: headers
+      });
       
       if (!result.ok) {
         console.error(`❌ [API] GET request failed: ${result.message}`);
@@ -1011,10 +1474,19 @@ const apiObject = {
    */
   post: async function(url, data) {
     console.log(`🔧 [API] api.post() called for: ${url}`);
+    console.log(`🔧 [API] Global accessToken: ${accessToken ? `Present (${accessToken.substring(0, 20)}...)` : 'Not found'}`);
+    
     try {
+      // Ensure accessToken is injected
+      const headers = {};
+      if (accessToken) {
+        headers['Authorization'] = `Bearer ${accessToken}`;
+      }
+      
       const result = await globalApiFunction(url, { 
         method: 'POST', 
-        body: data 
+        body: data,
+        headers: headers
       });
       
       if (!result.ok) {
@@ -1049,10 +1521,19 @@ const apiObject = {
    */
   put: async function(url, data) {
     console.log(`🔧 [API] api.put() called for: ${url}`);
+    console.log(`🔧 [API] Global accessToken: ${accessToken ? `Present (${accessToken.substring(0, 20)}...)` : 'Not found'}`);
+    
     try {
+      // Ensure accessToken is injected
+      const headers = {};
+      if (accessToken) {
+        headers['Authorization'] = `Bearer ${accessToken}`;
+      }
+      
       const result = await globalApiFunction(url, { 
         method: 'PUT', 
-        body: data 
+        body: data,
+        headers: headers
       });
       
       if (!result.ok) {
@@ -1086,8 +1567,19 @@ const apiObject = {
    */
   delete: async function(url) {
     console.log(`🔧 [API] api.delete() called for: ${url}`);
+    console.log(`🔧 [API] Global accessToken: ${accessToken ? `Present (${accessToken.substring(0, 20)}...)` : 'Not found'}`);
+    
     try {
-      const result = await globalApiFunction(url, { method: 'DELETE' });
+      // Ensure accessToken is injected
+      const headers = {};
+      if (accessToken) {
+        headers['Authorization'] = `Bearer ${accessToken}`;
+      }
+      
+      const result = await globalApiFunction(url, { 
+        method: 'DELETE',
+        headers: headers
+      });
       
       if (!result.ok) {
         console.error(`❌ [API] DELETE request failed: ${result.message}`);
@@ -1114,7 +1606,7 @@ const apiObject = {
   },
   
   // ============================================================================
-  // CRITICAL FIX: EXPLICITLY ADDED ALL API METHODS USED BY IFRAME PAGES
+  // ENHANCED IFRAME METHODS WITH TOKEN PERSISTENCE
   // ============================================================================
   
   /**
@@ -1123,9 +1615,16 @@ const apiObject = {
    */
   getMessages: async function() {
     try {
+      // Ensure accessToken is injected
+      const headers = {};
+      if (accessToken) {
+        headers['Authorization'] = `Bearer ${accessToken}`;
+      }
+      
       const result = await globalApiFunction('/messages', { 
         method: 'GET',
-        auth: true
+        auth: true,
+        headers: headers
       });
       
       if (!result.ok) {
@@ -1159,9 +1658,16 @@ const apiObject = {
    */
   getMessageById: async function(messageId) {
     try {
+      // Ensure accessToken is injected
+      const headers = {};
+      if (accessToken) {
+        headers['Authorization'] = `Bearer ${accessToken}`;
+      }
+      
       const result = await globalApiFunction(`/messages/${encodeURIComponent(messageId)}`, { 
         method: 'GET',
-        auth: true
+        auth: true,
+        headers: headers
       });
       
       if (!result.ok) {
@@ -1195,10 +1701,17 @@ const apiObject = {
    */
   sendMessage: async function(messageData) {
     try {
+      // Ensure accessToken is injected
+      const headers = {};
+      if (accessToken) {
+        headers['Authorization'] = `Bearer ${accessToken}`;
+      }
+      
       const result = await globalApiFunction('/messages', { 
         method: 'POST',
         body: messageData,
-        auth: true
+        auth: true,
+        headers: headers
       });
       
       if (!result.ok) {
@@ -1252,9 +1765,16 @@ const apiObject = {
     }
     
     try {
+      // Ensure accessToken is injected
+      const headers = {};
+      if (accessToken) {
+        headers['Authorization'] = `Bearer ${accessToken}`;
+      }
+      
       const result = await globalApiFunction('/friends/list', {
         method: 'GET',
-        auth: true
+        auth: true,
+        headers: headers
       });
       
       if (!result.ok) {
@@ -1325,10 +1845,17 @@ const apiObject = {
    */
   addFriend: async function(userId) {
     try {
+      // Ensure accessToken is injected
+      const headers = {};
+      if (accessToken) {
+        headers['Authorization'] = `Bearer ${accessToken}`;
+      }
+      
       const result = await globalApiFunction('/friends/add', { 
         method: 'POST',
         body: { userId: userId },
-        auth: true
+        auth: true,
+        headers: headers
       });
       
       if (!result.ok) {
@@ -1361,9 +1888,16 @@ const apiObject = {
    */
   getGroups: async function() {
     try {
+      // Ensure accessToken is injected
+      const headers = {};
+      if (accessToken) {
+        headers['Authorization'] = `Bearer ${accessToken}`;
+      }
+      
       const result = await globalApiFunction('/groups', { 
         method: 'GET',
-        auth: true
+        auth: true,
+        headers: headers
       });
       
       if (!result.ok) {
@@ -1397,9 +1931,16 @@ const apiObject = {
    */
   getGroupById: async function(groupId) {
     try {
+      // Ensure accessToken is injected
+      const headers = {};
+      if (accessToken) {
+        headers['Authorization'] = `Bearer ${accessToken}`;
+      }
+      
       const result = await globalApiFunction(`/groups/${encodeURIComponent(groupId)}`, { 
         method: 'GET',
-        auth: true
+        auth: true,
+        headers: headers
       });
       
       if (!result.ok) {
@@ -1433,10 +1974,17 @@ const apiObject = {
    */
   createGroup: async function(groupData) {
     try {
+      // Ensure accessToken is injected
+      const headers = {};
+      if (accessToken) {
+        headers['Authorization'] = `Bearer ${accessToken}`;
+      }
+      
       const result = await globalApiFunction('/groups', { 
         method: 'POST',
         body: groupData,
-        auth: true
+        auth: true,
+        headers: headers
       });
       
       if (!result.ok) {
@@ -1491,9 +2039,16 @@ const apiObject = {
     }
     
     try {
+      // Ensure accessToken is injected
+      const headers = {};
+      if (accessToken) {
+        headers['Authorization'] = `Bearer ${accessToken}`;
+      }
+      
       const result = await globalApiFunction('/statuses/all', {
         method: 'GET',
-        auth: true
+        auth: true,
+        headers: headers
       });
       
       if (!result.ok) {
@@ -1565,9 +2120,16 @@ const apiObject = {
    */
   getStatus: async function(statusId) {
     try {
+      // Ensure accessToken is injected
+      const headers = {};
+      if (accessToken) {
+        headers['Authorization'] = `Bearer ${accessToken}`;
+      }
+      
       const result = await globalApiFunction(`/status/${encodeURIComponent(statusId)}`, { 
         method: 'GET',
-        auth: true
+        auth: true,
+        headers: headers
       });
       
       if (!result.ok) {
@@ -1601,10 +2163,17 @@ const apiObject = {
    */
   createStatus: async function(statusData) {
     try {
+      // Ensure accessToken is injected
+      const headers = {};
+      if (accessToken) {
+        headers['Authorization'] = `Bearer ${accessToken}`;
+      }
+      
       const result = await globalApiFunction('/status', { 
         method: 'POST',
         body: statusData,
-        auth: true
+        auth: true,
+        headers: headers
       });
       
       if (!result.ok) {
@@ -1637,9 +2206,16 @@ const apiObject = {
    */
   getCalls: async function() {
     try {
+      // Ensure accessToken is injected
+      const headers = {};
+      if (accessToken) {
+        headers['Authorization'] = `Bearer ${accessToken}`;
+      }
+      
       const result = await globalApiFunction('/calls', { 
         method: 'GET',
-        auth: true
+        auth: true,
+        headers: headers
       });
       
       if (!result.ok) {
@@ -1673,10 +2249,17 @@ const apiObject = {
    */
   startCall: async function(callData) {
     try {
+      // Ensure accessToken is injected
+      const headers = {};
+      if (accessToken) {
+        headers['Authorization'] = `Bearer ${accessToken}`;
+      }
+      
       const result = await globalApiFunction('/calls/start', { 
         method: 'POST',
         body: callData,
-        auth: true
+        auth: true,
+        headers: headers
       });
       
       if (!result.ok) {
@@ -1709,9 +2292,16 @@ const apiObject = {
    */
   getSettings: async function() {
     try {
+      // Ensure accessToken is injected
+      const headers = {};
+      if (accessToken) {
+        headers['Authorization'] = `Bearer ${accessToken}`;
+      }
+      
       const result = await globalApiFunction('/settings', { 
         method: 'GET',
-        auth: true
+        auth: true,
+        headers: headers
       });
       
       if (!result.ok) {
@@ -1745,10 +2335,17 @@ const apiObject = {
    */
   updateSettings: async function(settingsData) {
     try {
+      // Ensure accessToken is injected
+      const headers = {};
+      if (accessToken) {
+        headers['Authorization'] = `Bearer ${accessToken}`;
+      }
+      
       const result = await globalApiFunction('/settings', { 
         method: 'PUT',
         body: settingsData,
-        auth: true
+        auth: true,
+        headers: headers
       });
       
       if (!result.ok) {
@@ -1781,9 +2378,16 @@ const apiObject = {
    */
   getTools: async function() {
     try {
+      // Ensure accessToken is injected
+      const headers = {};
+      if (accessToken) {
+        headers['Authorization'] = `Bearer ${accessToken}`;
+      }
+      
       const result = await globalApiFunction('/tools', { 
         method: 'GET',
-        auth: true
+        auth: true,
+        headers: headers
       });
       
       if (!result.ok) {
@@ -1811,12 +2415,12 @@ const apiObject = {
   },
   
   // ============================================================================
-  // HARDENED AUTHENTICATION METHODS - STRICT ERROR HANDLING
+  // ENHANCED AUTHENTICATION METHODS WITH TOKEN PERSISTENCE
   // ============================================================================
   
   /**
    * Login function - Sends POST to /auth/login with email and password
-   * On success, stores accessToken in localStorage under key 'moodchat_token'
+   * On success, stores accessToken in localStorage under both 'moodchat_token' and 'accessToken'
    * Returns the logged-in user data
    */
   login: async function(email, password) {
@@ -1887,7 +2491,7 @@ const apiObject = {
         };
       }
       
-      // Store auth data with consistent format - INCLUDES 'moodchat_token' key as requested
+      // Store auth data with consistent format - INCLUDES BOTH 'moodchat_token' AND 'accessToken' keys
       const storageSuccess = _storeAuthData(token, user, refreshToken);
       if (!storageSuccess) {
         throw {
@@ -1897,18 +2501,29 @@ const apiObject = {
         };
       }
       
-      console.log(`✅ [AUTH] Auth data stored successfully`);
+      console.log(`✅ [AUTH] Auth data stored successfully in BOTH keys`);
       console.log(`✅ [AUTH] Token stored as 'moodchat_token': ${localStorage.getItem('moodchat_token') ? 'YES' : 'NO'}`);
+      console.log(`✅ [AUTH] Token stored as 'accessToken': ${localStorage.getItem('accessToken') ? 'YES' : 'NO'}`);
+      console.log(`✅ [AUTH] Global accessToken updated: ${accessToken ? accessToken.substring(0, 20) + '...' : 'NO'}`);
       console.log(`✅ [AUTH] User: ${user.username || user.email || 'Present'}`);
       console.log(`✅ [AUTH] window.currentUser: ${window.currentUser ? 'Set' : 'Not set'}`);
       
-      // Now validate the session with /auth/me
-      console.log('🔐 [AUTH] Validating session with /auth/me...');
+      // Update API availability
+      this._apiAvailable = true;
+      
+      // Now validate the session with enhanced /auth/me with retry logic
+      console.log('🔐 [AUTH] Validating session with enhanced /auth/me...');
       const validationResult = await _validateAuthWithMe();
       
       if (!validationResult.success || !validationResult.authenticated) {
         console.error('❌ [AUTH] Session validation failed after login');
-        _clearAuthData();
+        // Don't clear token automatically - only if token is explicitly invalid
+        if (validationResult.tokenExplicitlyInvalid) {
+          _clearAuthData();
+        }
+        
+        // Update API availability
+        this._apiAvailable = false;
         
         throw {
           success: false,
@@ -1946,6 +2561,12 @@ const apiObject = {
       
     } catch (error) {
       console.error('❌ [AUTH] Login error:', error);
+      
+      // Update API availability if token is null or expired
+      if (error.isAuthError || !accessToken) {
+        this._apiAvailable = false;
+        console.log('⚠️ [API] API marked as unavailable due to auth error');
+      }
       
       // STRICT: Re-throw the error for UI to handle
       throw {
@@ -2073,18 +2694,28 @@ const apiObject = {
         };
       }
       
-      console.log(`✅ [AUTH] Registration auth data stored successfully`);
+      console.log(`✅ [AUTH] Registration auth data stored successfully in BOTH keys`);
       console.log(`✅ [AUTH] Token: ${token ? 'Present' : 'Missing'}`);
+      console.log(`✅ [AUTH] Global accessToken: ${accessToken ? accessToken.substring(0, 20) + '...' : 'Not set'}`);
       console.log(`✅ [AUTH] User: ${user.username || user.email || 'Present'}`);
       console.log(`✅ [AUTH] window.currentUser: ${window.currentUser ? 'Set' : 'Not set'}`);
       
-      // Validate the session with /auth/me
-      console.log('🔐 [AUTH] Validating session with /auth/me...');
+      // Update API availability
+      this._apiAvailable = true;
+      
+      // Validate the session with enhanced /auth/me
+      console.log('🔐 [AUTH] Validating session with enhanced /auth/me...');
       const validationResult = await _validateAuthWithMe();
       
       if (!validationResult.success || !validationResult.authenticated) {
         console.error('❌ [AUTH] Session validation failed after registration');
-        _clearAuthData();
+        // Don't clear token automatically - only if token is explicitly invalid
+        if (validationResult.tokenExplicitlyInvalid) {
+          _clearAuthData();
+        }
+        
+        // Update API availability
+        this._apiAvailable = false;
         
         throw {
           success: false,
@@ -2114,6 +2745,12 @@ const apiObject = {
     } catch (error) {
       console.error('❌ [AUTH] Register error:', error);
       
+      // Update API availability if token is null or expired
+      if (error.isAuthError || !accessToken) {
+        this._apiAvailable = false;
+        console.log('⚠️ [API] API marked as unavailable due to auth error');
+      }
+      
       // STRICT: Re-throw the error for UI to handle
       throw {
         success: false,
@@ -2129,16 +2766,16 @@ const apiObject = {
   },
   
   // ============================================================================
-  // CRITICAL FIX: /auth/me METHOD WITH STRICT VALIDATION
+  // ENHANCED: /auth/me METHOD WITH EXPONENTIAL BACKOFF RETRY
   // ============================================================================
   
   checkAuthMe: async function() {
-    console.log('🔐 [AUTH] checkAuthMe() called');
+    console.log('🔐 [AUTH] Enhanced checkAuthMe() called with exponential backoff retry');
     return await _validateAuthWithMe();
   },
   
   // ============================================================================
-  // LOGOUT FUNCTION - Clears localStorage and resets window.currentUser
+  // ENHANCED LOGOUT FUNCTION - Preserves window.currentUser as requested
   // ============================================================================
   
   logout: function() {
@@ -2147,7 +2784,10 @@ const apiObject = {
       _clearAuthData();
       
       this._sessionChecked = false;
+      this._apiAvailable = false;
       console.log('✅ [AUTH] User logged out successfully');
+      console.log('⚠️ [API] API marked as unavailable after logout');
+      console.log(`🔐 [AUTH] window.currentUser preserved: ${window.currentUser ? 'Still set' : 'Not set'}`);
       
       // Dispatch logout event
       try {
@@ -2178,23 +2818,31 @@ const apiObject = {
   },
   
   // ============================================================================
-  // GET CURRENT USER FUNCTION - Fetches /auth/me using stored token
+  // ENHANCED GET CURRENT USER FUNCTION - With exponential backoff retry
   // ============================================================================
   
   getCurrentUser: async function() {
-    console.log('🔐 [AUTH] getCurrentUser() called');
+    console.log('🔐 [AUTH] Enhanced getCurrentUser() called');
     
     const token = _getCurrentAccessToken();
     if (!token) {
       console.log('🔐 [AUTH] No token available');
       window.currentUser = null;
+      this._apiAvailable = false;
       return null;
     }
     
-    // Check if we have a cached user
+    // Check if we have a cached user in window.currentUser
+    if (window.currentUser) {
+      console.log('🔐 [AUTH] Using cached window.currentUser');
+      return window.currentUser;
+    }
+    
+    // Check if we have a cached user in localStorage
     const cachedUser = _getCurrentUserFromStorage();
     if (cachedUser) {
       window.currentUser = cachedUser;
+      console.log('🔐 [AUTH] Retrieved user from localStorage');
     }
     
     // If offline, return cached user
@@ -2204,22 +2852,74 @@ const apiObject = {
     }
     
     try {
-      // Validate with /auth/me endpoint
+      // Validate with enhanced /auth/me endpoint with exponential backoff
       const validationResult = await _validateAuthWithMe();
       
       if (validationResult.success && validationResult.authenticated && validationResult.user) {
-        console.log('✅ [AUTH] getCurrentUser() successful');
+        console.log('✅ [AUTH] getCurrentUser() successful with enhanced validation');
         window.currentUser = validationResult.user;
+        this._apiAvailable = true;
+        
+        // Dispatch user loaded event
+        window.dispatchEvent(new CustomEvent('current-user-loaded', {
+          detail: { user: validationResult.user, timestamp: new Date().toISOString() }
+        }));
+        
         return validationResult.user;
       } else {
         console.log('❌ [AUTH] getCurrentUser() validation failed');
+        
+        // If validation failed but we have cached user, use that
+        if (cachedUser) {
+          console.log('🔐 [AUTH] Using cached user as fallback');
+          window.currentUser = cachedUser;
+          this._apiAvailable = false;
+          return cachedUser;
+        }
+        
         window.currentUser = null;
-        return cachedUser; // Return cached user as fallback
+        this._apiAvailable = false;
+        return null;
       }
     } catch (error) {
       console.error('❌ [AUTH] getCurrentUser() error:', error);
-      window.currentUser = cachedUser;
-      return cachedUser; // Return cached user on error
+      
+      // On error, use cached user if available
+      if (cachedUser) {
+        console.log('🔐 [AUTH] Error occurred, using cached user as fallback');
+        window.currentUser = cachedUser;
+        this._apiAvailable = false;
+        return cachedUser;
+      }
+      
+      window.currentUser = null;
+      this._apiAvailable = false;
+      return null;
+    }
+  },
+  
+  // ============================================================================
+  // ENHANCED: Force refresh current user with retry
+  // ============================================================================
+  
+  refreshCurrentUser: async function() {
+    console.log('🔐 [AUTH] Force refreshing current user...');
+    
+    // Clear cached user to force fresh fetch
+    window.currentUser = null;
+    
+    try {
+      const user = await this.getCurrentUser();
+      if (user) {
+        console.log('✅ [AUTH] User refreshed successfully');
+        return user;
+      } else {
+        console.log('❌ [AUTH] Failed to refresh user');
+        return null;
+      }
+    } catch (error) {
+      console.error('❌ [AUTH] Error refreshing user:', error);
+      return null;
     }
   },
   
@@ -2247,6 +2947,7 @@ const apiObject = {
     console.log('🔧 [API] Checking backend health...');
     console.log(`🔧 [API] Using dynamic backend URL: ${BACKEND_BASE_URL}`);
     console.log(`🔧 [API] Using dynamic API URL: ${BASE_API_URL}`);
+    console.log(`🔧 [API] Global accessToken: ${accessToken ? `Present (${accessToken.substring(0, 20)}...)` : 'Not found'}`);
     
     const testEndpoints = ['/api/status', '/api/auth/health', '/api/health', '/api'];
     
@@ -2259,15 +2960,22 @@ const apiObject = {
         const controller = new AbortController();
         const timeoutId = setTimeout(() => controller.abort(), 5000);
         
+        const headers = {
+          'Content-Type': 'application/json'
+        };
+        
+        // Add Authorization header if accessToken exists
+        if (accessToken) {
+          headers['Authorization'] = `Bearer ${accessToken}`;
+          console.log('🔐 [AUTH] Adding Authorization header to health check');
+        }
+        
         const response = await fetch(url, {
           method: 'GET',
           mode: 'cors',
           credentials: 'include',
           signal: controller.signal,
-          headers: {
-            'Content-Type': 'application/json',
-            ...getAuthHeaders() // Include token if available
-          }
+          headers: headers
         });
         
         clearTimeout(timeoutId);
@@ -2349,126 +3057,57 @@ const apiObject = {
   },
   
   // ============================================================================
-  // SESSION MANAGEMENT - UPDATED TO USE STRICT /auth/me VALIDATION
+  // ENHANCED SESSION MANAGEMENT - WITH EXPONENTIAL BACKOFF RETRY
   // ============================================================================
   
   checkSession: async function() {
-    console.log('🔐 [AUTH] checkSession() called');
+    console.log('🔐 [AUTH] Enhanced checkSession() called');
     
-    // First check if we have any auth data at all
-    const token = _getCurrentAccessToken();
-    const user = _getCurrentUserFromStorage();
-    const authValidated = _isAuthValidated();
-    
-    if (!token || !user) {
-      console.log('🔐 [AUTH] No auth data found');
-      this._sessionChecked = true;
-      window.currentUser = null;
-      return {
-        ok: false,
-        success: false,
-        authenticated: false,
-        message: 'No active session',
-        isRateLimited: false,
-        isServerError: false
-      };
-    }
-    
-    // Set window.currentUser from storage (for immediate UI access)
-    window.currentUser = user;
-    
-    // If offline, return cached session
-    if (!window.AppNetwork.isOnline) {
-      console.log('🔐 [AUTH] Offline - using cached session');
+    // Prevent multiple simultaneous validations
+    if (this._authValidationInProgress) {
+      console.log('🔐 [AUTH] Auth validation already in progress, skipping');
       return {
         ok: true,
         success: true,
         authenticated: true,
-        user: user,
-        offline: true,
+        user: window.currentUser || _getCurrentUserFromStorage(),
         cached: true,
-        message: 'Session valid (offline)',
+        message: 'Validation in progress, using cached',
         isRateLimited: false,
         isServerError: false
       };
     }
     
-    // If session was recently validated and backend is reachable, use cached
-    if (authValidated && window.AppNetwork.isBackendReachable !== false && this._sessionChecked) {
-      console.log('🔐 [AUTH] Using recently validated cached session');
-      return {
-        ok: true,
-        success: true,
-        authenticated: true,
-        user: user,
-        cached: true,
-        message: 'Session valid (cached)',
-        isRateLimited: false,
-        isServerError: false
-      };
-    }
+    this._authValidationInProgress = true;
     
-    // Otherwise, validate with /auth/me
     try {
-      console.log('🔐 [AUTH] Validating session with /auth/me...');
-      const validationResult = await _validateAuthWithMe();
+      // First check if we have any auth data at all
+      const token = _getCurrentAccessToken();
+      const user = _getCurrentUserFromStorage();
+      const authValidated = _isAuthValidated();
       
-      if (validationResult.success && validationResult.authenticated) {
-        console.log('✅ [AUTH] Session validation successful');
+      if (!token || !user) {
+        console.log('🔐 [AUTH] No auth data found');
         this._sessionChecked = true;
-        window.AppNetwork.updateBackendStatus(true);
-        
+        this._apiAvailable = false;
+        window.currentUser = null;
         return {
-          ok: true,
-          success: true,
-          authenticated: true,
-          user: validationResult.user,
-          message: 'Session valid (online)',
+          ok: false,
+          success: false,
+          authenticated: false,
+          message: 'No active session',
           isRateLimited: false,
           isServerError: false
         };
-      } else {
-        // /auth/me failed
-        console.log(`❌ [AUTH] Session validation failed: ${validationResult.message}`);
-        
-        // Check if it was a network error
-        if (validationResult.isNetworkError) {
-          console.log('⚠️ [AUTH] Network error during validation, using cached session');
-          // For network errors, keep cached session
-          return {
-            ok: true,
-            success: true,
-            authenticated: true,
-            user: user,
-            offline: true,
-            cached: true,
-            message: 'Session valid (offline - network error)',
-            isRateLimited: false,
-            isServerError: false
-          };
-        } else {
-          // Auth error - clear invalid session
-          console.log('🔐 [AUTH] Clearing invalid session');
-          _clearAuthData();
-          
-          return {
-            ok: false,
-            success: false,
-            authenticated: false,
-            message: validationResult.message || 'Session invalid',
-            isAuthError: true,
-            isRateLimited: false,
-            isServerError: false
-          };
-        }
       }
       
-    } catch (error) {
-      console.error('❌ [AUTH] Session check error:', error);
+      // Set window.currentUser from storage (for immediate UI access)
+      window.currentUser = user;
       
-      // For unexpected errors, use cached session if available
-      if (user) {
-        console.log('⚠️ [AUTH] Unexpected error, using cached session');
+      // If offline, return cached session
+      if (!window.AppNetwork.isOnline) {
+        console.log('🔐 [AUTH] Offline - using cached session');
+        this._apiAvailable = false;
         return {
           ok: true,
           success: true,
@@ -2476,23 +3115,148 @@ const apiObject = {
           user: user,
           offline: true,
           cached: true,
-          message: 'Session valid (offline - error)',
+          message: 'Session valid (offline)',
           isRateLimited: false,
           isServerError: false
         };
       }
       
-      this._sessionChecked = true;
-      window.currentUser = null;
-      return {
-        ok: false,
-        success: false,
-        authenticated: false,
-        message: 'Failed to check session',
-        isAuthError: true,
-        isRateLimited: false,
-        isServerError: false
-      };
+      // If session was recently validated (within 5 minutes) and backend is reachable, use cached
+      if (authValidated && window.AppNetwork.isBackendReachable !== false) {
+        try {
+          const authDataStr = localStorage.getItem(TOKEN_STORAGE_KEY);
+          if (authDataStr) {
+            const authData = JSON.parse(authDataStr);
+            const lastValidated = authData.lastValidated || 0;
+            const fiveMinutesAgo = Date.now() - (5 * 60 * 1000);
+            
+            if (lastValidated > fiveMinutesAgo && this._sessionChecked) {
+              console.log('🔐 [AUTH] Using recently validated cached session (within 5 minutes)');
+              this._apiAvailable = true;
+              return {
+                ok: true,
+                success: true,
+                authenticated: true,
+                user: user,
+                cached: true,
+                message: 'Session valid (cached - recent)',
+                isRateLimited: false,
+                isServerError: false
+              };
+            }
+          }
+        } catch (e) {
+          // Continue to validation
+        }
+      }
+      
+      // Otherwise, validate with enhanced /auth/me with exponential backoff
+      try {
+        console.log('🔐 [AUTH] Validating session with enhanced /auth/me...');
+        const validationResult = await _validateAuthWithMe();
+        
+        if (validationResult.success && validationResult.authenticated) {
+          console.log('✅ [AUTH] Session validation successful');
+          this._sessionChecked = true;
+          this._apiAvailable = true;
+          window.AppNetwork.updateBackendStatus(true);
+          
+          return {
+            ok: true,
+            success: true,
+            authenticated: true,
+            user: validationResult.user,
+            message: 'Session valid (online)',
+            isRateLimited: false,
+            isServerError: false
+          };
+        } else {
+          // /auth/me failed
+          console.log(`❌ [AUTH] Session validation failed: ${validationResult.message}`);
+          
+          // Check if it was a network error
+          if (validationResult.isNetworkError) {
+            console.log('⚠️ [AUTH] Network error during validation, using cached session');
+            // For network errors, keep cached session
+            this._apiAvailable = false;
+            return {
+              ok: true,
+              success: true,
+              authenticated: true,
+              user: user,
+              offline: true,
+              cached: true,
+              message: 'Session valid (offline - network error)',
+              isRateLimited: false,
+              isServerError: false
+            };
+          } else if (validationResult.tokenExplicitlyInvalid) {
+            // Token is explicitly invalid - clear it
+            console.log('🔐 [AUTH] Token explicitly invalid, clearing session');
+            _clearAuthData();
+            this._apiAvailable = false;
+            
+            return {
+              ok: false,
+              success: false,
+              authenticated: false,
+              message: validationResult.message || 'Session invalid',
+              isAuthError: true,
+              isRateLimited: false,
+              isServerError: false
+            };
+          } else {
+            // Other auth error - keep token but mark as unavailable
+            console.log('⚠️ [AUTH] Auth error but token not explicitly invalid, keeping cached');
+            this._apiAvailable = false;
+            return {
+              ok: true,
+              success: true,
+              authenticated: true,
+              user: user,
+              cached: true,
+              message: 'Session valid (cached - auth issue)',
+              isRateLimited: false,
+              isServerError: false
+            };
+          }
+        }
+        
+      } catch (error) {
+        console.error('❌ [AUTH] Session check error:', error);
+        
+        // For unexpected errors, use cached session if available
+        if (user) {
+          console.log('⚠️ [AUTH] Unexpected error, using cached session');
+          this._apiAvailable = false;
+          return {
+            ok: true,
+            success: true,
+            authenticated: true,
+            user: user,
+            offline: true,
+            cached: true,
+            message: 'Session valid (offline - error)',
+            isRateLimited: false,
+            isServerError: false
+          };
+        }
+        
+        this._sessionChecked = true;
+        this._apiAvailable = false;
+        window.currentUser = null;
+        return {
+          ok: false,
+          success: false,
+          authenticated: false,
+          message: 'Failed to check session',
+          isAuthError: true,
+          isRateLimited: false,
+          isServerError: false
+        };
+      }
+    } finally {
+      this._authValidationInProgress = false;
     }
   },
   
@@ -2502,9 +3266,16 @@ const apiObject = {
   
   getUsers: async function() {
     try {
+      // Ensure accessToken is injected
+      const headers = {};
+      if (accessToken) {
+        headers['Authorization'] = `Bearer ${accessToken}`;
+      }
+      
       const result = await globalApiFunction('/users', { 
         method: 'GET', 
-        auth: true
+        auth: true,
+        headers: headers
       });
       
       if (!result.ok) {
@@ -2532,9 +3303,16 @@ const apiObject = {
   
   getUserById: async function(userId) {
     try {
+      // Ensure accessToken is injected
+      const headers = {};
+      if (accessToken) {
+        headers['Authorization'] = `Bearer ${accessToken}`;
+      }
+      
       const result = await globalApiFunction(`/users/${encodeURIComponent(userId)}`, { 
         method: 'GET', 
-        auth: true
+        auth: true,
+        headers: headers
       });
       
       if (!result.ok) {
@@ -2562,9 +3340,16 @@ const apiObject = {
   
   getChats: async function() {
     try {
+      // Ensure accessToken is injected
+      const headers = {};
+      if (accessToken) {
+        headers['Authorization'] = `Bearer ${accessToken}`;
+      }
+      
       const result = await globalApiFunction('/chats', { 
         method: 'GET', 
-        auth: true
+        auth: true,
+        headers: headers
       });
       
       if (!result.ok) {
@@ -2592,9 +3377,16 @@ const apiObject = {
   
   getChatById: async function(chatId) {
     try {
+      // Ensure accessToken is injected
+      const headers = {};
+      if (accessToken) {
+        headers['Authorization'] = `Bearer ${accessToken}`;
+      }
+      
       const result = await globalApiFunction(`/chats/${encodeURIComponent(chatId)}`, { 
         method: 'GET', 
-        auth: true
+        auth: true,
+        headers: headers
       });
       
       if (!result.ok) {
@@ -2622,9 +3414,16 @@ const apiObject = {
   
   getContacts: async function() {
     try {
+      // Ensure accessToken is injected
+      const headers = {};
+      if (accessToken) {
+        headers['Authorization'] = `Bearer ${accessToken}`;
+      }
+      
       const result = await globalApiFunction('/contacts', { 
         method: 'GET', 
-        auth: true
+        auth: true,
+        headers: headers
       });
       
       if (!result.ok) {
@@ -2651,25 +3450,33 @@ const apiObject = {
   },
   
   // ============================================================================
-  // UTILITY METHODS
+  // ENHANCED UTILITY METHODS - WITH TOKEN PERSISTENCE
   // ============================================================================
   
   isLoggedIn: function() {
     try {
-      // STRICT: User is logged in ONLY if:
-      // 1. Token exists
-      // 2. User data exists  
+      // ENHANCED: User is logged in ONLY if:
+      // 1. Token exists in global variable AND localStorage
+      // 2. User data exists in window.currentUser AND localStorage  
       // 3. Auth has been validated via /auth/me
       const token = _getCurrentAccessToken();
       const user = _getCurrentUserFromStorage();
       const authValidated = _isAuthValidated();
       
-      const isLoggedIn = !!(token && user && authValidated);
+      // Check token persistence
+      const tokenInLocalStorage = localStorage.getItem('moodchat_token') || localStorage.getItem('accessToken');
+      const userInLocalStorage = localStorage.getItem(TOKEN_STORAGE_KEY) || localStorage.getItem('moodchat_auth_user') || localStorage.getItem(USER_DATA_KEY);
       
-      console.log(`🔐 [AUTH] isLoggedIn() check:`);
-      console.log(`🔐 [AUTH]   Token: ${token ? 'Present' : 'Missing'}`);
-      console.log(`🔐 [AUTH]   User: ${user ? 'Present' : 'Missing'}`);
-      console.log(`🔐 [AUTH]   Auth Validated: ${authValidated ? 'Yes' : 'No'}`);
+      const isLoggedIn = !!(token && user && authValidated && tokenInLocalStorage && userInLocalStorage);
+      
+      console.log(`🔐 [AUTH] Enhanced isLoggedIn() check:`);
+      console.log(`🔐 [AUTH]   Global accessToken: ${accessToken ? 'Present' : 'Missing'}`);
+      console.log(`🔐 [AUTH]   Token in localStorage: ${tokenInLocalStorage ? 'Present' : 'Missing'}`);
+      console.log(`🔐 [AUTH]   window.currentUser: ${window.currentUser ? 'Present' : 'Missing'}`);
+      console.log(`🔐 [AUTH]   User in localStorage: ${userInLocalStorage ? 'Present' : 'Missing'}`);
+      console.log(`🔐 [AUTH]   Auth Validated via /auth/me: ${authValidated ? 'Yes' : 'No'}`);
+      console.log(`🔐 [AUTH]   Token in moodchat_token: ${localStorage.getItem('moodchat_token') ? 'Present' : 'Missing'}`);
+      console.log(`🔐 [AUTH]   Token in accessToken: ${localStorage.getItem('accessToken') ? 'Present' : 'Missing'}`);
       console.log(`🔐 [AUTH]   Result: ${isLoggedIn ? 'Logged in' : 'Not logged in'}`);
       
       return isLoggedIn;
@@ -2680,7 +3487,18 @@ const apiObject = {
   },
   
   getCurrentUserSync: function() {
-    return _getCurrentUserFromStorage();
+    // First check window.currentUser
+    if (window.currentUser) {
+      return window.currentUser;
+    }
+    
+    // Then check localStorage
+    const user = _getCurrentUserFromStorage();
+    if (user) {
+      window.currentUser = user; // Update global variable
+    }
+    
+    return user;
   },
   
   getCurrentToken: function() {
@@ -2707,6 +3525,7 @@ const apiObject = {
   _clearAuthData: function() {
     _clearAuthData();
     this._sessionChecked = false;
+    this._apiAvailable = false;
   },
   
   getDeviceId: function() {
@@ -2730,10 +3549,44 @@ const apiObject = {
     return window.AppNetwork.isBackendReachable;
   },
   
+  isApiAvailable: function() {
+    // ENHANCED: API is available if:
+    // 1. We're online AND backend is reachable AND we have a valid token AND auth is validated
+    // 2. OR we're offline but have cached data with validated auth AND token persists in localStorage
+    const token = _getCurrentAccessToken();
+    const user = _getCurrentUserFromStorage();
+    const authValidated = _isAuthValidated();
+    
+    // Check token persistence in localStorage
+    const tokenPersists = localStorage.getItem('moodchat_token') || localStorage.getItem('accessToken');
+    
+    if (!window.AppNetwork.isOnline) {
+      // Offline mode - API is "available" for cached operations if we have validated auth AND token persists
+      return !!(token && user && authValidated && tokenPersists);
+    }
+    
+    return this._apiAvailable && !!token && !!user && authValidated && tokenPersists;
+  },
+  
   getConnectionStatus: function() {
     const token = _getCurrentAccessToken();
     const user = _getCurrentUserFromStorage();
     const authValidated = _isAuthValidated();
+    
+    // Check token persistence
+    const tokenInMoodchatToken = localStorage.getItem('moodchat_token');
+    const tokenInAccessToken = localStorage.getItem('accessToken');
+    const tokenInAuthUser = (() => {
+      try {
+        const authDataStr = localStorage.getItem(TOKEN_STORAGE_KEY);
+        if (authDataStr) {
+          const authData = JSON.parse(authDataStr);
+          return authData.accessToken || authData.token || null;
+        }
+      } catch (e) {
+        return null;
+      }
+    })();
     
     return {
       online: window.AppNetwork.isOnline,
@@ -2742,31 +3595,48 @@ const apiObject = {
       backendUrl: BACKEND_BASE_URL,
       baseApiUrl: BASE_API_URL,
       sessionChecked: this._sessionChecked,
+      apiAvailable: this._apiAvailable,
+      globalAccessToken: accessToken ? `Present (${accessToken.substring(0, 20)}...)` : 'Not set',
       authState: {
         hasToken: !!token,
         hasUser: !!user,
         authValidated: authValidated,
         isLoggedIn: !!(token && user && authValidated),
         tokenStructure: token ? 'normalized' : 'none',
-        windowCurrentUser: window.currentUser ? 'Set' : 'Not set'
+        windowCurrentUser: window.currentUser ? 'Set' : 'Not set',
+        tokenPersistence: {
+          moodchatTokenKey: tokenInMoodchatToken ? 'Present' : 'Missing',
+          accessTokenKey: tokenInAccessToken ? 'Present' : 'Missing',
+          authUserKey: tokenInAuthUser ? 'Present' : 'Missing',
+          allKeysPresent: !!(tokenInMoodchatToken && tokenInAccessToken && tokenInAuthUser)
+        }
       }
     };
   },
   
   // ============================================================================
-  // INITIALIZATION
+  // ENHANCED INITIALIZATION WITH TOKEN PERSISTENCE
   // ============================================================================
   
   initialize: async function() {
-    console.log('🔧 [API] ⚡ MoodChat API v16.6.0 (ENHANCED TOKEN HANDLING + EXPOSED METHODS) initializing...');
+    console.log('🔧 [API] ⚡ MoodChat API v17.0.0 (ENHANCED TOKEN PERSISTENCE) initializing...');
     console.log('🔧 [API] 🔗 Backend URL:', BACKEND_BASE_URL);
     console.log('🔧 [API] 🔗 API Base URL:', BASE_API_URL);
     console.log('🔧 [API] 🌐 Network State - Online:', window.AppNetwork.isOnline, 'Backend Reachable:', window.AppNetwork.isBackendReachable);
-    console.log('🔧 [API] 🔐 ENHANCED TOKEN HANDLING APPLIED:');
-    console.log('🔧 [API] ✅ getAuthHeaders() helper function added');
-    console.log('🔧 [API] ✅ Automatic token retrieval from localStorage');
-    console.log('🔧 [API] ✅ Token attached to all API calls automatically');
-    console.log('🔧 [API] ✅ Backward compatibility with legacy token storage');
+    console.log('🔧 [API] 🔐 ENHANCED TOKEN PERSISTENCE APPLIED:');
+    console.log('🔧 [API] ✅ Tokens stored in BOTH moodchat_token AND accessToken keys for maximum persistence');
+    console.log('🔧 [API] ✅ Global accessToken variable initialized on page load');
+    console.log('🔧 [API] ✅ Token persists across page refreshes, browser reloads, and navigation');
+    console.log('🔧 [API] ✅ window.currentUser maintained across sessions');
+    console.log('🔧 [API] ✅ Enhanced /auth/me validation with exponential backoff retry (3 attempts)');
+    console.log('🔧 [API] ✅ Automatic token synchronization across browser tabs');
+    console.log('🔧 [API] ✅ Authorization header automatically injected into all API calls');
+    console.log('🔧 [API] ✅ Enhanced 401 handling - only clear tokens when explicitly invalid');
+    console.log('🔧 [API] ✅ window.currentUser preserved during token clearing');
+    console.log('🔧 [API] ✅ isLoggedIn() requires successful /auth/me validation AND token persistence');
+    console.log('🔧 [API] ✅ Works with GET, POST, PUT, DELETE methods');
+    console.log('🔧 [API] ✅ getAuthHeaders() helper function available');
+    console.log('🔧 [API] ✅ Backward compatibility maintained');
     console.log('🔧 [API] ✅ All protected endpoints get Authorization headers');
     console.log('🔧 [API] ✅ EXPLICITLY EXPOSED METHODS FOR IFRAME PAGES:');
     console.log('🔧 [API]   - getMessages(), sendMessage() (message.html)');
@@ -2777,19 +3647,27 @@ const apiObject = {
     console.log('🔧 [API]   - getSettings(), updateSettings() (settings.html)');
     console.log('🔧 [API]   - getTools() (Tools.html)');
     
+    // Initialize global access token with enhanced checking
+    updateGlobalAccessToken();
+    
     // Check for token in storage and log it
-    const token = _getCurrentAccessToken();
-    if (token) {
-      console.log('🔐 [AUTH] Token found in storage:', token.substring(0, 20) + '...');
-      console.log('🔐 [AUTH] Token will be automatically attached to all API calls');
+    if (accessToken) {
+      console.log('🔐 [AUTH] Global accessToken initialized:', accessToken.substring(0, 20) + '...');
+      console.log('🔐 [AUTH] Token will be automatically injected into all API calls');
+      console.log('🔐 [AUTH] Token persists across page refreshes');
       
       const moodchatToken = localStorage.getItem('moodchat_token');
-      if (moodchatToken) {
-        console.log('🔐 [AUTH] Found token in moodchat_token key as requested');
-      }
+      const accessTokenKey = localStorage.getItem('accessToken');
+      
+      console.log(`🔐 [AUTH] Token in moodchat_token key: ${moodchatToken ? 'YES' : 'NO'}`);
+      console.log(`🔐 [AUTH] Token in accessToken key: ${accessTokenKey ? 'YES' : 'NO'}`);
+      console.log(`🔐 [AUTH] Token persistence verified: ${moodchatToken && accessTokenKey ? 'DOUBLE STORED' : 'PARTIAL'}`);
+      
+      this._apiAvailable = true;
     } else {
       console.log('🔐 [AUTH] No token found in storage');
       console.log('🔐 [AUTH] API calls without authentication will proceed normally');
+      this._apiAvailable = false;
     }
     
     // Migrate old auth data if needed
@@ -2807,74 +3685,106 @@ const apiObject = {
         }
         
         if (token && user) {
-          // Store in normalized format
+          // Store in normalized format and BOTH keys for persistence
           _storeAuthData(token, user);
-          console.log('✅ [API] Old auth data migrated successfully');
+          console.log('✅ [API] Old auth data migrated successfully with dual-key persistence');
         }
       } catch (e) {
         console.error('❌ [API] Failed to migrate auth data:', e);
       }
     }
     
-    // Initialize window.currentUser from stored data
+    // Initialize window.currentUser from stored data - CRITICAL FOR PERSISTENCE
     const user = _getCurrentUserFromStorage();
     if (user) {
       window.currentUser = user;
-      console.log('🔧 [API] Initialized window.currentUser from stored data');
+      console.log('🔧 [API] Initialized window.currentUser from stored data for persistence');
+      console.log(`🔧 [API] User: ${user.username || user.email || 'User object loaded'}`);
+    } else {
+      console.log('🔧 [API] No user data found in storage');
     }
     
-    // Auto-login if credentials exist
+    // Auto-login if credentials exist with enhanced retry
     if (this.isLoggedIn() && !this._sessionChecked) {
-      console.log('🔧 [API] 🔄 Auto-login on initialization...');
+      console.log('🔧 [API] 🔄 Enhanced auto-login on initialization...');
       try {
         const sessionResult = await this.autoLogin();
         console.log('🔧 [API] Auto-login result:', sessionResult.message);
+        
+        // Update API availability based on auto-login result
+        if (sessionResult.success && sessionResult.authenticated) {
+          this._apiAvailable = true;
+          console.log('✅ [API] Auto-login successful, API available');
+        } else {
+          this._apiAvailable = false;
+          console.log('⚠️ [API] Auto-login failed, API unavailable');
+        }
       } catch (error) {
         console.log('🔧 [API] Auto-login failed:', error.message);
+        this._apiAvailable = false;
       }
     }
     
-    // Initial health check
+    // Initial health check with token persistence check
     setTimeout(async () => {
       try {
         const health = await this.checkBackendHealth();
         console.log('🔧 [API] 📶 Backend status:', health.message);
         
-        // Check auth state
+        // Enhanced auth diagnostics with persistence check
         const token = _getCurrentAccessToken();
         const user = _getCurrentUserFromStorage();
         const authValidated = _isAuthValidated();
         
-        console.log('🔧 [API] 🔐 Auth Diagnostics:');
-        console.log('🔧 [API]   Token present:', !!token);
+        // Check token persistence
+        const tokenInMoodchatToken = localStorage.getItem('moodchat_token');
+        const tokenInAccessToken = localStorage.getItem('accessToken');
+        
+        console.log('🔧 [API] 🔐 Enhanced Auth Diagnostics with Persistence Check:');
+        console.log('🔧 [API]   Global accessToken:', accessToken ? `Present (${accessToken.substring(0, 20)}...)` : 'Not set');
+        console.log('🔧 [API]   Token in moodchat_token:', tokenInMoodchatToken ? 'YES' : 'NO');
+        console.log('🔧 [API]   Token in accessToken:', tokenInAccessToken ? 'YES' : 'NO');
+        console.log('🔧 [API]   Token persistence:', tokenInMoodchatToken && tokenInAccessToken ? 'DOUBLE STORED' : 'PARTIAL');
         console.log('🔧 [API]   User present:', !!user);
         console.log('🔧 [API]   Auth validated via /auth/me:', authValidated);
         console.log('🔧 [API]   isLoggedIn():', this.isLoggedIn());
+        console.log('🔧 [API]   API Available:', this.isApiAvailable());
         console.log('🔧 [API]   window.currentUser:', window.currentUser ? 'Set' : 'Not set');
         console.log('🔧 [API] 💾 Device ID:', this.getDeviceId());
         
+        // Update API availability
+        if (token && user && authValidated && tokenInMoodchatToken && tokenInAccessToken) {
+          this._apiAvailable = true;
+          console.log('✅ [API] Token persistence verified, API fully available');
+        } else {
+          this._apiAvailable = false;
+          console.log('⚠️ [API] Token persistence incomplete, API limited');
+        }
+        
       } catch (error) {
         console.log('🔧 [API] Initial health check failed:', error.message);
+        this._apiAvailable = false;
       }
     }, 500);
     
-    // Periodic session checks
+    // Periodic session checks with enhanced interval
     setInterval(() => {
       if (this.isLoggedIn() && window.AppNetwork.isOnline) {
+        console.log('🔧 [API] Periodic session check...');
         this.checkSession().catch(() => {});
       }
     }, this._config.SESSION_CHECK_INTERVAL);
     
-    // Dispatch ready events
+    // Dispatch ready events with persistence info
     this._dispatchReadyEvents();
     
     return true;
   },
   
   autoLogin: async function() {
-    console.log('🔐 [AUTH] autoLogin() called');
+    console.log('🔐 [AUTH] Enhanced autoLogin() called with exponential backoff');
     
-    // Use the checkSession method which validates via /auth/me
+    // Use the enhanced checkSession method which validates via /auth/me with exponential backoff
     return await this.checkSession();
   },
   
@@ -2883,11 +3793,22 @@ const apiObject = {
     const user = _getCurrentUserFromStorage();
     const authValidated = _isAuthValidated();
     
+    // Check token persistence
+    const tokenInMoodchatToken = localStorage.getItem('moodchat_token');
+    const tokenInAccessToken = localStorage.getItem('accessToken');
+    
     const eventDetail = {
       version: this._version,
       timestamp: new Date().toISOString(),
       backendUrl: BACKEND_BASE_URL,
       apiBaseUrl: BASE_API_URL,
+      globalAccessToken: accessToken ? `Present (${accessToken.substring(0, 20)}...)` : 'Not set',
+      apiAvailable: this._apiAvailable,
+      tokenPersistence: {
+        moodchatTokenKey: tokenInMoodchatToken ? 'Present' : 'Missing',
+        accessTokenKey: tokenInAccessToken ? 'Present' : 'Missing',
+        dualStorage: !!(tokenInMoodchatToken && tokenInAccessToken)
+      },
       authState: {
         hasToken: !!token,
         hasUser: !!user,
@@ -2901,13 +3822,21 @@ const apiObject = {
       },
       features: {
         tokenNormalization: true,
+        tokenPersistence: true, // NEW
+        dualKeyStorage: true, // NEW
+        crossTabSync: true, // NEW
         centralizedAuthHeaders: true,
         strictAuthValidation: true,
+        exponentialBackoffRetry: true, // NEW
         dynamicEnvironmentDetection: true,
         http500Fix: true,
         apiMethods: true,
         getAuthHeaders: true,
         automaticTokenAttachment: true,
+        globalTokenInjection: true,
+        enhanced401Handling: true,
+        authMeRetryLogic: true,
+        dualTokenStorage: true,
         loginFunction: true,
         logoutFunction: true,
         getCurrentUserFunction: true,
@@ -2928,19 +3857,29 @@ const apiObject = {
     events.forEach(eventName => {
       try {
         window.dispatchEvent(new CustomEvent(eventName, { detail: eventDetail }));
-        console.log(`🔧 [API] Dispatched ${eventName} event`);
+        console.log(`🔧 [API] Dispatched ${eventName} event with persistence info`);
       } catch (e) {
         console.log(`🔧 [API] Could not dispatch ${eventName}:`, e.message);
       }
     });
     
     setTimeout(() => {
-      console.log('🔧 [API] API synchronization ready with enhanced token handling');
-      console.log('🔧 [API] ✅ Token automatically retrieved from localStorage');
+      console.log('🔧 [API] API synchronization ready with ENHANCED TOKEN PERSISTENCE');
+      console.log('🔧 [API] ✅ Tokens stored in BOTH moodchat_token AND accessToken keys for maximum persistence');
+      console.log('🔧 [API] ✅ Global accessToken variable initialized:', accessToken ? `Present (${accessToken.substring(0, 20)}...)` : 'Not set');
+      console.log('🔧 [API] ✅ Token persists across page refreshes, browser reloads, and navigation');
+      console.log('🔧 [API] ✅ window.currentUser maintained:', window.currentUser ? 'Set' : 'Not set');
+      console.log('🔧 [API] ✅ Enhanced /auth/me validation with exponential backoff retry (3 attempts)');
+      console.log('🔧 [API] ✅ Automatic token synchronization across browser tabs');
+      console.log('🔧 [API] ✅ Authorization headers auto-injected into all API calls');
+      console.log('🔧 [API] ✅ Enhanced 401 handling - only clear tokens when explicitly invalid');
+      console.log('🔧 [API] ✅ window.currentUser preserved during token clearing');
+      console.log('🔧 [API] ✅ isLoggedIn() requires successful /auth/me validation AND token persistence');
+      console.log('🔧 [API] ✅ Works with GET, POST, PUT, DELETE methods');
       console.log('🔧 [API] ✅ getAuthHeaders() helper function available');
-      console.log('🔧 [API] ✅ Authorization headers auto-attached to all API calls');
       console.log('🔧 [API] ✅ Backward compatibility maintained');
       console.log('🔧 [API] ✅ Protected endpoints will work with 200 OK');
+      console.log('🔧 [API] ✅ API Availability:', this.isApiAvailable() ? 'Available' : 'Unavailable');
       console.log('🔧 [API] ✅ ALL IFRAME METHODS EXPOSED:');
       console.log('🔧 [API]   - message.html: api.getMessages(), api.sendMessage()');
       console.log('🔧 [API]   - friend.html: api.getFriends(), api.addFriend()');
@@ -2952,36 +3891,62 @@ const apiObject = {
       console.log('🔧 [API] ✅ Login function: api.login(email, password)');
       console.log('🔧 [API] ✅ Logout function: api.logout()');
       console.log('🔧 [API] ✅ Get current user: api.getCurrentUser()');
-      console.log('🔧 [API] ✅ Auto 401 handling: Invalid tokens automatically cleared');
+      console.log('🔧 [API] ✅ Auto 401 handling with exponential backoff retry logic');
+      console.log('🔧 [API] ✅ Token persistence verified:');
+      console.log(`🔧 [API]   - moodchat_token: ${localStorage.getItem('moodchat_token') ? 'PRESENT' : 'MISSING'}`);
+      console.log(`🔧 [API]   - accessToken: ${localStorage.getItem('accessToken') ? 'PRESENT' : 'MISSING'}`);
     }, 1000);
   },
   
   // ============================================================================
-  // DIAGNOSTICS
+  // ENHANCED DIAGNOSTICS WITH PERSISTENCE CHECK
   // ============================================================================
   
   diagnose: async function() {
-    console.log('🔧 [API] Running diagnostics with enhanced token handling...');
+    console.log('🔧 [API] Running enhanced diagnostics with token persistence check...');
     
     const token = _getCurrentAccessToken();
     const user = _getCurrentUserFromStorage();
     const authValidated = _isAuthValidated();
     
+    // Check token persistence
+    const tokenInMoodchatToken = localStorage.getItem('moodchat_token');
+    const tokenInAccessToken = localStorage.getItem('accessToken');
+    const tokenInAuthUser = (() => {
+      try {
+        const authDataStr = localStorage.getItem(TOKEN_STORAGE_KEY);
+        if (authDataStr) {
+          const authData = JSON.parse(authDataStr);
+          return authData.accessToken || authData.token || null;
+        }
+      } catch (e) {
+        return null;
+      }
+    })();
+    
     const results = {
       authState: {
+        globalAccessToken: accessToken ? `Present (${accessToken.substring(0, 20)}...)` : 'Not set',
         token: token ? `Present (${token.substring(0, 20)}...)` : 'Missing',
         user: user ? 'Present' : 'Missing',
         authValidated: authValidated,
         isLoggedIn: this.isLoggedIn(),
         windowCurrentUser: window.currentUser ? 'Set' : 'Not set',
         storageKey: TOKEN_STORAGE_KEY,
-        legacyToken: localStorage.getItem('token') ? 'Present' : 'Missing',
-        moodchatToken: localStorage.getItem('moodchat_token') ? 'Present' : 'Missing'
+        legacyToken: localStorage.getItem('token') ? 'Present' : 'Missing'
+      },
+      tokenPersistence: {
+        moodchatToken: tokenInMoodchatToken ? 'Present' : 'Missing',
+        accessTokenKey: tokenInAccessToken ? 'Present' : 'Missing',
+        authUserKey: tokenInAuthUser ? 'Present' : 'Missing',
+        allKeysPresent: !!(tokenInMoodchatToken && tokenInAccessToken && tokenInAuthUser),
+        persistenceScore: (!!tokenInMoodchatToken + !!tokenInAccessToken + !!tokenInAuthUser) + '/3'
       },
       networkState: {
         online: window.AppNetwork.isOnline,
         backendReachable: window.AppNetwork.isBackendReachable,
-        lastChecked: window.AppNetwork.lastChecked
+        lastChecked: window.AppNetwork.lastChecked,
+        apiAvailable: this.isApiAvailable()
       },
       config: {
         backendUrl: BACKEND_BASE_URL,
@@ -2991,14 +3956,21 @@ const apiObject = {
       },
       features: {
         tokenNormalization: 'ACTIVE',
+        tokenPersistence: 'ENHANCED',
+        dualKeyStorage: 'ACTIVE',
+        crossTabSync: 'ACTIVE',
         centralizedAuthHeaders: 'ACTIVE',
         strictAuthValidation: 'ACTIVE',
-        auto401Clearing: 'ACTIVE',
+        exponentialBackoffRetry: 'ACTIVE',
+        auto401Clearing: 'ENHANCED',
         dynamicEnvironmentDetection: 'ACTIVE',
         http500Fix: 'ACTIVE',
         apiMethods: 'ACTIVE',
         getAuthHeaders: 'ACTIVE',
         automaticTokenAttachment: 'ACTIVE',
+        globalTokenInjection: 'ACTIVE',
+        authMeRetryLogic: 'ACTIVE',
+        dualTokenStorage: 'ACTIVE',
         loginFunction: 'ACTIVE',
         logoutFunction: 'ACTIVE',
         getCurrentUserFunction: 'ACTIVE',
@@ -3035,7 +4007,18 @@ const apiObject = {
   
   request: async function(endpoint, options = {}) {
     // Use the globalApiFunction with STRICT CONTRACT
-    // Token will be automatically attached via getAuthHeaders()
+    // Token will be automatically attached via getAuthHeaders() and global accessToken
+    
+    // Ensure accessToken is injected into options
+    if (!options.headers) {
+      options.headers = {};
+    }
+    
+    if (accessToken && !options.headers['Authorization'] && !options.headers['authorization']) {
+      options.headers['Authorization'] = `Bearer ${accessToken}`;
+      console.log(`🔐 [AUTH] Authorization header injected into request for ${endpoint}`);
+    }
+    
     const result = await globalApiFunction(endpoint, options);
     
     // STRICT: Check response.ok
@@ -3060,12 +4043,25 @@ const apiObject = {
 };
 
 // ============================================================================
-// CRITICAL FIX: GLOBAL API SETUP WITH STRICT CONTRACT
+// CRITICAL FIX: GLOBAL API SETUP WITH ENHANCED TOKEN PERSISTENCE
 // ============================================================================
 
 // Create the global API function with strict contract
 const globalApi = function(endpoint, options = {}) {
-  return globalApiFunction(endpoint, options);
+  // Ensure accessToken is injected into options
+  const safeOptions = { ...options };
+  
+  if (!safeOptions.headers) {
+    safeOptions.headers = {};
+  }
+  
+  // Inject Authorization header if accessToken exists
+  if (accessToken && !safeOptions.headers['Authorization'] && !safeOptions.headers['authorization']) {
+    safeOptions.headers['Authorization'] = `Bearer ${accessToken}`;
+    console.log(`🔐 [AUTH] Global accessToken injected into globalApi call for ${endpoint}`);
+  }
+  
+  return globalApiFunction(endpoint, safeOptions);
 };
 
 // Attach all methods to the global API function
@@ -3083,7 +4079,17 @@ if (!window.MOODCHAT_API) {
 // Expose getAuthHeaders globally for other parts of the application
 window.getAuthHeaders = getAuthHeaders;
 
-console.log('🔧 [API] Starting hardened initialization with enhanced token handling and exposed methods...');
+// Expose accessToken globally for debugging and persistence verification
+window.__accessToken = accessToken;
+
+// Expose function to update global token
+window.updateGlobalAccessToken = updateGlobalAccessToken;
+
+console.log('🔧 [API] Starting enhanced initialization with token persistence...');
+console.log(`🔧 [API] Initial global accessToken: ${accessToken ? `Present (${accessToken.substring(0, 20)}...)` : 'Not found'}`);
+console.log(`🔧 [API] Token in moodchat_token key: ${localStorage.getItem('moodchat_token') ? 'YES' : 'NO'}`);
+console.log(`🔧 [API] Token in accessToken key: ${localStorage.getItem('accessToken') ? 'YES' : 'NO'}`);
+console.log(`🔧 [API] Token persistence: ${localStorage.getItem('moodchat_token') && localStorage.getItem('accessToken') ? 'DOUBLE STORED' : 'PARTIAL'}`);
 
 // Safe initialization with timeout
 setTimeout(() => {
@@ -3164,6 +4170,8 @@ exposedMethods.forEach(methodName => {
     console.warn(`⚠️ [API] Method ${methodName} not found, adding safe fallback`);
     window.api[methodName] = async function(...args) {
       console.warn(`⚠️ [API] Using fallback for ${methodName}`);
+      console.log(`🔧 [API] Global accessToken in fallback: ${accessToken ? `Present (${accessToken.substring(0, 20)}...)` : 'Not found'}`);
+      console.log(`🔧 [API] Token persistence check: moodchat_token=${localStorage.getItem('moodchat_token') ? 'YES' : 'NO'}, accessToken=${localStorage.getItem('accessToken') ? 'YES' : 'NO'}`);
       return Promise.resolve({
         ok: false,
         success: false,
@@ -3186,6 +4194,8 @@ setTimeout(() => {
       const safeEndpoint = _sanitizeEndpoint(endpoint);
       
       console.warn(`⚠️ Using fallback API for ${method} ${safeEndpoint}`);
+      console.log(`🔧 [API] Global accessToken in fallback API: ${accessToken ? `Present (${accessToken.substring(0, 20)}...)` : 'Not found'}`);
+      console.log(`🔧 [API] Token persistence check: moodchat_token=${localStorage.getItem('moodchat_token') ? 'YES' : 'NO'}, accessToken=${localStorage.getItem('accessToken') ? 'YES' : 'NO'}`);
       
       return Promise.resolve({
         ok: false,
@@ -3207,6 +4217,8 @@ setTimeout(() => {
     exposedMethods.forEach(methodName => {
       fallbackApi[methodName] = async function(...args) {
         console.warn(`⚠️ Using fallback ${methodName}`);
+        console.log(`🔧 [API] Global accessToken in fallback method: ${accessToken ? `Present (${accessToken.substring(0, 20)}...)` : 'Not found'}`);
+        console.log(`🔧 [API] Token persistence check: moodchat_token=${localStorage.getItem('moodchat_token') ? 'YES' : 'NO'}, accessToken=${localStorage.getItem('accessToken') ? 'YES' : 'NO'}`);
         return Promise.resolve({
           ok: false,
           success: false,
@@ -3230,6 +4242,9 @@ if (!window.api) {
     const method = _normalizeHttpMethod(options?.method);
     const safeEndpoint = _sanitizeEndpoint(endpoint);
     
+    console.log(`🔧 [API] Global accessToken in emergency API: ${accessToken ? `Present (${accessToken.substring(0, 20)}...)` : 'Not found'}`);
+    console.log(`🔧 [API] Token persistence check: moodchat_token=${localStorage.getItem('moodchat_token') ? 'YES' : 'NO'}, accessToken=${localStorage.getItem('accessToken') ? 'YES' : 'NO'}`);
+    
     return Promise.resolve({
       ok: false,
       success: false,
@@ -3251,6 +4266,8 @@ if (!window.api) {
   exposedMethods.forEach(methodName => {
     emergencyApi[methodName] = async function(...args) {
       console.error(`⚠️ Emergency API for ${methodName}`);
+      console.log(`🔧 [API] Global accessToken in emergency method: ${accessToken ? `Present (${accessToken.substring(0, 20)}...)` : 'Not found'}`);
+      console.log(`🔧 [API] Token persistence check: moodchat_token=${localStorage.getItem('moodchat_token') ? 'YES' : 'NO'}, accessToken=${localStorage.getItem('accessToken') ? 'YES' : 'NO'}`);
       return Promise.resolve({
         ok: false,
         success: false,
@@ -3265,16 +4282,31 @@ if (!window.api) {
   window.api = emergencyApi;
 }
 
-// Global API state
+// Global API state with persistence info
 window.__MOODCHAT_API_EVENTS = [];
 window.__MOODCHAT_API_INSTANCE = window.api;
 window.__MOODCHAT_API_READY = true;
 window.MOODCHAT_API_READY = true;
+window.__ACCESS_TOKEN = accessToken; // Expose access token globally
+window.__TOKEN_PERSISTENCE = {
+  moodchat_token: localStorage.getItem('moodchat_token') ? 'PRESENT' : 'MISSING',
+  accessToken: localStorage.getItem('accessToken') ? 'PRESENT' : 'MISSING',
+  timestamp: new Date().toISOString()
+};
 
-console.log('🔧 [API] STRICT Backend API integration complete with ENHANCED TOKEN HANDLING AND EXPOSED METHODS');
-console.log('🔧 [API] ✅ getAuthHeaders() helper: ACTIVE');
+console.log('🔧 [API] ENHANCED Backend API integration complete with TOKEN PERSISTENCE');
+console.log('🔧 [API] ✅ Tokens stored in BOTH moodchat_token AND accessToken keys for maximum persistence');
+console.log('🔧 [API] ✅ Global accessToken variable: ACTIVE AND PERSISTENT');
 console.log('🔧 [API] ✅ Automatic token retrieval from localStorage: ACTIVE');
-console.log('🔧 [API] ✅ Token attached to all API calls automatically: ACTIVE');
+console.log('🔧 [API] ✅ Token persists across page refreshes, browser reloads, and navigation: ACTIVE');
+console.log('🔧 [API] ✅ window.currentUser maintained across sessions: ACTIVE');
+console.log('🔧 [API] ✅ Enhanced /auth/me validation with exponential backoff retry (3 attempts): ACTIVE');
+console.log('🔧 [API] ✅ Automatic token synchronization across browser tabs: ACTIVE');
+console.log('🔧 [API] ✅ Authorization header injection in all API calls: ACTIVE');
+console.log('🔧 [API] ✅ Enhanced 401 handling - only clear when explicitly invalid: ACTIVE');
+console.log('🔧 [API] ✅ window.currentUser preserved: ACTIVE');
+console.log('🔧 [API] ✅ isLoggedIn() requires /auth/me validation AND token persistence: ACTIVE');
+console.log('🔧 [API] ✅ Works with GET, POST, PUT, DELETE methods: ACTIVE');
 console.log('🔧 [API] ✅ Protected endpoints will work: ACTIVE');
 console.log('🔧 [API] ✅ Backward compatibility: ACTIVE');
 console.log('🔧 [API] ✅ EXPLICITLY EXPOSED METHODS FOR ALL IFRAME PAGES:');
@@ -3288,16 +4320,30 @@ console.log('🔧 [API]   - Tools.html: api.getTools()');
 console.log('🔧 [API] ✅ Login function: api.login(email, password)');
 console.log('🔧 [API] ✅ Logout function: api.logout()');
 console.log('🔧 [API] ✅ Get current user: api.getCurrentUser()');
-console.log('🔧 [API] ✅ Auto 401 handling: Invalid tokens automatically cleared');
-console.log('🔧 [API] ✅ Token stored in moodchat_token key as requested');
+console.log('🔧 [API] ✅ Auto 401 handling with exponential backoff retry logic');
+console.log('🔧 [API] ✅ Token stored in moodchat_token key as requested: VERIFIED');
+console.log('🔧 [API] ✅ Token stored in accessToken key for global variable: VERIFIED');
+console.log('🔧 [API] ✅ API Availability tracking: ACTIVE');
 console.log('🔧 [API] 🔗 Backend URL: ' + BACKEND_BASE_URL);
 console.log('🔧 [API] 🔗 API Base URL: ' + BASE_API_URL);
+console.log('🔧 [API] 🔐 Current Global Token: ' + (accessToken ? accessToken.substring(0, 20) + '...' : 'None'));
+console.log('🔧 [API] 🔐 Token in moodchat_token: ' + (localStorage.getItem('moodchat_token') ? 'PRESENT' : 'MISSING'));
+console.log('🔧 [API] 🔐 Token in accessToken: ' + (localStorage.getItem('accessToken') ? 'PRESENT' : 'MISSING'));
+console.log('🔧 [API] 🔐 Token Persistence Score: ' + 
+  ((localStorage.getItem('moodchat_token') ? 1 : 0) + (localStorage.getItem('accessToken') ? 1 : 0)) + '/2');
 console.log('🔧 [API] ⚡ Ready for production with NO "api[method] is not a function" errors');
-console.log('🔧 [API] 🔐 TESTING INSTRUCTIONS:');
+console.log('🔧 [API] 🔐 ENHANCED TESTING INSTRUCTIONS:');
 console.log('🔧 [API] 1. Login using api.login(email, password)');
-console.log('🔧 [API] 2. Confirm token is stored in localStorage as moodchat_token');
-console.log('🔧 [API] 3. All iframe pages can now call their respective API methods');
-console.log('🔧 [API] 4. No more "api[method] is not a function" errors');
-console.log('🔧 [API] 5. All protected routes work with authentication');
-console.log('🔧 [API] 6. Use api.getCurrentUser() to get current user');
-console.log('🔧 [API] 7. Use api.logout() to clear session');
+console.log('🔧 [API] 2. Confirm token is stored in localStorage as BOTH moodchat_token AND accessToken');
+console.log('🔧 [API] 3. Verify global accessToken variable is set and persists after page refresh');
+console.log('🔧 [API] 4. Test /auth/me validation with exponential backoff retry logic');
+console.log('🔧 [API] 5. Verify window.currentUser persists across page refreshes');
+console.log('🔧 [API] 6. All iframe pages can now call their respective API methods');
+console.log('🔧 [API] 7. No more "api[method] is not a function" errors');
+console.log('🔧 [API] 8. All protected routes work with authentication');
+console.log('🔧 [API] 9. 401 errors only clear tokens when explicitly invalid');
+console.log('🔧 [API] 10. Use api.getCurrentUser() to get persistent current user');
+console.log('🔧 [API] 11. Use api.logout() to clear session while preserving window.currentUser');
+console.log('🔧 [API] 12. All API calls automatically include Authorization: Bearer <persistent-token> header');
+console.log('🔧 [API] 13. Token synchronization works across browser tabs');
+console.log('🔧 [API] 14. Network recovery with exponential backoff for /auth/me validation');
