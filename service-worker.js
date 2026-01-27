@@ -1,16 +1,10 @@
 // Service Worker for PWA Chat Application
-// Version: 9.0.0 - PERMANENTLY SAFE EDITION - ENHANCED
+// Version: 9.0.0 - PERMANENTLY SAFE EDITION
 // Cache Strategy: Cache-First ONLY for static assets
 // Design: Zero API interference, future-proof, authentication-safe
-// GUARANTEE: Login and API will NEVER fail due to service worker
 
 const CACHE_NAME = 'moodchat-static-v9';
 const CACHE_MAX_AGE = 7 * 24 * 60 * 60 * 1000;
-
-// ABSOLUTE SAFETY RULES: 
-// 1. NEVER cache API endpoints
-// 2. NEVER clone request bodies for non-GET requests
-// 3. NEVER intercept authentication flows
 
 const CORE_STATIC_ASSETS = [
   '/',
@@ -28,32 +22,170 @@ const STATIC_ASSET_PATTERNS = [
   /\/static\//i
 ];
 
-// EXPANDED BYPASS PATTERNS - ABSOLUTE SAFETY
 const BYPASS_PATTERNS = [
-  /\/api\//i,           // All API endpoints
-  /\/auth\//i,          // All auth endpoints
-  /\/login/i,           // Login pages
-  /\/register/i,        // Registration
-  /\/logout/i,          // Logout
-  /\/backend\//i,       // Backend routes
-  /\/server\//i,        // Server routes
-  /\/socket\.io\//i,    // WebSocket
-  /\/ws\//i,            // WebSocket
-  /\/wss\//i,           // Secure WebSocket
-  /\/graphql/i,         // GraphQL
-  /\/webhook/i,         // Webhooks
-  /\/oauth\//i,         // OAuth flows
-  /\/token/i,           // Token endpoints
-  /\/refresh/i,         // Token refresh
-  /\/callback/i,        // Auth callbacks
-  /\/verify/i,          // Verification endpoints
-  /^https?:\/\/api\./i, // External APIs
-  /\?.*auth/i,          // Auth query params
-  /#.*token/i           // Token in hash
+  /\/api\//i,
+  /\/auth\//i,
+  /\/login/i,
+  /\/register/i,
+  /\/logout/i,
+  /\/backend\//i,
+  /\/server\//i,
+  /\/socket\.io\//i,
+  /\/ws\//i,
+  /\/wss\//i,
+  /\/graphql/i,
+  /\/webhook/i,
+  /^https?:\/\/api\./i
 ];
 
+const HTML_NAVIGATION_PATTERNS = [
+  /\.html$/i,
+  /^\/[^\.]*$/i,
+  /\/login$/i,
+  /\/register$/i,
+  /\/logout$/i
+];
+
+// ========== CRITICAL SAFETY GUARDS ==========
+
+function mustBypassCompletely(request) {
+  const url = request.url;
+  
+  // 🚫 NEVER intercept navigation requests
+  if (request.mode === 'navigate') {
+    console.log('[Service Worker] Bypassing (navigation request):', url);
+    return true;
+  }
+  
+  // 🚫 NEVER intercept HTML documents
+  if (request.destination === 'document') {
+    console.log('[Service Worker] Bypassing (document request):', url);
+    return true;
+  }
+  
+  // 🚫 NEVER intercept HTML files
+  if (HTML_NAVIGATION_PATTERNS.some(pattern => pattern.test(url))) {
+    console.log('[Service Worker] Bypassing (HTML/route):', url);
+    return true;
+  }
+  
+  // 🚫 NEVER cache non-GET requests
+  if (request.method !== 'GET') {
+    console.log('[Service Worker] Bypassing (non-GET):', url);
+    return true;
+  }
+  
+  // 🚫 NEVER cache API/auth requests
+  if (BYPASS_PATTERNS.some(pattern => pattern.test(url))) {
+    console.log('[Service Worker] Bypassing (API/auth):', url);
+    return true;
+  }
+  
+  return false;
+}
+
+function isStaticAsset(url) {
+  if (!url || typeof url !== 'string') return false;
+  
+  return STATIC_ASSET_PATTERNS.some(pattern => pattern.test(url));
+}
+
+function isLocalAsset(url) {
+  try {
+    const parsed = new URL(url, self.location.origin);
+    return parsed.origin === self.location.origin;
+  } catch (e) {
+    return false;
+  }
+}
+
+// ========== SAFE REQUEST HANDLER ==========
+
+async function handleApiRequest(request) {
+  // 🛡️ Clone request body ONLY ONCE
+  let requestToFetch = request;
+  if (request.body) {
+    requestToFetch = request.clone();
+  }
+  
+  try {
+    const response = await fetch(requestToFetch);
+    
+    // 🛡️ NEVER treat auth errors as offline
+    if (response.status === 401 || response.status === 403) {
+      return response;
+    }
+    
+    return response;
+  } catch (error) {
+    // 🛡️ Return clean error for API failures
+    return new Response(JSON.stringify({
+      error: 'Network request failed',
+      online: navigator.onLine
+    }), {
+      status: 503,
+      headers: {
+        'Content-Type': 'application/json'
+      }
+    });
+  }
+}
+
+async function handleStaticAsset(request) {
+  const cache = await caches.open(CACHE_NAME);
+  
+  const cachedResponse = await cache.match(request);
+  if (cachedResponse) {
+    const isStale = isCacheStale(cachedResponse);
+    if (!isStale) {
+      console.log('[Service Worker] Static asset from cache:', request.url);
+      return cachedResponse;
+    }
+  }
+  
+  try {
+    const networkResponse = await fetch(request);
+    
+    if (networkResponse.ok) {
+      await cache.put(request, networkResponse.clone());
+      console.log('[Service Worker] Static asset cached:', request.url);
+      return networkResponse;
+    }
+    
+    if (cachedResponse) {
+      console.log('[Service Worker] Using stale cache (network failed):', request.url);
+      return cachedResponse;
+    }
+    
+    throw new Error('Network failed and no cache available');
+    
+  } catch (error) {
+    // 🛡️ Return minimal error response for static assets only
+    return new Response('Resource not available', {
+      status: 404,
+      headers: { 'Content-Type': 'text/plain' }
+    });
+  }
+}
+
+function isCacheStale(cachedResponse) {
+  try {
+    const dateHeader = cachedResponse.headers.get('date');
+    if (!dateHeader) return false;
+    
+    const cacheTime = new Date(dateHeader).getTime();
+    const age = Date.now() - cacheTime;
+    
+    return age > CACHE_MAX_AGE;
+  } catch (error) {
+    return false;
+  }
+}
+
+// ========== SERVICE WORKER EVENTS ==========
+
 self.addEventListener('install', event => {
-  console.log('[Service Worker] Installing v9.0.0 - PERMANENTLY SAFE EDITION - ENHANCED');
+  console.log('[Service Worker] Installing v9.0.0 - PERMANENTLY SAFE EDITION');
   
   event.waitUntil(
     (async () => {
@@ -66,6 +198,11 @@ self.addEventListener('install', event => {
             const assetUrl = asset === '/' ? '/index.html' : asset;
             
             if (isLocalAsset(assetUrl)) {
+              // 🛡️ Skip caching if it's HTML navigation
+              if (HTML_NAVIGATION_PATTERNS.some(pattern => pattern.test(assetUrl))) {
+                return { asset: assetUrl, status: 'skipped', reason: 'html-navigation' };
+              }
+              
               const response = await fetch(assetUrl, {
                 credentials: 'same-origin',
                 cache: 'no-store'
@@ -99,7 +236,7 @@ self.addEventListener('install', event => {
 });
 
 self.addEventListener('activate', event => {
-  console.log('[Service Worker] Activating v9.0.0 - PERMANENTLY SAFE EDITION - ENHANCED');
+  console.log('[Service Worker] Activating v9.0.0 - PERMANENTLY SAFE EDITION');
   
   event.waitUntil(
     (async () => {
@@ -123,9 +260,7 @@ self.addEventListener('activate', event => {
             type: 'SW_ACTIVATED',
             version: '9.0.0',
             safeMode: true,
-            enhanced: true,
-            timestamp: Date.now(),
-            guarantee: 'API_AND_AUTH_SAFE'
+            timestamp: Date.now()
           });
         });
         
@@ -136,135 +271,27 @@ self.addEventListener('activate', event => {
   );
 });
 
-// ABSOLUTE SAFETY: Check if request must bypass service worker completely
-function mustBypass(url) {
-  if (!url || typeof url !== 'string') return false;
-  
-  // Check all bypass patterns
-  const shouldBypass = BYPASS_PATTERNS.some(pattern => pattern.test(url));
-  
-  if (shouldBypass) {
-    console.log('[Service Worker] BYPASSING (API/AUTH):', url);
-  }
-  
-  return shouldBypass;
-}
-
-function isStaticAsset(url) {
-  if (!url || typeof url !== 'string') return false;
-  
-  return STATIC_ASSET_PATTERNS.some(pattern => pattern.test(url));
-}
-
-function isLocalAsset(url) {
-  try {
-    const parsed = new URL(url, self.location.origin);
-    return parsed.origin === self.location.origin;
-  } catch (e) {
-    return false;
-  }
-}
-
-function isCacheStale(cachedResponse) {
-  try {
-    const dateHeader = cachedResponse.headers.get('date');
-    if (!dateHeader) return false;
-    
-    const cacheTime = new Date(dateHeader).getTime();
-    const age = Date.now() - cacheTime;
-    
-    return age > CACHE_MAX_AGE;
-  } catch (error) {
-    return false;
-  }
-}
-
-// ENHANCED: Return real network errors for non-static assets
-async function handleNetworkError(request, error) {
-  const url = request.url;
-  
-  // Only serve offline page for HTML pages
-  if (url.endsWith('.html') || url === self.location.origin + '/' || !url.includes('.')) {
-    console.log('[Service Worker] Serving offline page for HTML');
-    return getOfflinePage();
-  }
-  
-  // For API/auth failures, let the app handle it (NO interference)
-  if (mustBypass(url)) {
-    console.log('[Service Worker] API/AUTH failure - passing through:', error.message);
-    throw error; // Let the original error propagate
-  }
-  
-  // For static assets, return generic error
-  return new Response('Resource not available', {
-    status: 404,
-    headers: { 'Content-Type': 'text/plain' }
-  });
-}
-
-async function handleStaticAsset(request) {
-  const cache = await caches.open(CACHE_NAME);
-  
-  const cachedResponse = await cache.match(request);
-  if (cachedResponse) {
-    const isStale = isCacheStale(cachedResponse);
-    if (!isStale) {
-      console.log('[Service Worker] Static asset from cache:', request.url);
-      return cachedResponse;
-    }
-  }
-  
-  try {
-    const networkResponse = await fetch(request);
-    
-    if (networkResponse.ok) {
-      await cache.put(request, networkResponse.clone());
-      console.log('[Service Worker] Static asset cached:', request.url);
-      return networkResponse;
-    }
-    
-    if (cachedResponse) {
-      console.log('[Service Worker] Using stale cache (network failed):', request.url);
-      return cachedResponse;
-    }
-    
-    throw new Error('Network failed and no cache available');
-    
-  } catch (error) {
-    return handleNetworkError(request, error);
-  }
-}
-
-// MAIN FETCH HANDLER - ENHANCED SAFETY
 self.addEventListener('fetch', event => {
   const request = event.request;
-  const url = request.url;
   
-  // ABSOLUTE RULE 1: NEVER handle non-GET requests
-  if (request.method !== 'GET') {
-    console.log('[Service Worker] Bypassing (non-GET):', url, request.method);
+  // 🛡️ CRITICAL: Apply all bypass guards first
+  if (mustBypassCompletely(request)) {
     event.respondWith(fetch(request));
     return;
   }
   
-  // ABSOLUTE RULE 2: NEVER cache API/auth endpoints
-  if (mustBypass(url)) {
-    console.log('[Service Worker] Network-only (API/AUTH):', url);
+  // 🛡️ ONLY handle local static assets
+  if (!isLocalAsset(request.url) || !isStaticAsset(request.url)) {
     event.respondWith(fetch(request));
     return;
   }
   
-  // Only handle local static assets
-  if (!isLocalAsset(url) || !isStaticAsset(url)) {
-    event.respondWith(fetch(request));
-    return;
-  }
-  
-  // Handle static assets with cache
+  // 🛡️ Handle static assets only
   event.respondWith(handleStaticAsset(request));
 });
 
-// SAFETY MESSAGES - Communication with app
+// ========== MESSAGE HANDLING ==========
+
 self.addEventListener('message', event => {
   const data = event.data;
   
@@ -284,11 +311,10 @@ self.addEventListener('message', event => {
             clients.forEach(client => {
               client.postMessage({
                 type: 'CACHE_CLEARED',
-                timestamp: Date.now(),
-                message: 'Cache cleared - API/auth untouched'
+                timestamp: Date.now()
               });
             });
-            console.log('[Service Worker] Cache cleared (static only)');
+            console.log('[Service Worker] Cache cleared');
           } catch (error) {
             console.error('[Service Worker] Failed to clear cache:', error);
           }
@@ -308,9 +334,7 @@ self.addEventListener('message', event => {
               count: keys.length,
               version: '9.0.0',
               timestamp: Date.now(),
-              safeMode: true,
-              enhanced: true,
-              guarantee: 'API_AND_AUTH_SAFE'
+              safeMode: true
             });
           } catch (error) {
             event.ports?.[0]?.postMessage({
@@ -328,32 +352,14 @@ self.addEventListener('message', event => {
         status: 'healthy',
         version: '9.0.0',
         safeMode: true,
-        enhanced: true,
-        timestamp: Date.now(),
-        guarantee: 'API_AND_AUTH_SAFE',
-        message: 'Service worker will NEVER interfere with API or authentication'
-      });
-      break;
-      
-    case 'VERIFY_SAFETY':
-      event.ports?.[0]?.postMessage({
-        type: 'SAFETY_VERIFIED',
-        bypassPatterns: BYPASS_PATTERNS.length,
-        staticPatterns: STATIC_ASSET_PATTERNS.length,
-        version: '9.0.0',
-        timestamp: Date.now(),
-        guarantee: 'PERMANENTLY_SAFE'
+        timestamp: Date.now()
       });
       break;
   }
 });
 
-// Keep function unchanged
-function getOfflinePage() {
-  // ... offline page HTML remains exactly the same ...
-}
+// ========== MAINTENANCE ==========
 
-// Keep cleanup function unchanged
 async function cleanupOldCacheEntries() {
   try {
     const cache = await caches.open(CACHE_NAME);
@@ -389,5 +395,3 @@ self.addEventListener('unhandledrejection', event => {
 });
 
 console.log('[Service Worker] v9.0.0 loaded - PERMANENTLY SAFE MODE ACTIVE');
-console.log('[Service Worker] GUARANTEE: Login and API will NEVER fail due to service worker');
-console.log('[Service Worker] BYPASS patterns:', BYPASS_PATTERNS.length, 'API/auth protections');
